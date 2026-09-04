@@ -14,15 +14,17 @@ final class IslandWingRevealCoordinatorTests: XCTestCase {
         coordinator.wingVisibilityChanged(true)
         XCTAssertFalse(coordinator.revealed, "content must stay hidden while the form grows")
 
-        try await Task.sleep(for: .milliseconds(120))
-        XCTAssertTrue(coordinator.revealed, "content reveals after the grow delay")
+        await assertEventually("content reveals after the grow delay") {
+            coordinator.revealed
+        }
     }
 
     func test_hidingWingResetsRevealImmediately() async throws {
         let coordinator = IslandWingRevealCoordinator(growDelay: .milliseconds(10))
         coordinator.wingVisibilityChanged(true)
-        try await Task.sleep(for: .milliseconds(80))
-        XCTAssertTrue(coordinator.revealed)
+        await assertEventually("the reveal fires before we collapse it") {
+            coordinator.revealed
+        }
 
         coordinator.wingVisibilityChanged(false)
         XCTAssertFalse(coordinator.revealed, "collapse hides content in the same frame")
@@ -46,15 +48,15 @@ final class IslandWingRevealCoordinatorTests: XCTestCase {
         coordinator.wingVisibilityChanged(false)
         coordinator.wingVisibilityChanged(true)
 
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertTrue(coordinator.revealed, "the latest show still reveals")
+        await assertEventually("the latest show still reveals") {
+            coordinator.revealed
+        }
     }
 
     func test_repeatedVisibleCallsDoNotResetAnActiveReveal() async throws {
         let coordinator = IslandWingRevealCoordinator(growDelay: .milliseconds(10))
         coordinator.wingVisibilityChanged(true)
-        try await Task.sleep(for: .milliseconds(80))
-        XCTAssertTrue(coordinator.revealed)
+        await assertEventually("the first reveal lands") { coordinator.revealed }
 
         coordinator.wingVisibilityChanged(true)
         XCTAssertTrue(coordinator.revealed, "face→face swaps keep the content revealed")

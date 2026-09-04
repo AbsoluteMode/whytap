@@ -46,19 +46,20 @@ final class AudioCaptureRestartMonitorTests: XCTestCase {
 
     func test_rapid_triggers_coalesce_to_one_restart() async {
         let recorder = RestartRecorder()
-        let monitor = AudioCaptureRestartMonitor(debounceNanoseconds: 20_000_000) {
+        let monitor = AudioCaptureRestartMonitor(debounceNanoseconds: 200_000_000) {
             await recorder.record()
         }
 
         monitor.setActive(true)
+        // Fired back to back: `Task.sleep` only guarantees a minimum, so a
+        // sleep between triggers can outlast the debounce window on a busy
+        // machine and let the burst restart twice.
         monitor.trigger()
-        try? await Task.sleep(nanoseconds: 5_000_000)
         monitor.trigger()
-        try? await Task.sleep(nanoseconds: 5_000_000)
         monitor.trigger()
 
-        await waitForCount(1, recorder: recorder)
-        try? await Task.sleep(nanoseconds: 60_000_000)
+        await waitForCount(1, recorder: recorder, timeout: 3.0)
+        try? await Task.sleep(nanoseconds: 400_000_000)
         let count = await recorder.snapshot()
         XCTAssertEqual(count, 1)
     }

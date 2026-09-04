@@ -70,9 +70,17 @@ final class CodexProvider: CLIProvider {
 
     /// The thread_id from the last completed run(). AgentController reads this
     /// after each turn and passes it as resumeSessionID for continuity.
-    /// All writes go through `sessionQueue`; reads are unsynchronized (safe
-    /// because the caller reads after the AsyncStream has finished).
-    private(set) var lastSessionID: String?
+    ///
+    /// Both reads and writes go through `sessionQueue`, for the same reason as
+    /// `ClaudeCodeProvider.lastSessionID`: finishing the AsyncStream does not
+    /// synchronize with a write posted by `sessionQueue.async`.
+    /// WHY: docs/decisions/2026-09-04-session-id-read-through-serial-queue.md
+    var lastSessionID: String? {
+        sessionQueue.sync { _lastSessionID }
+    }
+
+    /// Backing storage for `lastSessionID`. Touch only inside `sessionQueue`.
+    private var _lastSessionID: String?
 
     init(
         locate: @escaping () -> URL? = { CodexBinaryLocator().locate() },
@@ -188,7 +196,7 @@ final class CodexProvider: CLIProvider {
                 watchdog?.kick()   // any stdout = alive
                 guard let event = CodexStreamJSONParser.parse(line: line) else { return }
                 if case .threadStarted(let tid) = event {
-                    self?.sessionQueue.async { self?.lastSessionID = tid }
+                    self?.sessionQueue.async { self?._lastSessionID = tid }
                 }
                 if case .turnCompleted = event { turnCompleted = true }
                 if case .streamError = event { surfacedError = true }

@@ -101,9 +101,18 @@ final class ClaudeCodeProvider: CLIProvider {
 
     /// The session_id from the last completed run(). The AgentController reads
     /// this after each turn and passes it as resumeSessionID for continuity.
-    /// All writes go through `sessionQueue`; reads are unsynchronized (safe
-    /// because the caller reads after the AsyncStream has finished).
-    private(set) var lastSessionID: String?
+    ///
+    /// Both reads and writes go through `sessionQueue`. Finishing the
+    /// AsyncStream does NOT synchronize with a write posted by
+    /// `sessionQueue.async`, so an unsynchronized read could miss the id and
+    /// silently drop `--resume` for the next turn.
+    /// WHY: docs/decisions/2026-09-04-session-id-read-through-serial-queue.md
+    var lastSessionID: String? {
+        sessionQueue.sync { _lastSessionID }
+    }
+
+    /// Backing storage for `lastSessionID`. Touch only inside `sessionQueue`.
+    private var _lastSessionID: String?
 
     /// The writable stdin handle for the currently-running process.
     /// Guarded by `sessionQueue`, like `lastSessionID`.
@@ -268,10 +277,10 @@ final class ClaudeCodeProvider: CLIProvider {
                 watchdog?.kick()   // any stdout = alive
                 for event in StreamJSONParser.parse(line: line) {
                     if case .initSession(let sid) = event {
-                        self?.sessionQueue.async { self?.lastSessionID = sid }
+                        self?.sessionQueue.async { self?._lastSessionID = sid }
                     }
                     if case .result(let sid?, _, _, _) = event {
-                        self?.sessionQueue.async { self?.lastSessionID = sid }
+                        self?.sessionQueue.async { self?._lastSessionID = sid }
                     }
                     if case .result = event {
                         resultSeen = true

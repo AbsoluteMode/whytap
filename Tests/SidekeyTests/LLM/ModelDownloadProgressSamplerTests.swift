@@ -27,6 +27,18 @@ final class ModelDownloadProgressSamplerTests: XCTestCase {
                     disk.set(Int64(written))
                     try await Task.sleep(for: .milliseconds(15))
                 }
+                // The sampler polls concurrently and stops when this operation
+                // returns, so returning immediately after the last write is a
+                // race: on a slow machine the final bytes are never sampled and
+                // the last emission stays at the previous chunk. Wait for the
+                // sampler to observe the full size instead of assuming it did.
+                let deadline = ContinuousClock.now + .seconds(3)
+                while ContinuousClock.now < deadline {
+                    if (emissions.values.last ?? 0) >= ModelDownloadByteProgress.ceiling - 0.0001 {
+                        break
+                    }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
                 return ()
             }
         )
@@ -37,8 +49,10 @@ final class ModelDownloadProgressSamplerTests: XCTestCase {
         for (a, b) in zip(values, values.dropFirst()) {
             XCTAssertLessThanOrEqual(a, b, "emissions must be non-decreasing")
         }
-        // Reached near the ceiling once ~all bytes were on disk.
-        XCTAssertGreaterThan(values.last ?? 0, 0.9)
+        // Reached the ceiling once all bytes were on disk. The operation above
+        // waits for that emission, so this is an assertion about the sampler's
+        // arithmetic, not about how fast the machine ran.
+        XCTAssertEqual(values.last ?? 0, ModelDownloadByteProgress.ceiling, accuracy: 0.0001)
         XCTAssertLessThanOrEqual(values.last ?? 1, ModelDownloadByteProgress.ceiling + 0.0001)
         // Never reported a premature 100%.
         XCTAssertTrue(values.allSatisfy { $0 <= ModelDownloadByteProgress.ceiling + 0.0001 })

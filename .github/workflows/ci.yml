@@ -56,10 +56,13 @@ jobs:
         # runner image; fail loudly when the image has none.
         run: |
           set -euo pipefail
-          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          xcode=""
+          for candidate in /Applications/Xcode_26*.app; do
+            [ -d "$candidate" ] && xcode="$candidate"
+          done
           if [ -z "$xcode" ]; then
-            echo "No Xcode 26 on this runner image" >&2
-            ls /Applications | grep -i xcode >&2 || true
+            echo "No Xcode 26 on this runner image; available:" >&2
+            printf '%s\n' /Applications/Xcode*.app >&2
             exit 1
           fi
           sudo xcode-select -s "$xcode"

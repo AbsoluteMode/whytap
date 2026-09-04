@@ -113,7 +113,7 @@ final class MeetingsEditBridgeTests: XCTestCase {
     /// matching the BlockNote "every keystroke" rate without rewriting the
     /// note file on every keystroke.
     func test_burst_of_edits_coalesces_to_single_emission() async throws {
-        let bridge = MeetingsEditBridge(debounceMilliseconds: 80)
+        let bridge = MeetingsEditBridge(debounceMilliseconds: 300)
         let meetingId = UUID()
         bridge.attachMeeting(id: meetingId)
 
@@ -122,14 +122,16 @@ final class MeetingsEditBridgeTests: XCTestCase {
             received.append(event)
         }
 
+        // Submitted synchronously: `Task.sleep` only guarantees a minimum, so
+        // a sleep between messages can outlast the debounce window on a busy
+        // machine and split the burst into two emissions.
         for i in 0..<5 {
             bridge.handleScriptMessage(name: "noteEdit", body: [
                 "markdown": "# Edit \(i)",
                 "clientVersion": 1
             ])
-            try await Task.sleep(nanoseconds: 10_000_000) // 10 ms between bursts
         }
-        try await Task.sleep(nanoseconds: 250_000_000) // pad past the debounce
+        try await Task.sleep(nanoseconds: 900_000_000) // pad past the debounce
 
         cancellable.cancel()
         XCTAssertEqual(

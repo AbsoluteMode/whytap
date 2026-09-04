@@ -136,6 +136,12 @@ enum MeetingsDateGrouping {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = locale
+        // The date above is built at midnight in `calendar`'s zone, so the
+        // formatter must read it back in that same zone. Without this it
+        // falls back to `TimeZone.current`, and a positive-offset calendar
+        // (say Europe/Moscow) formatted on a UTC machine renders the 1st of
+        // the month as the previous month.
+        formatter.timeZone = calendar.timeZone
         // `MMMM yyyy` — standalone month name + 4-digit year. Renders as
         // "April 2026" in en_US, "Апрель 2026" in ru_RU.
         formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")

@@ -1,0 +1,49 @@
+    <svg overflow="visible" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<defs>
+  <!-- gradient direction adjusted so icons do not share the same highlight position -->
+  <linearGradient id="orb-settings-orbStroke" x1="56" y1="50" x2="12" y2="12" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.46" stop-color="#FFF8FF"/>
+    <stop offset="0.73" stop-color="#D8BEFF"/>
+    <stop offset="1" stop-color="#8B6CFF"/>
+  </linearGradient>
+  <filter id="orb-settings-orbGlow" x="-24" y="-24" width="112" height="112" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="4.8" result="orbBlurLarge"/>
+    <feFlood flood-color="#8B6CFF" flood-opacity="0.78" result="orbViolet"/>
+    <feComposite in="orbViolet" in2="orbBlurLarge" operator="in" result="violetGlow"/>
+    <feGaussianBlur in="SourceGraphic" stdDeviation="1.55" result="orbBlurSmall"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.72" result="orbWhite"/>
+    <feComposite in="orbWhite" in2="orbBlurSmall" operator="in" result="whiteGlow"/>
+    <feMerge>
+      <feMergeNode in="violetGlow"/>
+      <feMergeNode in="whiteGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+  <filter id="orb-settings-symbolGlow" x="6" y="6" width="52" height="52" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="symbolBlur"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.55" result="symbolWhite"/>
+    <feComposite in="symbolWhite" in2="symbolBlur" operator="in" result="symbolGlow"/>
+    <feMerge>
+      <feMergeNode in="symbolGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</defs>
+      <path data-layer="violet-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#8B6CFF" stroke-width="9.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+  <path data-layer="white-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="url(#orb-settings-orbStroke)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#orb-settings-orbGlow)"/>
+      <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>
+
+<g transform="translate(32 32) scale(0.85) translate(-32 -32)">
+<g stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#orb-settings-symbolGlow)">
+  <!-- Gear silhouette: 8 teeth, outer R=14, inner R=10, centered (32,32).
+       Per-tooth corners computed at tooth_center ± 11.25° (outer tips)
+       and valley-edge angles for the inner valley flats. -->
+  <path d="M29.27 18.27 L34.73 18.27 L33.95 22.19 L37.56 23.69 L39.78 20.36 L43.64 24.22 L40.31 26.44 L41.81 30.05 L45.73 29.27 L45.73 34.73 L41.81 33.95 L40.31 37.56 L43.64 39.78 L39.78 43.64 L37.56 40.31 L33.95 41.81 L34.73 45.73 L29.27 45.73 L30.05 41.81 L26.44 40.31 L24.22 43.64 L20.36 39.78 L23.69 37.56 L22.19 33.95 L18.27 34.73 L18.27 29.27 L22.19 30.05 L23.69 26.44 L20.36 24.22 L24.22 20.36 L26.44 23.69 L30.05 22.19 Z" />
+  <!-- Center hub -->
+  <circle cx="32" cy="32" r="4.2" />
+</g>
+</g>
+    </svg>

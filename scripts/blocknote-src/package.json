@@ -1,0 +1,26 @@
+{
+  "name": "blocknote-bundle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BlockNote editor bundle for Whytap Meeting Notes viewer (Stage 8a). Built via scripts/build-blocknote.sh; output committed to Resources/blocknote/.",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@blocknote/core": "0.51.1",
+    "@blocknote/mantine": "0.51.1",
+    "@blocknote/react": "0.51.1",
+    "@mantine/core": "9.2.1",
+    "@mantine/hooks": "9.2.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "6.0.3",
+    "vite": "8.0.13"
+  }
+}

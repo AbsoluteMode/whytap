@@ -1,0 +1,45 @@
+    <svg overflow="visible" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<defs>
+  <!-- gradient direction adjusted so icons do not share the same highlight position -->
+  <linearGradient id="orb-drop-smart-orbStroke" x1="32" y1="6" x2="32" y2="58" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.46" stop-color="#FFF8FF"/>
+    <stop offset="0.73" stop-color="#D8BEFF"/>
+    <stop offset="1" stop-color="#8B6CFF"/>
+  </linearGradient>
+  <filter id="orb-drop-smart-orbGlow" x="-24" y="-24" width="112" height="112" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="4.8" result="orbBlurLarge"/>
+    <feFlood flood-color="#8B6CFF" flood-opacity="0.78" result="orbViolet"/>
+    <feComposite in="orbViolet" in2="orbBlurLarge" operator="in" result="violetGlow"/>
+    <feGaussianBlur in="SourceGraphic" stdDeviation="1.55" result="orbBlurSmall"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.72" result="orbWhite"/>
+    <feComposite in="orbWhite" in2="orbBlurSmall" operator="in" result="whiteGlow"/>
+    <feMerge>
+      <feMergeNode in="violetGlow"/>
+      <feMergeNode in="whiteGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+  <filter id="orb-drop-smart-symbolGlow" x="6" y="6" width="52" height="52" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="symbolBlur"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.55" result="symbolWhite"/>
+    <feComposite in="symbolWhite" in2="symbolBlur" operator="in" result="symbolGlow"/>
+    <feMerge>
+      <feMergeNode in="symbolGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</defs>
+      <path data-layer="violet-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#8B6CFF" stroke-width="9.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+  <path data-layer="white-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="url(#orb-drop-smart-orbStroke)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#orb-drop-smart-orbGlow)"/>
+      <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>
+
+<g transform="translate(32 32) scale(0.85) translate(-32 -32)">
+<g fill="#FFFFFF" filter="url(#orb-drop-smart-symbolGlow)">
+  <path d="M28 16 C29.8 25 33 28.2 42 30 C33 31.8 29.8 35 28 44 C26.2 35 23 31.8 14 30 C23 28.2 26.2 25 28 16 Z" fill="#FFFFFF" />
+  <path d="M44 38 C44.8 41.4 46.6 43.2 50 44 C46.6 44.8 44.8 46.6 44 50 C43.2 46.6 41.4 44.8 38 44 C41.4 43.2 43.2 41.4 44 38 Z" fill="#FFFFFF" />
+</g>
+</g>
+    </svg>

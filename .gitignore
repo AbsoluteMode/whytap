@@ -1,0 +1,43 @@
+# Swift / SwiftPM
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+xcuserdata/
+
+# Release artifacts (built locally, uploaded to GitHub Releases — not committed)
+/build/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Claude Code
+.claude/
+
+# Superpowers brainstorm mockups (ephemeral)
+.superpowers/
+
+# Packaging and release artifacts
+*.dmg
+*.pkg
+*.zip
+dist/
+
+# Local secrets and signing material (never commit)
+.env
+.env.*
+*.pem
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.secret
+.doppler.yaml
+
+# Node (BlockNote bundle sources)
+node_modules/

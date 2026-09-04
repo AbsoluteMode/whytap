@@ -1,0 +1,81 @@
+name: CI
+
+# Two jobs:
+#   lint            - Linux, validates the workflow files themselves.
+#   build-and-test  - macOS, `swift build` + `swift test` on every PR and push.
+# Releases are NOT built here; they are cut locally with
+# scripts/user-release.sh and published to GitHub Releases
+# (see docs/build-and-release.md).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -version
+
+      - name: Run actionlint
+        run: ./actionlint -color .github/workflows/*.yml
+
+      - name: Install yamllint
+        run: pipx install yamllint==1.38.0
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yml .github/workflows/
+
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Select Xcode 26
+        # The app compiles against the macOS 26 SDK (availability-guarded
+        # calls such as NSGlassEffectView). Pick the newest Xcode 26 on the
+        # runner image; fail loudly when the image has none.
+        run: |
+          set -euo pipefail
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$xcode" ]; then
+            echo "No Xcode 26 on this runner image" >&2
+            ls /Applications | grep -i xcode >&2 || true
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test

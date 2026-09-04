@@ -1,0 +1,46 @@
+    <svg overflow="visible" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<defs>
+  <!-- gradient direction adjusted so icons do not share the same highlight position -->
+  <linearGradient id="orb-exit-orbStroke" x1="44" y1="58" x2="20" y2="6" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.46" stop-color="#FFF8FF"/>
+    <stop offset="0.73" stop-color="#D8BEFF"/>
+    <stop offset="1" stop-color="#8B6CFF"/>
+  </linearGradient>
+  <filter id="orb-exit-orbGlow" x="-24" y="-24" width="112" height="112" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="4.8" result="orbBlurLarge"/>
+    <feFlood flood-color="#8B6CFF" flood-opacity="0.78" result="orbViolet"/>
+    <feComposite in="orbViolet" in2="orbBlurLarge" operator="in" result="violetGlow"/>
+    <feGaussianBlur in="SourceGraphic" stdDeviation="1.55" result="orbBlurSmall"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.72" result="orbWhite"/>
+    <feComposite in="orbWhite" in2="orbBlurSmall" operator="in" result="whiteGlow"/>
+    <feMerge>
+      <feMergeNode in="violetGlow"/>
+      <feMergeNode in="whiteGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+  <filter id="orb-exit-symbolGlow" x="6" y="6" width="52" height="52" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="symbolBlur"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.55" result="symbolWhite"/>
+    <feComposite in="symbolWhite" in2="symbolBlur" operator="in" result="symbolGlow"/>
+    <feMerge>
+      <feMergeNode in="symbolGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</defs>
+      <path data-layer="violet-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#8B6CFF" stroke-width="9.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+  <path data-layer="white-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="url(#orb-exit-orbStroke)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#orb-exit-orbGlow)"/>
+      <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>
+
+<g transform="translate(32 32) scale(0.85) translate(-32 -32)">
+<g stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#orb-exit-symbolGlow)">
+  <path d="M28 18 H22 C20.3 18 19 19.3 19 21 V43 C19 44.7 20.3 46 22 46 H28" />
+  <path d="M30 32 H45" />
+  <path d="M39 26 L45 32 L39 38" />
+</g>
+</g>
+    </svg>

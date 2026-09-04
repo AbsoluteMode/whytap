@@ -1,0 +1,1 @@
+../Sidekey/Settings/TranscriptionMode.swift

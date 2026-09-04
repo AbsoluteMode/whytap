@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>__BUNDLE_ID__</string>
+    <key>CFBundleName</key>
+    <string>__BUNDLE_DISPLAY_NAME__</string>
+    <key>CFBundleDisplayName</key>
+    <string>__BUNDLE_DISPLAY_NAME__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD_VERSION__</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__SHORT_VERSION__</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>__BUNDLE_EXECUTABLE__</string>
+    <key>CFBundleIconFile</key>
+    <string>__BUNDLE_ICON_FILE__</string>
+    <key>CFBundleIconName</key>
+    <string>__BUNDLE_ICON_FILE__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.2</string>
+    <!--
+      Opt out of legacy "below the notch" compatibility mode. Without
+      this, on notched MacBooks `NSScreen.safeAreaInsets.top` is 0 and
+      `auxiliaryTopRightArea` is nil — IslandFrameLayout's notch-detect
+      branch never triggers, so the Dynamic Island falls back to top-
+      centered (over the notch) instead of right-of-notch.
+    -->
+    <key>NSPrefersDisplaySafeAreaCompatibilityMode</key>
+    <false/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Whytap records audio to transcribe your speech.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Whytap records the other participants' audio during meetings to transcribe what's said.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Whytap uses Accessibility to paste transcribed text into the active window.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Whytap captures the active window to provide context for smarter formatting.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Whytap uses Accessibility to detect the global hotkey and to paste transcribed text into the active window.</string>
+    <key>SUFeedURL</key>
+    <string>__APPCAST_URL__</string>
+    <key>SUPublicEDKey</key>
+    <string>__SPARKLE_PUBLIC_ED_KEY__</string>
+    <!--
+        ATS (App Transport Security) exception. Allows plain HTTP only to
+        local-network hostnames: `localhost`, `*.local` (mDNS), loopback IPs,
+        and unqualified hostnames. Production and beta backend traffic uses
+        HTTPS public hosts through `BuildConfig.backendURL`; this exception is
+        retained for local development overrides and test harnesses.
+    -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <!--
+        Custom fonts bundled in Contents/Resources/Fonts/ — registered
+        automatically at launch via ATSApplicationFontsPath. Used by the
+        native SwiftUI onboarding: Instrument Serif for the English
+        headline editorial italic, and Playfair Display (Regular + Italic)
+        for the Russian headlines (Instrument Serif has no Cyrillic
+        glyphs — ROO-261). All .ttf files in Fonts/ register from this
+        single path.
+    -->
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
+</dict>
+</plist>

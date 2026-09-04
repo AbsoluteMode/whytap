@@ -1,0 +1,123 @@
+    <svg overflow="visible" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<defs>
+  <!-- gradient direction adjusted so icons do not share the same highlight position -->
+  <linearGradient id="orb-memory-orbStroke" x1="6" y1="32" x2="58" y2="32" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.46" stop-color="#FFF8FF"/>
+    <stop offset="0.73" stop-color="#D8BEFF"/>
+    <stop offset="1" stop-color="#8B6CFF"/>
+  </linearGradient>
+  <filter id="orb-memory-orbGlow" x="-24" y="-24" width="112" height="112" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="4.8" result="orbBlurLarge"/>
+    <feFlood flood-color="#8B6CFF" flood-opacity="0.78" result="orbViolet"/>
+    <feComposite in="orbViolet" in2="orbBlurLarge" operator="in" result="violetGlow"/>
+    <feGaussianBlur in="SourceGraphic" stdDeviation="1.55" result="orbBlurSmall"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.72" result="orbWhite"/>
+    <feComposite in="orbWhite" in2="orbBlurSmall" operator="in" result="whiteGlow"/>
+    <feMerge>
+      <feMergeNode in="violetGlow"/>
+      <feMergeNode in="whiteGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+  <filter id="orb-memory-symbolGlow" x="6" y="6" width="52" height="52" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="symbolBlur"/>
+    <feFlood flood-color="#FFFFFF" flood-opacity="0.55" result="symbolWhite"/>
+    <feComposite in="symbolWhite" in2="symbolBlur" operator="in" result="symbolGlow"/>
+    <feMerge>
+      <feMergeNode in="symbolGlow"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</defs>
+      <path data-layer="violet-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#8B6CFF" stroke-width="9.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+  <path data-layer="white-halo" d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="url(#orb-memory-orbStroke)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#orb-memory-orbGlow)"/>
+      <path d="M33.1 8.5C42.2 8.7 51.6 13.5 54.9 22.7C58.8 33.4 53.0 46.6 43.0 52.6C33.4 58.3 19.6 55.6 12.9 45.7C6.1 35.8 7.8 22.2 16.0 14.1C21.2 9.0 26.9 8.3 33.1 8.5Z" stroke="#FFFFFF" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>
+
+<g transform="translate(32 32) scale(0.85) translate(-32 -32)">
+  <!-- AI-brain icon: filled white brain hemisphere on the left joined at
+       the medial line (x=30) to bare floating PCB traces on the right.
+       NO background rectangle. drop-fast.svg / drop-smart.svg already
+       prove that solid white fills survive the orb halo; the right-side
+       traces use 3.2pt strokes + r=2.8 pads (well above the 2-2.4pt
+       threshold that previously got eaten by whiteGlow). -->
+
+  <!-- LEFT: filled white brain hemisphere with dark sulci folds. Medial
+       line at x=30 (right edge of hemisphere). Dark outline gives the
+       shape real edges against the white halo. No symbolGlow on the
+       brain — the halo already provides plenty of bloom; symbolGlow on
+       a large white fill dissolves the silhouette. -->
+  <g>
+    <!-- Brain hemisphere: white fill with dark outline only on the
+         curved (left/outer) edge — the medial edge at x=30 is drawn
+         separately without stroke so the trace lines flow into it
+         cleanly. -->
+    <path fill="#FFFFFF" d="
+      M 30 14
+      C 27 13 24 13 22 14
+      C 19 13 16 15 15 18
+      C 12 18 10 21 11 24
+      C 9 25 8 29 11 30
+      C 9 31 9 35 11 36
+      C 11 39 13 42 16 43
+      C 17 46 21 48 25 47
+      C 27 48 30 47 30 46
+      L 30 14
+      Z
+    " />
+    <!-- Outline along the curved hemisphere arc only — medial line at
+         x=30 stays un-stroked. -->
+    <path fill="none" stroke="#050505" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="
+      M 30 14
+      C 27 13 24 13 22 14
+      C 19 13 16 15 15 18
+      C 12 18 10 21 11 24
+      C 9 25 8 29 11 30
+      C 9 31 9 35 11 36
+      C 11 39 13 42 16 43
+      C 17 46 21 48 25 47
+      C 27 48 30 47 30 46
+    " />
+    <!-- Sulci/gyri folds — dark thin curves on the white brain surface. -->
+    <g stroke="#050505" stroke-width="1.4" stroke-linecap="round" fill="none">
+      <path d="M 21 19 Q 23 22 21 25" />
+      <path d="M 16 24 Q 19 27 16 30" />
+      <path d="M 24 27 Q 26 30 24 33" />
+      <path d="M 15 33 Q 18 36 15 39" />
+      <path d="M 22 38 Q 24 41 22 44" />
+    </g>
+  </g>
+
+  <!-- RIGHT: bare floating circuit traces + solder pads. To survive the
+       white orb halo we use the same trick as the brain — dark outline
+       around white core. Draw dark thicker traces first, then white
+       traces on top (creates a visible dark-edged trace). Pads are
+       white-filled circles with dark stroke. -->
+  <!-- Dark trace backdrop -->
+  <g stroke="#050505" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M 30 19 H 38 V 16" />
+    <path d="M 30 25 H 44" />
+    <path d="M 30 32 H 48" />
+    <path d="M 30 39 H 44" />
+    <path d="M 30 45 H 38 V 48" />
+  </g>
+  <!-- White trace core -->
+  <g stroke="#FFFFFF" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M 30 19 H 38 V 16" />
+    <path d="M 30 25 H 44" />
+    <path d="M 30 32 H 48" />
+    <path d="M 30 39 H 44" />
+    <path d="M 30 45 H 38 V 48" />
+  </g>
+  <!-- Solder pads: white fill + dark outline -->
+  <g fill="#FFFFFF" stroke="#050505" stroke-width="1.4">
+    <circle cx="38" cy="16" r="2.4" />
+    <circle cx="44" cy="25" r="2.4" />
+    <circle cx="48" cy="32" r="2.4" />
+    <circle cx="44" cy="39" r="2.4" />
+    <circle cx="38" cy="48" r="2.4" />
+  </g>
+</g>
+    </svg>

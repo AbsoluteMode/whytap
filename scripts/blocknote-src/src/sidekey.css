@@ -1,0 +1,118 @@
+/* sidekey-note-heading-overrides */
+:root {
+  --sidekey-note-heading-overrides: 1;
+}
+
+/* === Sidekey canvas ================================================= */
+/* Dark canvas matching the native detail pane, so the note reads like part
+   of the app rather than a bare web page. */
+html,
+body,
+#root {
+  background-color: #1c1c1f;
+}
+
+.bn-container {
+  --bn-colors-editor-background: #1c1c1f;
+  --bn-colors-editor-text: #ececf0;
+  --bn-colors-selected-background: rgba(0, 122, 255, 0.26);
+  background-color: #1c1c1f !important;
+}
+
+/* === Read as a finished page: hide editor chrome ==================== */
+/* The drag-handle (the dotted grip) + add-block (+) gutter buttons that
+   float to the left of every block are the single biggest "this is a raw
+   editor" tell. Meeting protocols are read-mostly, so remove the gutter
+   affordances entirely — the note reads as a clean document. Typing and
+   Enter still work for light edits. */
+.bn-side-menu,
+.bn-editor [class*="sideMenu"],
+.bn-editor [class*="SideMenu"] {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* === Reading column & typography =================================== */
+.bn-editor {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 30px 36px 96px !important;
+  font-size: 15px;
+  line-height: 1.64;
+  color: #d4d4db; /* body a touch softer than pure white, easier to read */
+  caret-color: #007aff;
+}
+
+/* Calmer paragraph rhythm. */
+.bn-editor .bn-block-content[data-content-type="paragraph"] {
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+}
+
+/* Lists: tighter rhythm, dimmed markers so the text leads. */
+.bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.bn-editor .bn-block-content[data-content-type="numberedListItem"],
+.bn-editor .bn-block-content[data-content-type="checkListItem"] {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+.bn-editor .bn-block-content[data-content-type="bulletListItem"]::marker,
+.bn-editor .bn-block-content[data-content-type="numberedListItem"]::marker {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* Links + checkboxes in the Sidekey accent. */
+.bn-editor a {
+  color: #4c9bff !important;
+}
+.bn-editor input[type="checkbox"] {
+  accent-color: #007aff;
+}
+
+/* === Headings ====================================================== */
+/* H1 — document title. */
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="1"] {
+  --level: 26px !important;
+  font-size: 26px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.01em !important;
+  color: #f5f5f7 !important;
+  padding-top: 4px !important;
+  padding-bottom: 6px !important;
+}
+
+/* H2 — section header ("Резюме", "Action items", …) with room above. */
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="2"] {
+  --level: 18px !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  line-height: 1.26 !important;
+  letter-spacing: 0 !important;
+  color: #f0f0f3 !important;
+  padding-top: 22px !important;
+  padding-bottom: 2px !important;
+}
+
+/* H3. */
+.bn-editor .bn-block-content[data-content-type="heading"][data-level="3"] {
+  --level: 15.5px !important;
+  font-size: 15.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0 !important;
+  color: #e8e8ee !important;
+  padding-top: 14px !important;
+}
+
+.bn-editor .bn-block-content[data-content-type="heading"] .bn-inline-content,
+.bn-editor .bn-block-content[data-content-type="heading"] h1,
+.bn-editor .bn-block-content[data-content-type="heading"] h2,
+.bn-editor .bn-block-content[data-content-type="heading"] h3 {
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  margin: 0 !important;
+}

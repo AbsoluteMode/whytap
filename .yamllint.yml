@@ -1,0 +1,25 @@
+---
+# Yamllint configuration for sidekey.
+#
+# Targeted at the .github/workflows/ directory: GitHub Actions YAML often
+# legitimately exceeds 80 chars due to expression syntax
+# (${{ secrets.X }} / ${{ steps.id.outputs.foo }}). Default yamllint is too
+# strict to use as a CI gate on real workflows — relax line-length and
+# tolerate the GHA `on:` keyword which yamllint flags as "truthy".
+extends: default
+
+rules:
+  line-length:
+    max: 200
+    level: warning
+  # `on:` is the GHA trigger keyword and serializes as the YAML 1.1 truthy
+  # value `on` (alias for `true`). yamllint flags this by default; the
+  # check would have to be silenced per-file via a directive comment in
+  # every workflow, so we relax it once here.
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+  # GHA workflows are commonly written without the `---` start marker.
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable

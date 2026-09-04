@@ -1,0 +1,1 @@
+../Sidekey/HotkeyHintView.swift

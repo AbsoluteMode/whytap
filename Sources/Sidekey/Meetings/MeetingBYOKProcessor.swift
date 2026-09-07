@@ -99,17 +99,22 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         }
 
         let transcript: String
+        let segments: [TranscriptSegment]
         if prefs.selectedProvider == .soniox {
             guard let key = try keyStore.read(for: .soniox), !key.isEmpty else {
                 throw MeetingBYOKProcessingError.missingTranscriptionKey
             }
-            transcript = try await SonioxMeetingTranscriber(apiKey: key).transcribe(
+            let result = try await SonioxMeetingTranscriber(apiKey: key).transcribe(
                 chunkURLs: event.chunkURLs, language: language, terms: vocab.terms
             )
+            segments = result.segments
+            transcript = TranscriptMarkdownFormatter.format(segments)
         } else {
             transcript = try await MeetingBYOKTranscriber(
                 adapter: makeTranscriptionAdapter(), terms: vocab.terms
             ).transcribe(chunkURLs: event.chunkURLs, language: language)
+            segments = [TranscriptSegment(speaker: nil, start: 0,
+                end: max(0, event.totalDurationSeconds), text: transcript)]
         }
 
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,14 +147,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
                 createdAt: Date()
             ),
             markdown: normalizedMarkdown,
-            transcript: [
-                TranscriptSegment(
-                    speaker: nil,
-                    start: 0,
-                    end: max(0, event.totalDurationSeconds),
-                    text: trimmedTranscript
-                )
-            ]
+            transcript: segments
         )
 
         cleanupStagingDirectory(for: event)

@@ -3,10 +3,17 @@ import Foundation
 /// Finished recordings use Soniox's file API. A durable checkpoint survives
 /// network failures and note-generation retries without uploading audio again.
 actor SonioxMeetingTranscriber {
+    struct Result: Codable, Sendable, Equatable {
+        let text: String
+        let segments: [TranscriptSegment]
+    }
+
     struct Checkpoint: Codable {
         var fileID: String?
         var transcriptionID: String?
         var transcript: String?
+        var segments: [TranscriptSegment]?
+        var diarizationEnabled: Bool?
     }
 
     private let apiKey: String
@@ -23,7 +30,8 @@ actor SonioxMeetingTranscriber {
         self.timeout = timeout
     }
 
-    func transcribe(chunkURLs: [URL], language: String?, terms: [String]) async throws -> String {
+    func transcribe(chunkURLs: [URL], language: String?, terms: [String]) async throws -> Result {
+        try Task.checkCancellation()
         guard let first = chunkURLs.first else { throw MeetingBYOKProcessingError.noAudio }
         let directory = first.deletingLastPathComponent()
         let checkpointURL = directory.appendingPathComponent("soniox-transcription.json")
@@ -31,11 +39,22 @@ actor SonioxMeetingTranscriber {
         if FileManager.default.fileExists(atPath: checkpointURL.path) {
             checkpoint = try JSONDecoder().decode(Checkpoint.self, from: Data(contentsOf: checkpointURL))
         } else {
-            checkpoint = Checkpoint()
+            checkpoint = Checkpoint(diarizationEnabled: true)
         }
-        if let transcript = checkpoint.transcript {
+        // Old jobs were created without diarization. Never silently reuse their
+        // text-only result when the caller expects speaker-attributed segments.
+        if checkpoint.diarizationEnabled != true {
             await cleanup(&checkpoint, at: checkpointURL)
-            return transcript
+            guard checkpoint.transcriptionID == nil, checkpoint.fileID == nil else {
+                throw MeetingBYOKProcessingError.upstreamError("Previous Soniox job is still active; retry after it completes.")
+            }
+            checkpoint = Checkpoint(diarizationEnabled: true)
+            try save(checkpoint, to: checkpointURL)
+        }
+        if let transcript = checkpoint.transcript, let segments = checkpoint.segments,
+           !segments.isEmpty {
+            await cleanup(&checkpoint, at: checkpointURL)
+            return Result(text: transcript, segments: segments)
         }
 
         if checkpoint.fileID == nil {
@@ -55,6 +74,7 @@ actor SonioxMeetingTranscriber {
             var body: [String: Any] = [
                 "model": "stt-async-v5", "file_id": checkpoint.fileID!,
                 "enable_language_identification": true,
+                "enable_speaker_diarization": true,
                 "client_reference_id": directory.lastPathComponent,
             ]
             if let language, !language.isEmpty { body["language_hints"] = [language] }
@@ -76,16 +96,13 @@ actor SonioxMeetingTranscriber {
             switch object?["status"] as? String {
             case "completed":
                 let result = try await send(path: jobPath + "/transcript")
-                let transcriptObject = try JSONSerialization.jsonObject(with: result) as? [String: Any]
-                guard let text = transcriptObject?["text"] as? String,
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    throw MeetingBYOKProcessingError.noTranscript
-                }
-                checkpoint.transcript = text
-                // Persist text BEFORE deleting remote resources or generating notes.
+                let decoded = try Self.decodeTranscript(result)
+                checkpoint.transcript = decoded.text
+                checkpoint.segments = decoded.segments
+                // Persist attribution BEFORE deleting remote resources or generating notes.
                 try save(checkpoint, to: checkpointURL)
                 await cleanup(&checkpoint, at: checkpointURL)
-                return text
+                return decoded
             case "error":
                 await cleanup(&checkpoint, at: checkpointURL)
                 throw MeetingBYOKProcessingError.upstreamError("Soniox could not process the audio file. The recording is saved for retry.")
@@ -95,6 +112,61 @@ actor SonioxMeetingTranscriber {
                 throw MeetingBYOKProcessingError.upstreamError("Invalid Soniox job status.")
             }
         }
+    }
+
+    /// Soniox token text already contains spaces and subword boundaries.
+    /// Group adjacent tokens, never all tokens with the same speaker globally.
+    static func decodeTranscript(_ data: Data) throws -> Result {
+        struct Response: Decodable {
+            struct Token: Decodable {
+                let text: String
+                let speaker: String?
+                let start_ms: Double?
+                let end_ms: Double?
+            }
+            let text: String
+            let tokens: [Token]
+        }
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        var segments: [TranscriptSegment] = []
+        var speaker: String?
+        var start = 0.0
+        var end = 0.0
+        var text = ""
+        func flush() {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                segments.append(TranscriptSegment(speaker: speaker, start: start, end: end, text: trimmed))
+            }
+            text = ""
+        }
+        for token in response.tokens {
+            guard !token.text.isEmpty, !["<end>", "<fin>"].contains(token.text) else { continue }
+            let tokenStart = token.start_ms.map { $0 / 1000 } ?? end
+            let tokenEnd = token.end_ms.map { $0 / 1000 } ?? tokenStart
+            guard tokenStart.isFinite, tokenEnd.isFinite, tokenStart >= 0, tokenEnd >= tokenStart else {
+                throw MeetingBYOKProcessingError.upstreamError("Invalid Soniox token timestamp.")
+            }
+            let label = token.speaker?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var tokenSpeaker = label.flatMap { $0.isEmpty ? nil : "Speaker " + $0 }
+            // Unlabelled punctuation belongs to the preceding words; unlabelled
+            // speech remains Unknown rather than guessing who said it.
+            if tokenSpeaker == nil, token.text.unicodeScalars.allSatisfy({
+                CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines).contains($0)
+            }) { tokenSpeaker = speaker }
+            if !text.isEmpty && (tokenSpeaker != speaker || tokenStart - end > 2 || text.count >= 1000) {
+                flush()
+            }
+            if text.isEmpty { start = tokenStart; end = tokenEnd; speaker = tokenSpeaker }
+            text += token.text
+            end = max(end, tokenEnd)
+        }
+        flush()
+        guard !response.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              segments.contains(where: { $0.speaker != nil }) else {
+            throw MeetingBYOKProcessingError.upstreamError("Soniox returned no speaker-attributed transcript. The audio is saved for retry.")
+        }
+        return Result(text: response.text, segments: segments)
     }
 
     private func cleanup(_ checkpoint: inout Checkpoint, at url: URL) async {

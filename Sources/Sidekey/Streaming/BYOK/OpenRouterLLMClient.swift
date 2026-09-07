@@ -192,15 +192,22 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         }
         try Task.checkCancellation()
         let discoveryMs = Int((ProcessInfo.processInfo.systemUptime - discoveryStarted) * 1000)
+        struct ProviderPreferences: Encodable {
+            let sort: String
+        }
+        // WHY: docs/decisions/2026-09-07-smart-latency.md
+        let provider: ProviderPreferences? = profile == .dictation && endpoint.sendsOpenRouterHeaders
+            ? ProviderPreferences(sort: "throughput") : nil
         struct ChatRequest: Encodable {
             let model: String
             let messages: [OpenRouterChatMessage]
             let temperature: Double
             let stream: Bool
             let reasoning: OpenRouterReasoningSetting?
+            let provider: ProviderPreferences?
         }
         request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: trimmedModel, messages: messages, temperature: 0.1, stream: false, reasoning: reasoning)
+            ChatRequest(model: trimmedModel, messages: messages, temperature: 0.1, stream: false, reasoning: reasoning, provider: provider)
         )
 
         let requestStarted = ProcessInfo.processInfo.systemUptime

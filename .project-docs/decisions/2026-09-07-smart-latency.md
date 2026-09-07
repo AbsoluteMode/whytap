@@ -63,6 +63,12 @@ non-cooperating AX child, so it does not enforce the caller deadline.
   finalization, release-to-completion and reasoning-token usage. Missing usage
   is -1, never inferred zero. No content, credentials, or server error bodies.
 
+- Prioritize provider throughput for Smart via `provider.sort: throughput`.
+  Preserve the selected model and normal provider fallbacks; do not pin one
+  endpoint or opt into priority service tiers. OpenRouter picks among eligible
+  providers using its current performance data. Standard/meeting requests and
+  custom endpoints omit this preference.
+
 ## Rationale
 
 A semantic provider acknowledgement preserves the full utterance while removing
@@ -75,6 +81,19 @@ latency from context extraction and insertion.
 See frontmatter and the regression tests in `Tests/SidekeyTests/AXContextReaderTests.swift`,
 `Tests/SidekeyTests/OpenRouterLLMClientTests.swift`, and
 `Tests/SidekeyTests/Streaming/BYOK/SonioxBYOKAdapterTests.swift`.
+
+## Verification follow-up
+
+A synthetic request to Gemini 3.8 Flash with `reasoning.max_tokens: 0` returned
+HTTP 400: reasoning is mandatory for the endpoint. The same sample with effort
+low and throughput sorting completed through Google AI Studio in 1.296 seconds,
+with 0 reported reasoning tokens. This single sample demonstrates compatibility,
+not a latency guarantee or proof that reasoning is disabled. OpenRouter documents
+that Gemini 3 budgets map to thinking levels rather than precise token limits.
+The endpoint catalog exposed AI Studio and Vertex variants but had null public
+throughput/latency measurements, so no static fastest-provider claim is made.
+
+Routing reference: https://openrouter.ai/docs/guides/routing/provider-selection
 
 ## Comments and objections
 

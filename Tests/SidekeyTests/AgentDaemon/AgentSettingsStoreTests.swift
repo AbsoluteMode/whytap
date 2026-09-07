@@ -8,104 +8,90 @@ final class AgentSettingsStoreTests: XCTestCase {
         d.removePersistentDomain(forName: name)
         return d
     }
-
-    func testRoundTripsAcrossInstances() {
-        let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        s.claudeEffort = "high"
-        s.codexServiceTier = "fast"
-        let reloaded = AgentSettingsStore(defaults: d)
-        XCTAssertEqual(reloaded.claudeEffort, "high")
-        XCTAssertEqual(reloaded.codexServiceTier, "fast")
+    private var models: [CodexModelOption] {
+        [CodexModelOption(model: "new-model", supportedReasoningEfforts: [.init(reasoningEffort: "low"), .init(reasoningEffort: "ultra")], defaultReasoningEffort: "low", serviceTiers: [.init(id: "priority", name: "Fast")], isDefault: true),
+         CodexModelOption(model: "small-model", supportedReasoningEfforts: [.init(reasoningEffort: "medium")], defaultReasoningEffort: "medium", serviceTiers: [])]
+    }
+    private func store(_ name: String = #function, config: CodexConfigSnapshot = .init()) -> AgentSettingsStore {
+        let s = AgentSettingsStore(defaults: freshDefaults(name), codexConfig: config)
+        s.updateCodexCatalog(models)
+        return s
     }
 
-    func testNilClearsTheKey() {
+    func testModelAndControlsRoundTripWithoutPinning() {
         let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        s.codexModel = "gpt-5.4"
-        s.codexModel = nil
-        XCTAssertNil(AgentSettingsStore(defaults: d).codexModel)
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init())
+        s.codexModel = "new-model"; s.codexEffort = "ultra"; s.codexServiceTier = "priority"
+        let reloaded = AgentSettingsStore(defaults: d, codexConfig: .init())
+        reloaded.updateCodexCatalog(models)
+        XCTAssertEqual(reloaded.options(for: .codex), AgentRunOptions(model: "new-model", effort: "ultra", serviceTier: "priority"))
+        XCTAssertEqual(d.string(forKey: "agent.codex.model"), "new-model")
     }
 
-    func testMigratesStoredSparkModelsToGPT55() {
+    func testStoredModelsIncludingSparkArePreserved() {
         let d = freshDefaults(#function)
         d.set("gpt-5.3-codex-spark", forKey: "agent.codex.model")
-        let s = AgentSettingsStore(defaults: d)
-        XCTAssertEqual(s.codexModel, "gpt-5.5")
-        XCTAssertEqual(d.string(forKey: "agent.codex.model"), "gpt-5.5")
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init())
+        XCTAssertEqual(s.codexModel, "gpt-5.3-codex-spark")
+        XCTAssertEqual(d.string(forKey: "agent.codex.model"), "gpt-5.3-codex-spark")
     }
 
-    func testMigratesStoredClaudeModelsToSonnet() {
+    func testChangingModelValidatesEffortAndSpeedWithoutErasingPreferences() {
+        let s = store()
+        s.codexEffort = "ULTRA"; s.codexServiceTier = "fast"
+        XCTAssertEqual(s.options(for: .codex).effort, "ultra")
+        XCTAssertEqual(s.options(for: .codex).serviceTier, "priority")
+        s.codexModel = "small-model"
+        XCTAssertEqual(s.options(for: .codex), AgentRunOptions(model: "small-model", effort: "medium", serviceTier: "default"))
+        s.codexModel = "new-model"
+        XCTAssertEqual(s.options(for: .codex).effort, "ultra")
+    }
+
+    func testResolutionUsesSavedThenConfigThenRegistryDefault() {
+        let s = store(config: .init(model: "small-model"))
+        XCTAssertEqual(s.selectedCodexModel, "small-model")
+        s.codexModel = "new-model"
+        XCTAssertEqual(s.selectedCodexModel, "new-model")
+        s.codexModel = nil
+        XCTAssertEqual(s.selectedCodexModel, "small-model")
+        XCTAssertEqual(store("registry-default").selectedCodexModel, "new-model")
+    }
+
+    func testNormalOverridesFastConfigAndUnsupportedModelNeverInheritsFast() {
+        let s = store(config: .init(serviceTier: "fast"))
+        XCTAssertEqual(s.options(for: .codex).serviceTier, "priority")
+        s.codexServiceTier = "default"
+        XCTAssertEqual(s.options(for: .codex).serviceTier, "default")
+        s.codexServiceTier = nil; s.codexModel = "small-model"
+        XCTAssertEqual(s.options(for: .codex).serviceTier, "default")
+    }
+
+    func testUnknownModelPreservesPickButDoesNotInventCapabilities() {
+        let s = store(); s.codexModel = "not-in-catalog"; s.codexEffort = "ultra"; s.codexServiceTier = "fast"
+        XCTAssertEqual(s.options(for: .codex), AgentRunOptions(model: "not-in-catalog"))
+    }
+
+    func testCatalogOutageKeepsLastGoodModelsAndShowsError() async {
+        let s = store()
+        await s.refreshCodexCatalog(force: true, load: { throw CodexModelCatalogReader.Failure.timedOut })
+        XCTAssertEqual(s.codexCatalog, models)
+        XCTAssertNotNil(s.codexCatalogError)
+        XCTAssertFalse(s.codexCatalogLoading)
+    }
+
+    func testUnavailableCatalogAndEmptyPreferencesLetCodexChoose() {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init())
+        XCTAssertEqual(s.options(for: .codex), AgentRunOptions())
+    }
+
+    func testClaudeSettingsRemainIndependent() {
         let d = freshDefaults(#function)
         d.set("opus", forKey: "agent.claude.model")
-        let s = AgentSettingsStore(defaults: d)
-        XCTAssertEqual(s.claudeModel, "sonnet")
-        XCTAssertEqual(d.string(forKey: "agent.claude.model"), "sonnet")
-    }
-
-    func testOptionsForProviderSplitsFields() {
-        let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        s.claudeModel = "sonnet"; s.claudeEffort = "high"
-        s.codexModel = "gpt-5.5"; s.codexEffort = "xhigh"; s.codexServiceTier = "fast"
-        let c = s.options(for: .claude)
-        XCTAssertEqual(c.model, "sonnet")
-        XCTAssertEqual(c.effort, "high")
-        XCTAssertNil(c.serviceTier)
-        let x = s.options(for: .codex)
-        XCTAssertEqual(x.model, "gpt-5.5")
-        XCTAssertEqual(x.effort, "xhigh")
-        XCTAssertEqual(x.serviceTier, "fast")
-    }
-
-    func testCodexOptionsDefaultToGPT55WhenModelUnset() {
-        let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        let x = s.options(for: .codex)
-        XCTAssertEqual(x.model, "gpt-5.5")
-    }
-
-    func testClaudeOptionsDefaultToSonnetWhenModelUnset() {
-        let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        let c = s.options(for: .claude)
-        XCTAssertEqual(c.model, "sonnet")
-    }
-
-    // MARK: - Effort is always sent (stored -> Low, never the CLI config)
-
-    func testClaudeOptionsDefaultEffortIsLow() {
-        let store = AgentSettingsStore(defaults: freshDefaults(#function))
-        XCTAssertEqual(store.options(for: .claude).effort, "low")
-    }
-
-    func testCodexOptionsDefaultEffortIsLow() {
-        let store = AgentSettingsStore(defaults: freshDefaults(#function))
-        XCTAssertEqual(store.options(for: .codex).effort, "low")
-    }
-
-    func testStoredEffortOverridesDefault() {
-        let store = AgentSettingsStore(defaults: freshDefaults(#function))
-        store.claudeEffort = "high"
-        XCTAssertEqual(store.options(for: .claude).effort, "high")
-    }
-
-    func testStoredEffortIsCaseInsensitiveAndValidatedPerProvider() {
-        let d = freshDefaults(#function)
-        let s = AgentSettingsStore(defaults: d)
-        // Case-insensitive, like the pickers.
-        s.claudeEffort = "HIGH"
-        XCTAssertEqual(s.options(for: .claude).effort, "high")
-        // Unknown level -> Low, never sent raw.
-        s.claudeEffort = "turbo"
-        XCTAssertEqual(s.options(for: .claude).effort, "low")
-        // Claude-only "max" is not a codex level; "minimal" is not ours.
-        s.codexEffort = "max"
-        XCTAssertEqual(s.options(for: .codex).effort, "low")
-        s.codexEffort = "minimal"
-        XCTAssertEqual(s.options(for: .codex).effort, "low")
-        // "max" stays valid on the claude side.
-        s.claudeEffort = "max"
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init())
+        XCTAssertEqual(s.options(for: .claude), AgentRunOptions(model: "sonnet", effort: "low"))
+        s.claudeEffort = "MAX"
         XCTAssertEqual(s.options(for: .claude).effort, "max")
+        s.claudeEffort = "bogus"
+        XCTAssertEqual(s.options(for: .claude).effort, "low")
     }
 }

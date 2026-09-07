@@ -81,90 +81,60 @@ struct AgentControlsClaude: View {
     }
 }
 
-/// Codex model (mirrored from ~/.codex/config.toml) + reasoning + speed.
+/// Controls are populated from the same Codex catalog used for runtime options.
 @MainActor
 struct AgentControlsCodex: View {
     @ObservedObject var settings: AgentSettingsStore
-    let config: CodexConfigSnapshot
 
-    static func modelOptions(config _: CodexConfigSnapshot) -> [(label: String, value: String)] {
-        [("GPT-5.5", AgentSettingsStore.pinnedCodexModel)]
-    }
-
-    /// Map a raw `service_tier` from `~/.codex/config.toml` to one of our two
-    /// option values, so the Speed picker mirrors the user's current Codex
-    /// setting the way Model does. "fast"/"priority" are the same fast lane;
-    /// "default"/"normal"/"standard" are the normal lane. Unknown -> nil.
-    static func mirroredTier(_ raw: String?) -> String? {
-        switch raw?.lowercased() {
-        case "priority", "fast": return "priority"
-        case "default", "normal", "standard": return "default"
-        default: return nil
+    static func modelOptions(catalog: [CodexModelOption], selected: String?) -> [(label: String, value: String)] {
+        var options = catalog.map { (label: $0.label, value: $0.model) }
+        if let selected, !options.contains(where: { $0.value == selected }) {
+            options.insert((label: selected + " (saved)", value: selected), at: 0)
         }
-    }
-
-    static func supportsSpeed(model: String?) -> Bool {
-        CodexProvider.supportsServiceTier(model: model)
-    }
-
-    static let effortOptions: [(label: String, value: String)] = [
-        ("Low", "low"), ("Medium", "medium"), ("High", "high"), ("Very high", "xhigh"),
-    ]
-
-    /// The Reasoning picker shows (no write-back) exactly what the run sends —
-    /// stored override, else Low (`AgentSettingsStore.resolvedEffort`, the
-    /// single display == send code path). The old config-mirror is gone: since
-    /// we now always pass -c model_reasoning_effort=..., mirroring
-    /// ~/.codex/config.toml would show a value that is NOT what the run uses.
-    static func displayedEffort(stored: String?) -> String {
-        AgentSettingsStore.resolvedEffort(stored: stored,
-                                          allowed: AgentSettingsStore.codexEffortLevels)
-    }
-
-    private var selectedModel: String {
-        AgentSettingsStore.normalizedCodexModel(settings.codexModel)
-            ?? AgentSettingsStore.pinnedCodexModel
-    }
-
-    /// Speed mirrors config (display-only) until the user picks: show the stored
-    /// override, else the mirrored config tier, else Normal.
-    private var speedSelection: Binding<String> {
-        Binding(get: { settings.codexServiceTier ?? Self.mirroredTier(config.serviceTier) ?? "default" },
-                set: { settings.codexServiceTier = $0 })
-    }
-
-    /// Displaying the fallback never writes it: the store is only touched on
-    /// an explicit pick (the `set` side).
-    private var effortSelection: Binding<String> {
-        Binding(get: { Self.displayedEffort(stored: settings.codexEffort) },
-                set: { settings.codexEffort = $0 })
+        if options.isEmpty { options = [(label: "Codex default", value: "")] }
+        return options
     }
 
     private var modelSelection: Binding<String> {
-        Binding(
-            get: { selectedModel },
-            set: {
-                settings.codexModel = $0
-                if !Self.supportsSpeed(model: $0) {
-                    settings.codexServiceTier = nil
-                }
-            }
-        )
+        Binding(get: { settings.selectedCodexModel ?? "" }, set: { settings.codexModel = $0 })
+    }
+    private var effortSelection: Binding<String> {
+        Binding(get: { settings.options(for: .codex).effort ?? "" }, set: { settings.codexEffort = $0 })
+    }
+    private var speedSelection: Binding<String> {
+        Binding(get: { settings.options(for: .codex).serviceTier ?? "default" }, set: { settings.codexServiceTier = $0 })
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ConcreteSettingPicker(title: "Model",
-                                  options: Self.modelOptions(config: config),
-                                  selection: modelSelection)
-            ConcreteSettingPicker(title: "Reasoning",
-                                  options: Self.effortOptions,
-                                  selection: effortSelection)
-            if Self.supportsSpeed(model: selectedModel) {
-                ConcreteSettingPicker(
-                    title: "Speed",
-                    options: [("Fast", "priority"), ("Normal", "default")],
-                    selection: speedSelection)
+            ConcreteSettingPicker(title: "Model", options: Self.modelOptions(
+                catalog: settings.codexCatalog, selected: settings.selectedCodexModel), selection: modelSelection)
+            if let model = settings.selectedCodexOption {
+                if !model.efforts.isEmpty {
+                    ConcreteSettingPicker(title: "Reasoning",
+                        options: model.efforts.map { (label: $0.capitalized, value: $0) }, selection: effortSelection)
+                }
+                if !model.tiers.isEmpty {
+                    ConcreteSettingPicker(title: "Speed",
+                        options: [(label: "Normal", value: "default")] + model.tiers.map {
+                            (label: $0.name ?? $0.id.capitalized, value: $0.id)
+                        }, selection: speedSelection)
+                    if let description = model.tiers.first(where: { $0.id == settings.options(for: .codex).serviceTier })?.description {
+                        Text(description).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                if settings.codexCatalogLoading { ProgressView().controlSize(.small) }
+                if let error = settings.codexCatalogError {
+                    Text(error).font(.caption).foregroundStyle(.secondary)
+                } else if settings.selectedCodexModel != nil && settings.selectedCodexOption == nil && !settings.codexCatalogLoading {
+                    Text("The saved model isn’t in the current Codex catalog. Choose an available model or refresh.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Refresh models") { Task { await settings.refreshCodexCatalog(force: true) } }
+                    .font(.caption).disabled(settings.codexCatalogLoading)
             }
         }
         .padding(.horizontal, 16)

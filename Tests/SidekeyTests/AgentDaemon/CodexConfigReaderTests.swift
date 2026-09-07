@@ -22,6 +22,16 @@ final class CodexConfigReaderTests: XCTestCase {
         XCTAssertEqual(CodexConfigReader.parse(toml).model, "gpt-5.5")
     }
 
+    func testNestedProfileNeverBecomesGlobalModelOrSpeed() {
+        let snapshot = CodexConfigReader.parse("""
+        [profiles.other]
+        model = "other-model"
+        service_tier = "fast"
+        """)
+        XCTAssertNil(snapshot.model)
+        XCTAssertNil(snapshot.serviceTier)
+    }
+
     func testMissingKeysYieldNil() {
         let s = CodexConfigReader.parse("# just a comment\n")
         XCTAssertNil(s.model)

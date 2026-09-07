@@ -51,26 +51,23 @@ final class AgentRunOptionsMappingTests: XCTestCase {
         XCTAssertTrue(captured.contains("service_tier=fast"))
     }
 
-    func testCodexOmitsServiceTierForSparkModel() async {
-        var captured: [String] = []
-        let provider = CodexProvider(
-            locate: { URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex") },
-            runStreaming: { _, args, _, _, onExit in captured = args; onExit(0); return CodexProcessHandle.noop })
-        for await _ in provider.run(prompt: "hi", resumeSessionID: nil,
-                                    options: AgentRunOptions(model: "gpt-5.3-codex-spark", serviceTier: "fast")) {}
-        XCTAssertTrue(hasFlag(captured, "-m", "gpt-5.3-codex-spark"))
-        XCTAssertFalse(captured.contains(where: { $0.hasPrefix("service_tier=") }))
-    }
-
-    func testCodexOmitsServiceTierWhenConfigModelIsSpark() async {
-        var captured: [String] = []
-        let provider = CodexProvider(
-            locate: { URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex") },
-            runStreaming: { _, args, _, _, onExit in captured = args; onExit(0); return CodexProcessHandle.noop },
-            readConfig: { CodexConfigSnapshot(model: "gpt-5.3-codex-spark") })
-        for await _ in provider.run(prompt: "hi", resumeSessionID: nil,
-                                    options: AgentRunOptions(serviceTier: "fast")) {}
-        XCTAssertFalse(captured.contains(where: { $0.hasPrefix("service_tier=") }))
+    @MainActor
+    func testRegistryResolvedOptionsReachNewAndResumedCodexTurns() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let settings = AgentSettingsStore(defaults: defaults, codexConfig: .init())
+        settings.updateCodexCatalog([CodexModelOption(model: "new-agent", supportedReasoningEfforts: [.init(reasoningEffort: "ultra")], defaultReasoningEffort: "ultra", serviceTiers: [], isDefault: true)])
+        settings.codexServiceTier = "fast"
+        for resume in [nil, "test-thread"] as [String?] {
+            var captured: [String] = []
+            let provider = CodexProvider(locate: { URL(fileURLWithPath: "/usr/local/bin/codex") },
+                runStreaming: { _, args, _, _, onExit in captured = args; onExit(0); return CodexProcessHandle.noop })
+            for await _ in provider.run(prompt: "hi", resumeSessionID: resume, options: settings.options(for: .codex)) {}
+            XCTAssertTrue(hasFlag(captured, "-m", "new-agent"))
+            XCTAssertTrue(captured.contains("model_reasoning_effort=ultra"))
+            XCTAssertTrue(captured.contains("service_tier=default"))
+            XCTAssertFalse(captured.contains("service_tier=fast"))
+        }
     }
 
     // MARK: - cliServiceTier mapping
@@ -79,8 +76,8 @@ final class AgentRunOptionsMappingTests: XCTestCase {
         XCTAssertEqual(CodexProvider.cliServiceTier("priority"), "fast")
         XCTAssertEqual(CodexProvider.cliServiceTier("fast"), "fast")
         XCTAssertEqual(CodexProvider.cliServiceTier("flex"), "flex")
-        XCTAssertNil(CodexProvider.cliServiceTier("default"))
-        XCTAssertNil(CodexProvider.cliServiceTier("standard"))
+        XCTAssertEqual(CodexProvider.cliServiceTier("default"), "default")
+        XCTAssertEqual(CodexProvider.cliServiceTier("standard"), "default")
     }
 
     func testCodexOmitsModelFlagsWhenOptionsEmpty() async {

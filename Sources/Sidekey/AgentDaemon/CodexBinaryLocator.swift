@@ -7,6 +7,7 @@ struct CodexBinaryLocator {
     /// Known install locations, highest priority first. The Codex.app bundle
     /// ships a newer binary than the npm global install, so prefer it.
     static let knownPaths: [String] = [
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
         "/Applications/Codex.app/Contents/Resources/codex",
         "\(NSHomeDirectory())/.npm-global/bin/codex",
         "/opt/homebrew/bin/codex",

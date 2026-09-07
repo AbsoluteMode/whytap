@@ -10,7 +10,7 @@
 
 **Спека:** `docs/specs/hotkey-recorder-raycast.md`.
 
-**Рабочая директория:** `/Users/maxim/sidekey-worktrees/configurable-hotkeys`.
+**Рабочая директория:** `<local-checkout>`.
 
 ## File Structure
 

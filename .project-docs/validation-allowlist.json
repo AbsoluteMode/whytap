@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "allow": [
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/Library/Application",
+      "reason": "Generic macOS storage path example with no username."
+    },
+    {
+      "path": "SECURITY.md",
+      "rule": "personal-path",
+      "literal": "~/Library/Application",
+      "reason": "Generic macOS storage path example with no username."
+    },
+    {
+      "path": "docs/plans/hotkeys-followups-a-hover-polish.md",
+      "rule": "sensitive-assignment",
+      "literal": "dropModeHotkeyToggleToken = 0",
+      "reason": "Synthetic Swift hotkey event-counter example; token is an integer sequence number, not a credential."
+    },
+    {
+      "path": "docs/plans/hotkeys-followups-a-hover-polish.md",
+      "rule": "sensitive-assignment",
+      "literal": "token: dropModeHotkeyToggleToken",
+      "reason": "Synthetic Swift hotkey event-counter example; token is an integer sequence number, not a credential."
+    },
+    {
+      "path": "docs/plans/hotkeys-followups-a-hover-polish.md",
+      "rule": "sensitive-assignment",
+      "literal": "token: Int",
+      "reason": "Synthetic Swift hotkey event-counter example; token is an integer sequence number, not a credential."
+    },
+    {
+      "path": "docs/plans/hotkeys-followups-a-hover-polish.md",
+      "rule": "sensitive-assignment",
+      "literal": "token: hoverPanelRequestToken",
+      "reason": "Synthetic Swift hotkey event-counter example; token is an integer sequence number, not a credential."
+    },
+    {
+      "path": "docs/privacy.md",
+      "rule": "personal-path",
+      "literal": "~/Library/Application",
+      "reason": "Generic macOS storage path example with no username."
+    }
+  ]
+}

@@ -10,7 +10,7 @@
 
 **Спека:** `docs/specs/hotkeys-followups.md` (Пакет А).
 
-**Рабочая директория:** `/Users/maxim/sidekey-worktrees/configurable-hotkeys`.
+**Рабочая директория:** `<local-checkout>`.
 
 ---
 

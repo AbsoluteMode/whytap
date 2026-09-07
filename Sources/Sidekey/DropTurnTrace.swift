@@ -106,6 +106,13 @@ final class DropTurnTrace {
         return meta
     }
 
+    /// Durations between actual checkpoints; absence stays unknown rather
+    /// than looking like a zero-latency stage in local diagnostics.
+    func durationMs(from: DropTurnPhase, to: DropTurnPhase) -> Int? {
+        guard let start = stamps[from], let end = stamps[to] else { return nil }
+        return max(0, Int((end.timeIntervalSince(start) * 1000).rounded()))
+    }
+
     private func elapsedMs(to date: Date) -> Int {
         max(0, Int(date.timeIntervalSince(start) * 1000))
     }

@@ -23,7 +23,7 @@
 
 ## Отвергли
 
-- **`responsibility_spawnattrs_setdisclaim` (disclaim child).** Ломает наследованный Full Disk Access → EPERM на `~/Downloads`/`~/Documents`/iCloud — ровно там, откуда юзер просит файлы. Контрпродуктивно; FDA родителю это не лечит (claude-code #64685).
+- **`responsibility_spawnattrs_setdisclaim` (disclaim child).** Ломает наследованный Full Disk Access → EPERM на `<local-checkout>`/`<local-checkout>`/iCloud — ровно там, откуда юзер просит файлы. Контрпродуктивно; FDA родителю это не лечит (claude-code #64685).
 - **Сразу выдать Whytap Full Disk Access.** Корень ещё не подтверждён как TCC, плюс это широкий privacy-trade-off для «голос+UX»-приложения — решаем осознанно в слое 2 на данных.
 - **Total-turn таймаут.** Убил бы легитимные долгие многошаговые турны — заменён на idle/no-output.
 - **MainActor-стриминг как perf-fix.** Реален (стрим обрабатывается на main, конкурирует с island-анимациями), но это вторичная отзывчивость, не причина минутных пауз — отдельная задача.

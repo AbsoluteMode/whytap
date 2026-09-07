@@ -24,7 +24,7 @@ struct PostProcessor {
             prefs: .shared,
             llmKeyStore: OpenRouterLLMKeyStore(),
             customLLMKeyStore: CustomLLMKeyStore(),
-            openRouterClient: OpenRouterLLMClient(),
+            openRouterClient: OpenRouterLLMClient(profile: .dictation),
             localLLM: LocalLLMSession(),
             evictLocalLLM: { await LocalLLMModelStore.shared.evict() }
         )
@@ -34,7 +34,7 @@ struct PostProcessor {
         prefs: SelfKeyPreferences,
         llmKeyStore: any OpenRouterLLMKeyStoring = OpenRouterLLMKeyStore(),
         customLLMKeyStore: any OpenRouterLLMKeyStoring = CustomLLMKeyStore(),
-        openRouterClient: any OpenRouterLLMClienting = OpenRouterLLMClient(),
+        openRouterClient: any OpenRouterLLMClienting = OpenRouterLLMClient(profile: .dictation),
         localLLM: any LocalLLMCompleting = LocalLLMSession(),
         evictLocalLLM: @escaping @Sendable () async -> Void = { await LocalLLMModelStore.shared.evict() }
     ) {

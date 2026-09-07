@@ -2483,8 +2483,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let trace = endDropTurn() else { return }
         trace.mark(.done)
         os_log(
-            "drop turn %{public}@ completed last_phase=%{public}@",
-            log: Self.log, type: .info, trace.turnId, trace.lastPhase.label
+            "drop turn %{public}@ completed last_phase=%{public}@ finishing_ms=%{public}d resolving_ms=%{public}d release_to_done_ms=%{public}d",
+            log: Self.log, type: .info, trace.turnId, trace.lastPhase.label,
+            trace.durationMs(from: .stopRequested, to: .resolving) ?? -1,
+            trace.durationMs(from: .resolving, to: .done) ?? -1,
+            trace.durationMs(from: .stopRequested, to: .done) ?? -1
         )
     }
 
@@ -3095,10 +3098,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         AppState.shared.phase = .verifying
-        let processStartedAt = Date()
+        let processStartedAt = ProcessInfo.processInfo.systemUptime
+        let turnID = dropTurnTrace?.turnId ?? "unavailable"
         let prefs = PrivacyPreferences.shared
         do {
             let appContext = await AXContextReader.snapshot(forPID: targetPID)
+            guard !Task.isCancelled else { return }
+            let contextReadyAt = ProcessInfo.processInfo.systemUptime
             let final = try await postProcessor.process(
                 rawText,
                 targetApp: targetApp,
@@ -3108,11 +3114,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 outputLanguage: outputLanguageCodeForDrop(),
                 transcriptionMode: UserPreferencesCache.shared.currentMode.rawValue
             )
-            let processMs = Int(Date().timeIntervalSince(processStartedAt) * 1000)
+            guard !Task.isCancelled else { return }
+            let cleanupReadyAt = ProcessInfo.processInfo.systemUptime
+            let processMs = Int((cleanupReadyAt - processStartedAt) * 1000)
             os_log(
-                "process ok chars=%{public}d latency_ms=%{public}d",
-                log: Self.log, type: .info,
-                final.count, processMs
+                "process ok turn_id=%{public}@ chars=%{public}d latency_ms=%{public}d ax_ms=%{public}d cleanup_ms=%{public}d",
+                log: Self.log, type: .info, turnID,
+                final.count, processMs, Int((contextReadyAt - processStartedAt) * 1000),
+                Int((cleanupReadyAt - contextReadyAt) * 1000)
             )
 
             // WHY: docs/decisions/2026-06-26-local-llm.md — a degenerate
@@ -3141,6 +3150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 targetApp: targetApp
             )
         } catch {
+            guard !Task.isCancelled else { return }
             // No usable LLM route (missing key / model not downloaded /
             // endpoint down): degrade to the fast output — the raw transcript
             // (filler stripping still applies in `finishDropDelivery`). The

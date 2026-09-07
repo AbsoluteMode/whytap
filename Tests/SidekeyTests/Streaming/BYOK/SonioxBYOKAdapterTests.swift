@@ -58,4 +58,63 @@ final class SonioxBYOKAdapterTests: XCTestCase {
         XCTAssertTrue(got.contains(.final("Privet")))
         XCTAssertEqual(got.last, .done("Privet mir"))  // finals joined with "" (tokens carry spacing)
     }
+    func testManualFinalizationCoversDrainedAudioAndFinCompletesWithoutSocketEOF() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        await session.sendAudio(Data([1, 2]))
+        await session.endInput()
+        let tail = Array(stub.sent.suffix(4))
+        XCTAssertEqual(tail, [.data(Data([1, 2])), .data(Data(repeating: 0, count: 6400)), .text(#"{"type":"finalize"}"#), .text("")])
+        stub.deliverText(#"{"tokens":[{"text":"last word","is_final":true},{"text":"<fin>","is_final":true}]}"#)
+        var events: [BYOKStreamEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events.last, .done("last word"))
+        XCTAssertFalse(events.contains(.final("<fin>")))
+        XCTAssertTrue(stub.cancelled)
+    }
+
+    func testProviderErrorEndsStreamImmediatelyWithoutLeakingMessage() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        stub.deliverText(#"{"error_code":429,"error_message":"private provider details"}"#)
+        var events: [BYOKStreamEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.error("provider")])
+        XCTAssertTrue(stub.cancelled)
+    }
+
+    func testAudioSendFailureIsNotSilentlyTreatedAsDelivered() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        stub.sendError = URLError(.networkConnectionLost)
+        await session.sendAudio(Data([1, 2]))
+        var events: [BYOKStreamEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.error("transport")])
+    }
+
+    func testBinaryJSONAndEmptyPartialFlushFinalOnlyFrame() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        stub.deliverText(#"{"tokens":[]}"#) // heartbeat is not transcription progress
+        stub.deliver(.success(.data(Data(#"{"tokens":[{"text":"done","is_final":true}],"finished":true}"#.utf8))))
+        var events: [BYOKStreamEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.final("done"), .partial(""), .done("done")])
+    }
+
+    func testEndInputIsIdempotentAndCancelCannotDeliverLateFinal() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        await session.endInput()
+        let count = stub.sent.count
+        await session.endInput()
+        XCTAssertEqual(stub.sent.count, count)
+        await session.close()
+        stub.deliverText(#"{"tokens":[{"text":"late","is_final":true}],"finished":true}"#)
+        var events: [BYOKStreamEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertTrue(events.isEmpty)
+    }
+
 }

@@ -39,19 +39,24 @@ struct SonioxBYOKAdapter: BYOKTranscriptionAdapter {
     }
 }
 
-final class SonioxBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
+actor SonioxBYOKSession: BYOKUpstreamSession {
     private let transport: StreamingTransporting
     private var continuation: AsyncStream<BYOKStreamEvent>.Continuation?
     private var receiveTask: Task<Void, Never>?
     private var finalParts: [String] = []
+    private var ending = false
+    private var terminal = false
+    private var endInputAt: Double?
+    private var audioBytes = 0
+    private let clientReferenceID = UUID().uuidString
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "byok-soniox")
 
     /// Soniox emits one `.final` per token; tokens carry their own leading
     /// spaces, so live composition must concatenate verbatim (same semantics
     /// so words are never split into syllables).
-    var finalsJoin: BYOKTranscriptJoin { .verbatim }
+    nonisolated let finalsJoin: BYOKTranscriptJoin = .verbatim
 
-    let events: AsyncStream<BYOKStreamEvent>
+    nonisolated let events: AsyncStream<BYOKStreamEvent>
 
     init(transport: StreamingTransporting) {
         self.transport = transport
@@ -68,6 +73,7 @@ final class SonioxBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
             "sample_rate": 16_000,
             "num_channels": 1,
             "enable_endpoint_detection": false,
+            "client_reference_id": clientReferenceID,
         ]
         var hints: [String] = []
         if let language, !language.isEmpty { hints.append(language) }
@@ -80,37 +86,64 @@ final class SonioxBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
     }
 
     private func startReceiveLoop() {
-        receiveTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                let result = await self.transport.receive()
-                switch result {
-                case .failure:
-                    self.emit(.error("transport"))
-                    self.continuation?.finish()
+        receiveTask = Task { [weak self] in await self?.receiveLoop() }
+    }
+
+    private func receiveLoop() async {
+        while !Task.isCancelled {
+            let result = await self.transport.receive()
+            guard !self.terminal, !Task.isCancelled else { return }
+            switch result {
+            case .failure:
+                self.finish(.error("transport"))
+                return
+            case .success(let frame):
+                let data: Data
+                switch frame {
+                case .text(let value): data = Data(value.utf8)
+                case .data(let value): data = value
+                }
+                guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self.finish(.error("provider"))
                     return
-                case .success(let frame):
-                    guard case .text(let s) = frame,
-                          let obj = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any]
-                    else { continue }
-                    if let tokens = obj["tokens"] as? [[String: Any]] {
-                        let interim = tokens
-                            .filter { ($0["is_final"] as? Bool) != true }
-                            .compactMap { $0["text"] as? String }
-                            .joined()
-                        for token in tokens where (token["is_final"] as? Bool) == true {
-                            let text = token["text"] as? String ?? ""
-                            self.finalParts.append(text)
-                            self.emit(.final(text))
+                }
+                if let code = obj["error_code"] as? Int {
+                    os_log("soniox provider_error session=%{public}@ code=%{public}d",
+                           log: Self.log, type: .error, self.clientReferenceID, code)
+                    self.finish(.error("provider"))
+                    return
+                }
+                var finalized = false
+                if let tokens = obj["tokens"] as? [[String: Any]] {
+                    var interim = ""
+                    for token in tokens {
+                        guard let value = token["text"] as? String else { continue }
+                        if value == "<fin>" {
+                            finalized = (token["is_final"] as? Bool) == true
+                            continue
                         }
-                        if !interim.isEmpty { self.emit(.partial(interim)) }
+                        if value == "<end>" { continue }
+                        if (token["is_final"] as? Bool) == true {
+                            self.finalParts.append(value)
+                            self.emit(.final(value))
+                        } else {
+                            interim += value
+                        }
                     }
-                    if (obj["finished"] as? Bool) == true {
-                        os_log("byok soniox finished", log: Self.log, type: .debug)
-                        self.emit(.done(self.finalParts.joined()))
-                        self.continuation?.finish()
-                        return
-                    }
+                    // Flush final-only frames, but an empty heartbeat is not
+                    // transcription progress and must not reset the stall clock.
+                    if !tokens.isEmpty { self.emit(.partial(interim)) }
+                }
+                // After the audio drain, our only finalize request covers
+                // ALL audio in this take. <fin> is the provider's explicit
+                // acknowledgement; no need to wait for a socket-close frame.
+                if (self.ending && finalized) || (obj["finished"] as? Bool) == true {
+                    let elapsed = self.endInputAt.map { Int((ProcessInfo.processInfo.systemUptime - $0) * 1000) } ?? -1
+                    os_log("soniox complete session=%{public}@ finalize_ms=%{public}d audio_bytes=%{public}d marker=%{public}@",
+                           log: Self.log, type: .info, self.clientReferenceID, elapsed, self.audioBytes,
+                           finalized ? "fin" : "finished")
+                    self.finish(.done(self.finalParts.joined()))
+                    return
                 }
             }
         }
@@ -118,24 +151,50 @@ final class SonioxBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
 
     private func emit(_ ev: BYOKStreamEvent) { continuation?.yield(ev) }
 
+    private func finish(_ event: BYOKStreamEvent) {
+        guard !terminal else { return }
+        terminal = true
+        emit(event)
+        continuation?.finish()
+        transport.cancel(reason: "session complete")
+    }
+
     func sendAudio(_ pcm: Data) async {
-        try? await transport.send(.data(pcm))  // native PCM16 16 kHz — raw binary
+        guard !terminal, !ending else { return }
+        do {
+            try await transport.send(.data(pcm))
+            audioBytes += pcm.count
+        } catch {
+            os_log("soniox audio_send_failed session=%{public}@", log: Self.log, type: .error, clientReferenceID)
+            finish(.error("transport"))
+        }
     }
 
     func endInput() async {
-        // Empty-string end-of-stream marker. Log the event type only on a
-        // failed send (no payload) so a half-open socket is diagnosable; the
-        // session's stop watchdog bounds the resulting receive-side wait.
+        guard !ending, !terminal else { return }
+        ending = true
+        endInputAt = ProcessInfo.processInfo.systemUptime
+        // The caller drains every captured chunk before entering here. Soniox
+        // recommends ~200ms silence before manual finalization; append PCM
+        // silence (never truncate or replace the captured post-release tail).
+        // WHY: docs/decisions/2026-09-07-smart-latency.md
         do {
+            try await transport.send(.data(Data(repeating: 0, count: 6400)))
+            guard !terminal else { return }
+            try await transport.send(.text(#"{"type":"finalize"}"#))
+            guard !terminal else { return }
             try await transport.send(.text(""))
+            os_log("soniox end_input_sent session=%{public}@ audio_bytes=%{public}d",
+                   log: Self.log, type: .info, clientReferenceID, audioBytes)
         } catch {
-            os_log("byok soniox endInput send failed", log: Self.log, type: .error)
-            self.emit(.error(BYOKStreamErrorCode.endOfStreamSendFailed))
-            self.continuation?.finish()
+            guard !terminal else { return }
+            os_log("soniox end_input_failed session=%{public}@", log: Self.log, type: .error, clientReferenceID)
+            finish(.error(BYOKStreamErrorCode.endOfStreamSendFailed))
         }
     }
 
     func close() async {
+        terminal = true
         receiveTask?.cancel()
         continuation?.finish()
         transport.cancel(reason: "client closed")

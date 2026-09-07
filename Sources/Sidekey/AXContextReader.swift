@@ -74,22 +74,31 @@ struct AXContextReader {
     ) async -> String? {
         guard let pid else { return nil }
         let limit = defaultMaxCharacters
-        let work = Task.detached(priority: .userInitiated) {
-            assemble(collect(pid), limit: limit)
+        // An AsyncStream lets the deadline win without waiting for synchronous
+        // AX IPC to acknowledge cancellation. A task group would wait for its
+        // losing child before returning. Late results are discarded.
+        // WHY: docs/decisions/2026-09-07-smart-latency.md
+        let results = AsyncStream<String?> { continuation in
+            let work = Task.detached(priority: .userInitiated) {
+                guard !Task.isCancelled else { return }
+                let value = assemble(collect(pid), limit: limit)
+                guard !Task.isCancelled else { return }
+                continuation.yield(value)
+                continuation.finish()
+            }
+            let timer = Task.detached {
+                do { try await Task.sleep(for: timeout) }
+                catch { return }
+                continuation.yield(nil)
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in
+                work.cancel()
+                timer.cancel()
+            }
         }
-        // Wall-clock guard: when the timeout fires we `cancel()` the walk
-        // rather than abandon it on a leaked task. `liveCollect` checks
-        // `Task.isCancelled` per node, so a sluggish tree stops descending and
-        // `work` resolves to whatever it had gathered so far (often nil) — the
-        // drop proceeds without the best-effort context instead of freezing on
-        // "thinking…" for tens of seconds.
-        let timeoutTask = Task.detached {
-            try? await Task.sleep(for: timeout)
-            work.cancel()
-        }
-        let value = await work.value
-        timeoutTask.cancel()
-        return value
+        for await value in results { return value }
+        return nil
     }
 
     /// Trim, drop blanks, de-duplicate (first occurrence wins, order
@@ -150,6 +159,7 @@ struct AXContextReader {
             budget -= 1
 
             for attribute in [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute] {
+                guard !Task.isCancelled else { return }
                 var value: CFTypeRef?
                 if AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
                    let text = value as? String {
@@ -158,6 +168,7 @@ struct AXContextReader {
                 }
             }
 
+            guard !Task.isCancelled else { return }
             var childrenRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
                let children = childrenRef as? [AXUIElement] {

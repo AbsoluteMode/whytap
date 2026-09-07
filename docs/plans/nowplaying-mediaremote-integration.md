@@ -2,7 +2,7 @@
 
 Replaces the AppleScript now-playing source (dead on macOS 15.4+/Tahoe, system-wedged on the target machine) with the community **MediaRemote adapter** (bundled `perl` + unlinked `MediaRemoteAdapter.framework` that dlopens the private MediaRemote framework and streams now-playing as JSON, **no permission prompt**). The existing `NowPlayingSource` protocol + `NowPlayingSnapshot` model + all UI (wing/strip/transport, Stages 2-4) stay — only the SOURCE changes.
 
-Worktree: `/Users/grigoriygolovlev/work/sidekey-nowplaying-sync`. NO commits/push. Build/tests FOREGROUND only.
+Worktree: `<local-checkout>`. NO commits/push. Build/tests FOREGROUND only.
 
 ## Legal (do this first)
 Vendor all runtime artifacts from **`ungive/mediaremote-adapter` (BSD-3-Clause)**, NOT `ejbills` (that fork ships no LICENSE). Verify `ungive`'s actual interface from its source (the design below was verified against `ejbills`; `ungive` is the upstream and reported identical — confirm the `loop` subcommand, the stdin transport verbs, and the JSON field names from `ungive`'s `run.pl`/sources before coding, and adapt any differences). Record the exact pinned commit SHA and add `Resources/MediaRemoteAdapter/THIRD_PARTY_NOTICE.md` with the BSD-3 text + copyright + source URL + SHA.

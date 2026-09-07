@@ -319,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { await AgentSettingsStore.shared.refreshCodexCatalog() }
         // Final-rubber-stamp diagnostic + last-resort retry. If we reach
         // `applicationDidFinishLaunching` with a non-`.accessory` policy
         // both earlier attempts lost the race to AppKit's Dock paint, so

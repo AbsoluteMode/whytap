@@ -8,7 +8,6 @@ struct AgentModeView: View {
     private let agentEnabledProvider: () -> Bool
     private let onAgentToggle: (Bool) -> Void
     @State private var agentEnabled: Bool
-    @State private var codexConfig = CodexConfigSnapshot()
     @State private var claudeCatalog = ClaudeModelCatalog()
     @StateObject private var claudeSetup = AgentSetupChecklistViewModel(probes: .claude())
     @StateObject private var codexSetup = AgentSetupChecklistViewModel(probes: .codex())
@@ -46,9 +45,9 @@ struct AgentModeView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .task {
-            codexConfig = CodexConfigReader().read()
             await loadClaudeCatalog()
         }
+        .task { await settings.refreshCodexCatalog() }
         .onAppear {
             agentEnabled = agentEnabledProvider()
         }
@@ -159,7 +158,7 @@ struct AgentModeView: View {
                 }
             }
             if store.activeProvider == .codex {
-                AgentControlsCodex(settings: settings, config: codexConfig)
+                AgentControlsCodex(settings: settings)
                     .padding(.top, 10)
             }
         }

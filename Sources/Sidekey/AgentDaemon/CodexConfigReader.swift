@@ -30,7 +30,8 @@ struct CodexConfigReader {
         var snap = CodexConfigSnapshot()
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") || line.hasPrefix("#") { continue }
+            if line.hasPrefix("[") { break }
+            if line.hasPrefix("#") { continue }
             guard let eq = line.firstIndex(of: "=") else { continue }
             let key = line[..<eq].trimmingCharacters(in: .whitespaces)
             var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)

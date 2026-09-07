@@ -167,9 +167,7 @@ final class CodexProvider: CLIProvider {
             if let model = options.model { args += ["-m", model] }
             if let effort = options.effort { args += ["-c", "model_reasoning_effort=\(effort)"] }
             if let tier = options.serviceTier {
-                let selectedModel = options.model ?? readConfig().model
-                if Self.supportsServiceTier(model: selectedModel),
-                   let cliTier = Self.cliServiceTier(tier) {
+                if let cliTier = Self.cliServiceTier(tier) {
                     args += ["-c", "service_tier=\(cliTier)"]
                 }
             }
@@ -257,21 +255,16 @@ final class CodexProvider: CLIProvider {
         }
     }
 
-    static func supportsServiceTier(model: String?) -> Bool {
-        guard let model else { return true }
-        return model.lowercased() != "gpt-5.3-codex-spark"
-    }
-
-    /// UI tier -> CLI config value. The old npm CLI (0.125) only accepts
-    /// fast/flex and fatals on anything else at config-load; the Codex.app
-    /// binary (0.140+) also accepts "priority"/"default". "fast" means the
-    /// same lane as "priority", so map down to the value every CLI accepts;
-    /// "default" means "no override" — send no flag at all.
+    /// Capabilities are validated by AgentSettingsStore. Preserve registry IDs;
+    /// Normal explicitly overrides a fast tier in the user's CLI config.
     static func cliServiceTier(_ uiTier: String) -> String? {
-        switch uiTier.lowercased() {
+        let value = uiTier.lowercased()
+        switch value {
         case "priority", "fast": return "fast"
-        case "flex": return "flex"
-        default: return nil
+        case "normal", "standard", "default": return "default"
+        default:
+            guard !value.isEmpty, value.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 95 || $0 == 45 }) else { return nil }
+            return value
         }
     }
 

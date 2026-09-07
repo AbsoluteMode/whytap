@@ -57,6 +57,17 @@ Voice flow (Drop / dictation):
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md
 
+Codex model controls:
+  CodexModelCatalogReader -> short-lived app-server (initialize -> model/list).
+  The CLI registry supplies models, reasoning levels and Fast/service tiers.
+  AgentSettingsStore resolves saved/config/default model and validates controls;
+  Settings and execution use the same options. No GPT-5.5 pin or model-name
+  speed exception. Normal explicitly overrides Fast from the CLI config.
+  Discovery refreshes at startup/Agents open/manual refresh, keeps last good
+  data on failure, and never creates a thread or submits a prompt. Prefer the
+  CLI in ChatGPT.app, then Codex.app and standalone locations. WHY:
+  docs/decisions/2026-09-07-codex-model-registry.md
+
 Agent flow (local CLI):
   User -> Right Command tap (text) / hold (voice) -> RightCmdGestureMonitor
        -> voice: the same STT factory as Drop

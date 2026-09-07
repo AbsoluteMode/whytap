@@ -1,22 +1,16 @@
 import Foundation
 
 /// Per-provider model / reasoning / speed settings chosen in Settings,
-/// persisted in UserDefaults. Models are pinned by Whytap for a stable tool
-/// surface; effort is always sent per-invocation (never inherited from the
-/// user's CLI config) so agent turns are consistently fast.
+/// persisted in UserDefaults. Codex models and controls come from its registry;
+/// the same resolution feeds both the Settings UI and per-turn CLI flags.
 @MainActor
 final class AgentSettingsStore: ObservableObject {
     static let shared = AgentSettingsStore()
     static let pinnedClaudeModel = "sonnet"
-    static let pinnedCodexModel = "gpt-5.5"
-    /// Whytap pins reasoning to Low unless the user explicitly picks another
-    /// level: the session flag must always be sent, otherwise the CLI inherits
-    /// the user's terminal config (often high/max) and turns feel slow.
+    /// Claude retains its existing low-effort default.
     static let defaultEffort = "low"
-    /// Levels each CLI accepts (`--effort` / `model_reasoning_effort`). The
-    /// pickers offer exactly these sets (guarded by tests).
+    /// Claude options; Codex capabilities come from model/list.
     static let claudeEffortLevels: Set<String> = ["low", "medium", "high", "xhigh", "max"]
-    static let codexEffortLevels: Set<String> = ["low", "medium", "high", "xhigh"]
 
     @Published var claudeModel: String?       { didSet { write(Keys.claudeModel, claudeModel) } }
     @Published var claudeEffort: String?      { didSet { write(Keys.claudeEffort, claudeEffort) } }
@@ -32,9 +26,15 @@ final class AgentSettingsStore: ObservableObject {
         static let codexServiceTier = "agent.codex.serviceTier"
     }
 
+    @Published private(set) var codexCatalog: [CodexModelOption] = []
+    @Published private(set) var codexCatalogLoading = false
+    @Published private(set) var codexCatalogError: String?
+    private var catalogUpdatedAt: Date?
+    private var codexConfig: CodexConfigSnapshot
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, codexConfig: CodexConfigSnapshot = CodexConfigReader().read()) {
+        self.codexConfig = codexConfig
         self.defaults = defaults
         // Property observers do not fire on initial assignment in init, so this
         // load does not write back.
@@ -45,22 +45,13 @@ final class AgentSettingsStore: ObservableObject {
         }
         self.claudeEffort = defaults.string(forKey: Keys.claudeEffort)
         self.codexModel = defaults.string(forKey: Keys.codexModel)
-        // Keep Whytap on the full Codex model. Earlier builds exposed Spark;
-        // normalize any stored Codex model so old preferences do not silently
-        // keep running a model with a narrower tool surface.
-        if let normalized = Self.normalizedCodexModel(codexModel), normalized != codexModel {
-            self.codexModel = normalized
-            defaults.set(normalized, forKey: Keys.codexModel)
-        }
         self.codexEffort = defaults.string(forKey: Keys.codexEffort)
         self.codexServiceTier = defaults.string(forKey: Keys.codexServiceTier)
     }
 
     /// Resolve the overrides for one provider into the run-time options struct.
-    /// Effort is always populated (stored -> "low"), the same chain the
-    /// Reasoning picker displays, so the run sends exactly what the picker
-    /// shows and neither the CLI's built-in default nor the user's CLI config
-    /// ever applies.
+    /// Codex overrides are validated against the selected model’s live capabilities.
+    /// Without a catalog, retain the model but let Codex resolve its controls.
     func options(for id: CLIProviderID) -> AgentRunOptions {
         switch id {
         case .claude:
@@ -71,17 +62,15 @@ final class AgentSettingsStore: ObservableObject {
             )
         case .codex:
             return AgentRunOptions(
-                model: Self.normalizedCodexModel(codexModel) ?? Self.pinnedCodexModel,
-                effort: Self.resolvedEffort(stored: codexEffort,
-                                            allowed: Self.codexEffortLevels),
-                serviceTier: codexServiceTier
+                model: selectedCodexModel,
+                effort: selectedCodexOption?.resolvedEffort(codexEffort),
+                serviceTier: selectedCodexOption?.resolvedTier(codexServiceTier ?? codexConfig.serviceTier)
             )
         }
     }
 
     /// The user's explicit pick when it is a level this CLI accepts, else Low.
-    /// Case-insensitive; values outside `allowed` (e.g. codex "minimal",
-    /// claude-only "max" on codex) never pass through to a CLI flag.
+    /// Case-insensitive; unknown Claude levels do not pass through to CLI flags.
     static func resolvedEffort(stored: String?, allowed: Set<String>) -> String {
         if let v = stored?.lowercased(), allowed.contains(v) { return v }
         return defaultEffort
@@ -89,7 +78,44 @@ final class AgentSettingsStore: ObservableObject {
 
     static func normalizedCodexModel(_ model: String?) -> String? {
         guard let model else { return nil }
-        return model == pinnedCodexModel ? model : pinnedCodexModel
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var selectedCodexModel: String? {
+        Self.normalizedCodexModel(codexModel)
+            ?? Self.normalizedCodexModel(codexConfig.model)
+            ?? codexCatalog.first(where: { $0.isDefault == true })?.model
+            ?? codexCatalog.first?.model
+    }
+
+    var selectedCodexOption: CodexModelOption? {
+        codexCatalog.first { $0.model == selectedCodexModel }
+    }
+
+    func updateCodexCatalog(_ models: [CodexModelOption]) {
+        codexCatalog = models
+        catalogUpdatedAt = Date()
+        codexCatalogError = nil
+    }
+
+    func refreshCodexCatalog(force: Bool = false,
+        load: () async throws -> [CodexModelOption] = { try await CodexModelCatalogReader().read() }
+    ) async {
+        guard !codexCatalogLoading else { return }
+        if !force, let date = catalogUpdatedAt, Date().timeIntervalSince(date) < 60 { return }
+        codexCatalogLoading = true
+        defer { codexCatalogLoading = false }
+        codexConfig = CodexConfigReader().read()
+        do {
+            let models = try await load()
+            try Task.checkCancellation()
+            updateCodexCatalog(models)
+        } catch is CancellationError {
+            // Closing Settings cancels discovery; preserve the previous catalog.
+        } catch {
+            codexCatalogError = "Couldn’t refresh models from Codex. Check that Codex is installed and signed in, then retry."
+        }
     }
 
     static func normalizedClaudeModel(_ model: String?) -> String? {

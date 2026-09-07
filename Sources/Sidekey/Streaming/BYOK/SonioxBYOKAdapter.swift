@@ -130,9 +130,9 @@ actor SonioxBYOKSession: BYOKUpstreamSession {
                             interim += value
                         }
                     }
-                    // An empty tail flushes newly committed final tokens to
-                    // the live UI and counts as receive-side progress.
-                    self.emit(.partial(interim))
+                    // Flush final-only frames, but an empty heartbeat is not
+                    // transcription progress and must not reset the stall clock.
+                    if !tokens.isEmpty { self.emit(.partial(interim)) }
                 }
                 // After the audio drain, our only finalize request covers
                 // ALL audio in this take. <fin> is the provider's explicit

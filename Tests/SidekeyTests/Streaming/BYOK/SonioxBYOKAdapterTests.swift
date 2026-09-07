@@ -96,6 +96,7 @@ final class SonioxBYOKAdapterTests: XCTestCase {
     func testBinaryJSONAndEmptyPartialFlushFinalOnlyFrame() async throws {
         let stub = StubWebSocketTransport()
         let session = try await SonioxBYOKAdapter(apiKey: "k", model: "stt-rt-v5") { stub }.open(language: nil, terms: [])
+        stub.deliverText(#"{"tokens":[]}"#) // heartbeat is not transcription progress
         stub.deliver(.success(.data(Data(#"{"tokens":[{"text":"done","is_final":true}],"finished":true}"#.utf8))))
         var events: [BYOKStreamEvent] = []
         for await event in session.events { events.append(event) }

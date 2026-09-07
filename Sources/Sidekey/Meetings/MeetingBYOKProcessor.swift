@@ -98,14 +98,23 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             throw MeetingBYOKProcessingError.directLLMDisabled
         }
 
-        let adapter = try makeTranscriptionAdapter()
-        let transcript = try await MeetingBYOKTranscriber(
-            adapter: adapter,
-            terms: vocab.terms
-        ).transcribe(chunkURLs: event.chunkURLs, language: language)
+        let transcript: String
+        if prefs.selectedProvider == .soniox {
+            guard let key = try keyStore.read(for: .soniox), !key.isEmpty else {
+                throw MeetingBYOKProcessingError.missingTranscriptionKey
+            }
+            transcript = try await SonioxMeetingTranscriber(apiKey: key).transcribe(
+                chunkURLs: event.chunkURLs, language: language, terms: vocab.terms
+            )
+        } else {
+            transcript = try await MeetingBYOKTranscriber(
+                adapter: makeTranscriptionAdapter(), terms: vocab.terms
+            ).transcribe(chunkURLs: event.chunkURLs, language: language)
+        }
 
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { throw MeetingBYOKProcessingError.noTranscript }
+        _ = try await meetingsStore.updateProgress(id: event.meetingId, status: .generatingProtocol)
 
         let durationSeconds = MeetingsCoordinator.roundedDurationSeconds(event.totalDurationSeconds)
         let endedAt = startedAt.addingTimeInterval(max(0, event.totalDurationSeconds))

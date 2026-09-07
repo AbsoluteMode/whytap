@@ -59,6 +59,7 @@ final class OpenRouterLLMClientTests: XCTestCase {
             XCTAssertEqual(json["model"] as? String, "openrouter/auto")
             XCTAssertEqual(json["stream"] as? Bool, false)
             XCTAssertNil(json["reasoning"])
+            XCTAssertNil(json["provider"])
             let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
             XCTAssertEqual(messages.first?["role"] as? String, "system")
             let response = Data(#"{"choices":[{"message":{"content":"clean text"}}]}"#.utf8)
@@ -115,6 +116,9 @@ final class OpenRouterLLMClientTests: XCTestCase {
             let reasoning = try XCTUnwrap(json["reasoning"] as? [String: Any])
             XCTAssertEqual(reasoning["effort"] as? String, "low")
             XCTAssertNil(reasoning["enabled"])
+            XCTAssertEqual(json["model"] as? String, "google/gemini-3.8-flash")
+            let provider = try XCTUnwrap(json["provider"] as? [String: String])
+            XCTAssertEqual(provider, ["sort": "throughput"])
             return (200, [:], Data(#"{"id":"gen-test","usage":{"completion_tokens":25,"completion_tokens_details":{"reasoning_tokens":10}},"choices":[{"message":{"content":"clean"}}]}"#.utf8))
         }
         let dictation = OpenRouterLLMClient(session: session, profile: .dictation)
@@ -131,6 +135,7 @@ final class OpenRouterLLMClientTests: XCTestCase {
             XCTAssertEqual(request.url?.lastPathComponent, "completions")
             let json = try JSONSerialization.jsonObject(with: XCTUnwrap(StubURLProtocol.capturedBodies.last)) as! [String: Any]
             XCTAssertNil(json["reasoning"])
+            XCTAssertNil(json["provider"])
             return (200, [:], Data(#"{"choices":[{"message":{"content":"clean"}}]}"#.utf8))
         }
         let dictation = OpenRouterLLMClient(session: session, profile: .dictation)
@@ -142,6 +147,7 @@ final class OpenRouterLLMClientTests: XCTestCase {
             if request.url?.lastPathComponent == "models" { return (503, [:], Data()) }
             let json = try JSONSerialization.jsonObject(with: XCTUnwrap(StubURLProtocol.capturedBodies.last)) as! [String: Any]
             XCTAssertNil(json["reasoning"])
+            XCTAssertEqual(json["provider"] as? [String: String], ["sort": "throughput"])
             return (200, [:], Data(#"{"choices":[{"message":{"content":"clean"}}]}"#.utf8))
         }
         let dictation = OpenRouterLLMClient(session: session, profile: .dictation)

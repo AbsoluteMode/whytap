@@ -36,7 +36,8 @@ Voice flow (Drop / dictation):
             (raw transcript + Filler stripping). An unconfigured route
             degrades to the no-LLM output; the paste never fails on it.
        Smart uses the lowest supported OpenRouter reasoning effort (or off
-       when optional), discovered from the cached model catalog. Meeting
+       when optional), discovered from the cached model catalog, and asks
+       OpenRouter to sort providers of the selected model by throughput. Meeting
        summaries and custom endpoints retain their own defaults. AX context
        has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
        timings/counts/IDs only. WHY: docs/decisions/2026-09-07-smart-latency.md

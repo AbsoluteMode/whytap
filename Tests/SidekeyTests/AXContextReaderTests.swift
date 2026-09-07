@@ -92,6 +92,32 @@ final class AXContextReaderTests: XCTestCase {
         )
     }
 
+    func testDeadlineDoesNotWaitForUncooperativeCollectorOrAcceptItsLateValue() async {
+        let started = ContinuousClock.now
+        let result = await AXContextReader.snapshot(
+            forPID: 4242, timeout: .milliseconds(50), collect: { _ in
+                Thread.sleep(forTimeInterval: 1)
+                return ["late context"]
+            }
+        )
+        XCTAssertNil(result)
+        XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(500))
+    }
+
+    func testCancellationDoesNotWaitForAXOrItsDeadline() async {
+        let started = ContinuousClock.now
+        let task = Task {
+            await AXContextReader.snapshot(forPID: 4242, timeout: .seconds(30), collect: { _ in
+                Thread.sleep(forTimeInterval: 1)
+                return ["cancelled context"]
+            })
+        }
+        task.cancel()
+        let value = await task.value
+        XCTAssertNil(value)
+        XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(500))
+    }
+
     func test_snapshot_returns_context_when_the_walk_finishes_before_timeout() async {
         // The fast path (the common case: apps that answer AX quickly) is
         // unaffected — the timeout is a ceiling, not a delay.

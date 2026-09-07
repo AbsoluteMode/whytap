@@ -160,12 +160,14 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
             // an actor crossing on every frame. Mirrors the on-device session.
             var marked = false
             for await chunk in self.audioEngine.chunks {
+                guard !Task.isCancelled else { return }
                 await session.sendAudio(chunk)
                 if !marked {
                     marked = true
                     await MainActor.run { [weak self] in self?.progress.noteAudioSent() }
                 }
             }
+            guard !Task.isCancelled else { return }
             os_log(
                 "byok stream: audio drained; sending endInput",
                 log: Self.log, type: .info
@@ -307,6 +309,9 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
         }
 
         for await ev in session.events {
+            // AsyncStream may still hold buffered events when a timeout/cancel
+            // closes its producer. Never accept a late done after either wins.
+            if cancelled || failureReason != nil { break }
             switch ev {
             case .partial(let text):
                 // A partial came back → the live stream is making progress;
@@ -320,6 +325,7 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                 ))
                 continue
             case .final(let text):
+                progress.notePartial()
                 committedLiveTranscript = Self.appendingLiveTranscriptSegment(
                     text,
                     to: committedLiveTranscript,

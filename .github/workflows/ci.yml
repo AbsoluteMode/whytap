@@ -35,7 +35,7 @@ jobs:
           ./actionlint -version
 
       - name: Run actionlint
-        run: ./actionlint -color .github/workflows/*.yml
+        run: ./actionlint -color
 
       - name: Install yamllint
         run: pipx install yamllint==1.38.0

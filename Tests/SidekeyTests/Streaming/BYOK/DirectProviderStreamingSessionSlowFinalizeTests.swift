@@ -78,6 +78,42 @@ final class DirectProviderStreamingSessionSlowFinalizeTests: XCTestCase {
         func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession { session }
     }
 
+    /// A terminal can already be buffered when the watchdog closes a session.
+    /// AsyncStream.finish() preserves that buffer; the consumer must respect
+    /// the failure that won, rather than accepting the now-late success.
+    final class BufferedDoneOnClose: BYOKUpstreamSession {
+        let events: AsyncStream<BYOKStreamEvent>
+        let continuation: AsyncStream<BYOKStreamEvent>.Continuation
+        init() {
+            var c: AsyncStream<BYOKStreamEvent>.Continuation!
+            events = AsyncStream { c = $0 }
+            continuation = c
+        }
+        func sendAudio(_ pcm: Data) async {}
+        func endInput() async {}
+        func close() async {
+            continuation.yield(.done("late final"))
+            continuation.finish()
+        }
+    }
+
+    struct BufferedDoneAdapter: BYOKTranscriptionAdapter {
+        let session: BufferedDoneOnClose
+        func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession { session }
+    }
+
+    func testWatchdogWinsOverDoneBufferedDuringClose() async {
+        let upstream = BufferedDoneOnClose()
+        let session = DirectProviderStreamingSession(
+            audioEngine: FakeAudio(), adapter: BufferedDoneAdapter(session: upstream),
+            language: nil, terms: [], stopWatchdog: .milliseconds(100), resilient: true
+        )
+        let task = Task { await session.run() }
+        await session.stop()
+        let result = await task.value
+        XCTAssertEqual(result, .failed(.watchdogTimeout))
+    }
+
     /// Upstream whose `sendAudio` takes `sendDelay` per chunk REGARDLESS of
     /// `close()` — models a half-open socket / throttled uplink where
     /// `URLSessionWebSocketTask.cancel()` does not promptly fail the in-flight

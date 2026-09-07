@@ -1,8 +1,10 @@
 import Foundation
+import OSLog
 
 struct OpenRouterModelOption: Identifiable, Equatable, Hashable {
     let id: String
     let name: String
+    var reasoning: OpenRouterReasoningCapabilities? = nil
 
     var displayName: String {
         name == id ? id : "\(name) · \(id)"
@@ -96,15 +98,23 @@ extension OpenRouterLLMClienting {
 }
 
 struct OpenRouterLLMClient: OpenRouterLLMClienting {
+    enum Profile { case standard, dictation }
+    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "cleanup-llm")
+    private let profile: Profile
+    private let reasoningCatalog: OpenRouterReasoningCatalog
     let baseURL: URL
     let session: URLSession
 
     init(
         baseURL: URL = URL(string: "https://openrouter.ai/api/v1")!,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        profile: Profile = .standard,
+        reasoningCatalog: OpenRouterReasoningCatalog = OpenRouterReasoningCatalog()
     ) {
         self.baseURL = baseURL
         self.session = session
+        self.profile = profile
+        self.reasoningCatalog = reasoningCatalog
     }
 
     func listModels(endpoint: OpenAICompatibleLLMEndpoint) async throws -> [OpenRouterModelOption] {
@@ -128,6 +138,7 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
                 let id: String
                 let name: String?
                 let architecture: Architecture?
+                let reasoning: OpenRouterReasoningCapabilities?
             }
 
             let data: [Model]
@@ -135,12 +146,14 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         do {
             let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
-            return decoded.data
+            let models = decoded.data
                 .filter { model in
                     let outputs = model.architecture?.outputModalities ?? ["text"]
                     return outputs.contains("text")
                 }
-                .map { OpenRouterModelOption(id: $0.id, name: $0.name ?? $0.id) }
+                .map { OpenRouterModelOption(id: $0.id, name: $0.name ?? $0.id, reasoning: $0.reasoning) }
+            if endpoint.sendsOpenRouterHeaders { await reasoningCatalog.update(models) }
+            return models
         } catch {
             throw OpenRouterLLMError.decoding(error.localizedDescription)
         }
@@ -170,17 +183,29 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyCommonHeaders(to: &request, endpoint: endpoint)
 
+        let discoveryStarted = ProcessInfo.processInfo.systemUptime
+        let reasoning: OpenRouterReasoningSetting?
+        if profile == .dictation, endpoint.sendsOpenRouterHeaders {
+            reasoning = await reasoningCatalog.setting(model: trimmedModel, baseURL: endpoint.baseURL, session: session)
+        } else {
+            reasoning = nil
+        }
+        try Task.checkCancellation()
+        let discoveryMs = Int((ProcessInfo.processInfo.systemUptime - discoveryStarted) * 1000)
         struct ChatRequest: Encodable {
             let model: String
             let messages: [OpenRouterChatMessage]
             let temperature: Double
             let stream: Bool
+            let reasoning: OpenRouterReasoningSetting?
         }
         request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: trimmedModel, messages: messages, temperature: 0.1, stream: false)
+            ChatRequest(model: trimmedModel, messages: messages, temperature: 0.1, stream: false, reasoning: reasoning)
         )
 
+        let requestStarted = ProcessInfo.processInfo.systemUptime
         let (data, response) = try await session.data(for: request)
+        let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
         try validate(response: response, body: data)
 
         struct ChatResponse: Decodable {
@@ -188,11 +213,29 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
                 struct Message: Decodable { let content: String? }
                 let message: Message
             }
+            struct Usage: Decodable {
+                struct Details: Decodable { let reasoning_tokens: Int? }
+                let completion_tokens: Int?
+                let completion_tokens_details: Details?
+            }
+            let id: String?
+            let usage: Usage?
             let choices: [Choice]
         }
 
         do {
             let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
+            if profile == .dictation {
+                // No prompt, reply, reasoning text, key, URL, or provider error body.
+                // Only catalog identifiers (OpenRouter) and numeric diagnostics.
+                let modelID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(trimmedModel) : "custom"
+                let requestID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(decoded.id) : "unavailable"
+                os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d",
+                       log: Self.log, type: .info,
+                       modelID, requestID, reasoning?.diagnosticLabel ?? "default",
+                       discoveryMs, requestMs, decoded.usage?.completion_tokens ?? -1,
+                       decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1)
+            }
             guard let content = decoded.choices.first?.message.content,
                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
@@ -213,6 +256,13 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             requiresAPIKey: true,
             sendsOpenRouterHeaders: true
         ), model: model, messages: messages)
+    }
+
+    private static func safeDiagnosticID(_ value: String?) -> String {
+        guard let value, !value.isEmpty, value.count <= 150,
+              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_/.:~").contains($0) })
+        else { return "unavailable" }
+        return value
     }
 
     private func applyCommonHeaders(to request: inout URLRequest, endpoint: OpenAICompatibleLLMEndpoint) {

@@ -3,6 +3,18 @@ import XCTest
 
 @MainActor
 final class DropTurnTraceTests: XCTestCase {
+    func testStageDurationsExcludeRecordingAndKeepMissingStagesUnknown() {
+        let start = Date(timeIntervalSince1970: 1000)
+        let trace = DropTurnTrace(start: start)
+        XCTAssertNil(trace.durationMs(from: .stopRequested, to: .done))
+        trace.mark(.stopRequested, at: start.addingTimeInterval(20))
+        trace.mark(.resolving, at: start.addingTimeInterval(20.7))
+        trace.mark(.done, at: start.addingTimeInterval(22.3))
+        XCTAssertEqual(trace.durationMs(from: .stopRequested, to: .resolving), 700)
+        XCTAssertEqual(trace.durationMs(from: .resolving, to: .done), 1600)
+        XCTAssertEqual(trace.durationMs(from: .stopRequested, to: .done), 2300)
+    }
+
     /// A normal-but-failed turn: records phase timeline + counters and emits
     /// privacy-safe metadata with millisecond offsets from the turn start.
     func test_metadata_includes_turn_id_last_phase_and_phase_offsets() {

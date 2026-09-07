@@ -85,14 +85,12 @@ case "$FLAVOR" in
     prod)
         TAG="v${SHORT_VERSION}"
         TITLE="Whytap ${SHORT_VERSION}"
-        PRERELEASE_FLAG=()
         FEED_TAG="$TAG"
         FEED_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/appcast.xml"
         ;;
     beta)
         TAG="beta-v${SHORT_VERSION}-b${BUILD_VERSION}"
         TITLE="Whytap Beta ${SHORT_VERSION} (build ${BUILD_VERSION})"
-        PRERELEASE_FLAG=(--prerelease)
         FEED_TAG="beta"
         FEED_URL="${DOWNLOAD_BASE}/beta/appcast.xml"
         ;;
@@ -237,8 +235,14 @@ if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
         "${STAGING_DIR}/appcast.xml"
 else
     echo "Creating release ${TAG}..."
+    # macOS Bash 3.2 treats an empty array as unset under set -u.
+    # Keep the argument array nonempty for both release channels.
+    create_args=(--title "$TITLE" "${notes_args[@]}")
+    if [ "$FLAVOR" = "beta" ]; then
+        create_args+=(--prerelease)
+    fi
     gh release create "$TAG" --repo "$GITHUB_REPO" \
-        --title "$TITLE" "${notes_args[@]}" "${PRERELEASE_FLAG[@]}" \
+        "${create_args[@]}" \
         "${STAGING_DIR}/${DMG_FILENAME}" \
         "${STAGING_DIR}/${LATEST_FILENAME}" \
         "${STAGING_DIR}/appcast.xml"

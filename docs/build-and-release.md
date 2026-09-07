@@ -30,6 +30,10 @@ doppler run --project sidekey --config dev -- env FLAVOR=prod ./scripts/user-rel
 
 A fork exports them in the shell instead. No value is ever committed.
 
+The release scripts support the Bash 3.2 shipped with macOS. Optional command
+arguments are appended to nonempty arrays: expanding an empty array with
+`set -u` fails in Bash 3.2 even when that array was explicitly initialized.
+
 ## Flavors
 
 | Flavor | Bundle id | Bundle name | Feed |

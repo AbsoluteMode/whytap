@@ -38,6 +38,15 @@ final class OnboardingResumeStoreTests: XCTestCase {
         XCTAssertEqual(resolved, .skills)
     }
 
+    func test_modelsSetupResumesWithoutArmingTryRuntime() {
+        defaults.set(OnboardingFlowStep.models.rawValue, forKey: OnboardingResumeStore.resumeDefaultsKey)
+        XCTAssertEqual(OnboardingResumeStore.resolvedInitialStep(
+            fallback: .permissions, needsPermissions: false, defaults: defaults), .models)
+        XCTAssertFalse(OnboardingFlowStep.models.isTryStep)
+        XCTAssertEqual(OnboardingResumeStore.resolvedInitialStep(
+            fallback: .models, needsPermissions: true, defaults: defaults), .permissions)
+    }
+
     func test_resolvedInitialStep_missingPermissionsWinOverSavedStep() {
         defaults.set(OnboardingFlowStep.tryDrop.rawValue, forKey: OnboardingResumeStore.resumeDefaultsKey)
         let resolved = OnboardingResumeStore.resolvedInitialStep(

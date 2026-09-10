@@ -57,6 +57,118 @@ final class SettingsModelsViewModelTests: XCTestCase {
         try body(.inMemory())
     }
 
+    // MARK: - Onboarding setup
+
+    func testOnboardingPresentsBYOKWithoutChangingSavedRoutes() {
+        let (vm, prefs) = makeVM()
+        _ = OnboardingModelsController(models: vm)
+        XCTAssertEqual(vm.level, .yourKey)
+        XCTAssertEqual(vm.llmTopLevel, .yourKey)
+        XCTAssertEqual(prefs.transcriptionLevel, .local)
+        XCTAssertEqual(prefs.llmLevel, .local)
+    }
+
+    func testOnboardingDoesNotAdvanceWithMissingOrRejectedSpeechKey() async {
+        let (vm, prefs) = makeVM(probeSucceeds: false)
+        let controller = OnboardingModelsController(models: vm)
+        let emptyResult = await controller.continueSetup()
+        XCTAssertFalse(emptyResult)
+        XCTAssertEqual(controller.stage, .speech)
+        vm.apiKeyInput = "test-key"
+        let rejectedResult = await controller.continueSetup()
+        XCTAssertFalse(rejectedResult)
+        XCTAssertEqual(controller.stage, .speech)
+        XCTAssertEqual(prefs.transcriptionLevel, .local)
+        XCTAssertFalse(controller.isSaving)
+    }
+
+    func testOnboardingSavesSpeechThenOptionalSmartKey() async throws {
+        let speechStore = BYOKKeyStore.inMemory()
+        let smartStore = ModelsFakeOpenRouterKeyStore()
+        let (vm, prefs) = makeVM(keyStore: speechStore, llmKeyStore: smartStore)
+        let controller = OnboardingModelsController(models: vm)
+        vm.apiKeyInput = "test-speech-key"
+        let speechResult = await controller.continueSetup()
+        XCTAssertFalse(speechResult)
+        XCTAssertEqual(controller.stage, .smart)
+        XCTAssertEqual(prefs.transcriptionLevel, .yourKey)
+        XCTAssertEqual(try speechStore.read(for: .soniox), "test-speech-key")
+        XCTAssertEqual(prefs.llmLevel, .local)
+
+        let missingSmartResult = await controller.continueSetup()
+        XCTAssertFalse(missingSmartResult)
+        XCTAssertEqual(controller.stage, .smart)
+        vm.openRouterAPIKeyInput = "test-smart-key"
+        let smartResult = await controller.continueSetup()
+        XCTAssertTrue(smartResult)
+        XCTAssertEqual(prefs.llmLevel, .yourKey)
+        XCTAssertEqual(smartStore.key, "test-smart-key")
+    }
+
+    func testOnboardingLocalAlternativeRequiresDownloadedModel() async {
+        let store = ModelsFakeLocalModelStore()
+        let (vm, prefs) = makeVM(localModelStore: store)
+        let controller = OnboardingModelsController(models: vm)
+        vm.selectLevel(.local)
+        let missingResult = await controller.continueSetup()
+        XCTAssertFalse(missingResult)
+        XCTAssertEqual(controller.stage, .speech)
+        await vm.downloadLocalModel()
+        let readyResult = await controller.continueSetup()
+        XCTAssertFalse(readyResult)
+        XCTAssertEqual(controller.stage, .smart)
+        XCTAssertEqual(prefs.transcriptionLevel, .local)
+        controller.backToSpeech()
+        XCTAssertEqual(controller.stage, .speech)
+    }
+
+    func testOnboardingLocalModelsDoNotRequireKeychainWrites() async {
+        let smartStore = ModelsFakeOpenRouterKeyStore()
+        smartStore.failWrites = true
+        let (vm, _) = makeVM(
+            keyStore: BYOKKeyStore(makeStore: { _ in ModelsFailingTokenStore() }),
+            llmKeyStore: smartStore,
+            localModelStore: ModelsFakeLocalModelStore(isReady: true),
+            localLLMStore: ModelsFakeLocalLLMStore(isReady: true)
+        )
+        let controller = OnboardingModelsController(models: vm)
+        vm.selectLevel(.local)
+        _ = await controller.continueSetup()
+        XCTAssertEqual(controller.stage, .smart)
+        vm.openRouterAPIKeyInput = "unused-test-key"
+        vm.selectLLMLevel(.local)
+        let result = await controller.continueSetup()
+        XCTAssertTrue(result)
+    }
+
+    func testOnboardingKeychainFailureDoesNotCommitSpeechRoute() async {
+        let (vm, prefs) = makeVM(keyStore: BYOKKeyStore(makeStore: { _ in ModelsFailingTokenStore() }))
+        let controller = OnboardingModelsController(models: vm)
+        vm.apiKeyInput = "test-key"
+        let result = await controller.continueSetup()
+        XCTAssertFalse(result)
+        XCTAssertEqual(controller.stage, .speech)
+        XCTAssertEqual(prefs.transcriptionLevel, .local)
+        XCTAssertEqual(vm.approvedLevel, .local)
+        XCTAssertEqual(vm.connectionStatus, .failed("Could not save API key in Keychain"))
+    }
+
+    func testOnboardingKeychainFailureDoesNotCommitSmartRoute() async {
+        let store = ModelsFakeOpenRouterKeyStore()
+        store.failWrites = true
+        let (vm, prefs) = makeVM(llmKeyStore: store)
+        let controller = OnboardingModelsController(models: vm)
+        vm.apiKeyInput = "test-key"
+        _ = await controller.continueSetup()
+        vm.openRouterAPIKeyInput = "test-smart-key"
+        let result = await controller.continueSetup()
+        XCTAssertFalse(result)
+        XCTAssertEqual(controller.stage, .smart)
+        XCTAssertEqual(prefs.llmLevel, .local)
+        XCTAssertEqual(vm.approvedLLMLevel, .local)
+        XCTAssertEqual(vm.llmConnectionStatus, .failed("Could not save API key in Keychain"))
+    }
+
     // MARK: - Defaults
 
     func testFreshInstallDefaultsFollowHardware() {
@@ -692,8 +804,10 @@ private final class ModelsFakeOpenRouterClient: OpenRouterLLMClienting {
 
 private final class ModelsFakeOpenRouterKeyStore: OpenRouterLLMKeyStoring {
     var key: String?
+    var failWrites = false
 
     func save(key: String) throws {
+        if failWrites { throw NSError(domain: "TestKeychain", code: 1) }
         self.key = key
     }
 
@@ -803,4 +917,10 @@ private actor ModelsFakeLocalLLMStore: LocalLLMModelManaging {
     }
 
     func evict() async {}
+}
+
+private struct ModelsFailingTokenStore: TokenStore {
+    func read() throws -> String? { nil }
+    func save(_ token: String) throws { throw NSError(domain: "TestKeychain", code: 1) }
+    func delete() throws { throw NSError(domain: "TestKeychain", code: 1) }
 }

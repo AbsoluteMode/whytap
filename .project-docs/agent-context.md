@@ -156,12 +156,19 @@ presentation order does not switch where existing users send audio or text.
 WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md
 
 First run: no sign-in. `OnboardingRouter` sends a newcomer through the tour
-(permissions -> Try Drop -> Skills -> Helpers), a returning user only to the
+(permissions -> Models -> Try Drop -> Skills -> Helpers), a returning user only to the
 permission-repair screen. Drop with the local level selected but no model
 downloaded opens Settings -> Models (download button / key field) instead
 of idling silently. Settings opens on the Models tab; "Screenshot
 protection" lives in Settings -> Other (default off) and also shields the
 island window.
+
+Models onboarding embeds the existing Settings forms: speech first, optional
+Smart processing second, with Your key before Local. Save & continue validates
+and persists through SettingsModelsViewModel; a failed probe or Keychain write
+keeps the current step visible. Skipping speech setup goes to Skills; skipping
+Smart goes to Try Drop. The models resume step does not arm the try runtime.
+WHY: .project-docs/decisions/2026-09-10-onboarding-models.md
 
 Targets: library `Sidekey` (all app code) + thin executable `SidekeyApp`
 (product `Sidekey`, `SidekeyAppMain.run()`), `OnboardingPreview` (a small

@@ -42,10 +42,15 @@ provider you selected. Transcripts, notes and history are SQLite files under
 1. Grant **Accessibility**, **Microphone** and (for Meeting Notes) **System
    Audio Recording** when prompted. Accessibility is what lets the hold-Space
    gesture and the agent hotkey work globally.
-2. Open **Settings, Models**, choose **Your key**, select a speech provider,
-   enter your API key and save. For on-device processing, choose **Local**
-   and download the model (Apple Silicon).
-3. Hold Space in any text field and talk.
+2. In onboarding, choose **Your key**, select a speech provider and enter
+   your API key. **Save & continue** checks the connection and saves the key.
+   For on-device processing, choose **Local** and download the model
+   (Apple Silicon).
+3. Optionally connect OpenRouter, your own endpoint or a local model for
+   text cleanup and meeting summaries. Then try holding Space and speaking.
+
+Keys are stored in macOS Keychain. You can skip setup and complete it later
+in **Settings, Models**.
 
 The Dynamic Island at the top of the screen is the whole UI. There is no
 menu bar item; open Settings from the island or with the Settings hover

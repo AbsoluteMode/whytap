@@ -86,7 +86,8 @@ FLAVOR=prod SHORT_VERSION=2.0.1 BUILD_VERSION=1450 ./scripts/user-release.sh --u
    merges them with `lipo`, assembles the `.app` (Info.plist from
    `Resources/Info.plist.template`, fonts, `mlx.metallib` as a sealed
    resource with the `Contents/MacOS` symlink), signs with the Developer ID,
-   notarizes with `notarytool`, staples the ticket and produces
+   notarizes with `notarytool`, staples the ticket, requires Gatekeeper
+   acceptance and a successful `--installation-check`, and produces
    `build/<Bundle>-<version>-build<build>.dmg`.
 2. `scripts/upload-release.sh` downloads the current `appcast.xml` from the
    feed, adds the new DMG with Sparkle's `generate_appcast` (signed with the

@@ -170,6 +170,13 @@ keeps the current step visible. Skipping speech setup goes to Skills; skipping
 Smart goes to Try Drop. The models resume step does not arm the try runtime.
 WHY: .project-docs/decisions/2026-09-10-onboarding-models.md
 
+Installation: SidekeyAppMain checks InstallationGuard before constructing the
+app delegate. A read-only or AppTranslocation copy shows Finder installation
+instructions and quits before permissions, provider discovery or updates.
+`--installation-check` loads the packaged executable and verifies resources
+without starting the app runtime. User guide: `docs/install.md`. Policy:
+`.project-docs/decisions/2026-09-10-public-installation.md`.
+
 Targets: library `Sidekey` (all app code) + thin executable `SidekeyApp`
 (product `Sidekey`, `SidekeyAppMain.run()`), `OnboardingPreview` (a small
 window that iterates on onboarding screens through symlinked sources) and

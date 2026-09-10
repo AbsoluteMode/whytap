@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/PostProcessor.swift
     confirmed_at: 2026-09-07
-related: [decisions/2026-09-07-smart-latency.md, decisions/2026-09-07-codex-model-registry.md, decisions/2026-09-07-soniox-meeting-files.md, decisions/2026-09-08-transcript-copy.md, decisions/2026-09-10-byok-and-local-builds.md, decisions/2026-09-10-onboarding-models.md]
+related: [decisions/2026-09-07-smart-latency.md, decisions/2026-09-07-codex-model-registry.md, decisions/2026-09-07-soniox-meeting-files.md, decisions/2026-09-08-transcript-copy.md, decisions/2026-09-10-byok-and-local-builds.md, decisions/2026-09-10-onboarding-models.md, decisions/2026-09-10-public-installation.md]
 ---
 
 # Whytap
@@ -31,3 +31,5 @@ New reasoning-policy and finalization behavior is recorded in
 Build and publication policy: [local builds](decisions/2026-09-10-byok-and-local-builds.md).
 
 First-run setup: [keys and models in onboarding](decisions/2026-09-10-onboarding-models.md).
+
+Distribution: [public installation](decisions/2026-09-10-public-installation.md).

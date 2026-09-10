@@ -14,10 +14,15 @@ Whytap is free and open source (MIT). See `LICENSE`, `TRADEMARK.md` and
 
 ## Download
 
-Grab the latest universal DMG (Apple Silicon + Intel) from the
-[Releases page](https://github.com/AbsoluteMode/whytap/releases/latest)
-(`Whytap-latest.dmg`), drag **Whytap** into **Applications** and launch it
-from Spotlight. Updates arrive through Sparkle from the same Releases page.
+**[Download Whytap for macOS](https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg)**
+
+One signed and notarized DMG for Apple Silicon and Intel. Open it, drag
+**Whytap** onto **Applications**, then open Whytap from Applications or
+Spotlight. Eject the disk image when you're done. Updates arrive in the app.
+
+You do not need Xcode, Homebrew, Node.js or a terminal to install Whytap.
+Claude Code / Codex is optional and only needed for the agent feature.
+See the [installation guide](docs/install.md) if you get stuck.
 
 Requirements: macOS 14.2 (Sonoma) or newer. Local speech and text models
 need Apple Silicon; on Intel Macs use your own provider key instead.

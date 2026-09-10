@@ -749,7 +749,14 @@ xcrun stapler staple "${APP_BUNDLE}"
 xcrun stapler validate "${APP_BUNDLE}"
 
 # Verify Gatekeeper acceptance of stapled app bundle
-spctl --assess --type exec "${APP_BUNDLE}" 2>/dev/null || echo "  (warning: spctl assess returned non-zero on app bundle)"
+if ! spctl --assess --type execute --verbose=2 "${APP_BUNDLE}"; then
+    echo "ERROR: Gatekeeper rejected the notarized app; refusing to package it." >&2
+    exit 1
+fi
+
+# Load the shipped executable and frameworks without initializing user state.
+# This catches missing runtime dependencies before anyone downloads the DMG.
+"${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}" --installation-check
 
 # --- DMG packaging ------------------------------------------------------
 #

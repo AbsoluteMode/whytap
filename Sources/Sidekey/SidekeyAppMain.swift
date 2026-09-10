@@ -5,6 +5,12 @@ import AppKit
 public enum SidekeyAppMain {
     @MainActor
     public static func run() {
+        if CommandLine.arguments.contains("--installation-check") {
+            let valid = InstallationGuard.installationCheck()
+            print(valid ? "installation-check: ok" : "installation-check: missing packaged resources")
+            exit(valid ? 0 : 1)
+        }
+        guard InstallationGuard.canLaunch() else { return }
         AppDelegate.main()
     }
 }

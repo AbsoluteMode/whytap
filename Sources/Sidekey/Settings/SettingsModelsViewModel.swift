@@ -167,31 +167,33 @@ final class SettingsModelsViewModel: ObservableObject {
         }
     }
 
-    func saveCurrentSelection() async {
+    @discardableResult
+    func saveCurrentSelection() async -> Bool {
         // Hardware gate (defence-in-depth): even if `level` ended up on a gated
         // value, the save never persists it.
         if let gateMessage = hardwareGateMessage(for: level) {
             level = .yourKey
             connectionStatus = .failed(gateMessage)
-            return
+            return false
         }
         switch level {
         case .yourKey:
-            guard await validateBYOKConnection() else { return }
-            persistSettings(committedLevel: .yourKey)
+            guard await validateBYOKConnection() else { return false }
+            guard persistSettings(committedLevel: .yourKey) else { return false }
             approvedLevel = .yourKey
             connectionStatus = .ok
         case .local:
             guard await localModelStore.isModelReady() else {
                 localModelStatus = .notDownloaded
                 connectionStatus = .failed(LocalModelMessaging.modelNotDownloaded)
-                return
+                return false
             }
-            persistSettings(committedLevel: .local)
+            guard persistSettings(committedLevel: .local, storeKey: false) else { return false }
             approvedLevel = .local
             localModelStatus = .ready
             connectionStatus = .ok
         }
+        return true
     }
 
     func refreshLocalModelStatus() async {
@@ -310,34 +312,36 @@ final class SettingsModelsViewModel: ObservableObject {
         }
     }
 
-    func saveCurrentLLMSelection() async {
+    @discardableResult
+    func saveCurrentLLMSelection() async -> Bool {
         if let gateMessage = llmHardwareGateMessage(for: llmLevel) {
             llmLevel = .yourKey
             llmConnectionStatus = .failed(gateMessage)
-            return
+            return false
         }
         switch llmLevel {
         case .yourKey:
-            guard await validateOpenRouterConnection() else { return }
-            persistLLMSettings(committedLevel: .yourKey)
+            guard await validateOpenRouterConnection() else { return false }
+            guard persistLLMSettings(committedLevel: .yourKey) else { return false }
             approvedLLMLevel = .yourKey
             llmConnectionStatus = .ok
         case .custom:
-            guard await validateCustomLLMConnection() else { return }
-            persistLLMSettings(committedLevel: .custom)
+            guard await validateCustomLLMConnection() else { return false }
+            guard persistLLMSettings(committedLevel: .custom) else { return false }
             approvedLLMLevel = .custom
             llmConnectionStatus = .ok
         case .local:
             guard await localLLMStore.isModelReady() else {
                 localLLMStatus = .notDownloaded
                 llmConnectionStatus = .failed(LocalModelMessaging.modelNotDownloaded)
-                return
+                return false
             }
-            persistLLMSettings(committedLevel: .local)
+            guard persistLLMSettings(committedLevel: .local, storeKeys: false) else { return false }
             approvedLLMLevel = .local
             localLLMStatus = .ready
             llmConnectionStatus = .ok
         }
+        return true
     }
 
     /// Disconnect the on-device LLM: revert the active level to OpenRouter BYOK
@@ -512,7 +516,18 @@ final class SettingsModelsViewModel: ObservableObject {
         persistSettings(committedLevel: approvedLevel)
     }
 
-    private func persistSettings(committedLevel: TranscriptionIsolationLevel) {
+    @discardableResult
+    private func persistSettings(committedLevel: TranscriptionIsolationLevel, storeKey: Bool = true) -> Bool {
+        let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if storeKey {
+                if trimmed.isEmpty { try keyStore.delete(for: provider) }
+                else { try keyStore.save(key: trimmed, for: provider) }
+            }
+        } catch {
+            setConnectionFailure("Could not save API key in Keychain")
+            return false
+        }
         prefs.transcriptionLevel = committedLevel
         prefs.selectedProvider = provider
         let trimmedBaseURL = selfHostedBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -522,20 +537,27 @@ final class SettingsModelsViewModel: ObservableObject {
         // Self-hosted persists via `selfHostedModel` above; every other provider
         // stores its picker selection per-provider.
         if provider != .selfHosted { prefs.setTranscriptionModel(selectedModel, for: provider) }
-        let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { try? keyStore.delete(for: provider) }
-        else { try? keyStore.save(key: trimmed, for: provider) }
+        return true
     }
 
-    private func persistLLMSettings(committedLevel: LLMIsolationLevel) {
+    @discardableResult
+    private func persistLLMSettings(committedLevel: LLMIsolationLevel, storeKeys: Bool = true) -> Bool {
+        let trimmed = openRouterAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCustomKey = customLLMAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if storeKeys {
+                if !trimmed.isEmpty { try llmKeyStore.save(key: trimmed) }
+                if !trimmedCustomKey.isEmpty { try customLLMKeyStore.save(key: trimmedCustomKey) }
+            }
+        } catch {
+            llmConnectionStatus = .failed("Could not save API key in Keychain")
+            return false
+        }
         prefs.llmLevel = committedLevel
         prefs.openRouterModel = openRouterModel
         prefs.customLLMBaseURL = customLLMBaseURL
         prefs.customLLMModel = customLLMModel
-        let trimmed = openRouterAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { try? llmKeyStore.save(key: trimmed) }
-        let trimmedCustomKey = customLLMAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedCustomKey.isEmpty { try? customLLMKeyStore.save(key: trimmedCustomKey) }
+        return true
     }
 
     func testConnection() async {

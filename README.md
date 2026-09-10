@@ -1,6 +1,7 @@
 # Whytap
 
-Voice input and a voice-driven agent for macOS, running entirely on your Mac.
+Voice input and a voice-driven agent for macOS. Bring your own API keys
+(BYOK), or use local models on Apple Silicon.
 
 Hold **Space** in any text field, speak, release: the transcript is pasted
 where the cursor is. Tap **Right Command** to ask your local coding agent
@@ -13,10 +14,15 @@ Whytap is free and open source (MIT). See `LICENSE`, `TRADEMARK.md` and
 
 ## Download
 
-Grab the latest universal DMG (Apple Silicon + Intel) from the
-[Releases page](https://github.com/AbsoluteMode/whytap/releases/latest)
-(`Whytap-latest.dmg`), drag **Whytap** into **Applications** and launch it
-from Spotlight. Updates arrive through Sparkle from the same Releases page.
+**[Download Whytap for macOS](https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg)**
+
+One signed and notarized DMG for Apple Silicon and Intel. Open it, drag
+**Whytap** onto **Applications**, then open Whytap from Applications or
+Spotlight. Eject the disk image when you're done. Updates arrive in the app.
+
+You do not need Xcode, Homebrew, Node.js or a terminal to install Whytap.
+Claude Code / Codex is optional and only needed for the agent feature.
+See the [installation guide](docs/install.md) if you get stuck.
 
 Requirements: macOS 14.2 (Sonoma) or newer. Local speech and text models
 need Apple Silicon; on Intel Macs use your own provider key instead.
@@ -25,12 +31,12 @@ need Apple Silicon; on Intel Macs use your own provider key instead.
 
 | Feature | Route | Runs on |
 |---|---|---|
+| Dictation (Drop) | Your key (BYOK): Soniox, Deepgram, ElevenLabs, or a self-hosted OpenAI-compatible endpoint | the provider you chose, with your key |
 | Dictation (Drop) | Local model: FluidAudio Parakeet TDT v3 (Core ML) | your Mac, offline after a one-time download |
-| Dictation (Drop) | Your key: OpenAI Realtime, Deepgram, Soniox, ElevenLabs, or any self-hosted OpenAI-compatible endpoint | the provider you chose, with your key |
-| Smart cleanup of dictated text | Local model: Qwen3-4B on MLX | your Mac |
 | Smart cleanup of dictated text | OpenRouter with your key, or a custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM) | the endpoint you chose |
+| Smart cleanup of dictated text | Local model: Qwen3-4B on MLX | your Mac |
 | Agent (Right Command) | Claude Code or Codex CLI installed on your machine, your subscription | your Mac plus the CLI's own provider |
-| Meeting Notes | Local: Parakeet + FluidAudio diarization + MLX summary, or your key | your Mac, or the provider you chose |
+| Meeting Notes | Your key, or local Parakeet + FluidAudio diarization + MLX summary | the provider you chose, or your Mac |
 
 Keys you enter are stored in the macOS Keychain and sent only to the
 provider you selected. Transcripts, notes and history are SQLite files under
@@ -41,9 +47,15 @@ provider you selected. Transcripts, notes and history are SQLite files under
 1. Grant **Accessibility**, **Microphone** and (for Meeting Notes) **System
    Audio Recording** when prompted. Accessibility is what lets the hold-Space
    gesture and the agent hotkey work globally.
-2. Pick where speech is transcribed in **Settings, Models**: download the
-   local model (Apple Silicon) or enter a provider key.
-3. Hold Space in any text field and talk.
+2. In onboarding, choose **Your key**, select a speech provider and enter
+   your API key. **Save & continue** checks the connection and saves the key.
+   For on-device processing, choose **Local** and download the model
+   (Apple Silicon).
+3. Optionally connect OpenRouter, your own endpoint or a local model for
+   text cleanup and meeting summaries. Then try holding Space and speaking.
+
+Keys are stored in macOS Keychain. You can skip setup and complete it later
+in **Settings, Models**.
 
 The Dynamic Island at the top of the screen is the whole UI. There is no
 menu bar item; open Settings from the island or with the Settings hover
@@ -79,6 +91,9 @@ packaging (signing, notarization, Sparkle appcast, GitHub Release) is
 described in `docs/build-and-release.md`. The Metal library for MLX is
 committed (`Resources/mlx.metallib`) and pinned to the resolved `mlx-swift`
 revision; bump both together with `scripts/build-metallib.sh`.
+
+Builds, tests and release packaging run locally on the maintainer's Mac.
+GitHub hosts the source and finished releases; GitHub Actions is disabled.
 
 Architecture notes live in `CLAUDE.md`, the product spec in `docs/SPEC.md`,
 hotkey conventions in `docs/hotkey.md`, and the reasoning behind

@@ -1,8 +1,8 @@
 # whytap
 
-Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). Fully local, free,
-MIT. Two hotkeys: hold Space in an editable field -> voice -> paste; Right
-Command tap (text) / hold (voice) -> the user's local agent CLI (Claude Code
+Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK first, with
+optional local models; free, MIT. Two hotkeys: hold Space in an editable
+field -> voice -> paste; Right Command tap (text) / hold (voice) -> the user's local agent CLI (Claude Code
 or Codex) -> rendered answer in the island. No account, no Whytap servers,
 no telemetry. The user-facing name is Whytap; the module and most internal
 identifiers are still `Sidekey`.
@@ -20,19 +20,19 @@ Voice flow (Drop / dictation):
        -> AutoPasteEngine.rememberTargetBeforeRecording (pid + name)
        -> realtime STT via TranscriptionSessionFactory
             (level = TranscriptionIsolationLevel, Settings -> Models):
-            - Local: FluidAudio Parakeet TDT v3 (Core ML), app-owned cache in
-              Application Support, Apple Silicon only, offline after the
-              one-time download (Streaming/Local/)
             - Your key (BYOK): direct to the provider with the user's key
               from the Keychain (Streaming/BYOK/): OpenAI Realtime or a
               self-hosted OpenAI-compatible endpoint, Deepgram, Soniox,
               ElevenLabs
+            - Local: FluidAudio Parakeet TDT v3 (Core ML), app-owned cache in
+              Application Support, Apple Silicon only, offline after the
+              one-time download (Streaming/Local/)
        Soniox Stop: drain all captured audio -> 200ms PCM silence -> explicit
        finalize + text EOF. A final <fin> acknowledgement completes the take;
        finished=true also completes it. The 10s watchdog remains the backstop.
        -> cleanup (PostProcessor, level = LLMIsolationLevel):
-            Local MLX Qwen3 / OpenRouter with the user's key / custom
-            OpenAI-compatible endpoint (Ollama, LM Studio, vLLM) / none
+            OpenRouter with the user's key / custom OpenAI-compatible endpoint
+            (Ollama, LM Studio, vLLM) / local MLX Qwen3 / none
             (raw transcript + Filler stripping). An unconfigured route
             degrades to the no-LLM output; the paste never fails on it.
        Smart uses the lowest supported OpenRouter reasoning effort (or off
@@ -150,13 +150,32 @@ Update flow (download-on-action):
   docs/decisions/2026-07-08-update-download-spinner-and-post-relaunch-updated-indicator.md
 ```
 
+Presentation: show Your key (BYOK) before Local in both Models segments and
+user-facing setup instructions. Preserve saved processing routes; changing
+presentation order does not switch where existing users send audio or text.
+WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md
+
 First run: no sign-in. `OnboardingRouter` sends a newcomer through the tour
-(permissions -> Try Drop -> Skills -> Helpers), a returning user only to the
+(permissions -> Models -> Try Drop -> Skills -> Helpers), a returning user only to the
 permission-repair screen. Drop with the local level selected but no model
 downloaded opens Settings -> Models (download button / key field) instead
 of idling silently. Settings opens on the Models tab; "Screenshot
 protection" lives in Settings -> Other (default off) and also shields the
 island window.
+
+Models onboarding embeds the existing Settings forms: speech first, optional
+Smart processing second, with Your key before Local. Save & continue validates
+and persists through SettingsModelsViewModel; a failed probe or Keychain write
+keeps the current step visible. Skipping speech setup goes to Skills; skipping
+Smart goes to Try Drop. The models resume step does not arm the try runtime.
+WHY: .project-docs/decisions/2026-09-10-onboarding-models.md
+
+Installation: SidekeyAppMain checks InstallationGuard before constructing the
+app delegate. A read-only or AppTranslocation copy shows Finder installation
+instructions and quits before permissions, provider discovery or updates.
+`--installation-check` loads the packaged executable and verifies resources
+without starting the app runtime. User guide: `docs/install.md`. Policy:
+`.project-docs/decisions/2026-09-10-public-installation.md`.
 
 Targets: library `Sidekey` (all app code) + thin executable `SidekeyApp`
 (product `Sidekey`, `SidekeyAppMain.run()`), `OnboardingPreview` (a small
@@ -207,6 +226,13 @@ FLAVOR=prod ./scripts/user-release.sh
 FLAVOR=beta ./scripts/user-release.sh
 FLAVOR=prod ./scripts/user-release.sh --dry-run
 ```
+
+Build, test and package every official update locally on the maintainer's
+Mac. GitHub Actions is disabled to avoid hosted-runner costs; do not enable
+or dispatch it for validation or release builds. GitHub is used for source
+and finished release assets. Run `swift build` and `swift test` locally and
+include their results in the PR. Policy and rationale:
+`.project-docs/decisions/2026-09-10-byok-and-local-builds.md`.
 
 Details and the fork checklist: `docs/build-and-release.md`.
 

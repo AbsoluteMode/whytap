@@ -1,8 +1,8 @@
 # Contributing to Whytap
 
 Thanks for helping. Whytap is a native macOS app (Swift, SwiftUI, AppKit,
-SwiftPM). Everything runs on the user's machine, and pull requests that keep
-it that way are very welcome.
+SwiftPM). Users bring their own provider keys or choose local models.
+Pull requests that preserve this independence from Whytap services are welcome.
 
 ## Ground rules
 
@@ -45,6 +45,10 @@ Audio grants you gave the dev bundle persist.
    (`CLAUDE.md` architecture notes, `docs/hotkey.md`, `docs/build-and-release.md`).
 5. Maintainers squash-merge.
 
+Builds and tests run locally. GitHub Actions is disabled to avoid hosted-runner
+costs. Include the local validation result in the PR; release packaging also
+runs on the maintainer's Mac (see `docs/build-and-release.md`).
+
 By contributing you agree that your contribution is licensed under the MIT
 License of this repository. No CLA is required.
 
@@ -52,4 +56,4 @@ License of this repository. No CLA is required.
 
 Use the issue templates. Include the macOS version, the Mac model (Apple
 Silicon or Intel), the Whytap version from Settings, and which speech / LLM
-route you use (local model, your own key, custom endpoint).
+route you use (your own key, custom endpoint, local model).

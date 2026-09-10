@@ -9,9 +9,9 @@ final class OnboardingLifecycleEvents: ObservableObject {
 }
 
 /// Top-level switcher between onboarding screens. Active order is
-/// `permissions → tryDrop (live) → skills → helpers`; `.language`, `.drop`
+/// `permissions → models → tryDrop (live) → skills → helpers`; `.language`, `.drop`
 /// (demo), `.agent` and `.tryAgent` are reachable only via Back / resume
-/// state. There is no sign-in: the app is fully local, so a first run lands
+/// state. There is no sign-in or Whytap account, so a first run lands
 /// straight on the permissions step. Each step has its own screen file;
 /// this view owns the cross-step state (permissions surface, selected
 /// language).
@@ -161,7 +161,13 @@ struct OnboardingFlowView: View {
             OnboardingPermissionsScreen(
                 surface: permissions,
                 onBack: nil,
-                onContinue: { advance(to: .tryDrop) }
+                onContinue: { advance(to: .models) }
+            )
+        case .models:
+            OnboardingModelsScreen(
+                onBack: { advance(to: .permissions) },
+                onContinue: { advance(to: .tryDrop) },
+                onSkip: { advance(to: .skills) }
             )
         case .language:
             OnboardingLanguageScreen(
@@ -184,7 +190,7 @@ struct OnboardingFlowView: View {
             )
         case .tryDrop:
             OnboardingTryDropScreen(
-                onBack: { advance(to: .permissions) },
+                onBack: { advance(to: .models) },
                 onContinue: { advance(to: .skills) },
                 dropChord: hotkeys.dropVoiceShortcut.contents,
                 dropGestureWord: hotkeys.configuration.normalizedDropGesture.voiceTitle.lowercased()
@@ -276,6 +282,7 @@ private struct OnboardingMuteButton: View {
 
 enum OnboardingFlowStep: String, Hashable {
     case permissions
+    case models
     case language
     case drop
     case tryDrop

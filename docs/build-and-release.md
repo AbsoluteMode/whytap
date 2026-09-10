@@ -3,7 +3,22 @@
 Whytap ships as a signed, notarized universal DMG published on GitHub
 Releases. The same release carries the EdDSA-signed Sparkle `appcast.xml`,
 so installed copies update in-app. Everything is built on a Mac with
-`scripts/user-release.sh`; there is no CI release pipeline.
+`scripts/user-release.sh`; there is no CI release pipeline. Official updates
+are built and tested on the maintainer's Mac. GitHub only hosts the source
+and finished release assets; GitHub Actions is disabled to avoid runner costs.
+See the [local build policy](../.project-docs/decisions/2026-09-10-byok-and-local-builds.md).
+
+## Local validation
+
+Run these on the Mac before merging or packaging an update:
+
+```bash
+swift build
+swift test
+```
+
+Record the result in the pull request. Do not dispatch GitHub workflows for
+validation or release builds.
 
 ## Prerequisites
 
@@ -71,7 +86,8 @@ FLAVOR=prod SHORT_VERSION=2.0.1 BUILD_VERSION=1450 ./scripts/user-release.sh --u
    merges them with `lipo`, assembles the `.app` (Info.plist from
    `Resources/Info.plist.template`, fonts, `mlx.metallib` as a sealed
    resource with the `Contents/MacOS` symlink), signs with the Developer ID,
-   notarizes with `notarytool`, staples the ticket and produces
+   notarizes with `notarytool`, staples the ticket, requires Gatekeeper
+   acceptance and a successful `--installation-check`, and produces
    `build/<Bundle>-<version>-build<build>.dmg`.
 2. `scripts/upload-release.sh` downloads the current `appcast.xml` from the
    feed, adds the new DMG with Sparkle's `generate_appcast` (signed with the

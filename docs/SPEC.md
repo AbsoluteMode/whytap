@@ -1,9 +1,9 @@
 # Whytap — Спецификация продукта
 
-> **Статус 2026-09.** Whytap — полностью локальный бесплатный open-source
-> инструмент (MIT). Whytap-облака, аккаунтов, тарифов и телеметрии больше
-> нет: STT и LLM работают либо на устройстве (Apple Silicon), либо напрямую
-> у провайдера ключом пользователя; агент — локальный Claude Code / Codex.
+> **Статус 2026-09.** Whytap — бесплатный open-source инструмент (MIT):
+> в первую очередь BYOK, затем локальные модели. Whytap-облака, аккаунтов, тарифов и телеметрии больше
+> нет: STT и LLM работают напрямую у провайдера ключом пользователя
+> либо на устройстве (Apple Silicon); агент — локальный Claude Code / Codex.
 > Разделы ниже про roadmap и vocabulary написаны в облачную эпоху и
 > сохранены как продуктовый контекст; упоминания backend/подписки в них не
 > актуальны. См. `docs/plans/2026-09-02-fully-local-open-source.md`.
@@ -37,9 +37,9 @@ Knowledge workers — разработчики, продакт-менеджер�
 ## Что уже работает
 
 - macOS 14.2+, Swift + AppKit + SwiftUI; surface — Dynamic Island (status-bar item нет)
-- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: Local (FluidAudio Parakeet TDT v3, Apple Silicon) или «Your key» (OpenAI Realtime / Deepgram / Soniox / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) → cleanup (Local MLX Qwen3 / OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / без LLM) → Cmd+V
+- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) или Local (FluidAudio Parakeet TDT v3, Apple Silicon) → cleanup (OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / Local MLX Qwen3 / без LLM) → Cmd+V
 - Agent flow: Right Cmd tap/hold → локальный agent-CLI пользователя (Connect Claude / Codex), рендер в окне
-- Meeting Notes: always-on детектор → запись (mic + system audio) → fully-local pipeline (Parakeet + FluidAudio диаризация + MLX саммари) или BYOK-процессор → notes window
+- Meeting Notes: always-on детектор → запись (mic + system audio) → BYOK-процессор или fully-local pipeline (Parakeet + FluidAudio диаризация + MLX саммари) → notes window
 - App-aware форматирование (Notion/Linear/Slack/Telegram → markdown, остальное → plain)
 - Без аккаунта, без серверов Whytap, без телеметрии
 - Sparkle auto-update (download-on-action, pill в Dynamic Island), фид — GitHub Releases

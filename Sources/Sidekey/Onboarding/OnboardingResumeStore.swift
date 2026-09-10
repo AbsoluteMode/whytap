@@ -43,7 +43,7 @@ enum OnboardingResumeStore {
 private extension OnboardingFlowStep {
     var canResumeAfterRelaunch: Bool {
         switch self {
-        case .agent, .permissions, .language, .drop, .tryDrop, .tryAgent, .skills, .helpers:
+        case .agent, .permissions, .models, .language, .drop, .tryDrop, .tryAgent, .skills, .helpers:
             return true
         }
     }

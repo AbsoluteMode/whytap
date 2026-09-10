@@ -114,7 +114,8 @@ final class MeetingsDetailView: NSView {
             noteBlocks: noteBlocks,
             transcriptBlocks: transcriptBlocks,
             hasTranscript: hasTranscript,
-            version: version
+            version: version,
+            transcriptCopyText: transcript.map(TranscriptMarkdownFormatter.plainText) ?? ""
         )
         switchTo(.note)
     }
@@ -174,6 +175,9 @@ final class MeetingDetailModel: ObservableObject {
     /// legacy / freely-edited notes (which fall back to the generic renderer).
     @Published private(set) var noteProtocol: MeetingProtocol?
 
+    /// Full transcript as plain text, including speaker labels and timestamps.
+    private(set) var transcriptCopyText = ""
+    @Published private(set) var transcriptCopied = false
     /// Raw note markdown — the source the editor edits and the renderer parses.
     private(set) var noteMarkdown = ""
     private(set) var version = 1
@@ -196,7 +200,8 @@ final class MeetingDetailModel: ObservableObject {
         noteBlocks: [NoteBlock],
         transcriptBlocks: [NoteBlock],
         hasTranscript: Bool,
-        version: Int
+        version: Int,
+        transcriptCopyText: String = ""
     ) {
         currentMeetingId = id
         unavailableMessage = nil
@@ -204,6 +209,8 @@ final class MeetingDetailModel: ObservableObject {
         self.noteMarkdown = noteMarkdown
         self.noteBlocks = noteBlocks
         self.noteProtocol = MeetingProtocolParser.parse(noteMarkdown)
+        self.transcriptCopyText = hasTranscript ? transcriptCopyText : ""
+        transcriptCopied = false
         self.transcriptBlocks = transcriptBlocks
         self.hasTranscript = hasTranscript
         self.version = version
@@ -222,6 +229,8 @@ final class MeetingDetailModel: ObservableObject {
         noteBlocks = []
         noteProtocol = nil
         transcriptBlocks = []
+        transcriptCopyText = ""
+        transcriptCopied = false
         hasTranscript = false
         version = 1
         activeTab = .note
@@ -239,6 +248,12 @@ final class MeetingDetailModel: ObservableObject {
 
     func cancelEdit() {
         isEditing = false
+    }
+
+    func copyTranscript(to pasteboard: NSPasteboard = .general) {
+        guard hasTranscript, !transcriptCopyText.isEmpty else { return }
+        pasteboard.clearContents()
+        transcriptCopied = pasteboard.setString(transcriptCopyText, forType: .string)
     }
 
     func shareCurrentNote() {
@@ -309,9 +324,32 @@ private struct MeetingDetailContentView: View {
         VStack(spacing: 0) {
             if model.activeTab == .note {
                 noteToolbar
+            } else if model.hasTranscript {
+                transcriptToolbar
             }
             noteBody
         }
+    }
+
+    private var transcriptToolbar: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button { model.copyTranscript() } label: {
+                Label(model.transcriptCopied ? "Copied" : "Copy transcript",
+                      systemImage: model.transcriptCopied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MacSettingsTheme.text)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(MacSettingsTheme.controlBg))
+            }
+            .buttonStyle(.plain)
+            .disabled(model.transcriptCopyText.isEmpty)
+            .help("Copy the full transcript with speakers and timestamps")
+        }
+        .padding(.top, 10)
+        .padding(.trailing, 16)
+        .padding(.bottom, 4)
     }
 
     private var noteToolbar: some View {

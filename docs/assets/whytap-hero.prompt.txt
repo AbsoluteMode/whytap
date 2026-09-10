@@ -1,0 +1,18 @@
+Whytap README hero
+Created: 2026-09-10
+Tool: built-in ImageGen (no fallback CLI)
+Brand reference: Resources/UsefulLinkIcons/whytap.png
+Output: docs/assets/whytap-hero.png
+The artwork is illustrative. The separate onboarding-speech.png is an actual
+SwiftUI rendering of the app's onboarding screen with an empty API-key field.
+
+Generation prompt:
+Use case: compositing / ads-marketing.
+Create one polished wide landscape GitHub README hero banner for Whytap, an open-source native macOS voice dictation app. Use the supplied Whytap app icon as the brand reference: preserve its defining thin luminous violet ring with a dark center, do not invent another logo.
+Art direction: premium restrained product launch artwork, near-black graphite background, extraordinary crisp violet light and very subtle fine grain. The recognizable violet ring is a large sculptural luminous centerpiece on the right. A delicate flowing ribbon of sound made from hairline violet-white filaments travels through the ring, becoming orderly and calm. Beautiful controlled bloom, tactile dark surfaces, depth, lots of negative space, confident editorial typography. The visual metaphor is speaking becoming clear text. No laptop, no humans, no fake UI, no extra app icons.
+Composition: wide 2:1 banner roughly 2000 x 1000, generous outer margins. Left half contains exceptionally legible elegant modern sans-serif text, left aligned. Brand name is the dominant typographic element. Right half holds the violet ring and sound ribbon. Typography and artwork feel integrated and intentional.
+Text verbatim, only these three lines:
+"Whytap"
+"Voice input for macOS."
+"Your keys. Local models. Open source."
+The third line is small secondary copy; preserve BYOK before local. Do not add other text, logos, badges, version numbers, watermarks, microscopic copy, or a download button. Keep all text correctly spelled and high contrast. The icon image is a brand reference, not an app interface or a photo. Produce the finished banner, edge-to-edge, no surrounding presentation board.

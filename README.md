@@ -1,5 +1,7 @@
 # Whytap
 
+![Whytap — Voice input for macOS. Your keys. Local models. Open source.](docs/assets/whytap-hero.png)
+
 Voice input and a voice-driven agent for macOS. Bring your own API keys
 (BYOK), or use local models on Apple Silicon.
 
@@ -56,6 +58,8 @@ provider you selected. Transcripts, notes and history are SQLite files under
 
 Keys are stored in macOS Keychain. You can skip setup and complete it later
 in **Settings, Models**.
+
+![Whytap's first-run setup: choose Your key or Local and connect a speech provider.](docs/assets/onboarding-speech.png)
 
 The Dynamic Island at the top of the screen is the whole UI. There is no
 menu bar item; open Settings from the island or with the Settings hover

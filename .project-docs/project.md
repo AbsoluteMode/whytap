@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/PostProcessor.swift
     confirmed_at: 2026-09-07
-related: [decisions/2026-09-07-smart-latency.md, decisions/2026-09-07-codex-model-registry.md]
+related: [decisions/2026-09-07-smart-latency.md, decisions/2026-09-07-codex-model-registry.md, decisions/2026-09-07-soniox-meeting-files.md, decisions/2026-09-08-transcript-copy.md]
 ---
 
 # Whytap

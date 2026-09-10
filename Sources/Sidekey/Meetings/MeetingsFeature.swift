@@ -56,8 +56,8 @@ enum MeetingAudioTrack: String, Codable, CaseIterable, Sendable {
 }
 
 /// One diarized segment of the meeting transcript. Produced by the
-/// on-device diarizer (or as a single whole-meeting segment on the BYOK
-/// path) and persisted as JSON so the notes viewer can render speaker
+/// on-device diarizer or Soniox token attribution (other BYOK providers
+/// currently produce a single whole-meeting segment) and persisted as JSON so the notes viewer can render speaker
 /// attributions without re-parsing.
 struct TranscriptSegment: Sendable, Codable, Equatable {
     let speaker: String?

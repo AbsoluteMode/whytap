@@ -30,14 +30,20 @@ enum TranscriptMarkdownFormatter {
             .joined(separator: "\n\n")
     }
 
+    /// Clipboard text keeps the attribution and timing without Markdown markers.
+    static func plainText(_ segments: [TranscriptSegment]) -> String {
+        segments.map { renderSegment($0, markdown: false) }.joined(separator: "\n\n")
+    }
+
     // MARK: - Private
 
-    private static func renderSegment(_ segment: TranscriptSegment) -> String {
+    private static func renderSegment(_ segment: TranscriptSegment, markdown: Bool = true) -> String {
         let speaker = segment.speaker?.trimmingCharacters(in: .whitespaces).isEmpty == false
             ? segment.speaker!
             : unknownSpeakerLabel
         let timestamp = "\(formatTimestamp(segment.start))-\(formatTimestamp(segment.end))"
-        return "**\(speaker) [\(timestamp)]:** \(segment.text)"
+        let label = "\(speaker) [\(timestamp)]:"
+        return "\(markdown ? "**" + label + "**" : label) \(segment.text)"
     }
 
     /// `mm:ss` from a Double seconds value, floored to whole seconds so

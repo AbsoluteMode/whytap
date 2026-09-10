@@ -89,8 +89,8 @@ Meeting Notes:
        -> processing: fully local (mic track = "Me", system track diarised by
           FluidAudio -> "Speaker N", alignment by time, MLX summary with
           map-reduce for long transcripts; the three models load SERIALLY
-          with evict() between stages) or BYOK processor (provider batch STT +
-          LLM with the user's keys). Neither configured = the meeting is
+          with evict() between stages) or BYOK processor (Soniox file API with speaker-attributed turns and durable job/transcript checkpoint;
+          other providers use their adapters, then LLM with the user's keys). Neither configured = the meeting is
           marked failed with `LocalModelMessaging.meetingProcessorNotConfigured`
           and its audio stays staged; a `MeetingFinalizeManifest` re-dispatches
           it later with the language captured at Stop time.

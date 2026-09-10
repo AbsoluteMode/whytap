@@ -327,6 +327,23 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 # stays "Sidekey".
 cp "${BUILD_DIR}/${EXECUTABLE_NAME}" "${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}"
 
+# SwiftPM can carry the active Xcode toolchain's Swift library directory into
+# LC_RPATH. That directory exists only on the build Mac and makes macOS's
+# distribution assessment reject otherwise valid embedded frameworks. Keep
+# only system and bundle-relative search paths, before signing either slice.
+RELEASE_RPATHS="$(otool -l "${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}" | \
+    awk '/cmd LC_RPATH/ { rpath = 1; next } rpath && /path / { sub(/^ *path /, ""); sub(/ \(offset.*$/, ""); print; rpath = 0 }' | sort -u)"
+while IFS= read -r release_rpath; do
+    case "${release_rpath}" in
+        ""|/usr/lib/*|/System/Library/*|@loader_path|@loader_path/*|@executable_path|@executable_path/*) ;;
+        *)
+            echo "▶ Removing build-machine rpath: ${release_rpath}"
+            install_name_tool -delete_rpath "${release_rpath}" \
+                "${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}"
+            ;;
+    esac
+done <<< "${RELEASE_RPATHS}"
+
 # CRITICAL: SwiftPM does not embed @executable_path/../Frameworks in the
 # binary's rpath search list. Without it, dyld cannot resolve the
 # @rpath/Sparkle.framework/Versions/B/Sparkle install name at launch and
@@ -752,6 +769,12 @@ xcrun stapler validate "${APP_BUNDLE}"
 if ! spctl --assess --type execute --verbose=2 "${APP_BUNDLE}"; then
     echo "ERROR: Gatekeeper rejected the notarized app; refusing to package it." >&2
     exit 1
+fi
+
+# macOS 14+ checks distribution-specific problems that spctl can miss, such
+# as external library search paths left behind by the developer toolchain.
+if command -v syspolicy_check >/dev/null 2>&1; then
+    syspolicy_check distribution "${APP_BUNDLE}"
 fi
 
 # Load the shipped executable and frameworks without initializing user state.

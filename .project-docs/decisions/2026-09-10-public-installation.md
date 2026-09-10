@@ -49,6 +49,11 @@ mode that loads the executable and its frameworks, verifies essential bundled
 resources and exits before user-state initialization. Use it to verify the
 actual release executable without reading keys or contacting providers.
 
+Remove build-machine library search paths before signing. Run macOS's
+`syspolicy_check distribution` when available as a hard release gate after
+notarization: the first release candidate passed `spctl` but failed this
+assessment because SwiftPM embedded an Xcode toolchain path in `LC_RPATH`.
+
 ## Alternatives
 
 A source-only install would require Xcode and compilation. An automatic move

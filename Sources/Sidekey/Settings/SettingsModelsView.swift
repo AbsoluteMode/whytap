@@ -28,8 +28,8 @@ struct SettingsModelsView: View {
             MacGroupTitle(title: "Processing")
             MacSegmented(
                 items: [
-                    .init(value: .local, label: "Local"),
                     .init(value: .yourKey, label: "Your key"),
+                    .init(value: .local, label: "Local"),
                 ],
                 selection: Binding(
                     get: { viewModel.level },
@@ -438,8 +438,8 @@ struct SettingsModelsView: View {
             )
             MacSegmented(
                 items: [
-                    .init(value: .local, label: "Local"),
                     .init(value: .yourKey, label: "Your key"),
+                    .init(value: .local, label: "Local"),
                 ],
                 selection: Binding(
                     get: { viewModel.llmTopLevel },

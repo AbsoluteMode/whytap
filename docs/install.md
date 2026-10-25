@@ -3,10 +3,10 @@
 The normal installation uses a ready-made macOS build. You do not need Xcode,
 a terminal or an Apple Developer account to use it.
 
-In [GitHub Releases](https://github.com/AbsoluteMode/whytap/releases), choose
-`Whytap-latest.dmg` when available. The latest published package may still be
-`Exodia-latest.dmg` and contain **Exodia** until a Whytap release is published.
-That is the same application; use the name shown in that disk image.
+Download [`Whytap-latest.dmg`](https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg)
+from [GitHub Releases](https://github.com/AbsoluteMode/whytap/releases). Whytap
+needs macOS 14.2 (Sonoma) or newer and runs on Apple Silicon and Intel.
+Releases before 2.2.17 were published as **Exodia**; it is the same application.
 
 ## Download and open
 
@@ -63,8 +63,8 @@ from its hover controls:
 2. In **API & Models**, click **Add key**, choose a speech provider and enter its
    API key. Whytap checks it and stores it in macOS Keychain; then pick a model
    for Drop Fast and Drop Smart.
-3. Optionally add OpenRouter or your own endpoint and pick models for text
-   cleanup and meeting summaries.
+3. Optionally add OpenRouter, OpenAI, Anthropic or your own endpoint and pick
+   models for Smart cleanup and meeting summaries.
 4. Focus a text field, hold **Space**, speak, then release Space.
 
 Whytap is free. Your selected provider handles API billing; there are no Whytap
@@ -72,10 +72,10 @@ accounts, plans or credits. On-device speech and text models were removed; if
 you used **Local** before, choose a speech model in **API & Models** to dictate
 again.
 
-For the optional agent, open **Settings → Agents**, install OpenCode, then add an
-OpenRouter or Anthropic key and choose the Agent model in **API & Models**, and
-press **Save & connect**. Meeting recording may
-also request **System Audio Recording** permission.
+For the optional agent, add an OpenRouter, OpenAI or Anthropic key, choose the
+Agent model in **API & Models**, then click **Connect** in **Settings → Agents**
+([Whytap Agent](agent.md)). Meeting recording may also request **System Audio
+Recording** permission.
 
 ## Updates
 
@@ -90,7 +90,7 @@ does not force a restart. Installation after force quit or a crash is not guaran
 
 You can also install a newer Whytap DMG over the copy in Applications. Keys,
 settings and local knowledge are stored outside the app bundle, and macOS
-permissions carry over because community builds share one signing certificate.
+permissions carry over because community builds share one Developer ID team identity.
 
 ## Customize from source
 

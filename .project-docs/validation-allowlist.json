@@ -2,7 +2,7 @@
   "version": 1,
   "allow": [
     {
-      "path": "README.md",
+      "path": "docs/agent.md",
       "rule": "personal-path",
       "literal": "~/Library/Application",
       "reason": "Generic macOS storage path example with no username."

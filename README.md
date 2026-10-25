@@ -42,7 +42,7 @@ What leaves your Mac, and when: [Privacy](docs/privacy.md).
 
 ## Install
 
-<a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-Whytap-6D4AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download Whytap for macOS"></a>
+<a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-6D4AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download Whytap for macOS"></a>
 
 macOS 14.2 or newer, Apple Silicon and Intel. Signed and notarized; updates arrive in the island.
 More in [Install and update](docs/install.md).

@@ -8,6 +8,7 @@ struct TranslationView: View {
     let openSettings: (AIFeature) -> Void
     var embedded = false
     @FocusState private var inputFocused: Bool
+    @State private var inputHovered = false
     @State private var copied = false
     @State private var followsLatest = true
 
@@ -15,7 +16,7 @@ struct TranslationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: embedded ? 8 : 16) {
-            if !embedded {
+            if !embedded && !isText {
                 HStack {
                     Image(systemName: "character.bubble.fill")
                         .font(.system(size: 22)).foregroundStyle(.blue)
@@ -29,39 +30,22 @@ struct TranslationView: View {
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
                 }
             }
-            if isText { textControls } else { audioControls }
-            if let issue = isText ? text.issue : subtitles.issue { errorCard(issue) }
+            if !isText {
+                audioControls
+                if let issue = subtitles.issue { errorCard(issue) }
+            }
             if isText { textContent } else { subtitleContent }
-            footer
+            if !isText { footer }
         }
         .padding(embedded ? 0 : 22)
-        .padding(.top, embedded ? 0 : 24)
-        .frame(minWidth: embedded ? 0 : 440, maxWidth: .infinity,
-               minHeight: embedded ? 0 : (isText ? 490 : 270), maxHeight: .infinity)
+        .padding(.top, embedded || isText ? 0 : 24)
+        .frame(minWidth: embedded ? 0 : (isText ? 320 : 440), maxWidth: .infinity,
+               minHeight: embedded ? 0 : (isText ? 80 : 270), maxHeight: .infinity)
         .background { if !embedded { Rectangle().fill(.regularMaterial) } }
         .onAppear { if isText { inputFocused = true } }
         .onChange(of: presentation.mode) { _, mode in if mode == .text { inputFocused = true } }
         .onChange(of: text.result) { _, _ in copied = false }
         .onChange(of: subtitles.lines) { _, _ in copied = false }
-    }
-
-    private var textControls: some View {
-        HStack(spacing: 10) {
-            if !embedded {
-                Label("Detect language", systemImage: "globe").foregroundStyle(.secondary)
-                Image(systemName: "arrow.right").foregroundStyle(.tertiary)
-            }
-            MacPopup(items: [.init(value: "auto", label: "Auto · RU ↔ EN")] + languageItems, selection: Binding(
-                get: { if case .language(let code) = text.target { return code }; return "auto" },
-                set: { text.target = $0 == "auto" ? .automatic : .language($0) }
-            ), maxWidth: 210, appearance: .adaptive)
-                .accessibilityLabel("Translate to")
-            Spacer(minLength: 0)
-            if subtitles.phase.isActive {
-                Button { presentation.mode = .subtitles } label: { Image(systemName: "waveform.circle.fill") }
-                    .accessibilityLabel("Show active subtitles").help("Subtitles are still listening")
-            }
-        }.font(.system(size: 13))
     }
 
     private var audioControls: some View {
@@ -131,48 +115,89 @@ struct TranslationView: View {
     }
 
     private var textContent: some View {
-        VStack(alignment: .leading, spacing: embedded ? 8 : 12) {
-            HStack {
-                Text("YOUR TEXT").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear") { text.input = ""; inputFocused = true }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).disabled(text.input.isEmpty)
-            }
-            ZStack(alignment: .topLeading) {
-                if text.input.isEmpty {
-                    Text("A word, a thought, a whole paragraph…")
-                        .foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.vertical, 8)
-                        .allowsHitTesting(false)
+        // WHY: docs/DESIGN.md — Quick Translate: two text rows.
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Text… · Return to translate", text: $text.input)
+                .textFieldStyle(.plain)
+                .font(.system(size: embedded ? 17 : 22))
+                .focused($inputFocused)
+                .onSubmit { text.translate() }
+                .onKeyPress(keys: [.return], phases: .down) { press in
+                    guard press.modifiers.contains(.command) else { return .ignored }
+                    text.translate()
+                    return .handled
                 }
-                TextEditor(text: $text.input)
-                    .scrollContentBackground(.hidden)
-                    .font(.system(size: embedded ? 13 : 16))
-                    .focused($inputFocused)
-                    .accessibilityLabel("Text to translate")
-            }
-            .padding(embedded ? 6 : 10)
-            .frame(minHeight: embedded ? 50 : 110, maxHeight: embedded ? 80 : 180)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.08)))
-            HStack {
-                Text("TRANSLATION").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer()
-                if text.isTranslating { ProgressView().controlSize(.small) }
-            }
+                .padding(4)
+                .contentShape(Rectangle())
+                .onTapGesture { inputFocused = true }
+                .background(Color.primary.opacity(inputHovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(inputFocused ? Color.accentColor : .clear))
+                .onHover { inputHovered = $0 }
+                .accessibilityLabel("Text to translate")
+                .accessibilityHint("Press Return to translate. Right-click for language and copy options.")
             ScrollView {
-                Text(text.result.isEmpty ? (text.isTranslating ? "Translating…" : "Your translation will appear here.") : text.result)
-                    .font(.system(size: embedded ? 15 : 20, weight: .medium))
-                    .foregroundStyle(text.result.isEmpty ? .secondary : .primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                Group {
+                    if let issue = text.issue, let feature = issue.feature {
+                        Button { openSettings(feature) } label: {
+                            Text(issue.message + " Open API & Models →")
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(4)
+                        }
+                        .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
+                        .focused($settingsFocused)
+                    } else {
+                        Text(textOutput)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(4)
+                    }
+                }
+                .font(.system(size: text.issue != nil || inputTooLong ? (embedded ? 12 : 13) : (embedded ? 18 : 24),
+                              weight: .medium))
+                .foregroundStyle(text.result.isEmpty ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: embedded ? 50 : 0, maxHeight: .infinity)
-            .background(Color.blue.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
-            if text.input.count > TextTranslationModel.inputLimit {
-                Text("Keep each translation under 12,000 characters.").font(.caption).foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, minHeight: 32, maxHeight: .infinity, alignment: .topLeading)
+            .accessibilityLabel("Translation")
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Copy translation") { copyTranslation() }.disabled(text.result.isEmpty)
+            Button("Clear") { text.input = ""; inputFocused = true }.disabled(text.input.isEmpty)
+            if text.isTranslating { Button("Cancel translation") { text.cancel() } }
+            Menu("Translate to") {
+                Button(text.target == .automatic ? "✓ Auto · RU ↔ EN" : "Auto · RU ↔ EN") { text.target = .automatic }
+                ForEach(AppLanguage.all.sorted { $0.englishName < $1.englishName }, id: \.code) { language in
+                    Button((text.target == .language(language.code) ? "✓ " : "") + language.displayName) {
+                        text.target = .language(language.code)
+                    }
+                }
+            }
+            if !embedded {
+                Button(subtitles.phase.isActive ? "Show active subtitles" : "Subtitles") { presentation.mode = .subtitles }
             }
         }
+    }
+
+    @FocusState private var settingsFocused: Bool
+
+    private var inputTooLong: Bool {
+        text.input.trimmingCharacters(in: .whitespacesAndNewlines).count > TextTranslationModel.inputLimit
+    }
+
+    private var textOutput: String {
+        if inputTooLong {
+            return "Keep each translation under 12,000 characters."
+        }
+        if let issue = text.issue { return issue.message }
+        if text.isTranslating { return "Translating…" }
+        return text.result.isEmpty ? "Translation" : text.result
+    }
+
+    private func copyTranslation() {
+        guard !text.result.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text.result, forType: .string)
     }
 
     private var subtitleContent: some View {
@@ -226,23 +251,17 @@ struct TranslationView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                let value = isText ? text.result : subtitles.lines.compactMap(\.translation).joined(separator: "\n\n")
+                let value = subtitles.lines.compactMap(\.translation).joined(separator: "\n\n")
                 guard !value.isEmpty else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(value, forType: .string)
                 copied = true
-            }.disabled(isText ? text.result.isEmpty : !subtitles.lines.contains { $0.translation != nil })
-            if !isText, !subtitles.phase.isActive, !subtitles.lines.isEmpty {
+            }.disabled(!subtitles.lines.contains { $0.translation != nil })
+            if !subtitles.phase.isActive, !subtitles.lines.isEmpty {
                 Button("Clear") { subtitles.clear(); copied = false }
             }
             Spacer()
-            if isText {
-                if text.isTranslating { Button("Cancel") { text.cancel() } }
-                Button("Translate") { text.translate() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!text.canTranslate)
-            } else if subtitles.phase == .finishing {
+            if subtitles.phase == .finishing {
                 ProgressView().controlSize(.small)
                 Button("Cancel") { subtitles.cancel() }
             } else if subtitles.phase.isActive {

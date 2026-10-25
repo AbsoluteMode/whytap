@@ -23,7 +23,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
          activityChanged: @escaping (Bool) -> Void) {
         text = textModel ?? TextTranslationModel()
         subtitles = subtitleModel ?? LiveSubtitleModel()
-        panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 610),
+        panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 140),
                                  styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
                                  backing: .buffered, defer: false)
         super.init()
@@ -35,8 +35,14 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.minSize = NSSize(width: 480, height: 540)
-        panel.setFrameAutosaveName("WhytapTranslation")
+        panel.minSize = NSSize(width: 360, height: 120)
+        // A new frame key avoids restoring the former 610pt form as a quick palette.
+        panel.setFrameAutosaveName("WhytapTranslationCompact")
+        panel.titleVisibility = .hidden
+        panel.isMovableByWindowBackground = true
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = true
+        }
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
         panel.contentView = NSHostingView(rootView: TranslationView(
@@ -73,10 +79,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 
     private func resize(for mode: Mode) {
-        panel.minSize = NSSize(width: 480, height: mode == .text ? 540 : 340)
+        let isText = mode == .text
+        panel.minSize = NSSize(width: isText ? 360 : 480, height: isText ? 120 : 340)
+        panel.titleVisibility = isText ? .hidden : .visible
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = isText
+        }
         var frame = panel.frame
-        let height: CGFloat = mode == .text ? 610 : 400
+        let height: CGFloat = isText ? 140 : 400
         frame.origin.y += frame.height - height
+        frame.size.width = max(frame.width, panel.minSize.width)
         frame.size.height = height
         panel.setFrame(frame, display: panel.isVisible)
     }

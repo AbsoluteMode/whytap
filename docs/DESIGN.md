@@ -1367,3 +1367,34 @@ branch. Pure geometry and fake-provider tests cover first mouse, scoped press
 cancellation, context end, preparation and repeated/cancelled starts. Physical
 pointer/keyboard/VoiceOver, native glass, actual calls and screen sharing remain
 installed acceptance; offscreen evidence does not establish those guarantees.
+
+
+## Quick Translate: two text rows — 2026-10-26
+
+The user explicitly chose the standalone Realtime Translator layout: input and
+translation only. This is a quick working palette, so remove the title, mode
+selector, language toolbar, field labels, cards and button footer from text
+mode, including its embedded Toolbox view. A plain 22pt input and a 24pt medium
+result carry the task; embedded typography is 17/18pt. Use 22pt outer padding
+and a 10pt row gap. No animation is needed. The compact floating frame starts
+at 560×140pt and remains resizable down to 360×120pt; its new autosave key avoids
+restoring the old tall form. These dimensions are implementation choices.
+
+Return submits; Command-Return remains supported. Focus starts in the input.
+Its full field bounds highlight on hover and have a full-opacity accent focus
+outline (default blue on the dark fixture: 4.26:1; secondary text: 5.45:1).
+Loading, empty, over-limit and failure messages replace the second row rather
+than adding rows. Setup failures are actionable with full-area hover/press and
+keyboard focus feedback. Long source text stays in the native horizontal field;
+long translations wrap and scroll in their row. Escape uses the panel’s existing
+close/cancellation path. No request starts merely by opening or hovering.
+
+Keep native selection/copy and existing target preferences. Right-click offers
+secondary copy/clear/cancel/language actions; the floating palette also offers
+access to active subtitles (Toolbox uses its separate tool tile);
+the input’s accessibility hint describes Return and these menu options. Do not
+change provider routes, read the clipboard automatically or trigger audio.
+Subtitles keep their separate Speech/LLM setup and explicit Start/Stop journey.
+Their two-stage pipeline is not evidence of the standalone audio model’s latency
+or translation quality. Fake-provider flow checks and offscreen renders do not
+prove live permissions, physical keyboard/focus or provider quality.

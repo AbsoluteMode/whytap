@@ -17,6 +17,14 @@ struct FixtureTranslator: TextTranslating {
     func translate(_ text: String, target: TranslationTarget) async throws -> String { "Перевод: " + text }
 }
 
+private actor SubtitleTranslationRecorder: TextTranslating {
+    private(set) var requests: [(String, TranslationTarget)] = []
+    func translate(_ text: String, target: TranslationTarget) async throws -> String {
+        requests.append((text, target))
+        return "Übersetzt: " + text
+    }
+}
+
 final class FixtureSubtitleAudio: TerminalSystemAudioSourceStreaming, @unchecked Sendable {
     let pair = AsyncStream<[Float]>.makeStream()
     private let lock = NSLock()
@@ -82,6 +90,58 @@ final class TranslationTests: XCTestCase {
         let data = SubtitleSegmenter.pcm16([-2, -1, 0, 1, 2, .nan, .infinity])
         let values = data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
         XCTAssertEqual(values, [-32767, -32767, 0, 32767, 32767, 0, 0])
+    }
+
+    func testSubtitlesTranslateCommittedSpeechIntoTheSelectedLanguageAndDrainOnStop() async throws {
+        let audio = FixtureSubtitleAudio()
+        let upstream = FixtureSubtitleUpstream()
+        let translator = SubtitleTranslationRecorder()
+        var openedLanguage: String?
+        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { audio },
+                                      open: { openedLanguage = $0; return upstream }, makeService: { translator })
+        model.sourceCode = "en"
+        model.targetCode = "de"
+        let task = try XCTUnwrap(model.start())
+        await waitUntil { model.phase == .listening }
+        XCTAssertEqual(openedLanguage, "en")
+        upstream.pair.continuation.yield(.partial("Uncommitted speech"))
+        await waitUntil { model.partial == "Uncommitted speech" }
+        let partialRequests = await translator.requests
+        XCTAssertTrue(partialRequests.isEmpty, "Interim text must not become a paid translation")
+
+        upstream.pair.continuation.yield(.final("What’s"))
+        upstream.pair.continuation.yield(.final(" new?"))
+        await waitUntil { model.lines.last?.translation != nil }
+        XCTAssertEqual(model.lines.last?.source, "What’s new?")
+        XCTAssertEqual(model.lines.last?.translation, "Übersetzt: What’s new?")
+
+        // The short tail has not reached the phrase timer. Stop must still translate it.
+        upstream.pair.continuation.yield(.final("One more thought"))
+        model.stop()
+        await task.value
+        let requests = await translator.requests
+        XCTAssertEqual(requests.map { $0.0 }, ["What’s new?", "One more thought"])
+        XCTAssertTrue(requests.allSatisfy { $0.1 == .language("de") })
+        XCTAssertEqual(model.lines.compactMap(\.translation), ["Übersetzt: What’s new?", "Übersetzt: One more thought"])
+        XCTAssertEqual(model.phase, .idle)
+        XCTAssertEqual(audio.finished, 1)
+        XCTAssertTrue(upstream.closed)
+    }
+
+    func testSubtitlesTranslateTerminalTranscriptWhenProviderHasNoFinalEvents() async throws {
+        let audio = FixtureSubtitleAudio()
+        let upstream = FixtureSubtitleUpstream()
+        let translator = SubtitleTranslationRecorder()
+        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { translator })
+        let task = try XCTUnwrap(model.start())
+        await waitUntil { model.phase == .listening }
+        model.stop()
+        await task.value
+        let requests = await translator.requests
+        XCTAssertEqual(requests.map { $0.0 }, ["Hello world."])
+        XCTAssertEqual(requests.first?.1, .language("ru"))
+        XCTAssertEqual(model.lines.first?.translation, "Übersetzt: Hello world.")
+        XCTAssertNil(model.issue)
     }
 
     func testTextSuccessAndLimit() async throws {

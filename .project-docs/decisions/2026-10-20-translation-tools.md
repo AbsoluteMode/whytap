@@ -6,8 +6,11 @@ summary: Bring the standalone translator journeys into two native tools using th
 status: confirmed
 tags: [translation, subtitles, system-audio, llm, tools]
 canonical_for: [translation-tools]
-verified_at: 2026-10-20
+verified_at: 2026-10-26
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-26 the user requested only two text rows like the original translator and verification of subtitle translation behavior.
+    confirmed_at: 2026-10-26
   - type: user-confirmed
     reference: On 2026-10-20 the user requested integration of Realtime Translator system-audio translation and its LLM translator into Whytap, with polished and reliable feature behavior.
     confirmed_at: 2026-10-20
@@ -43,7 +46,10 @@ the application's current provider and key choices.
 
 Use two catalog tools, Translate and Subtitles, opening one native floating
 window. Preserve the standalone RU/EN automatic text direction and offer
-explicit targets. Keep original speech optional beside subtitles.
+explicit targets. Keep original speech optional beside subtitles. The 2026-10-26
+text layout uses only an input row (Return to submit) and a result/status row.
+Saved explicit targets and secondary actions remain in the context menu; no
+provider choice changes. See [design](../../docs/DESIGN.md) and the guide.
 
 The implementation uses three routes: Translation (typed-text LLM),
 Subtitles audio (real-time speech) and Subtitles translation (its independent

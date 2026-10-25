@@ -11,24 +11,29 @@ final class TranslationRenderTests: XCTestCase {
         }
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let text = TextTranslationModel(makeService: { FixtureTranslator() })
+        let text = TextTranslationModel(makeService: { TranslationPreviewService() })
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
         let subtitles = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
         let presentation = TranslationWindowController.Presentation()
         let view = TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in })
             .environment(\.colorScheme, .dark)
-        try render(view, size: NSSize(width: 620, height: 610), to: directory.appendingPathComponent("text-empty.png"))
+        try render(view, size: NSSize(width: 560, height: 140), to: directory.appendingPathComponent("text-empty.png"))
         try render(TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in }, embedded: true)
-            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 330),
+            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 160),
             to: directory.appendingPathComponent("toolbox-text-empty.png"))
-        text.input = "Could you send me the latest version?\nI would like to review the changes before our call."
+        text.input = "что нового?"
         await text.translate()?.value
-        try render(view, size: NSSize(width: 620, height: 610), to: directory.appendingPathComponent("text-result.png"))
+        try render(view, size: NSSize(width: 560, height: 140), to: directory.appendingPathComponent("text-result.png"))
+        text.input = String(repeating: "Очень длинная фраза с английскими words и числами 123. ", count: 12)
+        await text.translate()?.value
+        try render(view, size: NSSize(width: 360, height: 180), to: directory.appendingPathComponent("text-long.png"))
+        text.input = "что нового?"
+        await text.translate()?.value
         try renderWorkspace(text: text, subtitles: subtitles, presentation: presentation, directory: directory)
-        try render(view, size: NSSize(width: 480, height: 540), to: directory.appendingPathComponent("text-narrow.png"))
+        try render(view, size: NSSize(width: 360, height: 150), to: directory.appendingPathComponent("text-narrow.png"))
         try render(TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in }, embedded: true)
-            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 330),
+            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 160),
             to: directory.appendingPathComponent("toolbox-text-result.png"))
         presentation.mode = .subtitles
         try render(view, size: NSSize(width: 620, height: 400), to: directory.appendingPathComponent("subtitles-empty.png"))
@@ -51,10 +56,10 @@ final class TranslationRenderTests: XCTestCase {
         await failed.translate()?.value
         presentation.mode = .text
         try render(TranslationView(text: failed, subtitles: subtitles, presentation: presentation, openSettings: { _ in }, embedded: true)
-            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 330),
+            .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 160),
             to: directory.appendingPathComponent("toolbox-text-setup.png"))
         try render(TranslationView(text: failed, subtitles: subtitles, presentation: presentation, openSettings: { _ in })
-            .environment(\.colorScheme, .dark), size: NSSize(width: 480, height: 540),
+            .environment(\.colorScheme, .dark), size: NSSize(width: 360, height: 150),
             to: directory.appendingPathComponent("text-setup.png"))
     }
 
@@ -129,5 +134,12 @@ final class TranslationRenderTests: XCTestCase {
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
         XCTAssertFalse(window.isVisible)
         XCTAssertFalse(window.isKeyWindow)
+    }
+}
+
+
+private struct TranslationPreviewService: TextTranslating {
+    func translate(_ text: String, target: TranslationTarget) async throws -> String {
+        text == "что нового?" ? "What’s new?" : "Translation: " + text
     }
 }

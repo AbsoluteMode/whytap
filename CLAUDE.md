@@ -281,7 +281,10 @@ Meeting Assistant pilot:
 
 Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
-  floating window (TranslationWindowController). TextTranslationModel cancels
+  floating window (TranslationWindowController). Text mode is a compact two-row
+  palette: plain input submits on Return/Command-Return; output includes loading
+  and errors. Escape closes it. Saved targets and secondary actions stay in the
+  context menu; long output scrolls. TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never

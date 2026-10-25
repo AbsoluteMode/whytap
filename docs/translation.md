@@ -9,7 +9,8 @@ the mini app or closing Settings cancels its work unless the floating translator
 is also visible. Selecting the tile alone never starts capture or a request.
 
 From the island, both tools open the same floating, resizable window, including over full-screen
-apps. Escape or the close button closes it and cancels translation/capture.
+apps. Escape closes it and cancels translation/capture. The text palette hides
+the title bar controls to keep only its two text rows; drag its background to move it.
 
 ## Setup
 
@@ -31,12 +32,20 @@ model or chooses a replacement provider after a failure.
 
 ## Text
 
-Type or paste text, choose a target and press **Translate** or **Command Return**.
-**Auto · RU ↔ EN** translates Cyrillic input to English and other input to Russian.
-An explicit target overrides that direction. Language choices are remembered
-locally for the next launch and included in settings backups; submitted text
-and subtitle content are excluded. Copy copies the result only when
-you click it; the translator does not read the clipboard automatically.
+The quick palette has two rows: input and translation, like the standalone
+Realtime Translator. Type or paste text and press **Return** (or **Command
+Return**). There is no separate Translate button. The second row shows the
+result, translating status or an actionable error; configuration errors open
+**API & Models** when clicked. Escape closes the palette and cancels its work.
+Long input scrolls horizontally; long output wraps and scrolls in the second row.
+
+**Auto · RU ↔ EN** translates Cyrillic input to English and other input to
+Russian. Right-click the palette for **Translate to**, **Copy translation**,
+**Clear** or **Cancel translation**. The floating palette also offers **Subtitles**;
+in Toolbox select its separate tile. Explicit language choices
+are retained, including existing saved choices. Native text selection also
+supports copying. Only language choices are saved, never submitted text or
+subtitle content; the clipboard is accessed only by an explicit Copy action.
 
 Editing the input or changing the target cancels the old request and clears
 its result. Late responses cannot replace a newer translation. Inputs are
@@ -67,7 +76,7 @@ use the standalone app's OpenAI translation endpoint or its credential files.
 finals and completes queued translations. Audio already captured at Stop is sent
 before the speech provider receives its end-of-input signal. **Cancel**, closing the window or
 Mac sleep cancels immediately. Switching to Text leaves subtitles running;
-a waveform button beside the target reopens them. Updates defer app-initiated
+the Subtitles tool or the palette’s context menu reopens them. Updates defer app-initiated
 restart while this window is open or a translation session is active, preserving
 unsent text as well. Close the window before choosing Restart.
 

@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><b>Download</b></a> ·
-  <a href="https://whytap.ai">Website</a> ·
+  <a href="https://whytap.ai">Website &amp; help</a> ·
   <a href="docs/README.md">Docs</a>
 </p>
 
@@ -63,6 +63,10 @@ More in [Install and update](docs/install.md).
 | Close the agent answer | <kbd>Esc</kbd> |
 
 Remap any of them, or give any tool its own shortcut, in **Settings → Hotkeys**.
+
+## Help
+
+Questions about setup, a feature or a problem with the app? Ask on [whytap.ai](https://whytap.ai), where you can find more information about Whytap.
 
 ## Build from source
 

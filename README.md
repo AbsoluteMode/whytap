@@ -1,184 +1,89 @@
-# Whytap
+<p align="center">
+  <img src="docs/assets/whytap-icon.png" width="128" height="128" alt="Whytap icon">
+</p>
 
-Voice input and a voice-driven agent for macOS. Bring your own API keys
-(BYOK) or your own OpenAI-compatible endpoint.
+<h1 align="center">Whytap</h1>
 
-Hold **Space** in any text field, speak, release: the transcript is pasted
-where the cursor is. Tap **Right Command** to ask Whytap Agent
-by text, hold it to ask by voice. Choose its model through OpenRouter. Let
-Whytap notices your meetings and turn them into notes. All of it without an
-account, without Whytap servers and without telemetry.
+<p align="center">
+  <b>Voice input and an AI agent in your Mac's notch.</b><br>
+  Bring your own keys. No account, no servers, no telemetry.
+</p>
 
-Whytap is free and open source (MIT). See `LICENSE`, `TRADEMARK.md` and
-`THIRD_PARTY_LICENSES.md`.
+<p align="center">
+  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><b>Download</b></a> ·
+  <a href="https://whytap.ai">Website</a> ·
+  <a href="docs/README.md">Docs</a>
+</p>
 
-## Install and update
+<p align="center">
+  <img src="docs/assets/whytap-drop.gif" width="800" alt="Holding Space in a chat field: the island at the top of the screen shows the live transcript, and the message is pasted into the field on release">
+</p>
 
-Ready-made macOS builds are the main installation path. Download a Whytap DMG
-from [GitHub Releases](https://github.com/AbsoluteMode/whytap/releases), drag
-**Whytap** into **Applications**, then open it. You do not need Xcode or an Apple
-Developer account to use the app.
+## Features
 
-Choose `Whytap-latest.dmg` when available. During the rename, the latest
-published package may still be `Exodia-latest.dmg` and contain **Exodia**; it is
-the same application. Use the app name shown in that disk image. Existing
-Exodia release links continue to redirect to this repository.
+- **Drop**: hold <kbd>Space</kbd> in any text field, speak, release, and the text is pasted at the cursor. Fast pastes the transcript; Smart lightly edits it with your model.
+- **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. It reads files, searches the web and answers in the island.
+- **Meeting notes**: notices calls in Zoom, Teams, Slack and Google Meet and turns them into a summary with a transcript.
+- **History**: your clipboard, dictations and agent answers in one list, ready to paste again.
+- **Case**: a secrets vault for Claude Code, Cursor and Whytap Agent. Agents see key names; Case puts the value into the command they run.
+- **Shot**: a screenshot editor with arrows, text blur and Copy text.
+- **Display Extra**: brighter whites on XDR and HDR displays, beyond the usual maximum.
+- **Notify**: notifications from any script your coding agent writes, next to the island.
 
-Community builds are signed with the Developer ID certificate of Whytap's Apple
-team and notarized by Apple; macOS can show its standard confirmation for an app
-downloaded from the internet. See [installation and permissions](docs/install.md).
-The stable team identity preserves privacy and Keychain grants on subsequent
-same-team updates. The first upgrade from an older community-signed build may
-ask for those permissions again.
-Updates use the existing island **Update** button and verify the archive with
-Whytap's Sparkle Ed25519 key, which is independent of Apple signing. An update
-will not force a restart during a meeting recording, dictation or agent task.
-A prepared download can also apply when you quit Whytap normally. **Later**
-cancels the current installation; **Restart** applies it once work is finished.
+Also in the island: Translate and live Subtitles, Vocab, To-do, Calendar and Monitor dashboards.
 
-Runtime: macOS 14.2 (Sonoma) or newer, on Apple Silicon or Intel. Whytap keeps
-the original storage identities so the rename preserves settings, keys, notes
-and agent memory.
+## Your keys, your Mac
 
-Source and custom builds remain available; see [Development](#development).
+- Use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI or Anthropic, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
+- Audio and text go only to the provider you chose for that feature. There is no Whytap account, backend or telemetry.
+- Free and open source under the MIT license.
 
-## What runs where
+What leaves your Mac, and when: [Privacy](docs/privacy.md).
 
-| Feature | Route | Runs on |
-|---|---|---|
-| Dictation (Drop) | Your key (BYOK): Soniox, Deepgram, ElevenLabs, or a self-hosted OpenAI-compatible endpoint | the provider you chose, with your key |
-| Smart cleanup of dictated text | OpenRouter with your key, or a custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM) | the endpoint you chose |
-| Agent (Right Command) | Built-in Whytap Agent with your OpenRouter, OpenAI or Anthropic model | tools and memory on your Mac; inference at your selected provider |
-| Meeting Notes | Your speech provider (Soniox labels speakers), then your LLM for the summary | the providers you chose |
+## Install
 
-Whytap no longer ships on-device speech or text models. If you used **Local**
-before, Whytap does not switch you to a provider on its own: dictation opens
-**Settings, API & Models** until you choose a speech model, and recorded meetings
-wait for both speech and an LLM. Fast uses no cleanup LLM. Smart requires the
-LLM you chose: if it fails, Whytap keeps the transcript in memory and shows
-Retry instead of silently inserting unprocessed text.
+<a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-Whytap-6D4AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download Whytap for macOS"></a>
 
-Keys you enter are stored in the macOS Keychain and sent only to the
-provider you selected for that feature. Transcripts, notes and history are SQLite files under
-`~/Library/Application Support/`.
+macOS 14.2 or newer, Apple Silicon and Intel. Signed and notarized; updates arrive in the island.
+More in [Install and update](docs/install.md).
 
-## Set up in Settings
+## Quick start
 
-Whytap opens directly to the island. There is no onboarding wizard or account.
-Open **Settings** from the island's hover controls:
-
-1. In **API & Models**, click **Add key** under **API keys**, pick a provider
-   (Soniox, Deepgram, ElevenLabs, OpenRouter, Anthropic for the agent, or your
-   own OpenAI-compatible server) and paste its key. Whytap checks it with a
-   free request and stores it in macOS Keychain. A dot on each provider chip
-   shows whether the key works.
-2. Under **Models**, give each feature a model: Drop Fast, Drop Smart, Drop
-   Smart cleanup, Meetings, Meeting notes, Agent, Agent voice, Voice search,
-   Translation and Subtitles audio.
-   After you add a key, **Set up** offers to assign it to the features it can
-   serve; nothing is assigned until you choose. A model that is not in Whytap's
-   built-in list is checked with a tiny synthetic request when you pick it.
-3. In **Permissions**, grant Accessibility and Microphone for dictation.
-   Meeting recording also needs System Audio Recording. Features may request
-   a missing permission when you use them.
-
-Hold Space in a text field, speak, then release. Settings remains available
-for changing keys, permissions and models later. The Dynamic Island at the
-top of the screen is the main UI; there is no menu bar item.
-
-## Connect your agent
-
-Choose the **Agent** model and add its OpenRouter, OpenAI or Anthropic key in
-**Settings → API & Models**, then click **Connect** in **Agents**. The agent is
-built into Whytap. Connect prepares the local workspace and checks that a key
-is present; model requests are billed by your provider.
-
-Links and returned file/folder paths appear as action cards with the existing
-keyboard shortcuts for selection, insertion and opening, even when the model
-returns them as ordinary text.
-
-For web search, add a **Tavily** key in **Settings → API & Models → API keys**.
-Saving checks the key without running a search. Search queries go to Tavily;
-results go to your selected model.
-
-The agent can edit files and run commands by default. Turn off **Allow file
-edits and commands** to block both. Its dedicated folder is
-`~/Library/Application Support/whytap/agent`, also available through **Open
-folder**. AGENTS.md keeps memory; recent text context resumes for 15 minutes,
-up to six pairs/12,000 characters. Screenshots and tool output stay out of that
-new conversation file. Approval modes are a later phase.
-
-## Custom notifications
-
-Notify shows compact notifications to the left of the island and keeps their
-history, colors and logos. Ask your coding agent to connect the source and
-filters you want; Whytap runs its local script only while the app is open.
-Find **Notify** in hover search or add it in **Settings → Toolbox**.
-[Setup and script contract](docs/customization/notifications.md).
-
-## Hotkeys
+1. Open Whytap. Hover the island at the top of the screen and click **Settings**.
+2. In **Permissions**, allow Microphone and Accessibility. In **API & Models**, add a speech key and pick a model for Drop.
+3. Click into any text field, hold <kbd>Space</kbd>, speak and release.
 
 | Action | Default |
 |---|---|
-| Dictate into the focused field | hold Space |
-| Ask the agent by text / by voice | tap / hold Right Command |
-| Google the selection or your voice | tap / hold Right Option |
-| Record a meeting now | Option M |
-| Hover buttons 1 to 5 | Option 1 to Option 5 |
-| Close the agent answer | Escape |
+| Dictate into the focused field | hold <kbd>Space</kbd> |
+| Ask the agent by text / by voice | tap / hold <kbd>Right ⌘</kbd> |
+| Google the selection / your voice | tap / hold <kbd>Right ⌥</kbd> |
+| Start or stop a meeting recording | <kbd>⌥</kbd> <kbd>M</kbd> |
+| Close the agent answer | <kbd>Esc</kbd> |
 
-Everything is remappable in **Settings, Hotkeys**. The Help window lists the
-full set.
+Remap any of them, or give any tool its own shortcut, in **Settings → Hotkeys**.
 
-## Development
+## Build from source
 
-To customize Whytap, use a local checkout, Xcode 26 or newer and its Swift 6
-macOS toolchain:
+Needs Xcode 26 or newer (Swift 6).
 
 ```bash
 git clone https://github.com/AbsoluteMode/whytap.git
 cd whytap
-swift build
 swift test
 ./scripts/dev-run.sh --run
 ```
 
-Use `scripts/dev-run.sh` instead of `swift run`: it creates a proper app
-bundle at a stable path and preserves the bundle identity. With the existing
-local signing identity, permission grants can survive rebuilds. An ad-hoc
-rebuild may require granting permissions again in macOS Settings.
-
-See [build details](docs/build-and-release.md). Builds and tests run locally;
-GitHub Actions is disabled. Ready-made releases
-use the community DMG and signed Sparkle archive pipeline; building from source
-needs no Apple Developer account. Development builds use version `0.0.0-dev` / build `9999`
-and do not accept binary-feed updates over your custom build. Update the source
-with your agent, preserve your changes and rebuild instead.
-
-Architecture notes live in `CLAUDE.md`, the product spec in `docs/SPEC.md`,
-hotkey conventions in `docs/hotkey.md`, and the reasoning behind
-non-obvious choices in `docs/decisions/`.
-
-## Customize it with your agent
-
-Use Claude Code, Codex, OpenCode or another harness in a local source checkout.
-Start with `python3 scripts/customize.py discover --json`; the shared guides and
-helpers cover source navigation, native build/run, focused tests, hover tools,
-local data and custom monitoring dashboards. See [Customize Whytap](docs/customization/README.md).
+[Build details](docs/build-and-release.md) · [Customize Whytap with your coding agent](docs/customization/README.md)
 
 ## Contributing
 
-See `CONTRIBUTING.md`. Bug reports and pull requests are welcome; proposals
-that would require a Whytap-hosted service are out of scope by design.
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
-See `SECURITY.md`. Report vulnerabilities to security@whytap.ai.
+Report vulnerabilities to security@whytap.ai; see [SECURITY.md](SECURITY.md).
 
-### Translation
+## License
 
-Use **Translate** or **Subtitles** in the island’s tool search. Translate text
-with automatic RU↔EN direction or choose a target language; read floating
-subtitles for system audio without opening the microphone. Choose the
-**Translation** and **Subtitles audio** routes in API & Models first. Both
-tools can be pinned in Toolbox or assigned shortcuts. [Usage and privacy](docs/translation.md).
+[MIT](LICENSE). The Whytap name and icon: [TRADEMARK.md](TRADEMARK.md). Third-party code: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

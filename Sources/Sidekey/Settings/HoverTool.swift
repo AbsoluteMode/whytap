@@ -90,7 +90,7 @@ enum HoverToolRegistry {
                                  description: "Open meeting notes")
         case .meetingAssistant:
             return HoverToolInfo(title: "Meeting Assistant", sfSymbol: "text.bubble", kind: .action,
-                                 description: "Questions and answers during a meeting, scoped to your selected Space")
+                                 description: "Beta. Questions and answers for your selected Space. Enable listening for each meeting with the wand")
         case .meetingRecord:
             return HoverToolInfo(title: "Record", sfSymbol: "record.circle", kind: .action,
                                  description: "Start or stop a meeting recording")

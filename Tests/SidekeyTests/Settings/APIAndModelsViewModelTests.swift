@@ -592,6 +592,22 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.keyStatuses.record(for: .openRouter)?.checkedAt, env.now)
     }
 
+    func test_reopening_settings_recovers_a_cached_credit_refusal_without_replacing_the_key() async throws {
+        let env = try makeEnv(keyed: [.openRouter])
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openai/gpt-6-sol"), for: .dropSmartCleanup)
+        env.keyStatuses.set(.rejected(.outOfCredit), for: .openRouter, at: env.now.addingTimeInterval(-301))
+        let vm = env.makeViewModel()
+        XCTAssertEqual(vm.rows.first { $0.feature == .dropSmartCleanup }?.status, .keyProblem)
+
+        await vm.onAppear()
+
+        XCTAssertEqual(vm.chips.first { $0.account == .openRouter }?.statusText, "Key works")
+        XCTAssertNotEqual(vm.rows.first { $0.feature == .dropSmartCleanup }?.status, .keyProblem)
+        XCTAssertEqual(env.lookup(.openRouter), .key("key"))
+        XCTAssertEqual(env.checker.calls.count, 1)
+        XCTAssertFalse(env.checker.calls[0].paid)
+    }
+
     // MARK: - Banner
 
     func test_banner_counts_unset_features_only_when_a_key_exists() throws {
@@ -682,14 +698,14 @@ final class APIAndModelsProviderTests: XCTestCase {
         let (vm, _, _, _) = try make()
         let features = vm.groups.flatMap { $0.rows.map(\.feature) }
         XCTAssertEqual(features.sorted { $0.rawValue < $1.rawValue }, AIFeature.activeCases.sorted { $0.rawValue < $1.rawValue })
-        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles", "Meeting Assistant"])
+        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles", "Meeting Assistant (Beta)"])
         XCTAssertEqual(vm.groups.first { $0.title == "Drop Smart" }?.rows.map(\.feature), [.dropSmart, .dropSmartCleanup])
         XCTAssertEqual(vm.groups.first { $0.title == "Meetings" }?.rows.map(\.feature), [.meetings, .meetingNotes])
         XCTAssertEqual(vm.groups.first { $0.title == "Translation" }?.rows.map(\.feature), [.translation])
         let subtitles = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })
         XCTAssertEqual(subtitles.rows.map(\.feature), [.subtitlesAudio, .subtitlesTranslation])
         XCTAssertEqual(subtitles.rows.map(\.fieldLabel), ["Speech", "LLM"])
-        let assistant = try XCTUnwrap(vm.groups.first { $0.title == "Meeting Assistant" })
+        let assistant = try XCTUnwrap(vm.groups.first { $0.title == "Meeting Assistant (Beta)" })
         XCTAssertEqual(assistant.rows.map(\.feature), [.meetingAssistantAudio, .meetingAssistant])
         XCTAssertEqual(assistant.rows.map(\.fieldLabel), ["Speech", "Text"])
     }

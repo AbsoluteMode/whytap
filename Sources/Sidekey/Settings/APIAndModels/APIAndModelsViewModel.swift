@@ -57,7 +57,7 @@ struct FeatureGroup: Equatable, Identifiable {
         ("Voice search", [.voiceSearch]),
         ("Translation", [.translation]),
         ("Subtitles", [.subtitlesAudio, .subtitlesTranslation]),
-        ("Meeting Assistant", [.meetingAssistantAudio, .meetingAssistant]),
+        ("Meeting Assistant (Beta)", [.meetingAssistantAudio, .meetingAssistant]),
     ]
 }
 

@@ -83,7 +83,16 @@ struct ProviderKeyChecker: ProviderKeyChecking {
         case .openRouter:
             guard let key else { return .rejected(.invalidKey) }
             let answer = await get(Self.openRouterURL, header: "Authorization", value: "Bearer \(key)")
-            return Self.interpret(answer, forbidden: .rejected(.outOfCredit), paymentRequired: .rejected(.outOfCredit))
+            // A metadata permission refusal does not establish a credit problem.
+            // Proxies can also return an HTML 403; that is no key verdict at all.
+            // WHY: docs/decisions/2026-10-26-openrouter-key-status.md
+            if case .status(403, let body) = answer {
+                guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                      let error = object["error"] as? [String: Any], error["code"] as? Int == 403
+                else { return .unreachable }
+                return .limited
+            }
+            return Self.interpret(answer, forbidden: .unreachable, paymentRequired: .rejected(.outOfCredit))
         case .anthropic:
             // The free models list. 403 is a permission or limit refusal.
             guard let key else { return .rejected(.invalidKey) }
@@ -247,10 +256,17 @@ final class KeyStatusStore: ObservableObject {
         save()
     }
 
-    /// No record yet, or the last one is a day old.
+    /// Working keys need at most a daily free check. A transient refusal must
+    /// recover when Settings is revisited, rather than stay red for a whole day.
     func needsCheck(_ account: ProviderAccount, now: Date) -> Bool {
         guard let record = records[account.storageID] else { return true }
-        return now.timeIntervalSince(record.checkedAt) >= Self.maxAge
+        let maxAge: TimeInterval
+        switch record.status {
+        case .valid, .limited: maxAge = Self.maxAge
+        case .rejected: maxAge = 300
+        case .unreachable: maxAge = 60
+        }
+        return now.timeIntervalSince(record.checkedAt) >= maxAge
     }
 
     func forget(_ account: ProviderAccount) {

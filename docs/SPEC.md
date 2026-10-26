@@ -780,24 +780,23 @@ Settings → API & Models → API keys содержит ключ Tavily в Keych
 следующий этап. См. [решение](../.project-docs/decisions/2026-10-22-native-agent.md).
 
 
-### Meeting Assistant pilot
+### Meeting Assistant Beta
 
 A configured assistant exposes a hover magic icon to the right of the recording
-timer, translucent when off and softly glowing while listening. It shares
-the automatic listening state and keeps answers when stopped. Both configured
-model routes and a ready Space enable listening on every recognized meeting;
-no extra enable switch or required hotkey is needed. The wand can disable the
-current meeting, and a later meeting enables listening again. A
-recognized meeting-context end sustained for 15 seconds stops listening; manual
-sessions without recognized context need the wand to stop. Context detection is a
-mic-activity heuristic, not a unique call identity.
-
+timer, translucent when off and softly glowing while listening. Listening starts
+off for every meeting, including after relaunch or wake. Configuring both model
+routes and a ready Space only makes the feature available. A wand click explicitly
+enables listening for this meeting; stopping, ending a meeting or changing Space
+never enables it again. The panel and API & Models group mark the feature Beta.
+A recognized meeting-context end sustained for 15 seconds stops listening;
+manual sessions without recognized context need the wand to stop. Context detection
+is a mic-activity heuristic, not a unique call identity.
 
 The approved native right-hand module offers a ready Space picker, plain input,
 up to five current questions, twenty answered roots and six removable screenshot
 attachments. Replies contain a conclusion, structured points and two follow-ups;
 conversation survives collapse. Closing answers does not stop listening. The
-module shows connection status instead of a Listen button. Automatic listening extracts questions
+module shows connection status instead of a Listen button. Explicitly enabled listening extracts questions
 from bounded system-audio transcription without retaining audio or starting Notes.
 Speech and answer models have separate initially unset routes in API & Models.
 Coding agents prepare Spaces; the user selects them. Runtime repository access

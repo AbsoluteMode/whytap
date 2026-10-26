@@ -1384,6 +1384,8 @@ installed acceptance; offscreen evidence does not establish those guarantees.
 
 ## Meeting Assistant — automatic listening, 2026-10-26
 
+Superseded later on the same day by the user's Beta/default-off request below.
+
 The user clarified that configuring models enables Assistant on every meeting.
 This supersedes the explicit Listen/Stop and no-auto-join choices above. Both
 routes and a ready Space enable a passive meeting observer. It starts system
@@ -1400,6 +1402,25 @@ through the wand. Reuse existing hover/pressed/focus/disabled feedback without
 adding controls or animation. Native offscreen fixtures cover ready, connecting,
 listening, stopping, populated and short-screen layouts in light/dark themes.
 Physical call/hover/keyboard acceptance remains in the installed app.
+
+## Meeting Assistant — Beta and explicit meeting enable, 2026-10-26
+
+Every meeting starts with listening off, even when routes and a Space are ready.
+Only the existing wand enables audio and automatic question extraction for the
+current meeting. Starting a later meeting, opening answers, a catalog refresh,
+wake and a failed connection never re-enable it. Reason: the user observed
+unexpected usage and explicitly requested default-off behavior.
+
+Keep the existing fixed wand target and hover/pressed/focus/disabled states.
+The API & Models group says “Meeting Assistant (Beta)”; a quiet noninteractive
+“Beta” sits beside the Space selector without adding a control or moving the
+picker. The tool description and wand help also identify Beta. This keeps the
+approved native module and the user's two-action key form intact.
+
+Native offscreen light/dark fixtures cover empty/ready/connecting/listening/
+stopping/populated/short-screen states. No new pointer or keyboard interaction
+is introduced. Real-call behavior remains installed acceptance; fake audio and
+providers verify that inactive meetings make no capture or extraction requests.
 
 ## Quick Translate: two text rows — 2026-10-26
 

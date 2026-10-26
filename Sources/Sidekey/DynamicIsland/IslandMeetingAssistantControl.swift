@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Overrides automatic listening for this meeting; revealing it never toggles it.
+/// Explicitly enables listening for this meeting; revealing it never toggles it.
 struct IslandMeetingAssistantControl: View {
     static let size: CGFloat = 28
     let state: MeetingAssistantHoverState
@@ -33,7 +33,7 @@ struct IslandMeetingAssistantControl: View {
         .buttonStyle(MeetingAssistantMagicFeedback(focused: focused))
         .focused($focused)
         .disabled(!state.canToggle)
-        .help(state.isOn ? "Выключить Meeting Assistant для этой встречи" : "Включить Meeting Assistant для этой встречи")
+        .help(state.isOn ? "Выключить Meeting Assistant (Beta) для этой встречи" : "Включить Meeting Assistant (Beta) для этой встречи")
         .accessibilityRepresentation {
             Toggle("Meeting Assistant — только эта встреча", isOn: Binding(get: { state.isOn }, set: setEnabled))
                 .disabled(!state.canToggle)

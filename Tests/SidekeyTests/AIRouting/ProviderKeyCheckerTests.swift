@@ -121,12 +121,22 @@ final class ProviderKeyCheckerTests: XCTestCase {
     func test_openrouter_codes() async {
         let table: [(Int, KeyStatus)] = [
             (200, .valid), (401, .rejected(.invalidKey)),
-            (402, .rejected(.outOfCredit)), (403, .rejected(.outOfCredit)),
+            (402, .rejected(.outOfCredit)), (403, .unreachable),
         ]
         for (code, expected) in table {
             let status = await check(checker(status: code), .openRouter)
             XCTAssertEqual(status, expected, "openrouter \(code)")
         }
+    }
+
+    func test_openrouter_metadata_permission_refusal_is_limited_not_out_of_credit() async {
+        let status = await check(checker(status: 403, body: #"{"error":{"code":403,"message":"Insufficient permissions"}}"#), .openRouter)
+        XCTAssertEqual(status, .limited)
+    }
+
+    func test_openrouter_proxy_html_forbidden_is_not_a_key_or_credit_verdict() async {
+        let status = await check(checker(status: 403, body: "<html><title>Access denied</title></html>"), .openRouter)
+        XCTAssertEqual(status, .unreachable)
     }
 
     /// The free models list, with Anthropic's own headers and no Bearer.

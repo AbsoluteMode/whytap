@@ -97,7 +97,7 @@ struct SettingsWindowView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
 
-            // Pinned support + Quit rows stay visible even when the settings
+            // Pinned project footer and Quit row stay visible even when the settings
             // tab list grows beyond the available window height.
             Rectangle()
                 .fill(MacSettingsTheme.sep)
@@ -106,7 +106,6 @@ struct SettingsWindowView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 SettingsProjectFooter(identity: .current)
-                learningCenterRow
                 quitRow
             }
                 .padding(.horizontal, SettingsSidebarStyle.horizontalPadding)
@@ -154,30 +153,6 @@ struct SettingsWindowView: View {
         .focused($focusedSidebarControl, equals: tab.id)
         .accessibilityAddTraits(selection.selectedTab == tab ? .isSelected : [])
         .accessibilityLabel(tab.title)
-    }
-
-    private var learningCenterRow: some View {
-        Button {
-            NSWorkspace.shared.open(HelpWindowContent.learningCenterURL)
-        } label: {
-            HStack(spacing: 0) {
-                Text("FAQ & Learning")
-                    .font(.system(size: SettingsSidebarStyle.labelFontSize, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(SettingsSidebarStyle.labelMinimumScaleFactor)
-                    .layoutPriority(1)
-
-                Spacer(minLength: 0)
-
-            }
-            .foregroundStyle(MacSettingsTheme.text2)
-            .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding)
-            .frame(height: SettingsSidebarStyle.rowHeight)
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        }
-        .buttonStyle(SettingsSidebarButtonStyle(focused: focusedSidebarControl == "learning"))
-        .focused($focusedSidebarControl, equals: "learning")
-        .accessibilityLabel("Open FAQ and Learning Center")
     }
 
     private var quitRow: some View {

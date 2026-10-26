@@ -30,8 +30,8 @@ final class PackagingRebrandTests: XCTestCase {
     }
 
     func test_uploadReleasePublishesToGitHubReleasesWithLatestAlias() throws {
-        // Releases live on GitHub Releases: the versioned DMG, a stable
-        // `<Bundle>-latest.dmg` alias and the signed appcast are assets of
+        // Releases live on GitHub Releases: one `<Bundle>-latest.dmg`
+        // and the signed appcast are assets of
         // the release. No object storage, no legacy Sidekey aliases.
         let source = try readProjectFile("scripts/upload-release.sh")
 

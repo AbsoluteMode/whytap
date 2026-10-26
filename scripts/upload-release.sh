@@ -24,8 +24,8 @@
 #                        publishes a team archive without notarization
 #
 # Channels:
-#   prod  -> tag v${SHORT_VERSION}. Assets: the versioned DMG, a
-#            ${APP_BUNDLE_NAME}-latest.dmg copy (stable download link) and
+#   prod  -> tag v${SHORT_VERSION}. Assets: one
+#            ${APP_BUNDLE_NAME}-latest.dmg (stable download link) and
 #            appcast.xml. The app's feed URL is
 #            https://github.com/<repo>/releases/latest/download/appcast.xml,
 #            so the newest non-prerelease release always carries the feed.
@@ -235,15 +235,17 @@ if [ "$priv_len" != "32" ]; then
     exit 1
 fi
 
-normalize_appcast_minimum_system_version() {
+prepare_appcast() {
     local appcast_path="$1"
 
-    /usr/bin/python3 - "$appcast_path" "$APPCAST_MINIMUM_SYSTEM_VERSION" <<'PY'
+    /usr/bin/python3 - "$appcast_path" "$APPCAST_MINIMUM_SYSTEM_VERSION" \
+        "$BUILD_VERSION" "${DOWNLOAD_BASE}/${TAG}/${LATEST_FILENAME}" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
 appcast_path = sys.argv[1]
 minimum_system_version = sys.argv[2]
+build, archive_url = sys.argv[3:]
 sparkle_ns = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 ET.register_namespace("sparkle", sparkle_ns)
@@ -255,6 +257,15 @@ if not nodes:
 
 for node in nodes:
     node.text = minimum_system_version
+
+# The public filename is always latest; the enclosing release tag pins its
+# bytes. Never point a signed update at the mutable releases/latest URL.
+for item in root.findall("./channel/item"):
+    if (item.findtext(f"{{{sparkle_ns}}}version") or "").strip() == build:
+        enclosure = item.find("enclosure")
+        if enclosure is None:
+            raise SystemExit("update item has no archive enclosure")
+        enclosure.set("url", archive_url)
 
 tree.write(appcast_path, encoding="utf-8", xml_declaration=True)
 PY
@@ -322,9 +333,10 @@ if [ ! -f "${STAGING_DIR}/appcast.xml" ]; then
     echo "ERROR: generate_appcast did not emit appcast.xml in ${STAGING_DIR}." >&2
     exit 1
 fi
-normalize_appcast_minimum_system_version "${STAGING_DIR}/appcast.xml"
+prepare_appcast "${STAGING_DIR}/appcast.xml"
+cp "${STAGING_DIR}/${DMG_FILENAME}" "${STAGING_DIR}/${LATEST_FILENAME}"
 if ! validate_signed_appcast_item "${STAGING_DIR}/appcast.xml" "$BUILD_VERSION" \
-        "${STAGING_DIR}/${DMG_FILENAME}" "${DOWNLOAD_BASE}/${TAG}/${DMG_FILENAME}"; then
+        "${STAGING_DIR}/${LATEST_FILENAME}" "${DOWNLOAD_BASE}/${TAG}/${LATEST_FILENAME}"; then
     echo "ERROR: appcast.xml has no valid signed update for build ${BUILD_VERSION}; refusing publication." >&2
     exit 1
 fi
@@ -340,9 +352,7 @@ for item in ET.parse(sys.argv[1]).getroot().findall("./channel/item"):
 PYSIGNATURE
 )"
 "${SIGN_UPDATE_BIN}" --verify --ed-key-file "$SPARKLE_PRIV_FILE" \
-    "${STAGING_DIR}/${DMG_FILENAME}" "${archive_signature}"
-
-cp "${STAGING_DIR}/${DMG_FILENAME}" "${STAGING_DIR}/${LATEST_FILENAME}"
+    "${STAGING_DIR}/${LATEST_FILENAME}" "${archive_signature}"
 
 # --- 3. Stage a new draft, verify uploaded bytes, then publish last ----------
 
@@ -365,14 +375,13 @@ echo "Creating draft ${TAG} from source ${SOURCE_SHA}..."
 gh release create "$TAG" --repo "$GITHUB_REPO" "${create_args[@]}"
 # No --clobber: even a concurrent publisher cannot replace versioned bytes.
 gh release upload "$TAG" --repo "$GITHUB_REPO" \
-    "${STAGING_DIR}/${DMG_FILENAME}" \
     "${STAGING_DIR}/${LATEST_FILENAME}" \
     "${STAGING_DIR}/appcast.xml"
 
 VERIFY_DIR="$(mktemp -d "${STAGING_DIR}/verify.XXXXXX")"
 gh release download "$TAG" --repo "$GITHUB_REPO" --dir "$VERIFY_DIR" \
-    --pattern "$DMG_FILENAME" --pattern "$LATEST_FILENAME" --pattern appcast.xml
-/usr/bin/python3 - "$STAGING_DIR" "$VERIFY_DIR" "$DMG_FILENAME" "$LATEST_FILENAME" <<'PYVERIFY'
+    --pattern "$LATEST_FILENAME" --pattern appcast.xml
+/usr/bin/python3 - "$STAGING_DIR" "$VERIFY_DIR" "$LATEST_FILENAME" <<'PYVERIFY'
 import hashlib
 from pathlib import Path
 import sys
@@ -385,11 +394,11 @@ def digest(path):
     return result.digest()
 
 staging, downloaded = map(Path, sys.argv[1:3])
-for name in [sys.argv[3], sys.argv[4], "appcast.xml"]:
+for name in [sys.argv[3], "appcast.xml"]:
     expected, actual = staging / name, downloaded / name
     if not actual.is_file() or actual.stat().st_size != expected.stat().st_size or digest(actual) != digest(expected):
         raise SystemExit("uploaded release asset bytes do not match; leaving the release as a draft")
-print("Uploaded archive, alias and appcast SHA256/length verified")
+print("Uploaded latest archive and appcast SHA256/length verified")
 PYVERIFY
 
 if [ "$FLAVOR" = "prod" ]; then
@@ -413,6 +422,6 @@ if [ "$FLAVOR" = "beta" ]; then
 fi
 
 echo ""
-echo "Released ${DMG_FILENAME}: ${DOWNLOAD_BASE}/${TAG}/${DMG_FILENAME}"
+echo "Released ${LATEST_FILENAME}: ${DOWNLOAD_BASE}/${TAG}/${LATEST_FILENAME}"
 echo "Latest alias: ${DOWNLOAD_BASE}/${FEED_TAG}/${LATEST_FILENAME}"
 echo "Sparkle feed: ${FEED_URL}"

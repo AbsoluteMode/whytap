@@ -21,7 +21,7 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
         return (canvas, ScreenshotToolbar(canvas: canvas, defaults: defaults, arrowPreferences: prefs), prefs, defaults)
     }
 
-    func testFourSquareAssignmentsAndAdjacentArrowKeycapsAreInToolbar() throws {
+    func testFourAssignmentButtonsEachContainTheirOwnArrowKeycapAndHitArea() throws {
         let (_, toolbar, _, _) = try fixture()
         toolbar.arrowCluster.layoutSubtreeIfNeeded()
         let buttons = toolbar.arrowCluster.buttons
@@ -30,8 +30,7 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
         let left = try XCTUnwrap(buttons[.left]), right = try XCTUnwrap(buttons[.right])
         let ordered = [up, left, right, down]
         let frames = ordered.map { $0.convert($0.bounds, to: toolbar.arrowCluster) }
-        for frame in frames { XCTAssertEqual(frame.width, frame.height) }
-        for index in 1..<frames.count { XCTAssertGreaterThan(frames[index].minX, frames[index - 1].maxX) }
+        for index in 1..<frames.count { XCTAssertGreaterThanOrEqual(frames[index].minX - frames[index - 1].maxX, 11) }
         XCTAssertTrue(frames.allSatisfy { $0.midY == frames[0].midY })
         XCTAssertTrue(buttons.values.allSatisfy { $0.isDescendant(of: toolbar) && toolbar.focusableControls.contains($0) })
         for (direction, button) in buttons {
@@ -39,11 +38,14 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
             XCTAssertEqual(button.dragAction, ScreenshotArrowBindings.defaults[direction])
             XCTAssertEqual(button.menu?.items.filter { !$0.isSeparatorItem && $0.state == .on }.count, 1)
             XCTAssertTrue(button.toolTip?.contains("Changes save immediately") == true)
-            let pair = try XCTUnwrap(button.superview)
-            let hint = try XCTUnwrap(pair.subviews.first { $0.identifier?.rawValue == "screenshot.arrow-keycap.\(direction.rawValue)" })
-            XCTAssertGreaterThan(hint.frame.minX, button.frame.maxX)
+            let hint = try XCTUnwrap(button.subviews.first { $0.identifier?.rawValue == "screenshot.arrow-keycap.\(direction.rawValue)" })
+            XCTAssertTrue(button.bounds.contains(hint.frame))
             XCTAssertFalse(hint.acceptsFirstResponder)
             XCTAssertNil(hint.hitTest(CGPoint(x: hint.frame.midX, y: hint.frame.midY)))
+            for point in [CGPoint(x: 15, y: 15), CGPoint(x: hint.frame.midX, y: hint.frame.midY)] {
+                XCTAssertTrue(toolbar.arrowCluster.hitTest(button.convert(point, to: toolbar.arrowCluster)) === button,
+                              "The icon and keycap must share one assignment click/drop target")
+            }
         }
     }
 
@@ -167,12 +169,12 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
         XCTAssertFalse(window.isVisible)
     }
 
-    func testRenderActualScreenshotToolbarWithSquareToolsAndArrowHints() throws {
+    func testRenderActualScreenshotToolbarWithGroupedShortcutButtons() throws {
         guard let directory = ProcessInfo.processInfo.environment["WHYTAP_SCREENSHOT_ARROW_RENDER_DIR"] else {
             throw XCTSkip("Opt-in native toolbar renders")
         }
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        for width in [360, 520, 900] {
+        for width in [320, 390, 768, 1024, 1440] {
             for dark in [false, true] {
                 let (canvas, toolbar, _, _) = try fixture()
                 canvas.commit(ScreenshotAnnotation(tool: .pen, points: [.zero, CGPoint(x: 50, y: 50)]))
@@ -190,10 +192,29 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
                 for button in toolbar.arrowCluster.buttons.values {
                     XCTAssertTrue(toolbar.bounds.contains(button.convert(button.bounds, to: toolbar)))
                 }
-                let bitmap = try XCTUnwrap(toolbar.bitmapImageRepForCachingDisplay(in: toolbar.bounds))
-                toolbar.cacheDisplay(in: toolbar.bounds, to: bitmap)
-                let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-                try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("toolbar-arrows-\(width)-\(dark ? "dark" : "light").png"))
+                func render(_ suffix: String = "") throws -> Data {
+                    let bitmap = try XCTUnwrap(toolbar.bitmapImageRepForCachingDisplay(in: toolbar.bounds))
+                    toolbar.cacheDisplay(in: toolbar.bounds, to: bitmap)
+                    let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("toolbar-arrows-\(width)-\(dark ? "dark" : "light")\(suffix).png"))
+                    return data
+                }
+                let idle = try render()
+                if width == 390 {
+                    let button = try XCTUnwrap(toolbar.arrowCluster.buttons[.up])
+                    let event = try XCTUnwrap(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+                    button.mouseEntered(with: event)
+                    let hovered = try render("-hover")
+                    XCTAssertNotEqual(hovered, idle)
+                    button.highlight(true)
+                    XCTAssertNotEqual(try render("-pressed"), hovered)
+                    button.highlight(false)
+                    canvas.busy = true; toolbar.refresh()
+                    let disabled = try render("-disabled")
+                    button.mouseExited(with: event)
+                    XCTAssertEqual(try render("-disabled-exit"), disabled, "Disabled shortcut pairs suppress hover")
+                }
                 XCTAssertFalse(window.isVisible)
             }
         }

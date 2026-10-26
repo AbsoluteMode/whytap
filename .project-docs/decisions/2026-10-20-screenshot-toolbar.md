@@ -6,8 +6,11 @@ summary: Explicit local capture opens a native toolbar with Blur defaulting to t
 status: confirmed
 tags: [screenshots, capture, blur, numbers, vision, toolbar, privacy]
 canonical_for: [screenshot-editor, screenshot-text-number-blur]
-verified_at: 2026-10-21
+verified_at: 2026-10-26
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-26 the user reported that the adjacent screenshot tool icons and arrow keycaps did not clearly show which shortcut belonged to which tool.
+    confirmed_at: 2026-10-26
   - type: user-confirmed
     reference: On 2026-10-21 the user requested restoring screenshot text extraction after finding a use for it, superseding only Copy text removal in the earlier tool reduction.
     confirmed_at: 2026-10-21
@@ -326,6 +329,18 @@ profile would mistake a deliberately reassigned previous stock map for an
 unmigrated map and reset it. A synthetic encrypted settings backup/restore
 regression checks version 2, the exact arrow map, other hotkeys and provider
 selection without accessing real data or credentials.
+
+# Grouped shortcut revision — 2026-10-26
+
+The user reported that the square/keycap row did not make shortcut ownership
+clear. Group each icon and its HotkeyHintView keycap inside one 57 × 30 pt
+native button, with a shared solid border/background and 11 pt between pairs
+(261 × 30 pt overall). The full pair owns hover, press, focus, assignment menu
+and drag/drop. Its decorative keycap passes events to the button. Disabled
+pairs suppress hover and reject assignment/drop. Existing arrow bindings,
+defaults, migration, execution and immediate source-preserving replacement
+remain unchanged. This supersedes only the separated square/keycap treatment
+above. Implementation details and the validation matrix live in docs/DESIGN.md.
 
 # Consequences
 

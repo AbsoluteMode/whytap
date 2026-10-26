@@ -21,7 +21,7 @@
 #   SHORT_VERSION  SemVer       (default: VERSION file)
 #   BUILD_VERSION  monotonic    (default: 1; user-release picks next live build)
 #                  integer
-#   EXODIA_DMG_HEADLESS  1 skips optional Finder layout (default: 0)
+#   EXODIA_DMG_HEADLESS  0|1 compatibility flag; layout is always written offline
 #   EXODIA_COMMUNITY_SIGNING  auto|adhoc (default: auto = committed identity)
 #   EXODIA_DEVELOPER_ID_IDENTITY  SHA-1 of the team's Developer ID Application
 #                  identity; needed only when the keychain holds several
@@ -146,6 +146,7 @@ ENTITLEMENTS="${PROJECT_DIR}/Resources/Sidekey.entitlements"
 INFO_PLIST_TEMPLATE="${PROJECT_DIR}/Resources/Info.plist.template"
 SPARKLE_PUBKEY_FILE="${PROJECT_DIR}/Resources/sparkle-public-ed-key.txt"
 DMG_BACKGROUND_SRC="${PROJECT_DIR}/Resources/dmg-background.png"
+DMG_LAYOUT="${PROJECT_DIR}/scripts/dmg-layout.py"
 MENU_BAR_ICON="${PROJECT_DIR}/Resources/MenuBarIconTemplate.pdf"
 
 # --- Community code-signing identity -------------------------------------
@@ -305,6 +306,9 @@ if ! [[ "${SPARKLE_PUBLIC_ED_KEY}" =~ ^[A-Za-z0-9+/=]{43,44}$ ]]; then
     echo "Got: ${SPARKLE_PUBLIC_ED_KEY}" >&2
     exit 1
 fi
+
+# Check layout dependencies/background before compiling or accessing signing keys.
+/usr/bin/python3 "${DMG_LAYOUT}" preflight --background-source "${DMG_BACKGROUND_SRC}"
 
 # --- Toolchain guard: require the macOS 26 (Tahoe) SDK -------------------
 # WHY: on macOS 26 AppKit applies the Liquid Glass material pipeline only to
@@ -1143,19 +1147,9 @@ fi
 
 # --- DMG packaging ------------------------------------------------------
 #
-# Two-step build:
-#   1. Build a writable UDRW image from the staging dir (app bundle + symlink
-#      to /Applications). HFS+ is required so Finder can persist its window
-#      layout via .DS_Store inside the volume.
-#   2. Mount UDRW, run AppleScript to paint a "drag here" Finder window
-#      (icon view, hidden toolbar, app on the left, /Applications on the
-#      right). AppleScript is best-effort: in headless CI without a UI
-#      session the Finder calls may no-op, but the symlink and contents are
-#      already on disk at the file-system level, so the install UX is still
-#      correct (just without polished icon positions).
-#   3. Detach, convert UDRW to compressed UDZO for distribution.
-#   4. Mount the final UDZO read-only and assert the symlink survived —
-#      hard fail with a clear error otherwise so a broken DMG never ships.
+# Create writable HFS+, write its Finder metadata directly, then compress.
+# Layout is a release contract even in EXODIA_DMG_HEADLESS=1: no Finder session
+# or Automation permission is needed. Verify again after the final remount.
 
 echo "▶ Creating writable staging DMG..."
 rm -f "${DMG_PATH}"
@@ -1166,30 +1160,18 @@ DMG_MOUNT_POINT="/Volumes/${BUNDLE_DISPLAY_NAME}"
 ditto "${APP_BUNDLE}" "${DMG_ROOT}/${APP_BUNDLE_NAME}.app"
 ln -s /Applications "${DMG_ROOT}/Applications"
 
-# Stage the drag-to-install background image in a hidden `.background/` folder
-# inside the volume. The AppleScript below references it via a POSIX path; the
-# folder is hidden so it doesn't show up in the user's Finder window. Treat the
-# background as polish — if the source PNG is missing (e.g. a developer hasn't
-# re-generated it after pulling), warn and continue. The DMG remains functional
-# without it; only the visual hint is lost.
-if [ -f "${DMG_BACKGROUND_SRC}" ]; then
-    mkdir -p "${DMG_ROOT}/.background"
-    cp "${DMG_BACKGROUND_SRC}" "${DMG_ROOT}/.background/background.png"
-    echo "  ok: staged DMG background image (.background/background.png)"
-else
-    echo "  warn: DMG background image missing at ${DMG_BACKGROUND_SRC}" >&2
-    echo "  (regenerate with: python3 scripts/generate-dmg-background.py)" >&2
-    echo "  (continuing without background — DMG will use Finder default)" >&2
-fi
+# The committed background and its layout are required for every archive.
+mkdir -p "${DMG_ROOT}/.background"
+cp "${DMG_BACKGROUND_SRC}" "${DMG_ROOT}/.background/background.png"
 
 # Detach any stale mount from a previous failed run before reusing the
 # volume name — otherwise hdiutil attach below picks a "<name> 1" path and
-# the AppleScript "tell disk <name>" call cannot find the volume.
+# the expected mount point would refer to a different volume.
 if [ -d "${DMG_MOUNT_POINT}" ]; then
     detach_dmg_mount "${DMG_MOUNT_POINT}" 3 >/dev/null 2>&1 || true
 fi
 
-# HFS+ + UDRW: writable while we paint the layout, will be converted to
+# HFS+ + UDRW: writable while we write the layout, will be converted to
 # compressed UDZO below before notarization.
 rm -f "${DMG_RW_PATH}"
 hdiutil create \
@@ -1209,7 +1191,7 @@ hdiutil attach \
     "${DMG_RW_PATH}" > /dev/null
 
 # Sanity: the symlink the user is supposed to drag onto must actually be on
-# the volume before we hand it to AppleScript / convert. If the symlink is
+# the volume before writing the layout / converting. If the symlink is
 # missing at this point, hdiutil silently dropped it from the srcfolder copy
 # and continuing would ship a broken DMG.
 if [ ! -L "${DMG_MOUNT_POINT}/Applications" ]; then
@@ -1219,67 +1201,10 @@ if [ ! -L "${DMG_MOUNT_POINT}/Applications" ]; then
     exit 1
 fi
 
-if [ "${DMG_HEADLESS}" = "1" ]; then
-    echo "▶ Headless packaging: keeping Finder’s default layout"
-else
-echo "▶ Painting Finder window layout (icon view, drag-to-install)..."
-# AppleScript runs against a live Finder session. In a logged-in macOS
-# session this is reliable; on a headless CI runner without a UI session
-# the Finder bridge may not be reachable. The layout is polish — if the
-# script no-ops, the DMG still mounts correctly with the symlink and the
-# background.png is already on disk in .background/. Capture failures as a
-# warning rather than a hard error.
-#
-# Window bounds {x0, y0, x1, y1} = {400, 100, 1060, 540} → 660x440 window,
-# matching the logical icon coordinates used in generate-dmg-background.py
-# (icons centred on y=220, Sidekey at x=180, Applications at x=480) so the
-# rendered arrow sits between the two icons.
-APPLESCRIPT_LOG="$(mktemp -t sidekey-dmg-layout)"
-if osascript - "${BUNDLE_DISPLAY_NAME}" "${APP_BUNDLE_NAME}" <<'OSA' >"${APPLESCRIPT_LOG}" 2>&1; then
-on run argv
-    set volName to item 1 of argv
-    set appName to (item 2 of argv) & ".app"
-    tell application "Finder"
-        tell disk volName
-            open
-            set current view of container window to icon view
-            set toolbar visible of container window to false
-            set statusbar visible of container window to false
-            set sidebar width of container window to 0
-            set the bounds of container window to {400, 100, 1060, 540}
-            set viewOptions to the icon view options of container window
-            set arrangement of viewOptions to not arranged
-            set icon size of viewOptions to 128
-            set text size of viewOptions to 13
-            -- Background image is staged in .background/ on the volume. Use a
-            -- POSIX file path so the AppleScript "file" specifier doesn't have
-            -- to navigate Finder's HFS-colon path syntax — Finder accepts
-            -- POSIX paths for the background picture as of macOS 10.11+.
-            try
-                set background picture of viewOptions to POSIX file ("/Volumes/" & volName & "/.background/background.png")
-            on error errMsg
-                log "background picture set failed: " & errMsg
-            end try
-            set position of item appName of container window to {180, 220}
-            set position of item "Applications" of container window to {480, 220}
-            close
-            open
-            update without registering applications
-            delay 1
-            close
-        end tell
-    end tell
-end run
-OSA
-    echo "  ok: Finder layout applied"
-else
-    echo "  warn: Finder layout script returned non-zero (headless CI?)" >&2
-    echo "  output (first 20 lines):" >&2
-    head -20 "${APPLESCRIPT_LOG}" >&2 || true
-    echo "  (continuing — symlink + contents + .background/ already on disk, layout is polish)" >&2
-fi
-rm -f "${APPLESCRIPT_LOG}"
-fi
+echo "▶ Writing Finder window layout (offline, headless=${DMG_HEADLESS})..."
+/usr/bin/python3 "${DMG_LAYOUT}" write \
+    --volume "${DMG_MOUNT_POINT}" --app-name "${APP_BUNDLE_NAME}.app" \
+    --background-source "${DMG_BACKGROUND_SRC}"
 
 sync
 
@@ -1311,14 +1236,11 @@ APP_PRESENT=0
 if [ -d "${DMG_MOUNT_POINT}/${APP_BUNDLE_NAME}.app" ]; then
     APP_PRESENT=1
 fi
-# Background image present iff the source PNG existed at staging time. Track
-# both the "expected" and "actual" state so the post-mount check matches what
-# we actually staged — a missing source PNG is a warn at stage time, not a
-# hard failure at verify time.
-BACKGROUND_OK=0
-if [ -f "${DMG_MOUNT_POINT}/.background/background.png" ]; then
-    BACKGROUND_OK=1
-fi
+# Read the final archive's records, positions and on-volume background alias.
+# Missing/corrupt metadata must fail before signing, notarization or sealing.
+/usr/bin/python3 "${DMG_LAYOUT}" verify \
+    --volume "${DMG_MOUNT_POINT}" --app-name "${APP_BUNDLE_NAME}.app" \
+    --background-source "${DMG_BACKGROUND_SRC}"
 if [ -n "${SIGNER_REQUIREMENT}" ] && [ "${APP_PRESENT}" -eq 1 ]; then
     if ! (verify_release_signature "${DMG_MOUNT_POINT}/${APP_BUNDLE_NAME}.app"); then
         detach_dmg_mount "${DMG_MOUNT_POINT}" 3 >/dev/null 2>&1 || true
@@ -1345,20 +1267,7 @@ if [ "${APP_PRESENT}" -ne 1 ]; then
     echo "ERROR: final DMG is missing ${APP_BUNDLE_NAME}.app." >&2
     exit 1
 fi
-if [ -f "${DMG_BACKGROUND_SRC}" ] && [ "${BACKGROUND_OK}" -ne 1 ]; then
-    # Background was staged but did not survive the UDRW → UDZO conversion.
-    # That's a real regression in the packaging step — fail rather than ship
-    # a DMG without the drag-to-install hint that the source PNG advertises.
-    echo "ERROR: final DMG is missing .background/background.png even though" >&2
-    echo "  the source PNG was staged. The hdiutil convert step dropped it." >&2
-    exit 1
-fi
-echo "  ok: Applications symlink + ${APP_BUNDLE_NAME}.app present in DMG"
-if [ "${BACKGROUND_OK}" -eq 1 ]; then
-    echo "  ok: .background/background.png present in DMG"
-else
-    echo "  note: .background/background.png NOT in DMG (source PNG was missing at stage time)"
-fi
+echo "  ok: Applications symlink + ${APP_BUNDLE_NAME}.app + verified Finder layout present in DMG"
 
 # --- Codesign DMG -------------------------------------------------------
 

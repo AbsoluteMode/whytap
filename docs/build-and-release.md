@@ -129,9 +129,24 @@ after changing HEAD, relabel an old archive or edit a manifest to make it pass;
 commit the intended inputs and rebuild. These are pipeline requirements;
 candidate-specific verification remains part of release acceptance.
 
-For CLI packaging without a live Finder layout session, set
-`EXODIA_DMG_HEADLESS=1`. It skips only cosmetic Finder layout; packaging and
-verification remain the same. The default keeps the Finder layout step.
+Every DMG includes the committed drag-to-install background and a 660 × 440
+Finder icon window, with Whytap on the left and Applications on the right.
+`scripts/dmg-layout.py` writes `.DS_Store` directly on the writable HFS+ image;
+no live Finder session or Automation permission is needed. The pinned MIT
+Python dependencies are included under `scripts/_vendor/`, so packaging requires
+no pip install or additional network access. `EXODIA_DMG_HEADLESS=0|1` remains
+accepted for existing builders; both values produce the same required layout.
+
+Before compiling, the preflight requires the source background and layout
+modules. After compression, the build mounts the final archive read-only and
+checks its window/view settings, both icon positions, exact background bytes
+and alias to that image inside the volume. Missing or altered layout fails the
+build before DMG signing, notarization or provenance sealing. To run focused
+checks without building or launching the app:
+
+```bash
+/usr/bin/python3 -m unittest discover -s scripts/tests -p 'test_dmg_layout.py' -v
+```
 
 Publication requires authenticated GitHub release access and Whytap's Sparkle
 Ed25519 private key through `SPARKLE_ED_PRIVATE_KEY` or

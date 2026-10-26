@@ -81,10 +81,10 @@ struct MeetingAssistantQuestionsView: View {
         VStack(alignment: .trailing, spacing: model.layoutHeight < 800 ? 7 : 9) {
             MeetingAssistantSpaceSelector(model: model)
             HStack(spacing: 6) {
-                Button { model.toggleListening() } label: {
-                    Label(model.releasingAudio ? "Останавливаю…" : model.startRequested || model.audioConnecting ? "Подключение… · Остановить" : model.listening ? "Слушаю · Остановить" : "Слушать встречу", systemImage: model.listening ? "waveform" : "ear")
-                }.buttonStyle(MeetingAssistantButtonStyle()).disabled(model.currentSpace == nil || model.releasingAudio)
-                    .help("Системный звук собеседников. Запуск и остановка — вручную.")
+                if model.releasingAudio || model.startRequested || model.audioConnecting || model.listening {
+                    Label(model.releasingAudio ? "Останавливаю…" : model.startRequested || model.audioConnecting ? "Подключение…" : "Слушаю встречу", systemImage: model.listening ? "waveform" : "ear")
+                        .foregroundStyle(.secondary)
+                }
                 if !model.answerVisible, model.selected != nil {
                     Button("Вернуть ответ") { model.restoreAnswer() }.buttonStyle(MeetingAssistantButtonStyle())
                 }
@@ -155,7 +155,7 @@ struct MeetingAssistantQuestionsView: View {
                 }
             }
             if model.pending.isEmpty {
-                Text(model.listening ? "Жду вопросы из встречи…" : "Можно задать вопрос или начать слушать встречу").font(.system(size: 11)).foregroundStyle(.secondary).padding(.trailing, 8)
+                Text(model.listening ? "Жду вопросы из встречи…" : "Можно задать вопрос").font(.system(size: 11)).foregroundStyle(.secondary).padding(.trailing, 8)
             }
         }
         .padding(10)

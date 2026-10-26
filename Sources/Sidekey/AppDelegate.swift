@@ -541,7 +541,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
-        meetingAssistantPanel?.close()
+        meetingAssistantPanel?.suspend()
         BackupViewModel.shared.stop()
         // Give the display its own transfer table back; Extra never changes the backlight.
         ScreenBrightnessController.shared.shutdown()
@@ -914,7 +914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         os_log("power_will_sleep pausing runtime", log: Self.log, type: .info)
         stopPermissionRecoveryPolling()
         translationWindowController?.cancel()
-        meetingAssistantPanel?.close()
+        meetingAssistantPanel?.suspend()
 
         recorder.cancel()
         // Same reasoning as `applicationWillTerminate` — sleep should not

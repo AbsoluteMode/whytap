@@ -23,7 +23,7 @@
 
 - **Drop**: hold <kbd>Space</kbd> in any text field, speak, release, and the text is pasted at the cursor. Fast pastes the transcript; Smart lightly edits it with your model.
 - **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. It reads files, searches the web and answers in the island.
-- **Meeting Assistant (pilot)**: get help answering questions during a call using your project's files. Select a Space, type a question or turn on listening to find questions from other participants. Attach screenshots for visual context. [Setup](docs/meeting-assistant.md).
+- **Meeting Assistant (pilot)**: get help answering questions during a call using your project's files. Configure its models and select a Space to listen automatically during recognized meetings, or type a question. Attach screenshots for visual context. [Setup](docs/meeting-assistant.md).
 - **Meeting notes**: notices calls in Zoom, Teams, Slack and Google Meet and turns them into a summary with a transcript.
 - **History**: your clipboard, dictations and agent answers in one list, ready to paste again.
 - **Case**: a secrets vault for Claude Code, Cursor and Whytap Agent. Agents see key names; Case puts the value into the command they run.

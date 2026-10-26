@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Explicit consent for this meeting; merely revealing this control never listens.
+/// Overrides automatic listening for this meeting; revealing it never toggles it.
 struct IslandMeetingAssistantControl: View {
     static let size: CGFloat = 28
     let state: MeetingAssistantHoverState
@@ -101,7 +101,7 @@ enum IslandMeetingAssistantPlacement {
     static func isVisible(recording: Bool, assistant: MeetingAssistantHoverState,
                           hoverExpanded: Bool, controls: Bool, obscured: Bool) -> Bool {
         hoverExpanded && controls && !obscured && assistant.visible
-            && (recording || assistant.phase != .off)
+            && (recording || assistant.meetingActive || assistant.phase != .off)
     }
     static func frame(beside compact: CGRect) -> CGRect {
         CGRect(x: compact.maxX, y: compact.minY, width: extensionWidth, height: compact.height)

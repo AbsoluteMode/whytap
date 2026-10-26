@@ -19,6 +19,14 @@ final class MeetingAssistantRenderTests: XCTestCase {
             try render(model, scheme: scheme, name: "empty", directory: directory)
             model.spaces = [.init(version: 1, id: "project", name: "Whytap", purpose: "", instructions: "", sources: [])]
             model.selectedSpaceID = "project"
+            try render(model, scheme: scheme, name: "ready", directory: directory)
+            model.audioConnecting = true
+            try render(model, scheme: scheme, name: "connecting", directory: directory)
+            model.audioConnecting = false; model.listening = true
+            try render(model, scheme: scheme, name: "listening", directory: directory)
+            model.listening = false; model.releasingAudio = true
+            try render(model, scheme: scheme, name: "stopping", directory: directory)
+            model.releasingAudio = false
             model.pending = (0..<5).map { .init(question: "Какие изменения нужны для пилота \($0 + 1)?") }
             model.completed = (0..<20).map { .init(question: "Как подключить источники проекта \($0 + 1)?") }
             model.selected = .init(question: "Как подготовить Space проекта?", conclusion: "Создай Space через Codex или Claude Code.",

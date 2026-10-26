@@ -6,8 +6,11 @@ summary: Replace OpenCode dispatch with a bounded direct model/tool loop, preser
 status: confirmed
 tags: [agent, native, tavily, search, workspace, context, actions, privacy]
 canonical_for: [agent-runtime, agent-web-search, agent-workspace]
-verified_at: 2026-10-23
+verified_at: 2026-10-26
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-26 the user approved removing the card-description language sentence from the native system prompt after replica runs showed Russian/German descriptions for English requests.
+    confirmed_at: 2026-10-26
   - type: user-confirmed
     reference: On 2026-10-23 the user reported a system beep when releasing Agent in text and voice modes while submission still worked, and requested a fix.
     confirmed_at: 2026-10-23
@@ -68,6 +71,31 @@ copy, clipboard preservation, change-count validation and watcher suppression
 remain for an available Copy command. Automated fixtures verify skipped input,
 focus drift, shortcut matching and preserved clipboard behavior; the user's
 live text/voice sound acceptance remains separate.
+
+## Card description language
+
+The system prompt sets the reply language once, in its first line ("Reply in the
+latest request's language"), and says nothing else about language. A second
+sentence about the language of `show_actions` descriptions made the selected
+model write those card titles in Russian or German for English requests.
+
+Tested on 2026-10-26 with the motion kit's replica of this request on the
+user's route (OpenRouter `anthropic/claude-sonnet-5.5`, pinned
+`google-vertex/us`), query "Find the Q4 budget spreadsheet.", no Cyrillic
+anywhere in the input:
+
+- "Use descriptions in the user's language." (previous prompt): Russian; on
+  2026-10-22, 8 of 9 runs Russian or German;
+- "Write card descriptions in the latest request's language.": Russian in 3/3;
+- "...in the same language as the text of the user request.": Russian in 2/2;
+- the base prompt without Monitor/Notify sections: German;
+- no sentence at all: English ("Older draft") in 2/2.
+
+The model itself, asked why, found nothing in the conversation that justified
+Russian. Rejected: rewording the rule (every wording tested failed), and
+pinning descriptions to English (non-English requests should keep their own
+language through the first line). The legacy CLI prompt in AgentController is
+unchanged; it does not drive the native runtime.
 
 ## Voice model mark
 

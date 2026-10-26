@@ -31,6 +31,14 @@ final class NativeAgentTests: XCTestCase {
         try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[index]) as? [String: Any])
     }
 
+    func testSystemPromptSetsReplyLanguageOnceWithoutCardDescriptionLanguageRule() {
+        let prompt = NativeAgentProvider.systemPrompt
+        XCTAssertTrue(prompt.contains("Reply in the latest request’s language."))
+        XCTAssertFalse(prompt.localizedCaseInsensitiveContains("descriptions in the user"))
+        XCTAssertEqual(prompt.components(separatedBy: "language").count - 1, 1,
+                       "Another language sentence made card descriptions come out in Russian or German")
+    }
+
     func testFirstRequestHasToolsAndExactRouteWithoutBootstrapAndActionsStayOutOfText() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("router-secret", account: OpenRouterLLMKeyStore.account)

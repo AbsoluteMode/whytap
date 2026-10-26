@@ -878,7 +878,13 @@ and soft glow instead of Not set/triangle status lines. Actual problem text and
 recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
 First run: no sign-in and no onboarding wizard. Launch and reopen show the
-island immediately. Configure provider keys and endpoints in
+island immediately. The first GUI launch on each Mac also opens Settings ->
+Permissions once if any listed permission is missing. Already authorized Macs
+skip this presentation; a dismissed screen is not reopened at every launch.
+The local presentation marker is excluded from settings backups. Showing the
+screen requests no permission automatically. WHY:
+.project-docs/decisions/2026-10-26-first-launch-permissions.md.
+Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Agents configures native connection and action settings), and permissions in
 Settings -> Permissions. A feature can request the permission it needs when
@@ -1252,9 +1258,12 @@ is separate from the removed app-managed speech/LLM models. Guide:
 - **Screen Recording** for explicit screenshot capture (Screenshot tool only).
   Settings -> Permissions shows a green circled checkmark when granted, or
   the same Allow button used by the other permissions when missing, without
-  status chips or an action on a granted row. Request with
-  `CGRequestScreenCaptureAccess` only on Screenshot
-  invocation or that Settings action, never at launch or refresh. Returning
+  status chips or an action on a granted row. Only explicit capture or Allow
+  actions request access, never launch or refresh. Settings Allow uses an async
+  ScreenCaptureKit content request without capturing pixels or audio, then
+  opens System Settings if access remains denied. A pending request shows
+  progress and ignores repeated clicks. WHY:
+  .project-docs/decisions/2026-10-26-first-launch-permissions.md. Returning
   from System Settings refreshes the status; it never gates launch/Drop readiness.
 
 - **Accessibility** gates `NSEvent.addGlobalMonitorForEvents`

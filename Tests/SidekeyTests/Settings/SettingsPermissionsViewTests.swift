@@ -12,7 +12,7 @@ final class SettingsPermissionsViewTests: XCTestCase {
         XCTAssertTrue(s.contains("MacButton"))
         XCTAssertFalse(s.contains("SettingsRowShell"))
         XCTAssertTrue(s.contains("title: \"Screen Recording\""))
-        XCTAssertTrue(s.contains("action: viewModel.requestScreenRecording"))
+        XCTAssertTrue(s.contains("await viewModel.requestScreenRecording()"))
         XCTAssertTrue(s.contains("NSApplication.didBecomeActiveNotification"))
     }
 

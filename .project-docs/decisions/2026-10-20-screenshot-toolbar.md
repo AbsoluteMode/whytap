@@ -74,7 +74,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Screenshots/ScreenshotSelectionTests.swift
     confirmed_at: 2026-10-20
-related: [../project.md]
+related: [2026-10-26-first-launch-permissions.md, ../project.md]
 ---
 
 # Context

@@ -519,6 +519,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startReady()
         ArtifactBackupEngine.shared.register(meetings: meetingsStore, usage: AIUsageStore.shared)
         BackupViewModel.shared.start()
+
+        if FirstLaunchPermissions.consumePresentation(
+            in: .standard,
+            requiredPermissionsGranted: PermissionsHelper.allRequiredPermissionsGranted(),
+            screenRecordingGranted: PermissionsHelper.screenRecordingGranted()
+        ) {
+            openSettingsWindow(tab: .permissions)
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

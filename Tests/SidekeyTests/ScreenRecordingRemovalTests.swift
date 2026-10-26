@@ -35,7 +35,7 @@ final class ScreenRecordingRemovalTests: XCTestCase {
         let settings = try loadSource(named: "SettingsPermissionsView.swift")
 
         XCTAssertTrue(settings.contains("title: \"Screen Recording\""))
-        XCTAssertTrue(settings.contains("action: viewModel.requestScreenRecording"))
+        XCTAssertTrue(settings.contains("await viewModel.requestScreenRecording()"))
     }
 
     func testOnlyExplicitScreenshotAndSettingsEntriesMayRequestScreenRecording() throws {
@@ -64,7 +64,7 @@ final class ScreenRecordingRemovalTests: XCTestCase {
         )
     }
 
-    func testOnlyExplicitScreenshotEntryMayUseScreenCaptureKit() throws {
+    func testOnlyExplicitCaptureAndSettingsPermissionEntriesMayUseScreenCaptureKit() throws {
         let forbidden = [
             "import ScreenCaptureKit",
             "SCStream",
@@ -75,6 +75,7 @@ final class ScreenRecordingRemovalTests: XCTestCase {
         let offenders = try appSourceFiles().compactMap { url -> String? in
             if url.path.hasSuffix("/Screenshots/ScreenshotCoordinator.swift") { return nil }
             if url.path.hasSuffix("/Agent/AgentScreenCapture.swift") { return nil }
+            if url.lastPathComponent == "PermissionsHelper.swift" { return nil }
             guard let source = try? String(contentsOf: url, encoding: .utf8) else { return nil }
             let hits = forbidden.filter { source.contains($0) }
             guard !hits.isEmpty else { return nil }
@@ -85,6 +86,13 @@ final class ScreenRecordingRemovalTests: XCTestCase {
             offenders.isEmpty,
             "Meeting audio must not rely on ScreenCaptureKit/SCStream: \(offenders.joined(separator: "; "))"
         )
+    }
+
+    func testSettingsPermissionRequestDoesNotCaptureImagesOrStartStreams() throws {
+        let source = try loadSource(named: "PermissionsHelper.swift")
+        XCTAssertFalse(source.contains("SCScreenshotManager"))
+        XCTAssertFalse(source.contains("SCStream("))
+        XCTAssertFalse(source.contains(".startCapture("))
     }
 
     func testScreenshotEntryUsesStillImagesAndDoesNotStartARecordingStream() throws {

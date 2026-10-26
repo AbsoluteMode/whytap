@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import CoreGraphics
+import ScreenCaptureKit
 
 enum PermissionsHelper {
     struct Snapshot: Equatable {
@@ -121,13 +122,9 @@ enum PermissionsHelper {
 
     /// Called only by the explicit Screen Recording button in Settings.
     // WHY: .project-docs/decisions/2026-10-20-screenshot-toolbar.md
-    static func requestScreenRecording() {
-        if screenRecordingGranted() {
-            openScreenRecordingSettings()
-        } else if !CGRequestScreenCaptureAccess() {
-            // A previous denial cannot show another native prompt.
-            openScreenRecordingSettings()
-        }
+    @MainActor
+    static func requestScreenRecording() async {
+        await ScreenRecordingPermissionRequest.request()
     }
 
     static func openScreenRecordingSettings() {
@@ -193,5 +190,30 @@ enum PermissionsHelper {
     /// manually added via the `+` button in Privacy & Security panes.
     static func revealCurrentAppBundle() {
         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+    }
+}
+
+/// Ask through the framework that captures screenshots before opening its
+/// privacy pane. Opening the pane alone cannot register an unrequested app.
+// WHY: .project-docs/decisions/2026-10-26-first-launch-permissions.md
+@MainActor
+enum ScreenRecordingPermissionRequest {
+    static func request(
+        isGranted: () -> Bool = PermissionsHelper.screenRecordingGranted,
+        requestContent: () async throws -> Void = {
+            // Enumerate only to request authorization. No image or audio is captured,
+            // and the returned display/window metadata is immediately discarded.
+            _ = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        },
+        openSettings: () -> Void = PermissionsHelper.openScreenRecordingSettings
+    ) async {
+        guard !isGranted() else { return }
+        do {
+            try await requestContent()
+        } catch {
+            // A denial needs the system toggle. Do not open Settings over the
+            // native request while it is still waiting for the user's answer.
+            if !isGranted() { openSettings() }
+        }
     }
 }

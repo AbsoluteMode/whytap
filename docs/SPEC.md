@@ -784,16 +784,20 @@ Settings → API & Models → API keys содержит ключ Tavily в Keych
 
 A configured assistant exposes a hover magic icon to the right of the recording
 timer, translucent when off and softly glowing while listening. It shares
-Listen/Stop state, keeps answers when stopped, and never saves auto-join. A
+the automatic listening state and keeps answers when stopped. Both configured
+model routes and a ready Space enable listening on every recognized meeting;
+no extra enable switch or required hotkey is needed. The wand can disable the
+current meeting, and a later meeting enables listening again. A
 recognized meeting-context end sustained for 15 seconds stops listening; manual
-sessions without recognized context need explicit stop. Context detection is a
+sessions without recognized context need the wand to stop. Context detection is a
 mic-activity heuristic, not a unique call identity.
 
 
 The approved native right-hand module offers a ready Space picker, plain input,
 up to five current questions, twenty answered roots and six removable screenshot
 attachments. Replies contain a conclusion, structured points and two follow-ups;
-conversation survives collapse. Listening starts explicitly and extracts questions
+conversation survives collapse. Closing answers does not stop listening. The
+module shows connection status instead of a Listen button. Automatic listening extracts questions
 from bounded system-audio transcription without retaining audio or starting Notes.
 Speech and answer models have separate initially unset routes in API & Models.
 Coding agents prepare Spaces; the user selects them. Runtime repository access

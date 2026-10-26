@@ -8,18 +8,20 @@ final class MeetingAssistantMeetingScopeTests: XCTestCase {
         XCTFail("Condition timed out")
     }
 
-    func testMeetingEndStopsOnceAndAnotherMeetingCannotEnableIt() async throws {
+    func testSuccessiveMeetingsEachStartOnceAndEndAfterTheGracePeriod() async throws {
         let probe = MeetingAssistantFixtureProbe()
         let scope = MeetingAssistantMeetingScope(endGrace: .milliseconds(20), makeProbe: { probe })
-        var ended = 0; scope.onEnd = { ended += 1 }
+        var started = 0, ended = 0
+        scope.onStart = { started += 1 }; scope.onEnd = { ended += 1 }
         scope.begin(); scope.begin()
         XCTAssertEqual(probe.subscriptions, 1)
         probe.emit(true); probe.emit(false)
         try await wait { ended == 1 }
-        XCTAssertEqual(probe.stops, 1)
+        XCTAssertEqual(started, 1); XCTAssertEqual(probe.stops, 0)
         probe.emit(true); probe.emit(false)
-        try await Task.sleep(for: .milliseconds(35))
-        XCTAssertEqual(ended, 1); XCTAssertEqual(probe.subscriptions, 1)
+        try await wait { ended == 2 }
+        XCTAssertEqual(started, 2); XCTAssertEqual(probe.subscriptions, 1)
+        scope.stop(); XCTAssertEqual(probe.stops, 1)
     }
 
     func testBriefReconnectCancelsEndAndExplicitOffCancelsDelayedEnd() async throws {
@@ -59,10 +61,12 @@ final class MeetingAssistantMeetingScopeTests: XCTestCase {
         XCTAssertTrue(stopping.visible); XCTAssertFalse(stopping.canToggle); XCTAssertFalse(stopping.isOn)
     }
 
-    func testMagicIsOnlyRevealedBesideRecordingOrAnExplicitActiveSession() {
+    func testMagicRemainsAvailableAfterOptingOutOfAnAutomaticallyDetectedMeeting() {
         let ready = MeetingAssistantHoverState(available: true)
         XCTAssertTrue(IslandMeetingAssistantPlacement.isVisible(recording: true, assistant: ready, hoverExpanded: true, controls: true, obscured: false))
         XCTAssertFalse(IslandMeetingAssistantPlacement.isVisible(recording: false, assistant: ready, hoverExpanded: true, controls: true, obscured: false))
+        XCTAssertTrue(IslandMeetingAssistantPlacement.isVisible(recording: false,
+            assistant: .init(available: true, meetingActive: true), hoverExpanded: true, controls: true, obscured: false))
         XCTAssertFalse(IslandMeetingAssistantPlacement.isVisible(recording: true, assistant: ready, hoverExpanded: false, controls: true, obscured: false))
         XCTAssertFalse(IslandMeetingAssistantPlacement.isVisible(recording: true, assistant: ready, hoverExpanded: true, controls: false, obscured: false))
         XCTAssertFalse(IslandMeetingAssistantPlacement.isVisible(recording: true, assistant: ready, hoverExpanded: true, controls: true, obscured: true))

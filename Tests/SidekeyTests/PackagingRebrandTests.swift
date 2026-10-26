@@ -984,7 +984,8 @@ final class PackagingRebrandTests: XCTestCase {
         try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
         let marker = temporary.appendingPathComponent("calls.txt")
         let root = try projectRoot()
-        for relative in ["scripts/build-dmg.sh", "VERSION", "Package.resolved",
+        for relative in ["scripts/build-dmg.sh", "scripts/dmg-layout.py", "scripts/_vendor",
+                         "VERSION", "Package.resolved", "Resources/dmg-background.png",
                          "Resources/Info.plist.template", "Resources/sparkle-public-ed-key.txt",
                          "Resources/blocknote/index.html"] {
             let destination = temporary.appendingPathComponent(relative)

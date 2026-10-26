@@ -9,6 +9,9 @@ canonical_for: [translation-tools]
 verified_at: 2026-10-26
 sources:
   - type: user-confirmed
+    reference: On 2026-10-26 the user requested a full-width lighter upper input area, darker lower output area and an immediately focused caret.
+    confirmed_at: 2026-10-26
+  - type: user-confirmed
     reference: On 2026-10-26 the user rejected the visible input hint and blue border and required closing the text palette by clicking outside it.
     confirmed_at: 2026-10-26
   - type: user-confirmed

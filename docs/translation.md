@@ -9,8 +9,11 @@ the mini app or closing Settings cancels its work unless the floating translator
 is also visible. Selecting the tile alone never starts capture or a request.
 
 From the island, both tools open the same floating, resizable window, including over full-screen
-apps. Escape closes it and cancels translation/capture. The text palette hides
-the title bar controls to keep only its two text rows; drag its background to move it.
+apps. Escape closes it and cancels translation/capture. The borderless text
+palette has no title bar or input hint. Click outside it to close and cancel
+translation; the click still reaches the app you chose. Its context menu stays
+usable. Subtitles stay open when you interact with the video or another app.
+Drag the palette background to move it.
 
 ## Setup
 

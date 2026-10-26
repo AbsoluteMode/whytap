@@ -117,7 +117,7 @@ struct TranslationView: View {
     private var textContent: some View {
         // WHY: docs/DESIGN.md — Quick Translate: two text rows.
         VStack(alignment: .leading, spacing: 10) {
-            TextField("Text… · Return to translate", text: $text.input)
+            TextField("", text: $text.input)
                 .textFieldStyle(.plain)
                 .font(.system(size: embedded ? 17 : 22))
                 .focused($inputFocused)
@@ -130,9 +130,8 @@ struct TranslationView: View {
                 .padding(4)
                 .contentShape(Rectangle())
                 .onTapGesture { inputFocused = true }
-                .background(Color.primary.opacity(inputHovered ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(inputFocused ? Color.accentColor : .clear))
+                .background(Color.primary.opacity(inputHovered ? 0.06 : inputFocused ? 0.025 : 0),
+                            in: RoundedRectangle(cornerRadius: 5))
                 .onHover { inputHovered = $0 }
                 .accessibilityLabel("Text to translate")
                 .accessibilityHint("Press Return to translate. Right-click for language and copy options.")

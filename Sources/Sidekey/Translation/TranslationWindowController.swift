@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 import Combine
 
+enum TranslationOutsideClickPolicy {
+    static func shouldDismiss(isText: Bool, isVisible: Bool, clickInside: Bool,
+                              menuTracking: Bool, modalInteraction: Bool) -> Bool {
+        isText && isVisible && !clickInside && !menuTracking && !modalInteraction
+    }
+}
+
 @MainActor
 final class TranslationWindowController: NSObject, NSWindowDelegate {
     enum Mode: String, CaseIterable { case text = "Text", subtitles = "Subtitles" }
@@ -14,6 +21,10 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     private let panel: TranslationPanel
     private var modeObservation: AnyCancellable?
     private var preferences = Set<AnyCancellable>()
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
+    private var menuObservers: [NSObjectProtocol] = []
+    private var trackingMenus = 0
 
     var window: NSWindow { panel }
 
@@ -24,12 +35,15 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         text = textModel ?? TextTranslationModel()
         subtitles = subtitleModel ?? LiveSubtitleModel()
         panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 140),
-                                 styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                                 styleMask: [.borderless, .resizable, .nonactivatingPanel],
                                  backing: .buffered, defer: false)
         super.init()
         preferences = TranslationPreferences(defaults: defaults).bind(text: text, subtitles: subtitles)
         panel.title = "Whytap Translate"
         panel.titlebarAppearsTransparent = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -48,11 +62,11 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         panel.contentView = NSHostingView(rootView: TranslationView(
             text: text, subtitles: subtitles, presentation: presentation,
             openSettings: { [weak self] feature in
-                self?.panel.orderOut(nil)
-                self?.cancel()
+                self?.dismiss()
                 openSettings(feature)
             }
         ))
+        configureChrome(for: .text)
         let publish = { [weak self] in
             guard let self else { return }
             activityChanged(self.isEmbedded || self.panel.isVisible || self.text.isTranslating || self.subtitles.phase.isActive)
@@ -75,11 +89,13 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
                                   width: width, height: height), display: false)
         }
         panel.makeKeyAndOrderFront(nil)
+        updateOutsideClickMonitors(for: mode)
         text.onActivityChange?()
     }
 
     private func resize(for mode: Mode) {
         let isText = mode == .text
+        configureChrome(for: mode)
         panel.minSize = NSSize(width: isText ? 360 : 480, height: isText ? 120 : 340)
         panel.titleVisibility = isText ? .hidden : .visible
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
@@ -91,6 +107,66 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         frame.size.width = max(frame.width, panel.minSize.width)
         frame.size.height = height
         panel.setFrame(frame, display: panel.isVisible)
+        updateOutsideClickMonitors(for: mode)
+    }
+
+    private func configureChrome(for mode: Mode) {
+        let isText = mode == .text
+        panel.styleMask = isText ? [.borderless, .resizable, .nonactivatingPanel]
+            : [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel]
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.cornerRadius = isText ? 16 : 0
+        panel.contentView?.layer?.masksToBounds = isText
+    }
+
+    private func updateOutsideClickMonitors(for mode: Mode) {
+        guard mode == .text, panel.isVisible else { removeOutsideClickMonitors(); return }
+        guard localMouseMonitor == nil else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleMouseDown(at: event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation,
+                                  in: event.window)
+            return event // Let the clicked window receive its original click.
+        }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleMouseDown(at: NSEvent.mouseLocation, in: nil) }
+        }
+        let center = NotificationCenter.default
+        menuObservers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.trackingMenus += 1 }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.trackingMenus = max(0, self.trackingMenus - 1)
+                }
+            }
+        ]
+    }
+
+    private func handleMouseDown(at point: NSPoint, in eventWindow: NSWindow?) {
+        guard TranslationOutsideClickPolicy.shouldDismiss(
+            isText: presentation.mode == .text, isVisible: panel.isVisible,
+            clickInside: eventWindow === panel || panel.frame.contains(point),
+            menuTracking: trackingMenus > 0,
+            modalInteraction: NSApp.modalWindow != nil || panel.attachedSheet != nil
+        ) else { return }
+        dismiss()
+    }
+
+    private func removeOutsideClickMonitors() {
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
+        localMouseMonitor = nil; globalMouseMonitor = nil
+        menuObservers.forEach(NotificationCenter.default.removeObserver)
+        menuObservers = []; trackingMenus = 0
+    }
+
+    func dismiss() {
+        removeOutsideClickMonitors()
+        panel.orderOut(nil)
+        cancel()
     }
 
     @discardableResult
@@ -114,10 +190,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func cancel() -> Task<Void, Never> { text.cancel(); return subtitles.cancel() }
-    func windowWillClose(_ notification: Notification) { panel.orderOut(nil); cancel() }
+    func windowWillClose(_ notification: Notification) { dismiss() }
+
+    deinit {
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
+        menuObservers.forEach(NotificationCenter.default.removeObserver)
+    }
 }
 
 private final class TranslationPanel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override func cancelOperation(_ sender: Any?) { performClose(sender) }
+    override func cancelOperation(_ sender: Any?) { close() }
 }

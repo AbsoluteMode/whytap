@@ -472,8 +472,48 @@ final class TranslationTests: XCTestCase {
         XCTAssertFalse(panel.hidesOnDeactivate)
         XCTAssertEqual(panel.level, .floating)
         XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.styleMask.contains(.titled), "Text mode must not show an empty title bar")
         XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
         XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
+    func testOutsideClickDismissesOnlyTheVisibleTextPalette() {
+        XCTAssertTrue(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: true, clickInside: false,
+                                                                 menuTracking: false, modalInteraction: false))
+        XCTAssertFalse(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: true, clickInside: true,
+                                                                  menuTracking: false, modalInteraction: false))
+        XCTAssertFalse(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: true, clickInside: false,
+                                                                  menuTracking: true, modalInteraction: false))
+        XCTAssertFalse(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: true, clickInside: false,
+                                                                  menuTracking: false, modalInteraction: true))
+        XCTAssertFalse(TranslationOutsideClickPolicy.shouldDismiss(isText: false, isVisible: true, clickInside: false,
+                                                                  menuTracking: false, modalInteraction: false),
+                       "Reading subtitles must survive clicks in the video or another app")
+        XCTAssertFalse(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: false, clickInside: false,
+                                                                  menuTracking: false, modalInteraction: false))
+    }
+
+    func testDismissingTextPaletteCancelsRequestAndRejectsLateResult() async throws {
+        let suite = "translation-dismiss-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let gate = TranslationGate()
+        let text = TextTranslationModel(makeService: { gate })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                          makeService: { FixtureTranslator() })
+        let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
+                                                      openSettings: { _ in }, activityChanged: { _ in })
+        defer { controller.window.close() }
+        text.input = "unsent fixture"
+        let task = try XCTUnwrap(text.translate())
+        await waitUntil { await gate.inputs.count == 1 }
+        controller.dismiss()
+        XCTAssertFalse(controller.window.isVisible)
+        XCTAssertFalse(text.isTranslating)
+        await gate.answer("late result")
+        await task.value
+        XCTAssertEqual(text.result, "")
+        XCTAssertEqual(text.input, "unsent fixture")
     }
 
     func testTranslationToolsShareClickAndHotkeyRouting() {

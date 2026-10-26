@@ -9,7 +9,7 @@ OpenCode agent using the OpenRouter model you select.
 ## Reporting a vulnerability
 
 Please do not open a public issue for security problems. Email
-security@whytap.ai with a description, the affected version and reproduction
+niceizzy1337@gmail.com with a description, the affected version and reproduction
 steps. You will get an acknowledgement within a few days and a fix or a
 mitigation plan as soon as we have one. Coordinated disclosure is
 appreciated; we will credit you in the release notes unless you prefer

@@ -87,7 +87,7 @@ Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Security
 
-Report vulnerabilities to security@whytap.ai; see [SECURITY.md](SECURITY.md).
+Report vulnerabilities to niceizzy1337@gmail.com; see [SECURITY.md](SECURITY.md).
 
 ## License
 

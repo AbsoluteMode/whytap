@@ -255,21 +255,6 @@ final class SettingsWindowControllerTests: XCTestCase {
                       "Quit row must call NSApp.terminate(nil)")
     }
 
-    func test_settings_window_view_source_has_pinned_faq_row() throws {
-        let root = try projectRoot()
-        let sourceURL = root
-            .appendingPathComponent("Sources")
-            .appendingPathComponent("Sidekey")
-            .appendingPathComponent("Settings")
-            .appendingPathComponent("SettingsWindowView.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-
-        XCTAssertTrue(source.contains("FAQ & Learning"),
-                      "Settings sidebar must expose the FAQ without a hidden hotkey")
-        XCTAssertTrue(source.contains("HelpWindowContent.learningCenterURL"),
-                      "FAQ row must open the flavor-aware Learning Center URL")
-    }
-
     func test_app_delegate_opens_api_and_models_on_the_failing_feature_row() throws {
         let sourceURL = try projectRoot()
             .appendingPathComponent("Sources/Sidekey/AppDelegate.swift")

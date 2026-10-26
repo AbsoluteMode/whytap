@@ -1400,13 +1400,22 @@ at 560×140pt and remains resizable down to 360×120pt; its new autosave key avo
 restoring the old tall form. These dimensions are implementation choices.
 
 Return submits; Command-Return remains supported. Focus starts in the input.
-Its full field bounds highlight on hover and have a full-opacity accent focus
-outline (default blue on the dark fixture: 4.26:1; secondary text: 5.45:1).
+The user rejected the input hint and blue outline after seeing the installed
+window. Keep the input empty with no visible placeholder or border; a subtle
+neutral fill and native caret show focus, with a stronger neutral fill on hover.
+Use a borderless rounded text panel to remove the empty title bar and native rim.
+Secondary text on the dark fixture remains 5.45:1.
 Loading, empty, over-limit and failure messages replace the second row rather
 than adding rows. Setup failures are actionable with full-area hover/press and
 keyboard focus feedback. Long source text stays in the native horizontal field;
 long translations wrap and scroll in their row. Escape uses the panel’s existing
-close/cancellation path. No request starts merely by opening or hovering.
+close/cancellation path. An outside mouse click dismisses only the floating text
+palette, cancels its request and still reaches its original target. Local and
+global pointer observers are installed only while it is visible and removed on
+close, settings repair or switching to Subtitles. Native menu tracking and modal
+interaction suspend outside dismissal; subtitles retain their existing floating
+behavior. Embedded Toolbox controls never install dismissal observers. No request
+starts merely by opening or hovering.
 
 Keep native selection/copy and existing target preferences. Right-click offers
 secondary copy/clear/cancel/language actions; the floating palette also offers

@@ -289,7 +289,11 @@ Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
   floating window (TranslationWindowController). Text mode is a compact two-row
   palette: plain input submits on Return/Command-Return; output includes loading
-  and errors. Escape closes it. Saved targets and secondary actions stay in the
+  and errors. The input has no hint/border and text mode has no window title bar.
+  Escape or a click outside the floating text palette closes/cancels it; pointer
+  observers are scoped to visible text mode, pass the click through and suspend
+  during native menu/modal interaction. Subtitles retain floating persistence.
+  Saved targets and secondary actions stay in the
   context menu; long output scrolls. TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use

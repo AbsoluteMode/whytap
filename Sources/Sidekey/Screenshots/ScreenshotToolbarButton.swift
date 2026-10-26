@@ -147,7 +147,9 @@ final class ScreenshotToolbarButton: NSButton, NSDraggingSource {
             let active = isEnabled && (hovered || isHighlighted || dropHovered)
             (active ? NSColor.controlAccentColor.withAlphaComponent(isHighlighted ? 0.28 : 0.16) : NSColor.labelColor.withAlphaComponent(isEnabled ? 0.035 : 0.015)).setFill()
             path.fill()
-            (isEnabled ? (active ? NSColor.controlAccentColor : .secondaryLabelColor) : .disabledControlTextColor).setStroke()
+            // Keep the grouping boundary above 3:1 after the render's ICC profile is converted to sRGB.
+            let idleBorder = NSColor.secondaryLabelColor.blended(withFraction: 0.15, of: .labelColor) ?? .labelColor
+            (isEnabled ? (active ? NSColor.controlAccentColor : idleBorder) : .disabledControlTextColor).setStroke()
             path.lineWidth = dropHovered && isEnabled ? 1.8 : 1
             path.stroke()
             let foreground = isEnabled ? NSColor.labelColor : .disabledControlTextColor

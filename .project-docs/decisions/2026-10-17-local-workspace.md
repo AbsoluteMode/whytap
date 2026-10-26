@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: scripts/customize.py
     confirmed_at: 2026-10-17
-related: [2026-10-19-remove-projects.md, ../project.md, 2026-09-10-onboarding-models.md]
+related: [2026-10-26-first-launch-permissions.md, 2026-10-19-remove-projects.md, ../project.md, 2026-09-10-onboarding-models.md]
 ---
 
 # Local workspace and direct launch

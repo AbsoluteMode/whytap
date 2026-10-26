@@ -54,8 +54,9 @@ changing this GitHub repository does not migrate those feeds.
 
 ## First dictation
 
-Whytap opens directly to the island, without a setup wizard. Open **Settings**
-from its hover controls:
+Whytap opens the island without a setup wizard. On the first launch on a Mac,
+**Settings → Permissions** also opens if access is missing. It appears once;
+you can return from the island's Settings control:
 
 1. In **Permissions**, allow Microphone and Accessibility. macOS may open
    **System Settings → Privacy & Security** to grant them. Reopen Whytap if

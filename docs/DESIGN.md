@@ -442,6 +442,17 @@ real provider output remain acceptance in the shared app after promotion.
 
 ## Screenshot permission — 2026-10-20
 
+First launch update (2026-10-26): a new Mac with missing permissions opens this
+existing screen once alongside the island. The marker stays on that Mac and
+does not travel in backups. A fully authorized Mac is not interrupted. The
+Screen Recording Allow action shows a small progress indicator in its reserved
+60 × 26 pt action slot while macOS handles the request; repeated requests are
+ignored. The native request completes before any system settings fallback.
+Existing MacButton hover, pressed and keyboard-focus feedback stays unchanged.
+Why: make required setup discoverable and register the screen-access request
+before sending the user to its system list. See
+`.project-docs/decisions/2026-10-26-first-launch-permissions.md`.
+
 The user requested a screenshot access entry in Settings -> Permissions.
 Keep the existing permission group, MacRow and MacButton: this is one
 more permission in the same workflow. A persistent explanation names

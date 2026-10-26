@@ -7,13 +7,14 @@ import SwiftUI
 final class PermissionsSettingsViewModel: ObservableObject {
     @Published private(set) var snapshot: PermissionsHelper.Snapshot
     @Published private(set) var screenRecordingGranted: Bool
+    @Published private(set) var isRequestingScreenRecording = false
     @Published private(set) var dropHotkeyStatus = AppState.shared.dropHotkeyStatus
 
     private var onComplete: () -> Void
     private var didComplete = false
     private let snapshotProvider: () -> PermissionsHelper.Snapshot
     private let screenRecordingAccessProvider: () -> Bool
-    private let screenRecordingRequester: () -> Void
+    private let screenRecordingRequester: () async -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
     /// When `false`, `completeIfReady` is a no-op even when every
@@ -27,7 +28,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         autoComplete: Bool = true,
         snapshotProvider: @escaping () -> PermissionsHelper.Snapshot = PermissionsHelper.snapshot,
         screenRecordingAccessProvider: @escaping () -> Bool = PermissionsHelper.screenRecordingGranted,
-        screenRecordingRequester: @escaping () -> Void = PermissionsHelper.requestScreenRecording,
+        screenRecordingRequester: @escaping () async -> Void = PermissionsHelper.requestScreenRecording,
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
                 userInfo: ["retry": retry, "resumePolling": resumePolling])
@@ -77,8 +78,11 @@ final class PermissionsSettingsViewModel: ObservableObject {
         completeIfReady()
     }
 
-    func requestScreenRecording() {
-        screenRecordingRequester()
+    func requestScreenRecording() async {
+        guard !isRequestingScreenRecording else { return }
+        isRequestingScreenRecording = true
+        defer { isRequestingScreenRecording = false }
+        await screenRecordingRequester()
         refresh()
     }
 

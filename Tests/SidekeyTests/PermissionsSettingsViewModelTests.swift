@@ -63,7 +63,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(requests, 0)
     }
 
-    func testScreenRecordingButtonRequestsAndRefreshesPermission() {
+    func testScreenRecordingButtonRequestsAndRefreshesPermission() async {
         var granted = false
         var requests = 0
         let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
@@ -72,8 +72,32 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             screenRecordingRequester: { requests += 1; granted = true },
             runtimeRefresh: { _, _ in })
         XCTAssertEqual(requests, 0)
-        model.requestScreenRecording()
+        await model.requestScreenRecording()
         XCTAssertEqual(requests, 1)
         XCTAssertTrue(model.screenRecordingGranted)
+    }
+
+    func testScreenRecordingRequestDoesNotRepeatWhileNativePromptIsPending() async {
+        let started = expectation(description: "Native request started")
+        var continuation: CheckedContinuation<Void, Never>?
+        var requests = 0
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
+            screenRecordingAccessProvider: { false },
+            screenRecordingRequester: {
+                requests += 1
+                await withCheckedContinuation { pending in
+                    continuation = pending
+                    started.fulfill()
+                }
+            }, runtimeRefresh: { _, _ in })
+        let first = Task { await model.requestScreenRecording() }
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertTrue(model.isRequestingScreenRecording)
+        await model.requestScreenRecording()
+        XCTAssertEqual(requests, 1)
+        continuation?.resume()
+        await first.value
+        XCTAssertFalse(model.isRequestingScreenRecording)
     }
 }

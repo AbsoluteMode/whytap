@@ -29,7 +29,8 @@ struct SettingsPermissionsView: View {
                             title: "Screen Recording",
                             subtitle: "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
                             granted: viewModel.screenRecordingGranted,
-                            action: viewModel.requestScreenRecording
+                            isRequesting: viewModel.isRequestingScreenRecording,
+                            action: { Task { await viewModel.requestScreenRecording() } }
                         )
                     }
                 }
@@ -52,6 +53,7 @@ struct SettingsPermissionsView: View {
         title: String,
         subtitle: String? = nil,
         granted: Bool,
+        isRequesting: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         MacRow(
@@ -70,6 +72,10 @@ struct SettingsPermissionsView: View {
                             .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(MacSettingsTheme.green)
                             .accessibilityLabel("\(title): Allowed")
+                    } else if isRequesting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Waiting for \(title) permission")
                     } else {
                         MacButton(title: "Allow", style: .default, action: action)
                             .accessibilityLabel("Allow \(title)")

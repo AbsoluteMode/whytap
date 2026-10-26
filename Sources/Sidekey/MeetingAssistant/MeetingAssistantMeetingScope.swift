@@ -1,8 +1,7 @@
 import Foundation
 
-/// A listening choice belongs to this session, never a saved auto-join policy.
-/// The existing metadata-only meeting probe is independent of Meeting Notes.
-// WHY: docs/decisions/2026-10-24-meeting-assistant-session-switch.md
+/// Observes successive meetings independently of audio capture and Meeting Notes.
+// WHY: docs/decisions/2026-10-26-meeting-assistant-auto-listen.md
 @MainActor
 final class MeetingAssistantMeetingScope {
     private let makeProbe: @MainActor () -> MicInUseProbing
@@ -11,7 +10,8 @@ final class MeetingAssistantMeetingScope {
     private var consumer: Task<Void, Never>?
     private var ending: Task<Void, Never>?
     private var generation = UUID()
-    private var sawMeeting = false
+    private(set) var isMeetingActive = false
+    var onStart: (() -> Void)?
     var onEnd: (() -> Void)?
 
     init(endGrace: Duration = .seconds(15), makeProbe: @escaping @MainActor () -> MicInUseProbing = { MeetingContextActiveProbe() }) {
@@ -21,7 +21,7 @@ final class MeetingAssistantMeetingScope {
     func begin() {
         guard probe == nil else { return }
         generation = UUID(); let token = generation
-        sawMeeting = false
+        isMeetingActive = false
         let probe = makeProbe(); self.probe = probe
         let events = probe.subscribe()
         consumer = Task { [weak self] in
@@ -34,14 +34,18 @@ final class MeetingAssistantMeetingScope {
 
     private func contextChanged(_ active: Bool, token: UUID) {
         ending?.cancel(); ending = nil
-        if active { sawMeeting = true; return }
-        // Explicit manual use also works before an app has opened its mic.
-        // Without a recognized context, only an explicit stop/close ends it.
-        guard sawMeeting else { return }
+        if active {
+            guard !isMeetingActive else { return }
+            isMeetingActive = true
+            onStart?()
+            return
+        }
+        guard isMeetingActive else { return }
         ending = Task { [weak self, endGrace] in
             try? await Task.sleep(for: endGrace)
             guard !Task.isCancelled, let self, self.generation == token else { return }
-            self.stop()
+            self.isMeetingActive = false
+            self.ending = nil
             self.onEnd?()
         }
     }
@@ -49,13 +53,14 @@ final class MeetingAssistantMeetingScope {
     func stop() {
         generation = UUID()
         consumer?.cancel(); consumer = nil; ending?.cancel(); ending = nil
-        probe?.stop(); probe = nil; sawMeeting = false
+        probe?.stop(); probe = nil; isMeetingActive = false
     }
 }
 
 struct MeetingAssistantHoverState: Equatable, Sendable {
     enum Phase: Equatable, Sendable { case off, connecting, listening, stopping }
     var available = false
+    var meetingActive = false
     var phase: Phase = .off
     var visible: Bool { available || phase != .off }
     var isOn: Bool { phase == .connecting || phase == .listening }

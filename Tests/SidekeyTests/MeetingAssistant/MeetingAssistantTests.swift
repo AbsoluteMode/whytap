@@ -173,7 +173,7 @@ final class MeetingAssistantTests: XCTestCase {
         XCTAssertFalse(model.transcript.isEmpty, "Stop preserves meeting evidence for the pending question")
         XCTAssertTrue(upstream.closed); XCTAssertGreaterThan(source.stopped, 0)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
-        model.dismiss(); XCTAssertTrue(model.transcript.isEmpty)
+        model.suspend(); XCTAssertTrue(model.transcript.isEmpty)
     }
     func testFencedQuestionsAndUsageFeatureAcrossAllProviders() async throws {
         for account in [ProviderAccount.openRouter, .openAI, .anthropic] {
@@ -193,30 +193,112 @@ final class MeetingAssistantTests: XCTestCase {
             XCTAssertEqual(events.first?.context.feature, .meetingAssistant)
         }
     }
-    func testSessionSwitchUsesValidatedCatalogAndEndDoesNotRejoin() async throws {
+    func testConfiguredModelsListenToSuccessiveMeetingsWithoutShowingThePanel() async throws {
         let (runner, root, defaults) = try fixture()
         let catalog = root.appendingPathComponent("catalog")
         try FileManager.default.createDirectory(at: catalog, withIntermediateDirectories: true)
         try JSONEncoder().encode(space(root)).write(to: catalog.appendingPathComponent("project.json"))
-        let source = FixtureSubtitleAudio(), upstream = FixtureSubtitleUpstream(), probe = MeetingAssistantFixtureProbe()
-        let audio = MeetingAssistantAudio(makeAudio: { source }, open: { upstream })
+        let probe = MeetingAssistantFixtureProbe()
+        var sources: [FixtureSubtitleAudio] = []
+        let audio = MeetingAssistantAudio(makeAudio: {
+            let source = FixtureSubtitleAudio(); sources.append(source); return source
+        }, open: { FixtureSubtitleUpstream() })
         let scope = MeetingAssistantMeetingScope(endGrace: .milliseconds(20), makeProbe: { probe })
         let model = MeetingAssistantModel(directory: catalog, defaults: defaults, runner: runner, audio: audio,
             meetingScope: scope, routesConfigured: { true })
         XCTAssertFalse(model.hoverState.visible)
-        model.setMeetingEnabled(true)
-        XCTAssertTrue(model.startRequested); XCTAssertEqual(source.started, 0, "Validate before capture")
+        model.prepare()
+        try await wait { probe.subscriptions == 1 }
+        probe.emit(false)
+        await model.reloadSpaces()
+        XCTAssertTrue(sources.isEmpty, "Configuration alone must not capture outside meetings")
+        probe.emit(true)
+        try await wait { scope.isMeetingActive }
+        await model.reloadSpaces()
         try await wait { model.listening && audio.ready }
+        XCTAssertFalse(model.visible, "Automatic listening must not open the answers window")
         XCTAssertEqual(model.hoverState.phase, .listening)
-        probe.emit(true); probe.emit(false)
+        model.show(); model.dismiss()
+        XCTAssertTrue(model.listening, "Closing answers must not disconnect a configured assistant")
+        probe.emit(false)
         try await wait { !model.listening && !model.releasingAudio }
         XCTAssertEqual(model.hoverState.phase, .off); XCTAssertTrue(model.hoverState.visible)
         XCTAssertTrue(model.audioIssue.contains("выключено"))
         probe.emit(true)
-        try await Task.sleep(for: .milliseconds(30))
-        XCTAssertEqual(source.started, 1, "A subsequent call does not re-enable the assistant")
-        XCTAssertNil(defaults.object(forKey: "meetingAssistant.enabled"), "No saved auto-join preference")
-        model.dismiss()
+        try await wait { scope.isMeetingActive }
+        await model.reloadSpaces()
+        try await wait { model.listening && audio.ready && sources.count == 2 }
+        XCTAssertTrue(sources.allSatisfy { $0.started == 1 })
+        XCTAssertNil(defaults.object(forKey: "meetingAssistant.enabled"), "Model routes are the configuration; no extra switch")
+        model.suspend()
+    }
+
+    func testWandOffSuppressesOnlyTheCurrentMeetingAndRemovingConfigurationStopsMonitoring() async throws {
+        let (runner, root, defaults) = try fixture()
+        try JSONEncoder().encode(space(root)).write(to: root.appendingPathComponent("project.json"))
+        let probe = MeetingAssistantFixtureProbe()
+        var starts = 0, configured = true
+        let audio = MeetingAssistantAudio(makeAudio: { starts += 1; return FixtureSubtitleAudio() }, open: { FixtureSubtitleUpstream() })
+        let scope = MeetingAssistantMeetingScope(endGrace: .milliseconds(20), makeProbe: { probe })
+        let model = MeetingAssistantModel(directory: root, defaults: defaults, runner: runner, audio: audio,
+            meetingScope: scope, routesConfigured: { configured })
+        model.prepare(); try await wait { probe.subscriptions == 1 }
+        probe.emit(true); try await wait { scope.isMeetingActive }
+        await model.reloadSpaces(); try await wait { audio.ready }
+        model.setMeetingEnabled(false)
+        try await wait { !model.releasingAudio }
+        await model.reloadSpaces(); probe.emit(true)
+        await model.reloadSpaces()
+        XCTAssertFalse(model.listening); XCTAssertEqual(starts, 1)
+        probe.emit(false); try await wait { !scope.isMeetingActive }
+        probe.emit(true); try await wait { scope.isMeetingActive }
+        await model.reloadSpaces(); try await wait { audio.ready && starts == 2 }
+        configured = false; model.configurationChanged()
+        try await wait { !model.releasingAudio }
+        XCTAssertFalse(model.listening); XCTAssertEqual(probe.stops, 1)
+        model.suspend()
+    }
+
+    func testUnconfiguredAndSuspendedAssistantCannotAutomaticallyCapture() async throws {
+        let (runner, root, defaults) = try fixture()
+        try JSONEncoder().encode(space(root)).write(to: root.appendingPathComponent("project.json"))
+        let probe = MeetingAssistantFixtureProbe(), source = FixtureSubtitleAudio()
+        var configured = false
+        let audio = MeetingAssistantAudio(makeAudio: { source }, open: { FixtureSubtitleUpstream() })
+        let scope = MeetingAssistantMeetingScope(makeProbe: { probe })
+        let model = MeetingAssistantModel(directory: root, defaults: defaults, runner: runner, audio: audio,
+            meetingScope: scope, routesConfigured: { configured })
+        await model.reloadSpaces()
+        XCTAssertEqual(probe.subscriptions, 0); XCTAssertEqual(source.started, 0)
+        configured = true; model.configurationChanged()
+        try await wait { probe.subscriptions == 1 }
+        probe.emit(true); try await wait { scope.isMeetingActive }
+        await model.reloadSpaces(); try await wait { audio.ready }
+        model.suspend()
+        await model.reloadSpaces()
+        try await wait { !model.releasingAudio }
+        XCTAssertFalse(model.startRequested); XCTAssertFalse(model.listening)
+        XCTAssertEqual(source.started, 1); XCTAssertEqual(probe.stops, 1)
+    }
+
+    func testFailedAutomaticConnectionWaitsForAnotherMeetingInsteadOfRetryingForever() async throws {
+        let (runner, root, defaults) = try fixture()
+        try JSONEncoder().encode(space(root)).write(to: root.appendingPathComponent("project.json"))
+        let probe = MeetingAssistantFixtureProbe()
+        var attempts = 0
+        let audio = MeetingAssistantAudio(open: { attempts += 1; throw URLError(.notConnectedToInternet) })
+        let scope = MeetingAssistantMeetingScope(endGrace: .milliseconds(20), makeProbe: { probe })
+        let model = MeetingAssistantModel(directory: root, defaults: defaults, runner: runner, audio: audio,
+            meetingScope: scope, routesConfigured: { true })
+        model.prepare(); try await wait { probe.subscriptions == 1 }
+        probe.emit(true); try await wait { scope.isMeetingActive }
+        await model.reloadSpaces(); try await wait { !model.audioIssue.isEmpty }
+        for _ in 0..<3 { await model.reloadSpaces() }
+        XCTAssertEqual(attempts, 1); XCTAssertFalse(model.listening)
+        probe.emit(false); try await wait { !scope.isMeetingActive }
+        probe.emit(true); try await wait { scope.isMeetingActive }
+        await model.reloadSpaces(); try await wait { attempts == 2 }
+        model.suspend()
     }
 
     func testTurningOffPendingHoverStartCannotOpenAudioLater() async throws {
@@ -245,7 +327,7 @@ final class MeetingAssistantTests: XCTestCase {
         XCTAssertFalse(model.visible); XCTAssertFalse(model.listening); XCTAssertEqual(source.started, 0)
         XCTAssertEqual(StubURLProtocol.capturedBodies.count, 0)
         XCTAssertEqual(hover.phase, .off)
-        panel.close()
+        panel.suspend()
     }
 
     func testIdleStopNeverShowsCleanupAndRepeatedActiveStopKeepsItsGate() async throws {
@@ -278,7 +360,7 @@ final class MeetingAssistantTests: XCTestCase {
         try await wait { model.hoverState.available }
         XCTAssertFalse(model.visible); XCTAssertFalse(model.listening)
         XCTAssertEqual(StubURLProtocol.capturedBodies.count, 0)
-        panel.close()
+        panel.suspend()
     }
 
 }

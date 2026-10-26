@@ -1,6 +1,6 @@
 import Foundation
 
-/// Explicit system-audio session. No microphone, research writer, notes store or
+/// Meeting system-audio session. No microphone, research writer, notes store or
 /// retained PCM. The relay is bounded and rejects overflow visibly.
 @MainActor
 final class MeetingAssistantAudio {
@@ -91,7 +91,7 @@ final class MeetingAssistantAudio {
                     }
                 }
                 guard self.generation == token, !Task.isCancelled else { return }
-                self.fail("Поток встречи завершён. Нажми «Слушать встречу», чтобы подключиться снова.")
+                self.fail("Поток встречи завершён. Включи ассистента волшебной палочкой, чтобы подключиться снова.")
             } catch {
                 guard self.generation == token, !Task.isCancelled else { return }
                 let message = error is FeatureRouteError

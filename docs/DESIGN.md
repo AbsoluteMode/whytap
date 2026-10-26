@@ -1369,6 +1369,25 @@ pointer/keyboard/VoiceOver, native glass, actual calls and screen sharing remain
 installed acceptance; offscreen evidence does not establish those guarantees.
 
 
+## Meeting Assistant — automatic listening, 2026-10-26
+
+The user clarified that configuring models enables Assistant on every meeting.
+This supersedes the explicit Listen/Stop and no-auto-join choices above. Both
+routes and a ready Space enable a passive meeting observer. It starts system
+audio on a recognized call without opening the answers window. No extra hotkey
+or persistent switch is added. The existing wand overrides only the current
+meeting; its off state remains reachable during a detected call without Notes.
+
+The module keeps the approved layout, input, attachments and answer controls.
+A secondary noninteractive label shows connecting, listening or stopping;
+the redundant Listen/Stop button is removed. Idle text says «Можно задать вопрос».
+Closing answers keeps capture active; sleep/quit and missing required routes
+stop it. Errors pause automatic attempts for that meeting, with explicit retry
+through the wand. Reuse existing hover/pressed/focus/disabled feedback without
+adding controls or animation. Native offscreen fixtures cover ready, connecting,
+listening, stopping, populated and short-screen layouts in light/dark themes.
+Physical call/hover/keyboard acceptance remains in the installed app.
+
 ## Quick Translate: two text rows — 2026-10-26
 
 The user explicitly chose the standalone Realtime Translator layout: input and

@@ -9,8 +9,6 @@ final class MeetingAssistantPanel {
     private var observers: [NSObjectProtocol] = []
     private var observation: AnyCancellable?
     private var routingObservation: AnyCancellable?
-    private var preparation: Task<Void, Never>?
-    private var preparationID = UUID()
     private let openSettings: (AIFeature) -> Void
     private let activityChanged: (Bool, Bool) -> Void
     private let hoverChanged: (MeetingAssistantHoverState) -> Void
@@ -29,7 +27,7 @@ final class MeetingAssistantPanel {
             DispatchQueue.main.async { self?.refresh() }
         }
         routingObservation = AIRoutingStore.shared.$state.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.refresh() }
+            DispatchQueue.main.async { self?.model.configurationChanged(); self?.refresh() }
         }
         for name in [NSApplication.didChangeScreenParametersNotification, IslandScreenResolver.selectionDidChangeNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -37,19 +35,11 @@ final class MeetingAssistantPanel {
             })
         }
     }
-    /// Read ready Space metadata without showing a window, keys or capture.
-    func prepare() {
-        guard preparation == nil, !model.visible else { return }
-        preparationID = UUID(); let token = preparationID
-        preparation = Task { [weak self] in
-            await self?.model.reloadSpaces()
-            if self?.preparationID == token { self?.preparation = nil }
-        }
-    }
-    private func cancelPreparation() { preparationID = UUID(); preparation?.cancel(); preparation = nil }
-    func show() { cancelPreparation(); model.show(); refresh() }
-    func close() { cancelPreparation(); model.dismiss(); panel?.orderOut(nil) }
-    func setMeetingEnabled(_ enabled: Bool) { cancelPreparation(); model.setMeetingEnabled(enabled); refresh() }
+    func prepare() { model.prepare() }
+    func show() { model.show(); refresh() }
+    func close() { model.dismiss(); panel?.orderOut(nil) }
+    func suspend() { model.suspend(); panel?.orderOut(nil) }
+    func setMeetingEnabled(_ enabled: Bool) { model.setMeetingEnabled(enabled); refresh() }
     func setProtection(_ enabled: Bool) {
         guard enabled != protected else { return }
         protected = enabled; model.screenshotProtected = enabled; model.previewScreenshot = nil
@@ -91,5 +81,5 @@ final class MeetingAssistantPanel {
         override var needsPanelToBecomeKey: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     }
-    deinit { preparation?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 }

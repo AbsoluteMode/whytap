@@ -18,6 +18,22 @@ final class TranslationRenderTests: XCTestCase {
         let presentation = TranslationWindowController.Presentation()
         let view = TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in })
             .environment(\.colorScheme, .dark)
+        let suite = "translation-native-render-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
+                                                      openSettings: { _ in }, activityChanged: { _ in })
+        defer { controller.window.close() }
+        // Include the real panel's frame view, so an empty native title bar cannot
+        // hide outside the SwiftUI-only fixture as it did in the previous review.
+        let nativeFrame = try XCTUnwrap(controller.window.contentView?.superview)
+        nativeFrame.layoutSubtreeIfNeeded()
+        let nativeBitmap = try XCTUnwrap(nativeFrame.bitmapImageRepForCachingDisplay(in: nativeFrame.bounds))
+        nativeFrame.cacheDisplay(in: nativeFrame.bounds, to: nativeBitmap)
+        try XCTUnwrap(nativeBitmap.representation(using: .png, properties: [:]))
+            .write(to: directory.appendingPathComponent("text-native-panel-empty.png"))
+        XCTAssertFalse(controller.window.isVisible)
+        XCTAssertFalse(controller.window.styleMask.contains(.titled))
         try render(view, size: NSSize(width: 560, height: 140), to: directory.appendingPathComponent("text-empty.png"))
         try render(TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in }, embedded: true)
             .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 160),

@@ -201,6 +201,27 @@ final class ScreenshotArrowToolbarTests: XCTestCase {
                 }
                 let idle = try render()
                 if width == 390 {
+                    // PNGs carry a Generic RGB ICC profile. Raw PNG channel values are
+                    // not sRGB; convert before WCAG luminance, including on decoded PNGs.
+                    let bitmap = try XCTUnwrap(NSBitmapImageRep(data: idle))
+                    func color(at point: CGPoint) throws -> NSColor {
+                        let x = Int((point.x - toolbar.bounds.minX) * CGFloat(bitmap.pixelsWide) / toolbar.bounds.width)
+                        let y = Int((toolbar.bounds.maxY - point.y) * CGFloat(bitmap.pixelsHigh) / toolbar.bounds.height)
+                        return try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
+                    }
+                    func luminance(_ color: NSColor) -> CGFloat {
+                        let linear = [color.redComponent, color.greenComponent, color.blueComponent].map {
+                            $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4)
+                        }
+                        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+                    }
+                    for button in toolbar.arrowCluster.buttons.values {
+                        let frame = button.convert(button.bounds, to: toolbar)
+                        let border = luminance(try color(at: CGPoint(x: frame.minX + 13, y: frame.maxY - 0.5)))
+                        let fill = luminance(try color(at: CGPoint(x: frame.minX + 13, y: frame.maxY - 4)))
+                        XCTAssertGreaterThanOrEqual((max(border, fill) + 0.05) / (min(border, fill) + 0.05), 3,
+                                                    "Enabled shortcut boundaries need 3:1 contrast in sRGB")
+                    }
                     let button = try XCTUnwrap(toolbar.arrowCluster.buttons[.up])
                     let event = try XCTUnwrap(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))

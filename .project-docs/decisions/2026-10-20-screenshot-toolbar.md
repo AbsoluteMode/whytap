@@ -340,7 +340,11 @@ and drag/drop. Its decorative keycap passes events to the button. Disabled
 pairs suppress hover and reject assignment/drop. Existing arrow bindings,
 defaults, migration, execution and immediate source-preserving replacement
 remain unchanged. This supersedes only the separated square/keycap treatment
-above. Implementation details and the validation matrix live in docs/DESIGN.md.
+above. Idle borders blend the secondary foreground toward the primary label
+to keep at least 3:1 contrast in the native render. Contrast measurements
+convert the PNG ICC profile to sRGB before WCAG luminance; treating raw
+Generic RGB channels as sRGB overstated the original light-theme contrast.
+Implementation details and the validation matrix live in docs/DESIGN.md.
 
 # Consequences
 

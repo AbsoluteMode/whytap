@@ -66,8 +66,11 @@ the physical key or click its pair to change that assignment.
 Native offscreen toolbar renders cover 320/390/768/1024/1440 pt in light/dark
 appearances; 390 pt also covers hover, pressed and disabled states. Synthetic
 hit tests cover both icon and keycap within each button. Measured idle border
-contrast is 3.35:1 light / 4.24:1 dark; symbol contrast is 6.23:1 / 5.94:1
-against the rendered button background. Physical dragging, menu/keyboard/VoiceOver
+contrast is 3.31:1 light / 4.06:1 dark; symbol contrast is 5.66:1 / 4.96:1
+against the rendered button background. Measurements decode the PNG through
+NSBitmapImageRep and convert each sample usingColorSpace(.sRGB) before WCAG
+luminance; raw Generic RGB channel values must not be treated as sRGB. The
+render regression checks every enabled pair against 3:1 in both appearances. Physical dragging, menu/keyboard/VoiceOver
 and installed-app acceptance remain
 separate from these fixtures. Assumption: shared borders and larger inter-pair
 gaps resolve the reported ambiguity; this still needs the user's live check.

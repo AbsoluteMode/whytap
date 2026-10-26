@@ -1,4 +1,4 @@
-# Meeting Assistant
+# Meeting Assistant (Beta)
 
 Open **Meeting Assistant** from the island's tool search or Toolbox. Choose a
 ready Space in the module, ask a question and press Enter. Answers include a
@@ -11,34 +11,26 @@ route and an answer model. Both start unset. Choose a tool-capable answer model;
 screenshots also require a model that accepts images. Whytap keeps the exact
 provider/model choice and reports failures without substituting another route.
 
-Once both models and a ready Space are configured, Assistant automatically
-listens to each recognized meeting, transcribing the other participants through
-the speech route. No separate Listen button or required hotkey is involved.
-The module shows connection/listening status. Questions extracted from the recent
-transcript appear above older questions; click one for an answer. This does not
-start recording notes or capture your microphone. Closing the module leaves
-listening active. Changing Space clears its transcript and reconnects during an
-active meeting. Audio, transcript, images and conversations are not saved.
+Listening starts **off for every meeting**, even with both models and a ready
+Space configured. Hovering over the island during a recognized meeting or a
+Meeting Notes recording reveals a **magic wand** immediately to the right of
+the recording timer. Click it to enable listening for this meeting; click again
+to stop. The translucent icon is off, and a soft glow means listening is active.
+Opening the module, selecting models and hovering never start audio.
 
-Once both model routes and a ready Space are selected, hovering over the island
-while a meeting is recognized or Meeting Notes records reveals a **magic wand** immediately to the right of
-the recording timer. It is translucent when off and has a soft white/blue glow
-while listening. Click it to stop or resume Assistant for this meeting. Connecting
-has a visible outline and can be cancelled; cleanup is temporarily disabled.
-The control remains available after stopping Assistant during a recognized call
-without Notes. It keeps answers when stopped. Newly created Spaces refresh
-automatically while models are configured. The ordinary
-tool/search/deep link still only opens the module; hover alone never starts audio.
+When explicitly enabled, Assistant transcribes the other participants through
+the speech route and extracts questions from the recent transcript. Click a
+question for an answer. This does not start recording notes or capture your
+microphone. Closing answers leaves an explicitly enabled listening session
+active. Changing Space stops listening and clears its transcript; enable it
+again when ready. Audio, transcript, images and conversations are not saved.
 
-The wand's off choice applies only to the current meeting. When the existing
-metadata-only probe has recognized meeting mic activity and that context ends
-for 15 seconds, listening stops. A brief reconnect cancels the pending stop;
-a later meeting automatically starts listening again. No microphone samples are
-captured by the probe. Sleep and quit stop capture; wake rechecks the current
-meeting. Removing either required model disables automatic listening. A connection
-error pauses capture until an explicit wand retry or the next meeting. Muting a
-call for long enough can look like an end, while calls without a detectable
-boundary cannot be distinguished: this is a context heuristic, not a calendar/call ID.
+An observed meeting-context end sustained for 15 seconds stops listening. Brief
+reconnects cancel that stop, while every later meeting starts off again. Sleep
+and quit stop capture; waking does not resume it. Removing either required model
+stops listening. A connection error requires another explicit wand click.
+Context detection uses mic-activity metadata without microphone samples; long
+mutes or calls without a detectable boundary remain heuristic limitations.
 
 **Прикрепить скрин** captures the island-selected display after the requested
 macOS permission. Up to six thumbnails fit in a horizontal tray. Open one to

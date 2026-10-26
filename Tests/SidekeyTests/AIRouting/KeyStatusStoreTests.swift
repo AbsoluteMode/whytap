@@ -35,6 +35,21 @@ final class KeyStatusStoreTests: XCTestCase {
         XCTAssertNil(second.record(for: .soniox))
     }
 
+    func test_failed_checks_retry_soon_without_rechecking_healthy_keys() {
+        let store = KeyStatusStore(defaults: makeDefaults())
+        let checked = Date(timeIntervalSince1970: 1_000_000)
+        for status in [KeyStatus.rejected(.outOfCredit), .rejected(.invalidKey)] {
+            store.set(status, for: .openRouter, at: checked)
+            XCTAssertFalse(store.needsCheck(.openRouter, now: checked.addingTimeInterval(299)))
+            XCTAssertTrue(store.needsCheck(.openRouter, now: checked.addingTimeInterval(300)))
+        }
+        store.set(.unreachable, for: .openRouter, at: checked)
+        XCTAssertFalse(store.needsCheck(.openRouter, now: checked.addingTimeInterval(59)))
+        XCTAssertTrue(store.needsCheck(.openRouter, now: checked.addingTimeInterval(60)))
+        store.set(.valid, for: .openRouter, at: checked)
+        XCTAssertFalse(store.needsCheck(.openRouter, now: checked.addingTimeInterval(300)))
+    }
+
     func test_forget_removes_the_record() {
         let defaults = makeDefaults()
         let store = KeyStatusStore(defaults: defaults)

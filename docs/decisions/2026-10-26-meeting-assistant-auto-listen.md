@@ -1,5 +1,7 @@
 # Meeting Assistant listens automatically after model setup
 
+Superseded later on 2026-10-26 by [Beta and explicit per-meeting enable](2026-10-26-meeting-assistant-beta-opt-in.md). The earlier requirement is retained as history.
+
 On 2026-10-26 the user rejected the separate «Слушать встречу» action and
 clarified: «Настроил модели — слушает каждую встречу». This supersedes the
 manual-start and no-auto-join policy in the

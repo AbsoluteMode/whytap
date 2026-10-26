@@ -1,7 +1,7 @@
 import Foundation
 
 /// Observes successive meetings independently of audio capture and Meeting Notes.
-// WHY: docs/decisions/2026-10-26-meeting-assistant-auto-listen.md
+// WHY: docs/decisions/2026-10-26-meeting-assistant-beta-opt-in.md
 @MainActor
 final class MeetingAssistantMeetingScope {
     private let makeProbe: @MainActor () -> MicInUseProbing

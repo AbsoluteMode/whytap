@@ -65,7 +65,6 @@ final class MeetingAssistantModel: ObservableObject {
     private var lastAnalyzed = ""
     private var seen: [String] = []
     private var suspended = false
-    private var suppressedForMeeting = false
     private let directory: URL
     private let defaults: UserDefaults
     private let runner: MeetingAssistantRunner
@@ -100,17 +99,13 @@ final class MeetingAssistantModel: ObservableObject {
         self.audio.onState = { [weak self] active, issue in
             guard let self else { return }
             self.mutate { self.listening = active; self.audioConnecting = active && !self.audio.ready; if let issue { self.audioIssue = issue } }
-            if issue != nil { self.suppressedForMeeting = true }
             if !active { self.detectionTask?.cancel(); self.detectionTask = nil; self.detectionTimer?.cancel(); self.detectionTimer = nil }
         }
         self.meetingScope?.onStart = { [weak self] in
-            guard let self else { return }
-            self.suppressedForMeeting = false
-            if !self.listening { self.mutate { self.startRequested = true } }
+            self?.onChange?()
         }
         self.meetingScope?.onEnd = { [weak self] in
             guard let self else { return }
-            self.suppressedForMeeting = false
             self.stopListening()
             self.mutate { self.audioIssue = "Встреча закончилась — слушание выключено." }
         }
@@ -129,9 +124,9 @@ final class MeetingAssistantModel: ObservableObject {
         prepare()
     }
 
-    /// Configured models enable automatic listening on each recognized meeting.
-    /// Catalog/probe work is passive until a meeting actually becomes active.
-    // WHY: docs/decisions/2026-10-26-meeting-assistant-auto-listen.md
+    /// Configuration exposes the per-meeting wand; only an explicit click can
+    /// start audio or question extraction. Every later meeting starts off too.
+    // WHY: docs/decisions/2026-10-26-meeting-assistant-beta-opt-in.md
     func prepare() {
         suspended = false
         guard catalogTask == nil else { return }
@@ -161,9 +156,6 @@ final class MeetingAssistantModel: ObservableObject {
             return
         }
         meetingScope?.begin()
-        if meetingScope?.isMeetingActive == true, !suppressedForMeeting, !listening {
-            startRequested = true
-        }
     }
 
     func reloadSpaces() async {
@@ -340,21 +332,18 @@ final class MeetingAssistantModel: ObservableObject {
     }
     func setMeetingEnabled(_ enabled: Bool) {
         guard enabled else {
-            suppressedForMeeting = true
             if listening || startRequested { stopListening() }
             return
         }
         guard !listening, !startRequested, !releasingAudio else { return }
         // Revalidate the Space before a hover start, including after the panel
         // was closed and its catalog watcher stopped. The catalog loop owns it.
-        suppressedForMeeting = false
         mutate { startRequested = true }
         show()
     }
     func startListening() {
         guard currentSpace != nil, !listening, !releasingAudio else { return }
         do { _ = try runner.resolve() } catch {
-            suppressedForMeeting = true
             mutate { audioIssue = "Настрой модель Meeting Assistant в API & Models." }
             return
         }
@@ -410,7 +399,6 @@ final class MeetingAssistantModel: ObservableObject {
                     self.mutate { self.audioIssue = "Модель не разобрала последнюю фразу. Слушаю дальше; можно задать вопрос вручную." }
                     return
                 }
-                self.suppressedForMeeting = true
                 self.stopListening()
                 self.mutate { self.audioIssue = "Не удалось выделить вопросы. Проверь модель Meeting Assistant и подключись снова." }
             }

@@ -251,37 +251,39 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
   WHY: .project-docs/decisions/2026-10-22-native-agent.md
 
-Meeting Assistant pilot:
+Meeting Assistant Beta:
   A passive right-hand module uses the approved native design: ready Space picker,
   plain input, bounded questions/answers, structured replies, two continuations
   and up to six explicit screenshot attachments. A Toolbox/search tool and
   whytap://tool/meetingAssistant only show it. With both model routes and a ready
-  Space configured, a metadata-only observer starts listening on each recognized
-  meeting, independently of opening the module. No extra toggle or required hotkey.
+  Space configured, a metadata-only observer exposes the wand during recognized
+  meetings. Listening starts off on every meeting and requires an explicit wand
+  click; configuration, opening the module and hover never enable it.
   Meeting Assistant and Meeting Assistant audio have independent initially unset
   routes. A native provider loop uses only scoped read/list/search tools, without
   the ordinary Agent's workspace/history, shell, writes, network or Case tools.
   Coding agents create/edit local manifests with scripts/meeting-space.py; users
   select ready Spaces. Each file is validated independently; descriptor-relative
   reads reject traversal, symlinks, hidden/credential paths and out-of-scope access.
-  Database declarations remain unavailable metadata in this pilot. Automatic
-  listening sends system audio (not microphone) to the selected realtime route,
+  Database declarations remain unavailable metadata in this Beta. Explicitly
+  enabled listening sends system audio (not microphone) to the selected realtime route,
   retains only bounded in-memory finals and extracts questions through the chosen
   answer model. No audio, transcript, images or conversations are written by this
   feature. Space changes/edits cancel work and revalidate context; closing answers
   keeps listening. Sleep/quit stop audio and monitoring; wake rechecks the current
-  meeting. Removing a required model stops capture. Protection recreates
+  meeting without resuming capture. Removing a required model stops capture. Protection recreates
   the panel using the existing Other setting. Guide: docs/meeting-assistant.md.
   Once both routes and a Space are configured, hover reveals a magic icon right
   of the recording timer during recognized meetings/Notes (also during a manually
   active Assistant session). It is translucent off and softly glowing while listening.
   This secondary action uses a temporary 36pt right wing; base compactWidth and
   drawer stay matched, so their right edges temporarily differ while it is shown.
-  The wand disables/resumes only the current meeting; the next recognized meeting
-  automatically listens again. Errors pause instead of repeatedly retrying requests.
+  The wand enables/disables only the current meeting; each later meeting starts
+  off. Errors stop listening until another explicit enable. The module and its
+  API & Models group visibly mark the feature Beta.
   An observed context ending for 15s stops capture; initial/unrecognized manual
   sessions need the wand to stop. This mic-activity heuristic cannot identify every call.
-  WHY: docs/decisions/2026-10-26-meeting-assistant-auto-listen.md
+  WHY: docs/decisions/2026-10-26-meeting-assistant-beta-opt-in.md
   WHY: docs/decisions/2026-10-24-meeting-assistant-session-switch.md
   WHY: docs/decisions/2026-10-23-meeting-assistant-pilot.md
 

@@ -5,6 +5,9 @@ struct MeetingAssistantSpaceSelector: View {
     @State private var hover = false
     var body: some View {
         HStack {
+            Text("Beta")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.primary)
             Spacer(minLength: 0)
             Menu {
                 ForEach(model.spaces) { space in

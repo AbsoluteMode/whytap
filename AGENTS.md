@@ -283,7 +283,10 @@ Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
   floating window (TranslationWindowController). Text mode is a compact two-row
   palette: plain input submits on Return/Command-Return; output includes loading
-  and errors. The input has no hint/border and text mode has no window title bar.
+  and errors. A full-width lighter input band meets the darker result with no
+  gap or inset field container. Each floating Text show requests input focus,
+  guarded against late focus after dismissal/mode changes. The input has no
+  hint/border and text mode has no window title bar.
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.

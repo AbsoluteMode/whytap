@@ -10,7 +10,8 @@ is also visible. Selecting the tile alone never starts capture or a request.
 
 From the island, both tools open the same floating, resizable window, including over full-screen
 apps. Escape closes it and cancels translation/capture. The borderless text
-palette has no title bar or input hint. Click outside it to close and cancel
+palette has no title bar or input hint. Its full-width input band is slightly
+lighter than the result below. Every open returns the caret to the input. Click outside it to close and cancel
 translation; the click still reaches the app you chose. Its context menu stays
 usable. Subtitles stay open when you interact with the video or another app.
 Drag the palette background to move it.

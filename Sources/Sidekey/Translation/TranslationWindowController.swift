@@ -12,7 +12,13 @@ enum TranslationOutsideClickPolicy {
 @MainActor
 final class TranslationWindowController: NSObject, NSWindowDelegate {
     enum Mode: String, CaseIterable { case text = "Text", subtitles = "Subtitles" }
-    final class Presentation: ObservableObject { @Published var mode: Mode = .text }
+    final class Presentation: ObservableObject {
+        @Published var mode: Mode = .text
+        @Published var isTextPresented = false
+        @Published var inputFocusRequest: UInt64 = 0
+
+        func requestInputFocus() { inputFocusRequest &+= 1 }
+    }
     let text: TextTranslationModel
     let subtitles: LiveSubtitleModel
     private let presentation = Presentation()
@@ -89,6 +95,8 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
                                   width: width, height: height), display: false)
         }
         panel.makeKeyAndOrderFront(nil)
+        presentation.isTextPresented = mode == .text
+        if mode == .text { presentation.requestInputFocus() }
         updateOutsideClickMonitors(for: mode)
         text.onActivityChange?()
     }
@@ -107,6 +115,8 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         frame.size.width = max(frame.width, panel.minSize.width)
         frame.size.height = height
         panel.setFrame(frame, display: panel.isVisible)
+        presentation.isTextPresented = isText && panel.isVisible
+        if presentation.isTextPresented { presentation.requestInputFocus() }
         updateOutsideClickMonitors(for: mode)
     }
 
@@ -164,6 +174,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 
     func dismiss() {
+        presentation.isTextPresented = false
         removeOutsideClickMonitors()
         panel.orderOut(nil)
         cancel()

@@ -41,6 +41,7 @@ final class TranslationRenderTests: XCTestCase {
         text.input = "что нового?"
         await text.translate()?.value
         try render(view, size: NSSize(width: 560, height: 140), to: directory.appendingPathComponent("text-result.png"))
+        try render(view, size: NSSize(width: 360, height: 120), to: directory.appendingPathComponent("text-minimum.png"))
         text.input = String(repeating: "Очень длинная фраза с английскими words и числами 123. ", count: 12)
         await text.translate()?.value
         try render(view, size: NSSize(width: 360, height: 180), to: directory.appendingPathComponent("text-long.png"))

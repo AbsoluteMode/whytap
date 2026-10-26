@@ -1375,15 +1375,25 @@ The user explicitly chose the standalone Realtime Translator layout: input and
 translation only. This is a quick working palette, so remove the title, mode
 selector, language toolbar, field labels, cards and button footer from text
 mode, including its embedded Toolbox view. A plain 22pt input and a 24pt medium
-result carry the task; embedded typography is 17/18pt. Use 22pt outer padding
-and a 10pt row gap. No animation is needed. The compact floating frame starts
+result carry the task; embedded typography is 17/18pt. The user then chose two
+full-width horizontal tones: a slightly lighter input band above the darker
+result. Remove outer text-mode padding and the gap between rows; keep 26pt
+horizontal text insets (12pt embedded). The input has 18pt vertical padding
+(12pt embedded), result content 14pt (12pt embedded). No animation is needed. The compact floating frame starts
 at 560×140pt and remains resizable down to 360×120pt; its new autosave key avoids
 restoring the old tall form. These dimensions are implementation choices.
 
-Return submits; Command-Return remains supported. Focus starts in the input.
+Return submits; Command-Return remains supported. Each floating Text show or
+return from Subtitles issues a fresh focus request after the panel becomes key.
+Reset/reapply SwiftUI focus after a yield; a visibility/generation guard rejects
+requests after dismissal or a mode change. Embedded panes retain their own focus.
+This restores the caret even after selecting output and reopening the palette.
 The user rejected the input hint and blue outline after seeing the installed
 window. Keep the input empty with no visible placeholder or border; a subtle
-neutral fill and native caret show focus, with a stronger neutral fill on hover.
+full-width white tint (6.5%) lightens the input, rising to 10% on hover. The
+result uses an 8% black tint over the same material. Their flush boundary forms
+the horizontal division without an extra border or inset field container; the
+native caret indicates input focus.
 Use a borderless rounded text panel to remove the empty title bar and native rim.
 Secondary text on the dark fixture remains 5.45:1.
 Loading, empty, over-limit and failure messages replace the second row rather

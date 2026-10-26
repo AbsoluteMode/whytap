@@ -37,13 +37,27 @@ struct TranslationView: View {
             if isText { textContent } else { subtitleContent }
             if !isText { footer }
         }
-        .padding(embedded ? 0 : 22)
+        .padding(embedded || isText ? 0 : 22)
         .padding(.top, embedded || isText ? 0 : 24)
         .frame(minWidth: embedded ? 0 : (isText ? 320 : 440), maxWidth: .infinity,
                minHeight: embedded ? 0 : (isText ? 80 : 270), maxHeight: .infinity)
         .background { if !embedded { Rectangle().fill(.regularMaterial) } }
-        .onAppear { if isText { inputFocused = true } }
-        .onChange(of: presentation.mode) { _, mode in if mode == .text { inputFocused = true } }
+        .onAppear { if isText && embedded { inputFocused = true } }
+        .onChange(of: presentation.mode) { _, mode in if mode == .text && embedded { inputFocused = true } }
+        .onChange(of: presentation.isTextPresented) { _, visible in
+            if !embedded && !visible { inputFocused = false }
+        }
+        .task(id: presentation.inputFocusRequest) {
+            guard !embedded, isText, presentation.isTextPresented else { return }
+            let request = presentation.inputFocusRequest
+            inputFocused = false
+            // Reapply after the key window and native text field have settled,
+            // including reopen after selecting the previous translation.
+            await Task.yield()
+            guard !Task.isCancelled, presentation.isTextPresented,
+                  presentation.inputFocusRequest == request, isText else { return }
+            inputFocused = true
+        }
         .onChange(of: text.result) { _, _ in copied = false }
         .onChange(of: subtitles.lines) { _, _ in copied = false }
     }
@@ -116,7 +130,7 @@ struct TranslationView: View {
 
     private var textContent: some View {
         // WHY: docs/DESIGN.md — Quick Translate: two text rows.
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             TextField("", text: $text.input)
                 .textFieldStyle(.plain)
                 .font(.system(size: embedded ? 17 : 22))
@@ -127,11 +141,12 @@ struct TranslationView: View {
                     text.translate()
                     return .handled
                 }
-                .padding(4)
+                .frame(minHeight: embedded ? 24 : 28)
+                .padding(.horizontal, embedded ? 12 : 26)
+                .padding(.vertical, embedded ? 12 : 18)
                 .contentShape(Rectangle())
                 .onTapGesture { inputFocused = true }
-                .background(Color.primary.opacity(inputHovered ? 0.06 : inputFocused ? 0.025 : 0),
-                            in: RoundedRectangle(cornerRadius: 5))
+                .background(Color.white.opacity(inputHovered ? 0.10 : 0.065))
                 .onHover { inputHovered = $0 }
                 .accessibilityLabel("Text to translate")
                 .accessibilityHint("Press Return to translate. Right-click for language and copy options.")
@@ -140,7 +155,7 @@ struct TranslationView: View {
                     if let issue = text.issue, let feature = issue.feature {
                         Button { openSettings(feature) } label: {
                             Text(issue.message + " Open API & Models →")
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
                         .focused($settingsFocused)
@@ -148,15 +163,17 @@ struct TranslationView: View {
                         Text(textOutput)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(4)
                     }
                 }
                 .font(.system(size: text.issue != nil || inputTooLong ? (embedded ? 12 : 13) : (embedded ? 18 : 24),
                               weight: .medium))
                 .foregroundStyle(text.result.isEmpty ? .secondary : .primary)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, embedded ? 12 : 26)
+                .padding(.vertical, embedded ? 12 : 14)
             }
             .frame(maxWidth: .infinity, minHeight: 32, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color.black.opacity(0.08))
             .accessibilityLabel("Translation")
         }
         .contentShape(Rectangle())

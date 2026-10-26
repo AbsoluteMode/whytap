@@ -95,10 +95,9 @@ There is no provider setup, account, app-managed model download or API request.
 Editor shortcuts, also listed in Help: A Arrow, R Rectangle,
 O Oval, P Pen, T Text, B Blur, N Numbered steps, ⌘C Copy,
 ⌘S Download, ⌘Z Undo, ⇧⌘Z Redo. Undo/redo also work with Russian input.
-Bare arrows default to ↑ Blur, ← Shape, → Pen, ↓ Text. Four dashed tool squares, each with its arrow-key hint beside it, sit directly
-on the screenshot toolbar.
+Bare arrows default to ↑ Blur, ← Shape, → Pen, ↓ Text. Four shortcut buttons sit directly on the screenshot toolbar. Each encloses its tool icon and arrow-key hint inside one shared border, with wider gaps between pairs.
 Drag a toolbar tool/action onto one to replace its function, or drag one arrow's
-assignment onto another; the source remains. Click a dashed square for the native
+assignment onto another; the source remains. Click anywhere in a pair for the native
 menu of every tool/command and Reset this arrow. Assignments save immediately,
 without leaving the editor, copying the screenshot or cancelling capture. The
 physical arrow keys execute those assignments; Tab and Space reach the menus.

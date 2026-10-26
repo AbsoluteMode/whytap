@@ -36,42 +36,41 @@ Assumption: the supported author marks are recognizable at 15 pt; the user can
 confirm that in the installed voice ticker. Static OpenRouter image paths may
 change; bundled fallbacks protect the voice experience.
 
-## Screenshot tool squares and arrow hints — 2026-10-21
+## Screenshot shortcut pairs — 2026-10-26
 
 The person comes to annotate a region and configure four quick tools without
-leaving the editor. First see the tool icons in dashed squares, each with its
-arrow-key hint beside it; then drag a tool onto a square or click to reassign it.
+leaving the editor. First identify which arrow belongs to each tool; then use
+the physical key or click its pair to change that assignment.
 
-- Put four pairs in one compact row directly on ScreenshotToolbar: a 30 pt
-  dashed rounded square with the assigned tool's 16 pt symbol, then a nearby
-  22 pt arrow keycap using HotkeyHintView. Keep a 5 pt intra-pair gap and 7 pt
-  between pairs. The complete group is 249 × 30 pt. Why: the user found the
-  earlier arrow-shaped cross hard to read and explicitly chose square tool
-  icons with separate arrow shortcut hints. This supersedes both the cross
-  and the earlier Settings-only/inverted-T placement.
-- Defaults are ↑ Blur, ← Shape, → Pen, ↓ Text. Only the old unmodified stock
-  map migrates once; custom mappings remain. Why: the user requested these
-  four drawing tools and rejected duplicating the existing Copy action.
-- The physical keys execute the functions. Clicking a square opens its native
-  assignment menu, including every retained action and Reset this arrow. A
-  drop from any toolbar tool or assigned square replaces only the destination
-  and saves immediately, preserving the source and current screenshot. Why:
-  reassignment should neither finish capture nor require Settings or Save.
-- Track press/drag/release without also activating a dragged source. Escape
-  aborts the pending click; hidden or disabled controls cannot complete it.
-  Why: beginning a drag from Copy/Download must never export on release.
-- Square hit areas highlight completely on hover, press and valid drop, with
-  native focus rings. Tab/Space reach assignment menus. Adjacent keycaps are
-  decorative, pass clicks through and add no focus stop. Busy state disables
-  squares, menus and drops and dims key hints. Why: affordances must match the
-  actual click targets and keep a keyboard/VoiceOver alternative to dragging.
-- Keep the group intact while the surrounding toolbar wraps. Reuse adaptive
-  AppKit popover materials and semantic foregrounds, with no new animation.
-  Screenshot's priority over Agent, text navigation and Command-Z stay intact.
+- Enclose each 16 pt tool icon and 22 pt HotkeyHintView arrow keycap in one
+  57 × 30 pt native button, with 11 pt gaps between buttons. The group is
+  261 × 30 pt. A shared solid border and adaptive background make membership
+  visible at rest. Why: on 26 October the user could not tell which adjacent
+  icon belonged to which key in the equally spaced dashed-square layout.
+  This supersedes the separate square/keycap click targets from 21 October.
+- The icon and keycap share one click, drag/drop and keyboard-focus target.
+  Whole-pair hover and pressed fills, valid-drop emphasis and native focus
+  rings cover the same bounds. Keycaps add no focus stop and pass events to
+  their button. Busy disables the button/menu/drop and dims the keycap;
+  disabled hover has no response. Why: the grouping must also explain where
+  clicking works, without a dead area over the visible key.
+- Clicking anywhere in a pair opens its native assignment menu and Reset this
+  arrow. Dragging replaces only the destination and saves immediately. Physical
+  keys execute actions. Defaults, custom assignments, migration, Screenshot's
+  priority over Agent, text navigation and Command-Z remain unchanged.
+  Why: this correction addresses readability rather than shortcut behavior.
+- Keep the four pairs together while surrounding toolbar controls wrap. Use
+  existing AppKit materials/semantic colors; add no animation. Why: stable
+  grouping remains readable on narrow displays and with reduced motion.
 
-Native offscreen toolbar renders cover 360/520/900 pt in light/dark appearances.
-Physical dragging, menu/keyboard/VoiceOver and installed-app acceptance remain
-separate from these generated fixtures.
+Native offscreen toolbar renders cover 320/390/768/1024/1440 pt in light/dark
+appearances; 390 pt also covers hover, pressed and disabled states. Synthetic
+hit tests cover both icon and keycap within each button. Measured idle border
+contrast is 3.35:1 light / 4.24:1 dark; symbol contrast is 6.23:1 / 5.94:1
+against the rendered button background. Physical dragging, menu/keyboard/VoiceOver
+and installed-app acceptance remain
+separate from these fixtures. Assumption: shared borders and larger inter-pair
+gaps resolve the reported ambiguity; this still needs the user's live check.
 
 ## Screenshot toolbar and capture reliability — 2026-10-21
 

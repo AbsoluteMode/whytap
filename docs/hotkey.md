@@ -385,10 +385,10 @@ Screenshot uses the existing optional named tool shortcut in Settings →
 Hotkeys → Tools; no new default global key is reserved. Local editor keys
 come from `ScreenshotEditorKeys.tools` and are included in Help.
 A/R/O/P/T/B/N choose Arrow/Rectangle/Oval/Pen/Text/Blur/Numbered steps.
-The removed Select/crop and Highlighter tools have no local shortcuts. ⌘C copies, ⌘S downloads PNG directly into Downloads, ⌘Z undoes and ⇧⌘Z redoes using the physical Z key in either English or Russian input. The screenshot toolbar contains four dashed tool squares with adjacent arrow keycaps:
+The removed Select/crop and Highlighter tools have no local shortcuts. ⌘C copies, ⌘S downloads PNG directly into Downloads, ⌘Z undoes and ⇧⌘Z redoes using the physical Z key in either English or Russian input. The screenshot toolbar contains four shortcut buttons, each grouping its tool icon and arrow keycap inside one border:
 ↑ Blur, ← Shape, → Pen, ↓ Text by default. Drag any toolbar tool/action or
-an existing arrow assignment onto another square to replace only the destination;
-the source stays available. Click a square to choose any tool/command from its
+an existing arrow assignment onto another pair to replace only the destination;
+the source stays available. Click anywhere in a pair to choose any tool/command from its
 native menu or reset that direction. Changes save immediately and preserve the
 screenshot. The physical arrow keys execute the assigned functions. Shift-arrows move the crop 10 points; Option-arrows resize it. Assign
 Move crop in an arrow menu for 1-point movement. Copy text remains available in the same assignment catalog without a new default shortcut; custom assignments are preserved. Screenshot temporarily releases

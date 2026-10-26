@@ -6,11 +6,11 @@ import SwiftUI
 /// export on click: the physical arrows run actions; clicking changes a binding.
 @MainActor
 final class ScreenshotArrowCluster: NSView {
-    static let size = CGSize(width: 249, height: 30)
+    // WHY: .project-docs/decisions/2026-10-20-screenshot-toolbar.md — grouped shortcut revision.
+    static let size = CGSize(width: 261, height: 30)
     private static let order: [ScreenshotArrow] = [.up, .left, .right, .down]
     private let preferences: HotkeyPreferences
     private var observation: AnyCancellable?
-    private var pairs: [ScreenshotArrow: NSView] = [:]
     private var hints: [ScreenshotArrow: NSView] = [:]
     private(set) var buttons: [ScreenshotArrow: ScreenshotToolbarButton] = [:]
     var isEnabled = true {
@@ -38,13 +38,11 @@ final class ScreenshotArrowCluster: NSView {
                 self.preferences.screenshotArrowBindings[direction] = action
                 return true
             }
-            let pair = NSView()
-            pair.addSubview(button)
             let hint = ScreenshotArrowKeycapHostingView(rootView:
                 HotkeyHintView(contents: [.text(direction.glyph)], style: .keycaps).accessibilityHidden(true))
             hint.identifier = NSUserInterfaceItemIdentifier("screenshot.arrow-keycap.\(direction.rawValue)")
-            pair.addSubview(hint)
-            addSubview(pair); pairs[direction] = pair; hints[direction] = hint; buttons[direction] = button
+            button.addSubview(hint)
+            addSubview(button); hints[direction] = hint; buttons[direction] = button
         }
         widthAnchor.constraint(equalToConstant: Self.size.width).isActive = true
         heightAnchor.constraint(equalToConstant: Self.size.height).isActive = true
@@ -55,9 +53,8 @@ final class ScreenshotArrowCluster: NSView {
     override func layout() {
         super.layout()
         for (index, direction) in Self.order.enumerated() {
-            pairs[direction]?.frame = CGRect(x: index * 64, y: 0, width: 57, height: 30)
-            buttons[direction]?.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
-            hints[direction]?.frame = CGRect(x: 35, y: 4, width: 22, height: 22)
+            buttons[direction]?.frame = CGRect(x: index * 68, y: 0, width: 57, height: 30)
+            hints[direction]?.frame = CGRect(x: 31, y: 4, width: 22, height: 22)
         }
     }
 
@@ -68,7 +65,7 @@ final class ScreenshotArrowCluster: NSView {
             button.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
             button.setAccessibilityLabel("\(direction.glyph) \(action.title) — change assignment")
             button.setAccessibilityValue(action.title)
-            button.toolTip = "\(direction.glyph): \(action.title). Drag a toolbar tool here to replace this action, drag this assignment to another square, or click to choose. Changes save immediately."
+            button.toolTip = "\(direction.glyph): \(action.title). Drag a toolbar tool here to replace this action, drag this assignment to another shortcut, or click to choose. Changes save immediately."
             button.setAccessibilityHelp(button.toolTip)
             let menu = NSMenu(title: "\(direction.glyph) arrow")
             menu.autoenablesItems = false
@@ -98,7 +95,7 @@ final class ScreenshotArrowCluster: NSView {
     }
 }
 
-/// A nearby keyboard hint is not a second click or focus target.
+/// The hint belongs to its assignment button's single click and focus target.
 @MainActor
 private final class ScreenshotArrowKeycapHostingView<Content: View>: NSHostingView<Content> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

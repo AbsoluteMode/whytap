@@ -149,10 +149,10 @@ final class ScreenshotToolbarButton: NSButton, NSDraggingSource {
             path.fill()
             (isEnabled ? (active ? NSColor.controlAccentColor : .secondaryLabelColor) : .disabledControlTextColor).setStroke()
             path.lineWidth = dropHovered && isEnabled ? 1.8 : 1
-            path.setLineDash([3, 2], count: 2, phase: 0); path.stroke()
+            path.stroke()
             let foreground = isEnabled ? NSColor.labelColor : .disabledControlTextColor
             if let symbol = image?.withSymbolConfiguration(.init(paletteColors: [foreground])) {
-                let center = CGPoint(x: bounds.midX, y: bounds.midY)
+                let center = CGPoint(x: 15, y: bounds.midY)
                 let scale = min(16 / symbol.size.width, 16 / symbol.size.height)
                 let rect = CGRect(x: center.x - symbol.size.width * scale / 2, y: center.y - symbol.size.height * scale / 2,
                                   width: symbol.size.width * scale, height: symbol.size.height * scale)

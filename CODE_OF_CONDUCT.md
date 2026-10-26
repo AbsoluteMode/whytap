@@ -9,5 +9,5 @@ commits, issues and pull requests that do not follow the Covenant, and may
 temporarily or permanently ban contributors for repeated or serious
 violations.
 
-Report unacceptable behaviour to security@whytap.ai. Reports are handled
+Report unacceptable behaviour to niceizzy1337@gmail.com. Reports are handled
 confidentially.

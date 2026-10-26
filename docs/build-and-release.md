@@ -328,8 +328,15 @@ Whytap delivery path. It shares `notarize-submit.sh` with team notarization.
 | `prod` | `com.rootwise.sidekey` | `Whytap.app` | `https://github.com/AbsoluteMode/whytap/releases/latest/download/appcast.xml` |
 | `beta` | `com.rootwise.sidekey.beta` | `Whytap-Beta.app` | `https://github.com/AbsoluteMode/whytap/releases/download/beta/appcast.xml` |
 
-Production tags are `v<version>` and include the versioned DMG,
-`Whytap-latest.dmg` and `appcast.xml`. Beta releases are prereleases with a rolling
+Production tags are `v<version>` and include one DMG, `Whytap-latest.dmg`,
+and the update feed `appcast.xml`. The public download link stays
+`https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg`.
+The signed feed pins each archive to its immutable release tag, for example
+`releases/download/v2.2.18/Whytap-latest.dmg`, so a later release cannot change
+the bytes expected by an older feed. Existing release assets and feed URLs stay
+available. Local build archives and their provenance manifests keep their
+version/build names; the upload verifies the byte-identical latest copy and
+publishes only that DMG. Beta releases are prereleases with a rolling
 `beta` feed. Every update is a complete archive, verified by Sparkle before
 installation.
 

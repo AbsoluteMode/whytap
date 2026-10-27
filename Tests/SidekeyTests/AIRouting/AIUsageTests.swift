@@ -41,7 +41,8 @@ final class AIUsageTests: XCTestCase {
 
     func test_partial_unknown_cost_and_small_nonzero_cost_are_not_free() {
         let events = [event(0.02), event(nil)]
-        XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).text, "$0.02 +")
+        XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).text, "$0.02")
+        XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).detail, "1 unpriced call")
         XCTAssertEqual(AIUsageTotal(events: [event(0.000001)], currency: .usd).text, "< $0.0001")
         XCTAssertEqual(AIUsageTotal(events: [event(0)], currency: .usd).text, "$0.00")
         XCTAssertEqual(AIUsageTotal(events: [event(0.01, account: .elevenLabs)], currency: .elevenLabsCredits).text, "< 0.1")
@@ -50,15 +51,27 @@ final class AIUsageTests: XCTestCase {
     func test_one_price_preserves_mixed_units_and_unknown_portions() {
         let events = [event(0.02), event(1234, account: .elevenLabs)]
         XCTAssertEqual(AIUsagePrice(events: events).text, "$0.02\n\(1234.formatted()) credits")
-        XCTAssertEqual(AIUsagePrice(events: [event(nil, account: .elevenLabs)]).text, "Credits unavailable")
-        XCTAssertEqual(AIUsagePrice(events: [event(0.02), event(nil)]).text, "$0.02 +")
+        XCTAssertEqual(AIUsagePrice(events: [event(nil, account: .elevenLabs)]).text, "Credits unavailable. 1 unpriced call")
+        XCTAssertEqual(AIUsagePrice(events: [event(0.02), event(nil)]).text, "$0.02. 1 unpriced call")
+    }
+
+    func test_each_currency_explains_its_own_estimates_and_excluded_calls() {
+        let estimatedCredits = AIUsageEvent(context: .init(feature: .dropFast, account: .elevenLabs, model: "scribe_v2_realtime"),
+            currency: .elevenLabsCredits, amount: 1776.5, basis: .estimated)
+        let price = AIUsagePrice(events: [event(6.22), event(nil), event(nil),
+                                        estimatedCredits, event(nil, account: .elevenLabs)])
+        XCTAssertEqual(price.lines.map(\.currency), [.usd, .elevenLabsCredits])
+        XCTAssertEqual(price.lines.map(\.value), ["$6.22", 1776.5.formatted(.number.precision(.fractionLength(0...1))) + " credits"])
+        XCTAssertEqual(price.lines.map(\.detail), ["2 unpriced calls", "Estimated · 1 unpriced call"])
+        XCTAssertTrue(AIUsagePrice(events: []).lines.isEmpty)
+        XCTAssertNil(AIUsagePrice(events: [event(0)]).lines.first?.detail)
     }
 
     func test_elevenlabs_model_details_explain_missing_duration_separately_from_missing_rate() {
         let missingDuration = event(nil, feature: .dropFast, account: .elevenLabs, model: "scribe_v2")
         let missingRate = AIUsageEvent.speech(.init(feature: .dropFast, account: .elevenLabs, model: "scribe_v2"), seconds: 60)
         let unknown = AIUsageModelRow(id: "fixture", events: [missingDuration])
-        XCTAssertEqual(unknown.total, "Credits unavailable")
+        XCTAssertEqual(unknown.total, "Credits unavailable. 1 unpriced call")
         XCTAssertTrue(unknown.pricingExplanation?.contains("durations were not recorded") == true)
         let unpriced = AIUsageModelRow(id: "fixture", events: [missingRate])
         XCTAssertEqual(unpriced.recordedMinutes, 1)
@@ -69,7 +82,7 @@ final class AIUsageTests: XCTestCase {
         let complete = AIUsageModelRow(id: "fixture", events: [known])
         XCTAssertNil(complete.pricingExplanation)
         let partial = AIUsageModelRow(id: "fixture", events: [missingDuration, known])
-        XCTAssertEqual(partial.total, "≈ 18 + credits")
+        XCTAssertEqual(partial.total, "18 credits. Estimated · 1 unpriced call")
         XCTAssertEqual(partial.recordedMinutes, 1)
         XCTAssertEqual(partial.pricingExplanation, unknown.pricingExplanation)
         XCTAssertNil(AIUsageModelRow(id: "usd", events: [event(nil)]).pricingExplanation)
@@ -153,7 +166,7 @@ final class AIUsageTests: XCTestCase {
             meter.consume(#"{"type":"step_finish","part":{"id":"one","cost":0.02}}"#)
             meter.consume(tail); meter.finish(); meter.finish()
             XCTAssertEqual(events.count, 2)
-            XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).text, "≈ $0.02 +")
+            XCTAssertEqual(AIUsagePrice(events: events).text, "$0.02. Estimated · 1 unpriced call")
         }
     }
 
@@ -163,7 +176,7 @@ final class AIUsageTests: XCTestCase {
         meter.consume(#"{"type":"step_finish","part":{"id":"parent","cost":0.02}}"#)
         meter.finish(interrupted: true); meter.finish(interrupted: true)
         XCTAssertEqual(events.count, 2)
-        XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).text, "≈ $0.02 +")
+        XCTAssertEqual(AIUsagePrice(events: events).text, "$0.02. Estimated · 1 unpriced call")
     }
 
     func test_agent_missing_pricing_and_early_exit_remain_unknown() {

@@ -28,7 +28,12 @@ final class AnthropicUsagePricesTests: XCTestCase {
         XCTAssertEqual(AnthropicUsagePrices.rates(model: "claude-sonnet-4-5-20250929", promptTokens: 0)?.input, 3)
         XCTAssertEqual(AnthropicUsagePrices.rates(model: "claude-opus-4-20250514", promptTokens: 0)?.input, 15)
         XCTAssertEqual(AnthropicUsagePrices.rates(model: "Claude-Haiku-4-5", promptTokens: 0)?.output, 5)
+        XCTAssertEqual(AnthropicUsagePrices.rates(model: "claude-3-5-haiku-latest", promptTokens: 0)?.input, 0.80)
         XCTAssertNil(AnthropicUsagePrices.rates(model: "claude-opus-55", promptTokens: 0))
+        XCTAssertNil(AnthropicUsagePrices.rates(model: "claude-opus-5-6", promptTokens: 0),
+                     "An unreleased variant is unknown, not priced as claude-opus-5")
+        XCTAssertNil(AnthropicUsagePrices.rates(model: "claude-sonnet-5-5-preview", promptTokens: 0))
+        XCTAssertNil(AnthropicUsagePrices.rates(model: "claude-sonnet-4-5-2025092", promptTokens: 0))
         XCTAssertNil(AnthropicUsagePrices.rates(model: "anthropic/claude-sonnet-5.5", promptTokens: 0),
                      "OpenRouter IDs report their own cost and must not be estimated here")
     }
@@ -53,6 +58,29 @@ final class AnthropicUsagePricesTests: XCTestCase {
         XCTAssertNil(cost("claude-next-model", ["input_tokens": 10, "output_tokens": 1]))
         XCTAssertNil(cost("claude-opus-5-5", ["input_tokens": 10, "output_tokens": 1, "speed": "fast"]))
         XCTAssertNotNil(cost("claude-opus-5-5", ["input_tokens": 10, "output_tokens": 1, "speed": "standard"]))
+    }
+
+    func testMalformedOrInconsistentPresentFieldsMakeTheEstimateUnavailable() {
+        let base: [String: Any] = ["input_tokens": 10, "output_tokens": 1]
+        func with(_ extra: [String: Any]) -> Double? { cost("claude-opus-5-5", base.merging(extra) { $1 }) }
+        XCTAssertNil(with(["input_tokens": 10.5]), "Fractional counts are not truncated")
+        XCTAssertNil(with(["output_tokens": "1"]))
+        XCTAssertNil(with(["cache_read_input_tokens": "many"]), "A malformed cache count is not zero")
+        XCTAssertNil(with(["cache_read_input_tokens": 0.5]))
+        XCTAssertNil(with(["cache_creation_input_tokens": -3]))
+        XCTAssertNil(with(["cache_creation_input_tokens": 100, "cache_creation": ["ephemeral_1h_input_tokens": 200]]))
+        XCTAssertNil(with(["cache_creation_input_tokens": 100,
+                           "cache_creation": ["ephemeral_5m_input_tokens": 60, "ephemeral_1h_input_tokens": 30]]))
+        XCTAssertNil(with(["cache_creation": "5m"]))
+        XCTAssertNil(with(["speed": 1]))
+        XCTAssertNil(with(["inference_geo": 1]))
+        XCTAssertNil(cost("claude-opus-5-5", ["input_tokens": NSNull(), "output_tokens": 1]))
+        // Whole numbers decoded as doubles and JSON nulls for optional fields stay usable.
+        XCTAssertEqual(try XCTUnwrap(with(["input_tokens": 10.0, "cache_read_input_tokens": NSNull(),
+                                           "cache_creation": NSNull(), "speed": NSNull()])),
+                       try XCTUnwrap(cost("claude-opus-5-5", base)), accuracy: 1e-15)
+        XCTAssertNotNil(with(["cache_creation_input_tokens": 90,
+                              "cache_creation": ["ephemeral_5m_input_tokens": 60, "ephemeral_1h_input_tokens": 30]]))
     }
 
     func testDirectAnthropicTextRequestRecordsEstimatedCost() async throws {

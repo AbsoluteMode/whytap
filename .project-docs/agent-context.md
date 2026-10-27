@@ -210,7 +210,12 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
   Anthropic uses Messages. Provider-native reasoning/tool items survive within
-  the turn. No provider fallback or model substitution. Connect checks only
+  the turn. OpenRouter continuations normalize tool arguments to JSON strings,
+  preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
+  reasoning. Only allowlisted provider error categories become static messages;
+  raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
+  reported usage is recorded. The shared model loop applies the same handling
+  to Meeting Assistant's OpenRouter route. No provider fallback or model substitution. Connect checks only
   local key availability, model selection and writable workspace; it does not
   prove the provider accepts the key. Existing connected OpenCode users migrate
   to native without changing the route/key; disconnected users stay disconnected.
@@ -223,9 +228,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Application Support/whytap/agent, with AGENTS.md memory, sessions.json and
   native-conversation.json. Read bounded memory before the first model request;
   no bootstrap scan of the home directory or source checkout. Recent context is
-  at most six completed user/assistant text pairs and 12,000 characters, scoped
+  at most six completed user/assistant pairs (answer text and returned card
+  descriptions/destinations) and 12,000 characters, scoped
   to provider/model/endpoint and resumed within 15 minutes. Expiry stops reuse;
-  the last file remains locally until replaced. Tool output, reasoning and
+  the last file remains locally until replaced. An oversized latest exchange is
+  shortened while retaining both ends and room for later turns. Copy-card
+  payloads are excluded from supplementary memory; only their labels remain.
+  Tool output, reasoning and
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
@@ -617,13 +626,15 @@ Brightness inside hover:
   until its own end notification, and a gap over 1 s between frames restarts
   the 5 s wait for headroom and the 1.5 s hold; another user's session also gets the
   display's own table until this one is active again. Extra is a fixed boost;
-  any backlight decrease ends it, including native brightness keys, automatic
-  brightness and idle dimming with the strip closed. The first slider decrease
+  external backlight changes, including automatic brightness, battery dimming
+  and native macOS controls, keep it enabled even with the strip closed.
+  Readback cannot distinguish automatic changes from native manual controls.
+  The first Whytap slider decrease
   or intercepted brightness-down press only ends Extra, leaving the backlight
   and slider unchanged for that whole drag or held press. The next adjustment
   lowers the backlight normally, including accessibility adjustments and fine
   key steps; outside changes
-  are detected within the 0.5 s poll, after the 0.75 s write-settle window.
+  are followed within the 0.5 s poll, after the 0.75 s write-settle window.
   Float readback round-off is ignored. Enabling Extra reads a fresh baseline;
   increasing brightness never enables it. Its switch (strip or Settings) also
   ends it, as do serious thermal state, a
@@ -776,6 +787,12 @@ Update flow (download-on-action):
   crashes, process kills or power loss. A final Sparkle delegate guard rechecks
   activity before an app-initiated relaunch. Feed = GitHub Releases
   (`BuildConfig.appcastURL`).
+  Update/Skip and Restart/Later use measured NSWindow down/up dispatch for
+  first mouse, including alongside a different open hover tool. Native buttons
+  retain keyboard/accessibility activation and hover/pressed/focus feedback.
+  A download click publishes the spinner immediately, before Sparkle reports
+  its first bytes; repeated or stale clicks do not repeat the action. Moving
+  off the button or changing its stage/build cancels the captured press.
   Community archives use our independent Sparkle Ed25519 signature. The app
   is signed with the Developer ID certificate of the
   team in Resources/developer-id-team.txt (team designated requirement and
@@ -817,7 +834,11 @@ period; hover/click/keyboard focus reveals their models. One Price column
 retains explicit USD and ElevenLabs credit units, both when mixed. Each visit
 starts at This month; matching neutral From/To controls open a dismissing native
 calendar. No permanent bottom explanation or sticky text-segment highlight.
-OpenRouter response costs are reported. Soniox reads exact request cost_usd from
+OpenRouter response costs are reported. Direct Anthropic text/Agent calls
+estimate USD from response usage tokens with published per-model rates
+(AnthropicUsagePrices, marked ≈); unknown models, fast mode or missing usage stay
+unavailable. WHY: .project-docs/decisions/2026-10-27-anthropic-token-costs.md
+Soniox reads exact request cost_usd from
 usage logs by random client reference and historical model; missing/delayed API
 prices retain public hourly estimates marked ≈. New meeting checkpoints retain
 the same reference across retries. Exact prices upgrade estimated journal rows
@@ -1030,7 +1051,11 @@ Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and publishes
-only the final answer and show_actions metadata after successful completion.
+the completed answer and show_actions metadata after successful completion.
+Text alongside successful presentation-only calls survives an empty final;
+a nonempty final wins, and evidence/action tools invalidate the fallback.
+Recent context includes returned card descriptions/destinations, and History
+persists visible text together with cards in both blocks and Markdown.
 The compatibility extractor also handles a trailing useful.actions fence.
 NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
 absolute/tilde paths into the same keyboard-action cards if the model omits

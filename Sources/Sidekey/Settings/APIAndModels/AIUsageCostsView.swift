@@ -30,7 +30,13 @@ struct AIUsageTotal {
     private var matching: [AIUsageEvent] { events.filter { $0.currency == currency } }
     var amount: Double { matching.compactMap(\.amount).reduce(0, +) }
     var estimated: Bool { matching.contains { $0.basis == .estimated } }
-    var incomplete: Bool { matching.contains { $0.amount == nil } }
+    var unpricedCount: Int { matching.filter { $0.amount == nil }.count }
+    var incomplete: Bool { unpricedCount > 0 }
+    var detail: String? {
+        let unpriced = incomplete ? "\(unpricedCount) unpriced \(unpricedCount == 1 ? "call" : "calls")" : nil
+        let parts = [estimated ? "Estimated" : nil, unpriced].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
     var text: String {
         guard !matching.isEmpty else { return "—" }
         guard matching.contains(where: { $0.amount != nil }) else { return "Unavailable" }
@@ -41,7 +47,7 @@ struct AIUsageTotal {
         } else {
             number = amount > 0 && amount < 0.1 ? "< 0.1" : amount.formatted(.number.precision(.fractionLength(0...1)))
         }
-        return (estimated ? "≈ " : "") + number + (incomplete ? " +" : "")
+        return number
     }
 }
 
@@ -49,14 +55,25 @@ struct AIUsageTotal {
 /// both providers. Different currencies are never added to one number.
 struct AIUsagePrice {
     let events: [AIUsageEvent]
-    var text: String {
-        [AIUsageCurrency.usd, .elevenLabsCredits].compactMap { currency -> String? in
+    struct Line: Identifiable {
+        let currency: AIUsageCurrency
+        let value: String
+        let detail: String?
+        var id: AIUsageCurrency { currency }
+    }
+    var lines: [Line] {
+        [AIUsageCurrency.usd, .elevenLabsCredits].compactMap { currency -> Line? in
             let matching = events.filter { $0.currency == currency }
             guard !matching.isEmpty else { return nil }
-            let total = AIUsageTotal(events: matching, currency: currency).text
-            if total == "Unavailable" { return currency == .usd ? "USD unavailable" : "Credits unavailable" }
-            return total + (currency == .elevenLabsCredits ? " credits" : "")
-        }.joined(separator: "\n")
+            let total = AIUsageTotal(events: matching, currency: currency)
+            let value = total.text == "Unavailable"
+                ? (currency == .usd ? "USD unavailable" : "Credits unavailable")
+                : total.text + (currency == .elevenLabsCredits ? " credits" : "")
+            return Line(currency: currency, value: value, detail: total.detail)
+        }
+    }
+    var text: String {
+        lines.map { [$0.value, $0.detail].compactMap { $0 }.joined(separator: ". ") }.joined(separator: "\n")
     }
 }
 
@@ -365,13 +382,29 @@ private struct AIUsageFeatureCostRow: View {
     }
 }
 
-private struct AIUsagePriceLabel: View {
+struct AIUsagePriceLabel: View {
     let events: [AIUsageEvent]
+    var width: CGFloat = 190
     var body: some View {
-        Text(AIUsagePrice(events: events).text)
-            .multilineTextAlignment(.trailing)
-            .frame(width: 190, alignment: .trailing)
-            .help("≈ Estimated cost. ElevenLabs uses recorded audio time × reported credits per minute for that model. + Additional calls have no usable price. Credits are separate from USD.")
+        // WHY: docs/DESIGN.md — Costs use visible words for estimates and omitted calls.
+        VStack(alignment: .trailing, spacing: 9) {
+            ForEach(AIUsagePrice(events: events).lines) { line in
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(line.value)
+                    if let detail = line.detail {
+                        Text(detail)
+                            .font(.system(size: 11.5, weight: .regular))
+                            .foregroundStyle(MacSettingsTheme.text2)
+                    }
+                }
+            }
+        }
+        .multilineTextAlignment(.trailing)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: width, alignment: .trailing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AIUsagePrice(events: events).text)
+        .help("Estimated amounts are calculated from recorded usage. Unpriced calls are excluded. ElevenLabs credits are separate from USD.")
     }
 }
 
@@ -427,7 +460,8 @@ struct AIUsageModelsPopover: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
-                            Text(item.total).font(.system(size: 12)).monospacedDigit().multilineTextAlignment(.trailing)
+                            AIUsagePriceLabel(events: item.events, width: 150)
+                                .font(.system(size: 12)).monospacedDigit()
                         }.padding(.vertical, 10)
                         if item.id != row.models.last?.id { Divider() }
                     }

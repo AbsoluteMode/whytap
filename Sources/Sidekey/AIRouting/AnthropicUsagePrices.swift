@@ -15,8 +15,8 @@ enum AnthropicUsagePrices {
         Rates(input: input, write5m: input * 1.25, write1h: input * 2, read: read, output: output)
     }
 
-    /// Model ID prefixes; the longest matching prefix wins, so dated snapshots
-    /// (`claude-sonnet-4-5-20250929`) resolve to their family.
+    /// Exact model IDs. A dated snapshot (`claude-sonnet-4-5-20250929`) or
+    /// `-latest` alias resolves to its family; any other variant is unknown.
     private static let table: [String: Rates] = [
         "claude-fable-5-1": rates(10, 0.25, 50), "claude-mythos-5-1": rates(10, 0.25, 50),
         "claude-fable-5": rates(10, 1, 50), "claude-mythos-5": rates(10, 1, 50),
@@ -35,32 +35,61 @@ enum AnthropicUsagePrices {
 
     static func rates(model: String, promptTokens: Int) -> Rates? {
         let id = model.lowercased()
-        guard let family = table.keys.filter({ id == $0 || id.hasPrefix($0 + "-") })
-            .max(by: { $0.count < $1.count }) else { return nil }
+        guard let family = table.keys.first(where: { family in
+            guard id.hasPrefix(family) else { return false }
+            let suffix = id.dropFirst(family.count)
+            return suffix.isEmpty || suffix == "-latest"
+                || (suffix.count == 9 && suffix.first == "-" && suffix.dropFirst().allSatisfy { ("0"..."9").contains($0) })
+        }) else { return nil }
         if family == "claude-haiku-5-5", promptTokens > 100_000 { return haiku55LongPrompt }
         return table[family]
     }
 
     static func cost(model: String, usage: [String: Any]?) -> Double? {
-        guard let usage, let output = tokens(usage["output_tokens"]),
-              let input = tokens(usage["input_tokens"]) else { return nil }
-        // Fast mode has its own model-specific premium; do not guess it.
-        if let speed = usage["speed"] as? String, speed != "standard" { return nil }
-        let read = tokens(usage["cache_read_input_tokens"]) ?? 0
-        let written = tokens(usage["cache_creation_input_tokens"]) ?? 0
-        let creation = usage["cache_creation"] as? [String: Any]
-        let write1h = min(written, tokens(creation?["ephemeral_1h_input_tokens"]) ?? 0)
-        let write5m = written - write1h
-        guard let rates = rates(model: model, promptTokens: input + read + written) else { return nil }
-        let micro = Double(input) * rates.input + Double(write5m) * rates.write5m
-            + Double(write1h) * rates.write1h + Double(read) * rates.read + Double(output) * rates.output
-        // US-only inference costs 1.1x on every token category.
-        let geo = (usage["inference_geo"] as? String) == "us" ? 1.1 : 1
-        return micro / 1_000_000 * geo
+        guard let usage else { return nil }
+        do {
+            let input = try tokens(usage["input_tokens"], required: true)
+            let output = try tokens(usage["output_tokens"], required: true)
+            // Fast mode has its own model-specific premium; do not guess it.
+            if let speed = present(usage["speed"]) { guard speed as? String == "standard" else { return nil } }
+            let read = try tokens(usage["cache_read_input_tokens"])
+            let written = try tokens(usage["cache_creation_input_tokens"])
+            var write1h = 0
+            if let breakdown = present(usage["cache_creation"]) {
+                // The TTL breakdown must account for exactly the reported writes.
+                guard let breakdown = breakdown as? [String: Any] else { return nil }
+                write1h = try tokens(breakdown["ephemeral_1h_input_tokens"])
+                guard try tokens(breakdown["ephemeral_5m_input_tokens"]) + write1h == written else { return nil }
+            }
+            let write5m = written - write1h
+            guard let rates = rates(model: model, promptTokens: input + read + written) else { return nil }
+            let micro = Double(input) * rates.input + Double(write5m) * rates.write5m
+                + Double(write1h) * rates.write1h + Double(read) * rates.read + Double(output) * rates.output
+            // US-only inference costs 1.1x on every token category.
+            var geo = 1.0
+            if let region = present(usage["inference_geo"]) {
+                guard let region = region as? String else { return nil }
+                if region == "us" { geo = 1.1 }
+            }
+            return micro / 1_000_000 * geo
+        } catch { return nil }
     }
 
-    private static func tokens(_ value: Any?) -> Int? {
-        guard let number = AIUsageNumber.nonnegative(value), number < 1e12 else { return nil }
+    private struct MalformedUsage: Error {}
+
+    /// JSON null reads as not reported.
+    private static func present(_ value: Any?) -> Any? { value is NSNull ? nil : value }
+
+    /// An absent optional count is zero; a present one must be a whole,
+    /// nonnegative number, otherwise the whole estimate is unavailable.
+    private static func tokens(_ value: Any?, required: Bool = false) throws -> Int {
+        guard let value = present(value) else {
+            if required { throw MalformedUsage() }
+            return 0
+        }
+        guard let number = AIUsageNumber.nonnegative(value), number < 1e12, number.rounded(.towardZero) == number else {
+            throw MalformedUsage()
+        }
         return Int(number)
     }
 }

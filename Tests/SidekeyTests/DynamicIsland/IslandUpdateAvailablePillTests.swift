@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import Sidekey
@@ -16,6 +17,111 @@ import XCTest
 /// Rendering correctness (icons, monospaced label, etc.) is verified in the
 /// manual smoke checklist; tests target wiring and label/affordance contracts.
 final class IslandUpdateAvailablePillTests: XCTestCase {
+    @MainActor
+    func test_pendingPressCannotTurnIntoRestartAfterStageChange() {
+        let bridge = IslandHoverHitBridge()
+        bridge.setEnabled(true); bridge.setContext("fixture")
+        var downloads = 0, installs = 0
+        func content(_ stage: IslandUpdateAvailablePillStage) -> some View {
+            IslandUpdateAvailablePill(displayVersion: "1.0", stage: stage, hoverExpanded: true,
+                onDownload: { downloads += 1 }, onSkip: {}, onInstall: { installs += 1 }, hitBridge: bridge)
+                .frame(width: 70, height: 40)
+        }
+        let host = NSHostingView(rootView: content(.available))
+        let window = NSPanel(contentRect: NSRect(x: -20_000, y: -20_000, width: 70, height: 40),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        host.frame = NSRect(x: 0, y: 0, width: 70, height: 40)
+        func settle() { for _ in 0..<3 { host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) } }
+        settle()
+        let point = host.convert(NSPoint(x: 20, y: 20), to: nil)
+        XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: true))
+        host.rootView = content(.readyToInstall)
+        settle()
+        bridge.mouseUp(at: point, in: window, allowed: true)
+        XCTAssertEqual(downloads, 0); XCTAssertEqual(installs, 0)
+        XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: true))
+        bridge.mouseUp(at: point, in: window, allowed: true)
+        XCTAssertEqual(installs, 1)
+        host.rootView = content(.downloading)
+        settle()
+        XCTAssertFalse(bridge.mouseDown(at: point, in: window, allowed: true))
+    }
+
+    @MainActor
+    func test_render_update_click_states() throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_UPDATE_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_UPDATE_RENDER_DIR for offscreen images")
+        }
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for stage in [IslandUpdateAvailablePillStage.available, .readyToInstall, .downloading] {
+            for disabled in [false, true] {
+                let bridge = IslandHoverHitBridge()
+                bridge.setEnabled(true); bridge.setContext("fixture")
+                let host = NSHostingView(rootView: IslandUpdateAvailablePill(displayVersion: "1.0", stage: stage,
+                    hoverExpanded: true, onDownload: {}, onSkip: {}, onInstall: {}, onLater: {}, hitBridge: bridge)
+                    .disabled(disabled).frame(width: 70, height: 40).background(Color.black))
+                let window = NSPanel(contentRect: NSRect(x: -20_000, y: -20_000, width: 70, height: 40),
+                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false; window.contentView = host
+                defer { window.close() }
+                host.frame = NSRect(x: 0, y: 0, width: 70, height: 40)
+                for _ in 0..<3 { host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+                for pressed in [false, true] {
+                    let point = host.convert(NSPoint(x: 20, y: 20), to: nil)
+                    if pressed {
+                        let captured = bridge.mouseDown(at: point, in: window, allowed: true)
+                        XCTAssertEqual(captured, stage != .downloading && !disabled)
+                        host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                    }
+                    let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                    host.cacheDisplay(in: host.bounds, to: bitmap)
+                    try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                        .write(to: directory.appendingPathComponent("update-\(stage)-\(disabled ? "disabled" : "enabled")-\(pressed ? "pressed" : "rest").png"))
+                }
+                XCTAssertFalse(window.isVisible); XCTAssertFalse(window.isKeyWindow)
+            }
+        }
+    }
+
+    @MainActor
+    func test_updateActionsReceiveFirstMouseWithoutActivatingTheApp() throws {
+        for stage in [IslandUpdateAvailablePillStage.available, .readyToInstall] {
+            for toolsEnabled in [false, true] {
+                let bridge = IslandHoverHitBridge()
+                bridge.setEnabled(toolsEnabled); bridge.setSurface(.result); bridge.setContext("fixture")
+                var primary = 0, secondary = 0
+                let pill = IslandUpdateAvailablePill(displayVersion: "1.0", stage: stage, hoverExpanded: true,
+                    onDownload: { primary += 1 }, onSkip: { secondary += 1 },
+                    onInstall: { primary += 1 }, onLater: { secondary += 1 }, hitBridge: bridge)
+                let host = NSHostingView(rootView: pill.frame(width: 70, height: 40))
+                let window = NSPanel(contentRect: NSRect(x: -20_000, y: -20_000, width: 70, height: 40),
+                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false; window.contentView = host
+                defer { window.close() }
+                host.frame = NSRect(x: 0, y: 0, width: 70, height: 40)
+                for _ in 0..<3 { host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+                let first = host.convert(NSPoint(x: 20, y: 20), to: nil)
+                let second = host.convert(NSPoint(x: 50, y: 20), to: nil)
+                let gap = host.convert(NSPoint(x: 35, y: 20), to: nil)
+                XCTAssertFalse(bridge.mouseDown(at: gap, in: window, allowed: true))
+                XCTAssertTrue(bridge.mouseDown(at: first, in: window, allowed: true))
+                bridge.mouseUp(at: first, in: window, allowed: true)
+                bridge.mouseUp(at: first, in: window, allowed: true)
+                XCTAssertEqual(primary, 1)
+                XCTAssertTrue(bridge.mouseDown(at: second, in: window, allowed: true))
+                bridge.mouseUp(at: second, in: window, allowed: true)
+                XCTAssertEqual(secondary, 1)
+                XCTAssertTrue(bridge.mouseDown(at: first, in: window, allowed: true))
+                bridge.mouseDragged(at: second, in: window, allowed: true)
+                bridge.mouseUp(at: second, in: window, allowed: true)
+                XCTAssertEqual(primary, 1); XCTAssertEqual(secondary, 1)
+                XCTAssertFalse(window.isVisible); XCTAssertFalse(window.isKeyWindow)
+            }
+        }
+    }
 
     // MARK: - .available stage label and affordances
 

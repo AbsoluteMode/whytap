@@ -82,11 +82,7 @@ struct NativeAgentHTTP {
         case "provider_overloaded", "provider_unavailable", "rate_limit_exceeded":
             message = "The selected provider is unavailable or busy. Try again later."
         default:
-            // A known native format code can help when the gateway type is
-            // absent/unmapped. Arbitrary provider codes are never surfaced.
-            if metadata?["provider_code"] as? String == "wrong_api_format" {
-                message = "The provider rejected the conversation format (wrong_api_format)."
-            } else { message = nil }
+            message = nil
         }
         if let message { return .message(message) }
         switch status {

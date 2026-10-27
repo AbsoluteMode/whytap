@@ -343,7 +343,7 @@ final class NativeAgentTests: XCTestCase {
             let function = try XCTUnwrap(wire["function"] as? [String: Any])
             let arguments = try XCTUnwrap(function["arguments"] as? String)
             XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(arguments.utf8)) as? NSDictionary, ["query": "weather"] as NSDictionary)
-            if !objectArguments { XCTAssertEqual(arguments, originalArguments, "Preserve an already valid argument string exactly") }
+            if !objectArguments { XCTAssertEqual(arguments, originalArguments, "Preserve an already valid argument string value exactly") }
             XCTAssertEqual(messages[3]["role"] as? String, "tool")
             XCTAssertEqual(messages[3]["tool_call_id"] as? String, "call-exact")
         }
@@ -377,19 +377,19 @@ final class NativeAgentTests: XCTestCase {
         }
     }
 
-    func testErrorBodyLimitAndNativeFormatCodeDoNotExposeRawContent() async throws {
+    func testErrorBodyLimitDoesNotExposeRawContent() async throws {
         for oversized in [false, true] {
             let (_, _, http) = try fixture()
             StubURLProtocol.handler = { _ in (400, [:], try! JSONSerialization.data(withJSONObject: ["error": [
                 "message": String(repeating: "SYNTHETIC_PRIVATE_CONTENT", count: oversized ? 2000 : 1),
-                "metadata": ["provider_code": "wrong_api_format"]]])) }
+                "metadata": ["error_type": "invalid_request", "provider_code": "SYNTHETIC_PRIVATE_CONTENT"]]])) }
             do {
                 _ = try await http.json(URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!))
                 XCTFail("Expected error")
             } catch {
                 XCTAssertFalse(error.localizedDescription.contains("SYNTHETIC_PRIVATE_CONTENT"))
                 if oversized { XCTAssertEqual(error.localizedDescription, "The service returned HTTP 400. Try again.") }
-                else { XCTAssertTrue(error.localizedDescription.contains("wrong_api_format")) }
+                else { XCTAssertTrue(error.localizedDescription.contains("invalid_request")) }
             }
         }
     }

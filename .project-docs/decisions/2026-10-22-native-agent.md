@@ -67,12 +67,14 @@ related: [../project.md, 2026-10-22-agent-answers-and-screen.md]
 ## Provider continuations
 
 OpenRouter tool continuations replay a canonical assistant message. Tool IDs
-and already-valid JSON argument strings are preserved exactly; tolerated
+and already-valid JSON argument string values are preserved exactly; tolerated
 object arguments are encoded as JSON strings before replay. Response-only
 extensions such as tool-call indexes are omitted. Ordered `reasoning_details`
 are retained without alteration; plaintext reasoning (including its legacy
 alias) is used only when those details are absent, avoiding duplicate forms.
-OpenAI Responses and direct Anthropic native items remain unchanged.
+OpenAI Responses and direct Anthropic native items remain unchanged. The common
+NativeAgentModel also serves Meeting Assistant, so these OpenRouter changes
+apply to its route as well; its tool access and capture policy do not change.
 
 OpenRouter error responses are read only into bounded transient memory
 (at most 16 KiB for a non-success HTTP response). Fixed, allowlisted error

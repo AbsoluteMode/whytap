@@ -214,7 +214,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
   raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
-  reported usage is recorded. No provider fallback or model substitution. Connect checks only
+  reported usage is recorded. The shared model loop applies the same handling
+  to Meeting Assistant's OpenRouter route. No provider fallback or model substitution. Connect checks only
   local key availability, model selection and writable workspace; it does not
   prove the provider accepts the key. Existing connected OpenCode users migrate
   to native without changing the route/key; disconnected users stay disconnected.

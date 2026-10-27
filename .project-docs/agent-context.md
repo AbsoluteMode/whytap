@@ -277,7 +277,14 @@ Meeting Assistant Beta:
   Database declarations remain unavailable metadata in this Beta. Explicitly
   enabled listening sends system audio (not microphone) to the selected realtime route,
   retains only bounded in-memory finals and extracts questions through the chosen
-  answer model. No audio, transcript, images or conversations are written by this
+  answer model. An optional, initially unset Meeting Assistant detector route
+  (Decision: OpenRouter typesafe/jev-1.14 or OpenAI gpt-6-luna, the measured models)
+  checks only unchecked finals plus 500 characters of context and the last three
+  offered questions every 10 s; the answer model runs only at needs_help >= 0.5 and
+  already_handled < 0.5. A malformed verdict warns and keeps listening; a failed
+  detector stops listening visibly, never falling back to the answer model. Unset
+  keeps the previous 4 s extraction. WHY: docs/decisions/2026-10-27-meeting-assistant-detector.md
+  No audio, transcript, images or conversations are written by this
   feature. Space changes/edits cancel work and revalidate context; closing answers
   keeps listening. Sleep/quit stop audio and monitoring; wake rechecks the current
   meeting without resuming capture. Removing a required model stops capture. Protection recreates

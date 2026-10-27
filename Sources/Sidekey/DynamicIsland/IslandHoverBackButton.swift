@@ -21,10 +21,7 @@ extension EnvironmentValues {
 /// identifies the current page so a press cannot navigate a replacement page.
 struct IslandHoverBackButton: View {
     let destination: String
-    var title: String? = nil
     var accessibilityLabel = "Back to tools"
-    var width: CGFloat = 32
-    var height: CGFloat = 26
     let action: () -> Void
     @Environment(\.islandHoverNavigation) private var navigation
     @Environment(\.isEnabled) private var enabled
@@ -43,13 +40,10 @@ struct IslandHoverBackButton: View {
 
     private var button: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "chevron.left")
-                if let title { Text(title).lineLimit(1) }
-            }
-            .font(.system(size: 11, weight: .semibold))
-            .frame(width: width, height: height)
-            .contentShape(Rectangle())
+            Image(systemName: "chevron.left")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 32, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(IslandHoverBackButtonStyle(focused: focused))
         .focused($focused)

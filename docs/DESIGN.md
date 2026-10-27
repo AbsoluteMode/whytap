@@ -1073,10 +1073,13 @@ existing window-level first-mouse dispatcher, while keeping native Button
 keyboard and accessibility actions. Why: an inactive, nonactivating island can
 drop a SwiftUI first click; enlarging only the drawn arrow cannot repair it.
 
-Icon targets are 32pt wide and 26pt high (24pt in the existing Notify/Display
-rows). Monitor uses its full existing 88pt navigation slot; Notify uses 68pt.
-The header heights and Monitor's equal side slots stay fixed. Why: padding must
-be clickable without moving adjacent controls or uncentering the heading.
+The user confirmed on 2026-10-27 that every Back should be the same compact,
+arrow-only button, without visible Tools or Dashboards text. Every target is
+32pt wide and 24pt high, fitting the smallest existing header row. Monitor's
+88pt and Notify's 68pt side slots remain layout reservations around the compact
+button; their empty space is not clickable. Header heights and Monitor's title
+centering stay fixed. Contextual accessibility labels still name the destination.
+Why: navigation must look consistent without shifting neighboring controls.
 
 The full target has a 6% white resting fill, 15% hover fill, 23% pressed fill
 and a separate 1.5pt focus outline. Disabled buttons use 42% opacity and no

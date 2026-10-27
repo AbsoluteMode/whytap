@@ -86,6 +86,8 @@ struct NativeAgentModel {
         let cost = options.openCodeProvider == .openRouter ? AIUsageNumber.nonnegative(usage?["cost"]) : nil
         usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
                                     currency: .usd, amount: cost, basis: cost == nil ? .unavailable : .reported))
+        if options.openCodeProvider == .openRouter,
+           let error = NativeAgentHTTP.openRouterError(in: response) { throw error }
         return try accept(response)
     }
 
@@ -124,12 +126,34 @@ struct NativeAgentModel {
                   let message = choice["message"] as? [String: Any] else {
                 throw NativeAgentError.message("The model did not finish its response. Try a shorter request.")
             }
-            messages.append(message)
             text = message["content"] as? String ?? message["refusal"] as? String ?? ""
-            for item in message["tool_calls"] as? [[String: Any]] ?? [] {
+            let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
+            for item in rawCalls {
                 let function = item["function"] as? [String: Any] ?? [:]
                 calls.append(try call(id: item["id"], name: function["name"], arguments: function["arguments"]))
             }
+            // Replay the request contract, not arbitrary response extensions.
+            // In particular call() tolerates object arguments, but the next
+            // request must encode them as a JSON string. Keep opaque reasoning
+            // details intact and avoid also echoing their plaintext duplicate.
+            // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Provider continuations)
+            var replay: [String: Any] = ["role": "assistant", "content": message["content"] ?? NSNull()]
+            if !calls.isEmpty {
+                replay["tool_calls"] = try zip(rawCalls, calls).map { original, call -> [String: Any] in
+                    let function = original["function"] as? [String: Any]
+                    let arguments: String
+                    if let original = function?["arguments"] as? String { arguments = original }
+                    else { arguments = String(decoding: try JSONSerialization.data(withJSONObject: call.arguments), as: UTF8.self) }
+                    return ["id": call.id, "type": "function", "function": ["name": call.name,
+                        "arguments": arguments]]
+                }
+            }
+            if let details = message["reasoning_details"] as? [[String: Any]], !details.isEmpty {
+                replay["reasoning_details"] = details
+            } else if let reasoning = message["reasoning"] as? String ?? message["reasoning_content"] as? String {
+                replay["reasoning"] = reasoning
+            }
+            messages.append(replay)
         }
         guard calls.count <= 12, Set(calls.map(\.id)).count == calls.count else {
             throw NativeAgentError.message("The model requested too many tools or repeated a call ID.")

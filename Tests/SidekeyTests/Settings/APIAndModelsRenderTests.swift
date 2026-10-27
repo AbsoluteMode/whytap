@@ -7,6 +7,37 @@ import XCTest
 /// `EXODIA_APIMODELS_RENDER_DIR` is set. Every network path is a stub.
 @MainActor
 final class APIAndModelsRenderTests: XCTestCase {
+    func test_render_cost_price_clarity() async throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
+        }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let now = Date()
+        let usd = AIUsageContext(feature: .agent, account: .openRouter, model: "example/model")
+        let credits = AIUsageContext(feature: .dropFast, account: .elevenLabs, model: "scribe_v2_realtime")
+        let known = [AIUsageEvent(createdAt: now, context: usd, currency: .usd, amount: 6.22, basis: .estimated),
+                     AIUsageEvent(createdAt: now, context: credits, currency: .elevenLabsCredits, amount: 1776.5, basis: .estimated)]
+        let unknown = [AIUsageEvent(createdAt: now, context: usd, currency: .usd, amount: nil, basis: .unavailable),
+                       AIUsageEvent(createdAt: now, context: credits, currency: .elevenLabsCredits, amount: nil, basis: .unavailable)]
+        for (state, events) in [("partial", known + unknown), ("complete", known), ("unavailable", unknown)] {
+            let store = AIUsageStore(url: directory.appendingPathComponent("clarity-\(state).sqlite"))
+            for event in events { try await store.insert(event) }
+            let model = AIUsageCostsViewModel(store: store, loadPrices: { .init(events: $0) })
+            await model.load(AIUsagePeriod.month.interval(now: now, start: now, end: now)!)
+            for dark in [false, true] {
+                for width in [390.0, 600.0, 900.0] {
+                    try await render(AIUsageCostsView(model: model, now: { now }),
+                        size: NSSize(width: width, height: 520), dark: dark,
+                        to: directory.appendingPathComponent("cost-clarity-\(state)-\(dark ? "dark" : "light")-\(Int(width)).png"))
+                }
+                try await render(AIUsageModelsPopover(row: .init(title: "Drop Fast", events: events.filter { $0.currency == .elevenLabsCredits })),
+                    size: NSSize(width: 422, height: 310), dark: dark,
+                    to: directory.appendingPathComponent("cost-clarity-model-\(state)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     func test_render_smart_editor_pass() async throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
             throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")

@@ -159,7 +159,7 @@ final class SonioxUsagePricesTests: XCTestCase {
         let interval = DateInterval(start: original.createdAt.addingTimeInterval(-1), duration: 86400)
         await model.load(interval)
         XCTAssertEqual(model.events, [original]); XCTAssertNotNil(model.pricingMessage)
-        XCTAssertTrue(AIUsagePrice(events: model.events).text.hasPrefix("≈ "))
+        XCTAssertEqual(AIUsagePrice(events: model.events).lines.first?.detail, "Estimated")
         available = true
         await model.load(interval)
         XCTAssertEqual(model.events.first?.amount, 0.001); XCTAssertEqual(model.events.first?.basis, .reported)

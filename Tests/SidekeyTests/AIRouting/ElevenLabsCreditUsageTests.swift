@@ -164,7 +164,7 @@ final class ElevenLabsCreditUsageTests: XCTestCase {
         await model.load(interval)
         XCTAssertEqual(model.events.first?.amount, 18)
         XCTAssertEqual(model.pricedEvents.first?.amount, 18)
-        XCTAssertTrue(AIUsagePrice(events: model.pricedEvents).text.hasPrefix("≈ "))
+        XCTAssertEqual(AIUsagePrice(events: model.pricedEvents).lines.first?.detail, "Estimated")
         let saved = try await store.events(from: interval.start, to: interval.end)
         XCTAssertEqual(saved.count, 1)
         XCTAssertEqual(saved.first?.id, event.id)

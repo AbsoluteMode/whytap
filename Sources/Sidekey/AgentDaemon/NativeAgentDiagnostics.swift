@@ -46,7 +46,7 @@ enum NativeAgentDiagnostics {
     }
     struct Shape: Codable {
         var messages = 0, toolCalls = 0, toolResults = 0, unmatchedResults = 0, missingResults = 0
-        var stringArguments = 0, objectArguments = 0, otherArguments = 0, nullContent = 0
+        var stringArguments = 0, objectArguments = 0, otherArguments = 0, nullContent = 0, emptyContent = 0
         var reasoningDetails = 0, plaintextReasoning = 0, reasoningAlias = 0, nativeThinking = 0
         var system = 0, user = 0, assistant = 0, otherRoles = 0
         var tools: [Tool] = []
@@ -63,6 +63,7 @@ enum NativeAgentDiagnostics {
                 default: otherRoles += 1
                 }
                 if message["content"] is NSNull { nullContent += 1 }
+                if let content = message["content"] as? String, content.isEmpty { emptyContent += 1 }
                 if let details = message["reasoning_details"] as? [Any] { reasoningDetails += details.count }
                 if message["reasoning"] is String { plaintextReasoning += 1 }
                 if message["reasoning_content"] is String { reasoningAlias += 1 }

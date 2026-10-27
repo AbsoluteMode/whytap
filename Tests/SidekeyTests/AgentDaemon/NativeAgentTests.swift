@@ -531,6 +531,9 @@ final class NativeAgentTests: XCTestCase {
     }
 
     func testDiagnosticsPairNativeToolIDsWithoutLoggingTheirValues() {
+        let content = NativeAgentDiagnostics.Shape(messages: [["content": ""], ["content": NSNull()], ["content": "PRIVATE"]])
+        XCTAssertEqual(content.emptyContent, 1)
+        XCTAssertEqual(content.nullContent, 1)
         let fixtures: [[[String: Any]]] = [
             [["role": "assistant", "tool_calls": [["id": "PRIVATE", "function": ["name": "read_file", "arguments": "{}"]]]],
              ["role": "tool", "tool_call_id": "PRIVATE", "content": "PRIVATE"]],

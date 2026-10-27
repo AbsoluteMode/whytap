@@ -778,6 +778,12 @@ Update flow (download-on-action):
   crashes, process kills or power loss. A final Sparkle delegate guard rechecks
   activity before an app-initiated relaunch. Feed = GitHub Releases
   (`BuildConfig.appcastURL`).
+  Update/Skip and Restart/Later use measured NSWindow down/up dispatch for
+  first mouse, including alongside a different open hover tool. Native buttons
+  retain keyboard/accessibility activation and hover/pressed/focus feedback.
+  A download click publishes the spinner immediately, before Sparkle reports
+  its first bytes; repeated or stale clicks do not repeat the action. Moving
+  off the button or changing its stage/build cancels the captured press.
   Community archives use our independent Sparkle Ed25519 signature. The app
   is signed with the Developer ID certificate of the
   team in Resources/developer-id-team.txt (team designated requirement and

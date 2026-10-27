@@ -2,9 +2,15 @@ import AppKit
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, meetingAssistant }
+    enum Surface: Hashable { case tile, result, meetingAssistant, update }
+    enum UpdateAction: Hashable { case download, skip, install, later }
+    private enum Control: Hashable { case tool(HoverTool), update(UpdateAction) }
     let surface: Surface
-    let tool: HoverTool
+    private let control: Control
+    var tool: HoverTool? { if case .tool(let tool) = control { return tool }; return nil }
+
+    init(surface: Surface, tool: HoverTool) { self.surface = surface; control = .tool(tool) }
+    init(update action: UpdateAction) { surface = .update; control = .update(action) }
 }
 
 struct IslandHoverHitSnapshot: Equatable {
@@ -129,7 +135,9 @@ final class IslandHoverHitBridge: ObservableObject {
     private func snapshots(in window: NSWindow) -> [IslandHoverHitSnapshot] {
         targets = targets.filter { $0.value.view != nil }
         return targets.values.compactMap { entry in
-            guard let view = entry.view, view.targetID.surface == activeSurface || view.targetID.surface == .meetingAssistant,
+            guard let view = entry.view,
+                  enabled || view.targetID.surface == .update,
+                  view.targetID.surface == activeSurface || view.targetID.surface == .meetingAssistant || view.targetID.surface == .update,
                   view.targetContext == context,
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
                   let region = regions[view.targetID.surface]?.view, region.surface == view.targetID.surface,
@@ -148,18 +156,18 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool) -> Bool {
-        let consumed = tracking.begin(at: point, targets: snapshots(in: window), enabled: enabled && allowed)
+        let consumed = tracking.begin(at: point, targets: snapshots(in: window), enabled: allowed)
         pressedID = tracking.captured?.id
         return consumed
     }
 
     func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool) {
-        tracking.move(at: point, targets: snapshots(in: window), enabled: enabled && allowed)
+        tracking.move(at: point, targets: snapshots(in: window), enabled: allowed)
         pressedID = tracking.captured?.id
     }
 
     func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool) {
-        let owner = tracking.end(at: point, targets: snapshots(in: window), enabled: enabled && allowed)
+        let owner = tracking.end(at: point, targets: snapshots(in: window), enabled: allowed)
         let action = owner.flatMap { targets[$0]?.view?.activate }
         pressedID = nil
         action?()

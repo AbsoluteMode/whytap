@@ -410,6 +410,10 @@ final class UpdateController: NSObject, ObservableObject {
                       case .available = self.appState?.updateAvailable?.stage,
                       !self.downloadRequested else { return }
                 self.downloadRequested = true
+                // Publish feedback before Sparkle reports its first response/bytes.
+                if let current = self.appState?.updateAvailable {
+                    self.appState?.updateAvailable = current.with(stage: .downloading(fractionCompleted: 0))
+                }
                 self.downloadAction()
             }),
             dismiss: { [weak self] in

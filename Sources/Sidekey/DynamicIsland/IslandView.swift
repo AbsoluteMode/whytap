@@ -984,6 +984,7 @@ struct IslandView: View {
                         : nil,
                     meetingRecording: meetingRecordingSnapshot,
                     updateAvailable: appState.updateAvailable,
+                    updateHitBridge: hoverHitBridge,
                     justUpdatedVersion: appState.justUpdatedVersion,
                     onJustUpdatedDismiss: {
                         appState.updateController?.dismissJustInstalledIndicator()
@@ -1856,6 +1857,7 @@ private struct IslandWrapRow: View {
     let meetingSuggestionDeadline: Date?
     let meetingRecording: IslandMeetingRecordingSnapshot?
     let updateAvailable: PendingUpdate?
+    let updateHitBridge: IslandHoverHitBridge
     /// Display version of an update that just applied on the previous launch
     /// (variant A). When non-nil the transient "Updated" pill occupies the same
     /// P1 slot as `updateAvailable` (the two are mutually exclusive — one shows
@@ -2072,8 +2074,10 @@ private struct IslandWrapRow: View {
                         onSkip: { updateAvailable.skip() },
                         onInstall: { updateAvailable.install() },
                         onLater: { updateAvailable.dismiss() },
-                        restartDeferralReason: updateAvailable.restartDeferralReason
+                        restartDeferralReason: updateAvailable.restartDeferralReason,
+                        hitBridge: updateHitBridge
                     )
+                    .id(updateAvailable.buildVersion)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
 
@@ -2113,6 +2117,7 @@ private struct IslandCompactRow: View {
     let meetingSuggestionDeadline: Date?
     let meetingRecording: IslandMeetingRecordingSnapshot?
     let updateAvailable: PendingUpdate?
+    let updateHitBridge: IslandHoverHitBridge
     let justUpdatedVersion: String?
     let onJustUpdatedDismiss: () -> Void
     let dropModeStatus: TranscriptionMode?
@@ -2134,6 +2139,7 @@ private struct IslandCompactRow: View {
             meetingSuggestionDeadline: meetingSuggestionDeadline,
             meetingRecording: meetingRecording,
             updateAvailable: updateAvailable,
+            updateHitBridge: updateHitBridge,
             justUpdatedVersion: justUpdatedVersion,
             onJustUpdatedDismiss: onJustUpdatedDismiss,
             dropModeStatus: dropModeStatus,

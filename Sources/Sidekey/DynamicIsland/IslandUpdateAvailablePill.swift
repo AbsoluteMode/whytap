@@ -86,6 +86,7 @@ struct IslandUpdateAvailablePill: View {
     var onInstall: () -> Void = {}
     var onLater: () -> Void = {}
     var restartDeferralReason: String? = nil
+    var hitBridge: IslandHoverHitBridge? = nil
 
     // MARK: - Testable computed properties
 
@@ -111,6 +112,15 @@ struct IslandUpdateAvailablePill: View {
     }
 
     var body: some View {
+        Group {
+            if let hitBridge {
+                content.islandHoverHitRegion(bridge: hitBridge, surface: .update)
+            } else { content }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if showsDownloadAffordance {
             expandedDownloadBody
         } else if showsRestartAffordance {
@@ -181,6 +191,7 @@ struct IslandUpdateAvailablePill: View {
                 label: "Update",
                 systemImage: IslandUpdateAvailablePillStyle.downloadActionSystemImage,
                 role: .primary,
+                hitBridge: hitBridge, hitAction: .download,
                 action: {
                     onDownload()
                 }
@@ -189,6 +200,7 @@ struct IslandUpdateAvailablePill: View {
                 label: "Skip this version",
                 systemImage: IslandUpdateAvailablePillStyle.skipActionSystemImage,
                 role: .secondary,
+                hitBridge: hitBridge, hitAction: .skip,
                 action: {
                     onSkip()
                 }
@@ -203,6 +215,7 @@ struct IslandUpdateAvailablePill: View {
                 label: "Restart to update",
                 systemImage: IslandUpdateAvailablePillStyle.restartActionSystemImage,
                 role: .primary,
+                hitBridge: hitBridge, hitAction: .install,
                 action: onInstall
             )
             .help(restartDeferralReason ?? "Restart to apply the downloaded update")
@@ -210,6 +223,7 @@ struct IslandUpdateAvailablePill: View {
                 label: "Later",
                 systemImage: IslandUpdateAvailablePillStyle.skipActionSystemImage,
                 role: .secondary,
+                hitBridge: hitBridge, hitAction: .later,
                 action: onLater
             )
         }
@@ -222,24 +236,34 @@ struct IslandUpdateAvailablePill: View {
 /// hover-expanded layout. Sized to fit two side-by-side actions inside the
 /// 70pt right band.
 ///
-/// Click handling goes through `.onTapGesture` instead of `Button`
-/// because `IslandPanel` is a non-key, nonactivating NSPanel; SwiftUI
-/// `Button(action:)` does not reliably receive `mouseDown` events in
-/// that context on macOS 15 — see the equivalent comment in
-/// `IslandView.swift` for context on when
-/// `.onTapGesture` vs `Button` is appropriate in this panel.
+/// Native window dispatch receives first mouse while the app is inactive.
+/// Button retains keyboard and accessibility activation; one owned mouse
+/// sequence bypasses the unreliable inactive SwiftUI gesture bridge.
+// WHY: docs/DESIGN.md — Update actions and first mouse.
 private struct IslandUpdatePillAction: View {
     enum Role { case primary, secondary }
 
     let label: String
     let systemImage: String
     let role: Role
+    let hitBridge: IslandHoverHitBridge?
+    let hitAction: IslandHoverHitTargetID.UpdateAction
     let action: () -> Void
-
-    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
-        Image(systemName: systemImage)
+        Group {
+            if let hitBridge, enabled {
+                button.islandHoverHitTarget(bridge: hitBridge, id: .init(update: hitAction),
+                    context: hitBridge.context, action: action)
+            } else { button }
+        }
+    }
+
+    private var button: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
             .font(.system(
                 size: iconFontSize,
                 weight: .bold,
@@ -254,14 +278,10 @@ private struct IslandUpdatePillAction: View {
                 width: IslandUpdateAvailablePillStyle.actionButtonSize,
                 height: IslandUpdateAvailablePillStyle.actionButtonSize
             )
-            .background(actionBackground)
-            .contentShape(Circle())
-            .scaleEffect(hovering ? 1.06 : 1)
-            .animation(.easeOut(duration: 0.12), value: hovering)
-            .onHover { hovering = $0 }
-            .onTapGesture(perform: action)
-            .accessibilityLabel(label)
-            .accessibilityAddTraits(.isButton)
+        }
+        .buttonStyle(IslandUpdatePillActionStyle(primary: role == .primary, focused: focused))
+        .focused($focused)
+        .accessibilityLabel(label)
     }
 
     private var iconFontSize: CGFloat {
@@ -273,25 +293,24 @@ private struct IslandUpdatePillAction: View {
         }
     }
 
-    @ViewBuilder
-    private var actionBackground: some View {
-        let fillOpacity: Double = {
-            switch role {
-            case .primary:
-                hovering ? 0.24 : 0.18
-            case .secondary:
-                hovering ? 0.15 : 0.08
-            }
-        }()
+}
 
-        Circle()
-            .fill(.white.opacity(fillOpacity))
-            .overlay {
-                Circle()
-                    .stroke(
-                        .white.opacity(role == .primary ? 0.28 : 0.18),
-                        lineWidth: IslandUpdateAvailablePillStyle.actionStrokeLineWidth
-                    )
-            }
+private struct IslandUpdatePillActionStyle: ButtonStyle {
+    let primary: Bool
+    let focused: Bool
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandHoverNativePressed) private var nativePressed
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Circle().fill(.white.opacity(enabled
+                ? ((configuration.isPressed || nativePressed) ? 0.36 : hovered ? 0.26 : primary ? 0.18 : 0.08) : 0.04)))
+            .overlay(Circle().strokeBorder(.white.opacity(enabled && focused ? 0.9 : primary ? 0.28 : 0.18),
+                lineWidth: enabled && focused ? 1.5 : IslandUpdateAvailablePillStyle.actionStrokeLineWidth))
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : 0.4)
+            .onHover { hovered = enabled && $0 }
+            .onChange(of: enabled) { _, value in if !value { hovered = false } }
     }
 }

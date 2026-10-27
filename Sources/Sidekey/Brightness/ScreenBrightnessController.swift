@@ -54,8 +54,8 @@ protocol ScreenBrightnessDevice {
 /// Hover Display: the island display's backlight plus an Extra switch.
 /// Extra is a fixed EDR boost of the display's transfer table on top of whatever the
 /// backlight is, and it never writes the backlight itself. The first manual decrease only
-/// ends Extra; the next adjustment lowers the backlight. Outside decreases also end Extra,
-/// including while the strip is closed. Increasing the backlight
+/// ends Extra; the next adjustment lowers the backlight. External changes keep Extra,
+/// including automatic brightness and battery dimming while the strip is closed. Increasing the backlight
 /// does not enable Extra. The switch, heat, a display change or lost EDR support, another
 /// app adjusting the display's table, a boost failure and quit also end it.
 // WHY: .project-docs/decisions/2026-10-18-brightness-tool.md
@@ -118,7 +118,7 @@ final class ScreenBrightnessController: ObservableObject {
         let workspace = workspaceCenter
         observe(center, NSApplication.didChangeScreenParametersNotification) { $0.refresh() }
         observe(center, IslandScreenResolver.selectionDidChangeNotification) { $0.refresh() }
-        // Wake reconciles the backlight too; a lower level ends Extra.
+        // Wake reconciles the backlight too, without treating macOS dimming as a manual action.
         observe(workspace, NSWorkspace.didWakeNotification) { $0.refresh() }
         observe(workspace, NSWorkspace.screensDidWakeNotification) { $0.refresh() }
         observe(center, ProcessInfo.thermalStateDidChangeNotification) { $0.thermalStateDidChange() }
@@ -168,9 +168,9 @@ final class ScreenBrightnessController: ObservableObject {
         let current = ScreenBrightnessScale.clampedLevel(hardware)
         let settling = isSettling(target.id)
         if isExtraOn {
-            if !settling, current < level - Self.levelReadbackTolerance {
-                endExtra()
-            } else if target.supportsExtra {
+            // Readback has no intent: automatic dimming and native manual controls look
+            // identical. Only our explicit slider/key actions consume Extra.
+            if target.supportsExtra {
                 boost?.refresh()
             } else {
                 endExtra()
@@ -269,8 +269,8 @@ final class ScreenBrightnessController: ObservableObject {
         lastWrite.map { $0.display == id && now().timeIntervalSince($0.date) < Self.writeSettleInterval } ?? false
     }
 
-    /// Extra must detect native brightness keys, auto-brightness and idle dimming even
-    /// with the strip closed. Stop polling once neither Extra nor a strip needs it.
+    /// Extra follows backlight and display support even with the strip closed.
+    /// Stop polling once neither Extra nor a strip needs it.
     private func updatePolling() {
         guard viewers > 0 || isExtraOn else {
             timer?.invalidate()

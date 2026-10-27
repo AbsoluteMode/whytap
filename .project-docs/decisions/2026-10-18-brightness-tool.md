@@ -2,12 +2,15 @@
 id: brightness-tool-2026-10-18
 type: decision
 title: Brightness is a catalog hover tool with a backlight slider and an Extra switch
-summary: A short inline strip sets the island display's backlight, offers an Extra switch that scales the display's transfer table into the EDR headroom, as Vivid does, until switched off or the backlight decreases, with no battery charge or runtime indicator; optional Brightness keys show the strip instead of the macOS indicator. Saved and default layouts are unchanged.
+summary: A short inline strip sets the island display's backlight and offers a fixed Extra EDR boost that survives automatic and external backlight changes; an explicit Whytap decrease or switch disables it, alongside existing display, thermal and boost-failure guards. Optional Brightness keys show the strip instead of the macOS indicator. Saved and default layouts are unchanged.
 status: confirmed
 tags: [hover, brightness, edr, gamma, battery, display, settings]
 canonical_for: [brightness-tool]
-verified_at: 2026-10-21
+verified_at: 2026-10-27
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-27 the user reported Extra turning off during ordinary work on a second Mac after an apparent one-step backlight decrease, then explicitly chose to keep Extra through automatic macOS brightness changes and switch it off only on a manual decrease. This supersedes the automatic-decrease lifetime rule of 2026-10-20.
+    confirmed_at: 2026-10-27
   - type: user-confirmed
     reference: On 2026-10-21 the user requested removal of the battery indicator because it repeatedly displayed apparently random values. This supersedes the earlier battery charge and runtime requirements.
     confirmed_at: 2026-10-21
@@ -194,9 +197,11 @@ another app stays, or restores every display's ColorSync table if
 Quartz refuses that write; Quartz also gives the displays their own tables
 back when the process exits.
 
-**Lifetime.** Extra is a fixed boost on top of the current backlight. Any
-backlight decrease ends it, including automatic brightness and idle dimming.
-The first manual slider decrease, accessibility decrement or intercepted
+**Lifetime.** Extra is a fixed boost on top of the current backlight. Automatic
+brightness, battery dimming, idle dimming and other external backlight changes
+keep it enabled. Readback provides the level, not the user's intent, so native
+macOS keys and controls also keep Extra when Brightness keys interception is off.
+The first manual Whytap slider decrease, accessibility decrement or intercepted
 brightness-down press only ends Extra without writing the backlight or changing
 the slider. The whole first drag or held key press is consumed; the next
 adjustment lowers the backlight normally. Increasing or leaving the level
@@ -205,8 +210,8 @@ with the strip closed. A write's 0.75-second settle window and Float round-off
 (up to 0.000001) are ignored. Enabling Extra reads a fresh baseline, so a
 decrease made before enabling it does not end it on the next poll. Increasing
 brightness never turns Extra back on. Closing the strip, sleep, a session
-switch and loss of current headroom alone do not end it; a lower backlight
-read on wake does. It also ends when the user switches it off in the strip or
+switch, a lower backlight read on wake and loss of current headroom alone do not
+end it. It also ends when the user switches it off in the strip or
 in Settings, and on a serious
 or critical thermal state (the cooling notice, which also blocks turning it
 on), a display change, a display that no longer offers EDR or cannot be read,
@@ -309,10 +314,11 @@ Brightness keys need the Accessibility permission the hotkeys use.
   Mac's own keys but ended with the strip's slider. Without a level to restore,
   there is no restore that can fail and no write of a backlight level the user
   did not choose. On 2026-10-20 the user changed the lifetime rule to end Extra
-  on any decrease, including automatic brightness and idle dimming. The fixed
-  boost still never writes or restores a backlight level itself. Polling while
-  Extra is active makes this work when the strip is closed, without a key tap
-  or an additional permission.
+  on any decrease. On 2026-10-27 the user replaced that rule after unwanted
+  shutdowns on the second Mac: automatic and other external changes now keep
+  Extra, while Whytap's explicit slider and intercepted keys still end it.
+  Polling follows the current level and display support with the strip closed;
+  no new event tap, permission or write to the backlight is needed.
 - Catalog-only follows the Toolbox contract: a new tool does not replace the
   user's selections or change the default layout.
 - The table follows the user's report that Vivid, which scales the table, does
@@ -406,7 +412,7 @@ Brightness keys need the Accessibility permission the hotkeys use.
 - The Settings pane has no description above its card so every state fits the
   Toolbox area without the window changing height.
 - The backlight is polled while the strip is visible or Extra is on, so an
-  outside decrease ends Extra with the strip closed. Otherwise there is no
+  outside change updates its level with the strip closed while Extra stays on. Otherwise there is no
   backlight timer. With Extra on, the trigger presents five frames a second
   with a table read after each. Battery sampling was removed on 2026-10-21.
 - Historical battery rationale (superseded on 2026-10-21): the battery line follows the user's request of 2026-10-19: the charge, the
@@ -606,7 +612,10 @@ and real display brightness was not changed during this validation.
   level when it ends (the first design): replaced by the user's fixed boost
   on 2026-10-19. Ending it on a decrease was requested again on 2026-10-20.
 - Ending Extra on sleep or a session switch alone (the first design): frames
-  pause instead; a lower backlight read on wake now ends Extra.
+  pause instead; a lower backlight read on wake also keeps Extra.
+- Ending Extra on every external backlight decrease (2026-10-20): superseded
+  by the user's manual-only choice on 2026-10-27 because automatic dimming
+  unexpectedly switched Extra off during ordinary work.
 - Brightness in the default slots (an earlier draft): it would change new
   installations' layout; the catalog and search cover discovery.
 - A full-screen multiply overlay (the Extra of builds up to 1472): WindowServer
@@ -682,11 +691,12 @@ the light average at the next minute's reading. The 2026-10-20 lifetime
 correction is pending a live check: first lower the slider or use an intercepted
 brightness-down press with Extra on; Extra should turn off while the whole
 drag or held press leaves the slider unchanged. A second action lowers it.
-Native macOS brightness changes with the strip closed should still turn Extra
-off after a decrease, and increasing brightness should leave it off.
-Automatic brightness and idle dimming should
-also end Extra if they lower the backlight. Sleep or a session switch alone
-keep it unless the backlight decreases. A live Extra check brightens the
+The 2026-10-27 lifetime correction supersedes the external-change checks:
+native macOS brightness changes with the strip closed, automatic brightness,
+battery dimming and idle dimming should now keep Extra enabled. Sleep or a
+session switch and a lower reading on wake should also keep it. The next
+explicit Whytap slider decrement or intercepted brightness-down press should
+still consume Extra before lowering the current backlight. A live Extra check brightens the
 user's screen and needs their consent.
 
 2026-10-19 · [AbsoluteMode/exodia#30](https://github.com/AbsoluteMode/exodia/pull/30), branch `claude/brightness-tool-battery-587fda`.

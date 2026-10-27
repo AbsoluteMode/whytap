@@ -90,7 +90,7 @@ final class ScreenBrightnessControllerTests: XCTestCase {
         controller.setExtra(true)
         controller.endInteraction()
         XCTAssertTrue(controller.isExtraOn)
-        XCTAssertTrue(controller.isPolling, "Extra must detect decreases while the strip is closed.")
+        XCTAssertTrue(controller.isPolling, "Extra follows the display while the strip is closed.")
         controller.setExtra(false)
         XCTAssertFalse(controller.isPolling)
         controller.shutdown()
@@ -197,44 +197,49 @@ final class ScreenBrightnessControllerTests: XCTestCase {
         XCTAssertEqual(device.boosts.first?.isClosed, false)
     }
 
-    func testOutsideDecreaseEndsExtraWithTheStripClosed() {
+    func testOutsideDecreaseKeepsExtraWithTheStripClosed() {
         let f = Fixture(), device = f.device, controller = f.controllerWithExtra()
         controller.endInteraction()
         XCTAssertTrue(controller.isPolling)
 
-        // Native brightness keys, auto-brightness and idle dimming all use this readback.
+        // Readback cannot tell auto-brightness, power-source dimming and native controls apart.
         device.hardware[1] = 0.25
         controller.refresh()
 
-        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertTrue(controller.isExtraOn)
         XCTAssertEqual(controller.level, 0.25)
-        XCTAssertEqual(device.boosts.first?.isClosed, true)
-        XCTAssertFalse(controller.isPolling)
+        XCTAssertEqual(device.boosts.first?.isClosed, false)
+        XCTAssertTrue(controller.isPolling)
         XCTAssertNil(controller.notice)
-        XCTAssertEqual(device.events, ["boost 1"], "Ending Extra must not write the backlight.")
+        XCTAssertEqual(device.events, ["boost 1"], "Following macOS must not write the backlight.")
 
         device.hardware[1] = 0.6
         controller.refresh()
-        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertTrue(controller.isExtraOn)
+        controller.setLevel(0.5)
+        XCTAssertFalse(controller.isExtraOn, "An explicit slider decrease still ends Extra.")
+        XCTAssertEqual(controller.level, 0.6, "The first manual decrease leaves the new backlight alone.")
+        XCTAssertEqual(device.events, ["boost 1"])
     }
 
-    func testPollingDetectsADecreaseWithoutOpeningTheStrip() async {
+    func testPollingFollowsADecreaseWithoutEndingExtraOrOpeningTheStrip() async {
         let f = Fixture(), device = f.device, controller = f.controller
         controller.refresh()
         controller.setExtra(true)
-        let ended = expectation(description: "Extra detects a lower backlight in the background")
-        let subscription = controller.$isExtraOn.dropFirst().filter { !$0 }.sink { _ in ended.fulfill() }
+        let followed = expectation(description: "Extra follows a lower backlight in the background")
+        let subscription = controller.$level.dropFirst().filter { $0 == 0.25 }.sink { _ in followed.fulfill() }
         defer {
             subscription.cancel()
             controller.shutdown()
         }
 
         device.hardware[1] = 0.25
-        await fulfillment(of: [ended], timeout: 3)
+        await fulfillment(of: [followed], timeout: 3)
 
-        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertTrue(controller.isExtraOn)
         XCTAssertEqual(controller.level, 0.25)
-        XCTAssertFalse(controller.isPolling)
+        XCTAssertTrue(controller.isPolling)
+        XCTAssertEqual(device.boosts.first?.isClosed, false)
         XCTAssertEqual(device.events, ["boost 1"])
     }
 
@@ -252,7 +257,11 @@ final class ScreenBrightnessControllerTests: XCTestCase {
 
         device.hardware[1] = 0.7
         controller.refresh()
-        XCTAssertFalse(controller.isExtraOn, "A subsequent real decrease ends Extra.")
+        XCTAssertTrue(controller.isExtraOn, "A subsequent automatic decrease keeps Extra.")
+        XCTAssertEqual(controller.level, 0.7)
+        controller.setLevel(0.6)
+        XCTAssertFalse(controller.isExtraOn, "A subsequent manual decrease still ends Extra.")
+        XCTAssertEqual(controller.level, 0.7)
     }
 
     func testStartingExtraUsesTheCurrentBacklightAsItsBaseline() {

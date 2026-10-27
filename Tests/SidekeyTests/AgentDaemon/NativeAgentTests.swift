@@ -431,7 +431,9 @@ final class NativeAgentTests: XCTestCase {
             ]], finish: "tool_calls")) }
             return (400, [:], try! JSONSerialization.data(withJSONObject: ["error": ["message": "SYNTHETIC_PRIVATE_CONTENT", "metadata": ["error_type": "invalid_prompt"]]]))
         }
-        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var diagnostics: [NativeAgentDiagnostics.Event] = []
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in },
+                                           diagnosticsSink: { diagnostics.append($0) })
         var events: [AgentSSEEvent] = []
         for await event in provider.run(prompt: "weather", resumeSessionID: nil,
             options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16")) { events.append(event) }
@@ -441,6 +443,134 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertFalse(events.contains(.done(sources: [])))
         XCTAssertNil(provider.lastSessionID)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+        XCTAssertEqual(diagnostics.map(\.stage), [.request, .accepted, .request, .failed])
+        XCTAssertEqual(diagnostics.map(\.request), [1, 1, 2, 2])
+        XCTAssertEqual(Set(diagnostics.map(\.turn)).count, 1)
+        XCTAssertEqual(diagnostics[2].shape?.toolCalls, 1)
+        XCTAssertEqual(diagnostics[2].shape?.toolResults, 1)
+        XCTAssertEqual(diagnostics[2].shape?.unmatchedResults, 0)
+        XCTAssertEqual(diagnostics[2].shape?.missingResults, 0)
+        XCTAssertEqual(diagnostics[2].shape?.tools, [.web_search])
+        XCTAssertEqual(diagnostics.last?.status, 400)
+        XCTAssertEqual(diagnostics.last?.error?.category, .invalid_prompt)
+        XCTAssertEqual(diagnostics.last?.error?.envelope, .http)
+        XCTAssertTrue(diagnostics.allSatisfy { $0.provider == .openRouter && $0.scope == .agent && $0.pinned })
+        XCTAssertFalse(diagnostics.compactMap(\.json).joined().contains("SYNTHETIC_PRIVATE_CONTENT"))
+    }
+
+    func testDiagnosticsKeepOnlyTypedStructureAcrossPrivateRequestAndErrorFields() async throws {
+        let (_, _, http) = try fixture()
+        let secret = "SYNTHETIC_PRIVATE_CONTENT"
+        var step = 0, diagnostics: [NativeAgentDiagnostics.Event] = []
+        StubURLProtocol.handler = { _ in
+            step += 1
+            if step == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(),
+                "reasoning_details": [["type": "reasoning.encrypted", "data": secret]],
+                "tool_calls": [["id": secret, "type": "function", "function": ["name": secret, "arguments": "{\"path\":\"\(secret)\"}"]]]
+            ], finish: "tool_calls")) }
+            return (400, [:], try! JSONSerialization.data(withJSONObject: ["error": ["message": secret + " reasoning_content tool_calls",
+                "param": secret, "metadata": ["raw": secret, "provider_name": secret, "provider_code": secret, "error_type": secret]]]))
+        }
+        var model = NativeAgentModel(options: .init(model: secret, openRouterProvider: secret), key: secret,
+            system: secret, history: [.init(user: secret, assistant: secret)], prompt: secret, http: http,
+            usageSink: { _ in }, diagnosticsSink: { diagnostics.append($0) })
+        model.usageFeature = .meetingAssistant
+        let (_, calls) = try await model.next(tools: NativeAgentTools.definitions(allowActions: false))
+        model.append(results: [(calls[0], .init(text: secret, image: secret))])
+        do { _ = try await model.next(tools: []); XCTFail("Expected error") } catch {}
+        XCTAssertEqual(step, 2)
+        let log = diagnostics.compactMap(\.json).joined(separator: "\n")
+        XCTAssertFalse(log.contains(secret))
+        XCTAssertFalse(log.contains("data:image"))
+        XCTAssertTrue(diagnostics.allSatisfy { $0.scope == .meetingAssistant })
+        XCTAssertEqual(diagnostics[2].shape?.reasoningDetails, 1)
+        XCTAssertEqual(diagnostics[2].shape?.tools, [.unknown])
+        XCTAssertEqual(diagnostics.last?.error?.category, .unknown)
+        XCTAssertNil(diagnostics.last?.error?.parameter)
+        XCTAssertTrue(diagnostics.last?.error?.mentions.contains(.reasoning_content) == true)
+        for event in diagnostics {
+            XCTAssertFalse(Mirror(reflecting: event).children.contains { $0.value is String }, "Event fields must not accept arbitrary text")
+        }
+    }
+
+    func testDiagnosticHTTP200ErrorsPreserveUsageAndEnvelope() async throws {
+        for insideChoice in [false, true] {
+            let (_, _, http) = try fixture()
+            var diagnostics: [NativeAgentDiagnostics.Event] = [], usage: [AIUsageEvent] = []
+            let error: [String: Any] = ["message": "PRIVATE", "metadata": ["error_type": "invalid_request"]]
+            StubURLProtocol.handler = { _ in
+                var response: [String: Any] = ["usage": ["cost": 0.007]]
+                if insideChoice { response["choices"] = [["error": error]] } else { response["error"] = error }
+                return self.serve(response)
+            }
+            var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http,
+                usageSink: { usage.append($0) }, diagnosticsSink: { diagnostics.append($0) })
+            do { _ = try await model.next(tools: []); XCTFail("Expected error") } catch {}
+            XCTAssertEqual(diagnostics.map(\.stage), [.request, .failed])
+            XCTAssertEqual(diagnostics.last?.status, 200)
+            XCTAssertEqual(diagnostics.last?.error?.envelope, insideChoice ? .choice200 : .root200)
+            XCTAssertEqual(usage.count, 1)
+            XCTAssertEqual(try XCTUnwrap(usage.first?.amount), 0.007, accuracy: 0.000000001)
+            XCTAssertFalse(diagnostics.compactMap(\.json).joined().contains("PRIVATE"))
+        }
+    }
+
+    func testDiagnosticsSafelyDescribeMalformedAndOversizedErrorBodies() async throws {
+        for payload in [Data("not-json PRIVATE".utf8), Data(String(repeating: "PRIVATE", count: 3000).utf8)] {
+            let (_, _, http) = try fixture()
+            StubURLProtocol.handler = { _ in (400, [:], payload) }
+            var diagnostics: [NativeAgentDiagnostics.Event] = []
+            var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http,
+                usageSink: { _ in }, diagnosticsSink: { diagnostics.append($0) })
+            do { _ = try await model.next(tools: []); XCTFail("Expected error") }
+            catch { XCTAssertEqual(error.localizedDescription, "The service returned HTTP 400. Try again.") }
+            XCTAssertEqual(diagnostics.last?.error?.parsed, false)
+            XCTAssertEqual(diagnostics.last?.error?.truncated, payload.count > 16_384)
+            XCTAssertFalse(diagnostics.compactMap(\.json).joined().contains("PRIVATE"))
+        }
+    }
+
+    func testDiagnosticsPairNativeToolIDsWithoutLoggingTheirValues() {
+        let content = NativeAgentDiagnostics.Shape(messages: [["content": ""], ["content": NSNull()], ["content": "PRIVATE"]])
+        XCTAssertEqual(content.emptyContent, 1)
+        XCTAssertEqual(content.nullContent, 1)
+        let fixtures: [[[String: Any]]] = [
+            [["role": "assistant", "tool_calls": [["id": "PRIVATE", "function": ["name": "read_file", "arguments": "{}"]]]],
+             ["role": "tool", "tool_call_id": "PRIVATE", "content": "PRIVATE"]],
+            [["type": "function_call", "call_id": "PRIVATE", "name": "read_file", "arguments": "{}"],
+             ["type": "function_call_output", "call_id": "PRIVATE", "output": "PRIVATE"]],
+            [["role": "assistant", "content": [["type": "tool_use", "id": "PRIVATE", "name": "read_file", "input": [:]]]],
+             ["role": "user", "content": [["type": "tool_result", "tool_use_id": "PRIVATE", "content": "PRIVATE"]]]]
+        ]
+        for messages in fixtures {
+            let shape = NativeAgentDiagnostics.Shape(messages: messages)
+            XCTAssertEqual(shape.toolCalls, 1)
+            XCTAssertEqual(shape.toolResults, 1)
+            XCTAssertEqual(shape.unmatchedResults, 0)
+            XCTAssertEqual(shape.missingResults, 0)
+            XCTAssertEqual(shape.tools, [.read_file])
+        }
+        let unmatched = NativeAgentDiagnostics.Shape(messages: [["role": "tool", "tool_call_id": "PRIVATE"]])
+        XCTAssertEqual(unmatched.unmatchedResults, 1)
+    }
+
+    func testDiagnosticsClassifyTransportFailuresWithoutLoggingTheirDescriptions() async throws {
+        let fixtures: [(URLError.Code, NativeAgentDiagnostics.Failure)] = [
+            (.notConnectedToInternet, .network), (.timedOut, .timeout), (.cancelled, .cancelled)
+        ]
+        for (code, expected) in fixtures {
+            let (_, _, http) = try fixture()
+            StubURLProtocol.handler = { _ in throw URLError(code, userInfo: [NSLocalizedDescriptionKey: "PRIVATE"]) }
+            var diagnostics: [NativeAgentDiagnostics.Event] = []
+            var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http,
+                usageSink: { _ in }, diagnosticsSink: { diagnostics.append($0) })
+            do { _ = try await model.next(tools: []); XCTFail("Expected error") } catch {}
+            XCTAssertEqual(diagnostics.map(\.stage), [.request, .failed])
+            XCTAssertEqual(diagnostics.last?.failure, expected)
+            XCTAssertNil(diagnostics.last?.status)
+            XCTAssertFalse(diagnostics.compactMap(\.json).joined().contains("PRIVATE"))
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+        }
     }
 
     func testDisabledActionsAreEnforcedEvenWhenModelRequestsHiddenTool() async throws {

@@ -9,6 +9,9 @@ canonical_for: [agent-runtime, agent-web-search, agent-workspace]
 verified_at: 2026-10-27
 sources:
   - type: user-confirmed
+    reference: On 2026-10-27 the user reported that greetings succeed but tool-using requests fail and explicitly requested diagnostic logs. The repeat was on installed 1601, before the canonical-continuation fix was promoted.
+    confirmed_at: 2026-10-27
+  - type: user-confirmed
     reference: On 2026-10-27 the user reported an Agent HTTP 400 after changing the model. Safe app-control metadata identified Qwen 3.8 27B pinned to Cerebras FP16; the original error body was not retained.
     confirmed_at: 2026-10-27
   - type: user-confirmed
@@ -101,6 +104,42 @@ Contracts: [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/
 [reasoning preservation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [typed errors](https://openrouter.ai/docs/api_reference/errors-and-debugging),
 [Cerebras tool use](https://inference-docs.cerebras.ai/capabilities/tool-use).
+
+## Local diagnostics
+
+The common native model loop writes a request event and an accepted/failed
+event to macOS unified logging (`com.rootwise.sidekey`, category `native-agent`).
+Default/error levels support retrospective inspection without a live log
+stream. The operating system owns retention; there is no new file, network
+destination or provider request. Tavily HTTP calls are not model events.
+
+Events contain only a locally generated turn UUID, request ordinal, closed
+provider/feature enums, pin presence, timings, byte/count metrics, tool names
+from a fixed enum, tool-call/result matching counts, argument/reasoning shape,
+finish/status enums and allowlisted error categories. Direct OpenAI/Anthropic
+tool pairing and Meeting Assistant feature scope are represented separately.
+The route strings, external IDs, paths, prompts, arguments/results, reasoning,
+images, keys and raw error text never enter events. Unknown external values
+become a fixed unknown enum. The HTTP layer returns typed error metadata but
+does not log shared search traffic or change user-visible error wording.
+
+Fixed error-field keyword-presence hints may be derived from the bounded
+transient provider error. They indicate mentions only, since an error can
+quote input; they do not prove the rejected field or root cause. Malformed or
+truncated bodies retain an explicit unparsed/truncated flag and generic status.
+HTTP-200 error envelopes distinguish root and choice errors, with usage still
+recorded before failure. Fixture tests place private sentinels in requests,
+tool data, route IDs, reasoning and errors and verify none reach event JSON.
+
+After an ordinary user reproduction, inspect locally:
+
+```sh
+log show --last 1h --style compact --predicate 'subsystem == "com.rootwise.sidekey" AND category == "native-agent"'
+```
+
+Compare request ordinals within one local turn UUID. A successful fixture or
+an installed logging build does not establish that the live provider failure
+is resolved; that remains ordinary user acceptance after promotion.
 
 ## Follow-up context
 

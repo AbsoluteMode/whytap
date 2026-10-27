@@ -23,10 +23,15 @@ struct NativeAgentModel {
     var http = NativeAgentHTTP()
     var usageSink: (AIUsageEvent) -> Void = AIUsageRecorder.record
     var usageFeature: AIFeature = .agent
+    var diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
+    private let diagnosticTurn = UUID()
+    private var diagnosticRequest = 0
 
     init(options: AgentRunOptions, key: String, system: String, history: [NativeAgentConversation.Pair], prompt: String,
-         http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record) {
+         http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
+         diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record) {
         self.options = options; self.key = key; self.system = system; self.http = http; self.usageSink = usageSink
+        self.diagnosticsSink = diagnosticsSink
         messages = history.flatMap { [["role": "user", "content": $0.user], ["role": "assistant", "content": $0.assistant]] }
         messages.append(["role": "user", "content": prompt])
     }
@@ -75,20 +80,50 @@ struct NativeAgentModel {
             body.removeValue(forKey: "tools")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let response: [String: Any]
-        do { response = try await http.json(request) }
-        catch {
+        diagnosticRequest += 1
+        let trace = NativeAgentDiagnostics.Trace(turn: diagnosticTurn, request: diagnosticRequest,
+            provider: options.openCodeProvider, feature: usageFeature,
+            pinned: options.openCodeProvider == .openRouter && options.openRouterProvider != nil,
+            toolsCount: tools.count, outputLimit: outputLimit, sink: diagnosticsSink)
+        let wireMessages = options.openCodeProvider == .openRouter ? [["role": "system", "content": system]] + messages : messages
+        trace.emit(.request, bytes: request.httpBody?.count, shape: .init(messages: wireMessages))
+        var responseStatus: Int?, responseBytes: Int?
+        do {
+            let response: [String: Any]
+            do {
+                let result = try await http.response(request)
+                response = result.object; responseStatus = result.status; responseBytes = result.bytes
+            } catch {
+                usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
+                                            currency: .usd, amount: nil, basis: .unavailable))
+                throw error
+            }
+            let usage = response["usage"] as? [String: Any]
+            let cost = options.openCodeProvider == .openRouter ? AIUsageNumber.nonnegative(usage?["cost"]) : nil
             usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
-                                        currency: .usd, amount: nil, basis: .unavailable))
+                                        currency: .usd, amount: cost, basis: cost == nil ? .unavailable : .reported))
+            if options.openCodeProvider == .openRouter,
+               let error = NativeAgentHTTP.openRouterError(in: response) { throw error }
+            let result = try accept(response)
+            let finish = (response["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String
+                ?? response["stop_reason"] as? String ?? response["status"] as? String ?? ""
+            trace.emit(.accepted, status: responseStatus, bytes: responseBytes, shape: .init(messages: messages),
+                       finish: .init(rawValue: finish) ?? .other)
+            return result
+        } catch {
+            var detail: NativeAgentDiagnostics.ErrorShape?
+            if case NativeAgentError.service(_, let status, let diagnostics) = error {
+                responseStatus = status; detail = diagnostics
+            }
+            let failure: NativeAgentDiagnostics.Failure
+            if error is CancellationError || Task.isCancelled { failure = .cancelled }
+            else if let network = error as? URLError {
+                failure = network.code == .cancelled ? .cancelled : network.code == .timedOut ? .timeout : .network
+            }
+            else { failure = .response }
+            trace.emit(.failed, status: responseStatus, bytes: responseBytes, error: detail, failure: failure)
             throw error
         }
-        let usage = response["usage"] as? [String: Any]
-        let cost = options.openCodeProvider == .openRouter ? AIUsageNumber.nonnegative(usage?["cost"]) : nil
-        usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
-                                    currency: .usd, amount: cost, basis: cost == nil ? .unavailable : .reported))
-        if options.openCodeProvider == .openRouter,
-           let error = NativeAgentHTTP.openRouterError(in: response) { throw error }
-        return try accept(response)
     }
 
     private mutating func accept(_ response: [String: Any]) throws -> (String, [NativeAgentToolCall]) {

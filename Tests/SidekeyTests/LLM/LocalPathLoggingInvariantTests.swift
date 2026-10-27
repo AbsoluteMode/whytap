@@ -23,6 +23,7 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
         "Sources/Sidekey/Streaming/BYOK/ProviderBatchTranscriber.swift",
         "Sources/Sidekey/AIRouting/ProviderKeyChecker.swift",
         "Sources/Sidekey/AIRouting/ModelProbe.swift",
+        "Sources/Sidekey/AgentDaemon/NativeAgentDiagnostics.swift",
     ]
 
     /// Identifiers whose VALUE is user/model content. If an `os_log` call passes

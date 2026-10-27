@@ -304,6 +304,145 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertNotNil(model.messages[1]["reasoning_details"])
     }
 
+    func testOpenRouterContinuationUsesCanonicalCallsAndOneReasoningRepresentation() async throws {
+        for objectArguments in [false, true] {
+            let (_, _, http) = try fixture()
+            let originalArguments = "{ \"query\" : \"weather\" }\n"
+            let details: [[String: Any]] = [
+                ["type": "reasoning.encrypted", "data": "opaque-one", "id": "r1", "format": "unknown"],
+                ["type": "reasoning.encrypted", "data": "opaque-two", "id": "r2", "format": "unknown"]
+            ]
+            var step = 0
+            StubURLProtocol.handler = { _ in
+                step += 1
+                if step == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(),
+                    "refusal": NSNull(), "annotations": [], "response_only": "omit-me",
+                    "reasoning": "duplicate-thoughts", "reasoning_content": "another-duplicate", "reasoning_details": details,
+                    "tool_calls": [["index": 0, "id": "call-exact", "type": "function", "function": [
+                        "name": "web_search", "arguments": objectArguments ? ["query": "weather"] as Any : originalArguments as Any]]]
+                ], finish: "tool_calls")) }
+                return self.serve(self.router(["role": "assistant", "content": "Answer."]))
+            }
+            var model = NativeAgentModel(options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16"),
+                key: "key", system: "system", history: [], prompt: "weather", http: http, usageSink: { _ in })
+            let tools = NativeAgentTools.definitions(allowActions: false)
+            let (_, calls) = try await model.next(tools: tools)
+            model.append(results: [(calls[0], .init(text: "Synthetic search result"))])
+            _ = try await model.next(tools: tools)
+            let first = try body(0), second = try body(1)
+            XCTAssertEqual(second["model"] as? String, first["model"] as? String)
+            XCTAssertEqual(second["provider"] as? NSDictionary, first["provider"] as? NSDictionary)
+            XCTAssertEqual(second["tools"] as? NSArray, first["tools"] as? NSArray)
+            let messages = try XCTUnwrap(second["messages"] as? [[String: Any]])
+            let assistant = messages[2]
+            XCTAssertEqual(Set(assistant.keys), ["role", "content", "tool_calls", "reasoning_details"])
+            XCTAssertEqual(assistant["reasoning_details"] as? NSArray, details as NSArray)
+            let wire = try XCTUnwrap((assistant["tool_calls"] as? [[String: Any]])?.first)
+            XCTAssertNil(wire["index"])
+            XCTAssertEqual(wire["id"] as? String, "call-exact")
+            let function = try XCTUnwrap(wire["function"] as? [String: Any])
+            let arguments = try XCTUnwrap(function["arguments"] as? String)
+            XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(arguments.utf8)) as? NSDictionary, ["query": "weather"] as NSDictionary)
+            if !objectArguments { XCTAssertEqual(arguments, originalArguments, "Preserve an already valid argument string value exactly") }
+            XCTAssertEqual(messages[3]["role"] as? String, "tool")
+            XCTAssertEqual(messages[3]["tool_call_id"] as? String, "call-exact")
+        }
+    }
+
+    func testOpenRouterPlainReasoningAliasIsRetainedWithoutDetails() async throws {
+        let (_, _, http) = try fixture()
+        StubURLProtocol.handler = { _ in self.serve(self.router(["role": "assistant", "content": "Answer", "reasoning_content": "plain-thinking"])) }
+        var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http, usageSink: { _ in })
+        _ = try await model.next(tools: [])
+        XCTAssertEqual(model.messages.last?["reasoning"] as? String, "plain-thinking")
+        XCTAssertNil(model.messages.last?["reasoning_content"])
+    }
+
+    func testOpenRouterErrorCategoriesNeverEchoMessagesOrUnknownMetadata() async throws {
+        for category in ["invalid_prompt", "context_length_exceeded", "SYNTHETIC_PRIVATE_CONTENT"] {
+            let (_, _, http) = try fixture()
+            StubURLProtocol.handler = { _ in (400, [:], try! JSONSerialization.data(withJSONObject: ["error": [
+                "message": "SYNTHETIC_PRIVATE_CONTENT", "metadata": ["error_type": category,
+                    "provider_code": "SYNTHETIC_PRIVATE_CONTENT", "flagged_input": "SYNTHETIC_PRIVATE_CONTENT"]]])) }
+            do {
+                _ = try await http.json(URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!))
+                XCTFail("Expected error")
+            } catch {
+                let text = error.localizedDescription
+                XCTAssertFalse(text.contains("SYNTHETIC_PRIVATE_CONTENT"))
+                if category == "invalid_prompt" { XCTAssertTrue(text.contains("invalid_prompt")) }
+                else if category == "context_length_exceeded" { XCTAssertTrue(text.contains("context limit")) }
+                else { XCTAssertEqual(text, "The service returned HTTP 400. Try again.") }
+            }
+        }
+    }
+
+    func testErrorBodyLimitDoesNotExposeRawContent() async throws {
+        for oversized in [false, true] {
+            let (_, _, http) = try fixture()
+            StubURLProtocol.handler = { _ in (400, [:], try! JSONSerialization.data(withJSONObject: ["error": [
+                "message": String(repeating: "SYNTHETIC_PRIVATE_CONTENT", count: oversized ? 2000 : 1),
+                "metadata": ["error_type": "invalid_request", "provider_code": "SYNTHETIC_PRIVATE_CONTENT"]]])) }
+            do {
+                _ = try await http.json(URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!))
+                XCTFail("Expected error")
+            } catch {
+                XCTAssertFalse(error.localizedDescription.contains("SYNTHETIC_PRIVATE_CONTENT"))
+                if oversized { XCTAssertEqual(error.localizedDescription, "The service returned HTTP 400. Try again.") }
+                else { XCTAssertTrue(error.localizedDescription.contains("invalid_request")) }
+            }
+        }
+    }
+
+    func testOpenRouterHTTP200ErrorsAreRejectedAfterRecordingReportedCost() async throws {
+        for insideChoice in [false, true] {
+            let (_, _, http) = try fixture()
+            let providerError: [String: Any] = ["code": 400, "message": "SYNTHETIC_PRIVATE_CONTENT", "metadata": ["error_type": "invalid_request"]]
+            StubURLProtocol.handler = { _ in
+                var response: [String: Any] = ["usage": ["cost": 0.007]]
+                if insideChoice { response["choices"] = [["finish_reason": "error", "error": providerError, "message": ["role": "assistant", "content": "Partial output"]]] }
+                else { response["error"] = providerError }
+                return self.serve(response)
+            }
+            var usage: [AIUsageEvent] = []
+            var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http, usageSink: { usage.append($0) })
+            do { _ = try await model.next(tools: []); XCTFail("Expected provider error") }
+            catch { XCTAssertTrue(error.localizedDescription.contains("invalid_request")); XCTAssertFalse(error.localizedDescription.contains("SYNTHETIC_PRIVATE_CONTENT")) }
+            XCTAssertEqual(usage.count, 1)
+            XCTAssertEqual(try XCTUnwrap(usage.first?.amount), 0.007, accuracy: 0.000000001)
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+            XCTAssertEqual(model.messages.count, 1, "A partial/error response must not enter the assistant history")
+        }
+    }
+
+    func testWebSearchContinuationErrorIsNotRetriedOrPersisted() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        try keys.save("search-key", account: TavilySearch.keychainAccount)
+        var modelCalls = 0, searchCalls = 0
+        StubURLProtocol.handler = { request in
+            if request.url?.host == "api.tavily.com" {
+                searchCalls += 1
+                return self.serve(["results": [["url": "https://example.com", "title": "Fixture", "content": "Search result"]]])
+            }
+            modelCalls += 1
+            if modelCalls == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "reasoning": "plain-thinking", "tool_calls": [
+                ["id": "search", "type": "function", "function": ["name": "web_search", "arguments": "{\"query\":\"weather\"}"]]
+            ]], finish: "tool_calls")) }
+            return (400, [:], try! JSONSerialization.data(withJSONObject: ["error": ["message": "SYNTHETIC_PRIVATE_CONTENT", "metadata": ["error_type": "invalid_prompt"]]]))
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var events: [AgentSSEEvent] = []
+        for await event in provider.run(prompt: "weather", resumeSessionID: nil,
+            options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16")) { events.append(event) }
+        XCTAssertEqual(modelCalls, 2)
+        XCTAssertEqual(searchCalls, 1)
+        XCTAssertTrue(events.contains { if case .error(_, let text, _) = $0 { return text.contains("invalid_prompt") && !text.contains("SYNTHETIC_PRIVATE_CONTENT") }; return false })
+        XCTAssertFalse(events.contains(.done(sources: [])))
+        XCTAssertNil(provider.lastSessionID)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+    }
+
     func testDisabledActionsAreEnforcedEvenWhenModelRequestsHiddenTool() async throws {
         let (directory, keys, _) = try fixture()
         let tools = NativeAgentTools(directory: directory, allowActions: false, keys: keys)

@@ -9,6 +9,9 @@ canonical_for: [agent-runtime, agent-web-search, agent-workspace]
 verified_at: 2026-10-27
 sources:
   - type: user-confirmed
+    reference: On 2026-10-27 the user reported an Agent HTTP 400 after changing the model. Safe app-control metadata identified Qwen 3.8 27B pinned to Cerebras FP16; the original error body was not retained.
+    confirmed_at: 2026-10-27
+  - type: user-confirmed
     reference: On 2026-10-27 the user reported a currency-conversion follow-up that showed only a source card and requested a joint Claude Code investigation and a fix preserving useful recent context.
     confirmed_at: 2026-10-27
   - type: repository
@@ -60,6 +63,44 @@ related: [../project.md, 2026-10-22-agent-answers-and-screen.md]
 ---
 
 # Decision
+
+## Provider continuations
+
+OpenRouter tool continuations replay a canonical assistant message. Tool IDs
+and already-valid JSON argument string values are preserved exactly; tolerated
+object arguments are encoded as JSON strings before replay. Response-only
+extensions such as tool-call indexes are omitted. Ordered `reasoning_details`
+are retained without alteration; plaintext reasoning (including its legacy
+alias) is used only when those details are absent, avoiding duplicate forms.
+OpenAI Responses and direct Anthropic native items remain unchanged. The common
+NativeAgentModel also serves Meeting Assistant, so these OpenRouter changes
+apply to its route as well; its tool access and capture policy do not change.
+
+OpenRouter error responses are read only into bounded transient memory
+(at most 16 KiB for a non-success HTTP response). Fixed, allowlisted error
+categories produce static messages; unknown metadata, upstream messages,
+raw payloads and arbitrary provider codes are never echoed, persisted or
+logged. Existing authentication/credit/rate-limit status handling stays
+immediate. Unknown errors retain the generic status message.
+
+A non-streaming response can contain an error despite HTTP 200, either at
+the root or on a completion choice. The model layer records any reported
+usage before rejecting that response, so it cannot become a completed answer
+or silently lose a reported charge. No retry or provider/model substitution
+is added. The selected provider pin and tool-result IDs remain unchanged.
+
+The reported Qwen/Cerebras failure followed a web-search tool call. The
+original provider error body and intermediate response were not retained;
+the exact rejected field is unknown. Canonical replay addresses a demonstrated
+serialization defect, while avoiding duplicate reasoning is a compatibility
+measure. Synthetic request-shape/error/privacy fixtures do not establish that
+this particular live HTTP 400 is resolved. Pin-specific context limits are a
+separate concern and are not changed here.
+
+Contracts: [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/tool-calling),
+[reasoning preservation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
+[typed errors](https://openrouter.ai/docs/api_reference/errors-and-debugging),
+[Cerebras tool use](https://inference-docs.cerebras.ai/capabilities/tool-use).
 
 ## Follow-up context
 

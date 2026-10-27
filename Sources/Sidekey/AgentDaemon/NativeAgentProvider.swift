@@ -12,13 +12,16 @@ final class NativeAgentProvider: CLIProvider {
     var lastSessionID: String? { lock.withLock { sessionID } }
     private let keys: ProviderKeyStore
     private let usageSink: (AIUsageEvent) -> Void
+    private let diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
     private let http: NativeAgentHTTP
     private let workspace: () throws -> URL
 
     init(keys: ProviderKeyStore = ProviderKeyStore(), http: NativeAgentHTTP = NativeAgentHTTP(),
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
-         usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record) {
+         usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
+         diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record) {
         self.keys = keys; self.http = http; self.workspace = workspace; self.usageSink = usageSink
+        self.diagnosticsSink = diagnosticsSink
     }
 
     func discoverBinary() -> URL? { nil } // No executable or installation is needed.
@@ -95,7 +98,8 @@ final class NativeAgentProvider: CLIProvider {
                                      system: Self.systemPrompt + "\nWorkspace: \(directory.path)\n"
                                         + WhytapCustomizationContext.promptInstructions + "\n"
                                         + WhytapCustomizationContext.notificationInstructions,
-                                     history: history, prompt: prompt, http: http, usageSink: usageSink)
+                                     history: history, prompt: prompt, http: http, usageSink: usageSink,
+                                     diagnosticsSink: diagnosticsSink)
         let turn = UUID().uuidString
         continuation.yield(.started(turnId: turn, requestId: turn, sessionId: conversation.id))
         var actions: UsefulActionsBlock?

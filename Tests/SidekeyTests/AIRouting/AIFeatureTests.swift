@@ -12,9 +12,9 @@ final class AIFeatureTests: XCTestCase {
     // MARK: - Registry
 
     func test_features_follow_the_spec_table() {
-        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agent, .agentVoice, .meetingAssistant, .meetingAssistantAudio, .voiceSearch, .translation, .subtitlesAudio, .subtitlesTranslation])
-        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent", "Agent voice", "Meeting Assistant", "Meeting Assistant audio", "Voice search", "Translation", "Subtitles audio", "Subtitles translation"])
-        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "LLM with tools", "real-time", "LLM with tools", "real-time", "real-time", "LLM", "real-time", "LLM"])
+        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agent, .agentVoice, .meetingAssistant, .meetingAssistantAudio, .meetingAssistantDetector, .voiceSearch, .translation, .subtitlesAudio, .subtitlesTranslation])
+        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent", "Agent voice", "Meeting Assistant", "Meeting Assistant audio", "Meeting Assistant detector", "Voice search", "Translation", "Subtitles audio", "Subtitles translation"])
+        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "LLM with tools", "real-time", "LLM with tools", "real-time", "Decision", "real-time", "LLM", "real-time", "LLM"])
         XCTAssertEqual(AIFeature.drop(.fast), .dropFast)
         XCTAssertEqual(AIFeature.drop(.smart), .dropSmart)
     }
@@ -22,7 +22,7 @@ final class AIFeatureTests: XCTestCase {
     func test_feature_raw_values_are_the_persisted_route_keys() {
         XCTAssertEqual(
             AIFeature.allCases.map(\.rawValue),
-            ["dropFast", "dropSmart", "dropSmartCleanup", "dropSmartDecision", "meetings", "meetingNotes", "agent", "agentVoice", "meetingAssistant", "meetingAssistantAudio", "voiceSearch", "translation", "subtitlesAudio", "subtitlesTranslation"]
+            ["dropFast", "dropSmart", "dropSmartCleanup", "dropSmartDecision", "meetings", "meetingNotes", "agent", "agentVoice", "meetingAssistant", "meetingAssistantAudio", "meetingAssistantDetector", "voiceSearch", "translation", "subtitlesAudio", "subtitlesTranslation"]
         )
     }
 
@@ -77,9 +77,14 @@ final class AIFeatureTests: XCTestCase {
                 soniox: nil, deepgram: nil, elevenLabs: nil,
                 openRouter: .chatWithTools, anthropic: .chatWithTools, openAICompatible: nil
             ),
+            TableRow(
+                features: [.meetingAssistantDetector],
+                soniox: nil, deepgram: nil, elevenLabs: nil,
+                openRouter: .decision, anthropic: nil, openAICompatible: nil
+            ),
         ]
         // Every feature sits in exactly one row, so the loop below visits all
-        // 13 active features x 7 providers = 91 cells.
+        // 14 active features x 7 providers = 98 cells.
         XCTAssertEqual(
             rows.flatMap(\.features).map(\.rawValue).sorted(),
             AIFeature.activeCases.map(\.rawValue).sorted()
@@ -97,7 +102,7 @@ final class AIFeatureTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(visited, 91)
+        XCTAssertEqual(visited, 98)
     }
 
     func test_direct_llm_providers_are_available_for_all_text_modes_only() {

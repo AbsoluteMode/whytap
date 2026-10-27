@@ -36,12 +36,16 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     case agentVoice
     case meetingAssistant
     case meetingAssistantAudio
+    /// Optional decision model that gates Meeting Assistant question extraction.
+    case meetingAssistantDetector
     case voiceSearch
     case translation
     case subtitlesAudio
     case subtitlesTranslation
 
     var isActive: Bool { self != .dropSmartDecision }
+    /// Not set is a valid choice: the feature works without this route.
+    var isOptional: Bool { self == .meetingAssistantDetector }
     static var activeCases: [AIFeature] { allCases.filter(\.isActive) }
 
     var title: String {
@@ -56,6 +60,7 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .agentVoice: return "Agent voice"
         case .meetingAssistant: return "Meeting Assistant"
         case .meetingAssistantAudio: return "Meeting Assistant audio"
+        case .meetingAssistantDetector: return "Meeting Assistant detector"
         case .voiceSearch: return "Voice search"
         case .translation: return "Translation"
         case .subtitlesAudio: return "Subtitles audio"
@@ -69,7 +74,7 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .meetings: return .recorded
         case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return .llm
         case .agent, .meetingAssistant: return .llmWithTools
-        case .dropSmartDecision: return .decision
+        case .dropSmartDecision, .meetingAssistantDetector: return .decision
         }
     }
 

@@ -706,8 +706,8 @@ final class APIAndModelsProviderTests: XCTestCase {
         XCTAssertEqual(subtitles.rows.map(\.feature), [.subtitlesAudio, .subtitlesTranslation])
         XCTAssertEqual(subtitles.rows.map(\.fieldLabel), ["Speech", "LLM"])
         let assistant = try XCTUnwrap(vm.groups.first { $0.title == "Meeting Assistant (Beta)" })
-        XCTAssertEqual(assistant.rows.map(\.feature), [.meetingAssistantAudio, .meetingAssistant])
-        XCTAssertEqual(assistant.rows.map(\.fieldLabel), ["Speech", "Text"])
+        XCTAssertEqual(assistant.rows.map(\.feature), [.meetingAssistantAudio, .meetingAssistantDetector, .meetingAssistant])
+        XCTAssertEqual(assistant.rows.map(\.fieldLabel), ["Speech", "Decision", "Text"])
     }
 
     func test_only_openrouter_rows_offer_a_provider_and_auto_is_the_default() throws {

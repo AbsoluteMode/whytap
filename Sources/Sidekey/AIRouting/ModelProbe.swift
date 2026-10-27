@@ -58,7 +58,18 @@ struct ModelProbe: ModelProbing {
         case .chat: outcome = await probeChat(route, withTools: false, catalog: catalog)
         case .chatWithTools: outcome = await probeChat(route, withTools: true, catalog: catalog)
         case .decision:
-            outcome = .failed(reason: "Separate Decision processing is retired")
+            // A synthetic one-word state, never meeting speech.
+            do {
+                _ = try await MeetingAssistantDetector(session: session, timeout: timeout, usageSink: { _ in })
+                    .verdict(route: route, newSpeech: "Hello.", context: "", offered: [])
+                outcome = .passed
+            } catch is MeetingQuestionError {
+                outcome = .inconclusive(reason: "No decision returned")
+            } catch let error as OpenRouterLLMError where error.isModelRefusal {
+                outcome = .failed(reason: "The provider refused this decision model")
+            } catch {
+                outcome = .inconclusive(reason: "Couldn't reach the decision API")
+            }
         }
         os_log("model probe provider=%{public}@ use=%{public}@ outcome=%{public}@ ms=%{public}d",
                log: Self.log, type: .info,

@@ -344,7 +344,7 @@ struct ModelStatusResolver {
         switch feature {
         case .agent, .meetingAssistant: minimum = ModelRegistry.agentMinContext
         case .meetingNotes: minimum = ModelRegistry.meetingNotesMinContext
-        case .dropFast, .dropSmart, .dropSmartCleanup, .dropSmartDecision, .meetings, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .meetingAssistantAudio: minimum = nil
+        case .dropFast, .dropSmart, .dropSmartCleanup, .dropSmartDecision, .meetings, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .meetingAssistantAudio, .meetingAssistantDetector: minimum = nil
         }
         if let minimum, let context = entry.contextLength, context < minimum {
             return "context under 64K tokens"
@@ -359,6 +359,8 @@ struct ModelStatusResolver {
             return entry?.reasoning?.mandatory == true ? "always reasons, slower" : nil
         case .dropSmartDecision:
             return nil // Historical feature only; never shown as a configurable row.
+        case .meetingAssistantDetector:
+            return account == .openAI ? "OpenAI Decisions API" : "Decision · calls the answer model only when needed"
         case .meetings:
             let registered = ModelRegistry.models.first {
                 $0.kind == account.kind && $0.id == model && $0.uses.contains(use)

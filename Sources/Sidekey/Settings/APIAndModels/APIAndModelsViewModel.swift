@@ -25,6 +25,8 @@ struct FeatureRow: Equatable, Identifiable {
     var provider: ProviderChoice? = nil
     /// The exact selected model, without transport modes or repeated account names.
     var modelSummary: String = "Choose a model"
+    /// Unset and required; an optional route left unset is a valid choice.
+    var needsSetup: Bool { status == .notSet && !feature.isOptional }
 
     var fieldLabel: String {
         if feature == .subtitlesTranslation { return "LLM" }
@@ -57,7 +59,7 @@ struct FeatureGroup: Equatable, Identifiable {
         ("Voice search", [.voiceSearch]),
         ("Translation", [.translation]),
         ("Subtitles", [.subtitlesAudio, .subtitlesTranslation]),
-        ("Meeting Assistant (Beta)", [.meetingAssistantAudio, .meetingAssistant]),
+        ("Meeting Assistant (Beta)", [.meetingAssistantAudio, .meetingAssistantDetector, .meetingAssistant]),
     ]
 }
 
@@ -410,7 +412,7 @@ final class APIAndModelsViewModel: ObservableObject {
     /// first keyed built-in provider with a recommended model. An empty
     /// proposal is not shown.
     func proposeSetup(for account: ProviderAccount) {
-        let unset = AIFeature.activeCases.filter { resolver.status(for: $0) == .notSet }
+        let unset = AIFeature.activeCases.filter { resolver.status(for: $0) == .notSet && !$0.isOptional }
         let items = unset.compactMap { feature in
             ModelRegistry.recommended(for: feature, kind: account.kind)
                 .map { AssignItem(feature: feature, account: account, model: $0) }
@@ -550,7 +552,7 @@ final class APIAndModelsViewModel: ObservableObject {
         let chips = keyedAccounts().map(chip(for:))
         let rows = AIFeature.activeCases.map(row(for:))
         let groups = resolver.aliasGroups()
-        let unset = rows.filter { $0.status == .notSet }.count
+        let unset = rows.filter(\.needsSetup).count
         let banner: String?
         if chips.isEmpty || unset == 0 {
             banner = nil

@@ -16,6 +16,8 @@ final class MeetingAssistantAudio {
     private var cleanup: Task<Void, Never>?
     private var generation = UUID()
     var onText: ((String) -> Void)?
+    /// Each newly finalized piece, joined exactly as it was appended to the transcript.
+    var onFinal: ((String) -> Void)?
     var onState: ((Bool, String?) -> Void)?
     private(set) var active = false
     private(set) var ready = false
@@ -78,11 +80,13 @@ final class MeetingAssistantAudio {
                     switch event {
                     case .final(let text):
                         sawFinal = true
+                        var piece = text
                         if upstream.finalsJoin == .wordBoundary, !committed.isEmpty,
-                           committed.last?.isWhitespace == false, text.first?.isWhitespace == false { committed += " " }
-                        committed += text
+                           committed.last?.isWhitespace == false, text.first?.isWhitespace == false { piece = " " + text }
+                        committed += piece
                         committed = String(committed.suffix(12_000))
                         self.onText?(committed)
+                        self.onFinal?(piece)
                     case .error:
                         self.fail("Распознавание остановилось. Проверь модель Meeting Assistant audio и соединение."); return
                     case .done(let text):

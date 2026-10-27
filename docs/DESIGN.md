@@ -310,6 +310,34 @@ popover dismissal or VoiceOver on the installed app; those remain acceptance.
 The interpretation that a family plus size is the useful search input follows
 the user's example; typo correction and model aliases are outside this change.
 
+## Update actions and first mouse — 2026-10-27
+
+The user reported repeatedly clicking Update before anything happened. The
+nonactivating island already dispatches measured down/up sequences through
+NSWindow for tools; update actions now use that same path, with distinct
+Download, Skip, Restart and Later identities. Why: an inactive SwiftUI gesture
+can lose first mouse. The existing 24 pt targets and 5 pt gap stay fixed;
+hover and press change the circle fill rather than scaling its hit geometry.
+Native Button retains keyboard and accessibility activation and a visible focus
+outline. Disabled controls have no active hover or registered pointer target.
+
+Update actions remain clickable alongside another open hover tool; they do not
+enable that tool's disabled pointer targets. A drag out, removed target,
+stage change or new build cancels the press; the gap activates neither action.
+The compact label remains a status; its hover actions perform the update.
+The controller publishes the downloading spinner as soon as it accepts the
+click, before invoking Sparkle, so there is feedback before the first bytes.
+The existing render-server spinner and reduced-motion glyph stay unchanged.
+Download/Skip and safe Restart/Later behavior and version guards are preserved.
+
+The reproduced failure is at the native-dispatch seam and immediate feedback,
+not evidence that the exact physical user click was captured. Native offscreen
+fixtures and down/up tests cover both action pairs, repeated mouse-up, a drag
+between buttons, stage replacement and disabled controls. Existing native
+spinner tests cover its reduced-motion glyph and render-server animation.
+Physical first mouse, Tab/Return, VoiceOver and the real Sparkle download remain
+installed-app acceptance; no real update is started by the tests.
+
 ## API & Models costs — 2026-10-20
 
 The user chose four tabs in one surface: API keys, Models, Costs, API hints.

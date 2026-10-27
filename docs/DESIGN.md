@@ -1064,6 +1064,37 @@ row background (RGB 211/41). Physical keyboard/VoiceOver, native tooltip timing 
 appearance require acceptance on the one installed application.
 
 
+### Shared Back controls — 2026-10-27
+
+To-do, Monitor, Calendar, Notify, Display and Case access use
+`IslandHoverBackButton`. The user reported difficult Back clicks in To-do and
+Monitor. These buttons now register their complete rendered label with the
+existing window-level first-mouse dispatcher, while keeping native Button
+keyboard and accessibility actions. Why: an inactive, nonactivating island can
+drop a SwiftUI first click; enlarging only the drawn arrow cannot repair it.
+
+Icon targets are 32pt wide and 26pt high (24pt in the existing Notify/Display
+rows). Monitor uses its full existing 88pt navigation slot; Notify uses 68pt.
+The header heights and Monitor's equal side slots stay fixed. Why: padding must
+be clickable without moving adjacent controls or uncentering the heading.
+
+The full target has a 6% white resting fill, 15% hover fill, 23% pressed fill
+and a separate 1.5pt focus outline. Disabled buttons use 42% opacity and no
+active feedback or native pointer registration. Navigation waits for mouse-up;
+dragging out, Escape, hiding the panel, a changed page/destination or a disabled
+button cancels the old press. Root tool/search targets and Meeting Assistant
+cannot dispatch through the submenu surface. Reduce Motion removes the brief
+hover color transition; target geometry never animates.
+
+Synthetic invisible-panel checks exercise the actual To-do and Monitor labels
+at 310/360pt, their padding, repeated clicks and cancellation. Offscreen fixtures
+cover both appearances, disabled transactions and all five feedback states.
+These verify local event dispatch and layout; physical first mouse, keyboard
+navigation and native glass remain acceptance on the installed app after the
+shared builder promotes the change. Calculated white-label contrast over the
+synthetic 12% gray backdrop is 12.97:1 at rest, 9.67:1 on hover and 7.34:1 while
+pressed; this does not establish contrast on every native glass backdrop.
+
 ### Case Connect polish — 2026-10-21
 
 The person comes to connect an installed agent. First they see OpenCode and/or

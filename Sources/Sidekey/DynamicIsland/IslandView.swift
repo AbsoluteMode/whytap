@@ -1446,7 +1446,7 @@ struct IslandView: View {
             if newValue == .calendar { CalendarHoverModel.shared.begin() }
             recomputeMouseExpanded()
             if newValue != .vocabularyEditor { hoverVocabularyFocused = false }
-            hoverHitBridge.setEnabled(isHoverExpanded && newValue == .controls)
+            hoverHitBridge.setEnabled(isHoverExpanded)
             let height = { (mode: IslandHoverPanelMode) in
                 Self.hoverPanelHeight(
                     for: mode,
@@ -1498,7 +1498,7 @@ struct IslandView: View {
         }
         .onChange(of: isHoverExpanded) { _, expanded in
             if expanded { actions.prepareMeetingAssistant() }
-            hoverHitBridge.setEnabled(expanded && hoverPanelMode == .controls)
+            hoverHitBridge.setEnabled(expanded)
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
             if !expanded {
@@ -2708,6 +2708,9 @@ private struct IslandDropModeHoverPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.islandHoverNavigation,
+            IslandHoverNavigationContext(bridge: hoverHitBridge, context: hitTargetContext))
+        .islandHoverHitRegion(bridge: hoverHitBridge, surface: .navigation)
         .overlay(alignment: .bottom) {
             if outputFastNoticeVisible {
                 Text(IslandOutputLanguageControl.smartOnlyNotice)
@@ -2722,6 +2725,8 @@ private struct IslandDropModeHoverPanel: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: panelMode)
         .onChange(of: panelMode) { _, newMode in
+            hoverHitBridge.setSurface(hitTargetSurface)
+            hoverHitBridge.setContext(hitTargetContext)
             if newMode != .controls {
                 setSearchFocus(false)
             }
@@ -2754,7 +2759,7 @@ private struct IslandDropModeHoverPanel: View {
         )
         .onAppear {
             contentsVisible = true
-            hoverHitBridge.setSurface(IslandHoverToolSearch.isFiltering(searchQuery) ? .result : .tile)
+            hoverHitBridge.setSurface(hitTargetSurface)
             hoverHitBridge.setContext(hitTargetContext)
             // Brightness keys may have changed the level since the last hover.
             if hoverStore.slots.contains(.brightness) { brightness.refresh() }
@@ -2766,7 +2771,7 @@ private struct IslandDropModeHoverPanel: View {
         .onChange(of: hoverStore.slots) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: mode) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: searchQuery) { _, _ in
-            hoverHitBridge.setSurface(IslandHoverToolSearch.isFiltering(searchQuery) ? .result : .tile)
+            hoverHitBridge.setSurface(hitTargetSurface)
             hoverHitBridge.setContext(hitTargetContext)
             selectedSearchIndex = 0
             hoveredTool = nil
@@ -2886,7 +2891,11 @@ private struct IslandDropModeHoverPanel: View {
     }
 
     private var hitTargetContext: String {
-        "\(searchQuery)|\(mode)|" + hoverStore.slots.map(\.rawValue).joined(separator: ",")
+        "\(panelMode)|\(searchQuery)|\(mode)|" + hoverStore.slots.map(\.rawValue).joined(separator: ",")
+    }
+
+    private var hitTargetSurface: IslandHoverHitTargetID.Surface {
+        panelMode == .controls ? (IslandHoverToolSearch.isFiltering(searchQuery) ? .result : .tile) : .navigation
     }
 
     private var searchMatches: [HoverTool] { IslandHoverToolSearch.results(for: searchQuery) }

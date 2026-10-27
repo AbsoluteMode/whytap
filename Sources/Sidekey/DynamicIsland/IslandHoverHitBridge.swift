@@ -2,15 +2,16 @@ import AppKit
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, meetingAssistant, update }
+    enum Surface: Hashable { case tile, result, navigation, meetingAssistant, update }
     enum UpdateAction: Hashable { case download, skip, install, later }
-    private enum Control: Hashable { case tool(HoverTool), update(UpdateAction) }
+    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction) }
     let surface: Surface
     private let control: Control
     var tool: HoverTool? { if case .tool(let tool) = control { return tool }; return nil }
 
     init(surface: Surface, tool: HoverTool) { self.surface = surface; control = .tool(tool) }
     init(update action: UpdateAction) { surface = .update; control = .update(action) }
+    init(back destination: String) { surface = .navigation; control = .back(destination) }
 }
 
 struct IslandHoverHitSnapshot: Equatable {
@@ -137,7 +138,9 @@ final class IslandHoverHitBridge: ObservableObject {
         return targets.values.compactMap { entry in
             guard let view = entry.view,
                   enabled || view.targetID.surface == .update,
-                  view.targetID.surface == activeSurface || view.targetID.surface == .meetingAssistant || view.targetID.surface == .update,
+                  view.targetID.surface == activeSurface
+                    || (view.targetID.surface == .meetingAssistant && (activeSurface == .tile || activeSurface == .result))
+                    || view.targetID.surface == .update,
                   view.targetContext == context,
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
                   let region = regions[view.targetID.surface]?.view, region.surface == view.targetID.surface,

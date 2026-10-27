@@ -26,15 +26,12 @@ struct MonitorHoverPanel: View {
         VStack(spacing: 10) {
             // Equal side slots center the title without overlapping navigation.
             HStack(spacing: 8) {
-                Button {
+                IslandHoverBackButton(destination: "monitor:\(selectedID ?? "picker")",
+                    title: selectedID == nil ? "Tools" : "Dashboards",
+                    accessibilityLabel: selectedID == nil ? "Back to tools" : "Back to dashboards", width: 88) {
                     if selectedID == nil { onBack() }
                     else { selectedID = nil }
-                } label: {
-                    Label(selectedID == nil ? "Tools" : "Dashboards", systemImage: "chevron.left")
-                        .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .frame(width: 88, alignment: .leading)
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)

@@ -22,16 +22,7 @@ struct IslandBrightnessStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.75))
-                .help("Back to tools")
-                .accessibilityLabel("Back to tools")
+                IslandHoverBackButton(destination: "brightness", height: 24, action: onBack)
 
                 BrightnessCapsuleSlider(level: controller.level, isEnabled: controller.isAvailable,
                                         onChange: controller.setLevel,
@@ -72,7 +63,7 @@ struct IslandBrightnessStrip: View {
                 .foregroundStyle(line.isNotice ? AnyShapeStyle(.orange) : AnyShapeStyle(.white.opacity(0.55)))
                 .frame(height: 16)
                 // Under the slider, not the back button.
-                .padding(.leading, 32)
+                .padding(.leading, 40)
                 .accessibilityElement(children: .combine)
             }
         }

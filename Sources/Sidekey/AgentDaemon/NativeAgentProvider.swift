@@ -99,13 +99,19 @@ final class NativeAgentProvider: CLIProvider {
         let turn = UUID().uuidString
         continuation.yield(.started(turnId: turn, requestId: turn, sessionId: conversation.id))
         var actions: UsefulActionsBlock?
+        // Some providers put the answer beside show_actions, then finish with
+        // empty content. Keep that answer hidden until the turn completes.
+        // Never promote narration preceding an evidence/action tool to a result.
+        // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
+        var cardAnswers: [String] = []
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
             let (answer, calls) = try await model.next(tools: NativeAgentTools.definitions(allowActions: options.allowActions))
             try Task.checkCancellation()
             if calls.isEmpty {
-                var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                let final = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                var text = final.isEmpty ? cardAnswers.joined(separator: "\n\n") : final
                 if let extracted = AgentUsefulLinksExtractor.extract(from: text) {
                     text = extracted.answer
                     actions = Self.merging(actions, extracted.block)
@@ -114,7 +120,13 @@ final class NativeAgentProvider: CLIProvider {
                 guard !text.isEmpty || actions?.items.isEmpty == false else { throw NativeAgentError.message("The model returned an empty answer. Try again.") }
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
-                let historyAnswer = text.isEmpty ? (actions?.items.map(\.insertText).joined(separator: "\n") ?? "") : text
+                // Returned card destinations are part of the answer too: the
+                // next request may refer to "that page" or "the second file".
+                let returnedItems = actions?.items.compactMap { item -> String? in
+                    guard !text.contains(item.insertText) else { return nil }
+                    return "- " + (item.description.map { $0 + ": " } ?? "") + item.insertText
+                }.joined(separator: "\n") ?? ""
+                let historyAnswer = [text, returnedItems].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 try? conversation.append(user: prompt, assistant: historyAnswer, directory: directory)
                 lock.withLock { sessionID = conversation.id }
                 continuation.yield(.finalAnswer(text: text))
@@ -122,6 +134,7 @@ final class NativeAgentProvider: CLIProvider {
                 continuation.yield(.done(sources: []))
                 return
             }
+            if calls.contains(where: { $0.name != "show_actions" }) { cardAnswers.removeAll() }
             toolCount += calls.count
             guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }
             var results: [(NativeAgentToolCall, NativeAgentToolResult)] = []
@@ -139,6 +152,14 @@ final class NativeAgentProvider: CLIProvider {
                 try Task.checkCancellation()
                 if let block = result.actions { actions = Self.merging(actions, block) }
                 results.append((call, result))
+            }
+            if calls.allSatisfy({ $0.name == "show_actions" }) {
+                if results.allSatisfy({ $0.1.actions?.items.isEmpty == false }) {
+                    let candidate = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !candidate.isEmpty, !cardAnswers.contains(candidate) { cardAnswers.append(candidate) }
+                } else {
+                    cardAnswers.removeAll()
+                }
             }
             model.append(results: results)
         }
@@ -158,6 +179,9 @@ final class NativeAgentProvider: CLIProvider {
     Answer first, precisely and compactly: usually 1–2 short sentences. Include more only when
     requested or necessary. No preamble, evidence dump, unrelated matches, closing offers or
     repeated summary. Never claim success until the tool confirmed it; state partial failures.
+    Resolve follow-up references using the recent conversation and returned items. For a
+    conversion or comparison, use the earlier values and answer the new question directly.
+    Links and cards supplement an explanation or calculation; they do not replace its answer.
     Simple timeless questions need no tools. Use Tavily web_search for current external facts,
     normally one search and at most two; cite the supporting URLs. If Tavily is not connected,
     say so briefly instead of inventing recent facts.

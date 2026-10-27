@@ -1,7 +1,7 @@
 import Foundation
 
-/// Only completed text pairs survive a turn. Screenshots, tool arguments/results
-/// and provider reasoning remain in the in-flight request, never in this file.
+/// Only completed answers (text and returned card descriptions/destinations)
+/// survive a turn. Raw tool arguments/results, screenshots and reasoning do not.
 struct NativeAgentConversation: Codable {
     struct Pair: Codable { let user: String; let assistant: String }
     var id: String
@@ -32,8 +32,25 @@ struct NativeAgentConversation: Codable {
     }
 
     private mutating func trim() {
-        while pairs.count > 6 || pairs.reduce(0, { $0 + $1.user.count + $1.assistant.count }) > Self.maximumCharacters {
+        while pairs.count > 6 || (pairs.count > 1 && pairs.reduce(0, { $0 + $1.user.count + $1.assistant.count }) > Self.maximumCharacters) {
             pairs.removeFirst()
         }
+        // A long selection or answer used to evict even the newest pair,
+        // leaving a follow-up with no context. Retain a bounded head and tail
+        // of both sides; the actual user request follows selected evidence.
+        // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
+        if let latest = pairs.last, latest.user.count + latest.assistant.count > Self.maximumCharacters {
+            let userLimit = min(latest.user.count, Self.maximumCharacters / 2)
+            pairs[pairs.count - 1] = Pair(user: Self.shortened(latest.user, limit: userLimit),
+                assistant: Self.shortened(latest.assistant, limit: Self.maximumCharacters - userLimit))
+        }
+    }
+
+    private static func shortened(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let marker = "\n[Shortened for recent context]\n"
+        let available = limit - marker.count
+        let prefixCount = available / 2
+        return String(text.prefix(prefixCount)) + marker + String(text.suffix(available - prefixCount))
     }
 }

@@ -223,9 +223,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Application Support/whytap/agent, with AGENTS.md memory, sessions.json and
   native-conversation.json. Read bounded memory before the first model request;
   no bootstrap scan of the home directory or source checkout. Recent context is
-  at most six completed user/assistant text pairs and 12,000 characters, scoped
+  at most six completed user/assistant pairs (answer text and returned card
+  descriptions/destinations) and 12,000 characters, scoped
   to provider/model/endpoint and resumed within 15 minutes. Expiry stops reuse;
-  the last file remains locally until replaced. Tool output, reasoning and
+  the last file remains locally until replaced. An oversized latest exchange is
+  shortened while retaining both ends and room for later turns. Copy-card
+  payloads are excluded from supplementary memory; only their labels remain.
+  Tool output, reasoning and
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
@@ -1038,7 +1042,11 @@ Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and publishes
-only the final answer and show_actions metadata after successful completion.
+the completed answer and show_actions metadata after successful completion.
+Text alongside successful presentation-only calls survives an empty final;
+a nonempty final wins, and evidence/action tools invalidate the fallback.
+Recent context includes returned card descriptions/destinations, and History
+persists visible text together with cards in both blocks and Markdown.
 The compatibility extractor also handles a trailing useful.actions fence.
 NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
 absolute/tilde paths into the same keyboard-action cards if the model omits

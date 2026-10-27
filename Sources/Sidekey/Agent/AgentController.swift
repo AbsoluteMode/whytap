@@ -1617,10 +1617,19 @@ final class AgentController: ObservableObject {
         let shouldEmitTelemetry = !didEmitTurnTerminator
         if !didFinalizeActiveRow {
             if let chatStackStore, let rowId = activeRowId {
+                var blocks = responseStore.blocks
+                let hasText = blocks.contains { if case .textAnswer = $0 { return true }; return false }
+                let answer = responseStore.streamingText.isEmpty ? responseStore.summary : responseStore.streamingText
+                // Native finalAnswer is rendered in the text pill, separately
+                // from action blocks. Persist both parts of the visible answer.
+                // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
+                if !hasText, !answer.isEmpty {
+                    blocks.insert(.textAnswer(TextAnswerBlock(body: answer)), at: 0)
+                }
                 chatStackStore.finalizeChat(
                     rowId: rowId,
-                    blocks: responseStore.blocks,
-                    markdown: composeResponseMarkdown()
+                    blocks: blocks,
+                    markdown: composeResponseMarkdown(blocks: blocks)
                 )
                 os_log(
                     "chat_row_finalized rowId=%{public}lld",
@@ -1659,12 +1668,12 @@ final class AgentController: ObservableObject {
         }
     }
 
-    private func composeResponseMarkdown() -> String {
+    private func composeResponseMarkdown(blocks: [UIBlock]) -> String {
         // Concatenate the body text of every block plus any remaining
         // streaming summary text. Falls back to the error message when the
         // turn failed before producing a block.
         var segments: [String] = []
-        for block in responseStore.blocks {
+        for block in blocks {
             switch block {
             case .textAnswer(let b):
                 segments.append(b.body)

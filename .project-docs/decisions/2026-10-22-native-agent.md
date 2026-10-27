@@ -6,8 +6,17 @@ summary: Replace OpenCode dispatch with a bounded direct model/tool loop, preser
 status: confirmed
 tags: [agent, native, tavily, search, workspace, context, actions, privacy]
 canonical_for: [agent-runtime, agent-web-search, agent-workspace]
-verified_at: 2026-10-26
+verified_at: 2026-10-27
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-27 the user reported a currency-conversion follow-up that showed only a source card and requested a joint Claude Code investigation and a fix preserving useful recent context.
+    confirmed_at: 2026-10-27
+  - type: repository
+    reference: Tests/SidekeyTests/Agent/AgentControllerHistoryTests.swift
+    confirmed_at: 2026-10-27
+  - type: repository
+    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentTests.swift
+    confirmed_at: 2026-10-27
   - type: user-confirmed
     reference: On 2026-10-26 the user approved removing the card-description language sentence from the native system prompt after replica runs showed Russian/German descriptions for English requests.
     confirmed_at: 2026-10-26
@@ -51,6 +60,48 @@ related: [../project.md, 2026-10-22-agent-answers-and-screen.md]
 ---
 
 # Decision
+
+## Follow-up context
+
+The native loop retains text accompanying successful presentation-only
+`show_actions` calls as a candidate answer. If the provider finishes with an
+empty text message, that candidate becomes the completed answer. A nonempty
+final response wins. Text preceding evidence or action tools is narration and
+cannot become a successful result through this fallback; subsequent evidence
+or action tools invalidate a prior candidate. Intermediate text stays hidden
+until successful completion, without extra model requests or repeated tools.
+
+Completed conversation pairs include the answer and returned card descriptions
+and destinations that are absent from its prose. This preserves references to
+earlier values, pages or files. Copy cards contribute only their description
+(or a generic label), never their payload, to supplementary memory. The same
+route, session ID, six-pair / 12,000
+character limit and 15-minute expiry still apply. Raw tool output, reasoning
+and screenshot pixels remain excluded. The prompt directs follow-ups to use
+recent answers and treats cards as supplements to requested explanations.
+The presentation tool also reminds the model to supply any still-missing
+requested text in the continuation that already follows the tool result;
+card-only requests remain supported without an added model request.
+
+A latest exchange larger than half the context budget is shortened with an
+explicit marker, retaining the beginning and end of each side. This leaves
+room for subsequent follow-ups; older pairs are evicted only after shortening.
+Long selected evidence can no longer evict the current question and
+answer entirely; the user request at the end of that evidence is retained.
+Selected evidence remains untrusted context and can be retained in shortened
+form as part of the submitted prompt.
+
+History persistence stores the visible final text as a textAnswer block when
+the provider supplied it separately from card blocks. Both the structured
+history and its Markdown representation retain text and cards, without
+duplicating an existing textAnswer block.
+
+Synthetic provider fixtures reproduce text-with-card followed by an empty
+final message, then verify a currency-conversion follow-up receives the earlier
+values and card target. Fixtures cover all three provider formats, canonical
+final precedence, narration exclusion, oversized turns and SQLite history. They establish the
+code defects and regression behavior; raw intermediate messages from the
+reported live turn were not retained, so its precise sequence is unknown.
 
 ## Quiet selection lookup
 
@@ -158,7 +209,8 @@ OpenRouter charges; unreported costs remain unavailable, not zero.
 
 The dedicated workspace is `Application Support/whytap/agent`, outside source.
 AGENTS.md remains durable memory. The new native-conversation.json retains only
-completed user/assistant text pairs, at most six pairs and 12,000 characters.
+completed user/assistant answers including returned card descriptions and
+destinations, at most six pairs and 12,000 characters.
 Reuse requires the same route/endpoint and session ID within 15 minutes. Expired
 context is ignored; the file is replaced on a later successful turn, not deleted
 by a timer. Tool results, reasoning and screenshot pixels remain in flight and

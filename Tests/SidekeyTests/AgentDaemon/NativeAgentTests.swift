@@ -98,6 +98,47 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual(selection.selectedItem?.insertText, folder.path)
     }
 
+    func testFollowUpRetainsPricesAndAnswerEmittedAlongsideCards() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        let prices = "256 ГБ — 8 499 AED; 512 ГБ — 9 349 AED."
+        let converted = "256 ГБ — примерно $2 314; 512 ГБ — $2 546."
+        let url = "https://example.com/phone"
+        var calls = 0
+        StubURLProtocol.handler = { _ in
+            calls += 1
+            if calls == 1 || calls == 3 {
+                return self.serve(self.router(["role": "assistant", "content": calls == 1 ? prices : converted,
+                    "tool_calls": [["id": "cards-\(calls)", "type": "function", "function": [
+                        "name": "show_actions", "arguments": "{\"items\":[{\"type\":\"link\",\"url\":\"\(url)\",\"description\":\"Phone prices\"}]}"
+                    ]]]], finish: "tool_calls"))
+            }
+            return self.serve(self.router(["role": "assistant", "content": ""]))
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let options = AgentRunOptions(model: "vendor/exact", allowActions: false, openRouterProvider: "endpoint/pin")
+        let first = AskResponseStore()
+        await first.consume(provider.run(prompt: "Сколько стоит телефон в Дубае?", resumeSessionID: nil, options: options))
+        XCTAssertEqual(first.streamingText, prices)
+        XCTAssertEqual(first.blocks.count, 1)
+        let session = try XCTUnwrap(provider.lastSessionID)
+        let second = AskResponseStore()
+        await second.consume(provider.run(prompt: "А сколько это в долларах?", resumeSessionID: session, options: options))
+        XCTAssertEqual(second.streamingText, converted)
+        XCTAssertEqual(provider.lastSessionID, session)
+        let request = try body(2)
+        let messages = try XCTUnwrap(request["messages"] as? [[String: Any]])
+        let priorAnswer = try XCTUnwrap(messages.first { $0["role"] as? String == "assistant" }?["content"] as? String)
+        XCTAssertTrue(priorAnswer.contains(prices))
+        XCTAssertTrue(priorAnswer.contains(url), "A follow-up may refer to the returned card, not only its prose")
+        XCTAssertEqual(messages.last?["content"] as? String, "А сколько это в долларах?")
+        XCTAssertEqual(calls, 4, "Preserving a card's accompanying answer needs no extra model call")
+        let saved = NativeAgentConversation.load(directory: directory, resumeID: session,
+            route: "openrouter/vendor/exact/endpoint/pin")
+        XCTAssertEqual(saved.pairs.count, 2)
+        XCTAssertTrue(saved.pairs.last?.assistant.contains(converted) == true)
+    }
+
     func testOpenAIResponsesRetainsReasoningAndCallIDAndReturnsImage() async throws {
         let (_, _, http) = try fixture()
         var count = 0
@@ -123,6 +164,114 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertTrue(input.contains { $0["type"] as? String == "function_call_output" && $0["call_id"] as? String == "fc1" })
         XCTAssertTrue(String(decoding: StubURLProtocol.capturedBodies[1], as: UTF8.self).replacingOccurrences(of: "\\/", with: "/").contains("data:image/jpeg;base64,synthetic-pixels"))
         XCTAssertEqual(StubURLProtocol.capturedRequests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer own-openai-key")
+    }
+
+    func testCardAnswerSurvivesEmptyFinalAcrossAllNativeProviders() async throws {
+        for route: OpenCodeModelProvider in [.openRouter, .openAI, .anthropic] {
+            let (directory, keys, http) = try fixture()
+            let account: String
+            switch route {
+            case .openRouter: account = OpenRouterLLMKeyStore.account
+            case .openAI: account = ProviderAccount.openAIKeychainAccount
+            case .anthropic: account = ProviderAccount.anthropicKeychainAccount
+            }
+            try keys.save("key", account: account)
+            var step = 0
+            StubURLProtocol.handler = { _ in
+                step += 1
+                let text = step == 1 ? "The price is about $2,314." : ""
+                let args: [String: Any] = ["items": [["type": "link", "url": "https://example.com/phone", "description": "Phone"]]]
+                switch route {
+                case .openRouter:
+                    var message: [String: Any] = ["role": "assistant", "content": text]
+                    if step == 1 { message["tool_calls"] = [["id": "card", "type": "function", "function": ["name": "show_actions",
+                        "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: args), as: UTF8.self)]]] }
+                    return self.serve(self.router(message, finish: step == 1 ? "tool_calls" : "stop"))
+                case .openAI:
+                    var output: [[String: Any]] = [["type": "message", "role": "assistant", "content": [["type": "output_text", "text": text]]]]
+                    if step == 1 { output.append(["type": "function_call", "call_id": "card", "name": "show_actions",
+                        "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: args), as: UTF8.self)]) }
+                    return self.serve(["status": "completed", "output": output])
+                case .anthropic:
+                    var content: [[String: Any]] = [["type": "text", "text": text]]
+                    if step == 1 { content.append(["type": "tool_use", "id": "card", "name": "show_actions", "input": args]) }
+                    return self.serve(["stop_reason": step == 1 ? "tool_use" : "end_turn", "content": content])
+                }
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            var events: [AgentSSEEvent] = []
+            for await event in provider.run(prompt: "And in dollars?", resumeSessionID: nil,
+                options: .init(model: "exact", allowActions: false, openCodeProvider: route)) { events.append(event) }
+            XCTAssertTrue(events.contains(.finalAnswer(text: "The price is about $2,314.")), "\(route)")
+            XCTAssertEqual(events.last, .done(sources: []))
+            XCTAssertEqual(step, 2)
+        }
+    }
+
+    func testCanonicalFinalAnswerOverridesTextBesideCards() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        var step = 0
+        StubURLProtocol.handler = { _ in
+            step += 1
+            if step == 1 { return self.serve(self.router(["role": "assistant", "content": "Earlier price.", "tool_calls": [
+                ["id": "card", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"link\",\"url\":\"https://example.com\",\"description\":\"Source\"}]}"]]
+            ]], finish: "tool_calls")) }
+            return self.serve(self.router(["role": "assistant", "content": "Corrected final price."]))
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var events: [AgentSSEEvent] = []
+        for await event in provider.run(prompt: "price", resumeSessionID: nil, options: .init(model: "model")) { events.append(event) }
+        XCTAssertTrue(events.contains(.finalAnswer(text: "Corrected final price.")))
+        XCTAssertFalse(events.contains(.finalAnswer(text: "Earlier price.")))
+    }
+
+    func testNarrationBeforeEvidenceToolDoesNotBecomeSuccessfulAnswer() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        var step = 0
+        StubURLProtocol.handler = { _ in
+            step += 1
+            if step == 1 { return self.serve(self.router(["role": "assistant", "content": "I'll check the price now.", "tool_calls": [
+                ["id": "read", "type": "function", "function": ["name": "read_file", "arguments": "{\"path\":\"missing.txt\"}"]]
+            ]], finish: "tool_calls")) }
+            return self.serve(self.router(["role": "assistant", "content": ""]))
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var events: [AgentSSEEvent] = []
+        for await event in provider.run(prompt: "price", resumeSessionID: nil, options: .init(model: "model")) { events.append(event) }
+        XCTAssertTrue(events.contains { if case .error = $0 { return true }; return false })
+        XCTAssertFalse(events.contains(.done(sources: [])))
+        XCTAssertNil(provider.lastSessionID)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+    }
+
+    func testCardAnswerPartsAccumulateButLaterEvidenceInvalidatesThem() async throws {
+        for continuesWithEvidence in [false, true] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: OpenRouterLLMKeyStore.account)
+            var step = 0
+            StubURLProtocol.handler = { _ in
+                step += 1
+                if step <= 2 {
+                    return self.serve(self.router(["role": "assistant", "content": step == 1 ? "First price." : "Second price.", "tool_calls": [
+                        ["id": "card-\(step)", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"path\",\"path\":\"/tmp/price\"}]}"]]
+                    ]], finish: "tool_calls"))
+                }
+                if step == 3, continuesWithEvidence {
+                    return self.serve(self.router(["role": "assistant", "content": "Checking a newer price.", "tool_calls": [
+                        ["id": "read", "type": "function", "function": ["name": "read_file", "arguments": "{\"path\":\"missing.txt\"}"]]
+                    ]], finish: "tool_calls"))
+                }
+                return self.serve(self.router(["role": "assistant", "content": ""]))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            var final: String?
+            for await event in provider.run(prompt: "price", resumeSessionID: nil, options: .init(model: "model")) {
+                if case .finalAnswer(let text) = event { final = text }
+            }
+            XCTAssertEqual(final, continuesWithEvidence ? "" : "First price.\n\nSecond price.")
+        }
     }
 
     func testAnthropicToolResultPreservesThinkingSignatureAndImage() async throws {
@@ -245,6 +394,57 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertTrue(NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route2", now: now).pairs.isEmpty)
         XCTAssertTrue(NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route1", now: now.addingTimeInterval(901)).pairs.isEmpty)
         XCTAssertTrue(NativeAgentConversation.load(directory: directory, resumeID: nil, route: "route1", now: now).pairs.isEmpty)
+    }
+
+    func testOversizedTurnRetainsBoundedLatestQuestionAndAnswer() throws {
+        let (directory, _, _) = try fixture()
+        var conversation = NativeAgentConversation.load(directory: directory, resumeID: nil, route: "route")
+        try conversation.append(user: "Older topic", assistant: "Older answer", directory: directory)
+        let question = "User request:\nА сколько это в долларах?"
+        let user = "Selected text:\n" + String(repeating: "evidence ", count: 3000) + "\n" + question
+        let answer = "256 ГБ: 8 499 AED\n" + String(repeating: "detail ", count: 3000) + "\n512 ГБ: 9 349 AED"
+        try conversation.append(user: user, assistant: answer, directory: directory)
+        let restored = NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route")
+        XCTAssertEqual(restored.pairs.count, 2, "Shorten before eviction so earlier small exchanges can remain")
+        let pair = try XCTUnwrap(restored.pairs.last)
+        XCTAssertLessThanOrEqual(pair.user.count + pair.assistant.count, NativeAgentConversation.maximumCharacters)
+        XCTAssertTrue(pair.user.hasPrefix("Selected text:"))
+        XCTAssertTrue(pair.user.hasSuffix(question))
+        XCTAssertTrue(pair.assistant.hasPrefix("256 ГБ: 8 499 AED"))
+        XCTAssertTrue(pair.assistant.hasSuffix("512 ГБ: 9 349 AED"))
+        XCTAssertFalse(pair.user.contains(String(repeating: "evidence ", count: 3000)))
+        XCTAssertTrue(NativeAgentConversation.load(directory: directory, resumeID: restored.id, route: "different").pairs.isEmpty)
+        try conversation.append(user: "А 512 ГБ?", assistant: "Примерно $2 546.", directory: directory)
+        let continued = NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route")
+        XCTAssertEqual(continued.pairs.count, 3)
+        XCTAssertTrue(continued.pairs.contains { $0.assistant.hasPrefix("256 ГБ: 8 499 AED") })
+        XCTAssertLessThanOrEqual(continued.pairs.reduce(0) { $0 + $1.user.count + $1.assistant.count }, NativeAgentConversation.maximumCharacters)
+    }
+
+    func testCopyCardPayloadStaysOutOfSupplementaryConversationMemory() async throws {
+        for finalText in ["", "Here is the example."] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: OpenRouterLLMKeyStore.account)
+            var step = 0
+            StubURLProtocol.handler = { _ in
+                step += 1
+                if step == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "copy", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"copy\",\"text\":\"SYNTHETIC_COPY_PAYLOAD\",\"description\":\"Code example\"},{\"type\":\"copy\",\"text\":\"ANOTHER_COPY_PAYLOAD\"}]}"]]
+                ]], finish: "tool_calls")) }
+                return self.serve(self.router(["role": "assistant", "content": finalText]))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            var items: [ActionItem] = []
+            for await event in provider.run(prompt: "Prepare a copyable example", resumeSessionID: nil, options: .init(model: "model")) {
+                if case .blockComplete(.usefulActions(let block)) = event { items = block.items }
+            }
+            XCTAssertEqual(items.first?.insertText, "SYNTHETIC_COPY_PAYLOAD")
+            let saved = try String(contentsOf: directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
+            XCTAssertFalse(saved.contains("SYNTHETIC_COPY_PAYLOAD"))
+            XCTAssertFalse(saved.contains("ANOTHER_COPY_PAYLOAD"))
+            XCTAssertTrue(saved.contains("Code example"))
+            XCTAssertTrue(saved.contains("Copyable text"))
+        }
     }
 
     func testShellUsesWorkspaceAndCapsOutput() async throws {
@@ -411,7 +611,7 @@ final class NativeAgentTests: XCTestCase {
         }
         XCTAssertEqual(actionCount, 2)
         let history = NativeAgentConversation.load(directory: directory, resumeID: provider.lastSessionID, route: "openrouter/model/")
-        XCTAssertEqual(history.pairs.last?.assistant, "/tmp/first\n/tmp/second")
+        XCTAssertEqual(history.pairs.last?.assistant, "- /tmp/first\n- /tmp/second")
         var model = NativeAgentModel(options: .init(model: "model", openCodeProvider: .anthropic), key: "key", system: "system", history: history.pairs, prompt: "continue", http: http, usageSink: { _ in })
         model.append(results: [(.init(id: "read", name: "read_file", arguments: [:]), .init(text: ""))])
         let result = try XCTUnwrap((model.messages.last?["content"] as? [[String: Any]])?.first?["content"] as? [[String: Any]])

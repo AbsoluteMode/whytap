@@ -39,8 +39,11 @@ extension OpenRouterLLMClient {
             throw OpenRouterLLMError.unexpectedStatus(http.statusCode, nil)
         }
         if let context = AIUsageTaskScope.context {
-            // The API reports tokens rather than an actual dollar charge.
-            usageSink(AIUsageEvent(context: context, currency: .usd, amount: nil, basis: .unavailable))
+            // The API reports tokens rather than an actual dollar charge: estimate it.
+            let usage = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["usage"] as? [String: Any]
+            let amount = AnthropicUsagePrices.cost(model: model, usage: usage)
+            usageSink(AIUsageEvent(context: context, currency: .usd, amount: amount,
+                                   basis: amount == nil ? .unavailable : .estimated))
         }
         struct Reply: Decodable {
             struct Block: Decodable { let type: String; let text: String? }

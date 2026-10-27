@@ -143,6 +143,31 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual((model.messages.last?["content"] as? [[String: Any]])?.first?["tool_use_id"] as? String, "tool1")
     }
 
+    func testAnthropicTurnRecordsTokenEstimateWhileOpenAIStaysUnpriced() async throws {
+        let (_, _, http) = try fixture()
+        StubURLProtocol.handler = { request in
+            if request.url?.host == "api.anthropic.com" {
+                return self.serve(["stop_reason": "end_turn", "content": [["type": "text", "text": "done"]],
+                                   "usage": ["input_tokens": 2000, "output_tokens": 100, "cache_read_input_tokens": 5000]])
+            }
+            return self.serve(["status": "completed", "usage": ["input_tokens": 2000, "output_tokens": 100],
+                               "output": [["type": "message", "content": [["type": "output_text", "text": "done"]]]]])
+        }
+        var recorded: [AIUsageEvent] = []
+        var anthropic = NativeAgentModel(options: .init(model: "claude-opus-5-5", openCodeProvider: .anthropic), key: "key", system: "system",
+                                         history: [], prompt: "hi", http: http, usageSink: { recorded.append($0) })
+        _ = try await anthropic.next(tools: [])
+        var openAI = NativeAgentModel(options: .init(model: "gpt-model", openCodeProvider: .openAI), key: "key", system: "system",
+                                      history: [], prompt: "hi", http: http, usageSink: { recorded.append($0) })
+        _ = try await openAI.next(tools: [])
+        XCTAssertEqual(recorded.map(\.context.account), [.anthropic, .openAI])
+        // 2,000 × $4 + 5,000 × $0.20 + 100 × $20 per million tokens.
+        XCTAssertEqual(try XCTUnwrap(recorded[0].amount), 0.011, accuracy: 1e-12)
+        XCTAssertEqual(recorded[0].basis, .estimated)
+        XCTAssertNil(recorded[1].amount)
+        XCTAssertEqual(recorded[1].basis, .unavailable)
+    }
+
     func testOpenRouterPreservesNativeReasoningAndToolPairing() async throws {
         let (_, _, http) = try fixture()
         StubURLProtocol.handler = { _ in self.serve(self.router(["role": "assistant", "content": NSNull(),

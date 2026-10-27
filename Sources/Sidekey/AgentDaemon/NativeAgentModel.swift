@@ -83,9 +83,15 @@ struct NativeAgentModel {
             throw error
         }
         let usage = response["usage"] as? [String: Any]
-        let cost = options.openCodeProvider == .openRouter ? AIUsageNumber.nonnegative(usage?["cost"]) : nil
+        // OpenRouter reports its charge; Anthropic reports tokens, priced as an estimate.
+        let cost: Double?, basis: AIUsageBasis
+        switch options.openCodeProvider {
+        case .openRouter: cost = AIUsageNumber.nonnegative(usage?["cost"]); basis = .reported
+        case .anthropic: cost = AnthropicUsagePrices.cost(model: model, usage: usage); basis = .estimated
+        case .openAI: cost = nil; basis = .unavailable
+        }
         usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
-                                    currency: .usd, amount: cost, basis: cost == nil ? .unavailable : .reported))
+                                    currency: .usd, amount: cost, basis: cost == nil ? .unavailable : basis))
         return try accept(response)
     }
 

@@ -817,7 +817,11 @@ period; hover/click/keyboard focus reveals their models. One Price column
 retains explicit USD and ElevenLabs credit units, both when mixed. Each visit
 starts at This month; matching neutral From/To controls open a dismissing native
 calendar. No permanent bottom explanation or sticky text-segment highlight.
-OpenRouter response costs are reported. Soniox reads exact request cost_usd from
+OpenRouter response costs are reported. Direct Anthropic text/Agent calls
+estimate USD from response usage tokens with published per-model rates
+(AnthropicUsagePrices, marked ≈); unknown models, fast mode or missing usage stay
+unavailable. WHY: .project-docs/decisions/2026-10-27-anthropic-token-costs.md
+Soniox reads exact request cost_usd from
 usage logs by random client reference and historical model; missing/delayed API
 prices retain public hourly estimates marked ≈. New meeting checkpoints retain
 the same reference across retries. Exact prices upgrade estimated journal rows

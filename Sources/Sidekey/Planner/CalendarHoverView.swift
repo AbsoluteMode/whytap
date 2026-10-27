@@ -144,6 +144,7 @@ struct CalendarHoverView: View {
                 }.accessibilityLabel("Connect a calendar")
             }
         }
+        .frame(height: 26)
     }
 
     private var title: String {

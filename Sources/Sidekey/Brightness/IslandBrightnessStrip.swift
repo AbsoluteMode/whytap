@@ -22,7 +22,7 @@ struct IslandBrightnessStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                IslandHoverBackButton(destination: "brightness", height: 24, action: onBack)
+                IslandHoverBackButton(destination: "brightness", action: onBack)
 
                 BrightnessCapsuleSlider(level: controller.level, isEnabled: controller.isAvailable,
                                         onChange: controller.setLevel,

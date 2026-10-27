@@ -22,7 +22,7 @@ struct NotifyHoverPanel: View {
             HStack {
                 Group {
                     if showsBackButton {
-                        IslandHoverBackButton(destination: "notify", title: "Tools", width: 68, height: 24, action: onBack)
+                        IslandHoverBackButton(destination: "notify", action: onBack)
                     }
                     else { Color.clear.frame(height: 1) }
                 }.frame(width: 68, alignment: .leading)

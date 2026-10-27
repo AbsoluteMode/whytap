@@ -23,7 +23,7 @@ final class IslandHoverBackButtonTests: XCTestCase {
                 let (host, window) = host(content, bridge: bridge, size: NSSize(width: width, height: 290))
                 defer { window.contentView = nil; window.close() }
                 // Both the leading/trailing padding and the icon belong to Back.
-                let xs: [CGFloat] = tool == "todo" ? [13, 28, 43] : [11, 54, 97]
+                let xs: [CGFloat] = tool == "todo" ? [13, 28, 43] : [11, 26, 41]
                 for x in xs {
                     let point = fromTop(x, 23, in: host)
                     let previous = activations
@@ -36,6 +36,10 @@ final class IslandHoverBackButtonTests: XCTestCase {
                 }
                 XCTAssertFalse(bridge.mouseDown(at: fromTop(130, 23, in: host), in: window, allowed: true),
                                "The title beside Back is not a navigation target")
+                if tool == "monitor" {
+                    XCTAssertFalse(bridge.mouseDown(at: fromTop(60, 23, in: host), in: window, allowed: true),
+                                   "The empty layout slot beside the compact arrow is not clickable")
+                }
                 XCTAssertFalse(window.isVisible || window.isKeyWindow)
             }
         }
@@ -45,13 +49,13 @@ final class IslandHoverBackButtonTests: XCTestCase {
         let bridge = makeBridge()
         var activations = 0
         func content(_ destination: String, enabled: Bool = true) -> AnyView {
-            AnyView(IslandHoverBackButton(destination: destination, title: "Dashboards", width: 88) {
+            AnyView(IslandHoverBackButton(destination: destination) {
                 activations += 1
             }.disabled(!enabled))
         }
-        let (host, window) = host(content("monitor:one"), bridge: bridge, size: NSSize(width: 88, height: 26))
+        let (host, window) = host(content("monitor:one"), bridge: bridge, size: NSSize(width: 32, height: 24))
         defer { window.contentView = nil; window.close() }
-        let point = fromTop(44, 13, in: host)
+        let point = fromTop(16, 12, in: host)
         XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: true))
         host.rootView = wrap(content("monitor:two"), bridge: bridge)
         settle(host)
@@ -146,8 +150,8 @@ final class IslandHoverBackButtonTests: XCTestCase {
             ForEach(0..<5) { state in
                 HStack {
                     Text(["Normal", "Hover", "Pressed", "Focus", "Disabled"][state]).frame(width: 70, alignment: .leading)
-                    Label("Dashboards", systemImage: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold)).frame(width: 88, height: 26)
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold)).frame(width: 32, height: 24)
                         .background(IslandHoverBackSurface(hovered: state == 1 || state == 4,
                             pressed: state == 2 || state == 4, focused: state == 3 || state == 4, enabled: state != 4))
                         .opacity(state == 4 ? 0.42 : 1)

@@ -94,8 +94,7 @@ struct TodoHoverView: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                Button(action: onBack) { Image(systemName: "chevron.left").frame(width: 24, height: 26) }
-                    .accessibilityLabel("Back to tools")
+                IslandHoverBackButton(destination: "todo", action: onBack)
                 Text(model.showingHistory ? "History" : "To-do").font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 4)
                 Button {

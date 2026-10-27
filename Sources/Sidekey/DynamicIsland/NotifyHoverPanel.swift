@@ -21,7 +21,9 @@ struct NotifyHoverPanel: View {
         VStack(spacing: 8) {
             HStack {
                 Group {
-                    if showsBackButton { Button(action: onBack) { Label("Tools", systemImage: "chevron.left") }.buttonStyle(.plain) }
+                    if showsBackButton {
+                        IslandHoverBackButton(destination: "notify", title: "Tools", width: 68, height: 24, action: onBack)
+                    }
                     else { Color.clear.frame(height: 1) }
                 }.frame(width: 68, alignment: .leading)
                 Text("Notify").font(.system(size: 13, weight: .semibold)).frame(maxWidth: .infinity)

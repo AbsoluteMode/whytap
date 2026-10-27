@@ -125,11 +125,11 @@ struct CalendarHoverView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            CalendarHoverButton {
+            IslandHoverBackButton(destination: "calendar:\(model.page)",
+                accessibilityLabel: model.page == .agenda ? "Back to tools" : "Back to calendar") {
                 if model.page == .agenda { onBack() }
                 else { connectionFlow.cancel(); model.page = .agenda }
-            } label: { Image(systemName: "chevron.left").frame(width: 26, height: 26) }
-                .accessibilityLabel(model.page == .agenda ? "Back to tools" : "Back to calendar")
+            }
             Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
             if model.page == .agenda {

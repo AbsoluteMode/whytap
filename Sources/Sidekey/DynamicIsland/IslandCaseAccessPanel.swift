@@ -61,20 +61,14 @@ struct IslandCaseAccessPanel: View {
 
     private var header: some View {
         HStack(spacing: 7) {
-            Button {
+            IslandHoverBackButton(destination: "case:\(draft?.appID?.uuidString ?? (draft == nil ? "agents" : "new"))",
+                accessibilityLabel: draft?.appID == nil && draft != nil ? "Back to agents" : "Back to keys") {
                 if draft?.appID == nil, draft != nil {
                     draft = nil
                     lastError = nil
                 } else { onBack() }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 24, height: 26)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(CaseAccessButtonStyle())
             .disabled(isBusy)
-            .accessibilityLabel(draft?.appID == nil && draft != nil ? "Back to agents" : "Back to keys")
             .accessibilityIdentifier("case.access.back")
             if let draft {
                 CaseAppBrandIcon(identity: draft.identity, size: 17, color: .white.opacity(0.92))

@@ -56,7 +56,7 @@ sources:
   - type: url
     reference: https://github.com/anomalyco/opencode/blob/v1.17.12/packages/opencode/src/session/session.ts
     confirmed_at: 2026-10-20
-related: [2026-10-19-api-hints.md]
+related: [2026-10-19-api-hints.md, 2026-10-27-anthropic-token-costs.md]
 ---
 
 # Feature expenses

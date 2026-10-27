@@ -326,8 +326,8 @@ feature expenses without a permanent model-level grid or scattered period contro
   empty history and a recoverable storage error have explicit states.
 - System typography: 15 pt heading, 13 pt feature/value rows, 11.5 pt secondary
   labels. Aligned numeric columns use monospaced digits; colors reuse adaptive
-  MacSettingsTheme tokens. Approximation and incomplete totals use text marks,
-  so meaning does not rely on color.
+  MacSettingsTheme tokens. Estimates and incomplete totals use visible secondary
+  labels beside their amounts, so meaning does not rely on symbols or color.
 - From/To controls share the period menu's 30 pt geometry, neutral fill and
   typography. They open a 310 pt calendar with separate month menu and editable year combo.
   Selecting a day or Today applies and closes; month/year browsing never changes
@@ -348,10 +348,11 @@ feature expenses without a permanent model-level grid or scattered period contro
   The model list scrolls at 320 pt while its heading and explanation stay visible.
   Rows retain their geometry during disclosure; no new motion needs reduction.
 - Historical feature/provider/model snapshots drive expenses. Unknown price is
-  Unavailable, never free; ≈ denotes a calculated estimate and + excluded unknown
-  costs. The permanent bottom explanation is removed at the user's request;
-  help and model details explain these marks. ElevenLabs credits are never
-  combined with dollars or inferred from a plan.
+  Unavailable, never free. Each amount has its own Estimated label when needed
+  and a count of unpriced calls excluded from that currency's subtotal. The
+  permanent bottom explanation stays removed at the user's request; model
+  details explain the affected providers. ElevenLabs credits are never combined
+  with dollars or inferred from a plan.
 
 Update 2026-10-21: one feature table remains the cost surface. Soniox exact
 request prices replace estimates when available; API delay/failure retains ≈
@@ -367,9 +368,20 @@ and inactive disabled states. Existing feature disclosures and layout stay intac
 Update 2026-10-21: ElevenLabs model details distinguish missing recorded audio
 duration from a missing model rate, beside the affected historical model.
 A durationless attempt cannot be priced by fetching a rate; it does not trigger
-that lookup or a misleading rate warning. Unknown costs stay excluded with +
-on partial totals. Known estimates are unchanged; no cost is inferred from a
+that lookup or a misleading rate warning. Unknown costs stay excluded from
+partial totals. Known estimates are unchanged; no cost is inferred from a
 failed connection or borrowed from another model.
+
+Update 2026-10-27: the user could not interpret the trailing + on the total and
+asked for a clearer presentation. Amounts now stand alone; a smaller visible
+line underneath says Estimated and/or the number of unpriced calls. Both USD
+and credits retain separate amount/status groups in feature rows, Total and
+model details. Fully priced reported amounts have no status line; wholly
+unpriced usage says USD/Credits unavailable with its excluded-call count.
+This keeps the existing one-table layout and makes incomplete data readable
+without a tooltip. Numeric accounting and recorded history are unchanged.
+No controls or animations are added; existing hover, focus, pin and Escape
+behavior remains. The layout assumes the existing English Settings language.
 
 The revised date popover has 310 pt offscreen fixtures in English/Russian and
 both appearances. Calendar arithmetic covers leap days, DST, previous years

@@ -617,13 +617,15 @@ Brightness inside hover:
   until its own end notification, and a gap over 1 s between frames restarts
   the 5 s wait for headroom and the 1.5 s hold; another user's session also gets the
   display's own table until this one is active again. Extra is a fixed boost;
-  any backlight decrease ends it, including native brightness keys, automatic
-  brightness and idle dimming with the strip closed. The first slider decrease
+  external backlight changes, including automatic brightness, battery dimming
+  and native macOS controls, keep it enabled even with the strip closed.
+  Readback cannot distinguish automatic changes from native manual controls.
+  The first Whytap slider decrease
   or intercepted brightness-down press only ends Extra, leaving the backlight
   and slider unchanged for that whole drag or held press. The next adjustment
   lowers the backlight normally, including accessibility adjustments and fine
   key steps; outside changes
-  are detected within the 0.5 s poll, after the 0.75 s write-settle window.
+  are followed within the 0.5 s poll, after the 0.75 s write-settle window.
   Float readback round-off is ignored. Enabling Extra reads a fresh baseline;
   increasing brightness never enables it. Its switch (strip or Settings) also
   ends it, as do serious thermal state, a

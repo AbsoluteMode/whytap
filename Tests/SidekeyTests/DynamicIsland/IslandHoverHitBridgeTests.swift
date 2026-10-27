@@ -131,6 +131,9 @@ final class IslandHoverHitBridgeTests: XCTestCase {
             bridge.cancelPress(for: .meetingAssistant)
             bridge.mouseUp(at: point, in: window, allowed: true)
             XCTAssertEqual(activations, 1)
+            bridge.setEnabled(false)
+            XCTAssertFalse(bridge.mouseDown(at: point, in: window, allowed: true),
+                           "Update's independent dispatch must not enable a disabled tools/search surface")
         }
     }
 

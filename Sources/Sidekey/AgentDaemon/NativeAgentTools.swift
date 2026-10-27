@@ -108,7 +108,7 @@ struct NativeAgentTools {
                 for case .path(let path, _) in block.items where !path.hasPrefix("/") {
                     throw NativeAgentError.message("Path actions require absolute paths.")
                 }
-                return .init(text: "Actions attached to the answer.", actions: block)
+                return .init(text: "Cards prepared. Provide the requested answer text if you have not already supplied it, unless the user requested only cards.", actions: block)
             default: throw NativeAgentError.message("Unknown tool.")
             }
         } catch is CancellationError { return .init(text: "Tool cancelled.") }

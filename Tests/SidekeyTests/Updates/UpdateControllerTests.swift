@@ -96,9 +96,15 @@ final class UpdateControllerTests: XCTestCase {
     func test_available_download_invokes_the_download_action() {
         AppState.shared.updateAvailable = nil
         var downloads = 0
-        let controller = UpdateController(appState: .shared, downloadAction: { downloads += 1 })
+        let controller = UpdateController(appState: .shared, downloadAction: {
+            XCTAssertEqual(AppState.shared.updateAvailable?.stage, .downloading(fractionCompleted: 0),
+                           "The click must show feedback before Sparkle starts delivering bytes")
+            downloads += 1
+        })
         controller.handleDiscovered(version: "1.9.1", build: "1356")
-        AppState.shared.updateAvailable?.startDownload()
+        let available = AppState.shared.updateAvailable
+        available?.startDownload()
+        available?.startDownload()
         XCTAssertEqual(downloads, 1, "clicking Update invokes the injected download action")
     }
 

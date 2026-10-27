@@ -123,6 +123,12 @@ final class NativeAgentProvider: CLIProvider {
                 // Returned card destinations are part of the answer too: the
                 // next request may refer to "that page" or "the second file".
                 let returnedItems = actions?.items.compactMap { item -> String? in
+                    if case .copy(_, let description) = item {
+                        // A copy payload can contain file/tool content. Keep
+                        // only its label in supplementary conversation memory.
+                        let label = description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        return "- " + (label.isEmpty ? "Copyable text" : label)
+                    }
                     guard !text.contains(item.insertText) else { return nil }
                     return "- " + (item.description.map { $0 + ": " } ?? "") + item.insertText
                 }.joined(separator: "\n") ?? ""

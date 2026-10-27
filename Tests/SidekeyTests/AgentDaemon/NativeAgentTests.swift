@@ -405,7 +405,7 @@ final class NativeAgentTests: XCTestCase {
         let answer = "256 ГБ: 8 499 AED\n" + String(repeating: "detail ", count: 3000) + "\n512 ГБ: 9 349 AED"
         try conversation.append(user: user, assistant: answer, directory: directory)
         let restored = NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route")
-        XCTAssertEqual(restored.pairs.count, 1, "The latest exchange must survive even if older pairs are evicted")
+        XCTAssertEqual(restored.pairs.count, 2, "Shorten before eviction so earlier small exchanges can remain")
         let pair = try XCTUnwrap(restored.pairs.last)
         XCTAssertLessThanOrEqual(pair.user.count + pair.assistant.count, NativeAgentConversation.maximumCharacters)
         XCTAssertTrue(pair.user.hasPrefix("Selected text:"))
@@ -414,6 +414,37 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertTrue(pair.assistant.hasSuffix("512 ГБ: 9 349 AED"))
         XCTAssertFalse(pair.user.contains(String(repeating: "evidence ", count: 3000)))
         XCTAssertTrue(NativeAgentConversation.load(directory: directory, resumeID: restored.id, route: "different").pairs.isEmpty)
+        try conversation.append(user: "А 512 ГБ?", assistant: "Примерно $2 546.", directory: directory)
+        let continued = NativeAgentConversation.load(directory: directory, resumeID: conversation.id, route: "route")
+        XCTAssertEqual(continued.pairs.count, 3)
+        XCTAssertTrue(continued.pairs.contains { $0.assistant.hasPrefix("256 ГБ: 8 499 AED") })
+        XCTAssertLessThanOrEqual(continued.pairs.reduce(0) { $0 + $1.user.count + $1.assistant.count }, NativeAgentConversation.maximumCharacters)
+    }
+
+    func testCopyCardPayloadStaysOutOfSupplementaryConversationMemory() async throws {
+        for finalText in ["", "Here is the example."] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: OpenRouterLLMKeyStore.account)
+            var step = 0
+            StubURLProtocol.handler = { _ in
+                step += 1
+                if step == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "copy", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"copy\",\"text\":\"SYNTHETIC_COPY_PAYLOAD\",\"description\":\"Code example\"},{\"type\":\"copy\",\"text\":\"ANOTHER_COPY_PAYLOAD\"}]}"]]
+                ]], finish: "tool_calls")) }
+                return self.serve(self.router(["role": "assistant", "content": finalText]))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            var items: [ActionItem] = []
+            for await event in provider.run(prompt: "Prepare a copyable example", resumeSessionID: nil, options: .init(model: "model")) {
+                if case .blockComplete(.usefulActions(let block)) = event { items = block.items }
+            }
+            XCTAssertEqual(items.first?.insertText, "SYNTHETIC_COPY_PAYLOAD")
+            let saved = try String(contentsOf: directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
+            XCTAssertFalse(saved.contains("SYNTHETIC_COPY_PAYLOAD"))
+            XCTAssertFalse(saved.contains("ANOTHER_COPY_PAYLOAD"))
+            XCTAssertTrue(saved.contains("Code example"))
+            XCTAssertTrue(saved.contains("Copyable text"))
+        }
     }
 
     func testShellUsesWorkspaceAndCapsOutput() async throws {

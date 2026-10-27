@@ -32,17 +32,19 @@ struct NativeAgentConversation: Codable {
     }
 
     private mutating func trim() {
-        while pairs.count > 6 || (pairs.count > 1 && pairs.reduce(0, { $0 + $1.user.count + $1.assistant.count }) > Self.maximumCharacters) {
-            pairs.removeFirst()
-        }
         // A long selection or answer used to evict even the newest pair,
         // leaving a follow-up with no context. Retain a bounded head and tail
-        // of both sides; the actual user request follows selected evidence.
+        // of both sides, reserving half the budget for subsequent exchanges.
+        // The actual user request follows selected evidence.
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
-        if let latest = pairs.last, latest.user.count + latest.assistant.count > Self.maximumCharacters {
-            let userLimit = min(latest.user.count, Self.maximumCharacters / 2)
+        let pairLimit = Self.maximumCharacters / 2
+        if let latest = pairs.last, latest.user.count + latest.assistant.count > pairLimit {
+            let userLimit = min(latest.user.count, pairLimit / 2)
             pairs[pairs.count - 1] = Pair(user: Self.shortened(latest.user, limit: userLimit),
-                assistant: Self.shortened(latest.assistant, limit: Self.maximumCharacters - userLimit))
+                assistant: Self.shortened(latest.assistant, limit: pairLimit - userLimit))
+        }
+        while pairs.count > 6 || pairs.reduce(0, { $0 + $1.user.count + $1.assistant.count }) > Self.maximumCharacters {
+            pairs.removeFirst()
         }
     }
 

@@ -226,8 +226,10 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   at most six completed user/assistant pairs (answer text and returned card
   descriptions/destinations) and 12,000 characters, scoped
   to provider/model/endpoint and resumed within 15 minutes. Expiry stops reuse;
-  an oversized latest exchange is shortened while retaining both ends.
-  the last file remains locally until replaced. Tool output, reasoning and
+  the last file remains locally until replaced. An oversized latest exchange is
+  shortened while retaining both ends and room for later turns. Copy-card
+  payloads are excluded from supplementary memory; only their labels remain.
+  Tool output, reasoning and
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.

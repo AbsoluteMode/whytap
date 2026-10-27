@@ -73,7 +73,9 @@ until successful completion, without extra model requests or repeated tools.
 
 Completed conversation pairs include the answer and returned card descriptions
 and destinations that are absent from its prose. This preserves references to
-earlier values, pages or files. The same route, session ID, six-pair / 12,000
+earlier values, pages or files. Copy cards contribute only their description
+(or a generic label), never their payload, to supplementary memory. The same
+route, session ID, six-pair / 12,000
 character limit and 15-minute expiry still apply. Raw tool output, reasoning
 and screenshot pixels remain excluded. The prompt directs follow-ups to use
 recent answers and treats cards as supplements to requested explanations.
@@ -81,9 +83,10 @@ The presentation tool also reminds the model to supply any still-missing
 requested text in the continuation that already follows the tool result;
 card-only requests remain supported without an added model request.
 
-A latest exchange larger than the context budget is shortened with an explicit
-marker, retaining the beginning and end of each side. Older pairs are evicted
-first. Long selected evidence can no longer evict the current question and
+A latest exchange larger than half the context budget is shortened with an
+explicit marker, retaining the beginning and end of each side. This leaves
+room for subsequent follow-ups; older pairs are evicted only after shortening.
+Long selected evidence can no longer evict the current question and
 answer entirely; the user request at the end of that evidence is retained.
 Selected evidence remains untrusted context and can be retained in shortened
 form as part of the submitted prompt.

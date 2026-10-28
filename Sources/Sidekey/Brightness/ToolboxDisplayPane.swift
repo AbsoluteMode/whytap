@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Settings -> Toolbox -> Display: the Extra and Brightness keys switches for the island
+/// Settings -> Toolbox -> Display: Hold, Extra and Brightness keys for the island
 /// display, without opening the island. It reads the display when it appears and then follows
-/// the controller's display notifications. It never polls, so a Settings window closed without
-/// onDisappear leaves no timer behind.
+/// the controller's display notifications. Opening Settings starts no polling; an enabled
+/// Hold or Extra owns its own timer independently of the Settings window.
 @MainActor
 struct ToolboxDisplayPane: View {
     static let noExtraText = "This display has no extra brightness."
@@ -22,6 +22,12 @@ struct ToolboxDisplayPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             MacCard {
+                MacRow(title: "Hold brightness", subtitle: "Restores this level. Adjust with Whytap's slider or Brightness keys. Uses more battery.") {
+                    MacSwitch(isOn: Binding(get: { controller.isHoldingLevel }, set: { controller.setHoldingLevel($0) }))
+                        .disabled(!controller.isAvailable)
+                        .accessibilityLabel("Hold brightness")
+                }
+                MacRowSeparator()
                 if controller.supportsExtra {
                     MacRow(title: "Extra", subtitle: "First decrease only turns Extra off. Uses more battery.") {
                         MacSwitch(isOn: Binding(get: { controller.isExtraOn }, set: { controller.setExtra($0) }))

@@ -4,7 +4,8 @@ import SwiftUI
 struct IslandHoverHitTargetID: Hashable {
     enum Surface: Hashable { case tile, result, navigation, meetingAssistant, update }
     enum UpdateAction: Hashable { case download, skip, install, later }
-    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction) }
+    enum DisplayAction: Hashable { case hold }
+    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction) }
     let surface: Surface
     private let control: Control
     var tool: HoverTool? { if case .tool(let tool) = control { return tool }; return nil }
@@ -12,6 +13,7 @@ struct IslandHoverHitTargetID: Hashable {
     init(surface: Surface, tool: HoverTool) { self.surface = surface; control = .tool(tool) }
     init(update action: UpdateAction) { surface = .update; control = .update(action) }
     init(back destination: String) { surface = .navigation; control = .back(destination) }
+    init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
 }
 
 struct IslandHoverHitSnapshot: Equatable {

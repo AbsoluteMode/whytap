@@ -92,10 +92,14 @@ sources:
   - type: url
     reference: https://developer.apple.com/videos/play/wwdc2022/10114/ (Display EDR content with Core Image, Metal, and SwiftUI)
     confirmed_at: 2026-10-19
-related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-17-native-hover-glass.md]
+related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-17-native-hover-glass.md, 2026-10-28-brightness-hold.md]
 ---
 
 # Brightness tool
+
+The optional backlight lock is specified separately in
+[Brightness hold](2026-10-28-brightness-hold.md). Its target and lifetime do not
+change the Extra boost contract below.
 
 ## Context
 

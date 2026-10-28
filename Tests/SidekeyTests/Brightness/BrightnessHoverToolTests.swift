@@ -122,7 +122,9 @@ final class BrightnessHoverToolTests: XCTestCase {
         let notices = [ScreenBrightnessController.writeFailedNotice,
                        ScreenBrightnessController.extraUnavailableNotice,
                        ScreenBrightnessController.otherAppNotice,
-                       ScreenBrightnessController.coolingNotice]
+                       ScreenBrightnessController.coolingNotice,
+                       ScreenBrightnessController.holdFailedNotice,
+                       ScreenBrightnessController.holdCoolingNotice]
         for notice in notices {
             XCTAssertLessThanOrEqual(Self.width(notice, size: 10) + iconAndSpacing, lineWidth, notice)
         }
@@ -131,7 +133,7 @@ final class BrightnessHoverToolTests: XCTestCase {
 
     /// The real strip with fake hardware, laid out in an unordered offscreen window.
     func testStripFitsItsBandInEveryState() throws {
-        for width in [CGFloat(310), 330] {
+        for width in [CGFloat(310), 330, 500] {
             for state in StripState.allCases {
                 let fixture = StripFixture(state: state, width: width)
                 defer { fixture.close() }
@@ -177,6 +179,54 @@ final class BrightnessHoverToolTests: XCTestCase {
         XCTAssertFalse(fixture.controller.isPolling)
     }
 
+    func testHoldButtonFirstMouseHonorsLocalAndInheritedDisabledState() {
+        for (local, inherited) in [(true, true), (false, true), (true, false)] {
+            let bridge = IslandHoverHitBridge()
+            bridge.setEnabled(true)
+            bridge.setSurface(.navigation)
+            bridge.setContext("brightness")
+            var activations = 0
+            let host = NSHostingView(rootView:
+                BrightnessHoldButton(isOn: false, isEnabled: local, action: { activations += 1 })
+                    .disabled(!inherited)
+                    .frame(width: 40, height: 40)
+                    .environment(\.islandHoverNavigation, .init(bridge: bridge, context: "brightness"))
+                    .islandHoverHitRegion(bridge: bridge, surface: .navigation))
+            let window = NSWindow(contentRect: CGRect(x: -20_000, y: -20_000, width: 40, height: 40),
+                                  styleMask: .borderless, backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            defer { window.close() }
+            for _ in 0..<3 {
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            let point = host.convert(CGPoint(x: 20, y: 20), to: nil)
+            XCTAssertEqual(bridge.mouseDown(at: point, in: window, allowed: true), local && inherited)
+            bridge.mouseUp(at: point, in: window, allowed: true)
+            XCTAssertEqual(activations, local && inherited ? 1 : 0)
+        }
+    }
+
+    func testHoldFeedbackSurfaces() throws {
+        for isOn in [false, true] {
+            for state in ["idle", "hover", "pressed", "focus", "disabled"] {
+                let host = NSHostingView(rootView:
+                    Image(systemName: isOn ? "lock.fill" : "lock.open")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.96))
+                        .frame(width: 24, height: 24)
+                        .background(BrightnessHoldSurface(isOn: isOn, hovered: state == "hover" || state == "disabled",
+                            pressed: state == "pressed", focused: state == "focus", enabled: state != "disabled"))
+                        .opacity(state == "disabled" ? 0.42 : 1)
+                        .padding(8).background(Color(white: 0.11)))
+                host.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
+                host.layoutSubtreeIfNeeded()
+                try saveProofImage(of: host, named: "hold-\(isOn ? "on" : "off")-\(state)")
+            }
+        }
+    }
+
     // MARK: Settings
 
     func testSettingsPaneReadsTheDisplayWithoutPolling() {
@@ -205,7 +255,7 @@ final class BrightnessHoverToolTests: XCTestCase {
 
     /// The real pane with fake hardware, rendered in an unordered offscreen window.
     func testSettingsPaneRemainsReachableInTheToolViewportInEveryState() throws {
-        for state in [StripState.extraOff, .extraOn, .noExtra, .unavailable, .notice] {
+        for state in StripState.allCases {
             for keys in PaneKeys.allCases {
                 let fixture = SettingsPaneFixture(state: state, keys: keys)
                 defer { fixture.close() }
@@ -239,7 +289,7 @@ final class BrightnessHoverToolTests: XCTestCase {
 }
 
 private enum StripState: String, CaseIterable {
-    case extraOff, extraOn, noExtra, unavailable, notice
+    case extraOff, extraOn, holdOn, noExtra, unavailable, notice
 
     @MainActor
     func makeController() -> ScreenBrightnessController {
@@ -247,7 +297,8 @@ private enum StripState: String, CaseIterable {
             headroom: self == .noExtra ? 1 : 16,
             level: self == .unavailable ? nil : 0.62,
             canWrite: self != .notice)
-        return ScreenBrightnessController(device: device, selectedDisplayID: { 1 }, observeSystem: false)
+        return ScreenBrightnessController(device: device, selectedDisplayID: { 1 }, observeSystem: false,
+                                          isDisplayAwake: { _ in true })
     }
 
     @MainActor
@@ -255,6 +306,7 @@ private enum StripState: String, CaseIterable {
         controller.refresh()
         switch self {
         case .extraOn: controller.setExtra(true)
+        case .holdOn: controller.setHoldingLevel(true)
         case .notice: controller.setLevel(0.3)
         default: break
         }

@@ -115,7 +115,10 @@ source headings. Unverified and clarification statuses get visible app-owned
 labels. Invalid output never becomes successful UI/history or conversation
 memory; an explicit error replaces it. There are no automatic paid repairs or
 repeated actions. If edits/commands were attempted before an invalid completion,
-the error warns that those operations may have completed before manual retry.
+the error warns that those operations may have completed before manual retry,
+including malformed argument JSON rejected by the model decoder before terminal
+validation. Provider/transport failures after attempted actions retain the same
+warning with static safe error text; cancellation remains silent.
 
 This is a structural contract, not proof of factual correctness or a general
 semantic grader. It cannot detect every evasive sentence or invented fact in a
@@ -141,7 +144,8 @@ Synthetic fixtures verify terminal completion in all three wire formats,
 required/auto tool-choice policy and strict flags, preserved
 endpoint/credentials/reasoning, Claude auto request bodies and rejected free-text
 finals without retries, missing fields,
-source-only finals, invalid cards, mixed final/write batches, no automatic retry,
+source-only finals, invalid cards, mixed final/write batches, malformed final
+JSON after a successful write, no automatic retry,
 visible uncertainty, retained follow-up values and copy-payload exclusion.
 Actual chosen-model behavior remains ordinary acceptance in the shared app.
 

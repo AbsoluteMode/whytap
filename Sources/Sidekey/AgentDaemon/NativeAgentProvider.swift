@@ -110,7 +110,17 @@ final class NativeAgentProvider: CLIProvider {
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
-            let (_, calls) = try await model.next(tools: definitions, structuredCompletion: true)
+            let calls: [NativeAgentToolCall]
+            do {
+                calls = try await model.next(tools: definitions, structuredCompletion: true).1
+            } catch {
+                // Malformed arguments can fail in the model decoder before the
+                // terminal validator runs. Earlier side effects still happened.
+                guard actionsAttempted, !(error is CancellationError), !Task.isCancelled else { throw error }
+                let message = (error as? NativeAgentError)?.localizedDescription
+                    ?? "Couldn’t complete the request. Check your connection, provider settings and workspace permissions."
+                throw NativeAgentError.message(message + NativeAgentFinalAnswer.actionWarning)
+            }
             try Task.checkCancellation()
             toolCount += calls.count
             guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }

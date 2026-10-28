@@ -295,24 +295,31 @@ final class NativeAgentTests: XCTestCase {
     }
 
     func testWriteIsNotRetriedWhenStructuredCompletionFails() async throws {
-        let (directory, keys, http) = try fixture()
-        try keys.save("key", account: OpenRouterLLMKeyStore.account)
-        var count = 0
-        StubURLProtocol.handler = { _ in
-            count += 1
-            if count == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
-                ["id": "write", "type": "function", "function": ["name": "write_file", "arguments": "{\"path\":\"written.txt\",\"content\":\"fixture\"}"]]
-            ]], finish: "tool_calls")) }
-            return self.serve(self.completion(""))
+        for malformed in [false, true] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: OpenRouterLLMKeyStore.account)
+            var count = 0
+            StubURLProtocol.handler = { _ in
+                count += 1
+                if count == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "write", "type": "function", "function": ["name": "write_file", "arguments": "{\"path\":\"written.txt\",\"content\":\"fixture\"}"]]
+                ]], finish: "tool_calls")) }
+                if malformed { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "final", "type": "function", "function": ["name": "finish_answer", "arguments": "{SYNTHETIC_PRIVATE_BROKEN_JSON"]]
+                ]], finish: "tool_calls")) }
+                return self.serve(self.completion(""))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let store = AskResponseStore()
+            await store.consume(provider.run(prompt: "Write the fixture file", resumeSessionID: nil, options: .init(model: "model", allowActions: true)))
+            XCTAssertEqual(count, 2)
+            XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("written.txt"), encoding: .utf8), "fixture")
+            XCTAssertEqual(store.status, .failed)
+            XCTAssertTrue(store.errorMessage?.contains("Earlier file edits or commands may have completed") == true)
+            XCTAssertFalse(store.errorMessage?.contains("SYNTHETIC_PRIVATE_BROKEN_JSON") == true)
+            XCTAssertNil(provider.lastSessionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
         }
-        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-        let store = AskResponseStore()
-        await store.consume(provider.run(prompt: "Write the fixture file", resumeSessionID: nil, options: .init(model: "model", allowActions: true)))
-        XCTAssertEqual(count, 2)
-        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("written.txt"), encoding: .utf8), "fixture")
-        XCTAssertEqual(store.status, .failed)
-        XCTAssertTrue(store.errorMessage?.contains("Earlier file edits or commands may have completed") == true)
-        XCTAssertNil(provider.lastSessionID)
     }
 
     func testSharedModelDoesNotRequireToolsUnlessAgentExplicitlyRequestsIt() async throws {

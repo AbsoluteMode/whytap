@@ -5,6 +5,7 @@ import Foundation
 /// WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
 struct NativeAgentFinalAnswer {
     static let toolName = "finish_answer"
+    static let actionWarning = " Earlier file edits or commands may have completed; check before retrying."
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String
@@ -82,7 +83,7 @@ struct NativeAgentFinalAnswer {
 
     static func invalid(actionsAttempted: Bool = false) -> NativeAgentError {
         .message("The model didn’t provide a valid structured answer."
-            + (actionsAttempted ? " Earlier file edits or commands may have completed; check before retrying." : " Try again."))
+            + (actionsAttempted ? actionWarning : " Try again."))
     }
 
     /// A conservative format check, not a semantic verifier. Rejects URL lists

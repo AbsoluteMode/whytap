@@ -1066,7 +1066,9 @@ Guide: docs/customization/app-control.md. WHY:
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 only with a sole finish_answer call containing status, answer, sources and actions.
-Required tool choice and the terminal strict schema preserve the selected route;
+Strict tool schemas and application-required completion preserve the selected route.
+Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
+forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
 local validation rejects missing/unknown fields, empty/source-only answers, invalid
 cards and mixed final/tool batches. No automatic repair or repeated actions.
 Unverified/clarification statuses are visibly labeled; invalid finals are errors,

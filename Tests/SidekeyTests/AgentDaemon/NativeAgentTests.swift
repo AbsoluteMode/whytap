@@ -202,7 +202,7 @@ final class NativeAgentTests: XCTestCase {
             let request = try body(0)
             let tools = try XCTUnwrap(request["tools"] as? [[String: Any]])
             if route == .anthropic {
-                XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "any")
+                XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto")
                 XCTAssertEqual(tools.first { $0["name"] as? String == "finish_answer" }?["strict"] as? Bool, true)
             } else {
                 XCTAssertEqual(request["tool_choice"] as? String, "required")
@@ -323,6 +323,61 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual(text, "A meeting answer.")
         let request = try body(0)
         XCTAssertNil(request["tool_choice"]); XCTAssertNil(request["provider"]); XCTAssertNil(request["tools"])
+    }
+
+    func testClaudeModelsKeepAutoChoiceAndStrictSchemaWithoutRouteSubstitution() async throws {
+        for route: OpenCodeModelProvider in [.anthropic, .openRouter] {
+            for name in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1"] {
+                let (_, _, http) = try fixture()
+                let modelID = route == .anthropic ? name : "anthropic/" + name
+                let args = finalArguments("The source confirms the answer.")
+                StubURLProtocol.handler = { _ in self.serve(route == .anthropic
+                    ? ["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "final", "name": "finish_answer", "input": args]]]
+                    : self.completion("The source confirms the answer.")) }
+                var model = NativeAgentModel(options: .init(model: modelID, openCodeProvider: route, openRouterProvider: "endpoint/pin"),
+                    key: "key", system: "system", history: [], prompt: "question", http: http, usageSink: { _ in })
+                let (_, calls) = try await model.next(tools: NativeAgentTools.structuredDefinitions(allowActions: false), structuredCompletion: true)
+                XCTAssertEqual(calls.first?.name, "finish_answer")
+                let request = try body(0)
+                XCTAssertEqual(request["model"] as? String, modelID)
+                let tools = try XCTUnwrap(request["tools"] as? [[String: Any]])
+                if route == .anthropic {
+                    XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto")
+                    XCTAssertTrue(tools.allSatisfy { $0["strict"] as? Bool == true })
+                } else {
+                    XCTAssertEqual(request["tool_choice"] as? String, "auto")
+                    let provider = try XCTUnwrap(request["provider"] as? [String: Any])
+                    XCTAssertEqual(provider["only"] as? [String], ["endpoint/pin"])
+                    XCTAssertEqual(provider["allow_fallbacks"] as? Bool, false)
+                    XCTAssertEqual(provider["require_parameters"] as? Bool, true)
+                    XCTAssertTrue(tools.allSatisfy { ($0["function"] as? [String: Any])?["strict"] as? Bool == true })
+                }
+                XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+            }
+        }
+    }
+
+    func testClaudeAutoChoiceStillRejectsUnstructuredFinalWithoutPaidRepair() async throws {
+        for route: OpenCodeModelProvider in [.anthropic, .openRouter] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: route == .anthropic ? ProviderAccount.anthropicKeychainAccount : OpenRouterLLMKeyStore.account)
+            StubURLProtocol.handler = { _ in self.serve(route == .anthropic
+                ? ["stop_reason": "end_turn", "content": [["type": "text", "text": "A plain answer outside the required contract."]]]
+                : self.router(["role": "assistant", "content": "A plain answer outside the required contract."])) }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let store = AskResponseStore()
+            let model = route == .anthropic ? "claude-opus-5-5" : "anthropic/claude-sonnet-5.5"
+            await store.consume(provider.run(prompt: "question", resumeSessionID: nil,
+                options: .init(model: model, allowActions: false, openCodeProvider: route)))
+            XCTAssertEqual(store.status, .failed); XCTAssertTrue(store.streamingText.isEmpty)
+            XCTAssertTrue(store.errorMessage?.contains("structured answer") == true)
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+            XCTAssertNil(provider.lastSessionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+            let request = try body(0)
+            if route == .anthropic { XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto") }
+            else { XCTAssertEqual(request["tool_choice"] as? String, "auto") }
+        }
     }
 
     func testAnthropicToolResultPreservesThinkingSignatureAndImage() async throws {

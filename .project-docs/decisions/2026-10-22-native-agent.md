@@ -85,12 +85,17 @@ carry title/HTTP(S) URL; actions carry an absolute path or copyable text and a
 description. The renderer reuses the existing text and keyboard-action cards;
 there is no new UI-block or persisted conversation schema.
 
-Use required tool choice for the Agent loop and strict schemas across its tool
-catalog. Optional inputs remain nullable with their existing defaults; numeric
+Use strict schemas across the Agent tool catalog and require the terminal
+completion in application code. Optional inputs remain nullable with their existing defaults; numeric
 offset limits stay locally checked. Uniform strict mode avoids endpoints that
-reject mixed strict/non-strict tools. Direct OpenAI and Anthropic receive their native tool-choice and
-strict flags; OpenRouter retains the exact model and endpoint pin and requires
-parameter support. A terminal call mixed with any other call fails before that
+reject mixed strict/non-strict tools. OpenAI and non-Anthropic OpenRouter routes
+request required tool choice. Direct Anthropic and Anthropic-authored OpenRouter
+models use auto with strict tool schemas: current Claude Opus 5.5, Sonnet 5.5,
+Fable 5.1 and Mythos 5.1 reject forced any/tool choice with HTTP 400, irrespective
+of thinking settings. This compatibility policy applies to the whole Anthropic
+route family rather than attempting a model downgrade or retry. Plain free-text
+completion under auto is still rejected by Whytap without a paid repair.
+OpenRouter retains the exact model and endpoint pin and requires parameter support. A terminal call mixed with any other call fails before that
 batch executes. Completion does not require another model request or a terminal
 tool-result round trip. The shared model's default remains automatic tool choice,
 so Meeting Assistant retains its existing output contract.
@@ -129,10 +134,13 @@ Explicit requests for only links/cards still require a brief answer field.
 Contracts: [Cerebras strict tool calling](https://inference-docs.cerebras.ai/capabilities/tool-use),
 [OpenRouter parameter requirements](https://openrouter.ai/docs/guides/routing/provider-selection),
 [OpenAI structured function calling](https://developers.openai.com/api/docs/guides/function-calling),
-[Anthropic strict tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/implement-tool-use).
+[Anthropic strict tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/implement-tool-use),
+[Anthropic tool-choice restrictions](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools#forcing-tool-use).
 
 Synthetic fixtures verify terminal completion in all three wire formats,
-required/strict flags, preserved endpoint/credentials/reasoning, missing fields,
+required/auto tool-choice policy and strict flags, preserved
+endpoint/credentials/reasoning, Claude auto request bodies and rejected free-text
+finals without retries, missing fields,
 source-only finals, invalid cards, mixed final/write batches, no automatic retry,
 visible uncertainty, retained follow-up values and copy-payload exclusion.
 Actual chosen-model behavior remains ordinary acceptance in the shared app.

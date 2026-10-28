@@ -36,8 +36,8 @@ struct NativeAgentModel {
         messages.append(["role": "user", "content": prompt])
     }
 
-    mutating func next(tools: [[String: Any]], requireToolCall: Bool = false) async throws -> (String, [NativeAgentToolCall]) {
-        guard !requireToolCall || !tools.isEmpty else { throw NativeAgentFinalAnswer.invalid() }
+    mutating func next(tools: [[String: Any]], structuredCompletion: Bool = false) async throws -> (String, [NativeAgentToolCall]) {
+        guard !structuredCompletion || !tools.isEmpty else { throw NativeAgentFinalAnswer.invalid() }
         guard let model = options.model, !model.isEmpty else { throw NativeAgentError.message("Choose an Agent model in Settings → API & Models.") }
         // Bound accumulated text before a provider request; image data has its own cap.
         let textBudget = min(180_000, max(8000, ((options.openCodeModelSpec?.contextLimit ?? 32_768) - 4096) * 2))
@@ -80,11 +80,18 @@ struct NativeAgentModel {
             request = try NativeAgentHTTP.request(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, key: key, body: body)
             request.setValue("Whytap", forHTTPHeaderField: "X-Title")
         }
-        if (tools.isEmpty || requireToolCall), let data = request.httpBody,
+        if (tools.isEmpty || structuredCompletion), let data = request.httpBody,
            var body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if tools.isEmpty { body.removeValue(forKey: "tools") }
-            if requireToolCall {
-                body["tool_choice"] = options.openCodeProvider == .anthropic ? ["type": "any"] as Any : "required" as Any
+            if structuredCompletion {
+                // Current Claude models reject forced any/tool choice, even
+                // without explicit thinking. Strict schemas + local terminal
+                // validation also work with auto, directly and via OpenRouter.
+                // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
+                let claude = options.openCodeProvider == .anthropic
+                    || (options.openCodeProvider == .openRouter && model.lowercased().hasPrefix("anthropic/"))
+                body["tool_choice"] = options.openCodeProvider == .anthropic ? ["type": "auto"] as Any
+                    : (claude ? "auto" : "required") as Any
                 if options.openCodeProvider == .openRouter {
                     var provider = body["provider"] as? [String: Any] ?? [:]
                     provider["require_parameters"] = true

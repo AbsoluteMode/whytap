@@ -110,7 +110,7 @@ final class NativeAgentProvider: CLIProvider {
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
-            let (_, calls) = try await model.next(tools: definitions, requireToolCall: true)
+            let (_, calls) = try await model.next(tools: definitions, structuredCompletion: true)
             try Task.checkCancellation()
             toolCount += calls.count
             guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }

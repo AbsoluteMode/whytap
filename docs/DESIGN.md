@@ -1544,3 +1544,39 @@ Subtitles keep their separate Speech/LLM setup and explicit Start/Stop journey.
 Their two-stage pipeline is not evidence of the standalone audio model’s latency
 or translation quality. Fake-provider flow checks and offscreen renders do not
 prove live permissions, physical keyboard/focus or provider quality.
+## Display: brightness hold (2026-10-28)
+
+The user opens Display to keep a chosen brightness steady. The slider remains
+the first control to notice; the adjacent lock shows whether that level is held.
+The next action is to adjust in Whytap or unlock for macOS controls.
+
+This extends the existing compact native strip rather than changing its
+composition: Back, white slider, 24 pt Hold lock, Extra. The strip stays 68 pt
+and the band stays 76/126 pt. Hold and Extra are separate because a fixed
+backlight and an EDR boost have different meanings. Settings names the same
+choice explicitly as Hold brightness, above Extra and Brightness keys, within
+the existing scrollable Toolbox viewport. Contract and rationale:
+[Brightness hold](../.project-docs/decisions/2026-10-28-brightness-hold.md).
+
+The lock is always visible. Off uses an open lock; selected uses a closed lock
+and the island's fixed blue accent. The entire 24 pt target highlights on
+hover, brightens while pressed and receives a distinct focus ring. Disabled
+uses 42% opacity with no hover response or native first-mouse activation,
+including inherited disabled state. The native Button retains keyboard and
+accessibility semantics with an On/Off value and an explanation. A second
+activation unlocks without moving focus or restoring an older level. Reduced
+motion removes the 0.1 s hover fade. Errors appear in the existing status line.
+
+Verification: 126 focused controller, brightness-key, strip and native hit-bridge
+tests pass. Offscreen native fixtures cover strip widths 310/330/500 pt, the
+268x188 pt Settings viewport with scrolling, and lock idle/hover/pressed/focus/
+disabled states. Reviewed PNGs show no new clipping. A same-engine independent
+review found an inherited-disabled activation bypass; it is fixed and covered
+by actual native bridge dispatch tests. These fixtures do not establish physical
+keyboard/VoiceOver behavior, native glass or a second-Mac brightness result.
+Different-engine review is pending; Claude consultation requires an explicit
+user request in this environment. White icon contrast against the active blue
+and neutral control backgrounds measures at least 4.26:1 across enabled states
+from the rendered sRGB pixels (3:1 non-text control requirement).
+No new screen-level layout or animation is introduced. The remaining assumption
+is that a separate opt-in lock is clearer than changing Extra's existing role.

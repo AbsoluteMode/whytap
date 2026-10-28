@@ -588,7 +588,7 @@ Brightness inside hover:
   search; its capsule title is Display, which fits one line of the narrowest
   capsule. HoverLayoutStore.defaultSlots and saved layouts are unchanged.
   HoverSlotRouter resolves .openPanel(.brightness) to IslandBrightnessStrip:
-  Back, a white capsule backlight slider and an Extra switch. A status line
+  Back, a white capsule backlight slider, a Hold lock and an Extra switch. A status line
   appears only for a notice or unavailable brightness. The switch is the Settings MacSwitch
   at its 30x18 compact size, blue while on: the island is never the active
   app's key window, where the native switch draws its on state gray. The strip
@@ -602,7 +602,7 @@ Brightness inside hover:
   ScreenBrightnessController follows the island display (IslandScreenResolver)
   and reads/writes its backlight through private DisplayServices (dlopen); an
   unreadable display gets a disabled slider and no switch. Showing the strip
-  only reads, polling every 0.5 s while it is visible or Extra is on; a pinned capsule
+  only reads, polling every 0.5 s while it is visible, Extra is on or Hold is awake; a pinned capsule
   refreshes its NN%/Extra VoiceOver status when hover opens. Extra exists only
   for potential EDR headroom > 1.01 and never writes the backlight. As Vivid
   does it, GammaBrightnessBoost scales the display's own transfer table by
@@ -646,9 +646,19 @@ Brightness inside hover:
   quit. Ending it gives the display its own table back (ColorSync's if Quartz
   refuses it; Quartz also restores it when the process exits) and leaves the
   backlight as it is. Extra is never persisted or resumed after relaunch.
-  Settings -> Toolbox -> Display (ToolboxDisplayPane) holds the Extra and
-  Brightness keys switches without a slider; it reads the display on appear,
-  never polls and fits the 188 pt Toolbox area in every state. Brightness keys
+  Optional Hold brightness captures this display's current level and restores
+  external changes, including native macOS controls. Whytap's slider and optional
+  Brightness keys update the target; Extra's first-decrease rule stays unchanged.
+  The lock beside the slider and the Settings switch share session-only state.
+  Writes settle for 0.75 s, ignore differences within 0.005 and stop after three
+  unmatched corrections or one rejected write. Sleep and inactive-session pauses
+  are independent; no automatic writes reach an asleep display. Heat ends Hold
+  and Extra; cooling does not restart them. A display change, lost readback or
+  quit ends Hold; the target never transfers or persists. WHY:
+  .project-docs/decisions/2026-10-28-brightness-hold.md
+  Settings -> Toolbox -> Display (ToolboxDisplayPane) holds Hold brightness,
+  Extra and Brightness keys without a slider; it reads the display on appear,
+  starts no polling of its own and scrolls in the 188 pt Toolbox area. Brightness keys
   are off by default and saved. BrightnessKeyEventTap, a head-insert session
   tap for system-defined events on a SpaceHoldMonitor.TapThread, takes the
   brightness key presses from macOS, so its indicator does not show: sixteenth

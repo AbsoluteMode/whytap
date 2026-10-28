@@ -512,6 +512,247 @@ final class ScreenBrightnessControllerTests: XCTestCase {
         XCTAssertEqual(device.boosts.last?.isClosed, false)
     }
 
+    // MARK: Brightness hold
+
+    func testHoldStartsFromAFreshReadingAndPollsWithTheStripClosed() {
+        let f = Fixture(), controller = f.controller
+        XCTAssertFalse(controller.isHoldingLevel)
+        controller.refresh()
+        f.device.hardware[1] = 0.7
+        controller.setHoldingLevel(true)
+        XCTAssertEqual(controller.level, 0.7)
+        XCTAssertTrue(controller.isHoldingLevel)
+        XCTAssertTrue(controller.isPolling)
+        XCTAssertEqual(f.device.events, [], "Enabling Hold only captures the current level.")
+        controller.shutdown()
+    }
+
+    func testHoldRestoresAutomaticDecreasesAndIncreasesWithoutRedundantWrites() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        for hardware in [0.3, 0.6] {
+            f.device.hardware[1] = hardware
+            controller.refresh()
+            XCTAssertEqual(f.device.hardware[1], 0.4)
+            XCTAssertEqual(controller.level, 0.4)
+            f.clock.advance(1)
+            controller.refresh()
+        }
+        XCTAssertEqual(f.device.events, ["write 1 0.4", "write 1 0.4"])
+        controller.shutdown()
+    }
+
+    func testWhytapAdjustmentsReplaceTheHeldLevelAndUnlockFollowsMacOSAgain() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        controller.setLevel(0.8)
+        f.clock.advance(1)
+        f.device.hardware[1] = 0.5
+        controller.refresh()
+        XCTAssertEqual(f.device.hardware[1], 0.8)
+        controller.setHoldingLevel(false)
+        f.clock.advance(1)
+        f.device.hardware[1] = 0.3
+        controller.refresh()
+        XCTAssertEqual(controller.level, 0.3)
+        XCTAssertFalse(controller.isPolling)
+        XCTAssertEqual(f.device.events, ["write 1 0.8", "write 1 0.8"])
+        controller.shutdown()
+    }
+
+    func testHoldKeepsExtrasFirstDecreaseAndThenHoldsTheNewManualLevel() {
+        let f = Fixture(), controller = f.controllerWithExtra()
+        controller.setHoldingLevel(true)
+        controller.setLevel(0.2)
+        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertTrue(controller.isHoldingLevel)
+        XCTAssertEqual(controller.level, 0.4)
+        controller.setLevel(0.2)
+        f.clock.advance(1)
+        f.device.hardware[1] = 0.1
+        controller.refresh()
+        XCTAssertEqual(f.device.events, ["boost 1", "write 1 0.2", "write 1 0.2"])
+        controller.shutdown()
+    }
+
+    func testInterceptedBrightnessKeyUpdatesTheHeldLevel() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        let handler = BrightnessKeyHandler(controller: controller, showStrip: {})
+        handler.handle(BrightnessKeyEvent(direction: .up, isDown: true, isRepeat: false, step: .normal),
+                       at: f.clock.now)
+        let selected = controller.level
+        XCTAssertGreaterThan(selected, 0.4)
+        f.clock.advance(1)
+        f.device.hardware[1] = 0.3
+        controller.refresh()
+        XCTAssertEqual(f.device.hardware[1], selected)
+        XCTAssertTrue(controller.isHoldingLevel)
+        controller.shutdown()
+    }
+
+    func testHoldIgnoresHardwareQuantizationButRestoresAFineKeyStep() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.device.hardware[1] = 0.402
+        controller.refresh()
+        XCTAssertEqual(f.device.events, [])
+        f.device.hardware[1] = 0.4 - 1.0 / 64
+        controller.refresh()
+        XCTAssertEqual(f.device.events, ["write 1 0.4"])
+        controller.shutdown()
+    }
+
+    func testHoldSettlesWritesAndStopsAfterRepeatedlyIgnoredCorrections() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.device.applyWrites = false
+        f.device.hardware[1] = 0.2
+        for _ in 0..<ScreenBrightnessController.maximumHoldAttempts {
+            controller.refresh()
+            let count = f.device.events.count
+            controller.refresh()
+            XCTAssertEqual(f.device.events.count, count, "No repeated write within the settle window.")
+            f.clock.advance(1)
+        }
+        controller.refresh()
+        controller.refresh()
+        XCTAssertEqual(f.device.events.count, ScreenBrightnessController.maximumHoldAttempts)
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertFalse(controller.isPolling)
+        XCTAssertEqual(controller.level, 0.2)
+        XCTAssertEqual(controller.notice, ScreenBrightnessController.holdFailedNotice)
+        controller.shutdown()
+    }
+
+    func testRejectedCorrectionStopsHoldImmediately() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.device.canWrite = false
+        f.device.hardware[1] = 0.2
+        controller.refresh()
+        controller.refresh()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(controller.level, 0.2)
+        XCTAssertEqual(controller.notice, ScreenBrightnessController.holdFailedNotice)
+        XCTAssertEqual(f.device.events, ["write-failed 1 0.4"])
+        controller.shutdown()
+    }
+
+    func testFailedManualAdjustmentReleasesHoldWithoutRestoringItsOldTarget() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.device.canWrite = false
+        f.device.hardware[1] = 0.2
+        controller.setLevel(0.8)
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(controller.level, 0.2)
+        XCTAssertEqual(controller.notice, ScreenBrightnessController.writeFailedNotice)
+        XCTAssertEqual(f.device.events, ["write-failed 1 0.8"])
+        controller.shutdown()
+    }
+
+    func testHoldPausesUntilEverySleepAndSessionPauseEnds() {
+        let f = Fixture()
+        f.observesSystem = true
+        let controller = f.controller
+        controller.setHoldingLevel(true)
+        f.workspace.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        f.workspace.post(name: NSWorkspace.willSleepNotification, object: nil)
+        f.workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        f.device.hardware[1] = 0.1
+        XCTAssertFalse(controller.isPolling)
+        f.device.hardware[1] = nil
+        controller.refresh()
+        controller.setLevel(0.8)
+        XCTAssertTrue(controller.isHoldingLevel, "Sleeping hardware may temporarily refuse reads.")
+        f.workspace.post(name: NSWorkspace.didWakeNotification, object: nil)
+        f.workspace.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        XCTAssertEqual(f.device.events, [])
+        f.device.hardware[1] = 0.1
+        f.workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertTrue(controller.isHoldingLevel)
+        XCTAssertTrue(controller.isPolling)
+        XCTAssertEqual(f.device.events, ["write 1 0.4"])
+        controller.shutdown()
+    }
+
+    func testHoldNeverWritesToASleepingDisplayEvenWithoutANotification() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.policy.displayAwake = false
+        f.device.hardware[1] = 0
+        controller.refresh()
+        XCTAssertEqual(f.device.events, [])
+        f.policy.displayAwake = true
+        controller.refresh()
+        XCTAssertEqual(f.device.events, ["write 1 0.4"])
+        controller.shutdown()
+    }
+
+    func testHeatStopsHoldAndExtraWithoutAutomaticResumption() {
+        let f = Fixture(), controller = f.controllerWithExtra()
+        controller.setHoldingLevel(true)
+        f.policy.extraAllowed = false
+        f.device.hardware[1] = 0.2
+        controller.refresh()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertEqual(controller.notice, ScreenBrightnessController.holdCoolingNotice)
+        f.policy.extraAllowed = true
+        controller.refresh()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(f.device.events, ["boost 1"])
+        controller.shutdown()
+    }
+
+    func testHoldCannotStartOnAnUnavailableHotOrSleepingDisplay() {
+        let f = Fixture(), controller = f.controller
+        f.device.hardware = [:]
+        controller.setHoldingLevel(true)
+        XCTAssertFalse(controller.isHoldingLevel)
+        f.device.hardware[1] = 0.4
+        f.policy.extraAllowed = false
+        controller.setHoldingLevel(true)
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(controller.notice, ScreenBrightnessController.holdCoolingNotice)
+        f.policy.extraAllowed = true
+        f.policy.displayAwake = false
+        controller.setHoldingLevel(true)
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(f.device.events, [])
+        controller.shutdown()
+    }
+
+    func testHoldEndsOnDisplaySwitchOrLostReadbackAndNeverTransfersTheTarget() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        f.device.connected.append(ScreenBrightnessDisplay(id: 2, potentialHeadroom: 1))
+        f.device.hardware[2] = 0.7
+        f.selected.id = 2
+        controller.refresh()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertEqual(controller.level, 0.7)
+        controller.setHoldingLevel(true)
+        XCTAssertTrue(controller.isHoldingLevel, "SDR displays can hold without Extra.")
+        f.device.hardware[2] = .nan
+        controller.refresh()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertFalse(controller.isAvailable)
+        XCTAssertEqual(f.device.events, [])
+        controller.shutdown()
+    }
+
+    func testShutdownReleasesHoldWithoutRestoringOrPersistingALevel() {
+        let f = Fixture(), controller = f.controller
+        controller.setHoldingLevel(true)
+        controller.shutdown()
+        XCTAssertFalse(controller.isHoldingLevel)
+        XCTAssertFalse(controller.isPolling)
+        XCTAssertEqual(f.device.events, [])
+        XCTAssertFalse(Fixture().controller.isHoldingLevel)
+    }
+
     // MARK: Scale
 
     func testScaleClampsLevels() {
@@ -542,7 +783,8 @@ private final class Fixture {
         let clock = clock, selected = selected, policy = policy
         return ScreenBrightnessController(device: device, selectedDisplayID: { selected.id },
                                           observeSystem: observesSystem, center: center, workspaceCenter: workspace,
-                                          extraAllowed: { policy.extraAllowed }, now: { clock.now })
+                                          extraAllowed: { policy.extraAllowed }, now: { clock.now },
+                                          isDisplayAwake: { _ in policy.displayAwake })
     }()
 
     /// The strip is open with Extra on.
@@ -612,4 +854,5 @@ private final class SelectedDisplay {
 
 private final class ExtraPolicy {
     var extraAllowed = true
+    var displayAwake = true
 }

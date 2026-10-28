@@ -82,8 +82,12 @@ the user’s local files and is absent from the source repository.
 The Display tool reads and sets the display backlight through macOS DisplayServices
 while its hover strip is open (each Brightness keys press opens it), and reads the
 level once when hover opens with Display pinned and when Settings -> Toolbox ->
-Display appears. While Extra is on, it also reads the selected display's level
-every half second with the strip closed, so any decrease turns Extra off.
+Display appears. While Extra or Hold brightness is on, it also reads the selected
+display's level every half second with the strip closed. External changes keep
+Extra enabled. Optional Hold restores the chosen backlight level, including
+changes made through native macOS controls; Whytap adjustments update its target.
+Sleep and inactive-session notifications pause Hold, and heat or unavailable
+hardware ends it. Hold's target and state remain in memory only.
 The tool does not read battery charge or load and keeps no battery history.
 While Extra is on, it scales the display's
 transfer table through Quartz; macOS gives the display its own table back when

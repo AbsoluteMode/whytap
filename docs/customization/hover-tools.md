@@ -31,7 +31,7 @@ All paths below start at `Sources/Sidekey/`.
 | Inline views, shared three-column geometry and bounded scrolling | `DynamicIsland/IslandView.swift`, `DynamicIsland/IslandDropModeControl.swift` |
 | Floating text translation and system-audio subtitles | `Translation/TranslationWindowController.swift`, `Translation/LiveSubtitleModel.swift` |
 | Inline monitoring, picker and refresh lifecycle | `Monitor/MonitorHoverPanel.swift`, `Monitor/MonitorStore.swift` |
-| Inline brightness strip, backlight, Extra boost (display table + EDR trigger) | `Brightness/IslandBrightnessStrip.swift`, `Brightness/ScreenBrightnessController.swift`, `Brightness/GammaBrightnessBoost.swift`, `Brightness/BrightnessHeadroomTrigger.swift` |
+| Inline brightness strip, backlight hold, Extra boost (display table + EDR trigger) | `Brightness/IslandBrightnessStrip.swift`, `Brightness/ScreenBrightnessController.swift`, `Brightness/GammaBrightnessBoost.swift`, `Brightness/BrightnessHeadroomTrigger.swift` |
 | Brightness keys (event tap, steps, Extra gesture) and the Settings -> Toolbox -> Display pane | `Brightness/BrightnessKeys.swift`, `Brightness/BrightnessKeyEventTap.swift`, `Brightness/ToolboxDisplayPane.swift` |
 | Measured pointer targets, viewport clipping and down/up ownership | `DynamicIsland/IslandHoverHitBridge.swift`, `DynamicIsland/IslandPanel.swift` |
 | Catalog search, aliases, AppKit search field and keyboard commands | `DynamicIsland/IslandHoverToolSearch.swift` |
@@ -72,7 +72,7 @@ All paths below start at `Sources/Sidekey/`.
    tools, so the band keeps the
    previous height until the pointer is over the drawer's final frame, also on
    a quick move. Settings -> Toolbox ->
-   Display offers the Extra and Brightness keys switches without the island; a
+   Display offers Hold brightness, Extra and Brightness keys without the island; a
    brightness key opens the strip as a glance without keyboard focus.
 
 `scaffold-hover` creates an isolated view and checklist, not a registered feature.

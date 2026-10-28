@@ -68,13 +68,19 @@ final class ScreenBrightnessController: ObservableObject {
     static let extraUnavailableNotice = "Extra brightness isn't available right now."
     static let coolingNotice = "Extra is paused while your Mac cools down."
     static let otherAppNotice = "Another app is adjusting this display."
+    static let holdFailedNotice = "Couldn't hold this display's brightness."
+    static let holdCoolingNotice = "Brightness hold stopped while cooling down."
     /// A read right after a write can still report the previous backlight level.
     static let writeSettleInterval: TimeInterval = 0.75
     /// DisplayServices reads Float values; their round-off is not a brightness decrease.
     static let levelReadbackTolerance = 0.000001
+    /// Ignore hardware quantization, but still restore a fine brightness-key step.
+    static let holdReadbackTolerance = 0.005
+    static let maximumHoldAttempts = 3
 
     @Published private(set) var level = 0.0
     @Published private(set) var isExtraOn = false
+    @Published private(set) var isHoldingLevel = false
     @Published private(set) var display: ScreenBrightnessDisplay?
     @Published private(set) var isAvailable = false
     @Published private(set) var notice: String?
@@ -85,6 +91,15 @@ final class ScreenBrightnessController: ObservableObject {
     private let selectedDisplayID: @MainActor () -> CGDirectDisplayID?
     private let extraAllowed: () -> Bool
     private let now: () -> Date
+    private let isDisplayAwake: @MainActor (CGDirectDisplayID) -> Bool
+    private var heldLevel: Double?
+    private var holdAttempts = 0
+    private var activePauses: Set<Notification.Name> = []
+    private static let pauses: [(start: Notification.Name, end: Notification.Name)] = [
+        (NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification),
+        (NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification),
+        (NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.sessionDidBecomeActiveNotification),
+    ]
     private var boost: BrightnessBoost?
     private var boostGeneration = 0
     /// A write settles only on its own display; another display's reading is current.
@@ -93,7 +108,7 @@ final class ScreenBrightnessController: ObservableObject {
     private var viewers = 0
     private var isDraggingLevel = false
     private var ignoresLevelDrag = false
-    /// True while a visible strip or active Extra follows outside changes.
+    /// True while a visible strip, active Extra or awake brightness hold needs reads.
     var isPolling: Bool { timer != nil }
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
@@ -109,18 +124,27 @@ final class ScreenBrightnessController: ObservableObject {
              let state = ProcessInfo.processInfo.thermalState
              return state != .serious && state != .critical
          },
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         isDisplayAwake: @escaping @MainActor (CGDirectDisplayID) -> Bool = { CGDisplayIsAsleep($0) == 0 }) {
         self.device = device ?? NativeScreenBrightnessDevice()
         self.selectedDisplayID = selectedDisplayID
         self.extraAllowed = extraAllowed
         self.now = now
+        self.isDisplayAwake = isDisplayAwake
         guard observeSystem else { return }
         let workspace = workspaceCenter
         observe(center, NSApplication.didChangeScreenParametersNotification) { $0.refresh() }
         observe(center, IslandScreenResolver.selectionDidChangeNotification) { $0.refresh() }
-        // Wake reconciles the backlight too, without treating macOS dimming as a manual action.
-        observe(workspace, NSWorkspace.didWakeNotification) { $0.refresh() }
-        observe(workspace, NSWorkspace.screensDidWakeNotification) { $0.refresh() }
+        for pause in Self.pauses {
+            observe(workspace, pause.start) {
+                $0.activePauses.insert(pause.start)
+                $0.updatePolling()
+            }
+            observe(workspace, pause.end) {
+                $0.activePauses.remove(pause.start)
+                $0.refresh()
+            }
+        }
         observe(center, ProcessInfo.thermalStateDidChangeNotification) { $0.thermalStateDidChange() }
     }
 
@@ -149,15 +173,22 @@ final class ScreenBrightnessController: ObservableObject {
     /// Assigns only changed values: `@Published` announces every assignment and
     /// the strip refreshes twice a second.
     func refresh() {
+        // Sleeping panels may temporarily refuse reads. Preserve the target until every
+        // matching wake/session notification arrives, without touching the backlight.
+        guard activePauses.isEmpty else { updatePolling(); return }
         let displays = device.displays()
         let selectedID = selectedDisplayID()
         let target = displays.first { $0.id == selectedID } ?? displays.first
         if display?.id != target?.id {
+            endHold()
             endExtra()
+            lastWrite = nil
             notice = nil
         }
         if display != target { display = target }
+        if isHoldingLevel, let target, !isDisplayAwake(target.id) { updatePolling(); return }
         guard let target, let hardware = device.read(target.id), hardware.isFinite else {
+            endHold()
             endExtra()
             if isAvailable { isAvailable = false }
             if level != 0 { level = 0 }
@@ -167,6 +198,7 @@ final class ScreenBrightnessController: ObservableObject {
         if !isAvailable { isAvailable = true }
         let current = ScreenBrightnessScale.clampedLevel(hardware)
         let settling = isSettling(target.id)
+        thermalStateDidChange()
         if isExtraOn {
             // Readback has no intent: automatic dimming and native manual controls look
             // identical. Only our explicit slider/key actions consume Extra.
@@ -176,14 +208,15 @@ final class ScreenBrightnessController: ObservableObject {
                 endExtra()
             }
         }
-        if !settling, level != current { level = current }
+        if !reconcileHold(current: current, display: target.id, settling: settling),
+           !settling, level != current { level = current }
         updatePolling()
     }
 
     /// The first manual decrease consumes Extra without writing the backlight. Keep the
     /// rest of that drag at the same level; another drag or accessibility action can lower it.
     func setLevel(_ requested: Double) {
-        guard isAvailable, let display, !ignoresLevelDrag else { return }
+        guard isAvailable, let display, activePauses.isEmpty, !ignoresLevelDrag else { return }
         let next = ScreenBrightnessScale.clampedLevel(requested)
         if isExtraOn, requested.isFinite, requested < level - Self.levelReadbackTolerance {
             endExtra()
@@ -192,12 +225,41 @@ final class ScreenBrightnessController: ObservableObject {
             return
         }
         guard write(next, to: display.id) else {
+            endHold()
             refresh()
             notice = Self.writeFailedNotice
             return
         }
         notice = nil
         level = next
+        if isHoldingLevel {
+            heldLevel = next
+            holdAttempts = 0
+        }
+    }
+
+    /// Hold is an explicit, session-only choice for this display. Native macOS changes
+    /// have no intent information; adjust through Whytap or turn Hold off to use them.
+    // WHY: .project-docs/decisions/2026-10-28-brightness-hold.md
+    func setHoldingLevel(_ enabled: Bool) {
+        guard enabled != isHoldingLevel else { return }
+        if !enabled {
+            endHold()
+            notice = nil
+            refresh()
+            return
+        }
+        refresh()
+        guard isAvailable, let display, activePauses.isEmpty, isDisplayAwake(display.id) else { return }
+        guard extraAllowed() else {
+            notice = Self.holdCoolingNotice
+            return
+        }
+        heldLevel = level
+        holdAttempts = 0
+        isHoldingLevel = true
+        notice = nil
+        updatePolling()
     }
 
     func setExtra(_ enabled: Bool) {
@@ -211,13 +273,19 @@ final class ScreenBrightnessController: ObservableObject {
         refresh()
     }
 
-    /// Thermal pressure pauses an active Extra; with Extra off there is nothing to report.
+    /// Stop automatic brightening under thermal pressure; never re-enable it on cooling.
     func thermalStateDidChange() {
-        guard isExtraOn, !extraAllowed() else { return }
-        stopExtra(notice: Self.coolingNotice)
+        guard !extraAllowed() else { return }
+        let wasHolding = isHoldingLevel
+        let wasExtra = isExtraOn
+        guard wasHolding || wasExtra else { return }
+        endHold()
+        endExtra()
+        notice = wasHolding ? Self.holdCoolingNotice : Self.coolingNotice
     }
 
     func shutdown() {
+        endHold()
         endExtra()
         timer?.invalidate()
         timer = nil
@@ -269,10 +337,36 @@ final class ScreenBrightnessController: ObservableObject {
         lastWrite.map { $0.display == id && now().timeIntervalSince($0.date) < Self.writeSettleInterval } ?? false
     }
 
+    private func endHold() {
+        heldLevel = nil
+        holdAttempts = 0
+        if isHoldingLevel { isHoldingLevel = false }
+        updatePolling()
+    }
+
+    /// True while the held target owns the slider. Writes settle before another attempt;
+    /// a rejected or repeatedly ignored write releases the hold instead of fighting macOS.
+    private func reconcileHold(current: Double, display: CGDirectDisplayID, settling: Bool) -> Bool {
+        guard let heldLevel else { return false }
+        guard activePauses.isEmpty, isDisplayAwake(display) else { return true }
+        if abs(current - heldLevel) <= Self.holdReadbackTolerance {
+            holdAttempts = 0
+            return true
+        }
+        guard !settling else { return true }
+        guard holdAttempts < Self.maximumHoldAttempts, write(heldLevel, to: display) else {
+            endHold()
+            notice = Self.holdFailedNotice
+            return false
+        }
+        holdAttempts += 1
+        return true
+    }
+
     /// Extra follows backlight and display support even with the strip closed.
-    /// Stop polling once neither Extra nor a strip needs it.
+    /// Hold also runs with the strip closed, but never keeps a sleeping session active.
     private func updatePolling() {
-        guard viewers > 0 || isExtraOn else {
+        guard viewers > 0 || isExtraOn || (isHoldingLevel && activePauses.isEmpty) else {
             timer?.invalidate()
             timer = nil
             return

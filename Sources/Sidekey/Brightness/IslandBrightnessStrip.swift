@@ -31,6 +31,10 @@ struct IslandBrightnessStrip: View {
                                             else { controller.endLevelDrag() }
                                         })
 
+                BrightnessHoldButton(isOn: controller.isHoldingLevel, isEnabled: controller.isAvailable) {
+                    controller.setHoldingLevel(!controller.isHoldingLevel)
+                }
+
                 if controller.supportsExtra {
                     // The island is never the active app's key window, where the native switch
                     // draws its on state gray; MacSwitch keeps its blue.
@@ -82,6 +86,78 @@ struct IslandBrightnessStrip: View {
         if let notice = controller.notice { return (notice, "exclamationmark.triangle.fill", true) }
         if !controller.isAvailable { return (Self.unavailableText, nil, false) }
         return nil
+    }
+}
+
+/// The lock sits beside the level it holds; Extra remains a separate boost.
+struct BrightnessHoldButton: View {
+    let isOn: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+    @Environment(\.islandHoverNavigation) private var navigation
+    @Environment(\.isEnabled) private var inheritedEnabled
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if let navigation, isEnabled && inheritedEnabled {
+                button.islandHoverHitTarget(bridge: navigation.bridge, id: .init(display: .hold),
+                    context: navigation.context, action: action)
+            } else { button }
+        }
+    }
+
+    private var button: some View {
+        Button(action: action) {
+            Image(systemName: isOn ? "lock.fill" : "lock.open")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(BrightnessHoldButtonStyle(isOn: isOn, focused: focused))
+        .focused($focused)
+        .disabled(!isEnabled)
+        .accessibilityLabel("Hold brightness")
+        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityHint("While held, adjust with Whytap or unlock to use macOS controls.")
+        .help(isOn ? "Brightness held. Adjust with Whytap or unlock to use macOS controls."
+                   : "Hold this brightness against automatic changes. Uses more battery.")
+    }
+}
+
+private struct BrightnessHoldButtonStyle: ButtonStyle {
+    let isOn: Bool
+    let focused: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandHoverNativePressed) private var nativePressed
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white.opacity(0.96))
+            .background(BrightnessHoldSurface(isOn: isOn, hovered: hovered,
+                pressed: configuration.isPressed || nativePressed, focused: focused, enabled: enabled))
+            .opacity(enabled ? 1 : 0.42)
+            .onHover { hovered = enabled && $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: enabled && hovered)
+    }
+}
+
+struct BrightnessHoldSurface: View {
+    var isOn = false
+    var hovered = false
+    var pressed = false
+    var focused = false
+    var enabled = true
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(isOn ? Color(red: 0, green: 100.0 / 255, blue: 210.0 / 255) : .clear)
+            IslandHoverBackSurface(hovered: hovered, pressed: pressed, focused: focused, enabled: enabled)
+        }
+        .allowsHitTesting(false)
     }
 }
 

@@ -14,7 +14,7 @@ enum NativeAgentDiagnostics {
         case messages, tool_calls, tool_call_id, arguments, reasoning, reasoning_content, reasoning_details, max_tokens, max_completion_tokens
     }
     enum Tool: String, Codable {
-        case web_search, capture_screen, show_actions, run_command, write_file, read_file, list_directory, search_files, fetch_url, case_list_keys, unknown
+        case web_search, capture_screen, show_actions, finish_answer, run_command, write_file, read_file, list_directory, search_files, fetch_url, case_list_keys, unknown
     }
     struct ErrorShape: Codable {
         // Protocol names chosen from a closed set; unknown values never leave memory.

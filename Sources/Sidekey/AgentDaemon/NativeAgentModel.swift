@@ -36,7 +36,8 @@ struct NativeAgentModel {
         messages.append(["role": "user", "content": prompt])
     }
 
-    mutating func next(tools: [[String: Any]]) async throws -> (String, [NativeAgentToolCall]) {
+    mutating func next(tools: [[String: Any]], structuredCompletion: Bool = false) async throws -> (String, [NativeAgentToolCall]) {
+        guard !structuredCompletion || !tools.isEmpty else { throw NativeAgentFinalAnswer.invalid() }
         guard let model = options.model, !model.isEmpty else { throw NativeAgentError.message("Choose an Agent model in Settings → API & Models.") }
         // Bound accumulated text before a provider request; image data has its own cap.
         let textBudget = min(180_000, max(8000, ((options.openCodeModelSpec?.contextLimit ?? 32_768) - 4096) * 2))
@@ -56,12 +57,16 @@ struct NativeAgentModel {
                 "model": model, "instructions": system, "input": messages, "store": false,
                 "include": ["reasoning.encrypted_content"], "max_output_tokens": outputLimit,
                 "tools": tools.map { ["type": "function", "name": $0["name"]!, "description": $0["description"]!,
-                                       "parameters": $0["parameters"]!, "strict": false] }
+                                       "parameters": $0["parameters"]!, "strict": $0["strict"] as? Bool ?? false] }
             ])
         case .anthropic:
             request = try NativeAgentHTTP.request(url: URL(string: "https://api.anthropic.com/v1/messages")!, key: key, body: [
                 "model": model, "system": system, "messages": messages, "max_tokens": outputLimit,
-                "tools": tools.map { ["name": $0["name"]!, "description": $0["description"]!, "input_schema": $0["parameters"]!] }
+                "tools": tools.map { tool -> [String: Any] in
+                    var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]
+                    if let strict = tool["strict"] as? Bool { result["strict"] = strict }
+                    return result
+                }
             ])
             request.setValue(nil, forHTTPHeaderField: "Authorization")
             request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -75,9 +80,24 @@ struct NativeAgentModel {
             request = try NativeAgentHTTP.request(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, key: key, body: body)
             request.setValue("Whytap", forHTTPHeaderField: "X-Title")
         }
-        if tools.isEmpty, let data = request.httpBody,
+        if (tools.isEmpty || structuredCompletion), let data = request.httpBody,
            var body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            body.removeValue(forKey: "tools")
+            if tools.isEmpty { body.removeValue(forKey: "tools") }
+            if structuredCompletion {
+                // Current Claude models reject forced any/tool choice, even
+                // without explicit thinking. Strict schemas + local terminal
+                // validation also work with auto, directly and via OpenRouter.
+                // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
+                let claude = options.openCodeProvider == .anthropic
+                    || (options.openCodeProvider == .openRouter && model.lowercased().hasPrefix("anthropic/"))
+                body["tool_choice"] = options.openCodeProvider == .anthropic ? ["type": "auto"] as Any
+                    : (claude ? "auto" : "required") as Any
+                if options.openCodeProvider == .openRouter {
+                    var provider = body["provider"] as? [String: Any] ?? [:]
+                    provider["require_parameters"] = true
+                    body["provider"] = provider
+                }
+            }
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         diagnosticRequest += 1

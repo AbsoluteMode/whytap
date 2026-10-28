@@ -27,6 +27,19 @@ final class NativeAgentTests: XCTestCase {
         ["choices": [["message": message, "finish_reason": finish]], "usage": ["cost": 0.001]]
     }
 
+    private func finalArguments(_ answer: String, status: String = "answered",
+                                sources: [[String: Any]] = [], actions: [[String: Any]] = []) -> [String: Any] {
+        ["status": status, "answer": answer, "sources": sources, "actions": actions]
+    }
+
+    private func completion(_ answer: String, status: String = "answered",
+                            sources: [[String: Any]] = [], actions: [[String: Any]] = []) -> [String: Any] {
+        let arguments = String(decoding: try! JSONSerialization.data(withJSONObject:
+            finalArguments(answer, status: status, sources: sources, actions: actions)), as: UTF8.self)
+        return router(["role": "assistant", "content": NSNull(), "tool_calls": [["id": "final", "type": "function",
+            "function": ["name": "finish_answer", "arguments": arguments]]]], finish: "tool_calls")
+    }
+
     private func body(_ index: Int) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[index]) as? [String: Any])
     }
@@ -44,29 +57,29 @@ final class NativeAgentTests: XCTestCase {
         try keys.save("router-secret", account: OpenRouterLLMKeyStore.account)
         try keys.save("wrong-openai-secret", account: ProviderAccount.openAIKeychainAccount)
         try Data("Prefer Russian.".utf8).write(to: directory.appendingPathComponent("AGENTS.md"))
-        var calls = 0
-        StubURLProtocol.handler = { _ in
-            calls += 1
-            if calls == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
-                ["id": "action", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"path\",\"path\":\"/tmp/project\",\"description\":\"Открыть папку\"}]}"]]
-            ]], finish: "tool_calls")) }
-            return self.serve(self.router(["role": "assistant", "content": "Проект здесь:\n```\n/tmp/project\n``` "]))
-        }
+        StubURLProtocol.handler = { _ in self.serve(self.completion("Проект найден.",
+            actions: [["type": "path", "path": "/tmp/project", "description": "Открыть папку"]])) }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
         var events: [AgentSSEEvent] = []
         for await event in provider.run(prompt: "Where is the project?", resumeSessionID: nil,
             options: .init(model: "vendor/exact-model", allowActions: false, openRouterProvider: "endpoint/pin")) { events.append(event) }
-        XCTAssertEqual(calls, 2, "No version check, catalog fetch, MCP bootstrap or extra model request")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1, "No handshake or model call after finishing the answer")
         let first = try body(0)
         XCTAssertEqual(first["model"] as? String, "vendor/exact-model")
-        XCTAssertEqual((first["provider"] as? [String: Any])?["only"] as? [String], ["endpoint/pin"])
+        let routing = try XCTUnwrap(first["provider"] as? [String: Any])
+        XCTAssertEqual(routing["only"] as? [String], ["endpoint/pin"])
+        XCTAssertEqual(routing["allow_fallbacks"] as? Bool, false)
+        XCTAssertEqual(routing["require_parameters"] as? Bool, true)
+        XCTAssertEqual(first["tool_choice"] as? String, "required")
         let tools = try XCTUnwrap(first["tools"] as? [[String: Any]])
-        XCTAssertTrue(tools.contains { ($0["function"] as? [String: Any])?["name"] as? String == "web_search" })
-        XCTAssertFalse(tools.contains { ($0["function"] as? [String: Any])?["name"] as? String == "run_command" })
+        let functions = tools.compactMap { $0["function"] as? [String: Any] }
+        XCTAssertTrue(functions.contains { $0["name"] as? String == "web_search" })
+        XCTAssertFalse(functions.contains { ["run_command", "show_actions"].contains($0["name"] as? String ?? "") })
+        XCTAssertEqual(functions.first { $0["name"] as? String == "finish_answer" }?["strict"] as? Bool, true)
         XCTAssertEqual(StubURLProtocol.capturedRequests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer router-secret")
         XCTAssertFalse(String(decoding: StubURLProtocol.capturedBodies[0], as: UTF8.self).contains("wrong-openai-secret"))
         XCTAssertTrue(events.contains { if case .blockComplete(.usefulActions(let block)) = $0 { return block.items.count == 1 }; return false })
-        XCTAssertTrue(events.contains(.finalAnswer(text: "Проект здесь:\n```\n/tmp/project\n```")))
+        XCTAssertTrue(events.contains(.finalAnswer(text: "Проект найден.")))
         XCTAssertEqual(events.last, .done(sources: []))
         XCTAssertNotNil(provider.lastSessionID)
         let saved = try String(contentsOf: directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
@@ -74,13 +87,13 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertFalse(saved.contains("Prefer Russian"), "Memory is supplied once, not duplicated into history")
     }
 
-    func testPlainFinalLinksAndFoundFoldersEmitKeyboardActionsWithoutExtraModelCalls() async throws {
+    func testStructuredAnswerKeepsArtifactFallbackAndKeyboardActionsWithoutExtraModelCalls() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("key", account: OpenRouterLLMKeyStore.account)
         let folder = directory.appendingPathComponent("My Project")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let answer = "Источник: https://example.com/source\nПапка: `\(folder.path)`"
-        StubURLProtocol.handler = { _ in self.serve(self.router(["role": "assistant", "content": answer])) }
+        let answer = "The source confirms the location: https://example.com/source\nFolder: `\(folder.path)`"
+        StubURLProtocol.handler = { _ in self.serve(self.completion(answer)) }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
         var items: [ActionItem] = []
         var final: String?
@@ -88,17 +101,16 @@ final class NativeAgentTests: XCTestCase {
             if case .blockComplete(.usefulActions(let block)) = event { items = block.items }
             if case .finalAnswer(let text) = event { final = text }
         }
-        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1, "Artifact presentation must not need another model or tool request")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
         XCTAssertEqual(final, answer)
         XCTAssertEqual(items.map(\.insertText), ["https://example.com/source", folder.path])
         let selection = UsefulLinksSelectionState(items: items)
         XCTAssertTrue(selection.selectedItemSupportsOpen)
         selection.selectNext()
         XCTAssertEqual(selection.selectedItem?.openTarget?.path, folder.path)
-        XCTAssertEqual(selection.selectedItem?.insertText, folder.path)
     }
 
-    func testFollowUpRetainsPricesAndAnswerEmittedAlongsideCards() async throws {
+    func testStructuredFollowUpRetainsPricesAndReturnedCards() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("key", account: OpenRouterLLMKeyStore.account)
         let prices = "256 ГБ — 8 499 AED; 512 ГБ — 9 349 AED."
@@ -107,13 +119,8 @@ final class NativeAgentTests: XCTestCase {
         var calls = 0
         StubURLProtocol.handler = { _ in
             calls += 1
-            if calls == 1 || calls == 3 {
-                return self.serve(self.router(["role": "assistant", "content": calls == 1 ? prices : converted,
-                    "tool_calls": [["id": "cards-\(calls)", "type": "function", "function": [
-                        "name": "show_actions", "arguments": "{\"items\":[{\"type\":\"link\",\"url\":\"\(url)\",\"description\":\"Phone prices\"}]}"
-                    ]]]], finish: "tool_calls"))
-            }
-            return self.serve(self.router(["role": "assistant", "content": ""]))
+            return self.serve(self.completion(calls == 1 ? prices : converted,
+                sources: [["url": url, "title": "Phone prices"]]))
         }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
         let options = AgentRunOptions(model: "vendor/exact", allowActions: false, openRouterProvider: "endpoint/pin")
@@ -126,15 +133,12 @@ final class NativeAgentTests: XCTestCase {
         await second.consume(provider.run(prompt: "А сколько это в долларах?", resumeSessionID: session, options: options))
         XCTAssertEqual(second.streamingText, converted)
         XCTAssertEqual(provider.lastSessionID, session)
-        let request = try body(2)
-        let messages = try XCTUnwrap(request["messages"] as? [[String: Any]])
+        let messages = try XCTUnwrap(try body(1)["messages"] as? [[String: Any]])
         let priorAnswer = try XCTUnwrap(messages.first { $0["role"] as? String == "assistant" }?["content"] as? String)
-        XCTAssertTrue(priorAnswer.contains(prices))
-        XCTAssertTrue(priorAnswer.contains(url), "A follow-up may refer to the returned card, not only its prose")
+        XCTAssertTrue(priorAnswer.contains(prices)); XCTAssertTrue(priorAnswer.contains(url))
         XCTAssertEqual(messages.last?["content"] as? String, "А сколько это в долларах?")
-        XCTAssertEqual(calls, 4, "Preserving a card's accompanying answer needs no extra model call")
-        let saved = NativeAgentConversation.load(directory: directory, resumeID: session,
-            route: "openrouter/vendor/exact/endpoint/pin")
+        XCTAssertEqual(calls, 2, "One request per simple turn, including its cards")
+        let saved = NativeAgentConversation.load(directory: directory, resumeID: session, route: "openrouter/vendor/exact/endpoint/pin")
         XCTAssertEqual(saved.pairs.count, 2)
         XCTAssertTrue(saved.pairs.last?.assistant.contains(converted) == true)
     }
@@ -166,7 +170,7 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.capturedRequests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer own-openai-key")
     }
 
-    func testCardAnswerSurvivesEmptyFinalAcrossAllNativeProviders() async throws {
+    func testStructuredCompletionAcrossAllNativeProviders() async throws {
         for route: OpenCodeModelProvider in [.openRouter, .openAI, .anthropic] {
             let (directory, keys, http) = try fixture()
             let account: String
@@ -176,26 +180,16 @@ final class NativeAgentTests: XCTestCase {
             case .anthropic: account = ProviderAccount.anthropicKeychainAccount
             }
             try keys.save("key", account: account)
-            var step = 0
+            let args = finalArguments("The price is about $2,314.", sources: [["url": "https://example.com/phone", "title": "Phone"]])
+            let json = String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)
             StubURLProtocol.handler = { _ in
-                step += 1
-                let text = step == 1 ? "The price is about $2,314." : ""
-                let args: [String: Any] = ["items": [["type": "link", "url": "https://example.com/phone", "description": "Phone"]]]
                 switch route {
-                case .openRouter:
-                    var message: [String: Any] = ["role": "assistant", "content": text]
-                    if step == 1 { message["tool_calls"] = [["id": "card", "type": "function", "function": ["name": "show_actions",
-                        "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: args), as: UTF8.self)]]] }
-                    return self.serve(self.router(message, finish: step == 1 ? "tool_calls" : "stop"))
-                case .openAI:
-                    var output: [[String: Any]] = [["type": "message", "role": "assistant", "content": [["type": "output_text", "text": text]]]]
-                    if step == 1 { output.append(["type": "function_call", "call_id": "card", "name": "show_actions",
-                        "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: args), as: UTF8.self)]) }
-                    return self.serve(["status": "completed", "output": output])
-                case .anthropic:
-                    var content: [[String: Any]] = [["type": "text", "text": text]]
-                    if step == 1 { content.append(["type": "tool_use", "id": "card", "name": "show_actions", "input": args]) }
-                    return self.serve(["stop_reason": step == 1 ? "tool_use" : "end_turn", "content": content])
+                case .openRouter: return self.serve(self.completion("The price is about $2,314.", sources: [["url": "https://example.com/phone", "title": "Phone"]]))
+                case .openAI: return self.serve(["status": "completed", "output": [
+                    ["type": "message", "content": [["type": "output_text", "text": "NARRATION_NOT_THE_ANSWER"]]],
+                    ["type": "function_call", "call_id": "final", "name": "finish_answer", "arguments": json]]])
+                case .anthropic: return self.serve(["stop_reason": "tool_use", "content": [
+                    ["type": "text", "text": "NARRATION_NOT_THE_ANSWER"], ["type": "tool_use", "id": "final", "name": "finish_answer", "input": args]]])
                 }
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
@@ -204,26 +198,38 @@ final class NativeAgentTests: XCTestCase {
                 options: .init(model: "exact", allowActions: false, openCodeProvider: route)) { events.append(event) }
             XCTAssertTrue(events.contains(.finalAnswer(text: "The price is about $2,314.")), "\(route)")
             XCTAssertEqual(events.last, .done(sources: []))
-            XCTAssertEqual(step, 2)
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+            let request = try body(0)
+            let tools = try XCTUnwrap(request["tools"] as? [[String: Any]])
+            if route == .anthropic {
+                XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto")
+                XCTAssertEqual(tools.first { $0["name"] as? String == "finish_answer" }?["strict"] as? Bool, true)
+            } else {
+                XCTAssertEqual(request["tool_choice"] as? String, "required")
+                // Responses uses flat function definitions; Chat Completions wraps them.
+                let functions = route == .openAI ? tools : tools.compactMap { $0["function"] as? [String: Any] }
+                XCTAssertEqual(functions.first { $0["name"] as? String == "finish_answer" }?["strict"] as? Bool, true)
+            }
         }
     }
 
-    func testCanonicalFinalAnswerOverridesTextBesideCards() async throws {
+    func testNarrationBeforeEvidenceDoesNotOverrideStructuredFinal() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("key", account: OpenRouterLLMKeyStore.account)
         var step = 0
         StubURLProtocol.handler = { _ in
             step += 1
             if step == 1 { return self.serve(self.router(["role": "assistant", "content": "Earlier price.", "tool_calls": [
-                ["id": "card", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"link\",\"url\":\"https://example.com\",\"description\":\"Source\"}]}"]]
+                ["id": "read", "type": "function", "function": ["name": "read_file", "arguments": "{\"path\":\"missing.txt\"}"]]
             ]], finish: "tool_calls")) }
-            return self.serve(self.router(["role": "assistant", "content": "Corrected final price."]))
+            return self.serve(self.completion("Could not read the price file.", status: "unverified"))
         }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
         var events: [AgentSSEEvent] = []
         for await event in provider.run(prompt: "price", resumeSessionID: nil, options: .init(model: "model")) { events.append(event) }
-        XCTAssertTrue(events.contains(.finalAnswer(text: "Corrected final price.")))
+        XCTAssertTrue(events.contains(.finalAnswer(text: "Couldn’t verify\n\nCould not read the price file.")))
         XCTAssertFalse(events.contains(.finalAnswer(text: "Earlier price.")))
+        XCTAssertEqual(step, 2)
     }
 
     func testNarrationBeforeEvidenceToolDoesNotBecomeSuccessfulAnswer() async throws {
@@ -246,31 +252,138 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
     }
 
-    func testCardAnswerPartsAccumulateButLaterEvidenceInvalidatesThem() async throws {
-        for continuesWithEvidence in [false, true] {
+    func testMixedCompletionAndWriteAreRejectedBeforeExecutingEither() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        StubURLProtocol.handler = { _ in
+            var response = self.completion("Saved the file.")
+            var choices = response["choices"] as! [[String: Any]]
+            var message = choices[0]["message"] as! [String: Any]
+            var calls = message["tool_calls"] as! [[String: Any]]
+            calls.append(["id": "write", "type": "function", "function": ["name": "write_file", "arguments": "{\"path\":\"must-not-exist.txt\",\"content\":\"payload\"}"]])
+            message["tool_calls"] = calls; choices[0]["message"] = message; response["choices"] = choices
+            return self.serve(response)
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var events: [AgentSSEEvent] = []
+        for await event in provider.run(prompt: "write file", resumeSessionID: nil, options: .init(model: "model", allowActions: true)) { events.append(event) }
+        XCTAssertTrue(events.contains { if case .error = $0 { return true }; return false })
+        XCTAssertFalse(events.contains(.done(sources: [])))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("must-not-exist.txt").path))
+        XCTAssertNil(provider.lastSessionID)
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+    }
+
+    func testSourceOnlyFinalAndFreeTextAreNotShownOrPersistedAsSuccess() async throws {
+        for structured in [false, true] {
             let (directory, keys, http) = try fixture()
             try keys.save("key", account: OpenRouterLLMKeyStore.account)
-            var step = 0
+            let dump = "Ссылки для проверки:\n- https://example.com/a\n- https://example.com/b"
+            StubURLProtocol.handler = { _ in self.serve(structured
+                ? self.completion(dump, sources: [["url": "https://example.com/a", "title": "Source"]])
+                : self.router(["role": "assistant", "content": dump])) }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let store = AskResponseStore()
+            await store.consume(provider.run(prompt: "Did the announcement happen?", resumeSessionID: nil, options: .init(model: "model")))
+            XCTAssertEqual(store.status, .failed)
+            XCTAssertTrue(store.streamingText.isEmpty); XCTAssertTrue(store.blocks.isEmpty)
+            XCTAssertTrue(store.errorMessage?.contains("structured answer") == true)
+            XCTAssertNil(provider.lastSessionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1, "An invalid final does not trigger a paid retry")
+        }
+    }
+
+    func testWriteIsNotRetriedWhenStructuredCompletionFails() async throws {
+        for malformed in [false, true] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: OpenRouterLLMKeyStore.account)
+            var count = 0
             StubURLProtocol.handler = { _ in
-                step += 1
-                if step <= 2 {
-                    return self.serve(self.router(["role": "assistant", "content": step == 1 ? "First price." : "Second price.", "tool_calls": [
-                        ["id": "card-\(step)", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"path\",\"path\":\"/tmp/price\"}]}"]]
-                    ]], finish: "tool_calls"))
-                }
-                if step == 3, continuesWithEvidence {
-                    return self.serve(self.router(["role": "assistant", "content": "Checking a newer price.", "tool_calls": [
-                        ["id": "read", "type": "function", "function": ["name": "read_file", "arguments": "{\"path\":\"missing.txt\"}"]]
-                    ]], finish: "tool_calls"))
-                }
-                return self.serve(self.router(["role": "assistant", "content": ""]))
+                count += 1
+                if count == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "write", "type": "function", "function": ["name": "write_file", "arguments": "{\"path\":\"written.txt\",\"content\":\"fixture\"}"]]
+                ]], finish: "tool_calls")) }
+                if malformed { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
+                    ["id": "final", "type": "function", "function": ["name": "finish_answer", "arguments": "{SYNTHETIC_PRIVATE_BROKEN_JSON"]]
+                ]], finish: "tool_calls")) }
+                return self.serve(self.completion(""))
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-            var final: String?
-            for await event in provider.run(prompt: "price", resumeSessionID: nil, options: .init(model: "model")) {
-                if case .finalAnswer(let text) = event { final = text }
+            let store = AskResponseStore()
+            await store.consume(provider.run(prompt: "Write the fixture file", resumeSessionID: nil, options: .init(model: "model", allowActions: true)))
+            XCTAssertEqual(count, 2)
+            XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("written.txt"), encoding: .utf8), "fixture")
+            XCTAssertEqual(store.status, .failed)
+            XCTAssertTrue(store.errorMessage?.contains("Earlier file edits or commands may have completed") == true)
+            XCTAssertFalse(store.errorMessage?.contains("SYNTHETIC_PRIVATE_BROKEN_JSON") == true)
+            XCTAssertNil(provider.lastSessionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+        }
+    }
+
+    func testSharedModelDoesNotRequireToolsUnlessAgentExplicitlyRequestsIt() async throws {
+        let (_, _, http) = try fixture()
+        StubURLProtocol.handler = { _ in self.serve(self.router(["role": "assistant", "content": "A meeting answer."])) }
+        var model = NativeAgentModel(options: .init(model: "model"), key: "key", system: "system", history: [], prompt: "question", http: http, usageSink: { _ in })
+        let (text, _) = try await model.next(tools: [])
+        XCTAssertEqual(text, "A meeting answer.")
+        let request = try body(0)
+        XCTAssertNil(request["tool_choice"]); XCTAssertNil(request["provider"]); XCTAssertNil(request["tools"])
+    }
+
+    func testClaudeModelsKeepAutoChoiceAndStrictSchemaWithoutRouteSubstitution() async throws {
+        for route: OpenCodeModelProvider in [.anthropic, .openRouter] {
+            for name in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1"] {
+                let (_, _, http) = try fixture()
+                let modelID = route == .anthropic ? name : "anthropic/" + name
+                let args = finalArguments("The source confirms the answer.")
+                StubURLProtocol.handler = { _ in self.serve(route == .anthropic
+                    ? ["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "final", "name": "finish_answer", "input": args]]]
+                    : self.completion("The source confirms the answer.")) }
+                var model = NativeAgentModel(options: .init(model: modelID, openCodeProvider: route, openRouterProvider: "endpoint/pin"),
+                    key: "key", system: "system", history: [], prompt: "question", http: http, usageSink: { _ in })
+                let (_, calls) = try await model.next(tools: NativeAgentTools.structuredDefinitions(allowActions: false), structuredCompletion: true)
+                XCTAssertEqual(calls.first?.name, "finish_answer")
+                let request = try body(0)
+                XCTAssertEqual(request["model"] as? String, modelID)
+                let tools = try XCTUnwrap(request["tools"] as? [[String: Any]])
+                if route == .anthropic {
+                    XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto")
+                    XCTAssertTrue(tools.allSatisfy { $0["strict"] as? Bool == true })
+                } else {
+                    XCTAssertEqual(request["tool_choice"] as? String, "auto")
+                    let provider = try XCTUnwrap(request["provider"] as? [String: Any])
+                    XCTAssertEqual(provider["only"] as? [String], ["endpoint/pin"])
+                    XCTAssertEqual(provider["allow_fallbacks"] as? Bool, false)
+                    XCTAssertEqual(provider["require_parameters"] as? Bool, true)
+                    XCTAssertTrue(tools.allSatisfy { ($0["function"] as? [String: Any])?["strict"] as? Bool == true })
+                }
+                XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
             }
-            XCTAssertEqual(final, continuesWithEvidence ? "" : "First price.\n\nSecond price.")
+        }
+    }
+
+    func testClaudeAutoChoiceStillRejectsUnstructuredFinalWithoutPaidRepair() async throws {
+        for route: OpenCodeModelProvider in [.anthropic, .openRouter] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("key", account: route == .anthropic ? ProviderAccount.anthropicKeychainAccount : OpenRouterLLMKeyStore.account)
+            StubURLProtocol.handler = { _ in self.serve(route == .anthropic
+                ? ["stop_reason": "end_turn", "content": [["type": "text", "text": "A plain answer outside the required contract."]]]
+                : self.router(["role": "assistant", "content": "A plain answer outside the required contract."])) }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let store = AskResponseStore()
+            let model = route == .anthropic ? "claude-opus-5-5" : "anthropic/claude-sonnet-5.5"
+            await store.consume(provider.run(prompt: "question", resumeSessionID: nil,
+                options: .init(model: model, allowActions: false, openCodeProvider: route)))
+            XCTAssertEqual(store.status, .failed); XCTAssertTrue(store.streamingText.isEmpty)
+            XCTAssertTrue(store.errorMessage?.contains("structured answer") == true)
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+            XCTAssertNil(provider.lastSessionID)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))
+            let request = try body(0)
+            if route == .anthropic { XCTAssertEqual((request["tool_choice"] as? [String: String])?["type"], "auto") }
+            else { XCTAssertEqual(request["tool_choice"] as? String, "auto") }
         }
     }
 
@@ -716,29 +829,20 @@ final class NativeAgentTests: XCTestCase {
     }
 
     func testCopyCardPayloadStaysOutOfSupplementaryConversationMemory() async throws {
-        for finalText in ["", "Here is the example."] {
-            let (directory, keys, http) = try fixture()
-            try keys.save("key", account: OpenRouterLLMKeyStore.account)
-            var step = 0
-            StubURLProtocol.handler = { _ in
-                step += 1
-                if step == 1 { return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": [
-                    ["id": "copy", "type": "function", "function": ["name": "show_actions", "arguments": "{\"items\":[{\"type\":\"copy\",\"text\":\"SYNTHETIC_COPY_PAYLOAD\",\"description\":\"Code example\"},{\"type\":\"copy\",\"text\":\"ANOTHER_COPY_PAYLOAD\"}]}"]]
-                ]], finish: "tool_calls")) }
-                return self.serve(self.router(["role": "assistant", "content": finalText]))
-            }
-            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-            var items: [ActionItem] = []
-            for await event in provider.run(prompt: "Prepare a copyable example", resumeSessionID: nil, options: .init(model: "model")) {
-                if case .blockComplete(.usefulActions(let block)) = event { items = block.items }
-            }
-            XCTAssertEqual(items.first?.insertText, "SYNTHETIC_COPY_PAYLOAD")
-            let saved = try String(contentsOf: directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
-            XCTAssertFalse(saved.contains("SYNTHETIC_COPY_PAYLOAD"))
-            XCTAssertFalse(saved.contains("ANOTHER_COPY_PAYLOAD"))
-            XCTAssertTrue(saved.contains("Code example"))
-            XCTAssertTrue(saved.contains("Copyable text"))
+        let (directory, keys, http) = try fixture()
+        try keys.save("key", account: OpenRouterLLMKeyStore.account)
+        StubURLProtocol.handler = { _ in self.serve(self.completion("Here is the example.", actions: [
+            ["type": "copy", "text": "SYNTHETIC_COPY_PAYLOAD", "description": "Code example"],
+            ["type": "copy", "text": "ANOTHER_COPY_PAYLOAD", "description": ""]])) }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        var items: [ActionItem] = []
+        for await event in provider.run(prompt: "copy code", resumeSessionID: nil, options: .init(model: "model")) {
+            if case .blockComplete(.usefulActions(let block)) = event { items = block.items }
         }
+        XCTAssertEqual(items.first?.insertText, "SYNTHETIC_COPY_PAYLOAD")
+        let saved = try String(contentsOf: directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
+        XCTAssertFalse(saved.contains("SYNTHETIC_COPY_PAYLOAD")); XCTAssertFalse(saved.contains("ANOTHER_COPY_PAYLOAD"))
+        XCTAssertTrue(saved.contains("Code example")); XCTAssertTrue(saved.contains("Copyable text"))
     }
 
     func testShellUsesWorkspaceAndCapsOutput() async throws {
@@ -883,29 +987,16 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertFalse(result.contains("[Exit 0]"))
     }
 
-    func testMultipleActionCallsAccumulateAndActionOnlyHistoryHasContent() async throws {
+    func testStructuredPathCardsRemainInHistoryAndEmptyToolResultsRemainNonempty() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("key", account: OpenRouterLLMKeyStore.account)
-        var step = 0
-        StubURLProtocol.handler = { _ in
-            step += 1
-            if step == 1 {
-                let calls = ["/tmp/first", "/tmp/second"].enumerated().map { index, path -> [String: Any] in
-                    let args = String(decoding: try! JSONSerialization.data(withJSONObject: ["items": [["type": "path", "path": path]]]), as: UTF8.self)
-                    return ["id": "call\(index)", "type": "function", "function": ["name": "show_actions", "arguments": args]]
-                }
-                return self.serve(self.router(["role": "assistant", "content": NSNull(), "tool_calls": calls], finish: "tool_calls"))
-            }
-            return self.serve(self.router(["role": "assistant", "content": ""]))
-        }
+        StubURLProtocol.handler = { _ in self.serve(self.completion("Both requested folders are available.", actions:
+            ["/tmp/first", "/tmp/second"].map { ["type": "path", "path": $0, "description": "Folder"] })) }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-        var actionCount = 0
-        for await event in provider.run(prompt: "return both folders", resumeSessionID: nil, options: .init(model: "model")) {
-            if case .blockComplete(.usefulActions(let block)) = event { actionCount = block.items.count }
-        }
-        XCTAssertEqual(actionCount, 2)
+        for await _ in provider.run(prompt: "folders", resumeSessionID: nil, options: .init(model: "model")) {}
         let history = NativeAgentConversation.load(directory: directory, resumeID: provider.lastSessionID, route: "openrouter/model/")
-        XCTAssertEqual(history.pairs.last?.assistant, "- /tmp/first\n- /tmp/second")
+        XCTAssertTrue(history.pairs.last?.assistant.contains("/tmp/first") == true)
+        XCTAssertTrue(history.pairs.last?.assistant.contains("/tmp/second") == true)
         var model = NativeAgentModel(options: .init(model: "model", openCodeProvider: .anthropic), key: "key", system: "system", history: history.pairs, prompt: "continue", http: http, usageSink: { _ in })
         model.append(results: [(.init(id: "read", name: "read_file", arguments: [:]), .init(text: ""))])
         let result = try XCTUnwrap((model.messages.last?["content"] as? [[String: Any]])?.first?["content"] as? [[String: Any]])

@@ -102,31 +102,43 @@ final class NativeAgentProvider: CLIProvider {
                                      diagnosticsSink: diagnosticsSink)
         let turn = UUID().uuidString
         continuation.yield(.started(turnId: turn, requestId: turn, sessionId: conversation.id))
-        var actions: UsefulActionsBlock?
-        // Some providers put the answer beside show_actions, then finish with
-        // empty content. Keep that answer hidden until the turn completes.
-        // Never promote narration preceding an evidence/action tool to a result.
-        // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
-        var cardAnswers: [String] = []
+        // Completion is one validated tool object, never free text beside cards.
+        // The terminal tool also works on endpoints without response_format.
+        // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
+        let definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions)
+        var actionsAttempted = false
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
-            let (answer, calls) = try await model.next(tools: NativeAgentTools.definitions(allowActions: options.allowActions))
+            let calls: [NativeAgentToolCall]
+            do {
+                calls = try await model.next(tools: definitions, structuredCompletion: true).1
+            } catch {
+                // Malformed arguments can fail in the model decoder before the
+                // terminal validator runs. Earlier side effects still happened.
+                guard actionsAttempted, !(error is CancellationError), !Task.isCancelled else { throw error }
+                let message = (error as? NativeAgentError)?.localizedDescription
+                    ?? "Couldn’t complete the request. Check your connection, provider settings and workspace permissions."
+                throw NativeAgentError.message(message + NativeAgentFinalAnswer.actionWarning)
+            }
             try Task.checkCancellation()
-            if calls.isEmpty {
-                let final = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-                var text = final.isEmpty ? cardAnswers.joined(separator: "\n\n") : final
-                if let extracted = AgentUsefulLinksExtractor.extract(from: text) {
-                    text = extracted.answer
-                    actions = Self.merging(actions, extracted.block)
-                }
-                actions = NativeAgentAnswerArtifacts.collect(from: text, existing: actions)
-                guard !text.isEmpty || actions?.items.isEmpty == false else { throw NativeAgentError.message("The model returned an empty answer. Try again.") }
+            toolCount += calls.count
+            guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }
+            guard !calls.isEmpty else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+            if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
+                // Reject a mixed batch before executing it: a final response
+                // cannot know whether a sibling write/command will succeed.
+                guard calls.count == 1 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                let final: NativeAgentFinalAnswer
+                do { final = try NativeAgentFinalAnswer(arguments: calls[0].arguments) }
+                catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                let text = final.visibleText
+                let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions) ?? final.actions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
                 // Returned card destinations are part of the answer too: the
                 // next request may refer to "that page" or "the second file".
-                let returnedItems = actions?.items.compactMap { item -> String? in
+                let returnedItems = actions.items.compactMap { item -> String? in
                     if case .copy(_, let description) = item {
                         // A copy payload can contain file/tool content. Keep
                         // only its label in supplementary conversation memory.
@@ -135,18 +147,15 @@ final class NativeAgentProvider: CLIProvider {
                     }
                     guard !text.contains(item.insertText) else { return nil }
                     return "- " + (item.description.map { $0 + ": " } ?? "") + item.insertText
-                }.joined(separator: "\n") ?? ""
+                }.joined(separator: "\n")
                 let historyAnswer = [text, returnedItems].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 try? conversation.append(user: prompt, assistant: historyAnswer, directory: directory)
                 lock.withLock { sessionID = conversation.id }
                 continuation.yield(.finalAnswer(text: text))
-                if let actions { continuation.yield(.blockComplete(.usefulActions(actions))) }
+                if !actions.items.isEmpty { continuation.yield(.blockComplete(.usefulActions(actions))) }
                 continuation.yield(.done(sources: []))
                 return
             }
-            if calls.contains(where: { $0.name != "show_actions" }) { cardAnswers.removeAll() }
-            toolCount += calls.count
-            guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }
             var results: [(NativeAgentToolCall, NativeAgentToolResult)] = []
             // Sequential execution makes ordering and cancellation predictable;
             // edits never race a read or another command from the same answer.
@@ -155,29 +164,18 @@ final class NativeAgentProvider: CLIProvider {
                 continuation.yield(.toolExecuting(tool: call.name, label: Self.label(call.name)))
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
+                if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
                 let result: NativeAgentToolResult
-                if searchCount > 2 && call.name == "web_search" { result = .init(text: "Search limit reached; answer using available results.") }
+                if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
+                else if searchCount > 2 && call.name == "web_search" { result = .init(text: "Search limit reached; answer using available results.") }
                 else if screenCount > 2 && call.name == "capture_screen" { result = .init(text: "Screen capture limit reached for this request.") }
                 else { result = await tools.execute(call) }
                 try Task.checkCancellation()
-                if let block = result.actions { actions = Self.merging(actions, block) }
                 results.append((call, result))
-            }
-            if calls.allSatisfy({ $0.name == "show_actions" }) {
-                if results.allSatisfy({ $0.1.actions?.items.isEmpty == false }) {
-                    let candidate = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !candidate.isEmpty, !cardAnswers.contains(candidate) { cardAnswers.append(candidate) }
-                } else {
-                    cardAnswers.removeAll()
-                }
             }
             model.append(results: results)
         }
         throw NativeAgentError.message("The agent reached its step limit. Try a smaller task.")
-    }
-
-    private static func merging(_ existing: UsefulActionsBlock?, _ incoming: UsefulActionsBlock) -> UsefulActionsBlock {
-        NativeAgentAnswerArtifacts.merging(existing, incoming)
     }
 
     // No separate language rule for card descriptions: any such sentence made the
@@ -192,7 +190,13 @@ final class NativeAgentProvider: CLIProvider {
     Resolve follow-up references using the recent conversation and returned items. For a
     conversion or comparison, use the earlier values and answer the new question directly.
     Links and cards supplement an explanation or calculation; they do not replace its answer.
-    Simple timeless questions need no tools. Use Tavily web_search for current external facts,
+    Complete every turn by calling finish_answer alone with status, answer, sources and actions.
+    Its answer must directly address the question, including uncertainty or a necessary question;
+    never return only source headings or ask the user to read links for the answer.
+    Use unverified when available evidence cannot confirm the fact; explain what is missing.
+    Use needs_clarification only when essential information must come from the user.
+    Finish after all tools have completed. Free text outside finish_answer is not a final answer.
+    Simple timeless questions need no evidence tools; finish directly. Use Tavily web_search for current external facts,
     normally one search and at most two; cite the supporting URLs. If Tavily is not connected,
     say so briefly instead of inventing recent facts.
     You have a dedicated workspace with AGENTS.md for concise durable preferences and facts.
@@ -205,9 +209,9 @@ final class NativeAgentProvider: CLIProvider {
     Capture the screen only if this request needs visible screen context. Images go to this
     selected model. If capture/image input is unavailable, report it; never guess what is visible.
     When returning a path, verify the best match, put its absolute value in a plain code fence
-    for copying, and call show_actions with a path item to open it. Always call show_actions
-    for every link you cite and every file/folder you return, so the user gets the existing
-    keyboard-selectable cards with insert/open actions. Use copy items for snippets.
+    for copying, and include a path item in finish_answer.actions to open it. Put every cited
+    link into finish_answer.sources and every returned file/folder into its actions, so the user
+    gets the existing keyboard-selectable cards with insert/open actions. Use copy items for snippets.
     Keep the prose short; put sources into cards instead of a long URL list.
     Actions are UI metadata: never print useful.actions JSON in the answer.
     Use Case key names via case_list_keys. If actions are enabled, `whytap case run -p PROJECT

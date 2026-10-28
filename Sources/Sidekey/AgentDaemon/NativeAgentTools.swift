@@ -33,6 +33,31 @@ struct NativeAgentTools {
         return tools
     }
 
+    /// Use one strict mode across the catalog: some endpoints reject a mix of
+    /// strict and non-strict functions. Optional inputs remain nullable and keep
+    /// their existing defaults. The shared model's other consumers are unchanged.
+    static func structuredDefinitions(allowActions: Bool) -> [[String: Any]] {
+        let tools = definitions(allowActions: allowActions).filter { $0["name"] as? String != "show_actions" }.map { tool in
+            var tool = tool
+            var schema = tool["parameters"] as! [String: Any]
+            var properties = schema["properties"] as! [String: [String: Any]]
+            let required = Set(schema["required"] as? [String] ?? [])
+            for key in properties.keys {
+                var property = properties[key]!
+                // read_file's offset is also checked by execute(); this numeric
+                // schema constraint is not portable across strict providers.
+                property.removeValue(forKey: "minimum")
+                properties[key] = required.contains(key) ? property : ["anyOf": [property, ["type": "null"]]]
+            }
+            schema["properties"] = properties
+            schema["required"] = properties.keys.sorted()
+            tool["parameters"] = schema
+            tool["strict"] = true
+            return tool
+        }
+        return tools + [NativeAgentFinalAnswer.definition]
+    }
+
     func execute(_ call: NativeAgentToolCall) async -> NativeAgentToolResult {
         do {
             try Task.checkCancellation()

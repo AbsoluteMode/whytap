@@ -200,7 +200,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   User -> Right Command tap (text) / hold (voice) -> RightCmdGestureMonitor
        -> voice: the same STT factory as Drop, route of agentVoice
        -> NativeAgentProvider -> direct model HTTP -> local tool -> model loop
-       -> final text and typed actions rendered in the island
+       -> validated finish_answer object -> text and typed cards in the island
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.
@@ -248,7 +248,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
   No key means an actionable tool error, never an alternative search provider.
   Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
-  typed answer actions and Case key names. The existing action preference
+  structured finish_answer completion and Case key names. The existing action preference
   agent.opencode.allowActions is preserved: Allow file edits and commands is
   on by default; off removes and rejects write_file/run_command. Case keeps its
   own approvals through the signed helper and scoped child PID registrations.
@@ -1064,16 +1064,21 @@ security controls, user content, recording, shell execution or quit are exposed.
 Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
 
-Agent answers: native Whytap Agent keeps intermediate text hidden and publishes
-the completed answer and show_actions metadata after successful completion.
-Text alongside successful presentation-only calls survives an empty final;
-a nonempty final wins, and evidence/action tools invalidate the fallback.
+Agent answers: native Whytap Agent keeps intermediate text hidden and completes
+only with a sole finish_answer call containing status, answer, sources and actions.
+Strict tool schemas and application-required completion preserve the selected route.
+Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
+forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
+local validation rejects missing/unknown fields, empty/source-only answers, invalid
+cards and mixed final/tool batches. No automatic repair or repeated actions.
+Unverified/clarification statuses are visibly labeled; invalid finals are errors,
+not successful History. Structural checks do not prove factual correctness.
 Recent context includes returned card descriptions/destinations, and History
 persists visible text together with cards in both blocks and Markdown.
-The compatibility extractor also handles a trailing useful.actions fence.
+Legacy CLI compatibility extractors remain separate from native completion.
 NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
 absolute/tilde paths into the same keyboard-action cards if the model omits
-show_actions. Explicit metadata wins; destinations deduplicate and cap at 20.
+card metadata in a valid final. Explicit metadata wins; destinations deduplicate and cap at 20.
 The fallback scans at most 32,000 characters, skips ordinary code/config fences,
 and does no network/file I/O or extra model call. It formats returned paths,
 not verifies their existence; nothing opens or inserts before user interaction. A

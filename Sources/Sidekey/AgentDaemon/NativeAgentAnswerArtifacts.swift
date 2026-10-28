@@ -2,7 +2,7 @@ import Foundation
 
 /// Presentation fallback for completed answers, never a tool or an authorization.
 /// Keeps the existing actions renderer and keyboard controls independent of
-/// whether the model remembered to call show_actions. No network or file I/O.
+/// whether a validated final included every card. No network or file I/O.
 enum NativeAgentAnswerArtifacts {
     static func merging(_ existing: UsefulActionsBlock?, _ incoming: UsefulActionsBlock) -> UsefulActionsBlock {
         var seen = Set<String>()

@@ -27,7 +27,7 @@ struct NativeAgentFinalAnswer {
         let path = object(["type": ["type": "string", "enum": ["path"]], "path": string, "description": string])
         let copy = object(["type": ["type": "string", "enum": ["copy"]], "text": string, "description": string])
         return ["name": toolName, "strict": true,
-                "description": "Finish the turn with the requested answer and its cards. Call alone, after all evidence and actions have completed. Does not open or execute cards.",
+                "description": "Finish the turn with the requested answer and at most 20 cards across sources and actions. Call alone, after all evidence and actions have completed. Does not open or execute cards.",
                 "parameters": object([
                     "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"],
                                "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."],

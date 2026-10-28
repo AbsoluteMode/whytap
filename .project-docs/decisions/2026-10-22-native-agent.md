@@ -6,8 +6,17 @@ summary: Replace OpenCode dispatch with a bounded direct model/tool loop, preser
 status: confirmed
 tags: [agent, native, tavily, search, workspace, context, actions, privacy]
 canonical_for: [agent-runtime, agent-web-search, agent-workspace]
-verified_at: 2026-10-27
+verified_at: 2026-10-28
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-28 the user approved structured Agent completion with a required answer, separate source cards, explicit uncertainty and application validation after a source-only response.
+    confirmed_at: 2026-10-28
+  - type: repository
+    reference: Sources/Sidekey/AgentDaemon/NativeAgentFinalAnswer.swift
+    confirmed_at: 2026-10-28
+  - type: repository
+    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentFinalAnswerTests.swift
+    confirmed_at: 2026-10-28
   - type: user-confirmed
     reference: On 2026-10-27 the user reported that greetings succeed but tool-using requests fail and explicitly requested diagnostic logs. The repeat was on installed 1601, before the canonical-continuation fix was promoted.
     confirmed_at: 2026-10-27
@@ -66,6 +75,67 @@ related: [../project.md, 2026-10-22-agent-answers-and-screen.md]
 ---
 
 # Decision
+
+## Structured completion
+
+From 2026-10-28, native Agent completes only through a sole `finish_answer`
+function call. Its closed schema requires `status`, `answer`, `sources` and
+`actions`. The status is answered, unverified or needs_clarification. Sources
+carry title/HTTP(S) URL; actions carry an absolute path or copyable text and a
+description. The renderer reuses the existing text and keyboard-action cards;
+there is no new UI-block or persisted conversation schema.
+
+Use required tool choice for the Agent loop and strict schemas across its tool
+catalog. Optional inputs remain nullable with their existing defaults; numeric
+offset limits stay locally checked. Uniform strict mode avoids endpoints that
+reject mixed strict/non-strict tools. Direct OpenAI and Anthropic receive their native tool-choice and
+strict flags; OpenRouter retains the exact model and endpoint pin and requires
+parameter support. A terminal call mixed with any other call fails before that
+batch executes. Completion does not require another model request or a terminal
+tool-result round trip. The shared model's default remains automatic tool choice,
+so Meeting Assistant retains its existing output contract.
+
+Rationale: the selected Qwen/Cerebras endpoint's public OpenRouter parameter
+list on 2026-10-28 advertises tools and tool_choice but not response_format.
+Cerebras documents strict tool calling for Qwen 3.8 27B, without string patterns
+or length constraints. A terminal function fits that route and the existing
+agent loop without selecting another model/provider or relying on a provider's
+free-text final after separate presentation calls. The schema uses required
+closed objects and basic types; lengths and URLs are checked locally.
+
+Whytap validates every field, including unknown keys, nonempty answer text,
+status, URL credentials/scheme/host, absolute paths and the combined 20-card
+limit. A bounded format check rejects URL-only lists and common English/Russian
+source headings. Unverified and clarification statuses get visible app-owned
+labels. Invalid output never becomes successful UI/history or conversation
+memory; an explicit error replaces it. There are no automatic paid repairs or
+repeated actions. If edits/commands were attempted before an invalid completion,
+the error warns that those operations may have completed before manual retry.
+
+This is a structural contract, not proof of factual correctness or a general
+semantic grader. It cannot detect every evasive sentence or invented fact in a
+valid answer. Endpoint enforcement can vary; local validation is unconditional.
+Refusals, unsupported strict tool use and malformed responses stay failures.
+No live paid provider request was used to establish end-to-end behavior.
+
+The 2026-10-27 fallback from prose beside show_actions to an empty free-text
+final is superseded. show_actions is no longer offered in native Agent; a stale
+call only requests the new final shape and does not publish cards. Intermediate
+prose remains hidden. The bounded text-artifact fallback still adds missing
+cards after a validated completion, without network or file I/O. Recent answer,
+card destination, copy-payload exclusion and History persistence rules remain.
+Explicit requests for only links/cards still require a brief answer field.
+
+Contracts: [Cerebras strict tool calling](https://inference-docs.cerebras.ai/capabilities/tool-use),
+[OpenRouter parameter requirements](https://openrouter.ai/docs/guides/routing/provider-selection),
+[OpenAI structured function calling](https://developers.openai.com/api/docs/guides/function-calling),
+[Anthropic strict tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/implement-tool-use).
+
+Synthetic fixtures verify terminal completion in all three wire formats,
+required/strict flags, preserved endpoint/credentials/reasoning, missing fields,
+source-only finals, invalid cards, mixed final/write batches, no automatic retry,
+visible uncertainty, retained follow-up values and copy-payload exclusion.
+Actual chosen-model behavior remains ordinary acceptance in the shared app.
 
 ## Provider continuations
 
@@ -143,14 +213,6 @@ is resolved; that remains ordinary user acceptance after promotion.
 
 ## Follow-up context
 
-The native loop retains text accompanying successful presentation-only
-`show_actions` calls as a candidate answer. If the provider finishes with an
-empty text message, that candidate becomes the completed answer. A nonempty
-final response wins. Text preceding evidence or action tools is narration and
-cannot become a successful result through this fallback; subsequent evidence
-or action tools invalidate a prior candidate. Intermediate text stays hidden
-until successful completion, without extra model requests or repeated tools.
-
 Completed conversation pairs include the answer and returned card descriptions
 and destinations that are absent from its prose. This preserves references to
 earlier values, pages or files. Copy cards contribute only their description
@@ -159,9 +221,7 @@ route, session ID, six-pair / 12,000
 character limit and 15-minute expiry still apply. Raw tool output, reasoning
 and screenshot pixels remain excluded. The prompt directs follow-ups to use
 recent answers and treats cards as supplements to requested explanations.
-The presentation tool also reminds the model to supply any still-missing
-requested text in the continuation that already follows the tool result;
-card-only requests remain supported without an added model request.
+Structured completion now supplies the requested text and cards together.
 
 A latest exchange larger than half the context budget is shortened with an
 explicit marker, retaining the beginning and end of each side. This leaves
@@ -176,12 +236,10 @@ the provider supplied it separately from card blocks. Both the structured
 history and its Markdown representation retain text and cards, without
 duplicating an existing textAnswer block.
 
-Synthetic provider fixtures reproduce text-with-card followed by an empty
-final message, then verify a currency-conversion follow-up receives the earlier
-values and card target. Fixtures cover all three provider formats, canonical
-final precedence, narration exclusion, oversized turns and SQLite history. They establish the
-code defects and regression behavior; raw intermediate messages from the
-reported live turn were not retained, so its precise sequence is unknown.
+Synthetic provider fixtures verify structured completion and a currency-conversion
+follow-up receiving earlier values and card targets. Oversized turns and SQLite
+history retain their separate regression checks. Original intermediate provider
+messages from earlier reports were not retained.
 
 ## Quiet selection lookup
 
@@ -296,8 +354,8 @@ context is ignored; the file is replaced on a later successful turn, not deleted
 by a timer. Tool results, reasoning and screenshot pixels remain in flight and
 are excluded from this new file. Old OpenCode data remains unused on disk.
 One app-owned system prompt directs compact answer-first replies, requested
-screenshots and typed show_actions buttons; the legacy JSON extractor is a
-compatibility fallback. A bounded final-text fallback also supplies the same
+screenshots and structured finish_answer completion. Legacy CLI extractors remain
+for compatibility; they do not replace the native completion contract. A bounded final-text fallback also supplies the same
 keyboard-action cards for ordinary links and returned paths when the model omits
 metadata; it performs no extra provider requests or file/network I/O. It is a
 bounded conversation, not an empty context for

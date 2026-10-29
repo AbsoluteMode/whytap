@@ -21,7 +21,7 @@ final class IslandAgentFlowStore: ObservableObject {
         /// Persistent total-offline Drop-delivery failure (Task 7,
         /// `AppPhase.deliveryFailed`). Unlike `.failed` this does NOT
         /// auto-collapse: the captured audio is retained and the wing offers a
-        /// manual Retry. It is still ESCAPABLE — a fresh Drop press abandons the
+        /// manual Retry and explicit Close. A fresh Drop press also abandons the
         /// failed take and starts a new turn (`.discardFailedTakeAndStart`),
         /// driving the phase off `.deliveryFailed` and clearing the wing; a
         /// successful Retry clears it the same way. So it is never a roach-motel.
@@ -377,8 +377,8 @@ final class IslandAgentFlowStore: ObservableObject {
             case .deliveryFailed:
                 // Total offline: batch recovery also failed. Surface a persistent,
                 // non-alarming failure with a manual Retry; the audio is retained
-                // (`AppDelegate.pendingRetryPCM`) until the user retries or starts
-                // a new turn.
+                // (`AppDelegate.pendingRetryPCM`) until the user retries, closes
+                // the error, or starts a new turn.
                 recordingProviderBrand = nil
                 wing = .deliveryFailed(message: dropDeliveryFailureMessage ?? Self.deliveryFailedMessage)
             case .idle:

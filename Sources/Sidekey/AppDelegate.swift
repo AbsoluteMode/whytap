@@ -1253,6 +1253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             retryDelivery: { [weak self] in
                 self?.retryPendingDelivery()
             },
+            dismissDeliveryFailure: { [weak self] in
+                self?.dismissPendingDelivery()
+            },
             musicPrevious: { [weak self] in
                 self?.nowPlayingCoordinator?.previous()
             },
@@ -3413,6 +3416,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingRetryTarget = nil
         pendingProcessingRetry = nil
         AppState.shared.dropDeliveryFailureMessage = nil
+    }
+
+    /// Explicit close only abandons a terminal failure. A stale click must
+    /// never clear a new recording or a Retry already processing the take.
+    func dismissPendingDelivery() {
+        guard AppState.shared.phase == .deliveryFailed, !retryInFlight else { return }
+        discardPendingRetry()
+        AppState.shared.phase = .idle
     }
 
     /// Manual retry for a total-offline degraded Drop (Task 7). Re-runs

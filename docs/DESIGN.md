@@ -1608,3 +1608,25 @@ and neutral control backgrounds measures at least 4.26:1 across enabled states
 from the rendered sRGB pixels (3:1 non-text control requirement).
 No new screen-level layout or animation is introduced. The remaining assumption
 is that a separate opt-in lock is clearer than changing Extra's existing role.
+
+
+### Failed dictation: Close and content width (2026-10-29)
+
+The persistent “Couldn't deliver” face keeps Retry and adds a separate × button.
+Close returns Drop to idle and discards only that failed take's in-memory retry
+payload and paste target; saved history is untouched. A stale Close is ignored
+once Retry or a fresh recording has started.
+
+The face measures its message and fixed Retry/Close footprints, with 12 pt edge
+insets and 8 pt gaps, up to the existing 290 pt cap. Long messages truncate before
+the controls. The black surface and the host hit zone use that same measured
+width; transparent host-window reservation does not add a black trailing tail.
+Both actions use measured window down/up dispatch, including with the hover drawer
+closed. Dragging away cancels activation. Native buttons retain accessibility and
+keyboard activation, visible hover/pressed/focus feedback and an inactive disabled
+state. No automatic retry or change to provider routing is introduced.
+
+Validation uses invisible non-key native fixtures for distinct first-mouse targets,
+text/gap exclusion, drag cancellation, removed/disabled controls, content width and
+rest/pressed/disabled images. Physical pointer, keyboard and VoiceOver behavior
+remain shared-app acceptance.

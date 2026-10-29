@@ -721,7 +721,7 @@ struct IslandView: View {
             )
         case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
         case .failed: return IslandFrameLayout.agentWingFailedWidth
-        case .deliveryFailed: return IslandFrameLayout.agentWingDeliveryFailedWidth
+        case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
         }
     }
 
@@ -1098,7 +1098,10 @@ struct IslandView: View {
                                 recordingProviderBrand: agentFlow.recordingProviderBrand,
                                 height: compactHeight,
                                 onComposingFocusChange: onAgentKeyboardFocusChange,
-                                isGoogle: agentFlow.activeSourceIsGoogle
+                                isGoogle: agentFlow.activeSourceIsGoogle,
+                                deliveryHitBridge: hoverHitBridge,
+                                onRetryDelivery: actions.retryDelivery,
+                                onDismissDeliveryFailure: actions.dismissDeliveryFailure
                             )
                             .frame(height: compactHeight, alignment: .top)
                             .offset(x: compactWidth + activeWingExtension - activeWingFaceWidth)

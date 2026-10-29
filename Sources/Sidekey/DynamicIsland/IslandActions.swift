@@ -106,6 +106,8 @@ struct IslandActions {
     /// the audio retained when delivery last failed. No-op when nothing is
     /// pending. Defaults to a silent no-op for previews / tests.
     var retryDelivery: () -> Void = {}
+    /// Close a terminal Drop error and discard only its in-memory retry take.
+    var dismissDeliveryFailure: () -> Void = {}
     /// Skip to the previous track in the active media player. Wired by
     /// `AppDelegate` to `NowPlayingCoordinator.previous()`; the Stage 3
     /// player strip's ⏮ button fires this.

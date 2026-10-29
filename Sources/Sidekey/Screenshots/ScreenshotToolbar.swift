@@ -40,7 +40,7 @@ final class ScreenshotToolbar: NSView {
             (ScreenshotTool.arrow, "arrow.up.right", "", "Arrow · A — point to a detail"),
             (.rectangle, "rectangle", "", "Shape · R / O — draw a rectangle or oval"),
             (.pen, "pencil", "", "Pen · P — draw freehand"),
-            (.text, "textformat", "", "Text · T — place a label"),
+            (.text, "textformat", "", "Text · T — click anywhere in the selection and type; drag a label’s handle to move it"),
             (.blur, "", "Blur", "Blur · B — blur text and numbers or an entire area"),
             (.counter, "number.circle", "", "Numbered steps · N — place consecutive step numbers")
         ] {

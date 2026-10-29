@@ -6,8 +6,14 @@ summary: Explicit local capture opens a native toolbar with Blur defaulting to t
 status: confirmed
 tags: [screenshots, capture, blur, numbers, vision, toolbar, privacy]
 canonical_for: [screenshot-editor, screenshot-text-number-blur]
-verified_at: 2026-10-26
+verified_at: 2026-10-29
 sources:
+  - type: user-confirmed
+    reference: On 2026-10-29 the user requested choosing Text then clicking anywhere to type directly on the screenshot, plus a hover anchor for dragging typed text.
+    confirmed_at: 2026-10-29
+  - type: repository
+    reference: Sources/Sidekey/Screenshots/ScreenshotInlineText.swift
+    confirmed_at: 2026-10-29
   - type: user-confirmed
     reference: On 2026-10-26 the user reported that the adjacent screenshot tool icons and arrow keycaps did not clearly show which shortcut belonged to which tool.
     confirmed_at: 2026-10-26
@@ -79,6 +85,18 @@ sources:
     confirmed_at: 2026-10-20
 related: [2026-10-26-first-launch-permissions.md, ../project.md]
 ---
+
+# Inline text amendment — 2026-10-29
+
+Text starts at a canvas click rather than in the settings panel. Existing
+labels reopen for native caret/selection editing. Hover exposes a separate move
+handle, retained for selected text and reachable by Tab/arrows. Return commits
+live text before the existing copy-and-exit action; Shift-Return adds a line;
+Escape restores this edit. Empty labels are discarded and completed edits/moves
+are undoable. Export excludes editing chrome. This supersedes the earlier
+prepare-in-toolbar/place-afterward label ordering. Rationale: the user's stated
+placement/editing gesture should work at the destination, while a separate
+anchor avoids confusing text selection with object movement.
 
 # Context
 

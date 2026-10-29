@@ -395,11 +395,14 @@ Move crop in an arrow menu for 1-point movement. Copy text remains available in 
 Agent Useful Links hotkeys so it owns arrows first, including while an annotation
 text field is focused (native cursor movement). Agent registrations return after
 the editor closes, using the latest visible actions. Delete removes a selected
-annotation. Tab and Shift-Tab move between enabled toolbar/settings controls.
+annotation. Tab and Shift-Tab move between enabled toolbar/settings controls and
+the visible text move handle. With that handle focused, arrows move its label
+one point (Shift: ten), and Return reopens text editing instead of exporting.
 Return requires an explicitly selected area, then copies it and closes, waiting for active Blur or Download to finish. Escape cancels
-the current stroke, then the capture. Native text
-entry keeps ordinary clipboard editing commands; Return commits the field and
-copies/closes the editor. See [screenshots](screenshots.md).
+the current text edit or stroke, then the capture. Native inline text entry keeps
+ordinary cursor, selection, clipboard and undo commands; Return commits the
+label and copies/closes the editor. Shift-Return adds a line. Marked input keeps
+its native composition confirmation/cancellation first. See [screenshots](screenshots.md).
 
 ## Agent answer Escape
 

@@ -185,18 +185,20 @@ enum HelpWindowContent {
             return HelpHotkeyRowSpec(title: "Screenshot — \(arrow.glyph)", detail: "\(action.title). Screenshot takes priority over Agent; text fields keep cursor navigation.",
                                      iconName: action.symbol, prefix: nil, contents: [.text(arrow.glyph)])
         } + ScreenshotEditorKeys.tools.map { entry in
-            HelpHotkeyRowSpec(title: "Screenshot — \(entry.title)", detail: "While the screenshot editor is open.",
+            HelpHotkeyRowSpec(title: "Screenshot — \(entry.title)", detail: entry.tool == .text ? "Click inside the selection to type. Click a label to edit; drag its hover handle to move." : "While the screenshot editor is open.",
                               iconName: "viewfinder", prefix: nil, contents: [.text(entry.key.uppercased())])
         } + [
             HelpHotkeyRowSpec(title: "Screenshot — copy", detail: "Copy the edited image and finish capture.", iconName: "doc.on.doc", prefix: nil, contents: [.text(HotkeyGlyph.command), .text("C")]),
             HelpHotkeyRowSpec(title: "Screenshot — download", detail: "Download PNG to Downloads and show its filename.", iconName: "arrow.down.to.line", prefix: nil, contents: [.text(HotkeyGlyph.command), .text("S")]),
             HelpHotkeyRowSpec(title: "Screenshot — copy and close", detail: "After selecting an area, copy the edited image and close the editor. Waits for pending Blur or Download.", iconName: "return", prefix: nil, contents: [.text("Return")]),
+            HelpHotkeyRowSpec(title: "Screenshot — new text line", detail: "Insert a line break while editing a label directly on the screenshot.", iconName: "textformat", prefix: nil, contents: [.text(HotkeyGlyph.shift), .text("Return")]),
+            HelpHotkeyRowSpec(title: "Screenshot — move text", detail: "Tab to the visible label handle, then use arrows (Shift: 10 points). Return edits the label.", iconName: "arrow.up.and.down.and.arrow.left.and.right", prefix: nil, contents: [.text("←"), .text("↑"), .text("↓"), .text("→")]),
             HelpHotkeyRowSpec(title: "Screenshot — undo", detail: "Undo a crop or annotation.", iconName: "arrow.uturn.backward", prefix: nil, contents: [.text(HotkeyGlyph.command), .text("Z")]),
             HelpHotkeyRowSpec(title: "Screenshot — redo", detail: "Redo the last undone change.", iconName: "arrow.uturn.forward", prefix: nil, contents: [.text(HotkeyGlyph.command), .text(HotkeyGlyph.shift), .text("Z")]),
             HelpHotkeyRowSpec(title: "Screenshot — next control", detail: "Move focus to the next enabled toolbar or tool-settings control.", iconName: "arrow.right", prefix: nil, contents: [.text("Tab")]),
             HelpHotkeyRowSpec(title: "Screenshot — previous control", detail: "Move focus to the previous enabled toolbar or tool-settings control.", iconName: "arrow.left", prefix: nil, contents: [.text(HotkeyGlyph.shift), .text("Tab")]),
             HelpHotkeyRowSpec(title: "Screenshot — move crop", detail: "Shift-arrows move the crop 10 points; Option-arrows resize. Assign Move crop by clicking a shortcut pair in the screenshot toolbar.", iconName: "arrow.up.left.and.arrow.down.right", prefix: nil, contents: [.text(HotkeyGlyph.shift), .text("←"), .text("↑"), .text("↓"), .text("→")]),
-            HelpHotkeyRowSpec(title: "Screenshot — cancel", detail: "Cancel the current drawing, then cancel capture.", iconName: "escape", prefix: nil, contents: [.text("Esc")]),
+            HelpHotkeyRowSpec(title: "Screenshot — cancel", detail: "Cancel the current text edit or drawing, then cancel capture.", iconName: "escape", prefix: nil, contents: [.text("Esc")]),
             HelpHotkeyRowSpec(title: "Screenshot — delete annotation", detail: "Remove the selected annotation.", iconName: "delete.left", prefix: nil, contents: [.text("Delete")])
         ]
     }

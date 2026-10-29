@@ -30,11 +30,17 @@ Highlighter, Spotlight, Pin above windows and Output size are removed.
 Copy & exit shows Return in a separate centered keycap within the same button.
 Blur is text-only; Download is the downward arrow with a tooltip. On narrower
 displays the toolbar wraps onto more rows.
-Color, width, shape, blur mode and text controls appear in a **separate adjacent
-settings panel** for the current tool; color/width are remembered per tool.
-Typing a label only prepares it: click the screenshot to place it before
-finishing. Return copies only placed annotations and discards an unplaced
-label; the field placeholder and help make that ordering explicit. Click the
+Color, width, shape and blur mode appear in a **separate adjacent settings
+panel** for the current tool; color/width are remembered per tool. Choose Text,
+click anywhere inside the crop and type directly there. Click an existing label
+to place the caret and edit; native selection, clipboard commands and text undo
+stay in the label. Shift-Return adds a line. Hover shows an outlined label and a
+separate move handle; drag that handle to reposition the label without moving
+the crop. The selected label keeps its handle visible. Tab can focus the handle;
+arrows move its label one point (Shift: ten), and Return edits it. Empty labels
+are discarded. Escape restores the text before this edit or discards a new label;
+a second Escape cancels capture. Finishing an edit or move creates one screenshot
+undo step. Handles, editing outlines and the caret never enter exported pixels. Click the
 active tool again to stop drawing, then move annotations or move/resize the
 selection by its corners. Arrow keys also move it; Option plus arrows resizes it. Blur patches
 can be deleted or undone; they cannot be moved because moving them would
@@ -76,7 +82,7 @@ Copy writes flattened PNG pixels to the clipboard and finishes. **Return /
 numeric Enter** does the same after selection; during Blur it waits for the
 completed patch before copying. Return during Download likewise waits for the file
 and then copies/closes. A failed Blur keeps the editor open. In the
-annotation text field, Return also copies/closes; it does not place a label.
+inline annotation editor, Return commits the current text, then copies/closes.
 **Download** (or ⌘S) writes PNG directly into Downloads, using a readable local
 timestamp such as `Screenshot 2026-10-20 at 20.30.15.png`. Existing files are never
 overwritten; a fully written temporary file is published by an exclusive atomic

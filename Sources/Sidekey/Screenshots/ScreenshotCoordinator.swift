@@ -31,6 +31,10 @@ final class ScreenshotCapturePanel: NSPanel {
         return super.performKeyEquivalent(with: event)
     }
     private func handleEditorKey(with event: NSEvent) -> Bool {
+        if firstResponder is ScreenshotInlineTextView { return false }
+        if firstResponder is ScreenshotTextMoveHandle {
+            return keyboardCanvas?.performKeyEquivalent(with: event) ?? false
+        }
         if event.keyCode == 48 && event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
             onAdvanceFocus?(event.modifierFlags.contains(.shift)); return true
         }
@@ -272,7 +276,8 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
 
     private func advanceFocus(backwards: Bool) {
         guard let toolbar else { return }
-        let controls = toolbar.focusableControls + toolbar.toolSettings.focusableControls
+        var controls = toolbar.focusableControls + toolbar.toolSettings.focusableControls
+        if let handle = selectedCanvas?.textHandle, !handle.isHidden, handle.isEnabled { controls.append(handle) }
         guard !controls.isEmpty else { return }
         let current = controls.firstIndex { control in
             guard control.window?.isKeyWindow == true else { return false }
@@ -351,6 +356,7 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
             }
             return
         }
+        canvas.finishTextEditing()
         do {
             switch command {
             case .copy:

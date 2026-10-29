@@ -1239,6 +1239,15 @@ Guide: `docs/backup.md`. WHY:
 
 ## Screenshots
 
+Text annotations are edited directly on the canvas: choose Text, click a point
+inside the crop and type. Existing labels reopen at the clicked caret position.
+A separate hover/selected handle moves text (also Tab + arrows); text gestures
+select/edit characters. Return commits live text before copying/exiting,
+Shift-Return adds a line, Escape restores the current edit. Empty labels add no
+undo step; finished edits/moves have screenshot undo. Text layout is shared by
+native editing and flattened export; selection/handle/caret chrome is excluded.
+WHY: `.project-docs/decisions/2026-10-20-screenshot-toolbar.md`.
+
 Screenshot is an action tool in hover search/Toolbox with an optional named
 hotkey. ScreenshotCoordinator explicitly captures displays with ScreenCaptureKit,
 then shows a frozen selection canvas and a wrapping native toolbar exposing all

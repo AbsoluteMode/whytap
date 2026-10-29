@@ -26,11 +26,10 @@ final class ScreenshotToolSettings: NSView {
     private let shape = MacPopupButton()
     private let width = MacPopupButton()
     private let color = ScreenshotColorWell()
-    private let text = NSTextField()
     private var currentTool: ScreenshotTool?
     private let defaults: UserDefaults
     private var hoverFeedback: [ScreenshotSettingHover] = []
-    var focusableControls: [NSControl] { [color as NSControl, width, shape, mode, text].filter { $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor } }
+    var focusableControls: [NSControl] { [color as NSControl, width, shape, mode].filter { $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor } }
 
     init(canvas: ScreenshotCanvas, defaults: UserDefaults = .standard) {
         self.canvas = canvas; self.defaults = defaults
@@ -61,15 +60,8 @@ final class ScreenshotToolSettings: NSView {
         mode.addItems(withTitles: ScreenshotBlurMode.allCases.map(\.rawValue))
         mode.target = self; mode.action = #selector(updateSettings(_:)); mode.setAccessibilityLabel("What to blur")
         mode.toolTip = "What to blur"; row.addArrangedSubview(mode)
-        text.placeholderString = "Label · click to place"; text.target = self; text.action = #selector(finishText(_:))
-        text.setAccessibilityLabel("Annotation text"); text.widthAnchor.constraint(equalToConstant: 160).isActive = true
-        text.toolTip = "Type a label, then click the screenshot to place it. Enter copies placed annotations and exits; unplaced text is discarded."
-        text.setAccessibilityHelp(text.toolTip)
-        NotificationCenter.default.addObserver(self, selector: #selector(updateSettings(_:)), name: NSControl.textDidChangeNotification, object: text)
-        stack.addArrangedSubview(text)
         row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10).isActive = true
-        text.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10).isActive = true
-        hoverFeedback = [color as NSControl, width, shape, mode, text].map(ScreenshotSettingHover.init)
+        hoverFeedback = [color as NSControl, width, shape, mode].map(ScreenshotSettingHover.init)
         refresh()
     }
     required init?(coder: NSCoder) { nil }
@@ -94,15 +86,14 @@ final class ScreenshotToolSettings: NSView {
         shape.isHidden = tool != .rectangle && tool != .ellipse
         shape.selectItem(at: tool == .ellipse ? 1 : 0)
         mode.isHidden = tool != .blur; mode.selectItem(withTitle: canvas.blurMode.rawValue)
-        text.isHidden = tool != .text
-        for control in [color as NSControl, width, shape, mode, text] { control.isEnabled = !canvas.busy }
+        for control in [color as NSControl, width, shape, mode] { control.isEnabled = !canvas.busy }
         hoverFeedback.forEach { $0.refresh() }
         layoutSubtreeIfNeeded()
     }
     @objc private func updateSettings(_ sender: Any?) {
         guard let canvas else { return }
         canvas.color = color.color; canvas.lineWidth = [2, 3, 5, 8][max(0, width.indexOfSelectedItem)]
-        canvas.labelText = text.stringValue
+        if canvas.tool == .text { canvas.applyTextStyle() }
         canvas.blurMode = ScreenshotBlurMode.allCases[max(0, mode.indexOfSelectedItem)]
         if sender as? NSPopUpButton === shape {
             canvas.selectTool(shape.indexOfSelectedItem == 0 ? .rectangle : .ellipse)
@@ -111,9 +102,6 @@ final class ScreenshotToolSettings: NSView {
             defaults.set([rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent], forKey: "sidekey.screenshot.color.\(canvas.tool.rawValue)")
         }
         defaults.set(width.indexOfSelectedItem, forKey: "sidekey.screenshot.width.\(canvas.tool.rawValue)")
-    }
-    @objc private func finishText(_ sender: Any?) {
-        updateSettings(sender); onCommand?(.copy)
     }
 }
 

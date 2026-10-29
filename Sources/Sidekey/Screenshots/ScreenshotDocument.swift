@@ -26,6 +26,7 @@ struct ScreenshotAnnotation {
     var color: NSColor
     var width: CGFloat
     var text: String
+    var textWidth: CGFloat?
     var patch: CGImage?
 
     init(tool: ScreenshotTool, points: [CGPoint], color: NSColor = .systemRed,
@@ -146,11 +147,10 @@ enum ScreenshotRenderer {
                 let size = value.size()
                 value.draw(at: CGPoint(x: start.x - size.width / 2, y: start.y - size.height / 2))
             } else {
-                let value = NSAttributedString(string: annotation.text, attributes: [
-                    .font: NSFont.systemFont(ofSize: max(14, annotation.width * 6), weight: .medium),
-                    .foregroundColor: annotation.color
-                ])
-                value.draw(at: start)
+                let value = NSAttributedString(string: annotation.text, attributes: ScreenshotTextLayout.attributes(annotation))
+                var frame = ScreenshotTextLayout.frame(annotation)
+                frame.size.width = annotation.textWidth ?? max(1, frame.width)
+                value.draw(with: frame, options: [.usesLineFragmentOrigin, .usesFontLeading])
             }
         case .select: break
         }

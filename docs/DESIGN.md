@@ -36,6 +36,34 @@ Assumption: the supported author marks are recognizable at 15 pt; the user can
 confirm that in the installed voice ticker. Static OpenRouter image paths may
 change; bundled fallbacks protect the voice experience.
 
+## Screenshot inline text — 2026-10-29
+
+The user comes to place text at a chosen spot on a screenshot. First they see
+an insertion caret where they click. Then they type/edit in place or grab a
+separate move handle. This supersedes the toolbar label field described below.
+
+- Text clicks create a native transparent NSTextView at that point; clicking
+  an existing label places the caret. Why: placement must precede typing.
+- Text selection and cursor gestures stay in the text; only a separate 28pt
+  handle drags the object. Why: editing must not accidentally move the label.
+- Hover outlines the text and reveals the handle; selection/editing retains it.
+  The handle uses a white surface, black icon/border, darker hover/press and a
+  separate focus ring. It stays outside the text when space permits. Why: the
+  drag target must be visible and reachable without covering the caret.
+- Tab reaches the handle; arrows move the label and Return edits. Native text
+  undo and input methods remain with NSTextView. Why: keyboard actions follow
+  the current focus rather than activating assigned screenshot tools.
+- Return commits and copies/exits; Shift-Return adds a line. Escape restores the
+  current edit; empty labels add no undo step. Export commits live text first.
+  Why: preserve the existing finish shortcut without losing the current label.
+- Text wraps at the crop's right edge; editor/export share font and measurement.
+  All chrome is separate from flattened annotation rendering. No animation is
+  introduced, including under Reduce Motion.
+
+Generated unshown native fixtures and keyboard/mouse dispatch tests cover these
+states. Physical pointer, input-method and VoiceOver acceptance remains on the
+one installed app after builder promotion; fixtures do not prove live capture.
+
 ## Screenshot shortcut pairs — 2026-10-26
 
 The person comes to annotate a region and configure four quick tools without

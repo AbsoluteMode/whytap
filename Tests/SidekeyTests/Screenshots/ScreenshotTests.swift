@@ -422,10 +422,8 @@ final class ScreenshotTests: XCTestCase {
         copyText.performClick(nil)
         XCTAssertEqual(textRequests, 1)
         XCTAssertTrue(toolbar.focusableControls.contains(copyText))
-        let label = try XCTUnwrap(settings.compactMap { $0 as? NSTextField }.first { $0.placeholderString == "Label · click to place" })
-        label.stringValue = "Test label"
-        _ = label.sendAction(label.action, to: label.target)
-        XCTAssertEqual(canvas.labelText, "Test label"); XCTAssertEqual(copyRequests, 1)
+        XCTAssertFalse(settings.compactMap { $0 as? NSTextField }.contains { $0.isEditable }, "Text is entered on the canvas")
+        XCTAssertEqual(copyRequests, 0)
         let directory = ProcessInfo.processInfo.environment["SCREENSHOT_TEST_RENDER_DIR"]
         if let directory { try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true) }
         for tool in ScreenshotTool.allCases {

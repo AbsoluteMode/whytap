@@ -91,34 +91,6 @@ struct IslandAgentHitZones {
             height: compactSize.height + slop * 2
         )
     }
-
-    /// Window-level hotspot for the Retry pill in the total-offline
-    /// `.deliveryFailed` Drop wing (Task 7). Same rationale as
-    /// `answerCloseHotspot`: in this non-key, non-activating panel the
-    /// AppKit→SwiftUI bridge drops the first-mouse click before any SwiftUI
-    /// gesture fires, so `IslandPanel.sendEvent` intercepts the click
-    /// geometrically and invokes `retryDelivery` directly. The pill hugs the
-    /// face's trailing (right) edge; this covers the rightmost slice of the
-    /// `.deliveryFailed` face (pill + its padding) plus slop so near-misses
-    /// still retry. `wingRect` already covers the face's full extension, so the
-    /// hotspot is clamped within it.
-    var deliveryRetryHotspot: CGRect {
-        let slop: CGFloat = 4
-        // Width of the trailing Retry pill + its capsule padding, generous so
-        // the whole control is clickable. Independent of the face width so the
-        // message text to its left is NOT a retry target.
-        let pillTargetWidth: CGFloat = 84
-        let ext = IslandFrameLayout.agentWingExtension(
-            faceWidth: IslandFrameLayout.agentWingDeliveryFailedWidth
-        )
-        let right = wingRect.minX + ext
-        return CGRect(
-            x: right - pillTargetWidth - slop,
-            y: boundsSize.height - compactSize.height - slop,
-            width: pillTargetWidth + slop * 2,
-            height: compactSize.height + slop * 2
-        )
-    }
 }
 
 /// Matching screen/bounds-space geometry for a drawer centered under the pill.
@@ -337,12 +309,8 @@ private final class ClickThroughHostingView<Content: View>: NSHostingView<Conten
     var agentAnswerSize: CGSize = .zero
     var agentActive: Bool = false
 
-    /// `true` while the wing shows the persistent total-offline Drop-delivery
-    /// failure (`IslandAgentFlowStore.Wing.deliveryFailed`, Task 7). Read by
-    /// `IslandPanel.sendEvent` so a click on the wing's trailing Retry pill
-    /// fires `retryDelivery` — same window-level dispatch the answer ✕ uses,
-    /// because the AppKit→SwiftUI bridge drops first-mouse clicks in this
-    /// non-key, non-activating panel.
+    /// Keeps measured Retry/Close targets available while the failure is
+    /// visible, including when the hover drawer is closed.
     var agentRetryActive: Bool = false
 
     /// `true` while a Now Playing track is active (mirrors
@@ -1013,7 +981,7 @@ final class IslandPanel: NSPanel {
                 )
             case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
             case .failed: return IslandFrameLayout.agentWingFailedWidth
-            case .deliveryFailed: return IslandFrameLayout.agentWingDeliveryFailedWidth
+            case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
             case .hidden: return 0
             }
         }()
@@ -1051,7 +1019,8 @@ final class IslandPanel: NSPanel {
     }
 
     private var allowsHoverPointerDispatch: Bool {
-        isShown && isVisible && !idleHidden && (host?.acceptsExpandedHitTesting ?? false)
+        isShown && isVisible && !idleHidden
+            && ((host?.acceptsExpandedHitTesting ?? false) || (host?.agentRetryActive ?? false))
     }
 
     override func sendEvent(_ event: NSEvent) {
@@ -1095,26 +1064,6 @@ final class IslandPanel: NSPanel {
             )
             if zones.answerCloseHotspot.contains(event.locationInWindow) {
                 agentCancelFlow()
-                return
-            }
-        }
-
-        // The total-offline Drop `.deliveryFailed` wing's Retry pill is
-        // dismissed HERE too, for the same first-mouse reason as the ✕ above.
-        // Gated on `agentRetryActive` so the hotspot only arms while the
-        // failure wing is on screen.
-        if event.type == .leftMouseDown,
-           let host, host.agentRetryActive, host.agentWingWidth > 0 {
-            let zones = IslandAgentHitZones(
-                boundsSize: frame.size,
-                compactSize: host.compactSize,
-                rightAgentZoneWidth: IslandFrameLayout.rightAgentZoneWidth,
-                wingWidth: host.agentWingWidth,
-                wingGap: IslandFrameLayout.agentWingGap,
-                answerSize: host.agentAnswerSize
-            )
-            if zones.deliveryRetryHotspot.contains(event.locationInWindow) {
-                actions.retryDelivery()
                 return
             }
         }

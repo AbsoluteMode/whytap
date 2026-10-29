@@ -78,10 +78,8 @@ enum IslandFrameLayout {
     /// its messages are full sentences ("Connect an agent in Settings"); kept
     /// separate so shrinking the acting slot doesn't truncate the notice.
     static let agentWingFailedWidth: CGFloat = 220
-    /// Total-offline Drop-delivery failure wing width (Task 7). Hosts the
-    /// "Couldn't deliver — offline" message AND the trailing Retry pill, so it
-    /// is wider than the transient `.failed` notice. Kept separate so the two
-    /// failure surfaces size independently.
+    /// Maximum failed Drop face width. The actual width hugs the measured
+    /// message plus Retry/Close controls (`IslandDeliveryFailureView`).
     static let agentWingDeliveryFailedWidth: CGFloat = 290
     /// Horizontal window extension to the right when agent is active. The
     /// agent phase content begins in the right band (inside the capsule) and

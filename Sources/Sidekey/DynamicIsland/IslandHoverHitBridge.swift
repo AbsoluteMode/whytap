@@ -2,16 +2,18 @@ import AppKit
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, navigation, meetingAssistant, update }
+    enum Surface: Hashable { case tile, result, navigation, meetingAssistant, update, deliveryFailure }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
-    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction) }
+    enum DeliveryFailureAction: Hashable { case retry, dismiss }
+    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction), deliveryFailure(DeliveryFailureAction) }
     let surface: Surface
     private let control: Control
     var tool: HoverTool? { if case .tool(let tool) = control { return tool }; return nil }
 
     init(surface: Surface, tool: HoverTool) { self.surface = surface; control = .tool(tool) }
     init(update action: UpdateAction) { surface = .update; control = .update(action) }
+    init(deliveryFailure action: DeliveryFailureAction) { surface = .deliveryFailure; control = .deliveryFailure(action) }
     init(back destination: String) { surface = .navigation; control = .back(destination) }
     init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
 }
@@ -139,10 +141,10 @@ final class IslandHoverHitBridge: ObservableObject {
         targets = targets.filter { $0.value.view != nil }
         return targets.values.compactMap { entry in
             guard let view = entry.view,
-                  enabled || view.targetID.surface == .update,
+                  enabled || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
                   view.targetID.surface == activeSurface
                     || (view.targetID.surface == .meetingAssistant && (activeSurface == .tile || activeSurface == .result))
-                    || view.targetID.surface == .update,
+                    || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
                   view.targetContext == context,
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
                   let region = regions[view.targetID.surface]?.view, region.surface == view.targetID.surface,

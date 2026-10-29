@@ -42,16 +42,14 @@ struct IslandAgentWingView: View {
     /// the companion `IslandAgentComposerPanel`. Bound from `IslandView` via
     /// `agentFlow.activeSourceIsGoogle`; defaults to `false`.
     var isGoogle: Bool = false
+    var deliveryHitBridge: IslandHoverHitBridge? = nil
+    var onRetryDelivery: () -> Void = {}
+    var onDismissDeliveryFailure: () -> Void = {}
 
     /// Recording placeholder. Used both for rendering and width measurement so
     /// the face never shrinks below the initial listening state when the first
     /// live partial is visually shorter than this word.
     static let recordingPlaceholder = "listening…"
-
-    /// Label on the Retry pill in the total-offline `.deliveryFailed` wing
-    /// (Task 7). Shared so `IslandPanel`'s window-level Retry hotspot and the
-    /// wing width can reason about the same control.
-    static let deliveryRetryLabel = "Retry"
 
     /// Extra width reserved past the measured text so the caret (and one more
     /// glyph) has room before the capsule has to grow again — keeps growth from
@@ -242,39 +240,9 @@ struct IslandAgentWingView: View {
                     .frame(width: faceWidth, height: height, alignment: .leading)
                     .transition(.identity)
             case .deliveryFailed(let message):
-                // Persistent total-offline Drop-delivery failure (Task 7). A
-                // non-alarming message + a Retry pill. The Retry click is caught
-                // at the window level (`IslandPanel.sendEvent` against
-                // `deliveryRetryHotspot`), mirroring the answer ✕ — in this
-                // non-key, non-activating panel the AppKit→SwiftUI bridge drops
-                // the first-mouse click before any SwiftUI gesture fires. This is
-                // the visual + VoiceOver layer only.
-                HStack(spacing: 8) {
-                    Text(message)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(1)
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(Self.deliveryRetryLabel)
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundStyle(.white.opacity(0.92))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule().fill(Color.white.opacity(0.16))
-                    )
-                    .accessibilityElement()
-                    .accessibilityLabel("Retry delivery")
-                    .accessibilityAddTraits(.isButton)
-                }
-                .padding(.horizontal, 12)
-                .frame(width: faceWidth, height: height, alignment: .leading)
-                .transition(.identity)
+                IslandDeliveryFailureView(message: message, height: height,
+                    hitBridge: deliveryHitBridge, onRetry: onRetryDelivery, onDismiss: onDismissDeliveryFailure)
+                    .transition(.identity)
             case .composing:
                 // The visible text field lives in `IslandAgentComposerPanel`
                 // (positioned over this slot by `IslandPanel`). The placeholder

@@ -165,8 +165,12 @@ Voice flow (Drop / dictation):
             to batch recovery over the retained PCM through the
             `BatchTranscribing` seam (bounded by BatchRecoveryDeadline, 30s),
             then rung3 raw partial, then rung4 .deliveryFailed ("Couldn't
-            deliver" + Retry). .deliveryFailed is escapable: a new take
-            discards it. Empty batch = silence, not offline. Production binds
+            deliver" + Retry + Close). Close discards the failed take's retained
+            audio/text and paste target only while terminal (never during Retry
+            or a new recording). A new take also discards it. The failure face
+            hugs the measured message and both controls up to its width cap;
+            native measured down/up targets keep Retry and Close separate even
+            with the hover drawer closed. Empty batch = silence, not offline. Production binds
             `ProviderBatchTranscriber` (Streaming/BYOK/) for the batch rung,
             Retry, the recorder fallback and agent batch voice: the whole
             take goes to the provider of the feature that led it (Drop Fast

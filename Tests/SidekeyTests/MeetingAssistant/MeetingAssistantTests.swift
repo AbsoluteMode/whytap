@@ -18,7 +18,7 @@ final class MeetingAssistantTests: XCTestCase {
         }
         let runner = MeetingAssistantRunner(http: .init(session: session), resolve: {
             ResolvedRoute(feature: .meetingAssistant, account: account, model: "fixture-model", apiKey: "fixture-key", server: nil)
-        }, endpoint: { nil }, usageSink: { _ in })
+        }, endpoint: { nil }, usageSink: { _ in }, resolveDetector: { nil })
         return (runner, root, defaults)
     }
     private func space(_ root: URL, id: String = "project") -> MeetingSpace {

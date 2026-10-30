@@ -86,7 +86,7 @@ struct APIAndModelsView: View {
                 if let feature { focus(feature, scroller: scroller) }
             }
             .onChange(of: showUnsetTick) { _, _ in
-                let unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
+                let unset = viewModel.rows.filter(\.needsSetup).map(\.feature)
                 if let first = unset.first { highlight(Set(unset), scrollTo: first, scroller: scroller) }
             }
             .task {
@@ -214,7 +214,7 @@ struct APIAndModelsView: View {
             .padding(.bottom, viewModel.aliasGroups.isEmpty ? 0 : 10)
             VStack(spacing: 10) {
                 ForEach(viewModel.groups) { group in
-                    MacCard(needsSetup: group.rows.contains { $0.status == .notSet }) {
+                    MacCard(needsSetup: group.rows.contains(where: \.needsSetup)) {
                         groupRow(group)
                     }
                     .id(group.id)
@@ -315,6 +315,12 @@ struct APIAndModelsView: View {
                             .foregroundStyle(MacSettingsTheme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if group.rows.contains(where: { $0.feature == .meetingAssistantDetector }) {
+                        Text("The optional detector checks new speech and calls the Meeting Assistant model only when someone may need help.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacSettingsTheme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -336,7 +342,7 @@ struct APIAndModelsView: View {
     }
 
     private func disclosureValue(_ group: FeatureGroup, expanded: Bool) -> String {
-        let setup = group.rows.contains { $0.status == .notSet } ? ", Needs setup" : ""
+        let setup = group.rows.contains(where: \.needsSetup) ? ", Needs setup" : ""
         return "\(expanded ? "Expanded" : "Collapsed"), \(group.summary)\(setup)"
     }
 
@@ -370,8 +376,9 @@ struct APIAndModelsView: View {
         .frame(height: MacPopupMetrics.height)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.feature.title)
-        .accessibilityValue(row.status == .notSet ? "Needs setup" : "")
-        .help(row.status == .notSet ? "Choose a model and add its provider key in API keys." : row.selectionLabel)
+        .accessibilityValue(row.needsSetup ? "Needs setup" : row.status == .notSet ? "Optional, off" : "")
+        .help(row.needsSetup ? "Choose a model and add its provider key in API keys."
+              : row.status == .notSet ? "Optional. Choose a decision model to check new speech before the answer model." : row.selectionLabel)
     }
 
     /// `prefix` names the part when a function has more than one route.

@@ -63,12 +63,15 @@ final class MeetingAssistantModel: ObservableObject {
     private var captureGeneration = UUID()
     private var listeningGeneration = UUID()
     private var lastAnalyzed = ""
+    /// Finals the detector has not seen yet (gated mode only).
+    private var unchecked = ""
     private var seen: [String] = []
     private var suspended = false
     private let directory: URL
     private let defaults: UserDefaults
     private let runner: MeetingAssistantRunner
     private let detectionInterval: Duration
+    private let gatedDetectionInterval: Duration
     private let meetingScope: MeetingAssistantMeetingScope?
     private let routesConfigured: @MainActor () -> Bool
     let audio: MeetingAssistantAudio
@@ -83,19 +86,24 @@ final class MeetingAssistantModel: ObservableObject {
 
     init(directory: URL = MeetingSpace.directory, defaults: UserDefaults = .standard,
          runner: MeetingAssistantRunner? = nil, audio: MeetingAssistantAudio? = nil, capture: AgentScreenCapture? = nil,
-         detectionInterval: Duration = .seconds(4), meetingScope: MeetingAssistantMeetingScope? = nil,
+         detectionInterval: Duration = .seconds(4), gatedDetectionInterval: Duration = .seconds(10),
+         meetingScope: MeetingAssistantMeetingScope? = nil,
          routesConfigured: @escaping @MainActor () -> Bool = {
              [AIFeature.meetingAssistant, .meetingAssistantAudio].allSatisfy {
                  AIRoutingStore.shared.route(for: $0)?.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
              }
          }) {
         self.directory = directory; self.defaults = defaults; self.runner = runner ?? MeetingAssistantRunner()
-        self.detectionInterval = detectionInterval
+        self.detectionInterval = detectionInterval; self.gatedDetectionInterval = gatedDetectionInterval
         self.meetingScope = meetingScope; self.routesConfigured = routesConfigured
         self.audio = audio ?? MeetingAssistantAudio()
         self.capture = capture ?? AgentScreenCapture(capture: AgentScreenCapture.captureForMeeting)
         selectedSpaceID = defaults.string(forKey: "meetingAssistant.selectedSpace") ?? ""
         self.audio.onText = { [weak self] text in self?.transcript = text }
+        self.audio.onFinal = { [weak self] piece in
+            guard let self else { return }
+            self.unchecked = String((self.unchecked + piece).suffix(4_000))
+        }
         self.audio.onState = { [weak self] active, issue in
             guard let self else { return }
             self.mutate { self.listening = active; self.audioConnecting = active && !self.audio.ready; if let issue { self.audioIssue = issue } }
@@ -347,13 +355,19 @@ final class MeetingAssistantModel: ObservableObject {
             mutate { audioIssue = "Настрой модель Meeting Assistant в API & Models." }
             return
         }
-        transcript = ""; lastAnalyzed = ""; audioIssue = ""
+        let gated: Bool
+        do { gated = try runner.resolveDetector() != nil } catch {
+            mutate { audioIssue = Self.detectorSetupIssue }
+            return
+        }
+        transcript = ""; lastAnalyzed = ""; unchecked = ""; audioIssue = ""
         seen = (pending + completed).map(\.question)
         listeningGeneration = UUID(); let token = listeningGeneration
+        let interval = gated ? gatedDetectionInterval : detectionInterval
         audio.start()
         detectionTimer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: self?.detectionInterval ?? .seconds(4))
+                try? await Task.sleep(for: interval)
                 guard !Task.isCancelled else { return }
                 self?.detectQuestions(token: token)
             }
@@ -374,20 +388,57 @@ final class MeetingAssistantModel: ObservableObject {
             }
         }
         detectionTask?.cancel(); detectionTask = nil; detectionTimer?.cancel(); detectionTimer = nil
-        if clearContext { transcript = ""; lastAnalyzed = ""; seen = [] }
+        if clearContext { transcript = ""; lastAnalyzed = ""; unchecked = ""; seen = [] }
     }
+    static let detectorSetupIssue = "Настрой детектор Meeting Assistant в API & Models."
+
+    /// With a detector route, only new speech it accepts reaches the answer
+    /// model; without one, every transcript change is analyzed as before.
+    // WHY: docs/decisions/2026-10-27-meeting-assistant-detector.md
     private func detectQuestions(token: UUID) {
-        guard listening, listeningGeneration == token, detectionTask == nil, busy == nil,
-              transcript.count >= 20, transcript != lastAnalyzed else { return }
-        let text = transcript, seen = self.seen
-        lastAnalyzed = text
+        guard listening, listeningGeneration == token, detectionTask == nil, busy == nil else { return }
+        let gate: ResolvedRoute?
+        do { gate = try runner.resolveDetector() } catch {
+            stopListening()
+            mutate { audioIssue = Self.detectorSetupIssue }
+            return
+        }
+        if gate == nil {
+            guard transcript.count >= 20, transcript != lastAnalyzed else { return }
+        } else {
+            guard unchecked.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 else { return }
+        }
+        let text = transcript, seen = self.seen, newSpeech = unchecked
+        let context = String(text.dropLast(min(newSpeech.count, text.count)).suffix(MeetingAssistantDetector.contextCharacters))
+        lastAnalyzed = text; unchecked = ""
         detectionTask = Task { [weak self, runner] in
             defer { if self?.listeningGeneration == token { self?.detectionTask = nil } }
+            if let gate {
+                do {
+                    let open = try await runner.needsHelp(route: gate, newSpeech: newSpeech, context: context, offered: seen)
+                    guard open else {
+                        if let self, self.listeningGeneration == token, self.audioIssue.hasPrefix("Детектор не разобрал") {
+                            self.mutate { self.audioIssue = "" }
+                        }
+                        return
+                    }
+                } catch {
+                    guard !Task.isCancelled, let self, self.listeningGeneration == token else { return }
+                    if error is MeetingQuestionError {
+                        self.mutate { self.audioIssue = "Детектор не разобрал последние реплики. Слушаю дальше; можно задать вопрос вручную." }
+                        return
+                    }
+                    self.stopListening()
+                    self.mutate { self.audioIssue = "Не удалось проверить реплики детектором. Проверь детектор Meeting Assistant и подключись снова." }
+                    return
+                }
+                guard !Task.isCancelled, self?.listeningGeneration == token else { return }
+            }
             do {
                 let questions = try await runner.questions(transcript: text, seen: seen)
                 guard !Task.isCancelled, let self, self.listeningGeneration == token else { return }
                 self.mutate {
-                    if self.audioIssue.hasPrefix("Модель не разобрала") { self.audioIssue = "" }
+                    if self.audioIssue.hasPrefix("Модель не разобрала") || self.audioIssue.hasPrefix("Детектор не разобрал") { self.audioIssue = "" }
                     for text in questions where !self.seen.contains(where: { $0.caseInsensitiveCompare(text) == .orderedSame }) {
                         self.pending.insert(.init(question: text), at: 0); self.seen.append(text)
                     }

@@ -27,6 +27,12 @@ struct MeetingAssistantRunner {
     var resolve: () throws -> ResolvedRoute = { try FeatureRouteResolver().resolve(.meetingAssistant) }
     var endpoint: () -> String? = { FeatureRouteResolver().route(for: .meetingAssistant)?.provider }
     var usageSink: (AIUsageEvent) -> Void = AIUsageRecorder.record
+    /// `nil` when no detector route is set; then question extraction runs on its timer alone.
+    var resolveDetector: () throws -> ResolvedRoute? = {
+        guard FeatureRouteResolver().route(for: .meetingAssistantDetector) != nil else { return nil }
+        return try FeatureRouteResolver().resolve(.meetingAssistantDetector)
+    }
+    var detector = MeetingAssistantDetector()
 
     func model(system: String, prompt: String, history: [NativeAgentConversation.Pair] = [], images: [MeetingAssistantImage] = []) throws -> NativeAgentModel {
         let route = try resolve()
@@ -121,6 +127,12 @@ struct MeetingAssistantRunner {
             defer { group.cancelAll() }
             return try await group.next()!
         }
+    }
+
+    /// Whether new speech justifies an answer-model request. The detector's own
+    /// route and key only; it never substitutes the answer model.
+    func needsHelp(route: ResolvedRoute, newSpeech: String, context: String, offered: [String]) async throws -> Bool {
+        try await detector.verdict(route: route, newSpeech: newSpeech, context: context, offered: offered).opensGate
     }
 
     func questions(transcript: String, seen: [String]) async throws -> [String] {

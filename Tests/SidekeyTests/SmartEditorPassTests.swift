@@ -123,7 +123,9 @@ final class SmartEditorPassTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(AIFeature.self, from: Data(#""dropSmartDecision""#.utf8)), .dropSmartDecision)
         XCTAssertFalse(AIFeature.activeCases.contains(.dropSmartDecision))
         XCTAssertTrue(AIFeature.allCases.contains(.dropSmartDecision))
-        XCTAssertFalse(ModelRegistry.models.contains { $0.id.hasPrefix("typesafe/jev-") })
+        // Jev returns only as the Meeting Assistant detector's decision model, never for Smart text.
+        XCTAssertTrue(ModelRegistry.models.filter { $0.id.hasPrefix("typesafe/jev-") }.allSatisfy { $0.uses == [.decision] })
+        XCTAssertEqual(AIFeature.activeCases.filter { $0.mode == .decision }, [.meetingAssistantDetector])
         XCTAssertTrue(AIProviderKind.allCases.allSatisfy { AIFeature.dropSmartDecision.modelUse(on: $0) == nil })
     }
 

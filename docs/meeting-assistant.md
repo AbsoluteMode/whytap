@@ -11,6 +11,14 @@ route and an answer model. Both start unset. Choose a tool-capable answer model;
 screenshots also require a model that accepts images. Whytap keeps the exact
 provider/model choice and reports failures without substituting another route.
 
+The optional **Detector** row (Decision) saves answer-model requests. Choose
+`typesafe/jev-1.14` on OpenRouter or `gpt-6-luna` on OpenAI. Every 10 seconds
+it receives only the newly finalized speech of the other participants, a short
+preceding excerpt and the last three offered questions. The answer model is called
+only when the detector reports a new information need that was not offered before.
+Left unset, every transcript change is analyzed by the answer model as before.
+A detector error stops listening and never falls back to the answer model.
+
 Listening starts **off for every meeting**, even with both models and a ready
 Space configured. Hovering over the island during a recognized meeting or a
 Meeting Notes recording reveals a **magic wand** immediately to the right of

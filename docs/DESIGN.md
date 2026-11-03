@@ -1060,6 +1060,11 @@ Later query parts that start a key-name word add to a partial match; parts of th
   subtasks, which stay struck through until the panel closes); a hover "+" adds a
   subtask in an inline field under the row; the context menu edits status and
   title in place. Return commits, Escape cancels, an empty status clears it.
+- Hovering a row whose title or status is cut off (more than two lines) shows a
+  280pt full-text bubble left of the drawer, placed like the History preview:
+  parent title, full title, full status and open subtask count. It is
+  non-interactive and clears on leave, inline editing and panel changes.
+  User feedback 2026-11-03: hover must show the whole text, as in History.
 
 ## Compact To-do in hover — 2026-10-20
 

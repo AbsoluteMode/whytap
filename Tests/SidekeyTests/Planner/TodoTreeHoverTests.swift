@@ -200,3 +200,62 @@ final class TodoTreeHoverTests: XCTestCase {
         }
     }
 }
+
+/// Hovering a row whose text is cut off shows its full text left of the drawer.
+@MainActor
+final class TodoHoverPreviewTests: XCTestCase {
+    func testOnlyCutOffTitlesOrStatusesGetAPreview() {
+        let width: CGFloat = 200
+        XCTAssertFalse(TodoHoverPreviewPolicy.needsPreview(title: "Купить кофе", status: nil, textWidth: width))
+        XCTAssertFalse(TodoHoverPreviewPolicy.needsPreview(title: "Карточки: проверка первоисточников", status: "готово", textWidth: width),
+                       "Two lines are fully visible in the row")
+        XCTAssertTrue(TodoHoverPreviewPolicy.needsPreview(
+            title: "ВкусВилл: схема персонализации ленты под 5 отделов (тег отдела на карточке, своя лента в аккаунте)",
+            status: nil, textWidth: width))
+        XCTAssertTrue(TodoHoverPreviewPolicy.needsPreview(
+            title: "Пороги", status: String(repeating: "получить решение Светы по графику ", count: 4), textWidth: width))
+        XCTAssertTrue(TodoHoverPreviewPolicy.needsPreview(title: "x", status: nil, textWidth: 0), "Unmeasured rows err toward showing")
+    }
+
+    func testAnchorBelongsToTheHoveredRowAndClosingClearsIt() throws {
+        let state = TodoHoverPreviewState.shared
+        let a = UUID(), b = UUID()
+        state.set(a, CGRect(x: 0, y: 40, width: 280, height: 32))
+        state.set(b, nil)
+        XCTAssertEqual(state.anchor?.taskID, a, "Leaving another row keeps this preview")
+        state.set(a, nil)
+        XCTAssertNil(state.anchor)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("todo-preview-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = TodoHoverModel(store: PlannerStore(url: directory.appendingPathComponent("planner.json")))
+        model.begin()
+        state.set(a, .zero)
+        model.end()
+        XCTAssertNil(state.anchor)
+    }
+
+    func testOffscreenPreviewBubble() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTap_TODO_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTap_TODO_RENDER_DIR for the synthetic preview render")
+        }
+        _ = NSApplication.shared
+        let task = PlannerTask(title: "ВкусВилл: схема персонализации ленты под 5 отделов (тег отдела на карточке, своя лента в аккаунте)",
+                               status: "жду фидбека Светы по схеме, потом созвон с аналитиками в четверг")
+        let host = NSHostingView(rootView: TodoHoverPreviewBubble(task: task, parentTitle: "Созвон со Светой 3 ноября", subtasks: 2)
+            .padding(10).background(Color(white: 0.3)).environment(\.colorScheme, .dark))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: host.fittingSize),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        try await Task.sleep(for: .milliseconds(60))
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: output).appendingPathComponent("preview-bubble.png"))
+        XCTAssertFalse(window.isVisible || window.isKeyWindow)
+    }
+}

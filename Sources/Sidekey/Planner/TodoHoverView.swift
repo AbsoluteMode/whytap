@@ -43,11 +43,12 @@ final class TodoHoverModel: ObservableObject {
         validationMessage = nil
         lastAddedID = nil
         editor = nil
+        TodoHoverPreviewState.shared.anchor = nil
         visible = true
         publishActivity()
     }
 
-    func end() { visible = false; publishActivity() }
+    func end() { visible = false; TodoHoverPreviewState.shared.anchor = nil; publishActivity() }
 
     var tasks: [PlannerTask] { rows.map(\.task) }
 
@@ -270,8 +271,16 @@ private struct TodoHoverRow: View {
     @ObservedObject var model: TodoHoverModel
     var editorFocused: FocusState<Bool>.Binding
     @State private var hovering = false
+    @State private var rowFrame: CGRect = .zero
+    @State private var textWidth: CGFloat = 0
 
     private var task: PlannerTask { row.task }
+
+    private func reportPreview() {
+        let show = hovering && model.editor == nil
+            && TodoHoverPreviewPolicy.needsPreview(title: task.title, status: task.status, textWidth: textWidth)
+        TodoHoverPreviewState.shared.set(task.id, show ? rowFrame : nil)
+    }
     private var editingStatus: Bool { model.editor?.kind == .status(task.id) }
     private var editingTitle: Bool { model.editor?.kind == .title(task.id) }
 
@@ -344,6 +353,7 @@ private struct TodoHoverRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
 
             if !showingHistory, !task.completed, hovering, model.editor == nil {
                 Button { model.beginEditing(.subtask(parent: task.id)); editorFocused.wrappedValue = true } label: {
@@ -360,8 +370,10 @@ private struct TodoHoverRow: View {
         .frame(minHeight: showingHistory ? 46 : 32)
         .background(.white.opacity(hovering ? 0.14 : 0.035), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .help(task.title)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(HistoryHoverView.hoverZoneSpaceName)) } action: { rowFrame = $0 }
+        .onHover { hovering = $0; reportPreview() }
+        .onChange(of: model.editor) { reportPreview() }
+        .onDisappear { TodoHoverPreviewState.shared.set(task.id, nil) }
         .contextMenu {
             if !showingHistory {
                 if !task.completed {

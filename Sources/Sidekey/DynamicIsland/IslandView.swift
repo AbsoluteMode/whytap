@@ -399,6 +399,7 @@ struct IslandView: View {
 
     /// Hovered History row whose content earned a preview bubble.
     @State private var historyPreviewAnchor: HistoryHoverPreviewAnchor?
+    @ObservedObject private var todoPreview = TodoHoverPreviewState.shared
     @State private var targetLanguage: AppLanguage?
     @StateObject private var vocabularyViewModel: IslandVocabularyViewModel
     @StateObject private var fillerViewModel: IslandFillerViewModel
@@ -1371,7 +1372,24 @@ struct IslandView: View {
                 .transition(.opacity)
             }
         }
+        // To-do's full-text preview uses the same left zone and placement.
+        .overlay(alignment: .topLeading) {
+            if let anchor = todoPreview.anchor, isHoverExpanded, hoverPanelMode == .tasks,
+               let task = PlannerStore.shared.archive.tasks.first(where: { $0.id == anchor.taskID }) {
+                TodoHoverPreviewBubble(
+                    task: task,
+                    parentTitle: task.parentID.flatMap { id in PlannerStore.shared.archive.tasks.first { $0.id == id }?.title },
+                    subtasks: PlannerStore.shared.archive.tasks.filter { $0.parentID == task.id && !$0.completed }.count)
+                .offset(
+                    x: -(TodoHoverPreviewPolicy.bubbleWidth + 8
+                        + IslandHoverPanelHitZone.leftOverhang(compactWidth: compactWidth)),
+                    y: anchor.rowFrame.minY)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.12), value: historyPreviewAnchor)
+        .animation(.easeOut(duration: 0.12), value: todoPreview.anchor)
         .animation(
             Self.hoverExpansionAnimation(programmatic: appState.programmaticHoverExpansion),
             value: isHoverExpanded
@@ -1473,6 +1491,7 @@ struct IslandView: View {
             if newValue != .history {
                 historyPreviewAnchor = nil
             }
+            if newValue != .tasks { todoPreview.anchor = nil }
         }
     }
 

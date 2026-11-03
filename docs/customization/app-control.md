@@ -29,7 +29,8 @@ Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
 | `whytap_list_providers` | `providers` | OpenRouter endpoints for the current model; free metadata request |
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |
-| `whytap_todo_add` | `whytap todo add` | Add a batch of To-do tasks; confirms what was saved, retry-safe |
+| `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
+| `whytap_todo_update` | `whytap todo set/done/reopen` | Edit title, status, parent or completion of one task (closing cascades to subtasks) |
 | `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
 
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language

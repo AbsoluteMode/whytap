@@ -66,29 +66,29 @@ final class AppControlController {
         // To-do is the one user-content surface here: titles the user's own
         // processes can already read in the planner file. WHY:
         // .project-docs/decisions/2026-11-03-todo-helper.md
-        case "todo_add":
-            guard only(args, ["titles"]), let titles = args["titles"]?.array?.compactMap(\.string),
-                  titles.count == args["titles"]?.array?.count else { return invalid() }
+        case "todo_add", "todo_update", "todo_list":
             let store = planner()
             do {
-                let planned = try store.addTasks(titles)
-                let active = store.archive.tasks.filter { !$0.completed }
-                // Confirm from the saved state, not from the request.
-                guard planned.allSatisfy({ item in active.contains { $0.id == item.id } }) else {
-                    return .failure("unconfirmed", "The saved to-do list does not contain the new tasks.")
+                let todo = try TodoRequest(request.operation, args)
+                guard todo.mutates else {
+                    store.refreshFromDisk()
+                    guard store.canWrite else { return .failure("planner_unreadable", store.errorMessage ?? "Couldn’t read the to-do list.") }
+                    var nodes = store.archive.tasks.map(\.node)
+                    return .success(try todo.apply(to: &nodes, now: Date())("app"))
                 }
-                return .success(PlannerTodoFile.result(planned, delivery: "app", activeCount: active.count))
+                var expected: [TodoNode] = []
+                let reply = try store.editTasks { nodes in
+                    let reply = try todo.apply(to: &nodes, now: Date())
+                    expected = nodes
+                    return reply
+                }
+                // Confirm from the saved state, not from the request.
+                guard store.archive.tasks.map(\.node) == expected else {
+                    return .failure("unconfirmed", "The saved to-do list does not contain the change.")
+                }
+                return .success(reply("app"))
             } catch let failure as PlannerTodoFile.Failure { return failure.response }
             catch { return .failure("save_failed", "Couldn’t save the to-do list.") }
-        case "todo_list":
-            guard only(args, ["includeCompleted"]),
-                  args["includeCompleted"] == nil || args["includeCompleted"]?.bool != nil else { return invalid() }
-            let store = planner()
-            store.refreshFromDisk()
-            guard store.canWrite else { return .failure("planner_unreadable", store.errorMessage ?? "Couldn’t read the to-do list.") }
-            return .success(PlannerTodoFile.listing(
-                store.archive.tasks.map { ($0.id, $0.title, $0.completed, $0.createdAt) },
-                includeCompleted: args["includeCompleted"]?.bool ?? false, delivery: "app"))
         case "get_state":
             guard args.isEmpty else { return invalid() }
             let features = AIFeature.activeCases.map { feature in

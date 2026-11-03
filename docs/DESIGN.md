@@ -1048,6 +1048,24 @@ Later query parts that start a key-name word add to a partial match; parts of th
 `docs/decisions/2026-10-21-case-search-project-ranking.md`.
 
 
+## To-do tree and statuses — 2026-11-03
+
+- Subtasks indent 14pt per level (at most five levels) inside the same rounded
+  row cards; a 12pt chevron column keeps titles aligned and shows a direct-child
+  count capsule when collapsed. Parents use a medium title weight.
+- Titles wrap to two lines; the status sits under the title in 10.5pt at 68%
+  white after a small branch glyph, up to two lines, with the full text in a
+  tooltip. Why: progress notes read as part of the task without competing with it.
+- Row actions: the check circle or title toggles completion (a folder closes its
+  subtasks, which stay struck through until the panel closes); a hover "+" adds a
+  subtask in an inline field under the row; the context menu edits status and
+  title in place. Return commits, Escape cancels, an empty status clears it.
+- Hovering a row whose title or status is cut off (more than two lines) shows a
+  280pt full-text bubble left of the drawer, placed like the History preview:
+  parent title, full title, full status and open subtask count. It is
+  non-interactive and clears on leave, inline editing and panel changes.
+  User feedback 2026-11-03: hover must show the whole text, as in History.
+
 ## Compact To-do in hover — 2026-10-20
 
 The user chose one small list, with immediate capture and completion. First see

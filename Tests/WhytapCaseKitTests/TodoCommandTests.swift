@@ -118,6 +118,46 @@ final class TodoCommandTests: XCTestCase {
         }
     }
 
+    /// Archives the app refuses must not be edited or listed by the helper either.
+    func testArchivesTheAppRefusesAreLeftByteIdentical() throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let task = #"{"id":"\#(UUID().uuidString)","title":"Ok","completed":false,"createdAt":1}"#
+        for json in Self.refusedArchives(task: task) {
+            let original = Data(json.utf8)
+            try original.write(to: url)
+            for args in [["add", "Task"], ["list"]] {
+                let (status, response) = run(args, client: closedApp)
+                XCTAssertEqual(status, 1, json)
+                XCTAssertEqual(response?.data.object?["code"], .string("planner_unreadable"), json)
+            }
+            XCTAssertEqual(try Data(contentsOf: url), original, json)
+        }
+    }
+
+    /// Each one valid JSON that PlannerStore.decodeArchive rejects.
+    static func refusedArchives(task: String) -> [String] {
+        let id = UUID().uuidString
+        let event = { (fields: String) in
+            #"{"version":1,"tasks":[],"events":[{"id":"\#(id)","title":"Call","start":1,"end":2,"allDay":false,"location":"","notes":"","timeZoneIdentifier":"UTC"\#(fields)}]}"#
+        }
+        return [
+            #"{"version":1,"tasks":[\#(task)],"events":[1]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"   ","completed":false,"createdAt":1}],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"Ok","completed":true,"createdAt":1,"completedAt":"yesterday"}],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"\#(String(repeating: "x", count: 501))","completed":false,"createdAt":1}],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"Ok","completed":false}],"events":[]}"#,
+            #"{"version":1,"tasks":[\#(task)]}"#,
+            #"{"tasks":[],"events":[]}"#,
+            #"{"version":1.5,"tasks":[],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"A","completed":false,"createdAt":1},{"id":"\#(id)","title":"B","completed":false,"createdAt":1}],"events":[]}"#,
+            event(#","meetingURL":"http://example.com""#),
+            event(#","meetingURL":"https://user:pw@example.com""#),
+            event(#","end":0"#).replacingOccurrences(of: #""end":2,"#, with: ""),
+            event("").replacingOccurrences(of: #","timeZoneIdentifier":"UTC""#, with: ""),
+            event(#","notes":"\#(String(repeating: "n", count: 20_001))""#).replacingOccurrences(of: #""notes":"","#, with: ""),
+        ]
+    }
+
     func testListHidesCompletedUnlessAll() throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let done = UUID(), open = UUID()

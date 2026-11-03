@@ -58,6 +58,10 @@ Whytap or typing through Computer Use were both unacceptable workarounds.
   joining inner line breaks with spaces); one bad title adds nothing. An
   active task with the same title is reported as `existing`, so retrying a
   delivered batch never duplicates it. Completed tasks do not block a title.
+- PlannerStore.decodeArchive and the helper share one validator
+  (`PlannerTodoFile.isValidArchive`: the app's field types, required keys and
+  limits). The helper edits only archives the app loads and re-validates the
+  edited bytes before replacing the file.
 - An unreadable or unsupported file is never written by either side. The app
   keeps the last good list visible, blocks saves and recovers via Retry or a
   later valid file. A broken socket exchange is reported as `unconfirmed`
@@ -85,7 +89,9 @@ AppControlController with a temporary store), the closed app (file path,
 retry without duplicates, stdin batch), a file edit while the app runs
 followed by a UI toggle, round-trip of existing tasks/events through the
 helper's JSON edit, empty/too-long titles, an oversized request, a broken or
-unsupported file, a broken socket exchange, an older running app that does
+unsupported file, a broken socket exchange, valid JSON the app refuses (non-object events,
+blank or long titles, a string `completedAt`, missing keys, unsafe meeting
+links; app and helper must agree on each), an older running app that does
 not know the operation, lock contention and the live folder watcher.
 Not tested: the installed app with a physical helper call; that is acceptance
 after the builder promotes this change.

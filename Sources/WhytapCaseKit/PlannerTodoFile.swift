@@ -130,6 +130,8 @@ public enum PlannerTodoFile {
                 guard data.count <= maxFileSize else {
                     throw Failure("too_many_tasks", "The to-do file would exceed its size limit. Nothing was added.")
                 }
+                // The edited bytes must still load in the app before they replace the file.
+                guard isValidArchive(data) else { throw unreadable }
                 try data.write(to: url, options: [.atomic])
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             }
@@ -153,23 +155,75 @@ public enum PlannerTodoFile {
                        includeCompleted: includeCompleted, delivery: "file")
     }
 
-    /// The archive as JSON objects, rejecting anything PlannerStore would not load.
-    /// A missing file is an empty archive; an unreadable one is never written.
+    /// The archive as JSON objects, only after it passes the same validation
+    /// PlannerStore.decodeArchive applies. A missing file is an empty archive;
+    /// an invalid one is never written.
     static func readRaw(_ url: URL) throws -> [String: Any] {
         let data: Data
         do { data = try Data(contentsOf: url) }
         catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return ["version": 1, "tasks": [[String: Any]](), "events": [[String: Any]]()]
         } catch { throw unreadable }
-        guard data.count <= maxFileSize,
+        guard isValidArchive(data),
               let archive = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              archive["version"] as? Int == 1, let tasks = archive["tasks"] as? [[String: Any]],
-              archive["events"] is [Any] else { throw unreadable }
-        let ids = tasks.compactMap { ($0["id"] as? String).flatMap(UUID.init(uuidString:)) }
-        guard ids.count == tasks.count, Set(ids).count == ids.count,
-              tasks.allSatisfy({ ($0["title"] as? String) != nil && ($0["completed"] as? Bool) != nil
-                  && ($0["createdAt"] as? Double) != nil }) else { throw unreadable }
+              archive["tasks"] is [[String: Any]] else { throw unreadable }
         return archive
+    }
+
+    // MARK: - Archive validation shared with PlannerStore
+
+    /// The archive shape PlannerStore loads, field for field: the same
+    /// synthesized Codable decoding (required keys, Date as seconds since 2001,
+    /// URL from string) and the same limits. PlannerStore.decodeArchive calls
+    /// this, so the helper never edits a file the app would refuse.
+    private struct ArchiveShape: Decodable {
+        struct Task: Decodable {
+            var id: UUID
+            var title: String
+            var completed: Bool
+            var createdAt: Date
+            var completedAt: Date?
+        }
+        struct Event: Decodable {
+            var id: UUID
+            var title: String
+            var start: Date
+            var end: Date
+            var allDay: Bool
+            var location: String
+            var notes: String
+            var meetingURL: URL?
+            var timeZoneIdentifier: String
+        }
+        var version: Int
+        var tasks: [Task]
+        var events: [Event]
+    }
+
+    public static func isValidArchive(_ data: Data) -> Bool {
+        guard data.count <= maxFileSize, let archive = try? JSONDecoder().decode(ArchiveShape.self, from: data),
+              archive.version == 1, archive.tasks.count <= maxTasks, archive.events.count <= maxTasks,
+              Set(archive.tasks.map(\.id)).count == archive.tasks.count,
+              Set(archive.events.map(\.id)).count == archive.events.count else { return false }
+        return archive.tasks.allSatisfy {
+            isValidTitle($0.title) && $0.createdAt.timeIntervalSince1970.isFinite
+                && ($0.completedAt?.timeIntervalSince1970.isFinite ?? true)
+        } && archive.events.allSatisfy {
+            isValidTitle($0.title) && $0.start.timeIntervalSince1970.isFinite && $0.end.timeIntervalSince1970.isFinite
+                && $0.end > $0.start && $0.location.count <= 2000 && $0.notes.count <= 20_000
+                && ($0.meetingURL == nil || safeMeetingURL($0.meetingURL?.absoluteString) != nil)
+        }
+    }
+
+    public static func isValidTitle(_ title: String) -> Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.count <= maxTitleLength
+    }
+
+    /// https with a host and no credentials.
+    public static func safeMeetingURL(_ raw: String?) -> URL? {
+        guard let raw, let url = URL(string: raw), url.scheme?.lowercased() == "https",
+              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
+        return url
     }
 
     private static func activeTasks(_ tasks: [[String: Any]]) -> [(id: UUID, title: String)] {

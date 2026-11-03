@@ -256,22 +256,13 @@ final class PlannerStore: ObservableObject {
     private static let saveFailureMessage = "Couldn’t save your changes. Check available storage and folder access, then try again."
 
     nonisolated static func decodeArchive(_ data: Data) throws -> Archive {
-        guard data.count <= 8 * 1024 * 1024 else { throw StoreError.invalid }
-        let loaded = try JSONDecoder().decode(Archive.self, from: data)
-        guard loaded.version == 1, loaded.tasks.count <= 10_000, loaded.events.count <= 10_000,
-              Set(loaded.tasks.map(\.id)).count == loaded.tasks.count,
-              Set(loaded.events.map(\.id)).count == loaded.events.count,
-              loaded.tasks.allSatisfy({ validTitle($0.title) && $0.createdAt.timeIntervalSince1970.isFinite && ($0.completedAt?.timeIntervalSince1970.isFinite ?? true) }),
-              loaded.events.allSatisfy(validEvent) else { throw StoreError.invalid }
-        return loaded
+        // One rule set with `whytap todo`, which edits the file while the app is closed.
+        guard PlannerTodoFile.isValidArchive(data) else { throw StoreError.invalid }
+        return try JSONDecoder().decode(Archive.self, from: data)
     }
 
     nonisolated private static func validTitle(_ title: String) -> Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.count <= 500
-    }
-
-    nonisolated private static func validEvent(_ event: PlannerEvent) -> Bool {
-        validationMessage(for: event) == nil
+        PlannerTodoFile.isValidTitle(title)
     }
 
     nonisolated static func validationMessage(for task: PlannerTask) -> String? {

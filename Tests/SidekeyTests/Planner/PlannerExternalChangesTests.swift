@@ -51,6 +51,54 @@ final class PlannerExternalChangesTests: XCTestCase {
         XCTAssertEqual(PlannerStore(url: url).archive, after, "A fresh launch reads the helper's file")
     }
 
+    /// The app and the helper must agree on every archive: one refused by the
+    /// app is never edited, and every edited one still loads in the app.
+    func testHelperEditsExactlyTheArchivesTheAppLoads() throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var event = PlannerEvent(title: "Review", start: Date(timeIntervalSinceReferenceDate: 10), end: Date(timeIntervalSinceReferenceDate: 20))
+        event.meetingURL = URL(string: "https://example.com/j/1")
+        var valid = PlannerStore.Archive()
+        valid.tasks = [PlannerTask(title: "Ok")]
+        valid.events = [event]
+        let task = #"{"id":"\#(UUID().uuidString)","title":"Ok","completed":false,"createdAt":1}"#
+        let refused = Self.refusedArchives(task: task)
+        for json in refused + [String(decoding: try JSONEncoder().encode(valid), as: UTF8.self)] {
+            let original = Data(json.utf8)
+            try original.write(to: url)
+            let appLoads = (try? PlannerStore.decodeArchive(original)) != nil
+            XCTAssertEqual(PlannerTodoFile.isValidArchive(original), appLoads, json)
+            if appLoads {
+                _ = try PlannerTodoFile.addOffline(["From agent"], to: url)
+                let after = try PlannerStore.decodeArchive(Data(contentsOf: url))
+                XCTAssertEqual(after.events, valid.events)
+                XCTAssertEqual(after.tasks.map(\.title), ["Ok", "From agent"])
+            } else {
+                XCTAssertThrowsError(try PlannerTodoFile.addOffline(["From agent"], to: url), json)
+                XCTAssertEqual(try Data(contentsOf: url), original, json)
+            }
+        }
+        XCTAssertEqual(refused.filter { (try? PlannerStore.decodeArchive(Data($0.utf8))) == nil }.count, refused.count,
+                       "Every refused sample is refused by the app itself")
+    }
+
+    private static func refusedArchives(task: String) -> [String] {
+        let id = UUID().uuidString
+        let event = { (fields: String) in
+            #"{"version":1,"tasks":[],"events":[{"id":"\#(id)","title":"Call","start":1,"end":2,"allDay":false,"location":"","notes":"","timeZoneIdentifier":"UTC"\#(fields)}]}"#
+        }
+        return [
+            #"{"version":1,"tasks":[\#(task)],"events":[1]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"   ","completed":false,"createdAt":1}],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"Ok","completed":true,"createdAt":1,"completedAt":"yesterday"}],"events":[]}"#,
+            #"{"version":1,"tasks":[{"id":"\#(id)","title":"Ok","completed":false}],"events":[]}"#,
+            #"{"version":1,"tasks":[\#(task)]}"#,
+            #"{"version":1.5,"tasks":[],"events":[]}"#,
+            event(#","meetingURL":"http://example.com""#),
+            event(#","meetingURL":"https://user:pw@example.com""#),
+            event("").replacingOccurrences(of: #","timeZoneIdentifier":"UTC""#, with: ""),
+        ]
+    }
+
     func testBatchAddIsValidatedAndIdempotent() throws {
         let store = PlannerStore(url: url)
         XCTAssertThrowsError(try store.addTasks(["Fine", String(repeating: "x", count: 501)])) {

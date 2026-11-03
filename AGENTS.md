@@ -1014,6 +1014,14 @@ file itself, never launching the app. Both sides hold planner-v1.json.lock; the
 store adopts newer file contents before each save and watches the folder.
 Batches of 1–100 are validated whole; matching active titles are not duplicated.
 WHY: .project-docs/decisions/2026-11-03-todo-helper.md
+To-do is a tree (parentID, at most five levels) with optional one-line statuses
+(300 characters). Closing a task closes its open subtasks; reopening restores
+those and reopens closed ancestors. Hover shows indentation, collapse, statuses
+and inline Add Subtask/Status/Rename; `todo set/done/reopen`, `add --parent/
+--status/--json` and whytap_todo_update edit every field. WhytapCaseKit's
+TodoRequest/TodoTree is the one rule set for the app, helper file path and MCP.
+Older builds load tree archives but flatten them when saving.
+WHY: .project-docs/decisions/2026-11-03-todo-tree.md
 PlannerStore atomically saves private local tasks
 and Whytap events; unreadable archives block writes. CalendarConnections combines
 selected EventKit calendars with direct Google Calendar, Microsoft Graph (including

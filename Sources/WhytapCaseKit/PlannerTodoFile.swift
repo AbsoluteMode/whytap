@@ -28,8 +28,9 @@ public enum PlannerTodoFile {
     public struct Planned: Equatable {
         public let id: UUID
         public let title: String
-        /// False when an active task already has this title (a retry or a duplicate line).
+        /// False when an active sibling already has this title (a retry or a duplicate line).
         public let isNew: Bool
+        public var parentID: UUID? = nil
     }
 
     /// One line per title: inner line breaks become spaces, outer whitespace is trimmed.
@@ -52,43 +53,55 @@ public enum PlannerTodoFile {
         }
     }
 
-    /// An active task with the same title is reused, so retrying a delivered
-    /// batch adds nothing. Completed tasks never block adding the title again.
-    public static func plan(_ titles: [String], active: [(id: UUID, title: String)]) -> [Planned] {
-        var known = Dictionary(active.map { ($0.title, $0.id) }, uniquingKeysWith: { first, _ in first })
-        return titles.map { title in
-            if let id = known[title] { return Planned(id: id, title: title, isNew: false) }
-            let id = UUID()
-            known[title] = id
-            return Planned(id: id, title: title, isNew: true)
-        }
-    }
-
-    public static func result(_ planned: [Planned], delivery: String, activeCount: Int) -> AppControlValue {
-        .object([
+    public static func result(_ planned: [Planned], delivery: String, nodes: [TodoNode]) -> AppControlValue {
+        let byID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return .object([
             "delivery": .string(delivery),
             "added": .int(planned.filter(\.isNew).count),
             "existing": .int(planned.filter { !$0.isNew }.count),
-            "activeCount": .int(activeCount),
-            "tasks": .array(planned.map {
-                .object(["id": .string($0.id.uuidString), "title": .string($0.title),
-                         "status": .string($0.isNew ? "added" : "existing")])
+            "activeCount": .int(nodes.filter { !$0.completed }.count),
+            "tasks": .array(planned.map { item in
+                var row = byID[item.id].map(taskValue) ?? [:]
+                row["result"] = .string(item.isNew ? "added" : "existing")
+                row["status"] = byID[item.id]?.status.map(AppControlValue.string) ?? .null
+                return .object(row)
             })
         ])
     }
 
-    public static func listing(_ tasks: [(id: UUID, title: String, completed: Bool, createdAt: Date)],
-                               includeCompleted: Bool, delivery: String) -> AppControlValue {
-        let formatter = ISO8601DateFormatter()
-        let shown = tasks.filter { includeCompleted || !$0.completed }.sorted { $0.createdAt < $1.createdAt }
+    public static func updated(_ id: UUID, delivery: String, nodes: [TodoNode]) -> AppControlValue {
+        var task = nodes.first { $0.id == id }.map(taskValue) ?? [:]
+        task["status"] = nodes.first { $0.id == id }?.status.map(AppControlValue.string) ?? .null
         return .object([
             "delivery": .string(delivery),
-            "activeCount": .int(tasks.filter { !$0.completed }.count),
-            "tasks": .array(shown.map {
-                .object(["id": .string($0.id.uuidString), "title": .string($0.title),
-                         "completed": .bool($0.completed), "createdAt": .string(formatter.string(from: $0.createdAt))])
+            "activeCount": .int(nodes.filter { !$0.completed }.count),
+            "task": .object(task),
+            "affected": .int(1 + TodoTree.descendants(of: id, in: nodes).count)
+        ])
+    }
+
+    /// Depth-first tree; completed tasks only with includeCompleted.
+    public static func listing(_ nodes: [TodoNode], includeCompleted: Bool, delivery: String) -> AppControlValue {
+        let shown = TodoTree.ordered(nodes) { includeCompleted || !$0.completed }
+        return .object([
+            "delivery": .string(delivery),
+            "activeCount": .int(nodes.filter { !$0.completed }.count),
+            "tasks": .array(shown.map { entry in
+                var row = taskValue(entry.node)
+                row["depth"] = .int(entry.depth)
+                row["status"] = entry.node.status.map(AppControlValue.string) ?? .null
+                row["children"] = .int(nodes.filter { $0.parentID == entry.node.id && (includeCompleted || !$0.completed) }.count)
+                return .object(row)
             })
         ])
+    }
+
+    private static func taskValue(_ node: TodoNode) -> [String: AppControlValue] {
+        [
+            "id": .string(node.id.uuidString), "title": .string(node.title), "completed": .bool(node.completed),
+            "createdAt": .string(ISO8601DateFormatter().string(from: node.createdAt)),
+            "parentID": node.parentID.map { .string($0.uuidString) } ?? .null
+        ]
     }
 
     /// Exclusive advisory lock on `<archive>.lock` beside the archive.
@@ -110,49 +123,73 @@ public enum PlannerTodoFile {
 
     // MARK: - Direct file access while Whytap is not running
 
-    /// Adds tasks straight to the archive, keeping every other field byte-for-byte
-    /// equivalent. Reads the file back to confirm the tasks are present.
-    public static func addOffline(_ titles: [String], to url: URL, now: Date = Date()) throws -> AppControlValue {
-        let titles = try validatedTitles(titles)
-        return try withLock(for: url, timeout: 2) {
+    /// Applies a request straight to the archive while Whytap is closed. Fields
+    /// the helper does not know are kept; the file is read back to confirm.
+    public static func applyOffline(_ request: TodoRequest, at url: URL, now: Date = Date()) throws -> AppControlValue {
+        try withLock(for: url, timeout: 2) {
             var archive = try readRaw(url)
-            var tasks = archive["tasks"] as! [[String: Any]]
-            let planned = plan(titles, active: activeTasks(tasks))
-            let new = planned.filter(\.isNew)
-            guard tasks.count + new.count <= maxTasks else {
-                throw Failure("too_many_tasks", "The to-do list is limited to \(maxTasks) tasks. Nothing was added.")
+            var rows = archive["tasks"] as! [[String: Any]]
+            let before = nodes(rows)
+            var after = before
+            let reply = try request.apply(to: &after, now: now)
+            guard after != before else { return reply("file") }
+            let byID = Dictionary(after.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            rows = rows.compactMap { row in
+                guard let id = (row["id"] as? String).flatMap(UUID.init(uuidString:)), let node = byID[id] else { return nil }
+                return merged(row, node)
             }
-            if !new.isEmpty {
-                tasks += new.map { ["id": $0.id.uuidString, "title": $0.title, "completed": false,
-                                    "createdAt": now.timeIntervalSinceReferenceDate] }
-                archive["tasks"] = tasks
-                let data = try JSONSerialization.data(withJSONObject: archive)
-                guard data.count <= maxFileSize else {
-                    throw Failure("too_many_tasks", "The to-do file would exceed its size limit. Nothing was added.")
-                }
-                // The edited bytes must still load in the app before they replace the file.
-                guard isValidArchive(data) else { throw unreadable }
-                try data.write(to: url, options: [.atomic])
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            let known = Set(before.map(\.id))
+            rows += after.filter { !known.contains($0.id) }.map { merged([:], $0) }
+            archive["tasks"] = rows
+            let data = try JSONSerialization.data(withJSONObject: archive)
+            guard data.count <= maxFileSize else {
+                throw Failure("too_many_tasks", "The to-do file would exceed its size limit. Nothing was changed.")
             }
-            let saved = activeTasks(try readRaw(url)["tasks"] as! [[String: Any]])
-            let savedIDs = Set(saved.map(\.id))
-            guard planned.allSatisfy({ savedIDs.contains($0.id) }) else {
-                throw Failure("unconfirmed", "The to-do file did not contain the new tasks after saving.")
+            // The edited bytes must still load in the app before they replace the file.
+            guard isValidArchive(data) else { throw unreadable }
+            try data.write(to: url, options: [.atomic])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            guard nodes(try readRaw(url)["tasks"] as! [[String: Any]]) == after else {
+                throw Failure("unconfirmed", "The to-do file did not contain the change after saving.")
             }
-            return result(planned, delivery: "file", activeCount: saved.count)
+            return reply("file")
         }
     }
 
+    /// Flat batch while Whytap is closed (kept for scripts and tests).
+    public static func addOffline(_ titles: [String], to url: URL, now: Date = Date()) throws -> AppControlValue {
+        try applyOffline(TodoRequest("todo_add", ["titles": .array(titles.map(AppControlValue.string))]), at: url, now: now)
+    }
+
     public static func listOffline(at url: URL, includeCompleted: Bool) throws -> AppControlValue {
-        let tasks = try withLock(for: url, timeout: 2) { try readRaw(url)["tasks"] as! [[String: Any]] }
-        let rows = tasks.compactMap { task -> (UUID, String, Bool, Date)? in
-            guard let id = (task["id"] as? String).flatMap(UUID.init(uuidString:)), let title = task["title"] as? String,
-                  let completed = task["completed"] as? Bool, let created = task["createdAt"] as? Double else { return nil }
-            return (id, title, completed, Date(timeIntervalSinceReferenceDate: created))
+        try applyOffline(.list(includeCompleted: includeCompleted), at: url)
+    }
+
+    static func nodes(_ rows: [[String: Any]]) -> [TodoNode] {
+        rows.compactMap { row in
+            guard let id = (row["id"] as? String).flatMap(UUID.init(uuidString:)), let title = row["title"] as? String,
+                  let completed = row["completed"] as? Bool, let created = row["createdAt"] as? Double else { return nil }
+            return TodoNode(id: id, title: title, completed: completed, createdAt: Date(timeIntervalSinceReferenceDate: created),
+                            completedAt: (row["completedAt"] as? Double).map(Date.init(timeIntervalSinceReferenceDate:)),
+                            parentID: (row["parentID"] as? String).flatMap(UUID.init(uuidString:)),
+                            status: row["status"] as? String)
         }
-        return listing(rows.map { (id: $0.0, title: $0.1, completed: $0.2, createdAt: $0.3) },
-                       includeCompleted: includeCompleted, delivery: "file")
+    }
+
+    /// Writes the node's fields into its JSON object, leaving other keys as they were.
+    private static func merged(_ row: [String: Any], _ node: TodoNode) -> [String: Any] {
+        var row = row
+        let previous = nodes([row]).first
+        row["id"] = node.id.uuidString
+        row["title"] = node.title
+        row["completed"] = node.completed
+        // Unchanged dates keep their exact stored number.
+        if previous?.createdAt != node.createdAt { row["createdAt"] = node.createdAt.timeIntervalSinceReferenceDate }
+        if node.completedAt == nil { row.removeValue(forKey: "completedAt") }
+        else if previous?.completedAt != node.completedAt { row["completedAt"] = node.completedAt!.timeIntervalSinceReferenceDate }
+        if let parent = node.parentID { row["parentID"] = parent.uuidString } else { row.removeValue(forKey: "parentID") }
+        if let status = node.status { row["status"] = status } else { row.removeValue(forKey: "status") }
+        return row
     }
 
     /// The archive as JSON objects, only after it passes the same validation
@@ -183,6 +220,8 @@ public enum PlannerTodoFile {
             var completed: Bool
             var createdAt: Date
             var completedAt: Date?
+            var parentID: UUID?
+            var status: String?
         }
         struct Event: Decodable {
             var id: UUID
@@ -205,6 +244,11 @@ public enum PlannerTodoFile {
               archive.version == 1, archive.tasks.count <= maxTasks, archive.events.count <= maxTasks,
               Set(archive.tasks.map(\.id)).count == archive.tasks.count,
               Set(archive.events.map(\.id)).count == archive.events.count else { return false }
+        let nodes = archive.tasks.map {
+            TodoNode(id: $0.id, title: $0.title, completed: $0.completed, createdAt: $0.createdAt,
+                     completedAt: $0.completedAt, parentID: $0.parentID, status: $0.status)
+        }
+        guard TodoTree.isValid(nodes) else { return false }
         return archive.tasks.allSatisfy {
             isValidTitle($0.title) && $0.createdAt.timeIntervalSince1970.isFinite
                 && ($0.completedAt?.timeIntervalSince1970.isFinite ?? true)
@@ -224,14 +268,6 @@ public enum PlannerTodoFile {
         guard let raw, let url = URL(string: raw), url.scheme?.lowercased() == "https",
               url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
         return url
-    }
-
-    private static func activeTasks(_ tasks: [[String: Any]]) -> [(id: UUID, title: String)] {
-        tasks.compactMap { task in
-            guard task["completed"] as? Bool == false, let title = task["title"] as? String,
-                  let id = (task["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
-            return (id, title)
-        }
     }
 
     private static var unreadable: Failure {

@@ -45,7 +45,32 @@ batch (exit 2). Exit 1 reports `code`/`message`: `unconfirmed` (check with
 `unknown_operation` (the running Whytap predates this command; update it).
 The helper never launches Whytap. `open whytap://tool/tasks` shows the list.
 
-MCP hosts get the same operations as `whytap_todo_add` / `whytap_todo_list`
+### Subtasks and statuses
+
+To-do is a tree, like folders: a task can hold subtasks up to five levels deep,
+and each task can carry a one-line status (up to 300 characters) shown under its
+title. Completing a task completes all its open subtasks; reopening it restores
+the ones completed with it.
+
+```sh
+W=/Applications/Whytap.app/Contents/Helpers/whytap
+$W todo add --json '[{"title": "Исследовать клин", "children": [
+  {"title": "Запустить проверку на последних 30 картах", "status": "готово, результаты отправил Свете в тг",
+   "children": [{"title": "Согласовать план со Светой", "status": "жду фидбека Светы"}]}]}]'
+$W todo add --parent 1A2B3C4D --status "в работе" "Сравнить с прошлой неделей"
+$W todo set 1A2B3C4D --title "Новое название" --status "готово"   # --no-status clears, --top / --parent moves
+$W todo done 1A2B3C4D       # closes the task and its open subtasks
+$W todo reopen 1A2B3C4D
+```
+
+IDs come from `todo list` (`id`, `parentID`, `depth`, `status`, `children`);
+a unique prefix of at least 8 characters works too. Repeating the same tree adds
+nothing new and refreshes the statuses it gives. Errors (`not_found`,
+`invalid_parent`, `too_deep`, `parent_completed`, `status_too_long`) change
+nothing. In Hover, "+" on a row adds a subtask; the row's context menu edits the
+status and title; the chevron collapses a folder.
+
+MCP hosts get the same operations as `whytap_todo_add` / `whytap_todo_update` / `whytap_todo_list`
 from `whytap app mcp` (see `docs/customization/app-control.md`), so an agent can
 split a meeting note into tasks on any Mac with Whytap installed. Meeting notes
 are local Markdown files in Application Support/Sidekey/Meetings.

@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Planner/PlannerStore.swift
     confirmed_at: 2026-10-20
-related: [2026-10-19-planner.md, 2026-10-21-calendar-hover.md, 2026-11-03-todo-helper.md]
+related: [2026-10-19-planner.md, 2026-10-21-calendar-hover.md, 2026-11-03-todo-helper.md, 2026-11-03-todo-tree.md]
 ---
 
 ## Decision

@@ -8,6 +8,26 @@ struct PlannerTask: Codable, Identifiable, Equatable, Sendable {
     var createdAt = Date()
     // Optional for archives saved before completion history was introduced.
     var completedAt: Date?
+    /// To-do tree: the folder task this one belongs to, and a one-line status.
+    /// Older builds ignore both and drop them when they save.
+    var parentID: UUID?
+    var status: String?
+
+    var node: TodoNode {
+        TodoNode(id: id, title: title, completed: completed, createdAt: createdAt,
+                 completedAt: completedAt, parentID: parentID, status: status)
+    }
+
+    init(id: UUID = UUID(), title: String, completed: Bool = false, createdAt: Date = Date(),
+         completedAt: Date? = nil, parentID: UUID? = nil, status: String? = nil) {
+        self.id = id; self.title = title; self.completed = completed; self.createdAt = createdAt
+        self.completedAt = completedAt; self.parentID = parentID; self.status = status
+    }
+
+    init(_ node: TodoNode) {
+        self.init(id: node.id, title: node.title, completed: node.completed, createdAt: node.createdAt,
+                  completedAt: node.completedAt, parentID: node.parentID, status: node.status)
+    }
 }
 
 struct PlannerEvent: Codable, Identifiable, Equatable, Sendable {
@@ -137,26 +157,39 @@ final class PlannerStore: ObservableObject {
         if canWrite { adoptExternalChanges() } else { reload() }
     }
 
-    /// Batch add for the helper and agents: one validated, atomic save. An active
-    /// task with the same title is reported as existing, so a retry adds nothing.
-    func addTasks(_ titles: [String], now: Date = Date()) throws -> [PlannerTodoFile.Planned] {
-        let titles = try PlannerTodoFile.validatedTitles(titles)
-        var planned: [PlannerTodoFile.Planned] = []
-        var overflow = false
+    /// Applies a tree change (helper, agents or the To-do panel) in one
+    /// validated, atomic save. Throws without saving when the change is invalid.
+    // WHY: .project-docs/decisions/2026-11-03-todo-tree.md
+    @discardableResult
+    func editTasks<T>(_ change: (inout [TodoNode]) throws -> T) throws -> T {
+        var outcome: Result<T, Error>?
         let saved = commit { value in
-            planned = PlannerTodoFile.plan(titles, active: value.tasks.filter { !$0.completed }.map { ($0.id, $0.title) })
-            let new = planned.filter(\.isNew)
-            guard value.tasks.count + new.count <= PlannerTodoFile.maxTasks else { overflow = true; return }
-            value.tasks += new.map { PlannerTask(id: $0.id, title: $0.title, createdAt: now) }
+            var nodes = value.tasks.map(\.node)
+            do {
+                let result = try change(&nodes)
+                value.tasks = nodes.map(PlannerTask.init)
+                outcome = .success(result)
+            } catch { outcome = .failure(error) }
         }
-        if overflow {
-            throw PlannerTodoFile.Failure("too_many_tasks", "The to-do list is limited to \(PlannerTodoFile.maxTasks) tasks. Nothing was added.")
-        }
-        guard saved else {
+        if case .failure(let error) = outcome { throw error }
+        guard saved, case .success(let result) = outcome else {
             throw canWrite ? PlannerTodoFile.Failure("save_failed", errorMessage ?? Self.saveFailureMessage)
                 : PlannerTodoFile.Failure("planner_unreadable", Self.readFailureMessage)
         }
-        return planned
+        return result
+    }
+
+    /// Batch add for the helper and agents. An active sibling with the same title
+    /// is reported as existing, so a retry adds nothing.
+    func addTasks(_ titles: [String], under parent: UUID? = nil, now: Date = Date()) throws -> [PlannerTodoFile.Planned] {
+        let titles = try PlannerTodoFile.validatedTitles(titles)
+        return try editTasks { try TodoTree.add(titles.map { TodoItem(title: $0) }, under: parent, to: &$0, now: now) }
+    }
+
+    /// Closing closes open subtasks too; reopening restores them.
+    @discardableResult
+    func setCompleted(_ id: UUID, _ completed: Bool, now: Date = Date()) -> Bool {
+        (try? editTasks { TodoTree.setCompleted(id, completed, in: &$0, now: now) }) != nil
     }
 
     @discardableResult
@@ -175,7 +208,13 @@ final class PlannerStore: ObservableObject {
     }
 
     @discardableResult
-    func deleteTask(_ id: UUID) -> Bool { commit { $0.tasks.removeAll { $0.id == id } } }
+    func deleteTask(_ id: UUID) -> Bool {
+        commit { value in
+            var nodes = value.tasks.map(\.node)
+            TodoTree.remove(id, from: &nodes)
+            value.tasks = value.tasks.filter { task in nodes.contains { $0.id == task.id } }
+        }
+    }
 
     @discardableResult
     func saveEvent(_ event: PlannerEvent) -> Bool {

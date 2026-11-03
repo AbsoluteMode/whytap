@@ -1009,7 +1009,7 @@ WHY: .project-docs/decisions/2026-10-21-calendar-hover.md
 Agents add tasks with `Contents/Helpers/whytap todo add "<task>" …` (or `add -`
 from stdin) and read them with `todo list [--all]`: JSON confirmation over the
 authenticated helper socket while Whytap runs (todo_add/todo_list app-control
-operations, not exposed over MCP); with nothing listening the helper edits the
+operations, also whytap_todo_add/list in `whytap app mcp`); with nothing listening the helper edits the
 file itself, never launching the app. Both sides hold planner-v1.json.lock; the
 store adopts newer file contents before each save and watches the folder.
 Batches of 1–100 are validated whole; matching active titles are not duplicated.
@@ -1072,7 +1072,8 @@ async model checks recheck the route and cancellation before assignment. It
 shares Case's authenticated bundled-helper transport but never loads its vault
 or uses its registrations/grants. Any local process running that helper as the
 user can access these non-secret settings; no arbitrary defaults, keys,
-security controls, user content, recording, shell execution or quit are exposed.
+security controls, user content (except To-do titles via whytap_todo_*),
+recording, shell execution or quit are exposed.
 Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
 

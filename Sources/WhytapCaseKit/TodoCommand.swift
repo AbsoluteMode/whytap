@@ -37,18 +37,8 @@ public final class TodoCommand {
                     guard titles.count <= PlannerTodoFile.maxBatch else { break }
                 }
             }
-            do { titles = try PlannerTodoFile.validatedTitles(titles) } catch let failure as PlannerTodoFile.Failure {
-                emit(failure.response, write)
-                return 2
-            } catch { return 2 }
             operation = "todo_add"
             arguments = ["titles": .array(titles.map(AppControlValue.string))]
-            // The app's socket reads at most 64 KiB per request; say so instead of failing unconfirmed.
-            let line = try? CaseBrokerCodec.encodeLine(CaseBrokerRequest.appControl(AppControlRequest(operation, arguments: arguments)))
-            guard let line, line.count <= Self.maxRequestBytes else {
-                emit(.failure("batch_too_large", "This batch is too large for one request. Split it into smaller batches; nothing was added."), write)
-                return 2
-            }
         case "list" where args.count == 1 || args.dropFirst() == ["--all"]:
             operation = "todo_list"
             arguments = args.count == 2 ? ["includeCompleted": .bool(true)] : [:]
@@ -56,25 +46,57 @@ public final class TodoCommand {
             write(Self.usage)
             return 2
         }
+        let response = respond(operation, arguments)
+        emit(response, write)
+        if response.ok { return 0 }
+        return Self.inputErrors.contains(response.data.object?["code"]?.string ?? "") ? 2 : 1
+    }
 
-        guard let client else {
-            emit(.failure("unavailable", "Use the helper inside the installed Whytap app."), write)
-            return 1
+    /// Codes for a request that is wrong as given; nothing was sent or written.
+    static let inputErrors: Set<String> = ["invalid_arguments", "empty_title", "title_too_long", "batch_too_large"]
+
+    /// `todo_add {titles: [String]}` or `todo_list {includeCompleted?: Bool}`, shared
+    /// by the CLI and the `whytap app mcp` tools: validated locally, delivered to the
+    /// running app, or applied to the file when nothing listens.
+    public func respond(_ operation: String, _ arguments: [String: AppControlValue]) -> AppControlResponse {
+        var arguments = arguments
+        switch operation {
+        case "todo_add":
+            guard arguments.keys.allSatisfy({ $0 == "titles" }),
+                  let raw = arguments["titles"]?.array, raw.allSatisfy({ $0.string != nil }) else {
+                return .failure("invalid_arguments", "Pass titles as an array of 1–\(PlannerTodoFile.maxBatch) strings.")
+            }
+            do {
+                arguments["titles"] = .array(try PlannerTodoFile.validatedTitles(raw.compactMap(\.string)).map(AppControlValue.string))
+            } catch let failure as PlannerTodoFile.Failure { return failure.response } catch {
+                return .failure("invalid_arguments", "Invalid task titles.")
+            }
+            // The app's socket reads at most 64 KiB per request; say so instead of failing unconfirmed.
+            let line = try? CaseBrokerCodec.encodeLine(CaseBrokerRequest.appControl(AppControlRequest(operation, arguments: arguments)))
+            guard let line, line.count <= Self.maxRequestBytes else {
+                return .failure("batch_too_large", "This batch is too large for one request. Split it into smaller batches; nothing was added.")
+            }
+        case "todo_list":
+            guard arguments.keys.allSatisfy({ $0 == "includeCompleted" }),
+                  arguments["includeCompleted"] == nil || arguments["includeCompleted"]?.bool != nil else {
+                return .failure("invalid_arguments", "includeCompleted must be a boolean.")
+            }
+        default:
+            return .failure("unknown_operation", "Unknown to-do operation.")
         }
-        let response: AppControlResponse
+
+        guard let client else { return .failure("unavailable", "Use the helper inside the installed Whytap app.") }
         do {
             guard case .appControl(let answer) = try client.send(.appControl(AppControlRequest(operation, arguments: arguments))) else {
                 throw CaseBrokerClientError.protocolFailure
             }
-            response = answer
+            return answer
         } catch CaseBrokerClientError.unavailable {
             // Nothing was sent and no app is listening: use the file directly.
-            response = offline(operation, arguments)
+            return offline(operation, arguments)
         } catch {
-            response = .failure("unconfirmed", "Whytap did not confirm the request. Run `whytap todo list` to check; retrying add is safe because matching active tasks are not duplicated.")
+            return .failure("unconfirmed", "Whytap did not confirm the request. Run `whytap todo list` to check; retrying add is safe because matching active tasks are not duplicated.")
         }
-        emit(response, write)
-        return response.ok ? 0 : 1
     }
 
     private func offline(_ operation: String, _ arguments: [String: AppControlValue]) -> AppControlResponse {

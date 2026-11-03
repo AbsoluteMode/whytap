@@ -3,7 +3,8 @@ import Foundation
 /// Uses only `.appControl` requests, even when sharing the authenticated socket.
 public final class AppControlCommand {
     private let client: CaseBrokerCalling?
-    public init(client: CaseBrokerCalling?) { self.client = client }
+    private let todo: TodoCommand?
+    public init(client: CaseBrokerCalling?, todo: TodoCommand? = nil) { self.client = client; self.todo = todo }
 
     public func call(_ request: AppControlRequest) -> AppControlResponse {
         call(request, cancellation: nil)
@@ -29,7 +30,8 @@ public final class AppControlCommand {
         FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
     }) -> Int32 {
         if args == ["mcp"] || args == ["screen-mcp"] {
-            let server = AppControlMCPServer(screenOnly: args == ["screen-mcp"], cancellableCall: { self.call($0, cancellation: $1) })
+            let server = AppControlMCPServer(screenOnly: args == ["screen-mcp"], todo: todo.map { todo in { todo.respond($0, $1) } },
+                                             cancellableCall: { self.call($0, cancellation: $1) })
             server.run(readLine: readLine, write: write)
             return 0
         }

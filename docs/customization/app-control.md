@@ -29,6 +29,8 @@ Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
 | `whytap_list_providers` | `providers` | OpenRouter endpoints for the current model; free metadata request |
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |
+| `whytap_todo_add` | `whytap todo add` | Add a batch of To-do tasks; confirms what was saved, retry-safe |
+| `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
 
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
@@ -38,8 +40,11 @@ no arbitrary UserDefaults operation. Keys, permissions, security controls,
 Case contents, transcripts, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
 
-`whytap todo add | list` uses the same authenticated transport for To-do tasks
-(user content, not exposed over MCP); see `docs/planner.md`.
+The To-do tools carry task titles (user content) through the same path as
+`whytap todo`: the running app over the authenticated socket, or the planner
+file under its lock when Whytap is closed. They never launch Whytap; see
+`docs/planner.md`. The server's instructions point agents to local meeting
+notes so "split this call into tasks" works without extra setup.
 
 Feature IDs are `dropFast`, `dropSmart`, `dropSmartCleanup`, `meetings`,
 `meetingNotes`, `agent`, `agentVoice`, `voiceSearch`, `translation`,
@@ -129,6 +134,12 @@ Use a local marketplace to install it in Codex. The package is not publicly
 published and does not require a hosted Whytap service. Other MCP hosts can
 configure the helper command with `app`, `mcp` for application controls and
 `case`, `mcp` for Case discovery directly.
+
+Claude Code needs no checkout; on each Mac run once:
+
+```sh
+claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+```
 
 With the current Codex CLI, run from this checkout:
 

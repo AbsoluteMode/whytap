@@ -80,7 +80,14 @@ be silently lost.
 To-do titles are user content, an exception to the app-control allowlist,
 which otherwise excludes user content. The exposure is no wider than before:
 any process able to run the helper as this user can already read and write the
-user-private planner file. The operations are not added to the MCP server.
+user-private planner file.
+
+Update, same day: the user expected any Claude on any of their Macs to find
+this without repository instructions ("decompose the call into tasks"), so
+`whytap app mcp` exposes `whytap_todo_add` / `whytap_todo_list`. They call
+`TodoCommand.respond`, the same non-launching path and validation as the CLI,
+never the launching app-control client. The server instructions mention the
+local meeting-notes folder; the tools read no notes themselves.
 
 ## What was tested
 

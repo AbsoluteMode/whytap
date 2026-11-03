@@ -38,6 +38,9 @@ no arbitrary UserDefaults operation. Keys, permissions, security controls,
 Case contents, transcripts, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
 
+`whytap todo add | list` uses the same authenticated transport for To-do tasks
+(user content, not exposed over MCP); see `docs/planner.md`.
+
 Feature IDs are `dropFast`, `dropSmart`, `dropSmartCleanup`, `meetings`,
 `meetingNotes`, `agent`, `agentVoice`, `voiceSearch`, `translation`,
 `subtitlesAudio`, `subtitlesTranslation`, `meetingAssistant` and `meetingAssistantAudio`. Accounts use the exact ID returned

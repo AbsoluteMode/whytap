@@ -1,4 +1,5 @@
 import Foundation
+import WhytapCaseKit
 
 struct PlannerTask: Codable, Identifiable, Equatable, Sendable {
     var id = UUID()
@@ -79,10 +80,12 @@ struct PlannerEvent: Codable, Identifiable, Equatable, Sendable {
 }
 
 /// Private local data. Failed loads block writes; failed writes never change the visible data.
+/// Other writers (`whytap todo` while the app is closed, scripts) are adopted
+/// before every save and, for the shared store, as soon as the folder changes.
+// WHY: .project-docs/decisions/2026-11-03-todo-helper.md
 @MainActor
 final class PlannerStore: ObservableObject {
-    static let shared = PlannerStore(url: FileManager.default.urls(for: .applicationSupportDirectory,
-        in: .userDomainMask)[0].appendingPathComponent("Sidekey/Planner/planner-v1.json"))
+    static let shared = PlannerStore(url: PlannerTodoFile.defaultURL, observesExternalChanges: true)
 
     struct Archive: Codable, Equatable, Sendable {
         var version = 1
@@ -95,8 +98,11 @@ final class PlannerStore: ObservableObject {
     @Published private(set) var canWrite = false
     private let url: URL
     private let write: (Data, URL) throws -> Void
+    /// The bytes last read from or written to `url`; nil while no file exists.
+    private var diskSnapshot: Data?
+    nonisolated(unsafe) private var watcher: DispatchSourceFileSystemObject?
 
-    init(url: URL, write: @escaping (Data, URL) throws -> Void = { data, url in
+    init(url: URL, observesExternalChanges: Bool = false, write: @escaping (Data, URL) throws -> Void = { data, url in
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
@@ -107,35 +113,62 @@ final class PlannerStore: ObservableObject {
         self.url = url
         self.write = write
         reload()
+        if observesExternalChanges { startWatching() }
     }
+
+    deinit { watcher?.cancel() }
 
     func reload() {
         do {
-            let loaded: Archive
-            do {
-                loaded = try Self.decodeArchive(Data(contentsOf: url, options: .mappedIfSafe))
-            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-                loaded = Archive()
-            }
-            archive = loaded
+            let data = try readDisk()
+            archive = try data.map(Self.decodeArchive) ?? Archive()
+            diskSnapshot = data
             canWrite = true
             errorMessage = nil
         } catch {
             canWrite = false
-            errorMessage = "Couldn’t read your planner. Your saved file has been kept. Restore access or a backup, then retry."
+            errorMessage = Self.readFailureMessage
         }
+    }
+
+    /// Shows changes another writer saved. A broken file blocks writes and keeps
+    /// the current view; Retry (or a later valid file) recovers.
+    func refreshFromDisk() {
+        if canWrite { adoptExternalChanges() } else { reload() }
+    }
+
+    /// Batch add for the helper and agents: one validated, atomic save. An active
+    /// task with the same title is reported as existing, so a retry adds nothing.
+    func addTasks(_ titles: [String], now: Date = Date()) throws -> [PlannerTodoFile.Planned] {
+        let titles = try PlannerTodoFile.validatedTitles(titles)
+        var planned: [PlannerTodoFile.Planned] = []
+        var overflow = false
+        let saved = commit { value in
+            planned = PlannerTodoFile.plan(titles, active: value.tasks.filter { !$0.completed }.map { ($0.id, $0.title) })
+            let new = planned.filter(\.isNew)
+            guard value.tasks.count + new.count <= PlannerTodoFile.maxTasks else { overflow = true; return }
+            value.tasks += new.map { PlannerTask(id: $0.id, title: $0.title, createdAt: now) }
+        }
+        if overflow {
+            throw PlannerTodoFile.Failure("too_many_tasks", "The to-do list is limited to \(PlannerTodoFile.maxTasks) tasks. Nothing was added.")
+        }
+        guard saved else {
+            throw canWrite ? PlannerTodoFile.Failure("save_failed", errorMessage ?? Self.saveFailureMessage)
+                : PlannerTodoFile.Failure("planner_unreadable", Self.readFailureMessage)
+        }
+        return planned
     }
 
     @discardableResult
     func saveTask(_ task: PlannerTask, now: Date = Date()) -> Bool {
         var task = task
         task.title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let previous = archive.tasks.first { $0.id == task.id }
-        if !task.completed { task.completedAt = nil }
-        else if previous?.completed == false || previous == nil { task.completedAt = now }
-        else { task.completedAt = previous?.completedAt }
         guard Self.validationMessage(for: task) == nil else { return false }
         return commit { value in
+            let previous = value.tasks.first { $0.id == task.id }
+            if !task.completed { task.completedAt = nil }
+            else if previous?.completed == false || previous == nil { task.completedAt = now }
+            else { task.completedAt = previous?.completedAt }
             if let index = value.tasks.firstIndex(where: { $0.id == task.id }) { value.tasks[index] = task }
             else { value.tasks.append(task) }
         }
@@ -158,41 +191,78 @@ final class PlannerStore: ObservableObject {
     @discardableResult
     func deleteEvent(_ id: UUID) -> Bool { commit { $0.events.removeAll { $0.id == id } } }
 
+    /// Applies `change` to the newest saved archive under the lock `whytap todo` also holds.
     private func commit(_ change: (inout Archive) -> Void) -> Bool {
         guard canWrite else { return false }
-        var candidate = archive
-        change(&candidate)
         do {
-            let data = try JSONEncoder().encode(candidate)
-            _ = try Self.decodeArchive(data)
-            try write(data, url)
-            archive = candidate
-            errorMessage = nil
-            NotificationCenter.default.post(name: .exodiaBackupArtifactsChanged, object: nil)
-            return true
+            return try PlannerTodoFile.withLock(for: url, timeout: 0.5) {
+                guard adoptExternalChanges() else { return false }
+                var candidate = archive
+                change(&candidate)
+                guard candidate != archive else { return true }
+                let data = try JSONEncoder().encode(candidate)
+                _ = try Self.decodeArchive(data)
+                try write(data, url)
+                archive = candidate
+                diskSnapshot = data
+                errorMessage = nil
+                NotificationCenter.default.post(name: .exodiaBackupArtifactsChanged, object: nil)
+                return true
+            }
         } catch {
-            errorMessage = "Couldn’t save your changes. Check available storage and folder access, then try again."
+            errorMessage = Self.saveFailureMessage
             return false
         }
     }
 
+    /// Adopts the file when another writer changed it since our last read/write.
+    @discardableResult
+    private func adoptExternalChanges() -> Bool {
+        do {
+            let data = try readDisk()
+            guard data != diskSnapshot else { return true }
+            archive = try data.map(Self.decodeArchive) ?? Archive()
+            diskSnapshot = data
+            return true
+        } catch {
+            canWrite = false
+            errorMessage = Self.readFailureMessage
+            return false
+        }
+    }
+
+    private func readDisk() throws -> Data? {
+        do { return try Data(contentsOf: url) }
+        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
+    }
+
+    /// Atomic saves replace the file, so the folder is watched rather than the file.
+    /// In-place edits that do not touch the folder are still adopted on the next save.
+    private func startWatching() {
+        let directory = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete], queue: .main)
+        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.refreshFromDisk() } }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        watcher = source
+    }
+
+    private static let readFailureMessage = "Couldn’t read your planner. Your saved file has been kept. Restore access or a backup, then retry."
+    private static let saveFailureMessage = "Couldn’t save your changes. Check available storage and folder access, then try again."
+
     nonisolated static func decodeArchive(_ data: Data) throws -> Archive {
-        guard data.count <= 8 * 1024 * 1024 else { throw StoreError.invalid }
-        let loaded = try JSONDecoder().decode(Archive.self, from: data)
-        guard loaded.version == 1, loaded.tasks.count <= 10_000, loaded.events.count <= 10_000,
-              Set(loaded.tasks.map(\.id)).count == loaded.tasks.count,
-              Set(loaded.events.map(\.id)).count == loaded.events.count,
-              loaded.tasks.allSatisfy({ validTitle($0.title) && $0.createdAt.timeIntervalSince1970.isFinite && ($0.completedAt?.timeIntervalSince1970.isFinite ?? true) }),
-              loaded.events.allSatisfy(validEvent) else { throw StoreError.invalid }
-        return loaded
+        // One rule set with `whytap todo`, which edits the file while the app is closed.
+        guard PlannerTodoFile.isValidArchive(data) else { throw StoreError.invalid }
+        return try JSONDecoder().decode(Archive.self, from: data)
     }
 
     nonisolated private static func validTitle(_ title: String) -> Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.count <= 500
-    }
-
-    nonisolated private static func validEvent(_ event: PlannerEvent) -> Bool {
-        validationMessage(for: event) == nil
+        PlannerTodoFile.isValidTitle(title)
     }
 
     nonisolated static func validationMessage(for task: PlannerTask) -> String? {

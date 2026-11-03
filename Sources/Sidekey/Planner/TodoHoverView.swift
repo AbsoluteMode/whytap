@@ -28,6 +28,8 @@ final class TodoHoverModel: ObservableObject {
 
     func begin() {
         guard !visible else { return }
+        // Shows tasks agents added through the file while the panel was closed.
+        store.refreshFromDisk()
         completedThisOpening = []
         showingHistory = false
         validationMessage = nil

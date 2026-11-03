@@ -1,4 +1,5 @@
 import Foundation
+import WhytapCaseKit
 
 enum CalendarProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     case apple, google, microsoft, zoom
@@ -129,9 +130,7 @@ enum CalendarDateCodec {
     static func string(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
 
     static func safeURL(_ raw: String?) -> URL? {
-        guard let raw, let url = URL(string: raw), url.scheme?.lowercased() == "https",
-              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
-        return url
+        PlannerTodoFile.safeMeetingURL(raw)
     }
 
     static func meetingURL(in text: String) -> URL? {

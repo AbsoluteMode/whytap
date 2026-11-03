@@ -29,6 +29,8 @@ public enum AppControlValue: Codable, Equatable {
     public var string: String? { if case .string(let v) = self { return v }; return nil }
     public var object: [String: Self]? { if case .object(let v) = self { return v }; return nil }
     public var int: Int? { if case .int(let v) = self { return v }; return nil }
+    public var bool: Bool? { if case .bool(let v) = self { return v }; return nil }
+    public var array: [Self]? { if case .array(let v) = self { return v }; return nil }
 }
 
 public struct AppControlRequest: Codable, Equatable {

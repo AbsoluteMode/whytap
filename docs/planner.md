@@ -45,6 +45,11 @@ batch (exit 2). Exit 1 reports `code`/`message`: `unconfirmed` (check with
 `unknown_operation` (the running Whytap predates this command; update it).
 The helper never launches Whytap. `open whytap://tool/tasks` shows the list.
 
+MCP hosts get the same operations as `whytap_todo_add` / `whytap_todo_list`
+from `whytap app mcp` (see `docs/customization/app-control.md`), so an agent can
+split a meeting note into tasks on any Mac with Whytap installed. Meeting notes
+are local Markdown files in Application Support/Sidekey/Meetings.
+
 The local planner is stored privately in Application Support/Sidekey/Planner.
 Changes persist atomically before appearing in the interface. A newer file
 saved by the helper or another local writer is adopted before every save and

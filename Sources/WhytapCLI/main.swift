@@ -29,7 +29,8 @@ if CommandLine.arguments.dropFirst().first == "todo" {
     exit(TodoCommand(client: directClient).run(args: Array(CommandLine.arguments.dropFirst(2))))
 }
 if CommandLine.arguments.dropFirst().first == "app" {
-    exit(AppControlCommand(client: client).run(args: Array(CommandLine.arguments.dropFirst(2))))
+    // `app mcp` also serves the To-do tools through the same non-launching path.
+    exit(AppControlCommand(client: client, todo: TodoCommand(client: directClient)).run(args: Array(CommandLine.arguments.dropFirst(2))))
 }
 exit(CaseCommand(client: client, executablePath: resolvedPath, unavailableMessage: message)
     .run(args: Array(CommandLine.arguments.dropFirst())))

@@ -54,11 +54,11 @@ the ones completed with it.
 
 ```sh
 W=/Applications/Whytap.app/Contents/Helpers/whytap
-$W todo add --json '[{"title": "Исследовать клин", "children": [
-  {"title": "Запустить проверку на последних 30 картах", "status": "готово, результаты отправил Свете в тг",
-   "children": [{"title": "Согласовать план со Светой", "status": "жду фидбека Светы"}]}]}]'
-$W todo add --parent 1A2B3C4D --status "в работе" "Сравнить с прошлой неделей"
-$W todo set 1A2B3C4D --title "Новое название" --status "готово"   # --no-status clears, --top / --parent moves
+$W todo add --json '[{"title": "Research the cleaner", "children": [
+  {"title": "Run the check on the last 30 cards", "status": "done, results sent to Sveta",
+   "children": [{"title": "Agree the plan with Sveta", "status": "waiting for feedback from Sveta"}]}]}]'
+$W todo add --parent 1A2B3C4D --status "in progress" "Compare with last week"
+$W todo set 1A2B3C4D --title "New title" --status "done"   # --no-status clears, --top / --parent moves
 $W todo done 1A2B3C4D       # closes the task and its open subtasks
 $W todo reopen 1A2B3C4D
 ```

@@ -16,6 +16,7 @@ public final class TodoCommand {
 
     /// Below the broker's 64 KiB request limit (`CaseBrokerServer.defaultMaxRequestBytes`).
     static let maxRequestBytes = 60 * 1024
+    static let maxStdinBytes = 1024 * 1024
 
     public static let usage = """
         Usage: whytap todo add [--parent ID] [--status TEXT] "<task>" ["<task>" ...]
@@ -31,7 +32,12 @@ public final class TodoCommand {
 
     public func run(args: [String], readLine: () -> String? = { Swift.readLine() },
                     write: (String) -> Void = { FileHandle.standardOutput.write(Data(($0 + "\n").utf8)) }) -> Int32 {
-        guard let (operation, arguments) = parse(args, readLine: readLine) else {
+        let parsed: (String, [String: AppControlValue])?
+        do { parsed = try parse(args, readLine: readLine) } catch let failure as PlannerTodoFile.Failure {
+            emit(failure.response, write)
+            return 2
+        } catch { return 2 }
+        guard let (operation, arguments) = parsed else {
             write(Self.usage)
             return 2
         }
@@ -41,7 +47,10 @@ public final class TodoCommand {
         return Self.inputErrors.contains(response.data.object?["code"]?.string ?? "") ? 2 : 1
     }
 
-    private func parse(_ args: [String], readLine: () -> String?) -> (String, [String: AppControlValue])? {
+    private static let oversized = PlannerTodoFile.Failure(
+        "batch_too_large", "This batch is too large for one request. Split it into smaller batches; nothing was changed.")
+
+    private func parse(_ args: [String], readLine: () -> String?) throws -> (String, [String: AppControlValue])? {
         guard let command = args.first else { return nil }
         var rest = Array(args.dropFirst())
         func take(_ flag: String) -> String?? {
@@ -64,6 +73,16 @@ public final class TodoCommand {
             }
             return lines
         }
+        /// The whole of stdin for `--json -`: pretty JSON spans many lines.
+        /// Bounded well above the socket limit; a larger input is reported as too large.
+        func stdinDocument() -> String? {
+            var text = ""
+            while let line = readLine() {
+                text += line + "\n"
+                guard text.utf8.count <= Self.maxStdinBytes else { return nil }
+            }
+            return text
+        }
         switch command {
         case "add":
             guard let parent = take("--parent"), let status = take("--status"), let json = take("--json") else { return nil }
@@ -71,7 +90,7 @@ public final class TodoCommand {
             if let parent { arguments["parentID"] = .string(parent) }
             if let json {
                 guard rest.isEmpty, status == nil else { return nil }
-                let text = json == "-" ? stdinLines().joined(separator: "\n") : json
+                guard let text = json == "-" ? stdinDocument() : json else { throw Self.oversized }
                 // Malformed JSON reaches validation as a non-array and is reported there.
                 arguments["tasks"] = (try? JSONDecoder().decode(AppControlValue.self, from: Data(text.utf8))) ?? .string(text)
                 return ("todo_add", arguments)
@@ -124,7 +143,7 @@ public final class TodoCommand {
             // The app's socket reads at most 64 KiB per request; say so instead of failing unconfirmed.
             let line = try? CaseBrokerCodec.encodeLine(CaseBrokerRequest.appControl(AppControlRequest(operation, arguments: request.arguments)))
             guard let line, line.count <= Self.maxRequestBytes else {
-                return .failure("batch_too_large", "This batch is too large for one request. Split it into smaller batches; nothing was changed.")
+                return Self.oversized.response
             }
         }
         guard let client else { return .failure("unavailable", "Use the helper inside the installed Whytap app.") }

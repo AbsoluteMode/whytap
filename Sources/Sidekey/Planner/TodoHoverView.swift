@@ -75,6 +75,16 @@ final class TodoHoverModel: ObservableObject {
         }
     }
 
+    enum SubtaskEligibility { case allowed, tooDeep, completed }
+    static let actionSlotWidth: CGFloat = 18
+
+    /// One rule for the hover "+" and the context menu: open tasks above the
+    /// deepest level. The deepest level shows the button disabled.
+    static func subtaskEligibility(for row: TodoHoverRowModel) -> SubtaskEligibility {
+        if row.task.completed { return .completed }
+        return row.depth + 1 < TodoTree.maxDepth ? .allowed : .tooDeep
+    }
+
     func toggleCollapsed(_ id: UUID) {
         if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) }
     }
@@ -82,7 +92,9 @@ final class TodoHoverModel: ObservableObject {
     func beginEditing(_ kind: TodoInlineEditor.Kind) {
         guard let task = store.archive.tasks.first(where: { $0.id == kind.taskID }) else { return }
         switch kind {
-        case .subtask: editor = TodoInlineEditor(kind: kind, text: ""); collapsed.remove(task.id)
+        case .subtask:
+            guard !task.completed, TodoTree.depth(of: task.id, in: store.archive.tasks.map(\.node)) < TodoTree.maxDepth else { return }
+            editor = TodoInlineEditor(kind: kind, text: ""); collapsed.remove(task.id)
         case .status: editor = TodoInlineEditor(kind: kind, text: task.status ?? "")
         case .title: editor = TodoInlineEditor(kind: kind, text: task.title)
         }
@@ -355,13 +367,20 @@ private struct TodoHoverRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
 
-            if !showingHistory, !task.completed, hovering, model.editor == nil {
+            if !showingHistory {
+                // A fixed slot: showing the button on hover never reflows the title.
+                let eligibility = TodoHoverModel.subtaskEligibility(for: row)
                 Button { model.beginEditing(.subtask(parent: task.id)); editorFocused.wrappedValue = true } label: {
-                    Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).frame(width: 18, height: 18)
+                    Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                        .frame(width: TodoHoverModel.actionSlotWidth, height: 18)
                         .background(.white.opacity(0.12), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Add subtask")
+                .disabled(eligibility != .allowed)
+                .opacity(hovering && model.editor == nil && eligibility != .completed ? (eligibility == .allowed ? 1 : 0.35) : 0)
+                .allowsHitTesting(hovering && eligibility == .allowed)
+                .help(eligibility == .tooDeep ? "To-do allows \(TodoTree.maxDepth) levels" : "Add subtask")
+                .accessibilityHidden(eligibility == .completed)
                 .accessibilityLabel("Add subtask to \(task.title)")
             }
         }
@@ -378,7 +397,7 @@ private struct TodoHoverRow: View {
             if !showingHistory {
                 if !task.completed {
                     Button("Add Subtask") { model.beginEditing(.subtask(parent: task.id)); editorFocused.wrappedValue = true }
-                        .disabled(row.depth + 1 >= TodoTree.maxDepth)
+                        .disabled(TodoHoverModel.subtaskEligibility(for: row) != .allowed)
                 }
                 Button(task.status == nil ? "Add Status" : "Edit Status") {
                     model.beginEditing(.status(task.id)); editorFocused.wrappedValue = true

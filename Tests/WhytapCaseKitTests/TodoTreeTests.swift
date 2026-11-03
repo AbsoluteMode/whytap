@@ -77,6 +77,30 @@ final class TodoTreeTests: XCTestCase {
         XCTAssertEqual(rows.last?["status"], .string("в работе"), "\(rows.map { ($0["title"], $0["status"], $0["createdAt"]) })")
     }
 
+    /// Agents often pipe pretty-printed JSON: many lines, more than 100 of them.
+    func testPrettyJSONFromStdinIsReadWhole() throws {
+        let tasks: [AppControlValue] = (1...30).map { index in
+            .object(["title": .string("Step \(index)"), "status": .string("status \(index)"),
+                     "children": .array([.object(["title": .string("Detail \(index)")])])])
+        }
+        let pretty = JSONEncoder()
+        pretty.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let text = String(decoding: try pretty.encode(AppControlValue.array(tasks)), as: UTF8.self)
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertGreaterThan(lines.count, 200)
+        let (status, data) = run(["add", "--json", "-"], stdin: lines)
+        XCTAssertEqual(status, 0, "\(data)")
+        XCTAssertEqual(data["added"], .int(60))
+        XCTAssertEqual(list().count, 60)
+        XCTAssertEqual(list().first { $0["title"] == .string("Step 30") }?["status"], .string("status 30"))
+
+        let huge = Array(repeating: String(repeating: " ", count: 1023), count: 1100)
+        let (tooLarge, refusal) = run(["add", "--json", "-"], stdin: huge)
+        XCTAssertEqual(tooLarge, 2)
+        XCTAssertEqual(refusal["code"], .string("batch_too_large"))
+        XCTAssertEqual(list().count, 60)
+    }
+
     func testClosingParentClosesChildrenAndReopenRestoresOnlyThose() throws {
         run(["add", "--json", meeting])
         run(["add", "--parent", id("Исследовать клин"), "Отдельно закрытая"])

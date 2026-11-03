@@ -110,6 +110,30 @@ final class TodoTreeHoverTests: XCTestCase {
         XCTAssertEqual(store.archive.tasks.count, 2)
     }
 
+    /// The hover "+" and the context menu share one rule; the deepest level
+    /// and closed tasks never open a subtask field.
+    func testSubtaskEligibilityAtDepthAndForClosedTasks() throws {
+        let store = PlannerStore(url: url)
+        var parent: UUID?
+        for level in 1...TodoTree.maxDepth {
+            parent = try store.addTasks(["Level \(level)"], under: parent).first?.id
+        }
+        let model = TodoHoverModel(store: store)
+        model.begin()
+        XCTAssertEqual(model.rows.map(\.depth), [0, 1, 2, 3, 4])
+        XCTAssertEqual(model.rows.map { TodoHoverModel.subtaskEligibility(for: $0) },
+                       [.allowed, .allowed, .allowed, .allowed, .tooDeep])
+        model.beginEditing(.subtask(parent: try XCTUnwrap(model.rows.last?.id)))
+        XCTAssertNil(model.editor, "The deepest level cannot open a subtask field")
+
+        let leaf = try XCTUnwrap(model.rows.first?.id)
+        model.toggle(leaf)
+        XCTAssertEqual(TodoHoverModel.subtaskEligibility(for: try XCTUnwrap(model.rows.first)), .completed)
+        model.beginEditing(.subtask(parent: leaf))
+        XCTAssertNil(model.editor)
+        XCTAssertEqual(TodoHoverModel.actionSlotWidth, 18, "The slot is reserved whether or not the button shows")
+    }
+
     func testAgentUpdateWhileUserWatchesAndFieldErrors() async throws {
         let store = PlannerStore(url: url)
         let controller = AppControlController(planner: { store })

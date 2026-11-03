@@ -21,8 +21,34 @@ Whytap events retain their archive format. This change does not delete local
 content or existing calendar connections. The former Planner editor remains an
 internal compatibility surface; normal Calendar entry points no longer open it.
 
+## Adding tasks from agents and scripts
+
+Coding agents and scripts add tasks with the helper inside the installed app,
+without restarting Whytap:
+
+```sh
+/Applications/Whytap.app/Contents/Helpers/whytap todo add "Send the deck to Anna" "Book the review"
+printf '%s\n' "First task" "Second task" | /Applications/Whytap.app/Contents/Helpers/whytap todo add -
+/Applications/Whytap.app/Contents/Helpers/whytap todo list          # active tasks
+/Applications/Whytap.app/Contents/Helpers/whytap todo list --all    # with completed
+```
+
+Each call prints one JSON object. Exit code 0 means the tasks are saved:
+`delivery` is `app` when the running Whytap saved them (they appear in To-do at
+once) or `file` when Whytap was closed and the helper wrote the planner file
+(they appear on the next launch). `tasks` lists each title with its ID and
+`added` or `existing`. An active task with the same title is not duplicated,
+so retrying is safe. One batch takes 1–100 tasks of 1–500 characters each;
+line breaks inside a task become spaces, and one invalid task rejects the whole
+batch (exit 2). Exit 1 reports `code`/`message`: `unconfirmed` (check with
+`todo list`, then retry), `planner_unreadable` (the file is left unchanged),
+`unknown_operation` (the running Whytap predates this command; update it).
+The helper never launches Whytap. `open whytap://tool/tasks` shows the list.
+
 The local planner is stored privately in Application Support/Sidekey/Planner.
-Changes persist atomically before appearing in the interface. Unreadable or
+Changes persist atomically before appearing in the interface. A newer file
+saved by the helper or another local writer is adopted before every save and
+shown as soon as the folder changes; it is never overwritten. Unreadable or
 unsupported archives block writes and retain the original file; Retry loads a
 restored file. A failed save keeps the editor/draft and reports an error.
 Local tasks and events are not uploaded by calendar connections.

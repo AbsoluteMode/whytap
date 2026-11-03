@@ -21,14 +21,17 @@ final class AppControlController {
     private let activity: () -> AppControlValue
     private let googleCalendarReview: () -> Bool
     private let screenCapture: AgentScreenCapture
+    private let planner: @MainActor () -> PlannerStore
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
          preferences: UserPreferencesCache? = nil, languages: PrivacyPreferences? = nil,
          idle: IslandIdlePreferences? = nil, identity: AppBuildIdentity = .current,
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
+         planner: (@MainActor () -> PlannerStore)? = nil,
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive }) {
         self.screenCapture = screenCapture ?? AgentScreenCapture()
+        self.planner = planner ?? { PlannerStore.shared }
         self.routing = routing ?? .shared
         // Reading status/settings must not read Keychain or initialize model
         // discovery. Model tools construct the view model only when needed.
@@ -60,6 +63,32 @@ final class AppControlController {
         switch request.operation {
         case "capture_screen":
             return await screenCapture.handle(args)
+        // To-do is the one user-content surface here: titles the user's own
+        // processes can already read in the planner file. WHY:
+        // .project-docs/decisions/2026-11-03-todo-helper.md
+        case "todo_add":
+            guard only(args, ["titles"]), let titles = args["titles"]?.array?.compactMap(\.string),
+                  titles.count == args["titles"]?.array?.count else { return invalid() }
+            let store = planner()
+            do {
+                let planned = try store.addTasks(titles)
+                let active = store.archive.tasks.filter { !$0.completed }
+                // Confirm from the saved state, not from the request.
+                guard planned.allSatisfy({ item in active.contains { $0.id == item.id } }) else {
+                    return .failure("unconfirmed", "The saved to-do list does not contain the new tasks.")
+                }
+                return .success(PlannerTodoFile.result(planned, delivery: "app", activeCount: active.count))
+            } catch let failure as PlannerTodoFile.Failure { return failure.response }
+            catch { return .failure("save_failed", "Couldn’t save the to-do list.") }
+        case "todo_list":
+            guard only(args, ["includeCompleted"]),
+                  args["includeCompleted"] == nil || args["includeCompleted"]?.bool != nil else { return invalid() }
+            let store = planner()
+            store.refreshFromDisk()
+            guard store.canWrite else { return .failure("planner_unreadable", store.errorMessage ?? "Couldn’t read the to-do list.") }
+            return .success(PlannerTodoFile.listing(
+                store.archive.tasks.map { ($0.id, $0.title, $0.completed, $0.createdAt) },
+                includeCompleted: args["includeCompleted"]?.bool ?? false, delivery: "app"))
         case "get_state":
             guard args.isEmpty else { return invalid() }
             let features = AIFeature.activeCases.map { feature in

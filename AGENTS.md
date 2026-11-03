@@ -1006,6 +1006,14 @@ through temporary Hover hiding. Only Hover-owned connections pin its menu;
 Settings connections do not. Repeat opens preserve an active connection.
 Success reactivates Hover only if visible; failures retain a retry path.
 WHY: .project-docs/decisions/2026-10-21-calendar-hover.md
+Agents add tasks with `Contents/Helpers/whytap todo add "<task>" …` (or `add -`
+from stdin) and read them with `todo list [--all]`: JSON confirmation over the
+authenticated helper socket while Whytap runs (todo_add/todo_list app-control
+operations, not exposed over MCP); with nothing listening the helper edits the
+file itself, never launching the app. Both sides hold planner-v1.json.lock; the
+store adopts newer file contents before each save and watches the folder.
+Batches of 1–100 are validated whole; matching active titles are not duplicated.
+WHY: .project-docs/decisions/2026-11-03-todo-helper.md
 PlannerStore atomically saves private local tasks
 and Whytap events; unreadable archives block writes. CalendarConnections combines
 selected EventKit calendars with direct Google Calendar, Microsoft Graph (including

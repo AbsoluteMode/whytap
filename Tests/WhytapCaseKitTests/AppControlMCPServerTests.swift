@@ -59,7 +59,7 @@ final class AppControlMCPServerTests: XCTestCase {
             #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"case_list_keys"}}"#,
             #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whytap_set_setting","arguments":[]}}"#,
             #"{"id":1,"method":"tools/call","params":{"name":"whytap_get_state"}}"#,
-            String(repeating: "x", count: 33_000)
+            String(repeating: "x", count: AppControlMCPServer.maxLineBytes + 1)
         ] { XCTAssertNotNil(server.handle(line: invalid)) }
         XCTAssertEqual(calls, 0)
     }
@@ -151,6 +151,39 @@ final class AppControlMCPServerTests: XCTestCase {
         let listed = try toolCall(server, "whytap_todo_list", .object([:]))
         XCTAssertEqual(listed["structuredContent"]?.object?["data"]?.object?["tasks"]?.array?.compactMap { $0.object?["title"]?.string },
                        ["Draft brief", "Book room"])
+    }
+
+    /// The largest advertised batch reaches TodoCommand through the real stdio
+    /// reader: ASCII fits the app's socket, Cyrillic gets a clear batch_too_large.
+    func test_largest_advertised_batch_is_not_a_parse_error() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("todo-mcp-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("planner-v1.json")
+        let server = todoServer(TodoClient(running: false), file: file)
+        func line(_ character: String, escaped: Bool) throws -> String {
+            let titles = (0..<100).map { "\($0) " + String(repeating: character, count: 496) }
+            let request: AppControlValue = .object(["jsonrpc": .string("2.0"), "id": .int(9), "method": .string("tools/call"),
+                "params": .object(["name": .string("whytap_todo_add"), "arguments": .object(["titles": .array(titles.map(AppControlValue.string))])])])
+            let text = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+            // Some hosts \u-escape every non-ASCII character.
+            return escaped ? text.unicodeScalars.map { $0.isASCII ? String($0) : String(format: "\\u%04x", $0.value) }.joined() : text
+        }
+        let ascii = try line("x", escaped: false)
+        XCTAssertGreaterThan(ascii.utf8.count, 32_768)
+        let cyrillic = try line("ж", escaped: true)
+        XCTAssertGreaterThan(cyrillic.utf8.count, 250_000)
+        for (input, expected) in [(ascii, "\"added\":100"), (cyrillic, "batch_too_large")] {
+            let direct = try XCTUnwrap(server.handle(line: input))
+            XCTAssertTrue(direct.contains(expected), String(direct.prefix(300)))
+            var lines = [input][...]
+            var replies: [String] = []
+            let replied = DispatchSemaphore(value: 0)
+            server.run(readLine: {
+                if lines.isEmpty { XCTAssertEqual(replied.wait(timeout: .now() + 10), .success); return nil }
+                return lines.popFirst()
+            }, write: { replies.append($0); replied.signal() })
+            XCTAssertTrue(replies.first?.contains(#""id":9"#) == true)
+        }
     }
 
     /// `whytap app mcp` as the agent host starts it: the command wires the To-do tools.

@@ -27,7 +27,7 @@ public final class AppControlMCPServer {
             output.withLock { write(line) }
         }
         while let line = readLine() {
-            let bytes = line.utf8.count <= 32_768 ? line.data(using: .utf8) : nil
+            let bytes = line.utf8.count <= Self.maxLineBytes ? line.data(using: .utf8) : nil
             let request = bytes.flatMap { try? JSONDecoder().decode(AppControlValue.self, from: $0) }?.object
             if request?["jsonrpc"] == .string("2.0"), request?["method"] == .string("notifications/cancelled"),
                let id = request?["params"]?.object?["requestId"], let key = Self.requestKey(id) {
@@ -50,6 +50,12 @@ public final class AppControlMCPServer {
         group.wait()
     }
 
+    /// Bounded, but above the largest To-do batch the tools advertise (100 titles
+    /// of 500 characters, even with every character \u-escaped by the host).
+    /// Requests the app's socket cannot take get `batch_too_large` from
+    /// TodoCommand instead of a bare parse error.
+    static let maxLineBytes = 512 * 1024
+
     private static func requestKey(_ id: AppControlValue) -> String? {
         switch id {
         case .string(let value): return "s:" + value
@@ -64,7 +70,7 @@ public final class AppControlMCPServer {
     }
 
     private func handle(line: String, cancellation: AppControlCancellation?) -> String? {
-        guard line.utf8.count <= 32_768, let bytes = line.data(using: .utf8),
+        guard line.utf8.count <= Self.maxLineBytes, let bytes = line.data(using: .utf8),
               let value = try? JSONDecoder().decode(AppControlValue.self, from: bytes) else {
             return error(.null, -32700, "Parse error or request too large")
         }

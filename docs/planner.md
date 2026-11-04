@@ -44,6 +44,8 @@ batch (exit 2). Exit 1 reports `code`/`message`: `unconfirmed` (check with
 `todo list`, then retry), `planner_unreadable` (the file is left unchanged),
 `unknown_operation` (the running Whytap predates this command; update it).
 The helper never launches Whytap. `open whytap://tool/tasks` shows the list.
+It also works while the screen is locked, once the Mac has been unlocked
+since startup.
 
 ### Subtasks and statuses
 
@@ -81,6 +83,9 @@ saved by the helper or another local writer is adopted before every save and
 shown as soon as the folder changes; it is never overwritten. Unreadable or
 unsupported archives block writes and retain the original file; Retry loads a
 restored file. A failed save keeps the editor/draft and reports an error.
+The file uses the system's default data protection class, so it stays
+readable while the screen is locked; a file saved by Whytap 2.2.22 or earlier
+moves to that class on its first read.
 Local tasks and events are not uploaded by calendar connections.
 Encrypted backups include the Planner archive, calendar account settings and saved
 OAuth credentials. The local content has its own To-do & calendar archive section;

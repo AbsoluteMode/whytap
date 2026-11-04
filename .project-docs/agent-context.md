@@ -1014,6 +1014,9 @@ file itself, never launching the app. Both sides hold planner-v1.json.lock; the
 store adopts newer file contents before each save and watches the folder.
 Batches of 1–100 are validated whole; matching active titles are not duplicated.
 WHY: .project-docs/decisions/2026-11-03-todo-helper.md
+Both save with CompleteUntilFirstUserAuthentication and migrate older
+CompleteUnlessOpen files on read, so agents reach To-do on a locked screen.
+WHY: .project-docs/decisions/2026-11-04-todo-locked-screen.md
 To-do is a tree (parentID, at most five levels) with optional one-line statuses
 (300 characters). Closing a task closes its open subtasks; reopening restores
 those and reopens closed ancestors. Hover shows indentation, collapse, statuses,

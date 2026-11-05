@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/WhytapCaseKitTests/TodoCommandTests.swift
     confirmed_at: 2026-11-03
-related: [2026-10-19-planner.md, 2026-10-20-todo-hover.md, 2026-10-21-app-control-plugin.md, 2026-11-03-todo-tree.md]
+related: [2026-10-19-planner.md, 2026-10-20-todo-hover.md, 2026-10-21-app-control-plugin.md, 2026-11-03-todo-tree.md, 2026-11-04-todo-locked-screen.md]
 ---
 
 # To-do tasks from agents

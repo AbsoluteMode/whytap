@@ -186,4 +186,26 @@ final class TodoCommandTests: XCTestCase {
         }
         XCTAssertNoThrow(try PlannerTodoFile.withLock(for: url, timeout: 0.05) {})
     }
+
+    /// An agent on a locked Mac: the file must not use a class that only opens
+    /// while the screen is unlocked. Builds up to 2.2.22 saved CompleteUnlessOpen.
+    // WHY: .project-docs/decisions/2026-11-04-todo-locked-screen.md
+    func testHelperMovesArchiveToTheLockedScreenReadableClass() throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let archive: [String: Any] = ["version": 1, "events": [], "tasks": [
+            ["id": UUID().uuidString, "title": "Open", "completed": false, "createdAt": 11.0]]]
+        try JSONSerialization.data(withJSONObject: archive).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        guard protection(url) == .completeUnlessOpen else { throw XCTSkip("This volume has no data protection classes") }
+
+        XCTAssertEqual(tasks(run(["list"], client: closedApp).1).count, 1)
+        XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication, "Reading migrates the old class")
+
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path)
+        XCTAssertEqual(run(["add", "From agent"], client: closedApp).1?.data.object?["added"], .int(1))
+        XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication, "A helper save keeps the readable class")
+    }
+
+    private func protection(_ url: URL) -> FileProtectionType? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.protectionKey] as? FileProtectionType
+    }
 }

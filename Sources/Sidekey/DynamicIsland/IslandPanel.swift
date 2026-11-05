@@ -290,7 +290,6 @@ private final class ClickThroughHostingView<Content: View>: NSHostingView<Conten
         height: IslandFrameLayout.defaultCompactHeight + IslandDropModeControl.hoverPanelHeight
     )
     var acceptsExpandedHitTesting = false
-    var meetingAssistantMagicVisible = false
 
     /// Width of the active left morph zone (the notification pill). `0` when
     /// no notification is on screen. When non-zero the window has grown
@@ -421,8 +420,6 @@ private final class ClickThroughHostingView<Content: View>: NSHostingView<Conten
                                  y: bounds.height - compactSize.height,
                                  width: compactSize.width, height: compactSize.height)
         if compactRect.contains(point) { return true }
-        if acceptsExpandedHitTesting && meetingAssistantMagicVisible,
-           IslandMeetingAssistantPlacement.frame(beside: compactRect).contains(point) { return true }
         if leftZoneWidth > 0 {
             let notificationRect = CGRect(x: compactRect.minX - leftZoneWidth, y: compactRect.minY,
                                           width: compactSize.width + leftZoneWidth, height: compactSize.height)
@@ -508,8 +505,7 @@ enum IslandPanelMouseEventPolicy {
         expanded: Bool,
         notificationActive: Bool,
         musicStripActive: Bool,
-        hoverFrames: [NSRect]? = nil,
-        meetingAssistantMagicVisible: Bool = false
+        hoverFrames: [NSRect]? = nil
     ) -> [NSRect] {
         var frames: [NSRect] = []
         // Idle-hidden: the compact pill is faded to the bare notch, so its rect
@@ -541,9 +537,6 @@ enum IslandPanelMouseEventPolicy {
             acceptsExpandedHitTesting: expanded
         ) {
             frames.append(musicStripFrame)
-        }
-        if !idleHidden && expanded && meetingAssistantMagicVisible {
-            frames.append(IslandMeetingAssistantPlacement.frame(beside: compactFrame))
         }
         frames.append(contentsOf: agentSurfaceFrames)
         return frames
@@ -1427,10 +1420,6 @@ final class IslandPanel: NSPanel {
             onHoverPanelBandHeightChange: { [weak self] height in
                 self?.setHoverBandHeight(height)
             },
-            onMeetingAssistantMagicVisibilityChange: { [weak self] visible in
-                self?.host?.meetingAssistantMagicVisible = visible
-                self?.refreshMouseEventRouting()
-            },
             onAgentAnswerHeightChange: { [weak self] height in
                 self?.setAgentAnswerContentHeight(height)
             },
@@ -1726,8 +1715,7 @@ final class IslandPanel: NSPanel {
             expanded: expanded,
             notificationActive: notificationActive,
             musicStripActive: musicStripActive,
-            hoverFrames: hoverPanelHitZone(layout: layout).activeFrames,
-            meetingAssistantMagicVisible: host?.meetingAssistantMagicVisible ?? false
+            hoverFrames: hoverPanelHitZone(layout: layout).activeFrames
         )
 
         // Keep delivery of the mouse-up we own even after a drag leaves the

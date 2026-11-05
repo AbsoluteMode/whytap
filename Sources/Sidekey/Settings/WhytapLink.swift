@@ -16,7 +16,6 @@ enum WhytapLinkDestination: Equatable {
     /// Open Settings -> Toolbox with this tool's pane selected.
     case toolboxTool(HoverTool)
     case translation(TranslationWindowController.Mode)
-    case meetingAssistant
     /// A well-formed link to something this version does not have (a newer
     /// tile, tab or link kind): only show the island.
     case island
@@ -112,7 +111,6 @@ enum WhytapLink {
         case .translate: return .translation(.text)
         // The window opens idle; subtitles start from its own button.
         case .subtitles: return .translation(.subtitles)
-        case .meetingAssistant: return .meetingAssistant
         // Toolbox shows the pane; the mode switch, recording and capture
         // stay behind its explicit buttons.
         case .dropMode, .meetingRecord, .screenshot: return .toolboxTool(tool)
@@ -135,7 +133,7 @@ enum WhytapLink {
             return false
         case .dropMode, .clipboard, .notifs, .vocab, .caseVault, .filler, .inputLang,
              .outputLang, .hotkeys, .notes, .meetingRecord, .monitor, .brightness, .tasks,
-             .calendar, .translate, .subtitles, .meetingAssistant, .settings, .screenshot:
+             .calendar, .translate, .subtitles, .settings, .screenshot:
             return true
         }
     }

@@ -16,7 +16,6 @@ struct ToolboxDeps {
     var deleteHistoryCard: (HistoryStripCard) async -> Bool = { _ in false }
     var toggleMeetingRecord: () -> Void = {}
     var openScreenshot: () -> Void = {}
-    var openMeetingAssistant: () -> Void = {}
     /// Show an inline tool in this process, without LaunchServices scheme lookup.
     var openHoverPanel: (HoverInlinePanel) -> Void = { _ in }
     var quitApplication: () -> Void = {}

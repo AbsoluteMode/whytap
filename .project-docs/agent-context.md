@@ -218,8 +218,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
   raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
-  reported usage is recorded. The shared model loop applies the same handling
-  to Meeting Assistant's OpenRouter route. Native model requests also emit local
+  reported usage is recorded. Native model requests also emit local
   unified-log events (native-agent): generated turn/request IDs, timings, counts,
   tool/reasoning shape, status and fixed error hints only. No content, route
   strings, external IDs, keys or raw errors; search HTTP is not model traffic.
@@ -268,42 +267,6 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
   WHY: .project-docs/decisions/2026-10-22-native-agent.md
 
-Meeting Assistant Beta:
-  A passive right-hand module uses the approved native design: ready Space picker,
-  plain input, bounded questions/answers, structured replies, two continuations
-  and up to six explicit screenshot attachments. A Toolbox/search tool and
-  whytap://tool/meetingAssistant only show it. With both model routes and a ready
-  Space configured, a metadata-only observer exposes the wand during recognized
-  meetings. Listening starts off on every meeting and requires an explicit wand
-  click; configuration, opening the module and hover never enable it.
-  Meeting Assistant and Meeting Assistant audio have independent initially unset
-  routes. A native provider loop uses only scoped read/list/search tools, without
-  the ordinary Agent's workspace/history, shell, writes, network or Case tools.
-  Coding agents create/edit local manifests with scripts/meeting-space.py; users
-  select ready Spaces. Each file is validated independently; descriptor-relative
-  reads reject traversal, symlinks, hidden/credential paths and out-of-scope access.
-  Database declarations remain unavailable metadata in this Beta. Explicitly
-  enabled listening sends system audio (not microphone) to the selected realtime route,
-  retains only bounded in-memory finals and extracts questions through the chosen
-  answer model. No audio, transcript, images or conversations are written by this
-  feature. Space changes/edits cancel work and revalidate context; closing answers
-  keeps listening. Sleep/quit stop audio and monitoring; wake rechecks the current
-  meeting without resuming capture. Removing a required model stops capture. Protection recreates
-  the panel using the existing Other setting. Guide: docs/meeting-assistant.md.
-  Once both routes and a Space are configured, hover reveals a magic icon right
-  of the recording timer during recognized meetings/Notes (also during a manually
-  active Assistant session). It is translucent off and softly glowing while listening.
-  This secondary action uses a temporary 36pt right wing; base compactWidth and
-  drawer stay matched, so their right edges temporarily differ while it is shown.
-  The wand enables/disables only the current meeting; each later meeting starts
-  off. Errors stop listening until another explicit enable. The module and its
-  API & Models group visibly mark the feature Beta.
-  An observed context ending for 15s stops capture; initial/unrecognized manual
-  sessions need the wand to stop. This mic-activity heuristic cannot identify every call.
-  WHY: docs/decisions/2026-10-26-meeting-assistant-beta-opt-in.md
-  WHY: docs/decisions/2026-10-24-meeting-assistant-session-switch.md
-  WHY: docs/decisions/2026-10-23-meeting-assistant-pilot.md
-
 Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
   floating window (TranslationWindowController). Text mode is a compact two-row
@@ -342,9 +305,8 @@ Meeting Notes:
   History keeps the full date-grouped list. Back from a note preserves its list
   origin; the Settings Meetings entry and direct note links return to overview.
   Both use MeetingListModel and retain refresh, status and confirmed deletion.
-  Load failures preserve existing rows and offer Retry. The vertical overview
-  layout leaves room for future Meeting Assistant presets without showing
-  unfinished controls. UI rationale and behavior: docs/DESIGN.md.
+  Load failures preserve existing rows and offer Retry.
+  UI rationale and behavior: docs/DESIGN.md.
   Always-on detector (mic activity + CoreAudio system audio + FluidAudio
   Silero VAD, the only remaining Core ML model, downloaded from Hugging Face
   on the first speech check; fires only when a recognised meeting app writes
@@ -416,22 +378,9 @@ Meeting Notes:
   the next launch). WHY:
   .project-docs/decisions/2026-10-18-meeting-recovery-dark-wake.md
 
-  Internal opt-in research (no Settings controls): the local
-  sidekey.meetings.liveTestCapture flag adds a separate Soniox stt-rt-v5 stream
-  only when Meetings uses Soniox, and only in source dev builds (9999 / -dev);
-  packaged builds ignore it and remove Sidekey/meeting-assistant-tests at
-  launch. Preserve its explicitly chosen value. It saves
-  private aligned source PCM, signal activity, final diarized tokens and receipt
-  times under Sidekey/meeting-assistant-tests. Normal notes remain unchanged;
-  no automatic suggestions are enabled. The independent 100ms test mixer uses
-  a 150ms jitter allowance and approximate callback timing; source-role labels
-  are experimental. Per-source background calibration warms up for two seconds;
-  unique-time speaker anchors check surrounding audio and never override current
-  overlap or an opposing source. Meeting mic capture keeps its quiet-input boost
-  with a peak limiter and gradual gain release. Guide: docs/meeting-assistant-testing.md. WHY:
-  .project-docs/decisions/2026-10-20-meeting-source-noise-floor.md,
-  .project-docs/decisions/2026-10-19-live-meeting-test-capture.md,
-  .project-docs/decisions/2026-10-22-no-retained-meeting-audio.md
+  Meeting microphone capture keeps its quiet-input boost with a peak limiter
+  and gradual gain release. Retired research capture cannot be enabled.
+  WHY: .project-docs/decisions/2026-10-20-meeting-source-noise-floor.md
 
 Case secrets manager:
   The Case drawer has a 320 pt content viewport (the outer hit band includes

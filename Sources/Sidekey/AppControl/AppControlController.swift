@@ -46,8 +46,7 @@ final class AppControlController {
             return .object(["drop": .string(String(describing: state.phase)),
                             "agent": .string(String(describing: state.agentPhase)),
                             "meetingRecording": .bool(state.meetingRecordingActive),
-                            "translationActive": .bool(state.translationActive),
-                            "meetingAssistantActive": .bool(state.meetingAssistantActive)])
+                            "translationActive": .bool(state.translationActive)])
         }
     }
 

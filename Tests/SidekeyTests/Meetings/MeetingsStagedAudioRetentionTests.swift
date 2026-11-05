@@ -224,43 +224,6 @@ final class MeetingsStagedAudioRetentionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: looseFile.path))
     }
 
-    // MARK: - Research capture
-
-    /// Break caught: a packaged build keeps writing research audio of every
-    /// call while the internal flag is on and Meetings run on Soniox.
-    func test_packaged_build_never_starts_the_research_capture() {
-        let packaged = MeetingLiveTestSettings.isAvailable(buildVersion: "1564", displayVersion: "2.2.17")
-        XCTAssertFalse(MeetingLiveTestSettings.shouldCapture(available: packaged, enabled: true, meetingsAccount: .soniox))
-        for dev in [("9999", "2.2.17"), ("1565", "2.3.0-dev")] {
-            let available = MeetingLiveTestSettings.isAvailable(buildVersion: dev.0, displayVersion: dev.1)
-            XCTAssertTrue(
-                MeetingLiveTestSettings.shouldCapture(available: available, enabled: true, meetingsAccount: .soniox),
-                "a source dev build \(dev) still captures for debugging"
-            )
-            XCTAssertFalse(MeetingLiveTestSettings.shouldCapture(available: available, enabled: false, meetingsAccount: .soniox))
-            XCTAssertFalse(MeetingLiveTestSettings.shouldCapture(available: available, enabled: true, meetingsAccount: .deepgram))
-        }
-    }
-
-    /// Break caught: research audio of earlier calls stays on disk after the
-    /// packaged build stopped capturing, or a dev build loses its captures.
-    func test_packaged_build_removes_earlier_research_captures_and_dev_build_keeps_them() throws {
-        let root = tempRoot.appendingPathComponent("meeting-assistant-tests", isDirectory: true)
-        let session = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
-        try Data([0x01]).write(to: session.appendingPathComponent("mixed.pcm"))
-
-        MeetingLiveTestSettings.removeCapturesIfUnavailable(
-            available: MeetingLiveTestSettings.isAvailable(buildVersion: "9999", displayVersion: "2.2.17"), root: root
-        )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: session.appendingPathComponent("mixed.pcm").path))
-
-        MeetingLiveTestSettings.removeCapturesIfUnavailable(
-            available: MeetingLiveTestSettings.isAvailable(buildVersion: "1564", displayVersion: "2.2.17"), root: root
-        )
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
-    }
-
     // MARK: - Fixtures
 
     private func makeStore() throws -> MeetingsStore {

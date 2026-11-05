@@ -34,14 +34,20 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     case meetingNotes
     case agent
     case agentVoice
-    case meetingAssistant
-    case meetingAssistantAudio
+    // Historical usage IDs only; no runtime, settings row or assignable route.
+    case retiredMeetingText = "meetingAssistant"
+    case retiredMeetingAudio = "meetingAssistantAudio"
     case voiceSearch
     case translation
     case subtitlesAudio
     case subtitlesTranslation
 
-    var isActive: Bool { self != .dropSmartDecision }
+    var isActive: Bool {
+        switch self {
+        case .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio: return false
+        default: return true
+        }
+    }
     static var activeCases: [AIFeature] { allCases.filter(\.isActive) }
 
     var title: String {
@@ -54,8 +60,8 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .meetingNotes: return "Meeting notes"
         case .agent: return "Agent"
         case .agentVoice: return "Agent voice"
-        case .meetingAssistant: return "Meeting Assistant"
-        case .meetingAssistantAudio: return "Meeting Assistant audio"
+        case .retiredMeetingText: return "Retired meeting text"
+        case .retiredMeetingAudio: return "Retired meeting audio"
         case .voiceSearch: return "Voice search"
         case .translation: return "Translation"
         case .subtitlesAudio: return "Subtitles audio"
@@ -65,10 +71,10 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
 
     var mode: AIFeatureMode {
         switch self {
-        case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return .realtime
+        case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .retiredMeetingAudio: return .realtime
         case .meetings: return .recorded
         case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return .llm
-        case .agent, .meetingAssistant: return .llmWithTools
+        case .agent, .retiredMeetingText: return .llmWithTools
         case .dropSmartDecision: return .decision
         }
     }

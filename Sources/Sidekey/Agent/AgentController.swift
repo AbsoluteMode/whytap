@@ -518,8 +518,7 @@ final class AgentController: ObservableObject {
             phase == .recording || screenshot || approval || shortcutRecording
         }
         escapeCloseLifecycleCancellable = Publishers.CombineLatest(
-            islandAgentFlow.$answerPanelVisible, Publishers.CombineLatest(competingInteraction, escapeInteractionState.$meetingAssistantEditing)
-                .map { other, meetingEditor in other || meetingEditor }
+            islandAgentFlow.$answerPanelVisible, competingInteraction
         )
             .map { answerVisible, competingInteraction in answerVisible && !competingInteraction }
             .removeDuplicates()

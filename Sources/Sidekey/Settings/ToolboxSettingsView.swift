@@ -386,8 +386,6 @@ struct ToolboxSettingsView: View {
                 ToolboxTranslationPane(mode: tool == .translate ? .text : .subtitles, deps: deps,
                                        openFeature: { selection.focus($0) })
                     .id(tool)
-            case .meetingAssistant:
-                actionPane(tool, title: "Open Meeting Assistant", action: deps.openMeetingAssistant)
             case .meetingRecord:
                 ToolboxRecordingPane(toggle: deps.toggleMeetingRecord)
             case .screenshot:

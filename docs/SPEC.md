@@ -573,8 +573,7 @@ The Meetings entry opens an overview with the five newest meetings and History.
 History retains the complete date-grouped list. Opening a note preserves its
 origin for Back; choosing Meetings again or following a direct note link uses
 the overview. Both lists retain processing states and confirmed deletion.
-Load failures offer Retry without discarding the last loaded list. The overview
-can grow with future Meeting Assistant sections; no preset controls ship yet.
+Load failures offer Retry without discarding the last loaded list.
 
 **Current continuation behavior (2026-10-20):** Each completed call starts BYOK
 processing immediately. After auto-end, Reconnect is available for three minutes;
@@ -590,16 +589,6 @@ merely submitting a debounced save does not reload older stored text.
 See [the continuation decision](../.project-docs/decisions/2026-10-20-meeting-continuations.md).
 The backend design below is historical; current processing uses the user's BYOK
 routes and the native notes viewer.
-
-**Live-assistant test preparation (2026-10-19):** Internal opt-in capture uses
-the local `sidekey.meetings.liveTestCapture` flag when Meeting Notes uses Soniox.
-The user requested no test-mode controls or test-files row in Settings.
-It adds a separate live diarization stream, stores private source tracks and
-timing locally, and preserves ordinary notes processing. Since 2026-10-22 only
-source dev builds (9999 / `-dev`) capture; packaged builds ignore the flag and
-remove earlier captures at launch. No automatic
-suggestions are enabled. Real-call source attribution and latency remain
-acceptance tests. See [testing instructions](meeting-assistant-testing.md).
 
 Auto-detect когда пользователь на голосовой встрече (Zoom, Meet, Teams, FaceTime, Discord, Slack huddle и т.п.) и предложить записать структурированную заметку. Whytap уже всегда запущен и имеет JWT — нативное место для этой фичи (vs. Granola/tl;dv как отдельные продукты с собственной авторизацией).
 
@@ -802,27 +791,3 @@ Settings → API & Models → API keys содержит ключ Tavily в Keych
 без платного поиска. Поиск отправляет только запрос и возвращает до пяти результатов.
 Существующее разрешение редактирования/команд сохраняется; approve и bypass —
 следующий этап. См. [решение](../.project-docs/decisions/2026-10-22-native-agent.md).
-
-
-### Meeting Assistant Beta
-
-A configured assistant exposes a hover magic icon to the right of the recording
-timer, translucent when off and softly glowing while listening. Listening starts
-off for every meeting, including after relaunch or wake. Configuring both model
-routes and a ready Space only makes the feature available. A wand click explicitly
-enables listening for this meeting; stopping, ending a meeting or changing Space
-never enables it again. The panel and API & Models group mark the feature Beta.
-A recognized meeting-context end sustained for 15 seconds stops listening;
-manual sessions without recognized context need the wand to stop. Context detection
-is a mic-activity heuristic, not a unique call identity.
-
-The approved native right-hand module offers a ready Space picker, plain input,
-up to five current questions, twenty answered roots and six removable screenshot
-attachments. Replies contain a conclusion, structured points and two follow-ups;
-conversation survives collapse. Closing answers does not stop listening. The
-module shows connection status instead of a Listen button. Explicitly enabled listening extracts questions
-from bounded system-audio transcription without retaining audio or starting Notes.
-Speech and answer models have separate initially unset routes in API & Models.
-Coding agents prepare Spaces; the user selects them. Runtime repository access
-is read-only and constrained to declared scopes. Database adapters are not yet
-connected. See [pilot usage and Space contract](meeting-assistant.md).

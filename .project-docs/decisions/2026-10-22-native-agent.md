@@ -97,8 +97,8 @@ route family rather than attempting a model downgrade or retry. Plain free-text
 completion under auto is still rejected by Whytap without a paid repair.
 OpenRouter retains the exact model and endpoint pin and requires parameter support. A terminal call mixed with any other call fails before that
 batch executes. Completion does not require another model request or a terminal
-tool-result round trip. The shared model's default remains automatic tool choice,
-so Meeting Assistant retains its existing output contract.
+tool-result round trip. The model layer retains automatic tool choice as its default; the Agent
+explicitly supplies its completion policy.
 
 Rationale: the selected Qwen/Cerebras endpoint's public OpenRouter parameter
 list on 2026-10-28 advertises tools and tool_choice but not response_format.
@@ -157,9 +157,7 @@ object arguments are encoded as JSON strings before replay. Response-only
 extensions such as tool-call indexes are omitted. Ordered `reasoning_details`
 are retained without alteration; plaintext reasoning (including its legacy
 alias) is used only when those details are absent, avoiding duplicate forms.
-OpenAI Responses and direct Anthropic native items remain unchanged. The common
-NativeAgentModel also serves Meeting Assistant, so these OpenRouter changes
-apply to its route as well; its tool access and capture policy do not change.
+OpenAI Responses and direct Anthropic native items remain unchanged.
 
 OpenRouter error responses are read only into bounded transient memory
 (at most 16 KiB for a non-success HTTP response). Fixed, allowlisted error
@@ -198,8 +196,7 @@ destination or provider request. Tavily HTTP calls are not model events.
 Events contain only a locally generated turn UUID, request ordinal, closed
 provider/feature enums, pin presence, timings, byte/count metrics, tool names
 from a fixed enum, tool-call/result matching counts, argument/reasoning shape,
-finish/status enums and allowlisted error categories. Direct OpenAI/Anthropic
-tool pairing and Meeting Assistant feature scope are represented separately.
+finish/status enums and allowlisted error categories. Direct OpenAI/Anthropic tool pairing is represented separately.
 The route strings, external IDs, paths, prompts, arguments/results, reasoning,
 images, keys and raw error text never enter events. Unknown external values
 become a fixed unknown enum. The HTTP layer returns typed error metadata but

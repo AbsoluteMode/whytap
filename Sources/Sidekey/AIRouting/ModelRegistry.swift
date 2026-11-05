@@ -78,33 +78,38 @@ extension ModelRegistry {
         switch kind {
         case .soniox:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return "stt-rt-v5"
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio: return "stt-rt-v5"
             case .meetings: return sonioxRecordedModel
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .deepgram:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio, .meetings: return "nova-3"
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return "nova-3"
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .elevenLabs:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio, .meetings: return "scribe_v2_realtime"
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return "scribe_v2_realtime"
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .openRouter:
             switch feature {
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
             case .dropSmartDecision: return nil
             case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return "google/gemini-3.8-flash"
-            case .agent, .meetingAssistant: return "anthropic/claude-sonnet-5.5"
-            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return nil
+            case .agent: return "anthropic/claude-sonnet-5.5"
+            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .anthropic:
             switch feature {
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
             case .dropSmartDecision: return nil
-            case .agent, .meetingAssistant: return anthropicAgentModel
+            case .agent: return anthropicAgentModel
             case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return anthropicAgentModel
-            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return nil
+            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .openAI:
             // The authenticated live catalog is the source of available IDs.

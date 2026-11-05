@@ -195,6 +195,19 @@ final class AIRoutingStore: ObservableObject {
         commit(updated)
     }
 
+    /// Also retire routes restored from older backups. Keep provider keys,
+    /// unrelated routes and historical usage identifiers intact.
+    // WHY: docs/decisions/2026-11-05-retire-live-assistant.md
+    func retireMeetingRoutesIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for feature in [AIFeature.retiredMeetingText, .retiredMeetingAudio] {
+            updated.routes[feature.rawValue] = nil
+            updated.migratedRoutes[feature.rawValue] = nil
+        }
+        commit(updated)
+    }
+
     // MARK: - Persistence
 
     /// Reads entry by entry: a route or server this build does not know (an

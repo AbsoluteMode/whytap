@@ -88,7 +88,7 @@ that arbitrary project files contain no sensitive information.
 
 Local storage does not make remote inference offline: chosen excerpts and notes
 may be sent to the user's selected model provider. The project library is a
-foundation for Meeting Assistant; live call-question detection and a validated
+foundation for contextual tools; live call-question detection and a validated
 long-duration copilot are not implemented by this change.
 
 ## Supersedes / superseded by

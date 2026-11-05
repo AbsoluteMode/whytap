@@ -342,9 +342,9 @@ struct ModelStatusResolver {
         }
         let minimum: Int?
         switch feature {
-        case .agent, .meetingAssistant: minimum = ModelRegistry.agentMinContext
+        case .agent: minimum = ModelRegistry.agentMinContext
         case .meetingNotes: minimum = ModelRegistry.meetingNotesMinContext
-        case .dropFast, .dropSmart, .dropSmartCleanup, .dropSmartDecision, .meetings, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .meetingAssistantAudio: minimum = nil
+        case .dropFast, .dropSmart, .dropSmartCleanup, .dropSmartDecision, .meetings, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio, .retiredMeetingText: minimum = nil
         }
         if let minimum, let context = entry.contextLength, context < minimum {
             return "context under 64K tokens"
@@ -364,7 +364,7 @@ struct ModelStatusResolver {
                 $0.kind == account.kind && $0.id == model && $0.uses.contains(use)
             }
             return registered?.diarization == true ? "with speakers" : nil
-        case .dropFast, .dropSmart, .meetingNotes, .agent, .meetingAssistant, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .meetingAssistantAudio:
+        case .dropFast, .dropSmart, .meetingNotes, .agent, .retiredMeetingText, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
             return nil
         }
     }

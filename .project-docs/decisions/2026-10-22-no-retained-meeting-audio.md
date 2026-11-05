@@ -2,28 +2,28 @@
 id: no-retained-meeting-audio-2026-10-22
 type: decision
 title: Keep meeting audio only while it can still become a note
-summary: Staged meeting audio exists only while a meeting is recorded and processed; a failed recording is retried for 24 hours after its last chunk and then deleted, directories without a manifest go an hour after their last write, a stored meeting keeps no audio even without its note, and packaged builds neither capture nor keep research audio.
+summary: Staged meeting audio exists only while a meeting is recorded and processed; a failed recording is retried for 24 hours after its last chunk and then deleted, directories without a manifest go an hour after their last write, a stored meeting keeps no audio even without its note, and all builds remove retired research audio.
 status: confirmed
 tags: [meetings, storage, privacy, recovery, disk]
 canonical_for: [meeting-audio-retention]
-verified_at: 2026-10-22
+verified_at: 2026-11-05
 sources:
   - type: user-confirmed
     reference: On 2026-10-21 the user said meeting audio should not be stored and is only useful for debugging in development builds; on 2026-10-22, answering the retention proposal, the user repeated that recordings are not to be kept.
     confirmed_at: 2026-10-22
   - type: trace
-    reference: Metadata on the maintainer's Mac (du, ls, file dates and meeting ids/statuses; no audio read) on 2026-10-21 — meetings-staging 2.3 GB in 44 directories, none with manifest.json, none written after 2026-10-18 06:17, all mixed tracks of already processed meetings (13 by id, 31 cloud-era matched by start time in the 2026-10-18 inventory); meeting-assistant-tests 845 MB in 7 sessions from 2026-10-20 and 2026-10-21.
+    reference: Metadata on the maintainer's Mac (du, ls, file dates and meeting ids/statuses; no audio read) on 2026-10-21 — meetings-staging 2.3 GB in 44 directories, none with manifest.json, none written after 2026-10-18 06:17, all mixed tracks of already processed meetings (13 by id, 31 cloud-era matched by start time in the 2026-10-18 inventory); retired research captures totaled 845 MB in 7 sessions from 2026-10-20 and 2026-10-21.
     confirmed_at: 2026-10-21
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsCoordinator.swift
     confirmed_at: 2026-10-22
   - type: repository
-    reference: Sources/Sidekey/Meetings/MeetingLiveTestCapture.swift
-    confirmed_at: 2026-10-22
+    reference: Sources/Sidekey/Meetings/RetiredMeetingCaptureCleanup.swift
+    confirmed_at: 2026-11-05
   - type: repository
     reference: Tests/SidekeyTests/Meetings/MeetingsStagedAudioRetentionTests.swift
     confirmed_at: 2026-10-22
-related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-21-backup-essentials-only.md, 2026-10-19-live-meeting-test-capture.md, 2026-10-18-silent-meetings.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-20-meeting-continuations.md]
+related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-21-backup-essentials-only.md, 2026-10-18-silent-meetings.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-20-meeting-continuations.md]
 ---
 
 # Keep meeting audio only while it can still become a note
@@ -78,10 +78,8 @@ not to be kept; audio is debugging material for development builds.
   entries not named by a UUID. Listing, dating and removal run off the main
   thread; use is rechecked after every suspension. An unreadable directory
   listing or modification date leaves its age unknown and keeps the recording.
-- Research capture (`sidekey.meetings.liveTestCapture`) works only in source
-  dev builds (build 9999 or a `-dev` version, the same markers that keep dev
-  bundles off packaged updates). A packaged build ignores the flag and removes
-  `Sidekey/meeting-assistant-tests` at launch.
+- Research capture was retired on 2026-11-05. All builds remove its old
+  diagnostic-audio directory at launch; no flag enables capture.
 - Development builds keep no extra copy of processed audio.
 
 ## Why
@@ -124,10 +122,9 @@ backdated modification times and a real `MeetingsStore`:
   after two hours; a fresh one stays; an undecodable manifest stays for two
   hours and goes after 25; directories and files not named by a recording id
   stay;
-- the research-capture gate, from build metadata: build 1564 / 2.2.17 never
-  captures even with the flag on and Soniox chosen, build 9999 and a `-dev`
-  version do (and still need the flag and Soniox); the packaged gate removes
-  earlier captures, the dev gate keeps them.
+
+`RetiredMeetingFeatureTests` verifies that retired research audio is removed
+without touching ordinary meeting files.
 
 `MeetingsCoordinatorLifecycleTests` keeps the directory of a running recording
 whose files are three hours old, and of a recording whose microphone start
@@ -142,7 +139,7 @@ covered by `MeetingBYOKProcessorTests`.
   a week is storage, a day is a retry buffer.
 - Deleting on the first failure: a transient outage would lose the meeting.
 - Keeping processed audio for N days in development builds: the user wants no
-  stored recordings; a dev session can enable research capture explicitly.
+  stored recordings; research capture was subsequently removed.
 - A manual Retry button with indefinite retention: still unbounded storage.
 - Recovering manifest-less directories as meetings: legacy leftovers would be
   processed again and duplicate existing notes at the user's expense. A
@@ -156,9 +153,8 @@ covered by `MeetingBYOKProcessorTests`.
 
 This replaces "a ready row without a note keeps its audio" in the
 [delete-meeting decision](2026-10-18-delete-meeting-and-staged-audio.md); Delete
-still never removes a staged directory by an unknown id. It narrows the
-[research capture](2026-10-19-live-meeting-test-capture.md) to source dev
-builds and closes the open question at the end of the
+still never removes a staged directory by an unknown id. Research capture was subsequently removed on 2026-11-05. This closes the
+open question at the end of the
 [backup essentials decision](2026-10-21-backup-essentials-only.md).
 
 2026-10-22 · PR AbsoluteMode/whytap#209

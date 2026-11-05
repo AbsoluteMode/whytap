@@ -57,7 +57,6 @@ enum DropCancelRoute: Equatable {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translationWindowController: TranslationWindowController?
-    private var meetingAssistantPanel: MeetingAssistantPanel?
     private var screenshotCoordinator: ScreenshotCoordinator?
     private let recorder = AudioRecorder()
     /// Batch transcriber for the Drop recorder fallback, the resilient-delivery
@@ -404,9 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // WHY: .project-docs/decisions/2026-10-18-legacy-model-cleanup.md
         DispatchQueue.global(qos: .utility).async {
             LegacyLocalModelCleanup().run()
-            // Packaged builds keep no meeting research audio.
-            // WHY: .project-docs/decisions/2026-10-22-no-retained-meeting-audio.md
-            MeetingLiveTestSettings.removeCapturesIfUnavailable()
+            RetiredMeetingCaptureCleanup.run()
         }
 
         // Restore standard text-editing shortcuts (⌘V/⌘C/⌘X/⌘A) for the app's
@@ -542,14 +539,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshRuntimePermissions()
         IslandPanel.shared.show()
         IslandNotificationPanel.shared.show()
-        ensureMeetingAssistant().prepare()
         registerIslandHotkeyActivity()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
-        meetingAssistantPanel?.suspend()
         BackupViewModel.shared.stop()
         // Give the display its own transfer table back; Extra never changes the backlight.
         ScreenBrightnessController.shared.shutdown()
@@ -729,7 +724,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureSettingsDeps(from: IslandPanel.shared.actions)
         IslandPanel.shared.show()
         IslandNotificationPanel.shared.show()
-        ensureMeetingAssistant().prepare()
         installIslandIdleControllerIfNeeded()
         // Post-relaunch "Updated" indicator (variant A): if the previous
         // session installed an update and this is the new binary, surface a
@@ -789,7 +783,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             deleteHistoryCard: actions.deleteHistoryCard,
             toggleMeetingRecord: actions.toggleMeetingRecord,
             openScreenshot: actions.openScreenshot,
-            openMeetingAssistant: actions.openMeetingAssistant,
             openHoverPanel: { [weak self] panel in self?.show(.hoverPanel(panel)) },
             quitApplication: actions.quitApplication,
             translationController: { [weak self] in self?.ensureTranslationController() },
@@ -922,7 +915,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         os_log("power_will_sleep pausing runtime", log: Self.log, type: .info)
         stopPermissionRecoveryPolling()
         translationWindowController?.cancel()
-        meetingAssistantPanel?.suspend()
 
         recorder.cancel()
         // Same reasoning as `applicationWillTerminate` — sleep should not
@@ -1226,9 +1218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             openTranslate: { [weak self] in self?.openTranslation(.text) },
             openSubtitles: { [weak self] in self?.openTranslation(.subtitles) },
-            openMeetingAssistant: { [weak self] in self?.openMeetingAssistant() },
-            setMeetingAssistantEnabled: { [weak self] enabled in self?.ensureMeetingAssistant().setMeetingEnabled(enabled) },
-            prepareMeetingAssistant: { [weak self] in self?.ensureMeetingAssistant().prepare() },
             openScreenshot: { [weak self] in self?.openScreenshot() },
             openSettings: { [weak self] in
                 self?.openSettingsWindow(tab: .apiAndModels)
@@ -1365,10 +1354,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsWindowController() -> SettingsWindowController {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                screenshotProtectionChanged: { [weak self] enabled in
+                screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
-                    self?.meetingAssistantPanel?.setProtection(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -1769,7 +1757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // invisible and reads as "the hotkey does nothing".
             let newMode = IslandPanel.shared.actions.toggleDropMode()
             AppState.shared.publishDropModeHotkeyToggle(newMode)
-        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openMeetingAssistant, .openScreenshot, .quit:
+        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty
             // Hover for ~4s (Stage 3 review fix). Run the effect directly
@@ -1859,35 +1847,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.show(tab: .toolbox)
             controller.selection.focus(tool)
             controller.selection.setHighlight(.tab(.toolbox))
-        case .meetingAssistant:
-            openMeetingAssistant()
         case .translation(let mode):
             openTranslation(mode)
         case .island:
             // Already woken above: a link this version does not know.
             break
         }
-    }
-
-    private func openMeetingAssistant() {
-        registerIslandHotkeyActivity()
-        ensureMeetingAssistant().show()
-    }
-
-    private func ensureMeetingAssistant() -> MeetingAssistantPanel {
-        if meetingAssistantPanel == nil {
-            meetingAssistantPanel = MeetingAssistantPanel(
-                openSettings: { [weak self] feature in self?.openSettingsWindow(tab: .apiAndModels, feature: feature) },
-                activityChanged: { active, editing in
-                    if AppState.shared.meetingAssistantActive != active { AppState.shared.meetingAssistantActive = active }
-                    if AppState.shared.meetingAssistantEditing != editing { AppState.shared.meetingAssistantEditing = editing }
-                },
-                hoverChanged: { state in
-                    if AppState.shared.meetingAssistantHover != state { AppState.shared.meetingAssistantHover = state }
-                }
-            )
-        }
-        return meetingAssistantPanel!
     }
 
     private func openTranslation(_ mode: TranslationWindowController.Mode) {
@@ -3818,8 +3783,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 micSource: MicCaptureSource(),
                 systemSource: vadProbe,
                 micInUseProbe: micProbe,
-                stagingRoot: stagingRoot,
-                testCapture: MeetingLiveTestSettings.makeIfEnabled()
+                stagingRoot: stagingRoot
             )
         }
         // Local store + coordinator wire. Store init can throw on

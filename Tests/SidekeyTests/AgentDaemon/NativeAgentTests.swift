@@ -612,7 +612,6 @@ final class NativeAgentTests: XCTestCase {
         var model = NativeAgentModel(options: .init(model: secret, openRouterProvider: secret), key: secret,
             system: secret, history: [.init(user: secret, assistant: secret)], prompt: secret, http: http,
             usageSink: { _ in }, diagnosticsSink: { diagnostics.append($0) })
-        model.usageFeature = .meetingAssistant
         let (_, calls) = try await model.next(tools: NativeAgentTools.definitions(allowActions: false))
         model.append(results: [(calls[0], .init(text: secret, image: secret))])
         do { _ = try await model.next(tools: []); XCTFail("Expected error") } catch {}
@@ -620,7 +619,7 @@ final class NativeAgentTests: XCTestCase {
         let log = diagnostics.compactMap(\.json).joined(separator: "\n")
         XCTAssertFalse(log.contains(secret))
         XCTAssertFalse(log.contains("data:image"))
-        XCTAssertTrue(diagnostics.allSatisfy { $0.scope == .meetingAssistant })
+        XCTAssertTrue(diagnostics.allSatisfy { $0.scope == .agent })
         XCTAssertEqual(diagnostics[2].shape?.reasoningDetails, 1)
         XCTAssertEqual(diagnostics[2].shape?.tools, [.unknown])
         XCTAssertEqual(diagnostics.last?.error?.category, .unknown)

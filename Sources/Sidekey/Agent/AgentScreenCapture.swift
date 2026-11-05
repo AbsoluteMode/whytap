@@ -79,14 +79,6 @@ final class AgentScreenCapture {
     }
 
     private static func captureDisplay(_ requested: CGDirectDisplayID?) async throws -> (CGDirectDisplayID, CGImage) {
-        try await captureDisplay(requested, excludingOwnApplication: false)
-    }
-
-    static func captureForMeeting(_ requested: CGDirectDisplayID?) async throws -> (CGDirectDisplayID, CGImage) {
-        try await captureDisplay(requested, excludingOwnApplication: true)
-    }
-
-    private static func captureDisplay(_ requested: CGDirectDisplayID?, excludingOwnApplication: Bool) async throws -> (CGDirectDisplayID, CGImage) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         try Task.checkCancellation()
         let selected = NSScreen.screens.first { $0.frame == IslandScreenResolver.currentDescriptor().frame }
@@ -95,10 +87,7 @@ final class AgentScreenCapture {
         guard let display = content.displays.first(where: { $0.displayID == target }) else {
             throw CocoaError(.fileNoSuchFile)
         }
-        let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
-        let filter = excludingOwnApplication
-            ? SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
-            : SCContentFilter(display: display, excludingWindows: [])
+        let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = ScreenshotCaptureConfiguration.make(contentRect: filter.contentRect, pointPixelScale: filter.pointPixelScale)
         let scale = min(1, 1920 / Double(max(configuration.width, configuration.height)))
         configuration.width = max(1, Int(Double(configuration.width) * scale))

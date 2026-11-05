@@ -339,7 +339,6 @@ final class APIAndModelsViewModelTests: XCTestCase {
             AssignItem(feature: .dropSmart, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .meetings, account: .soniox, model: "stt-async-v5"),
             AssignItem(feature: .agentVoice, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .meetingAssistantAudio, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .voiceSearch, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v5"),
         ])
@@ -615,7 +614,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertNil(env.makeViewModel().unsetBanner)
 
         env.addKey(.soniox)
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "13 features have no model")
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "11 features have no model")
 
         for feature in AIFeature.allCases where feature != .dropFast {
             env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: feature)
@@ -698,16 +697,13 @@ final class APIAndModelsProviderTests: XCTestCase {
         let (vm, _, _, _) = try make()
         let features = vm.groups.flatMap { $0.rows.map(\.feature) }
         XCTAssertEqual(features.sorted { $0.rawValue < $1.rawValue }, AIFeature.activeCases.sorted { $0.rawValue < $1.rawValue })
-        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles", "Meeting Assistant (Beta)"])
+        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles"])
         XCTAssertEqual(vm.groups.first { $0.title == "Drop Smart" }?.rows.map(\.feature), [.dropSmart, .dropSmartCleanup])
         XCTAssertEqual(vm.groups.first { $0.title == "Meetings" }?.rows.map(\.feature), [.meetings, .meetingNotes])
         XCTAssertEqual(vm.groups.first { $0.title == "Translation" }?.rows.map(\.feature), [.translation])
         let subtitles = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })
         XCTAssertEqual(subtitles.rows.map(\.feature), [.subtitlesAudio, .subtitlesTranslation])
         XCTAssertEqual(subtitles.rows.map(\.fieldLabel), ["Speech", "LLM"])
-        let assistant = try XCTUnwrap(vm.groups.first { $0.title == "Meeting Assistant (Beta)" })
-        XCTAssertEqual(assistant.rows.map(\.feature), [.meetingAssistantAudio, .meetingAssistant])
-        XCTAssertEqual(assistant.rows.map(\.fieldLabel), ["Speech", "Text"])
     }
 
     func test_only_openrouter_rows_offer_a_provider_and_auto_is_the_default() throws {

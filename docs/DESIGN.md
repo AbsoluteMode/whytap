@@ -558,7 +558,7 @@ checkmark is recognizable without a visible Allowed label.
 ## Meetings overview — 2026-10-20
 
 The user approved the Overview composition: recent meetings first, History
-beside the screen title, and room below for future Meeting Assistant presets.
+beside the screen title.
 The person comes to reopen a recent note; first they see the newest five
 meetings, then they can open a note or browse the complete history.
 
@@ -571,9 +571,6 @@ meetings, then they can open a note or browse the complete history.
   scrolling. Back from a note returns to the page that opened it; the Settings
   Meetings entry and direct note links use the overview as their parent.
   Why: browsing older notes must not repeatedly reset the user's context.
-- Reserve extension through the overview's vertical section layout, without
-  empty Meeting Assistant panels, preset settings or new persistence yet.
-  Why: unfinished controls would imply that the assistant is already available.
 - Use the current adaptive Settings tokens and the system font. Screen title is
   23 pt semibold, section headings 13 pt semibold, titles 13 pt medium, dates
   and statuses 12 pt. Titles wrap to two lines; full text is available through
@@ -1131,8 +1128,7 @@ The full target has a 6% white resting fill, 15% hover fill, 23% pressed fill
 and a separate 1.5pt focus outline. Disabled buttons use 42% opacity and no
 active feedback or native pointer registration. Navigation waits for mouse-up;
 dragging out, Escape, hiding the panel, a changed page/destination or a disabled
-button cancels the old press. Root tool/search targets and Meeting Assistant
-cannot dispatch through the submenu surface. Reduce Motion removes the brief
+button cancels the old press. Root tool/search targets cannot dispatch through the submenu surface. Reduce Motion removes the brief
 hover color transition; target geometry never animates.
 
 Synthetic invisible-panel checks exercise the actual To-do and Monitor labels
@@ -1431,116 +1427,6 @@ supersedes the former window presentation. See
   6.62:1 light and 6.84:1 dark using the shared semantic tokens.
 
 
-## Meeting Assistant — approved native pilot, 2026-10-23
-
-The user approved the isolated native design and requested a live pilot inside
-Whytap. Preserve its 354pt right column, slightly dimmed material and single thin
-outline. The project name/arrow selector hugs its content; there is one common
-close control and a plain input with a left caret. Questions appear newest first,
-with older items lower/fainter; Answers is a separate bounded list. Long replies
-scroll inside their body and emphasize the conclusion and important spans.
-
-Two contextual continuations and a free clarification input continue the same
-conversation. Collapse preserves the branch and exposes Return answer. Escape
-in a field releases focus and preserves screenshots. Only editors acquire key
-status, so reading/clicking the module keeps the meeting app's keyboard focus.
-
-Attach screen sits beside the main input. Up to six independently removable
-thumbnails sit directly below it and scroll horizontally. Images stay in memory;
-success removes submitted images, failure/cancellation preserves them for retry.
-A compact explicit Listen/Stop action makes capture state visible. Empty catalog,
-setup errors and listening failures have visible explanations and repair access.
-
-Creation/editing of Spaces belongs to coding agents. The module only chooses
-ready Spaces. A malformed active manifest invalidates context instead of silently
-reusing its former scope. The pilot uses the existing screenshot-protection
-setting. Real sharing exclusion and native call interactions are installed
-acceptance; offscreen renders and test checks do not establish those guarantees.
-
-
-## Meeting Assistant — per-meeting hover magic, 2026-10-24
-
-The user chose a magic icon right of the upper recording timer, replacing the
-proposed separate switch row before it shipped. Reason: this is a secondary
-meeting action and should sit beside recording rather than consume drawer space.
-Keep the approved right-hand answer module and tool/search show-only behavior.
-A configured Space and both routes expose the icon during Notes recording;
-an explicitly active Assistant session also exposes it when Notes is off.
-Only the controls hover shows it; agent, nudge, approval and other inline panels
-preempt it. Hover reveals a control, never capture permission.
-
-The wand is 15pt in a fixed 28pt target, within a 36pt trailing extension of the
-same black island. This is a temporary secondary-action wing: the base compact
-island and drawer retain matched compactWidth, while the visible upper right
-edge extends by 36pt. This geometry is an implementation assumption for the
-latest requested placement, not a separate user approval of a wider drawer.
-The timer, Stop and drawer keep their original positions and height. Native hit routing claims exactly this visible extension while shown.
-The measured first-mouse target is only the icon, with separate hover, pressed,
-keyboard-focus and disabled feedback. Its overlay owns a hover signal that holds an already
-open drawer without reopening it after collapse. Off is white at 52% opacity; listening
-is white/ice blue with a soft blue halo. Connecting uses a static partial outline
-and stays cancellable; stopping dims and disables the control. The active halo
-breathes gently over 3.2s without moving or scaling the glyph/target. Reduce Motion
-keeps the glow static and stops timeline frame updates. White icon on black at
-52% alpha has 5.66:1 contrast; the bright active core exceeds 3:1 throughout.
-
-One in-memory model backs icon and module Listen/Stop. Stop preserves answers;
-close/sleep/restart stop listening and no later meeting auto-enables it. Startup
-and hover refresh metadata without opening a panel, accessing keys or audio.
-A separate metadata-only probe stops an observed recognized call after 15s of
-inactivity; brief reconnects cancel the stop. Manual unrecognized calls require
-explicit Stop. Long mute/seamless call switches remain heuristic limitations.
-
-Verification uses component-composition darkAqua fixtures at 310/312/354pt:
-the live recording slot, real IslandCameraSurface with its trailing extension,
-four magic phases, hover/press/focus/disabled drawing surfaces and unchanged
-drawer components. These are offscreen compositions, not whole-window or
-physical pointer/extension-animation evidence. Reduced-motion fixture uses the live static
-branch. Pure geometry and fake-provider tests cover first mouse, scoped press
-cancellation, context end, preparation and repeated/cancelled starts. Physical
-pointer/keyboard/VoiceOver, native glass, actual calls and screen sharing remain
-installed acceptance; offscreen evidence does not establish those guarantees.
-
-
-## Meeting Assistant — automatic listening, 2026-10-26
-
-Superseded later on the same day by the user's Beta/default-off request below.
-
-The user clarified that configuring models enables Assistant on every meeting.
-This supersedes the explicit Listen/Stop and no-auto-join choices above. Both
-routes and a ready Space enable a passive meeting observer. It starts system
-audio on a recognized call without opening the answers window. No extra hotkey
-or persistent switch is added. The existing wand overrides only the current
-meeting; its off state remains reachable during a detected call without Notes.
-
-The module keeps the approved layout, input, attachments and answer controls.
-A secondary noninteractive label shows connecting, listening or stopping;
-the redundant Listen/Stop button is removed. Idle text says «Можно задать вопрос».
-Closing answers keeps capture active; sleep/quit and missing required routes
-stop it. Errors pause automatic attempts for that meeting, with explicit retry
-through the wand. Reuse existing hover/pressed/focus/disabled feedback without
-adding controls or animation. Native offscreen fixtures cover ready, connecting,
-listening, stopping, populated and short-screen layouts in light/dark themes.
-Physical call/hover/keyboard acceptance remains in the installed app.
-
-## Meeting Assistant — Beta and explicit meeting enable, 2026-10-26
-
-Every meeting starts with listening off, even when routes and a Space are ready.
-Only the existing wand enables audio and automatic question extraction for the
-current meeting. Starting a later meeting, opening answers, a catalog refresh,
-wake and a failed connection never re-enable it. Reason: the user observed
-unexpected usage and explicitly requested default-off behavior.
-
-Keep the existing fixed wand target and hover/pressed/focus/disabled states.
-The API & Models group says “Meeting Assistant (Beta)”; a quiet noninteractive
-“Beta” sits beside the Space selector without adding a control or moving the
-picker. The tool description and wand help also identify Beta. This keeps the
-approved native module and the user's two-action key form intact.
-
-Native offscreen light/dark fixtures cover empty/ready/connecting/listening/
-stopping/populated/short-screen states. No new pointer or keyboard interaction
-is introduced. Real-call behavior remains installed acceptance; fake audio and
-providers verify that inactive meetings make no capture or extraction requests.
 
 ## Quick Translate: two text rows — 2026-10-26
 

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, navigation, meetingAssistant, update, deliveryFailure }
+    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
@@ -143,7 +143,6 @@ final class IslandHoverHitBridge: ObservableObject {
             guard let view = entry.view,
                   enabled || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
                   view.targetID.surface == activeSurface
-                    || (view.targetID.surface == .meetingAssistant && (activeSurface == .tile || activeSurface == .result))
                     || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
                   view.targetContext == context,
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,

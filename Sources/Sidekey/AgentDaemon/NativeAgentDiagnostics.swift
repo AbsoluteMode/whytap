@@ -7,7 +7,7 @@ enum NativeAgentDiagnostics {
     enum Stage: String, Codable { case request, failed, accepted }
     enum Failure: String, Codable { case cancelled, timeout, network, response }
     enum Provider: String, Codable { case openRouter, openAI, anthropic }
-    enum Scope: String, Codable { case agent, meetingAssistant }
+    enum Scope: String, Codable { case agent }
     enum Finish: String, Codable { case stop, tool_calls, length, error, end_turn, tool_use, completed, other }
     enum Envelope: String, Codable { case http, root200, choice200 }
     enum Field: String, Codable, CaseIterable {
@@ -130,7 +130,6 @@ enum NativeAgentDiagnostics {
         let turn: UUID
         let request: Int
         let provider: OpenCodeModelProvider
-        let feature: AIFeature
         let pinned: Bool
         let toolsCount: Int
         let outputLimit: Int
@@ -143,7 +142,7 @@ enum NativeAgentDiagnostics {
             let service: Provider
             switch provider { case .openRouter: service = .openRouter; case .openAI: service = .openAI; case .anthropic: service = .anthropic }
             sink(Event(turn: turn, request: request, provider: service,
-                scope: feature == .meetingAssistant ? .meetingAssistant : .agent,
+                scope: .agent,
                 pinned: pinned, toolsCount: toolsCount, outputLimit: outputLimit, stage: stage,
                 status: status, bytes: bytes, elapsedMS: Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000),
                 shape: shape, error: error, failure: failure, finish: finish))

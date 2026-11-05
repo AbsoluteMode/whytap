@@ -108,23 +108,6 @@ final class IslandHoverBackButtonTests: XCTestCase {
         XCTAssertEqual(activations, 8)
     }
 
-    func testSubmenuDoesNotActivateLingeringMeetingMagicFromTools() {
-        let bridge = makeBridge()
-        var activations = 0
-        let content = AnyView(IslandMeetingAssistantControl(state: .init(available: true),
-            setEnabled: { _ in activations += 1 }, hitBridge: bridge, hitContext: "fixture")
-            .frame(width: 240, height: 44))
-        let (host, window) = host(content, bridge: bridge, size: NSSize(width: 240, height: 44))
-        defer { window.contentView = nil; window.close() }
-        let point = fromTop(120, 22, in: host)
-        XCTAssertFalse(bridge.mouseDown(at: point, in: window, allowed: true))
-        bridge.setSurface(.tile)
-        XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: true))
-        bridge.setSurface(.navigation)
-        bridge.mouseUp(at: point, in: window, allowed: true)
-        XCTAssertEqual(activations, 0, "Entering a submenu cancels the previous root control")
-    }
-
     func testRenderBackStatesAndCompactPanels() throws {
         guard let output = ProcessInfo.processInfo.environment["WHYTAP_BACK_RENDER_DIR"] else {
             throw XCTSkip("Set WHYTAP_BACK_RENDER_DIR for offscreen navigation fixtures")

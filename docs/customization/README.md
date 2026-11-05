@@ -121,10 +121,3 @@ For the running app's state, model routes and supported settings, use the
 [local application-control plugin](app-control.md). It changes settings through
 the app's stores; editing preferences files directly does not synchronize the
 live routing store.
-
-
-### Meeting Assistant Spaces
-
-A coding agent can create/edit ready Spaces with `python3 scripts/meeting-space.py`.
-The user selects them inside Meeting Assistant. See [Space contract](../meeting-assistant.md).
-Manifests contain source paths/scopes or credential names only; never secret values.

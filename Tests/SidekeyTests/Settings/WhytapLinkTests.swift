@@ -91,7 +91,7 @@ final class WhytapLinkTests: XCTestCase {
             // Toolbox panes whose action is an explicit button. Case's pane
             // requests Touch ID on appear and is excluded.
             return [.dropMode, .meetingRecord, .screenshot].contains(tool)
-        case .settings, .translation, .meetingAssistant, .island:
+        case .settings, .translation, .island:
             return true
         }
     }

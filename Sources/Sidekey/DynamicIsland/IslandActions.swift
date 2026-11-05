@@ -75,9 +75,6 @@ struct IslandActions {
     var openCalendar: () -> Void = {}
     var openTranslate: () -> Void = {}
     var openSubtitles: () -> Void = {}
-    var openMeetingAssistant: () -> Void = {}
-    var setMeetingAssistantEnabled: (Bool) -> Void = { _ in }
-    var prepareMeetingAssistant: () -> Void = {}
     var openScreenshot: () -> Void = {}
     /// Open Settings on its default tab.
     var openSettings: () -> Void

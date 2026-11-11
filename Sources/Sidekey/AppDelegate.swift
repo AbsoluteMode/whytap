@@ -2509,7 +2509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wakeWordMayListen() -> Bool {
         let state = AppState.shared
         return AppDelegate.wakeWordShouldListen(
-            enabled: WakeWordPreferences.shared.isEnabled,
+            enabled: WakeWordPreferences.shared.isEnabled && !WakeWordPause.shared.isPaused,
             asleep: wakeWordSuspendedForSleep,
             phase: state.phase,
             agentPhase: state.agentPhase,
@@ -2538,13 +2538,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeWordEndpointTask = nil
     }
 
-    /// The phrase was heard. Starts a Drop take only where dictation would be
-    /// pasted: a false trigger with no text field focused does nothing.
+    /// The phrase was heard. Starts a Drop take only with positive evidence of
+    /// a focused editable field: a false trigger must not stream the room to a
+    /// provider with nowhere to paste. Unknown or unavailable focus is a no.
     private func wakeWordHeard() {
         guard wakeWordMayListen(), !wakeWordTakeActive,
               let app = NSWorkspace.shared.frontmostApplication else { return }
         guard PasteTargetValidator.appHasFocusedTextInput(
-            pid: app.processIdentifier, bundleIdentifier: app.bundleIdentifier
+            pid: app.processIdentifier, bundleIdentifier: app.bundleIdentifier,
+            requiringEvidence: true
         ) else { return }
         startWakeWordTake()
     }

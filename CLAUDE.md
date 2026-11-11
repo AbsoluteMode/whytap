@@ -204,7 +204,11 @@ Wake word (opt-in, Settings -> Other, off by default):
   would keep headphones in the call profile): it uses the default input only
   when that is built in or USB, otherwise the built-in one, or stays off.
   A heard phrase starts an ordinary Drop take through handleDropHotkeyRoute,
-  only when the frontmost app has a focused text field. Nobody releases a key:
+  only with positive evidence of a focused editable field
+  (appHasFocusedTextInput requiringEvidence: unknown focus or a bare web area
+  is a no; the permissive hint rules are unchanged elsewhere). App control's
+  memory-only wakeWordPaused releases the listener for up to three minutes so
+  the builder's meeting gate sees real microphone use. Nobody releases a key:
   WakeTakeEndpointer finishes the take 2 s after the live transcript stops
   changing, cancels it without pasting when no words arrive within 5 s of
   recording, and ends any take at 60 s. A self-hosted server route sends no

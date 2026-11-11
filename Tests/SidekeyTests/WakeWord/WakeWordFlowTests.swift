@@ -105,6 +105,70 @@ final class WakeWordFlowTests: XCTestCase {
         }
     }
 
+    // MARK: - Pause for the builder's meeting gate
+
+    func testPauseReleasesListeningAndEndsByItself() {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        var notifications = 0
+        let pause = WakeWordPause(now: { clock }, notify: { notifications += 1 })
+        XCTAssertFalse(pause.isPaused)
+        pause.setPaused(true)
+        XCTAssertTrue(pause.isPaused)
+        XCTAssertEqual(notifications, 1)
+        clock += WakeWordPause.duration - 1
+        XCTAssertTrue(pause.isPaused)
+        clock += 1
+        XCTAssertFalse(pause.isPaused, "a builder that never resumes cannot leave the wake word off")
+        pause.setPaused(true)
+        pause.setPaused(false)
+        XCTAssertFalse(pause.isPaused)
+        XCTAssertEqual(notifications, 3)
+    }
+
+    // MARK: - Where a wake word may start a take
+
+    func testOnlyPositiveEvidenceOfAnEditableFieldCounts() {
+        func editable(_ role: String?, _ subrole: String? = nil, value: Bool = false, selected: Bool = false) -> Bool {
+            PasteTargetValidator.isPositivelyEditable(
+                role: role, subrole: subrole, valueSettable: value, selectedTextSettable: selected
+            )
+        }
+        // Focused editable fields.
+        XCTAssertTrue(editable("AXTextField"))
+        XCTAssertTrue(editable("AXTextArea"))
+        XCTAssertTrue(editable("AXComboBox"))
+        XCTAssertTrue(editable("AXGroup", "AXContentEditableElement"))
+        XCTAssertTrue(editable("AXGroup", value: true))
+        XCTAssertTrue(editable("AXWebArea", selected: true))
+        // Focus that is not a text field.
+        XCTAssertFalse(editable("AXButton"))
+        XCTAssertFalse(editable("AXWebArea"))
+        XCTAssertFalse(editable("AXWebArea", value: true))
+        XCTAssertFalse(editable("AXWindow"))
+        // Unknown focus: no role at all, whatever else is claimed.
+        XCTAssertFalse(editable(nil, value: true, selected: true))
+        XCTAssertFalse(editable("", "AXSearchField", value: true))
+    }
+
+    func testProcessWithoutAnyFocusNeverStartsAWakeWordTake() throws {
+        // No such process: the permissive hint rule says yes, the strict one no.
+        XCTAssertTrue(PasteTargetValidator.appHasFocusedTextInput(pid: .max))
+        XCTAssertFalse(PasteTargetValidator.appHasFocusedTextInput(pid: .max, requiringEvidence: true))
+
+        // A live process with no windows and no editable focus.
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["30"]
+        try child.run()
+        defer { child.terminate() }
+        XCTAssertFalse(PasteTargetValidator.appHasFocusedTextInput(
+            pid: child.processIdentifier, requiringEvidence: true
+        ))
+        XCTAssertFalse(PasteTargetValidator.appHasFocusedTextInput(
+            pid: child.processIdentifier, bundleIdentifier: "com.apple.finder", requiringEvidence: true
+        ))
+    }
+
     // MARK: - Microphone choice
 
     func testBluetoothDefaultInputFallsBackToBuiltInAndNeverOpensBluetooth() {

@@ -100,6 +100,24 @@ final class DropOutputPolicyTests: XCTestCase {
         XCTAssertEqual(result, "Запусти `ls . ` и скажи, что вышло.")
     }
 
+    /// Smart into a Markdown field: the code span is masked while filters
+    /// run, and the mark right after it must still lose its space.
+    func testSmartRemovesSpaceRightAfterInlineCodeAndLinksKeepingTheirBytes() async throws {
+        let cases: [(String, String)] = [
+            ("Run `ls` ?", "Run `ls`?"),
+            ("Сначала `git  status . ` , потом `ls -la` .", "Сначала `git  status . `, потом `ls -la`."),
+            ("Открой https://example.com/a?b=1 , потом напиши .", "Открой https://example.com/a?b=1, потом напиши."),
+            ("```\nls . ?\n```\nГотово .", "```\nls . ?\n```\nГотово."),
+        ]
+        for (cleaned, expected) in cases {
+            let result = try await DropOutputPolicy(mode: .smart).prepare(
+                rawText: "raw", fillerTerms: [], preservingMarkdown: { true }
+            ) { cleaned }
+            XCTAssertEqual(result, expected, cleaned)
+        }
+        XCTAssertEqual(DropPunctuationSpacing.apply("Run `ls` ?"), "Run `ls`?")
+    }
+
     func testPunctuationSpacingLeavesLegitimateTextAlone() {
         let cases: [(String, String)] = [
             ("Привет , мир !", "Привет, мир!"),

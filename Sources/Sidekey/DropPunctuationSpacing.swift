@@ -9,9 +9,14 @@ import Foundation
 /// (followed by whitespace, a closing quote/bracket or the end of the text).
 /// That keeps " .env", " ...and" style tokens, " :)", list markers and the
 /// no-break spaces of French typography untouched.
+///
+/// Inline code counts as a word before the mark ("`ls` ?" -> "`ls`?"): the
+/// backtick, and the private-use token `SmartMarkdownProtection` masks code
+/// and URLs with while filters run, are accepted before the space. The mask
+/// itself is never matched, so protected bytes stay intact.
 enum DropPunctuationSpacing {
     private static let regex = try? NSRegularExpression(
-        pattern: "(?<=[\\p{L}\\p{N})\\]}»”\"'%])[ \\t]+(?![:;][()])([,.!?;:…]+)(?=[\\s)\\]}»”\"']|$)",
+        pattern: "(?<=[\\p{L}\\p{N}\\p{Co}`)\\]}»”\"'%])[ \\t]+(?![:;][()])([,.!?;:…]+)(?=[\\s)\\]}»”\"']|$)",
         options: [.anchorsMatchLines]
     )
 

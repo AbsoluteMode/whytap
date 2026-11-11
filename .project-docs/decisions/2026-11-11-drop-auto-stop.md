@@ -48,7 +48,10 @@ user tried it and asked to remove it, keeping only the automatic stop.
   (under the session's 6 s silent-stall check). It is always an ordinary stop,
   never a cancel: the delivery ladder pastes nothing for silence, and a
   connection that dropped before the first word resolves `.degraded` and is
-  recovered from the retained audio. There is no extra time cap: a deliberate
+  recovered from the retained audio. The rule exists from the moment
+  recording begins (`DropAutoStopWatch`): words that arrive before the
+  watcher's first 200 ms poll count as speech, not silence. There is no extra
+  time cap: a deliberate
   long dictation runs to the hotkey's own limit.
 - **Provider turn prediction.** On ElevenLabs `scribe_v3_live` such a take
   asks for `commit_strategy=turn_prediction`; the provider's first commit with

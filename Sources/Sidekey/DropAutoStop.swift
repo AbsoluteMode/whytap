@@ -101,3 +101,39 @@ struct DropAutoStopRule: Equatable {
         return now - lastChangeAt >= quietAfterSpeech ? .finish : .keepListening
     }
 }
+
+/// The rule for the take in progress, owned by the app delegate.
+///
+/// Words can arrive before the watcher's first poll, so the rule must exist
+/// from the moment recording begins: `transcriptChanged` creates it when the
+/// watcher has not yet, and nothing said is ever counted as silence.
+@MainActor
+final class DropAutoStopWatch {
+    private var rule: DropAutoStopRule?
+    private let quietSeconds: () -> TimeInterval
+
+    init(quietSeconds: @escaping () -> TimeInterval = { DropAutoStopTuning.quietSeconds() }) {
+        self.quietSeconds = quietSeconds
+    }
+
+    /// Recording began. Idempotent: the first caller sets the start time.
+    func recordingBegan(now: TimeInterval) {
+        guard rule == nil else { return }
+        rule = DropAutoStopRule(now: now, quietAfterSpeech: quietSeconds())
+    }
+
+    func transcriptChanged(_ text: String, now: TimeInterval) {
+        recordingBegan(now: now)
+        rule?.transcriptChanged(text, now: now)
+    }
+
+    /// The decision for a take that is recording.
+    func decision(now: TimeInterval) -> DropAutoStopRule.Decision {
+        recordingBegan(now: now)
+        return rule?.decision(now: now) ?? .keepListening
+    }
+
+    func reset() {
+        rule = nil
+    }
+}

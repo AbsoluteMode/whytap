@@ -75,6 +75,79 @@ final class DropAutoStopTests: XCTestCase {
         XCTAssertEqual(DropAutoStopTuning.quietSeconds(defaults), 2)
     }
 
+    // MARK: - Words that arrive before the watcher's first poll
+
+    /// The first final lands before the 200 ms poll ever ran. It must count
+    /// as speech: the take ends on the quiet path, not the no-speech one.
+    func testWordsBeforeTheFirstPollAreSpeechNotSilence() {
+        let watch = DropAutoStopWatch(quietSeconds: { 2 })
+        // Callback first, exactly as the streaming session delivers it.
+        watch.transcriptChanged("напиши письмо", now: 10.05)
+        // The watcher wakes for the first time afterwards.
+        XCTAssertEqual(watch.decision(now: 10.2), .keepListening)
+        XCTAssertEqual(watch.decision(now: 12.0), .keepListening)
+        XCTAssertEqual(watch.decision(now: 12.1), .finish, "2 s after the words, not 5 s after start")
+    }
+
+    func testRecordingStartSetsTheClockOnceAndLaterEventsDoNotMoveIt() {
+        let watch = DropAutoStopWatch(quietSeconds: { 2 })
+        watch.recordingBegan(now: 100)
+        watch.recordingBegan(now: 103)          // a later poll must not restart it
+        XCTAssertEqual(watch.decision(now: 104.9), .keepListening)
+        XCTAssertEqual(watch.decision(now: 105), .finish, "no speech 5 s after the first start")
+    }
+
+    func testPollBeforeAnyWordStartsTheClockAndResetForgetsTheTake() {
+        let watch = DropAutoStopWatch(quietSeconds: { 2 })
+        XCTAssertEqual(watch.decision(now: 50), .keepListening)   // first poll, no words yet
+        watch.transcriptChanged("да", now: 51)
+        XCTAssertEqual(watch.decision(now: 53), .finish)
+
+        watch.reset()
+        // The next take starts clean: the old words and clock are gone.
+        XCTAssertEqual(watch.decision(now: 200), .keepListening)
+        XCTAssertEqual(watch.decision(now: 204.9), .keepListening)
+        XCTAssertEqual(watch.decision(now: 205), .finish)
+    }
+
+    private struct FinalOnlyAdapter: BYOKTranscriptionAdapter {
+        let session: DirectProviderStreamingSessionTests.FakeSession
+        func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession { session }
+    }
+
+    /// The wiring with a fake upstream: the session's callback feeds the
+    /// watch before any poll, and the take then stops as speech.
+    func testFinalDeliveredBeforeTheWatcherWakesEndsTheTakeAsSpeech() async {
+        let upstream = DirectProviderStreamingSessionTests.FakeSession()
+        let session = DirectProviderStreamingSession(
+            audioEngine: DirectProviderStreamingSessionTests.FakeAudio(),
+            adapter: FinalOnlyAdapter(session: upstream), language: nil, terms: []
+        )
+        let watch = DropAutoStopWatch(quietSeconds: { 2 })
+        var clock: TimeInterval = 0
+        var delivered = 0
+        session.onTranscriptUpdate = {
+            delivered += 1
+            watch.transcriptChanged($0, now: clock)
+        }
+        let run = Task { await session.run() }
+        try? await Task.sleep(for: .milliseconds(30))
+        clock = 0.05
+        upstream.cont.yield(.final("напиши письмо Ярославу"))
+        for _ in 0..<100 where delivered == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(delivered, 1)
+
+        // First poll at 200 ms, then the quiet path at 2 s after the words.
+        XCTAssertEqual(watch.decision(now: 0.2), .keepListening)
+        XCTAssertEqual(watch.decision(now: 2.0), .keepListening)
+        XCTAssertEqual(watch.decision(now: 2.1), .finish)
+
+        await session.stop()
+        upstream.cont.yield(.done("напиши письмо Ярославу"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("напиши письмо Ярославу"))
+    }
+
     // MARK: - Which press starts such a take
 
     func testOnlyAToggleStartWithTheSettingOnBecomesAnAutoStopTake() {

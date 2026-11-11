@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set only across the dispatcher call that starts an auto-stop take, so
     /// `startDropTurnTelemetry` decides the mode for every take synchronously.
     private var dropAutoStopStartPending = false
-    private var dropAutoStopRule: DropAutoStopRule?
+    private let dropAutoStopWatch = DropAutoStopWatch()
     private var dropAutoStopTask: Task<Void, Never>?
     private let autoPasteEngine = AutoPasteEngine()
     private var hotkey: HotkeyShortcutMonitor?
@@ -2480,7 +2480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func endDropAutoStop() {
         dropAutoStopTakeActive = false
-        dropAutoStopRule = nil
+        dropAutoStopWatch.reset()
         dropAutoStopTask?.cancel()
         dropAutoStopTask = nil
     }
@@ -2499,14 +2499,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if phase == .idle || phase == .deliveryFailed { return }
                 // Session setup, or a stop already under way.
                 guard phase == .recording, !self.streamingStopRequested else { continue }
+                // The clock starts when recording does, not during setup; a
+                // transcript that arrived before this poll already started it.
                 let now = ProcessInfo.processInfo.systemUptime
-                // The clock starts when recording does, not during setup.
-                if self.dropAutoStopRule == nil {
-                    self.dropAutoStopRule = DropAutoStopRule(
-                        now: now, quietAfterSpeech: DropAutoStopTuning.quietSeconds()
-                    )
-                }
-                guard self.dropAutoStopRule?.decision(now: now) == .finish else { continue }
+                guard self.dropAutoStopWatch.decision(now: now) == .finish else { continue }
                 // Always an ordinary stop, never a cancel. With no words the
                 // delivery ladder pastes nothing; if the connection dropped
                 // before the first word the stop still recovers the retained
@@ -2789,6 +2785,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try recorder.start()
             dropTurnTrace?.mark(.recording)
+            if dropAutoStopTakeActive {
+                dropAutoStopWatch.recordingBegan(now: ProcessInfo.processInfo.systemUptime)
+            }
             AppState.shared.phase = .recording
         } catch {
             FileHandle.standardError.write(Data("✗ start recording failed: \(error)\n".utf8))
@@ -3007,15 +3006,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // but nothing arrived". First token also stamps `.firstToken`.
                 self?.dropTurnTrace?.recordToken()
                 self?.lastDropPartial = text
-                self?.dropAutoStopRule?.transcriptChanged(
-                    text, now: ProcessInfo.processInfo.systemUptime
-                )
+                if self?.dropAutoStopTakeActive == true {
+                    // Creates the rule if the watcher has not polled yet, so
+                    // words that arrive first are never counted as silence.
+                    self?.dropAutoStopWatch.transcriptChanged(
+                        text, now: ProcessInfo.processInfo.systemUptime
+                    )
+                }
                 IslandPanel.shared.agentFlow.dropTranscriptUpdated(text)
             }
             // Close the setup window now that the session exists. From here a
             // stop routes through `.stopStreamingSession` normally.
             streamingSetupInProgress = false
             dropTurnTrace?.mark(.recording)
+            if dropAutoStopTakeActive {
+                dropAutoStopWatch.recordingBegan(now: ProcessInfo.processInfo.systemUptime)
+            }
             AppState.shared.phase = .recording
 
             // Apply any stop the user requested DURING setup. Must happen

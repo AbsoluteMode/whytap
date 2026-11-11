@@ -210,7 +210,9 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         upstream.cont.yield(.done("Privet mir"))
         _ = await runTask.value
 
-        XCTAssertEqual(updates, ["Privet mir"])
+        // The committed final is live text on its own (final-only providers,
+        // and a hands-free take's end rule, depend on it), then the tail joins.
+        XCTAssertEqual(updates, ["Privet", "Privet mir"])
     }
 
     /// Soniox emits per-token finals whose texts carry their own leading

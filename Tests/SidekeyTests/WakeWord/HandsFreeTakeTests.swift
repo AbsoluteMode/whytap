@@ -141,6 +141,72 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertEqual(stopped, .transcript("готово"))
     }
 
+    // MARK: - What the wake-word end rule can see and recover
+
+    private struct PlainAdapter: BYOKTranscriptionAdapter {
+        let session: DirectProviderStreamingSessionTests.FakeSession
+        func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession { session }
+    }
+
+    /// Deepgram-style upstream: words arrive only as finals. The live
+    /// transcript must still move, or the end rule would see silence.
+    func testFinalOnlySpeechReachesTheLiveTranscriptAndEndsTheTakeNormally() async {
+        let upstream = DirectProviderStreamingSessionTests.FakeSession()
+        let session = DirectProviderStreamingSession(
+            audioEngine: DirectProviderStreamingSessionTests.FakeAudio(),
+            adapter: PlainAdapter(session: upstream), language: nil, terms: []
+        )
+        var updates: [String] = []
+        var endpointer = WakeTakeEndpointer(now: 0)
+        session.onTranscriptUpdate = {
+            updates.append($0)
+            endpointer.transcriptChanged($0, now: 1)
+        }
+        let run = Task { await session.run() }
+        try? await Task.sleep(for: .milliseconds(30))
+        upstream.cont.yield(.final("напиши письмо"))
+        upstream.cont.yield(.final("Ярославу"))
+        for _ in 0..<100 where updates.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(updates, ["напиши письмо", "напиши письмо Ярославу"])
+        // Words were seen: quiet ends the take, the no-speech window does not.
+        XCTAssertEqual(endpointer.decision(now: 2.9), .keepListening)
+        XCTAssertEqual(endpointer.decision(now: 3), .finish)
+
+        await session.stop()
+        upstream.cont.yield(.done("напиши письмо Ярославу"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("напиши письмо Ярославу"))
+    }
+
+    /// The connection drops before any word. The end rule stops the take
+    /// (never cancels), so the session resolves `.degraded` and the retained
+    /// audio goes to batch recovery, exactly as after a key release.
+    func testTransportLossBeforeTheFirstWordIsRecoveredByTheStop() async {
+        let retained = Data([0x01, 0x02, 0x03, 0x04])
+        let audio = CapturingStubAudioSource(captured: retained)
+        let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
+        let session = DirectProviderStreamingSession(
+            audioEngine: audio,
+            adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
+            language: nil, terms: [], resilient: true
+        )
+        var endpointer = WakeTakeEndpointer(now: 0)
+        session.onTranscriptUpdate = { endpointer.transcriptChanged($0, now: 1) }
+        let run = Task<StreamingSessionResult, Never> { await session.run() }
+        try? await Task.sleep(for: .milliseconds(40))
+        upstream.emit(.error("transport"))
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(audio.didStop, "capture goes on after the connection drops")
+
+        // No word ever arrived: the rule stops the take, it does not cancel it.
+        XCTAssertEqual(endpointer.decision(now: WakeTakeEndpointer.noSpeechTimeout - 0.1), .keepListening)
+        XCTAssertEqual(endpointer.decision(now: WakeTakeEndpointer.noSpeechTimeout), .finish)
+        await session.stop()
+        let result = await run.value
+        XCTAssertEqual(result, .degraded)
+        XCTAssertEqual(session.capturedAudioPCM16(), retained)
+    }
+
     // MARK: - Factory
 
     func testOnlyAHandsFreeTakeUsesTheHandsFreeAdapterOnTheSameRoute() throws {

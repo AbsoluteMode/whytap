@@ -210,9 +210,11 @@ Wake word (opt-in, Settings -> Other, off by default):
   rules are unchanged elsewhere). App control's
   memory-only wakeWordPaused releases the listener for up to three minutes so
   the builder's meeting gate sees real microphone use. Nobody releases a key:
-  WakeTakeEndpointer finishes the take 2 s after the live transcript stops
-  changing, cancels it without pasting when no words arrive within 5 s of
-  recording, and ends any take at 60 s. A self-hosted server route sends no
+  WakeTakeEndpointer stops the take 2 s after the live transcript stops
+  changing, when no words arrive within 5 s of recording, and at 60 s. It is
+  always an ordinary stop, never a cancel: silence pastes nothing, and a
+  connection lost before the first word still goes to batch recovery. Finals
+  without partials (Deepgram) count as live text. A self-hosted server route sends no
   words before a commit, so a wake word does not start a take there. On
   ElevenLabs scribe_v3_live such a take (TranscriptionSessionFactory
   handsFree) also asks for commit_strategy=turn_prediction; the provider's

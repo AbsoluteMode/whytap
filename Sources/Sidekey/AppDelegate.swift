@@ -2593,20 +2593,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         now: now, quietAfterSpeech: WakeWordTuning.quietSeconds()
                     )
                 }
-                guard let decision = self.wakeWordEndpointer?.decision(now: now),
-                      decision != .keepListening else { continue }
-                let finish = AppDelegate.dropMaxHoldRoute(
+                guard self.wakeWordEndpointer?.decision(now: now) == .finish else { continue }
+                // Always an ordinary stop, never a cancel. With no words the
+                // delivery ladder pastes nothing; if the connection dropped
+                // before the first word, the stop still recovers the retained
+                // audio; after a failed connection it stops the batch recorder.
+                self.handleDropHotkeyRoute(AppDelegate.dropMaxHoldRoute(
                     phase: AppState.shared.phase,
                     hasStreamingSession: self.streamingSession != nil
-                )
-                if decision == .finish || self.streamingSession == nil {
-                    // No live session means the batch recorder took over after
-                    // a failed connection: it has no transcript to watch, so
-                    // transcribe what it recorded instead of discarding it.
-                    self.handleDropHotkeyRoute(finish)
-                } else {
-                    self.onDropHotkeyCancelled()
-                }
+                ))
                 return
             }
         }

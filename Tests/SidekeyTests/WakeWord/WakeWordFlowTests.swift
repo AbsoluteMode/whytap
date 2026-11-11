@@ -47,11 +47,13 @@ final class WakeWordFlowTests: XCTestCase {
         XCTAssertEqual(endpointer.decision(now: 3), .finish)
     }
 
-    func testFalseTriggerWithoutSpeechIsCancelledNotPasted() {
+    /// A false trigger is stopped, not cancelled: silence pastes nothing, and
+    /// a connection that dropped before the first word is still recovered.
+    func testFalseTriggerWithoutSpeechIsStoppedAfterTheNoSpeechWindow() {
         var endpointer = WakeTakeEndpointer(now: 0)
         endpointer.transcriptChanged("   ", now: 3)
         XCTAssertEqual(endpointer.decision(now: 4.9), .keepListening)
-        XCTAssertEqual(endpointer.decision(now: 5), .cancel)
+        XCTAssertEqual(endpointer.decision(now: 5), .finish)
     }
 
     func testSpeechStartingLateStillCountsFromItsLastWord() {

@@ -1,18 +1,19 @@
 import Foundation
 
 /// Decides when a wake-word take is over. Nobody releases a key, so the take
-/// ends when the live transcript stops changing, and is dropped when nothing
-/// was said at all (a false trigger). Works for every provider; a provider
-/// that predicts the end of a turn simply finishes the take earlier.
+/// is stopped when the live transcript stops changing, or when no words came
+/// at all (a false trigger). It is always an ordinary stop, never a cancel:
+/// the delivery ladder then pastes nothing for silence and still recovers the
+/// retained audio if the connection had dropped. Works for every provider; a
+/// provider that predicts the end of a turn simply finishes the take earlier.
 /// Pure: the caller supplies the clock.
 /// WHY: .project-docs/decisions/2026-11-11-wake-word.md
 struct WakeTakeEndpointer: Equatable {
     enum Decision: Equatable {
         case keepListening
-        /// Words were said and then the transcript went quiet: deliver them.
+        /// Stop the take: the transcript went quiet after words, no words
+        /// arrived in time, or the take reached its cap.
         case finish
-        /// No words arrived: discard the take without pasting.
-        case cancel
     }
 
     /// Time to start speaking once recording has begun. Shorter than the
@@ -45,9 +46,9 @@ struct WakeTakeEndpointer: Equatable {
     }
 
     func decision(now: TimeInterval) -> Decision {
-        if now - startedAt >= Self.maximumDuration { return lastText.isEmpty ? .cancel : .finish }
+        if now - startedAt >= Self.maximumDuration { return .finish }
         guard !lastText.isEmpty, let lastChangeAt else {
-            return now - startedAt >= Self.noSpeechTimeout ? .cancel : .keepListening
+            return now - startedAt >= Self.noSpeechTimeout ? .finish : .keepListening
         }
         return now - lastChangeAt >= quietAfterSpeech ? .finish : .keepListening
     }

@@ -331,6 +331,10 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                     to: committedLiveTranscript,
                     join: liveJoin
                 )
+                // A provider can deliver words as finals with no partial
+                // before them (Deepgram's final event): they are live text
+                // too, for the island and for a hands-free take's end.
+                emitLiveTranscript(committedLiveTranscript)
                 continue
             case .done(let text):
                 await teardown(session)

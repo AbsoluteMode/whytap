@@ -316,18 +316,21 @@ enum PasteTargetValidator {
     ///   couldn't be read (empty / nil) — leave it to other sources or
     ///   the permissive default. Rejecting on an unknown role would
     ///   reintroduce the Electron false-negative.
-    /// Positive evidence that typing would land in the focused element: a
-    /// text role or subrole, or a settable value / selected text. A web area
-    /// counts only when its selected text is settable (an editable document),
-    /// never by its role alone. Pure, for the strict wake-word path.
+    /// Positive evidence that typed text would land in the focused element.
+    /// Pure, for the strict wake-word path.
+    ///
+    /// - A text role or subrole counts only when it is editable: its value or
+    ///   selected text is settable. A read-only text view still reports
+    ///   `AXTextArea`.
+    /// - Anything else counts only by settable selected text, the mark of a
+    ///   text-editing surface (a contenteditable group, an editable web
+    ///   document). A settable value alone is a slider or a scroll bar.
     static func isPositivelyEditable(
         role: String?, subrole: String?, valueSettable: Bool, selectedTextSettable: Bool
     ) -> Bool {
         guard let role, !role.isEmpty else { return false }
-        if textRoles.contains(role) { return true }
-        if let subrole, textSubroleHints.contains(subrole) { return true }
-        if role == "AXWebArea" { return selectedTextSettable }
-        return valueSettable || selectedTextSettable
+        let isText = textRoles.contains(role) || subrole.map(textSubroleHints.contains) == true
+        return isText ? (valueSettable || selectedTextSettable) : selectedTextSettable
     }
 
     private static func evaluateFocusedElement(

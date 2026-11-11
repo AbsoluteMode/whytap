@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Sidekey
 
@@ -127,27 +128,61 @@ final class WakeWordFlowTests: XCTestCase {
 
     // MARK: - Where a wake word may start a take
 
-    func testOnlyPositiveEvidenceOfAnEditableFieldCounts() {
+    func testOnlyPositiveEvidenceOfEditableTextCounts() {
         func editable(_ role: String?, _ subrole: String? = nil, value: Bool = false, selected: Bool = false) -> Bool {
             PasteTargetValidator.isPositivelyEditable(
                 role: role, subrole: subrole, valueSettable: value, selectedTextSettable: selected
             )
         }
-        // Focused editable fields.
-        XCTAssertTrue(editable("AXTextField"))
-        XCTAssertTrue(editable("AXTextArea"))
-        XCTAssertTrue(editable("AXComboBox"))
-        XCTAssertTrue(editable("AXGroup", "AXContentEditableElement"))
-        XCTAssertTrue(editable("AXGroup", value: true))
+        // Editable text.
+        XCTAssertTrue(editable("AXTextField", value: true))
+        XCTAssertTrue(editable("AXTextArea", value: true, selected: true))
+        XCTAssertTrue(editable("AXComboBox", selected: true))
+        XCTAssertTrue(editable("AXGroup", "AXContentEditableElement", selected: true))
+        XCTAssertTrue(editable("AXGroup", selected: true))
         XCTAssertTrue(editable("AXWebArea", selected: true))
-        // Focus that is not a text field.
+        // Read-only text: the role alone proves nothing.
+        XCTAssertFalse(editable("AXTextArea"))
+        XCTAssertFalse(editable("AXTextField"))
+        XCTAssertFalse(editable("AXStaticText"))
+        XCTAssertFalse(editable("AXGroup", "AXSearchField"))
+        // Non-text controls with a settable value.
+        XCTAssertFalse(editable("AXSlider", value: true))
+        XCTAssertFalse(editable("AXScrollBar", value: true))
+        XCTAssertFalse(editable("AXCheckBox", value: true))
         XCTAssertFalse(editable("AXButton"))
         XCTAssertFalse(editable("AXWebArea"))
         XCTAssertFalse(editable("AXWebArea", value: true))
-        XCTAssertFalse(editable("AXWindow"))
         // Unknown focus: no role at all, whatever else is claimed.
         XCTAssertFalse(editable(nil, value: true, selected: true))
-        XCTAssertFalse(editable("", "AXSearchField", value: true))
+        XCTAssertFalse(editable("", "AXSearchField", value: true, selected: true))
+    }
+
+    /// The same rule against what real AppKit controls report (no window is
+    /// shown): an editable text view is a destination; the same view made
+    /// read-only, and a slider, are not.
+    func testRealAppKitControlsClassifyByEditability() {
+        func evidence(_ view: NSView) -> Bool {
+            PasteTargetValidator.isPositivelyEditable(
+                role: view.accessibilityRole()?.rawValue,
+                subrole: view.accessibilitySubrole()?.rawValue,
+                valueSettable: view.accessibilityIsAttributeSettable(.value),
+                selectedTextSettable: view.accessibilityIsAttributeSettable(.selectedText)
+            )
+        }
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 80))
+        text.string = "черновик"
+        text.isEditable = true
+        XCTAssertEqual(text.accessibilityRole(), .textArea)
+        XCTAssertTrue(evidence(text))
+
+        text.isEditable = false
+        XCTAssertEqual(text.accessibilityRole(), .textArea, "read-only text keeps the text role")
+        XCTAssertFalse(evidence(text))
+
+        let slider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
+        XCTAssertFalse(evidence(slider))
+        XCTAssertFalse(evidence(NSButton(title: "OK", target: nil, action: nil)))
     }
 
     func testProcessWithoutAnyFocusNeverStartsAWakeWordTake() throws {

@@ -20,7 +20,10 @@ struct DropOutputPolicy {
         case .smart: output = try await cleanup()
         }
         try Task.checkCancellation()
-        let filter: (String) -> String = { DropFillerFilter.apply($0, removing: fillerTerms) }
+        // Both modes: a provider can leave a space before a mark ("слово ?").
+        let filter: (String) -> String = {
+            DropPunctuationSpacing.apply(DropFillerFilter.apply($0, removing: fillerTerms))
+        }
         let filtered = mode == .smart && preservingMarkdown()
             ? SmartMarkdownProtection.filtering(output, apply: filter) : filter(output)
         if filtered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

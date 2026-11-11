@@ -83,6 +83,41 @@ final class DropOutputPolicyTests: XCTestCase {
         XCTAssertEqual(retry.targetPID, 123)
     }
 
+    func testFastRemovesSpaceTheProviderLeftBeforePunctuation() async throws {
+        let result = try await DropOutputPolicy(mode: .fast).prepare(
+            rawText: "Объявить их истёкшими ?", fillerTerms: []
+        ) {
+            XCTFail("Fast must not contact the LLM")
+            return "unused"
+        }
+        XCTAssertEqual(result, "Объявить их истёкшими?")
+    }
+
+    func testSmartRemovesSpaceBeforePunctuationButKeepsCodeSpans() async throws {
+        let result = try await DropOutputPolicy(mode: .smart).prepare(
+            rawText: "raw", fillerTerms: [], preservingMarkdown: { true }
+        ) { "Запусти `ls . ` и скажи , что вышло ." }
+        XCTAssertEqual(result, "Запусти `ls . ` и скажи, что вышло.")
+    }
+
+    func testPunctuationSpacingLeavesLegitimateTextAlone() {
+        let cases: [(String, String)] = [
+            ("Привет , мир !", "Привет, мир!"),
+            ("Что ?! Серьёзно ...", "Что?! Серьёзно..."),
+            ("первая строка .\nвторая ;", "первая строка.\nвторая;"),
+            ("он сказал « да » и ушёл", "он сказал « да » и ушёл"),
+            ("открой .env и .gitignore", "открой .env и .gitignore"),
+            ("улыбка :) и ...потом", "улыбка :) и ...потом"),
+            ("Vraiment\u{00A0}? Oui\u{202F}!", "Vraiment\u{00A0}? Oui\u{202F}!"),
+            ("- пункт\n- . точка", "- пункт\n- . точка"),
+            ("", ""),
+            ("  ?", "  ?"),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(DropPunctuationSpacing.apply(input), expected, input)
+        }
+    }
+
     func testFastPreservesSpeechWhenFillerRulesWouldRemoveEverything() async throws {
         let result = try await DropOutputPolicy(mode: .fast).prepare(rawText: "uh", fillerTerms: ["uh"]) {
             XCTFail("Fast must not contact the LLM")

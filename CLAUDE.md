@@ -134,6 +134,9 @@ Voice flow (Drop / dictation):
             the original mode and target; configuration errors open API & Models on
             the Drop Smart cleanup row.
             Full, batch-recovered and partial transcripts use the same rule.
+            In both modes DropPunctuationSpacing then removes an ordinary
+            space a provider left before closing punctuation ("слово ?"),
+            outside protected Markdown code/URLs.
             A new take discards the old retry. The island observes persisted
             mode changes from every control. The cleanup provider mark appears
             only while processing; paste shows “pasting…” without a provider. WHY:

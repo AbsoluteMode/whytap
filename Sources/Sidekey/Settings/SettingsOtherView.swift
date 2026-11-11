@@ -121,6 +121,8 @@ struct SettingsOtherView: View {
                     }
                 }
 
+                WakeWordSettingsCard()
+
                 VStack(alignment: .leading, spacing: 0) {
                     MacGroupTitle(title: "Features")
                     MacCard {

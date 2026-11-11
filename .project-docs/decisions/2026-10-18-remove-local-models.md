@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/RetiredLocalRouteTests.swift
     confirmed_at: 2026-10-18
-related: [2026-10-19-api-and-models.md, 2026-10-19-strict-drop-modes.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-no-default-realtime-host.md, 2026-10-18-provider-batch-transcription.md, ../project.md, 2026-09-10-byok-and-local-builds.md, 2026-10-18-silent-meetings.md]
+related: [2026-10-19-api-and-models.md, 2026-10-19-strict-drop-modes.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-no-default-realtime-host.md, 2026-10-18-provider-batch-transcription.md, ../project.md, 2026-09-10-byok-and-local-builds.md, 2026-10-18-silent-meetings.md, 2026-11-11-wake-word.md]
 ---
 
 # Remove on-device models

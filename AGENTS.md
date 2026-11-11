@@ -191,6 +191,40 @@ Voice flow (Drop / dictation):
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md
 
+Wake word (opt-in, Settings -> Other, off by default):
+  WakeWordListener keeps the microphone open only while a take could start
+  (enabled, awake, Drop and Agent idle, no meeting recording or screenshot) and
+  feeds 16 kHz audio to WakeWordSpotter: sherpa-onnx keyword spotting with the
+  bundled 3.3M English model (Resources/WakeWord, Apache-2.0), entirely on this
+  Mac. Listener audio is never stored, logged or sent; logs say only that the
+  phrase was heard. Phrases are user text (default `why tap, why tab`),
+  encoded by WakeWordTokenizer (SentencePiece unigram Viterbi over bpe.model);
+  the model is English, so phrases are Latin letters as an English listener
+  hears them. WakeWordMicOperator never holds a Bluetooth microphone open (it
+  would keep headphones in the call profile): it uses the default input only
+  when that is built in or USB, otherwise the built-in one, or stays off.
+  A heard phrase starts an ordinary Drop take through handleDropHotkeyRoute,
+  only with positive evidence of a focused editable field
+  (appHasFocusedTextInput requiringEvidence: read-only text, non-text
+  controls, unknown focus and a bare web area are a no; the permissive hint
+  rules are unchanged elsewhere). App control's
+  memory-only wakeWordPaused releases the listener for up to three minutes so
+  the builder's meeting gate sees real microphone use. Nobody releases a key:
+  WakeTakeEndpointer stops the take 2 s after the live transcript stops
+  changing, when no words arrive within 5 s of recording, and at 60 s. It is
+  always an ordinary stop, never a cancel: silence pastes nothing, and a
+  connection lost before the first word still goes to batch recovery. Finals
+  without partials (Deepgram) count as live text. A self-hosted server route sends no
+  words before a commit, so a wake word does not start a take there. On
+  ElevenLabs scribe_v3_live such a take (TranscriptionSessionFactory
+  handsFree) also asks for commit_strategy=turn_prediction; the provider's
+  first commit with words ends it as .endpointDetected; a closed socket is a
+  transport error (batch recovery), never a turn end. Other models keep
+  manual commit. Both end-of-speech timings can be overridden through
+  WakeWordTuning defaults while they are calibrated (no UI yet).
+  turn_prediction is unverified against a live socket. WHY:
+  .project-docs/decisions/2026-11-11-wake-word.md
+
 Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   The Agent voice ticker shows the selected model author's bundled mark instead
   of the generic star; OpenRouter's hosting-provider pin does not change authorship.
@@ -1316,7 +1350,9 @@ is separate from the removed app-managed speech/LLM models. Guide:
   `NSAudioCaptureUsageDescription` (contract: `PackagingRebrandTests`);
   without the grant the tap silently yields zeros, so `SystemAudioVADProbe`
   rebuilds it at every recording start.
-- **Microphone** for Drop, agent voice and meetings.
+- **Microphone** for Drop, agent voice, meetings and the opt-in wake word.
+  Background wake-word listening never prompts: it starts only with an existing
+  grant, and the Settings switch is the action that may ask.
 
 Drop reconciles failed installations and permission changes on activation,
 reopen, Settings Refresh/Retry and a bounded quiet polling session. Carbon tap
@@ -1459,7 +1495,10 @@ input layout, including live recording and previously saved non-English titles.
    `RetiredLocalRouteTests`). Each feature's data, including its fallback and
    probe, goes only to the provider of its own route in Settings -> API &
    Models; a removed key leaves the feature Not set and moves nothing. WHY:
-   .project-docs/decisions/2026-10-19-api-and-models.md FluidAudio stays only for the meeting detector's
+   .project-docs/decisions/2026-10-19-api-and-models.md Two on-device models
+   are permitted, and neither recognizes speech: the opt-in wake word's bundled
+   keyword spotter (only "was the phrase said"; WHY:
+   .project-docs/decisions/2026-11-11-wake-word.md) and Silero VAD. FluidAudio stays only for the meeting detector's
    Silero VAD; launch removes the retired models' weights under
    Application Support/Sidekey once per flavor and never touches FluidAudio's
    cache (`LegacyLocalModelCleanup`, WHY:

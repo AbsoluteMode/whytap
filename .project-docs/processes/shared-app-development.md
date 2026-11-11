@@ -44,7 +44,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md]
+related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-11-wake-word.md]
 ---
 
 # Parallel development, one working Whytap
@@ -294,6 +294,14 @@ Under the lock:
    A data migration also needs a consistent private backup using the store's
    backup mechanism or a quiescent copy; copying an open SQLite file is not a
    reliable backup. Never inspect user content as part of a build check.
+   The opt-in wake word keeps Whytap's own microphone open while idle, which
+   the gate rightly reads as `microphone_in_use`. Do not weaken the gate:
+   first release that listener, then probe the real microphone state. Read
+   `whytap app settings`; if `wakeWordPaused` is `false`, run
+   `whytap app set-setting '{"key":"wakeWordPaused","value":true,"expected":false}'`
+   and wait two seconds. The pause is memory-only, changes no user setting and
+   ends by itself after three minutes or at quit; on a deferral set it back to
+   `false` (expected `true`). A build without this setting has no wake word.
    Check for meetings immediately before a normal quit using
    `python3 scripts/build-queue-meeting-gate.py` from checked main. Only exit 0
    with a fresh `status: clear` permits the next step; never reuse a cached

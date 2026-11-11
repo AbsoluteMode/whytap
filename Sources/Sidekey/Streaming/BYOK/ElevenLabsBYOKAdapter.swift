@@ -9,14 +9,31 @@ import os
 /// `no_verbatim=true` asks Scribe to remove fillers, false starts and
 /// disfluencies. Remaining end-to-end behavior is verified once a live key exists.
 enum ElevenLabsRealtimeURL {
-    static func make(model: String, language: String?, terms: [String]) -> URL {
+    /// Models whose `commit_strategy=turn_prediction` lets the provider end the
+    /// speaker's turn; any other model rejects it with `invalid_request`.
+    /// LIVE-VERIFY: from the published guides, not yet confirmed on a socket.
+    /// WHY: .project-docs/decisions/2026-11-11-wake-word.md
+    static func supportsTurnPrediction(model: String) -> Bool { model == "scribe_v3_live" }
+
+    /// - Parameter providerEndsTurn: a hands-free take on a model that
+    ///   predicts turns: the provider commits when the speaker is done (or
+    ///   after `vad_silence_threshold_secs` of silence) instead of on release.
+    static func make(
+        model: String, language: String?, terms: [String], providerEndsTurn: Bool = false,
+        turnSilenceSeconds: Double = WakeWordTuning.defaultProviderSilenceSeconds
+    ) -> URL {
         var comps = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         var items: [URLQueryItem] = [
             URLQueryItem(name: "model_id", value: model),
             URLQueryItem(name: "audio_format", value: "pcm_16000"),
-            URLQueryItem(name: "commit_strategy", value: "manual"),
+            URLQueryItem(name: "commit_strategy", value: providerEndsTurn ? "turn_prediction" : "manual"),
             URLQueryItem(name: "no_verbatim", value: "true"),
         ]
+        if providerEndsTurn {
+            items.append(URLQueryItem(
+                name: "vad_silence_threshold_secs", value: String(format: "%.2f", turnSilenceSeconds)
+            ))
+        }
         if let language, !language.isEmpty { items.append(URLQueryItem(name: "language_code", value: language)) }
         // ElevenLabs expects one `keyterms` query param per term (repeated), not
         // a comma-joined string — same shape as Deepgram's `keyterm`.
@@ -38,13 +55,24 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
     /// `ELEVENLABS_REALTIME_PREVIOUS_TEXT="."`).
     private let prerollSilenceMs: Int
     private let previousText: String?
+    let endsTurnItself: Bool
 
     /// Production: authenticated `URLSessionWebSocketTask` with the URL query.
-    init(apiKey: String, model: String, prerollSilenceMs: Int = 150, previousText: String? = ".") {
+    /// `handsFree` asks for provider turn prediction; it takes effect only on
+    /// a model that supports it, otherwise the take stays manual.
+    init(
+        apiKey: String, model: String, prerollSilenceMs: Int = 150, previousText: String? = ".",
+        handsFree: Bool = false
+    ) {
         self.prerollSilenceMs = prerollSilenceMs
         self.previousText = previousText
+        let providerEndsTurn = handsFree && ElevenLabsRealtimeURL.supportsTurnPrediction(model: model)
+        self.endsTurnItself = providerEndsTurn
         self.makeTransport = { language, terms in
-            let url = ElevenLabsRealtimeURL.make(model: model, language: language, terms: terms)
+            let url = ElevenLabsRealtimeURL.make(
+                model: model, language: language, terms: terms, providerEndsTurn: providerEndsTurn,
+                turnSilenceSeconds: WakeWordTuning.providerSilenceSeconds()
+            )
             var request = URLRequest(url: url)
             request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
             return URLSessionWebSocketTransport(task: URLSession.shared.webSocketTask(with: request))
@@ -52,9 +80,13 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
     }
 
     /// Test: inject a transport.
-    init(model: String, prerollSilenceMs: Int = 150, previousText: String? = ".", transport: @escaping TransportFactory) {
+    init(
+        model: String, prerollSilenceMs: Int = 150, previousText: String? = ".",
+        providerEndsTurn: Bool = false, transport: @escaping TransportFactory
+    ) {
         self.prerollSilenceMs = prerollSilenceMs
         self.previousText = previousText
+        self.endsTurnItself = providerEndsTurn
         self.makeTransport = transport
     }
 
@@ -62,7 +94,8 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
         let transport = makeTransport(language, terms)
         transport.resume()
         let session = ElevenLabsBYOKSession(
-            transport: transport, prerollSilenceMs: prerollSilenceMs, previousText: previousText
+            transport: transport, prerollSilenceMs: prerollSilenceMs, previousText: previousText,
+            providerEndsTurn: endsTurnItself
         )
         session.start()
         return session
@@ -85,14 +118,21 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
     /// forward loop, so it needs no lock.
     private let prerollSilence: Data
     private let previousText: String?
+    /// Hands-free take: the provider's own commit of spoken text is the
+    /// terminal, with no manual commit from us.
+    private let providerEndsTurn: Bool
     private var firstAudioSent = false
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "byok-elevenlabs")
     private static let sampleRate = 16_000
 
     let events: AsyncStream<BYOKStreamEvent>
 
-    init(transport: StreamingTransporting, prerollSilenceMs: Int = 0, previousText: String? = nil) {
+    init(
+        transport: StreamingTransporting, prerollSilenceMs: Int = 0, previousText: String? = nil,
+        providerEndsTurn: Bool = false
+    ) {
         self.transport = transport
+        self.providerEndsTurn = providerEndsTurn
         self.prerollSilence = prerollSilenceMs > 0
             ? Data(count: Self.sampleRate * 2 * prerollSilenceMs / 1000)
             : Data()
@@ -115,7 +155,11 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
                     // segment-capped stream, or a post-commit close), recover them
                     // as the terminal so a long dictation is delivered, not lost.
                     // Nothing accumulated → a genuine transport error.
-                    if self.finalParts.isEmpty {
+                    // A hands-free take the provider has not ended: a closed
+                    // socket is a failure to recover from the retained audio,
+                    // never a finished turn.
+                    let unfinishedHandsFree = self.providerEndsTurn && !self.endInputDidSend
+                    if self.finalParts.isEmpty || unfinishedHandsFree {
                         self.emit(.error("transport"))
                     } else {
                         self.emit(.done(self.finalParts.joined(separator: " ")))
@@ -141,7 +185,10 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
                         if let text = obj["text"] as? String { self.emit(.partial(text)) }
                     case "committed_transcript", "committed_transcript_with_timestamps":
                         let text = (obj["text"] as? String) ?? ""
-                        self.finalParts.append(text)
+                        let isBlank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        // Hands-free: silence before speech can be committed
+                        // empty; it is not part of the dictation.
+                        if !(self.providerEndsTurn && isBlank) { self.finalParts.append(text) }
                         self.emit(.final(text))
                         // Scribe auto-commits a segment at its ~36 s max length
                         // WITHOUT our manual commit; the socket stays open and
@@ -152,7 +199,21 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
                         // Accumulate mid-hold segments and keep listening; the joined
                         // terminal is delivered on our commit here, or on close above.
                         // WHY: docs/decisions/2026-06-30-elevenlabs-byok-segment-commit-truncation.md
-                        guard self.endInputDidSend else { continue }
+                        // Hands-free: the provider commits when it predicts
+                        // the turn is over, so its first commit with words in
+                        // it ends the take. An empty commit (silence before
+                        // speech) keeps listening.
+                        let turnEnded = self.providerEndsTurn
+                            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        guard self.endInputDidSend || turnEnded else { continue }
+                        if turnEnded, !self.endInputDidSend {
+                            let spoken = self.finalParts
+                                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .filter { !$0.isEmpty }
+                            self.emit(.done(spoken.joined(separator: " ")))
+                            self.continuation?.finish()
+                            return
+                        }
                         self.emit(.done(self.finalParts.joined(separator: " ")))
                         self.continuation?.finish()
                         return

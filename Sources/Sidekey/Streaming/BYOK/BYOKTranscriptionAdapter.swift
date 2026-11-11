@@ -82,4 +82,13 @@ extension BYOKUpstreamSession {
 
 protocol BYOKTranscriptionAdapter {
     func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession
+
+    /// True when the provider itself decides the speaker's turn is over and
+    /// the session's `.done` can arrive without the app's stop: a hands-free
+    /// take. The streaming session then resolves `.endpointDetected`.
+    var endsTurnItself: Bool { get }
+}
+
+extension BYOKTranscriptionAdapter {
+    var endsTurnItself: Bool { false }
 }

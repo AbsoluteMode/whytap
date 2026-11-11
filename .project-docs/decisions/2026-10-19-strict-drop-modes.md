@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropOutputPolicyTests.swift
     confirmed_at: 2026-10-19
-related: [2026-10-21-smart-decisions.md, 2026-10-19-api-and-models.md, ../project.md, 2026-10-18-remove-local-models.md, 2026-10-21-smart-editor-prompt.md]
+related: [2026-10-21-smart-decisions.md, 2026-10-19-api-and-models.md, ../project.md, 2026-10-18-remove-local-models.md, 2026-10-21-smart-editor-prompt.md, 2026-11-11-wake-word.md]
 ---
 
 # Strict Drop modes

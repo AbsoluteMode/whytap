@@ -762,6 +762,13 @@ if [ -d "${LANGUAGE_FLAGS_DIR}" ]; then
     cp -R "${LANGUAGE_FLAGS_DIR}" "${APP_BUNDLE}/Contents/Resources/LanguageFlags"
 fi
 
+# Wake word keyword-spotting model (Apache-2.0), read from
+# Bundle.main/WakeWord by the opt-in wake word listener.
+WAKE_WORD_DIR="${PROJECT_DIR}/Resources/WakeWord"
+if [ -d "${WAKE_WORD_DIR}" ]; then
+    cp -R "${WAKE_WORD_DIR}" "${APP_BUNDLE}/Contents/Resources/WakeWord"
+fi
+
 # Custom fonts (Instrument Serif) for editorial display typography.
 # Mirror dev-run.sh — registered automatically via Info.plist
 # ATSApplicationFontsPath = "Fonts".

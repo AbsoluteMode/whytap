@@ -21,8 +21,16 @@ struct DropOutputPolicy {
         }
         try Task.checkCancellation()
         let filter: (String) -> String = { DropFillerFilter.apply($0, removing: fillerTerms) }
-        let filtered = mode == .smart && preservingMarkdown()
+        let markdown = mode == .smart && preservingMarkdown()
+        let withoutFillers = markdown
             ? SmartMarkdownProtection.filtering(output, apply: filter) : filter(output)
+        // Both modes: a provider can leave a space before a mark ("слово ?").
+        // Run on the real text, not the masked one, so a mark right after
+        // inline code is tightened while code bytes and links stay intact.
+        let filtered = DropPunctuationSpacing.apply(
+            withoutFillers,
+            protecting: markdown ? SmartMarkdownProtection.codeRanges(in: withoutFillers) : []
+        )
         if filtered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard mode == .fast else { throw OpenRouterLLMError.emptyContent }
             return rawText

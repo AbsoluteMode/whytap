@@ -83,6 +83,136 @@ final class DropOutputPolicyTests: XCTestCase {
         XCTAssertEqual(retry.targetPID, 123)
     }
 
+    func testFastRemovesSpaceTheProviderLeftBeforePunctuation() async throws {
+        let result = try await DropOutputPolicy(mode: .fast).prepare(
+            rawText: "Объявить их истёкшими ?", fillerTerms: []
+        ) {
+            XCTFail("Fast must not contact the LLM")
+            return "unused"
+        }
+        XCTAssertEqual(result, "Объявить их истёкшими?")
+    }
+
+    func testSmartRemovesSpaceBeforePunctuationButKeepsCodeSpans() async throws {
+        let result = try await DropOutputPolicy(mode: .smart).prepare(
+            rawText: "raw", fillerTerms: [], preservingMarkdown: { true }
+        ) { "Запусти `ls . ` и скажи , что вышло ." }
+        XCTAssertEqual(result, "Запусти `ls . ` и скажи, что вышло.")
+    }
+
+    /// Smart into a Markdown field: the code span is masked while filters
+    /// run, and the mark right after it must still lose its space.
+    func testSmartRemovesSpaceRightAfterInlineCodeAndLinksKeepingTheirBytes() async throws {
+        let cases: [(String, String)] = [
+            ("Run `ls` ?", "Run `ls`?"),
+            ("Сначала `git  status . ` , потом `ls -la` .", "Сначала `git  status . `, потом `ls -la`."),
+            ("Открой https://example.com/a?b=1 , потом напиши .", "Открой https://example.com/a?b=1 , потом напиши."),
+            ("```\nls . ?\n```\nГотово .", "```\nls . ?\n```\nГотово."),
+        ]
+        for (cleaned, expected) in cases {
+            let result = try await DropOutputPolicy(mode: .smart).prepare(
+                rawText: "raw", fillerTerms: [], preservingMarkdown: { true }
+            ) { cleaned }
+            XCTAssertEqual(result, expected, cleaned)
+        }
+        XCTAssertEqual(DropPunctuationSpacing.apply("Run `ls` ?"), "Run `ls`?")
+    }
+
+    /// Attaching a mark to a link changes where it points: every detector
+    /// reads "…b=1?" as a different address. The destination must survive
+    /// Fast, Smart and Smart-Markdown output.
+    func testPunctuationNeverChangesALinkDestination() async throws {
+        let detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        func destinations(_ text: String) -> [String] {
+            detector.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+                .compactMap { $0.url?.absoluteString }
+        }
+        let links = ["https://example.com/a?b=1", "http://example.com/path", "www.example.com/a?b=1",
+                     "[docs](https://example.com/a?b=1)",
+                     // Scheme-less and quoted links are links too.
+                     "example.com/a?b=1", "example.com", "mail@example.com",
+                     "«www.example.com/a?b=1", "\"example.com/a?b=1", "(example.com/a?b=1"]
+        for link in links {
+            for mark in ["?", ":", "!", ";", ",", ".", "?!", "?»", "?\"", "?)"] {
+                let spoken = "Открой \(link) \(mark) потом напиши ."
+                let expected = destinations(spoken)
+                XCTAssertFalse(expected.isEmpty, link)
+
+                XCTAssertEqual(destinations(DropPunctuationSpacing.apply(spoken)), expected, spoken)
+                let fast = try await DropOutputPolicy(mode: .fast).prepare(rawText: spoken, fillerTerms: []) { "" }
+                XCTAssertEqual(destinations(fast), expected, spoken)
+                for markdown in [false, true] {
+                    let smart = try await DropOutputPolicy(mode: .smart).prepare(
+                        rawText: "raw", fillerTerms: [], preservingMarkdown: { markdown }
+                    ) { spoken }
+                    XCTAssertEqual(destinations(smart), expected, spoken)
+                    XCTAssertTrue(smart.hasSuffix("напиши."), "ordinary words are still tightened")
+                }
+            }
+        }
+    }
+
+    /// Explicit Markdown destinations, read back with Foundation's Markdown
+    /// parser: a relative angle-delimited path with spaces and marks, a
+    /// titled link, an autolink and a reference definition must point to the
+    /// same place after every mode, while prose around them is tightened.
+    func testExplicitMarkdownLinkDestinationsSurviveByTheParser() async throws {
+        func destinations(_ text: String) throws -> [String] {
+            let parsed = try AttributedString(
+                markdown: text,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            )
+            return parsed.runs.compactMap { $0.link?.absoluteString }
+        }
+        let cases = [
+            "Открой [ref](<dir/file ? notes>) потом напиши .",
+            "Открой [ref](<dir/a , b ! c>) , потом напиши .",
+            "Смотри [docs](https://example.com/a?b=1 \"title ?\") и `ls` ? Готово .",
+            "Адрес <https://example.com/a?b=1> ? Готово .",
+            "См. [ref][id] .\n\n[id]: dir/file ?x=1 .\n\nГотово .",
+        ]
+        for spoken in cases {
+            let expected = try destinations(spoken)
+            XCTAssertEqual(try destinations(DropPunctuationSpacing.apply(spoken)), expected, spoken)
+            let fast = try await DropOutputPolicy(mode: .fast).prepare(rawText: spoken, fillerTerms: []) { "" }
+            XCTAssertEqual(try destinations(fast), expected, spoken)
+            for markdown in [false, true] {
+                let smart = try await DropOutputPolicy(mode: .smart).prepare(
+                    rawText: "raw", fillerTerms: [], preservingMarkdown: { markdown }
+                ) { spoken }
+                XCTAssertEqual(try destinations(smart), expected, spoken)
+                XCTAssertTrue(smart.hasSuffix("."), spoken)
+                XCTAssertFalse(smart.hasSuffix(" ."), "prose after the link is still tightened: \(spoken)")
+            }
+        }
+        // The builder's exact case: the destination bytes are untouched.
+        let exact = try await DropOutputPolicy(mode: .smart).prepare(
+            rawText: "raw", fillerTerms: [], preservingMarkdown: { true }
+        ) { "Открой [ref](<dir/file ? notes>) потом напиши ." }
+        XCTAssertEqual(exact, "Открой [ref](<dir/file ? notes>) потом напиши.")
+        XCTAssertFalse(try destinations(exact).isEmpty)
+        // Code-adjacent tightening is kept.
+        XCTAssertEqual(DropPunctuationSpacing.apply("Run `ls` ? Готово ."), "Run `ls`? Готово.")
+    }
+
+    func testPunctuationSpacingLeavesLegitimateTextAlone() {
+        let cases: [(String, String)] = [
+            ("Привет , мир !", "Привет, мир!"),
+            ("Что ?! Серьёзно ...", "Что?! Серьёзно..."),
+            ("первая строка .\nвторая ;", "первая строка.\nвторая;"),
+            ("он сказал « да » и ушёл", "он сказал « да » и ушёл"),
+            ("открой .env и .gitignore", "открой .env и .gitignore"),
+            ("улыбка :) и ...потом", "улыбка :) и ...потом"),
+            ("Vraiment\u{00A0}? Oui\u{202F}!", "Vraiment\u{00A0}? Oui\u{202F}!"),
+            ("- пункт\n- . точка", "- пункт\n- . точка"),
+            ("", ""),
+            ("  ?", "  ?"),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(DropPunctuationSpacing.apply(input), expected, input)
+        }
+    }
+
     func testFastPreservesSpeechWhenFillerRulesWouldRemoveEverything() async throws {
         let result = try await DropOutputPolicy(mode: .fast).prepare(rawText: "uh", fillerTerms: ["uh"]) {
             XCTFail("Fast must not contact the LLM")

@@ -1,7 +1,7 @@
 import XCTest
 @testable import Sidekey
 
-/// A wake-word take has no key release: on a model that predicts turns the
+/// An auto-stop Drop take has no key release: on a model that predicts turns the
 /// provider ends it, and the app must treat that as a normal finish.
 @MainActor
 final class HandsFreeTakeTests: XCTestCase {
@@ -141,7 +141,7 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertEqual(stopped, .transcript("готово"))
     }
 
-    // MARK: - What the wake-word end rule can see and recover
+    // MARK: - What the auto-stop rule can see and recover
 
     private struct PlainAdapter: BYOKTranscriptionAdapter {
         let session: DirectProviderStreamingSessionTests.FakeSession
@@ -157,7 +157,7 @@ final class HandsFreeTakeTests: XCTestCase {
             adapter: PlainAdapter(session: upstream), language: nil, terms: []
         )
         var updates: [String] = []
-        var endpointer = WakeTakeEndpointer(now: 0)
+        var endpointer = DropAutoStopRule(now: 0)
         session.onTranscriptUpdate = {
             updates.append($0)
             endpointer.transcriptChanged($0, now: 1)
@@ -190,7 +190,7 @@ final class HandsFreeTakeTests: XCTestCase {
             adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
             language: nil, terms: [], resilient: true
         )
-        var endpointer = WakeTakeEndpointer(now: 0)
+        var endpointer = DropAutoStopRule(now: 0)
         session.onTranscriptUpdate = { endpointer.transcriptChanged($0, now: 1) }
         let run = Task<StreamingSessionResult, Never> { await session.run() }
         try? await Task.sleep(for: .milliseconds(40))
@@ -199,8 +199,8 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertFalse(audio.didStop, "capture goes on after the connection drops")
 
         // No word ever arrived: the rule stops the take, it does not cancel it.
-        XCTAssertEqual(endpointer.decision(now: WakeTakeEndpointer.noSpeechTimeout - 0.1), .keepListening)
-        XCTAssertEqual(endpointer.decision(now: WakeTakeEndpointer.noSpeechTimeout), .finish)
+        XCTAssertEqual(endpointer.decision(now: DropAutoStopRule.noSpeechTimeout - 0.1), .keepListening)
+        XCTAssertEqual(endpointer.decision(now: DropAutoStopRule.noSpeechTimeout), .finish)
         await session.stop()
         let result = await run.value
         XCTAssertEqual(result, .degraded)

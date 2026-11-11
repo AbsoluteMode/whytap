@@ -12,15 +12,15 @@ enum ElevenLabsRealtimeURL {
     /// Models whose `commit_strategy=turn_prediction` lets the provider end the
     /// speaker's turn; any other model rejects it with `invalid_request`.
     /// LIVE-VERIFY: from the published guides, not yet confirmed on a socket.
-    /// WHY: .project-docs/decisions/2026-11-11-wake-word.md
+    /// WHY: .project-docs/decisions/2026-11-11-drop-auto-stop.md
     static func supportsTurnPrediction(model: String) -> Bool { model == "scribe_v3_live" }
 
-    /// - Parameter providerEndsTurn: a hands-free take on a model that
+    /// - Parameter providerEndsTurn: an auto-stop take on a model that
     ///   predicts turns: the provider commits when the speaker is done (or
     ///   after `vad_silence_threshold_secs` of silence) instead of on release.
     static func make(
         model: String, language: String?, terms: [String], providerEndsTurn: Bool = false,
-        turnSilenceSeconds: Double = WakeWordTuning.defaultProviderSilenceSeconds
+        turnSilenceSeconds: Double = DropAutoStopTuning.defaultProviderSilenceSeconds
     ) -> URL {
         var comps = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         var items: [URLQueryItem] = [
@@ -71,7 +71,7 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
         self.makeTransport = { language, terms in
             let url = ElevenLabsRealtimeURL.make(
                 model: model, language: language, terms: terms, providerEndsTurn: providerEndsTurn,
-                turnSilenceSeconds: WakeWordTuning.providerSilenceSeconds()
+                turnSilenceSeconds: DropAutoStopTuning.providerSilenceSeconds()
             )
             var request = URLRequest(url: url)
             request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")

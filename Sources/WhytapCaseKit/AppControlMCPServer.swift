@@ -176,7 +176,7 @@ public final class AppControlMCPServer {
                  ["feature": string, "provider": .object(["type": .array([.string("string"), .string("null")])]), "expected": route],
                  ["feature", "provider", "expected"], writes: true),
             tool("set_setting", "Change one supported setting using its existing app store. Read get_settings first and pass the exact expected current value.",
-                 ["key": .object(["type": .string("string"), "enum": .array(["dropMode", "inputLanguage", "outputLanguage", "autoHideIsland", "wakeWordPaused"].map(AppControlValue.string))]),
+                 ["key": .object(["type": .string("string"), "enum": .array(["dropMode", "inputLanguage", "outputLanguage", "autoHideIsland"].map(AppControlValue.string))]),
                   "value": .object(["type": .array([.string("string"), .string("boolean"), .string("null")])]),
                   "expected": .object(["type": .array([.string("string"), .string("boolean"), .string("null")])])],
                  ["key", "value", "expected"], writes: true),

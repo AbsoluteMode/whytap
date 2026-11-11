@@ -129,15 +129,9 @@ enum PasteTargetValidator {
     ///   app. When passed and matching `blacklistedBundleIds`, short-
     ///   circuits to `false` before any AX work. The callsite usually
     ///   passes `NSRunningApplication(processIdentifier: pid)?.bundleIdentifier`.
-    /// - Parameter requiringEvidence: `false` (history paste hint, hold-Space)
-    ///   keeps the permissive rules above. `true` is for a trigger nobody
-    ///   pressed (wake word): only a focused element that is positively
-    ///   editable counts; unknown or unavailable focus and a bare web area
-    ///   are a no.
     static func appHasFocusedTextInput(
         pid: pid_t,
-        bundleIdentifier: String? = nil,
-        requiringEvidence: Bool = false
+        bundleIdentifier: String? = nil
     ) -> Bool {
         guard pid > 0 else { return false }
 
@@ -160,7 +154,7 @@ enum PasteTargetValidator {
         // Source 1: app-scoped focused element.
         let appElement = AXUIElementCreateApplication(pid)
         if let focused = copyFocusedElement(from: appElement, pid: pid, source: "app") {
-            switch evaluateFocusedElement(focused, pid: pid, source: "app", strict: requiringEvidence) {
+            switch evaluateFocusedElement(focused, pid: pid, source: "app") {
             case .accept:
                 return true
             case .rejectNonText:
@@ -176,7 +170,7 @@ enum PasteTargetValidator {
         if let window = copyAttributeAsElement(appElement, kAXFocusedWindowAttribute as CFString, pid: pid, source: "window"),
            let focused = copyFocusedElement(from: window, pid: pid, source: "window")
         {
-            switch evaluateFocusedElement(focused, pid: pid, source: "window", strict: requiringEvidence) {
+            switch evaluateFocusedElement(focused, pid: pid, source: "window") {
             case .accept:
                 return true
             case .rejectNonText:
@@ -192,7 +186,7 @@ enum PasteTargetValidator {
         if let focused = copyFocusedElement(from: systemElement, pid: pid, source: "system") {
             let focusedPid = focusedElementPid(focused)
             if focusedPid == pid {
-                switch evaluateFocusedElement(focused, pid: pid, source: "system", strict: requiringEvidence) {
+                switch evaluateFocusedElement(focused, pid: pid, source: "system") {
                 case .accept:
                     return true
                 case .rejectNonText:
@@ -222,9 +216,6 @@ enum PasteTargetValidator {
             )
             return false
         }
-
-        // Without positive evidence a caller that requires it gets a no.
-        if requiringEvidence { return false }
 
         // No source produced a usable verdict (Electron / uncooperative
         // app / AX permission revoked). Default to permissive — the
@@ -316,43 +307,14 @@ enum PasteTargetValidator {
     ///   couldn't be read (empty / nil) — leave it to other sources or
     ///   the permissive default. Rejecting on an unknown role would
     ///   reintroduce the Electron false-negative.
-    /// Positive evidence that typed text would land in the focused element.
-    /// Pure, for the strict wake-word path.
-    ///
-    /// - A text role or subrole counts only when it is editable: its value or
-    ///   selected text is settable. A read-only text view still reports
-    ///   `AXTextArea`.
-    /// - Anything else counts only by settable selected text, the mark of a
-    ///   text-editing surface (a contenteditable group, an editable web
-    ///   document). A settable value alone is a slider or a scroll bar.
-    static func isPositivelyEditable(
-        role: String?, subrole: String?, valueSettable: Bool, selectedTextSettable: Bool
-    ) -> Bool {
-        guard let role, !role.isEmpty else { return false }
-        let isText = textRoles.contains(role) || subrole.map(textSubroleHints.contains) == true
-        return isText ? (valueSettable || selectedTextSettable) : selectedTextSettable
-    }
-
     private static func evaluateFocusedElement(
         _ focused: AXUIElement,
         pid: pid_t,
-        source: String,
-        strict: Bool = false
+        source: String
     ) -> Verdict {
         let roleRaw = copyStringAttribute(focused, kAXRoleAttribute as CFString)
         let role = roleRaw ?? "(nil)"
         let subrole = copyStringAttribute(focused, kAXSubroleAttribute as CFString) ?? "(nil)"
-
-        if strict {
-            let editable = isPositivelyEditable(
-                role: roleRaw,
-                subrole: copyStringAttribute(focused, kAXSubroleAttribute as CFString),
-                valueSettable: isAttributeSettable(focused, kAXValueAttribute as CFString),
-                selectedTextSettable: isAttributeSettable(focused, kAXSelectedTextAttribute as CFString)
-            )
-            if editable { return .accept }
-            return roleRaw?.isEmpty == false ? .rejectNonText : .noOpinion
-        }
 
         // FAST PATH 1: well-known text-input roles.
         if textRoles.contains(role) {

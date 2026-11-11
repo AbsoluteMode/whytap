@@ -42,7 +42,6 @@ final class AppControlControllerTests: XCTestCase {
         let preferences: UserPreferencesCache
         let probe: ControlTestProbe
         let controller: AppControlController
-        let wakeWordPause: WakeWordPause
     }
 
     private func env(googleReview: @escaping () -> Bool = { false }) throws -> Env {
@@ -68,14 +67,11 @@ final class AppControlControllerTests: XCTestCase {
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
             probe: probe, endpoints: ControlTestEndpoints(), inputLanguage: { nil })
         let preferences = UserPreferencesCache(defaults: defaults)
-        let wakeWordPause = WakeWordPause(notify: {})
         let controller = AppControlController(routing: routing, models: models, preferences: preferences,
             languages: PrivacyPreferences(defaults: defaults), idle: IslandIdlePreferences(defaults: defaults),
-            wakeWordPause: wakeWordPause,
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-42", "ExodiaSourceRevision": "fixture-sha"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
             activity: { .object(["drop": .string("idle")]) }, googleCalendarReview: googleReview)
-        return Env(routing: routing, preferences: preferences, probe: probe, controller: controller,
-                   wakeWordPause: wakeWordPause)
+        return Env(routing: routing, preferences: preferences, probe: probe, controller: controller)
     }
 
     private var expectedOld: AppControlValue {
@@ -177,29 +173,6 @@ final class AppControlControllerTests: XCTestCase {
         let result = await task.value
         XCTAssertFalse(result.ok)
         XCTAssertEqual(e.routing.route(for: .dropSmartCleanup)?.model, "old-text")
-    }
-
-    /// The builder releases the idle wake word microphone before its meeting
-    /// gate; the pause is not a saved preference and needs the current value.
-    func test_wake_word_pause_is_a_memory_only_setting_guarded_by_expected() async throws {
-        let e = try env()
-        let settings = await e.controller.handle(AppControlRequest("get_settings"))
-        XCTAssertEqual(settings.data.object?["values"]?.object?["wakeWordPaused"], .bool(false))
-
-        let stale = await e.controller.handle(AppControlRequest("set_setting", arguments: [
-            "key": .string("wakeWordPaused"), "value": .bool(true), "expected": .bool(true)]))
-        XCTAssertFalse(stale.ok)
-        XCTAssertFalse(e.wakeWordPause.isPaused)
-
-        let paused = await e.controller.handle(AppControlRequest("set_setting", arguments: [
-            "key": .string("wakeWordPaused"), "value": .bool(true), "expected": .bool(false)]))
-        XCTAssertTrue(paused.ok)
-        XCTAssertTrue(e.wakeWordPause.isPaused)
-
-        let resumed = await e.controller.handle(AppControlRequest("set_setting", arguments: [
-            "key": .string("wakeWordPaused"), "value": .bool(false), "expected": .bool(true)]))
-        XCTAssertTrue(resumed.ok)
-        XCTAssertFalse(e.wakeWordPause.isPaused)
     }
 
     func test_settings_validate_types_expected_values_and_notify_existing_mode_store() async throws {

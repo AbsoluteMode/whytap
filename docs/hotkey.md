@@ -125,6 +125,11 @@ stored separately and can be changed in Settings independently of the key.
 | `.hold` | Hold | Press starts recording; release sends (grace-tail then commit). |
 | `.tap`  | Toggle | First press starts recording; second press sends. |
 
+With **Stop Drop automatically** on (Settings -> Other -> Recording), a Toggle
+Drop shortcut needs one press: recording ends when the speaker has finished,
+and a second press still stops it at once. Hold shortcuts are unchanged. See
+`.project-docs/decisions/2026-11-11-drop-auto-stop.md`.
+
 All UI surfaces that display the gesture word for voice bindings must use
 `HotkeyGesture.voiceTitle` — `.tap` maps to **"Toggle"** (not "Tap"), because
 "Toggle" correctly describes start/stop semantics. `HotkeyGesture.title`

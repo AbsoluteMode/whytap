@@ -17,7 +17,6 @@ final class AppControlController {
     private let preferences: UserPreferencesCache
     private let languages: PrivacyPreferences
     private let idle: IslandIdlePreferences
-    private let wakeWordPause: WakeWordPause
     private let identity: AppBuildIdentity
     private let activity: () -> AppControlValue
     private let googleCalendarReview: () -> Bool
@@ -27,8 +26,7 @@ final class AppControlController {
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
          preferences: UserPreferencesCache? = nil, languages: PrivacyPreferences? = nil,
-         idle: IslandIdlePreferences? = nil, wakeWordPause: WakeWordPause? = nil,
-         identity: AppBuildIdentity = .current,
+         idle: IslandIdlePreferences? = nil, identity: AppBuildIdentity = .current,
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
          planner: (@MainActor () -> PlannerStore)? = nil,
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive }) {
@@ -41,7 +39,6 @@ final class AppControlController {
         self.preferences = preferences ?? .shared
         self.languages = languages ?? .shared
         self.idle = idle ?? IslandIdlePreferences()
-        self.wakeWordPause = wakeWordPause ?? .shared
         self.identity = identity
         self.googleCalendarReview = googleCalendarReview
         self.activity = activity ?? {
@@ -111,7 +108,6 @@ final class AppControlController {
                 "acceptedValues": .object([
                     "dropMode": .array([.string("fast"), .string("smart")]),
                     "autoHideIsland": .array([.bool(true), .bool(false)]),
-                    "wakeWordPaused": .array([.bool(true), .bool(false)]),
                     "inputLanguage": .array([.null] + AppLanguage.all.map { .string($0.code) }),
                     "outputLanguage": .array([.null] + AppLanguage.all.map { .string($0.code) })
                 ])
@@ -192,9 +188,6 @@ final class AppControlController {
                 guard let mode = TranscriptionMode(rawValue: mode) else { return invalid() }
                 preferences.setMode(mode)
             case ("autoHideIsland", .bool(let enabled)): idle.isEnabled = enabled
-            // Memory only, ends by itself: releases the idle listener's
-            // microphone so the builder's meeting gate sees real use.
-            case ("wakeWordPaused", .bool(let paused)): wakeWordPause.setPaused(paused)
             case ("inputLanguage", .null): languages.selectedLanguage = nil
             case ("outputLanguage", .null): languages.targetLanguage = nil
             case ("inputLanguage", .string(let code)), ("outputLanguage", .string(let code)):
@@ -215,7 +208,6 @@ final class AppControlController {
 
     private var settings: [String: AppControlValue] {
         ["dropMode": .string(preferences.currentMode.rawValue), "autoHideIsland": .bool(idle.isEnabled),
-         "wakeWordPaused": .bool(wakeWordPause.isPaused),
          "inputLanguage": languages.selectedLanguage.map { .string($0.code) } ?? .null,
          "outputLanguage": languages.targetLanguage.map { .string($0.code) } ?? .null]
     }

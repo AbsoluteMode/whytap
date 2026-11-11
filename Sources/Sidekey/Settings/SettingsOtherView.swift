@@ -43,6 +43,7 @@ struct SettingsOtherView: View {
     /// Local mirror of the volume-duck flag. Seeded from `volumeDuckConfig`
     /// on init and re-read on appear; written back on every toggle.
     @State private var volumeDuckEnabled: Bool
+    @State private var dropAutoStopEnabled = false
 
     /// Local mirror of the island auto-hide flag. Seeded from
     /// `islandIdlePreferences` on init and re-read on appear; written back on
@@ -118,10 +119,16 @@ struct SettingsOtherView: View {
                         ) {
                             MacSwitch(isOn: volumeDuckToggleBinding, label: "Lower other audio while speaking")
                         }
+
+                        MacRowSeparator()
+                        MacRow(
+                            title: "Stop Drop automatically",
+                            subtitle: "With a Toggle shortcut: press once, speak, and dictation ends when you stop. Press again to stop sooner. Hold shortcuts are unchanged."
+                        ) {
+                            MacSwitch(isOn: dropAutoStopToggleBinding, label: "Stop Drop automatically")
+                        }
                     }
                 }
-
-                WakeWordSettingsCard()
 
                 VStack(alignment: .leading, spacing: 0) {
                     MacGroupTitle(title: "Features")
@@ -193,6 +200,7 @@ struct SettingsOtherView: View {
             // Re-read live values so a tab revisit (SwiftUI recreates this view)
             // never shows a stale toggle state.
             volumeDuckEnabled = volumeDuckConfig.isEnabled
+            dropAutoStopEnabled = DropAutoStopPreferences.shared.isEnabled
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
             meetingsEnabled = meetingsEnabledProvider()
             googleEnabled = googleEnabledProvider()
@@ -211,6 +219,17 @@ struct SettingsOtherView: View {
         .onReceive(NotificationCenter.default.publisher(for: IslandIdlePreferences.didChangeNotification)) { _ in
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
         }
+    }
+
+    /// Binding: persists to `DropAutoStopPreferences`; read when a take starts.
+    private var dropAutoStopToggleBinding: Binding<Bool> {
+        Binding(
+            get: { dropAutoStopEnabled },
+            set: { newValue in
+                dropAutoStopEnabled = newValue
+                DropAutoStopPreferences.shared.isEnabled = newValue
+            }
+        )
     }
 
     /// Binding: persists to `VolumeDuckConfig` on every flip. The volume-duck

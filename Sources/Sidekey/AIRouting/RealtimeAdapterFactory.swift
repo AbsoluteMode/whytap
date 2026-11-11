@@ -8,7 +8,7 @@ enum RealtimeAdapterFactory {
         AIUsageMeteredAdapter(adapter: try make(route), context: AIUsageContext(route))
     }
 
-    /// Runtime, for a take nobody ends with a key (wake word): where the
+    /// Runtime, for a take nobody ends with a key (Drop auto-stop): where the
     /// route's model can end the turn itself, ask it to.
     static func makeMeteredHandsFree(_ route: ResolvedRoute) throws -> BYOKTranscriptionAdapter {
         AIUsageMeteredAdapter(adapter: try build(route, handsFree: true), context: AIUsageContext(route))

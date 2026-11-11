@@ -35,10 +35,7 @@ Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
 
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
-Smart), `autoHideIsland` (boolean) and `wakeWordPaused` (boolean). The last one
-is not a saved preference: `true` releases the idle wake word microphone for up
-to three minutes and then ends by itself, leaving the user's switch as it is.
-`get_settings` enumerates accepted codes.
+Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation. Keys, permissions, security controls,
 Case contents, transcripts, history, clipboard, recording, shell execution,

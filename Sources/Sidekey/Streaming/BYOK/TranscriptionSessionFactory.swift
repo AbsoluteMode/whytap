@@ -31,7 +31,7 @@ struct TranscriptionSessionFactory {
     /// recovery and must be `true` ONLY for the Drop flow; agent-voice and
     /// Google-search pass `false` so they can never resolve `.degraded` (their
     /// handlers treat it as a no-op, which would silently drop dictation).
-    /// `handsFree` marks a take that no key press ends (wake word): the same
+    /// `handsFree` marks a take that no key press ends (Drop auto-stop): the same
     /// route and key, with the provider asked to end the turn where it can.
     func make(
         feature: AIFeature,

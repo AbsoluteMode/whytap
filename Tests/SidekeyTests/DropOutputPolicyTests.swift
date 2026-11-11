@@ -106,7 +106,7 @@ final class DropOutputPolicyTests: XCTestCase {
         let cases: [(String, String)] = [
             ("Run `ls` ?", "Run `ls`?"),
             ("Сначала `git  status . ` , потом `ls -la` .", "Сначала `git  status . `, потом `ls -la`."),
-            ("Открой https://example.com/a?b=1 , потом напиши .", "Открой https://example.com/a?b=1, потом напиши."),
+            ("Открой https://example.com/a?b=1 , потом напиши .", "Открой https://example.com/a?b=1 , потом напиши."),
             ("```\nls . ?\n```\nГотово .", "```\nls . ?\n```\nГотово."),
         ]
         for (cleaned, expected) in cases {
@@ -116,6 +116,37 @@ final class DropOutputPolicyTests: XCTestCase {
             XCTAssertEqual(result, expected, cleaned)
         }
         XCTAssertEqual(DropPunctuationSpacing.apply("Run `ls` ?"), "Run `ls`?")
+    }
+
+    /// Attaching a mark to a link changes where it points: every detector
+    /// reads "…b=1?" as a different address. The destination must survive
+    /// Fast, Smart and Smart-Markdown output.
+    func testPunctuationNeverChangesALinkDestination() async throws {
+        let detector = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        func destinations(_ text: String) -> [String] {
+            detector.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+                .compactMap { $0.url?.absoluteString }
+        }
+        let links = ["https://example.com/a?b=1", "http://example.com/path", "www.example.com/a?b=1",
+                     "[docs](https://example.com/a?b=1)"]
+        for link in links {
+            for mark in ["?", ":", "!", ";", ",", ".", "?!"] {
+                let spoken = "Открой \(link) \(mark) потом напиши ."
+                let expected = destinations("Открой \(link) потом")
+                XCTAssertFalse(expected.isEmpty, link)
+
+                XCTAssertEqual(destinations(DropPunctuationSpacing.apply(spoken)), expected, spoken)
+                let fast = try await DropOutputPolicy(mode: .fast).prepare(rawText: spoken, fillerTerms: []) { "" }
+                XCTAssertEqual(destinations(fast), expected, spoken)
+                for markdown in [false, true] {
+                    let smart = try await DropOutputPolicy(mode: .smart).prepare(
+                        rawText: "raw", fillerTerms: [], preservingMarkdown: { markdown }
+                    ) { spoken }
+                    XCTAssertEqual(destinations(smart), expected, spoken)
+                    XCTAssertTrue(smart.hasSuffix("напиши."), "ordinary words are still tightened")
+                }
+            }
+        }
     }
 
     func testPunctuationSpacingLeavesLegitimateTextAlone() {

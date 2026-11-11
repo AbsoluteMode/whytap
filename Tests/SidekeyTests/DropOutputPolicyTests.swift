@@ -128,11 +128,14 @@ final class DropOutputPolicyTests: XCTestCase {
                 .compactMap { $0.url?.absoluteString }
         }
         let links = ["https://example.com/a?b=1", "http://example.com/path", "www.example.com/a?b=1",
-                     "[docs](https://example.com/a?b=1)"]
+                     "[docs](https://example.com/a?b=1)",
+                     // Scheme-less and quoted links are links too.
+                     "example.com/a?b=1", "example.com", "mail@example.com",
+                     "«www.example.com/a?b=1", "\"example.com/a?b=1", "(example.com/a?b=1"]
         for link in links {
-            for mark in ["?", ":", "!", ";", ",", ".", "?!"] {
+            for mark in ["?", ":", "!", ";", ",", ".", "?!", "?»", "?\"", "?)"] {
                 let spoken = "Открой \(link) \(mark) потом напиши ."
-                let expected = destinations("Открой \(link) потом")
+                let expected = destinations(spoken)
                 XCTAssertFalse(expected.isEmpty, link)
 
                 XCTAssertEqual(destinations(DropPunctuationSpacing.apply(spoken)), expected, spoken)

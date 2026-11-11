@@ -113,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opt-in wake word: an on-device listener that starts a Drop take.
     /// WHY: .project-docs/decisions/2026-11-11-wake-word.md
     private let wakeWordListener = WakeWordListener()
+    private let wakeWordFocusProbe = WakeWordFocusProbe()
     private var wakeWordCancellables: Set<AnyCancellable> = []
     private var wakeWordSuspendedForSleep = false
     /// True from a wake-word start until that take is delivered or dropped.
@@ -2503,6 +2504,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         .receive(on: DispatchQueue.main)
         .sink { [weak self] in self?.refreshWakeWordListening() }
         .store(in: &wakeWordCancellables)
+        // Ask each app for its accessibility tree as it comes to the front,
+        // so the first wake word there starts without the wait.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] app in
+                guard let self, self.wakeWordListener.isListening else { return }
+                self.wakeWordFocusProbe.prepare(pid: app.processIdentifier, bundleIdentifier: app.bundleIdentifier)
+            }
+            .store(in: &wakeWordCancellables)
+        workspace.publisher(for: NSWorkspace.didTerminateApplicationNotification)
+            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] app in self?.wakeWordFocusProbe.forget(pid: app.processIdentifier) }
+            .store(in: &wakeWordCancellables)
         refreshWakeWordListening()
     }
 
@@ -2541,14 +2558,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The phrase was heard. Starts a Drop take only with positive evidence of
     /// a focused editable field: a false trigger must not stream the room to a
     /// provider with nowhere to paste. Unknown or unavailable focus is a no.
+    ///
+    /// An app that publishes no accessibility tree until asked (Electron) is
+    /// asked, and the take starts when it shows an editable field.
     private func wakeWordHeard() {
-        guard wakeWordMayListen(), !wakeWordTakeActive,
-              let app = NSWorkspace.shared.frontmostApplication else { return }
-        guard PasteTargetValidator.appHasFocusedTextInput(
-            pid: app.processIdentifier, bundleIdentifier: app.bundleIdentifier,
-            requiringEvidence: true
-        ) else { return }
-        startWakeWordTake()
+        guard wakeWordMayListen(), !wakeWordTakeActive else { return }
+        wakeWordFocusProbe.whenEditable(
+            stillWanted: { [weak self] in
+                guard let self else { return false }
+                return self.wakeWordMayListen() && !self.wakeWordTakeActive
+            },
+            start: { [weak self] in self?.startWakeWordTake() }
+        )
     }
 
     /// Routes whose provider sends words while the user is still speaking.

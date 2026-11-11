@@ -207,7 +207,11 @@ Wake word (opt-in, Settings -> Other, off by default):
   only with positive evidence of a focused editable field
   (appHasFocusedTextInput requiringEvidence: read-only text, non-text
   controls, unknown focus and a bare web area are a no; the permissive hint
-  rules are unchanged elsewhere). App control's
+  rules are unchanged elsewhere). Electron apps publish no accessibility tree
+  until asked, so WakeWordFocusProbe sets AXManualAccessibility on the
+  frontmost app (when it comes to the front while listening, or at the first
+  phrase) and starts the take once an editable field appears, within about
+  2.6 s; without that evidence nothing starts. App control's
   memory-only wakeWordPaused releases the listener for up to three minutes so
   the builder's meeting gate sees real microphone use. Nobody releases a key:
   WakeTakeEndpointer stops the take 2 s after the live transcript stops

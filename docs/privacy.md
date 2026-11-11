@@ -134,6 +134,11 @@ Data-use policies depend on the selected provider and its account settings.
   editable text field before recording and, only when Brightness keys is
   switched on in Settings → Toolbox → Display, the Mac's brightness keys.
 - Microphone: dictation and meetings.
+  With the optional wake word on (Settings -> Other, off by default), Whytap
+  also listens for your phrase while idle. That listening runs entirely on this
+  Mac: the audio goes into a small bundled keyword model and is discarded. It
+  is never stored or sent, and no provider hears anything until the phrase
+  starts a dictation. macOS shows the microphone indicator while it listens.
 - System Audio Recording: the other side of a call, only while a meeting is
   being recorded. The audio tap is created at recording start and torn down
   at stop.

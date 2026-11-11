@@ -110,6 +110,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the new turn would be indistinguishable from "my own window is still
     /// open".
     private var streamingSetupGeneration: UInt64 = 0
+    /// Opt-in wake word: an on-device listener that starts a Drop take.
+    /// WHY: .project-docs/decisions/2026-11-11-wake-word.md
+    private let wakeWordListener = WakeWordListener()
+    private var wakeWordCancellables: Set<AnyCancellable> = []
+    private var wakeWordSuspendedForSleep = false
+    /// True from a wake-word start until that take is delivered or dropped.
+    /// Such a take has no key to release: `wakeWordEndpointer` ends it.
+    private var wakeWordTakeActive = false
+    /// Set only across the dispatcher call that starts a wake-word take, so
+    /// `startDropTurnTelemetry` can tell it from a hotkey take.
+    private var wakeWordStartPending = false
+    private var wakeWordEndpointer: WakeTakeEndpointer?
+    private var wakeWordEndpointTask: Task<Void, Never>?
     private let autoPasteEngine = AutoPasteEngine()
     private var hotkey: HotkeyShortcutMonitor?
     private var helpHotkey: CarbonHotkeyMonitor?
@@ -508,6 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = updateController
 
         installMeetingsCoordinator()
+        installWakeWord()
         installNowPlayingCoordinator()
         installCaseBroker()
         installDisplayPreferenceObserver()
@@ -920,6 +934,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Same reasoning as `applicationWillTerminate` — sleep should not
         // leave a half-open WS task spinning the URLSession.
         cancelStreamingSessionIfNeeded()
+        wakeWordSuspendedForSleep = true
+        refreshWakeWordListening()
         AppState.shared.phase = .idle
         AppState.shared.agentPhase = .idle
 
@@ -969,6 +985,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         clipboardWatcher?.start()
+        wakeWordSuspendedForSleep = false
+        refreshWakeWordListening()
 
         switch reason {
         case .full:
@@ -2453,6 +2471,145 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return hasStreamingSession ? .cancelStreamingSession : .cancelRecording
     }
 
+    // MARK: - Wake word
+
+    /// The microphone stays open only while a wake word could start a take:
+    /// the feature is on, the Mac is awake, and nothing else is capturing or
+    /// already dictating.
+    static func wakeWordShouldListen(
+        enabled: Bool,
+        asleep: Bool,
+        phase: AppPhase,
+        agentPhase: AgentPhase,
+        meetingRecording: Bool,
+        screenshotActive: Bool
+    ) -> Bool {
+        enabled && !asleep && phase == .idle && agentPhase == .idle
+            && !meetingRecording && !screenshotActive
+    }
+
+    private func installWakeWord() {
+        wakeWordListener.onWake = { [weak self] _ in self?.wakeWordHeard() }
+        let state = AppState.shared
+        Publishers.CombineLatest4(
+            state.$phase, state.$agentPhase, state.$meetingRecordingActive,
+            Publishers.CombineLatest(state.$screenshotActive, state.$screenshotPreparing)
+        )
+        .map { _ in () }
+        .merge(with: NotificationCenter.default
+            .publisher(for: WakeWordPreferences.didChangeNotification).map { _ in () })
+        // @Published fires in willSet: read the new values on the next turn.
+        // DispatchQueue, not RunLoop: this must also run during event tracking.
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] in self?.refreshWakeWordListening() }
+        .store(in: &wakeWordCancellables)
+        refreshWakeWordListening()
+    }
+
+    private func wakeWordMayListen() -> Bool {
+        let state = AppState.shared
+        return AppDelegate.wakeWordShouldListen(
+            enabled: WakeWordPreferences.shared.isEnabled,
+            asleep: wakeWordSuspendedForSleep,
+            phase: state.phase,
+            agentPhase: state.agentPhase,
+            meetingRecording: state.meetingRecordingActive,
+            screenshotActive: state.screenshotActive || state.screenshotPreparing
+        )
+    }
+
+    private func refreshWakeWordListening() {
+        let phase = AppState.shared.phase
+        if wakeWordTakeActive, phase == .idle || phase == .deliveryFailed {
+            endWakeWordTake()
+        }
+        wakeWordListener.update(listenWith: wakeWordMayListen()
+            ? WakeWordListener.Configuration(
+                phrases: WakeWordPreferences.shared.phrases,
+                threshold: WakeWordPreferences.threshold
+            )
+            : nil)
+    }
+
+    private func endWakeWordTake() {
+        wakeWordTakeActive = false
+        wakeWordEndpointer = nil
+        wakeWordEndpointTask?.cancel()
+        wakeWordEndpointTask = nil
+    }
+
+    /// The phrase was heard. Starts a Drop take only where dictation would be
+    /// pasted: a false trigger with no text field focused does nothing.
+    private func wakeWordHeard() {
+        guard wakeWordMayListen(), !wakeWordTakeActive,
+              let app = NSWorkspace.shared.frontmostApplication else { return }
+        guard PasteTargetValidator.appHasFocusedTextInput(
+            pid: app.processIdentifier, bundleIdentifier: app.bundleIdentifier
+        ) else { return }
+        startWakeWordTake()
+    }
+
+    /// Routes whose provider sends words while the user is still speaking.
+    /// A self-hosted OpenAI-realtime server transcribes only after a commit,
+    /// so nothing could tell a wake-word take that the speaker has finished.
+    static func wakeWordCanEndTake(on route: FeatureRoute?) -> Bool {
+        guard let route else { return true }  // Not set: the start explains it.
+        if case .server = route.account { return false }
+        return true
+    }
+
+    private func startWakeWordTake() {
+        let mode = UserPreferencesCache.shared.currentMode
+        guard AppDelegate.wakeWordCanEndTake(on: AIRoutingStore.shared.route(for: .drop(mode))) else { return }
+        let route = AppDelegate.dropFlowRoute(
+            phase: AppState.shared.phase,
+            mode: mode,
+            hasStreamingSession: streamingSession != nil,
+            isStreamingSetupInProgress: streamingSetupInProgress
+        )
+        guard DropHotkeyRecovery.requiresStartPermission(route) else { return }
+        registerIslandHotkeyActivity()
+        wakeWordStartPending = true
+        handleDropHotkeyRoute(route)
+        wakeWordStartPending = false
+        // A missing permission explains itself and starts nothing.
+        guard wakeWordTakeActive, AppState.shared.phase != .idle else {
+            endWakeWordTake()
+            return
+        }
+        wakeWordEndpointTask?.cancel()
+        wakeWordEndpointTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled, let self, self.wakeWordTakeActive else { return }
+                // Session setup and a stop already under way are not ours to end.
+                guard AppState.shared.phase == .recording, !self.streamingStopRequested else { continue }
+                let now = ProcessInfo.processInfo.systemUptime
+                // The clock starts when recording does, not during setup.
+                if self.wakeWordEndpointer == nil {
+                    self.wakeWordEndpointer = WakeTakeEndpointer(
+                        now: now, quietAfterSpeech: WakeWordTuning.quietSeconds()
+                    )
+                }
+                guard let decision = self.wakeWordEndpointer?.decision(now: now),
+                      decision != .keepListening else { continue }
+                let finish = AppDelegate.dropMaxHoldRoute(
+                    phase: AppState.shared.phase,
+                    hasStreamingSession: self.streamingSession != nil
+                )
+                if decision == .finish || self.streamingSession == nil {
+                    // No live session means the batch recorder took over after
+                    // a failed connection: it has no transcript to watch, so
+                    // transcribe what it recorded instead of discarding it.
+                    self.handleDropHotkeyRoute(finish)
+                } else {
+                    self.onDropHotkeyCancelled()
+                }
+                return
+            }
+        }
+    }
+
     private func onDropHotkeyPressed() {
         registerIslandHotkeyActivity()
         let route = AppDelegate.dropHotkeyPressedRoute(
@@ -2616,6 +2773,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here and every later read of the take's mode uses `DropTake`.
         let mode = UserPreferencesCache.shared.currentMode
         DropTake.shared.begin(mode: mode, route: AIRoutingStore.shared.route(for: .drop(mode)))
+        // Decided here, synchronously, for every take: a hotkey take that
+        // follows a wake-word take must never inherit its hands-free mode.
+        if wakeWordStartPending {
+            wakeWordTakeActive = true
+        } else {
+            endWakeWordTake()
+        }
         AppState.shared.dropDeliveryFailureMessage = nil
         lastDropPartial = ""
         let trace = DropTurnTrace()
@@ -2840,7 +3004,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // which would silently drop the dictation).
                 session = try await makeStreamingSession(
                     feature: DropTake.shared.feature,
-                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled
+                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled,
+                    handsFree: wakeWordTakeActive
                 )
             } catch {
                 // Stale-turn gate: a newer turn claimed the window while we
@@ -2925,6 +3090,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // but nothing arrived". First token also stamps `.firstToken`.
                 self?.dropTurnTrace?.recordToken()
                 self?.lastDropPartial = text
+                self?.wakeWordEndpointer?.transcriptChanged(
+                    text, now: ProcessInfo.processInfo.systemUptime
+                )
                 IslandPanel.shared.agentFlow.dropTranscriptUpdated(text)
             }
             // Close the setup window now that the session exists. From here a
@@ -2969,14 +3137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// were accidentally inherited.
     private func makeStreamingSession(
         feature: AIFeature,
-        resilient: Bool = false
+        resilient: Bool = false,
+        handsFree: Bool = false
     ) async throws -> any StreamingSessionRunning {
         let factory = TranscriptionSessionFactory()
         do {
             return try factory.make(
                 feature: feature,
                 language: PrivacyPreferences.shared.selectedLanguage?.code,
-                resilient: resilient
+                resilient: resilient,
+                handsFree: handsFree
             )
         } catch let error as FeatureRouteError {
             os_log(

@@ -12,6 +12,8 @@ files, next to the files themselves.
 |---|---|---|
 | sparkle-project/Sparkle | in-app updates | MIT |
 | FluidInference/FluidAudio | Silero VAD for the meeting detector (Core ML) | Apache-2.0 |
+| k2-fsa/sherpa-onnx (prebuilt static xcframework) | keyword spotter for the opt-in wake word | Apache-2.0 |
+| microsoft/onnxruntime (prebuilt by csukuangfj/onnxruntime-libs) | inference runtime for sherpa-onnx | MIT |
 
 ## Vendored and generated binaries
 
@@ -25,9 +27,16 @@ files, next to the files themselves.
   dependencies. The MPL-2.0 parts are used unmodified; their source is
   available from the upstream BlockNote repository.
 
+## Bundled model
+
+`Resources/WakeWord/`: the keyword-spotting model for the opt-in wake word
+(`sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, Apache-2.0), copied
+unchanged from the sherpa-onnx `kws-models` release. See
+`Resources/WakeWord/README.md` for the source and checksums.
+
 ## Models downloaded at runtime
 
-Whytap does not bundle model weights. The meeting detector downloads, on its
+The meeting detector downloads, on its
 first speech check, the Silero VAD Core ML conversion published by
 FluidInference on Hugging Face (`FluidInference/silero-vad-coreml`; the
 upstream Silero VAD is MIT). On-device speech recognition, diarization and

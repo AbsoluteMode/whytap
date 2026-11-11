@@ -334,6 +334,9 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                 continue
             case .done(let text):
                 await teardown(session)
+                // A hands-free take: the provider ended the turn before any
+                // stop, which is a legitimate finish, not an abnormal close.
+                if adapter.endsTurnItself, !stopped { return .endpointDetected(text) }
                 return .transcript(text)
             case .error(let code):
                 if resilient, !stopped, Self.isTransportClass(code) {

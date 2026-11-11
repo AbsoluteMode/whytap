@@ -53,14 +53,34 @@ let package = Package(
             name: "WhytapCaseKit",
             path: "Sources/WhytapCaseKit"
         ),
+        // sherpa-onnx keyword spotter (Apache-2.0) for the opt-in wake word,
+        // with the ONNX Runtime it links (MIT). Official prebuilt static
+        // universal (arm64 + x86_64) xcframeworks, pinned by checksum. Declared
+        // as binary targets here because the upstream package's Swift target
+        // would clone the whole sherpa-onnx repository; WakeWord/ wraps the C
+        // API itself. sherpa-onnx v2.0.1 expects ONNX Runtime 1.28.2.
+        // WHY: .project-docs/decisions/2026-11-11-wake-word.md
+        .binaryTarget(
+            name: "SherpaOnnxC",
+            url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/xcframework/sherpa-onnx-v2.0.1-macos-static.xcframework.zip",
+            checksum: "3c378789ebcbf3b1fb2e7cf0c58dae8e5629001598148aee2edd4494dc939a27"
+        ),
+        .binaryTarget(
+            name: "onnxruntime",
+            url: "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.2/onnxruntime-macos-static-xcframework-1.28.2.xcframework.zip",
+            checksum: "cb0b0bec912c77229517c463e28a3fac9674c521f9599919efff1ef2b42f3da0"
+        ),
         .target(
             name: "Sidekey",
             dependencies: [
                 "WhytapCaseKit",
+                "SherpaOnnxC",
+                "onnxruntime",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "FluidAudio", package: "FluidAudio")
             ],
-            path: "Sources/Sidekey"
+            path: "Sources/Sidekey",
+            linkerSettings: [.linkedLibrary("c++")]
         ),
         // The binary users install as Whytap.
         .executableTarget(

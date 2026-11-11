@@ -57,7 +57,9 @@ enum ConfigBackupRegistry {
         add(.other, .bool, ["sidekey.privacy.screenshotProtectionEnabled", "sidekey.preferences.hideHelpers",
             "sidekey.preferences.hideIslandHoverWidgets", "sidekey.preferences.agentEnabled", "sidekey.preferences.meetingsEnabled",
             "sidekey.preferences.googleEnabled", "com.sidekey.meetings.enabled", "com.sidekey.volumeduck.enabled",
-            "com.sidekey.nowplaying.enabled", "com.sidekey.island.idleHideEnabled", "notifications.meetingReady.enabled"])
+            "com.sidekey.nowplaying.enabled", "com.sidekey.island.idleHideEnabled", "notifications.meetingReady.enabled",
+            "com.sidekey.wakeword.enabled"])
+        add(.other, .strings, ["com.sidekey.wakeword.phrases"])
         add(.other, .string, ["sidekey.dynamicIsland.preferredDisplayUUID"])
         add(.other, .calendarAccounts, [CalendarAccountSettings.accountsKey])
         add(.other, .strings, [CalendarAccountSettings.hiddenFeedsKey])

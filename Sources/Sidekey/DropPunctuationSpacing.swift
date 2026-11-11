@@ -15,10 +15,21 @@ import Foundation
 /// space, because "…b=1?" is a different address to every URL detector. Links
 /// are the ones the system detector finds (scheme-less and quoted included),
 /// and the result is kept only if every detected destination is unchanged.
+/// An explicit Markdown destination is never edited either: the `(...)` of
+/// an inline link (angle-delimited paths with spaces included), an `<...>`
+/// autolink and a `[label]: target` definition are left byte for byte.
 /// Matches inside `protecting` ranges (Markdown code) are left alone.
 enum DropPunctuationSpacing {
     private static let regex = try? NSRegularExpression(
         pattern: "(?<=[\\p{L}\\p{N}`)\\]}»”\"'%])[ \\t]+(?![:;][()])([,.!?;:…]+)(?=[\\s)\\]}»”\"']|$)",
+        options: [.anchorsMatchLines]
+    )
+
+    /// Explicit Markdown link syntax whose inside is an address, not prose.
+    private static let markdownDestinations = try? NSRegularExpression(
+        pattern: "\\]\\((?:<[^>\\n]*>|[^)\\n]*)\\)"          // [text](dest) / [text](<dest with spaces>)
+            + "|<[^\\s<>][^<>\\n]*>"                          // <autolink>
+            + "|^[ \\t]{0,3}\\[[^\\]\\n]+\\]:[ \\t]*\\S.*$",        // [label]: target
         options: [.anchorsMatchLines]
     )
 
@@ -36,11 +47,14 @@ enum DropPunctuationSpacing {
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return text }
         let detected = links(in: text)
+        let whole = NSRange(location: 0, length: ns.length)
+        let destinations = markdownDestinations?.matches(in: text, range: whole).map(\.range) ?? []
         var result = text
         // From the end, so earlier ranges stay valid.
         for match in matches.reversed() {
             let range = match.range
             if protected.contains(where: { NSIntersectionRange($0, range).length > 0 }) { continue }
+            if destinations.contains(where: { NSIntersectionRange($0, range).length > 0 }) { continue }
             // The space sits right after, or inside, a detected link.
             if detected.contains(where: {
                 NSMaxRange($0.range) == range.location || NSIntersectionRange($0.range, range).length > 0

@@ -138,8 +138,9 @@ Voice flow (Drop / dictation):
             space a provider left before closing punctuation ("слово ?"),
             also right after inline code, never inside Markdown code and
             never attaching a mark to a link the system detector finds (it
-            would change the address); a result that changes any detected
-            destination is discarded.
+            would change the address) and never editing an explicit Markdown
+            destination; a result that changes any detected destination is
+            discarded.
             A new take discards the old retry. The island observes persisted
             mode changes from every control. The cleanup provider mark appears
             only while processing; paste shows “pasting…” without a provider. WHY:

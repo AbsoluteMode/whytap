@@ -87,6 +87,65 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertEqual(result, .transcript("первая часть вторая часть"))
     }
 
+    /// The connection drops after a committed segment while the speaker goes
+    /// on, before any stop. The segment alone is not the dictation: a result
+    /// that arrives without a stop is recovered from the retained audio, for
+    /// an auto-stop take exactly as for a manual one.
+    func testAConnectionLostAfterASegmentIsRecoveredFromTheRetainedAudio() async throws {
+        // ElevenLabs: a close with segments held reports them as done.
+        let stub = StubWebSocketTransport()
+        let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live") { _, _ in stub }
+        let provider = try await adapter.open(language: nil, terms: [])
+        var events = provider.events.makeAsyncIterator()
+        stub.deliverText(#"{"message_type":"committed_transcript","text":"первая часть"}"#)
+        _ = await events.next()
+        stub.deliverText(#"{"message_type":"partial_transcript","text":"вторая"}"#)
+        _ = await events.next()
+        stub.deliver(.failure(URLError(.networkConnectionLost)))
+        let closed = await events.next()
+        XCTAssertEqual(closed, .done("первая часть"))
+        await provider.close()
+
+        // The Drop session reports the fragment and still holds the audio.
+        let retained = Data([0x01, 0x02, 0x03, 0x04])
+        let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
+        let session = DirectProviderStreamingSession(
+            audioEngine: CapturingStubAudioSource(captured: retained),
+            adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
+            language: nil, terms: [], resilient: true
+        )
+        let run = Task<StreamingSessionResult, Never> { await session.run() }
+        try? await Task.sleep(for: .milliseconds(40))
+        upstream.emit(.final("первая часть"))
+        upstream.emit(.partial("вторая"))
+        upstream.emit(.done("первая часть"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("первая часть"))
+        XCTAssertEqual(session.capturedAudioPCM16(), retained)
+
+        // No stop was requested, so delivery transcribes the whole recording.
+        var delivered: [String] = []
+        var transcribed: [Data] = []
+        let sink = AppDelegate.DropBatchRecoverySink(
+            setPhase: { _ in },
+            deliver: { delivered.append($0); return true },
+            retainForRetry: { _ in },
+            clearPendingRetry: {},
+            failTelemetry: { _ in },
+            pasteRaw: { delivered.append("raw: " + $0); return true },
+            requiresProcessingForPartial: false
+        )
+        await AppDelegate.resolveDelivery(
+            result: result, stopRequested: false,
+            capturedPCM: session.capturedAudioPCM16(), lastPartial: "первая часть вторая",
+            hasBatchTranscriber: true,
+            transcribe: { transcribed.append($0); return "первая часть вторая часть" },
+            sink: sink
+        )
+        XCTAssertEqual(transcribed, [retained])
+        XCTAssertEqual(delivered, ["первая часть вторая часть"], "never the fragment")
+    }
+
     private actor Finished {
         private(set) var value = false
         func set() { value = true }

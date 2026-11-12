@@ -18,6 +18,9 @@ sources:
     reference: Sources/Sidekey/Streaming/BYOK/ElevenLabsBYOKAdapter.swift
     confirmed_at: 2026-11-12
   - type: repository
+    reference: Sources/Sidekey/AppDelegate.swift
+    confirmed_at: 2026-11-12
+  - type: repository
     reference: Tests/SidekeyTests/DropAutoStop/HandsFreeTakeTests.swift
     confirmed_at: 2026-11-12
 related: [2026-11-11-drop-auto-stop.md]
@@ -47,6 +50,15 @@ segment cap.
   `com.sidekey.drop.autoStop.quietSeconds`), or no words arrive within 5 s. The
   stop is the ordinary one, so the manual commit joins every segment, as in a
   take ended by the key.
+- **A connection lost before the stop is recovered, not delivered.** With
+  manual commit, ElevenLabs reports the segments it holds as done when its
+  socket closes. For an auto-stop take this now follows the existing rule for
+  every take (`AppDelegate.resolveDelivery`): a transcript that arrives
+  without a requested stop is a fragment, so the retained audio is
+  batch-transcribed and the fragment is only the fallback. Tried and dropped:
+  degrading the session on an early done event to keep capturing; it left
+  manual takes waiting for a stop that the early result used to make
+  unnecessary (`testDoneResolvesToTranscript`).
 - Removed: the hands-free adapter path (`handsFree`, `endsTurnItself`,
   `makeMeteredHandsFree`) and the `providerSilenceSeconds` default. A stored
   value of that default is ignored.
@@ -63,6 +75,10 @@ segment cap.
 - `testASegmentCommitMidSpeechKeepsAnAutoStopTakeRunning`: a commit at 36 s
   followed by more speech keeps the session running, the rule keeps listening,
   and the stop delivers both segments.
+- `testAConnectionLostAfterASegmentIsRecoveredFromTheRetainedAudio`: a
+  segment, more speech, then a closed socket before any stop: the session
+  reports the fragment with the audio retained, and delivery pastes the batch
+  transcription of that audio, never the fragment.
 - `testEveryTakeAsksForAManualCommit`, `testProviderCommitsNeverEndATakeBeforeItsStop`.
 
 ## Not verified

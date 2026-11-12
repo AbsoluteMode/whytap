@@ -11,7 +11,7 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-12 the user reported that automatic stop misbehaved and switched it off, then approved the fix that ends a take only by the local rule.
     confirmed_at: 2026-11-12
-  - type: runtime-log
+  - type: trace
     reference: Build 1619 unified log, 2026-11-12. Two consecutive auto-stop takes on scribe_v3_live resolved at 35,810 ms and 35,922 ms with no key release.
     confirmed_at: 2026-11-12
   - type: repository

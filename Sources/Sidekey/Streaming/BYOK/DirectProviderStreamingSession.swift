@@ -50,6 +50,14 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
     /// upstream keeps capturing and resolves `.degraded` so
     /// `AppDelegate.recoverViaBatch` can batch-transcribe the retained PCM.
     private let resilient: Bool
+    /// A Drop auto-stop take: nobody holds a key, so the speaker goes on after
+    /// the provider's connection ends. A done event before the stop (ElevenLabs
+    /// closing with segments held) then degrades like a transport error and
+    /// capture continues until the stop, instead of ending the take on the
+    /// fragment. Other takes keep resolving that fragment at once, and the
+    /// delivery recovers their audio. Only has effect with `resilient`.
+    /// WHY: .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
+    private let endsOnlyByStop: Bool
 
     private var upstream: BYOKUpstreamSession?
     private var audioTask: Task<Void, Never>?
@@ -105,7 +113,8 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
         stopWatchdog: Duration = DirectProviderStreamingSession.defaultStopWatchdog,
         stallSeconds: Double = DirectProviderStreamingSession.defaultStallSeconds,
         noProgressResolveSeconds: Double = DirectProviderStreamingSession.defaultNoProgressResolveSeconds,
-        resilient: Bool = AgentFeatureGate.resilientDropDeliveryEnabled
+        resilient: Bool = AgentFeatureGate.resilientDropDeliveryEnabled,
+        endsOnlyByStop: Bool = false
     ) {
         self.audioEngine = audioEngine
         self.adapter = adapter
@@ -114,6 +123,7 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
         self.stopWatchdog = stopWatchdog
         self.noProgressResolveSeconds = noProgressResolveSeconds
         self.resilient = resilient
+        self.endsOnlyByStop = endsOnlyByStop
         self.progress = StreamingProgressMonitor(
             stallSeconds: stallSeconds,
             now: { ProcessInfo.processInfo.systemUptime }
@@ -337,6 +347,15 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                 emitLiveTranscript(committedLiveTranscript)
                 continue
             case .done(let text):
+                if resilient, endsOnlyByStop, !stopped {
+                    degraded = true
+                    os_log(
+                        "byok stream: degraded (ended before stop); keeping capture",
+                        log: Self.log, type: .error
+                    )
+                    await session.close()
+                    break
+                }
                 await teardown(session)
                 return .transcript(text)
             case .error(let code):

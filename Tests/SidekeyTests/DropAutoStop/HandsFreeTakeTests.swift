@@ -87,11 +87,11 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertEqual(result, .transcript("первая часть вторая часть"))
     }
 
-    /// The connection drops after a committed segment while the speaker goes
-    /// on, before any stop. The segment alone is not the dictation: a result
-    /// that arrives without a stop is recovered from the retained audio, for
-    /// an auto-stop take exactly as for a manual one.
-    func testAConnectionLostAfterASegmentIsRecoveredFromTheRetainedAudio() async throws {
+    /// The connection drops after a committed segment while the speaker of an
+    /// auto-stop take goes on. The take must not end there: the microphone
+    /// keeps recording, and the stop recovers all of it, the speech after the
+    /// drop included, from the retained audio.
+    func testAnAutoStopTakeKeepsRecordingAfterTheConnectionDrops() async throws {
         // ElevenLabs: a close with segments held reports them as done.
         let stub = StubWebSocketTransport()
         let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live") { _, _ in stub }
@@ -106,24 +106,41 @@ final class HandsFreeTakeTests: XCTestCase {
         XCTAssertEqual(closed, .done("первая часть"))
         await provider.close()
 
-        // The Drop session reports the fragment and still holds the audio.
-        let retained = Data([0x01, 0x02, 0x03, 0x04])
+        let audio = RecordingAudio()
         let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
         let session = DirectProviderStreamingSession(
-            audioEngine: CapturingStubAudioSource(captured: retained),
+            audioEngine: audio,
             adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
-            language: nil, terms: [], resilient: true
+            language: nil, terms: [], resilient: true, endsOnlyByStop: true
         )
-        let run = Task<StreamingSessionResult, Never> { await session.run() }
+        let finished = Finished()
+        let run = Task<StreamingSessionResult, Never> {
+            let result = await session.run()
+            await finished.set()
+            return result
+        }
         try? await Task.sleep(for: .milliseconds(40))
+        audio.record(Data([0x01, 0x02]))
         upstream.emit(.final("первая часть"))
         upstream.emit(.partial("вторая"))
         upstream.emit(.done("первая часть"))
-        let result = await run.value
-        XCTAssertEqual(result, .transcript("первая часть"))
-        XCTAssertEqual(session.capturedAudioPCM16(), retained)
+        try? await Task.sleep(for: .milliseconds(60))
 
-        // No stop was requested, so delivery transcribes the whole recording.
+        // Speech after the drop is still recorded and the take is still open.
+        audio.record(Data([0x03, 0x04]))
+        audio.record(Data([0x05, 0x06]))
+        try? await Task.sleep(for: .milliseconds(60))
+        let endedEarly = await finished.value
+        XCTAssertFalse(endedEarly, "the drop must not end the take")
+        XCTAssertFalse(audio.stopped, "the microphone stays on after the drop")
+
+        await session.stop()
+        let result = await run.value
+        XCTAssertEqual(result, .degraded)
+        let whole = Data([0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+        XCTAssertEqual(session.capturedAudioPCM16(), whole)
+
+        // Delivery transcribes the whole recording.
         var delivered: [String] = []
         var transcribed: [Data] = []
         let sink = AppDelegate.DropBatchRecoverySink(
@@ -136,14 +153,83 @@ final class HandsFreeTakeTests: XCTestCase {
             requiresProcessingForPartial: false
         )
         await AppDelegate.resolveDelivery(
-            result: result, stopRequested: false,
+            result: result, stopRequested: true,
             capturedPCM: session.capturedAudioPCM16(), lastPartial: "первая часть вторая",
             hasBatchTranscriber: true,
             transcribe: { transcribed.append($0); return "первая часть вторая часть" },
             sink: sink
         )
-        XCTAssertEqual(transcribed, [retained])
-        XCTAssertEqual(delivered, ["первая часть вторая часть"], "never the fragment")
+        XCTAssertEqual(transcribed, [whole])
+        XCTAssertEqual(delivered, ["первая часть вторая часть"])
+    }
+
+    /// A take ended by a key keeps its existing rule: the fragment resolves at
+    /// once without a requested stop, and delivery recovers the audio so far.
+    func testAManualTakeStillResolvesAtTheDropAndRecoversItsAudio() async {
+        let audio = RecordingAudio()
+        let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
+        let session = DirectProviderStreamingSession(
+            audioEngine: audio,
+            adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
+            language: nil, terms: [], resilient: true
+        )
+        let run = Task<StreamingSessionResult, Never> { await session.run() }
+        try? await Task.sleep(for: .milliseconds(40))
+        audio.record(Data([0x01, 0x02]))
+        upstream.emit(.final("первая часть"))
+        upstream.emit(.done("первая часть"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("первая часть"))
+
+        var delivered: [String] = []
+        let sink = AppDelegate.DropBatchRecoverySink(
+            setPhase: { _ in },
+            deliver: { delivered.append($0); return true },
+            retainForRetry: { _ in },
+            clearPendingRetry: {},
+            failTelemetry: { _ in },
+            pasteRaw: { delivered.append("raw: " + $0); return true },
+            requiresProcessingForPartial: false
+        )
+        await AppDelegate.resolveDelivery(
+            result: result, stopRequested: false,
+            capturedPCM: session.capturedAudioPCM16(), lastPartial: "первая часть",
+            hasBatchTranscriber: true,
+            transcribe: { _ in "первая часть целиком" }, sink: sink
+        )
+        XCTAssertEqual(delivered, ["первая часть целиком"], "never the fragment")
+    }
+
+    /// A microphone that keeps what it records, like the real engine's tee.
+    private final class RecordingAudio: StreamingAudioSourcing, @unchecked Sendable {
+        let chunks: AsyncStream<Data>
+        private let continuation: AsyncStream<Data>.Continuation
+        private let lock = NSLock()
+        private var recorded = Data()
+        private var isStopped = false
+
+        init() {
+            (chunks, continuation) = AsyncStream<Data>.makeStream()
+        }
+
+        var stopped: Bool { lock.withLock { isStopped } }
+
+        func record(_ pcm: Data) {
+            let live = lock.withLock { () -> Bool in
+                guard !isStopped else { return false }
+                recorded.append(pcm)
+                return true
+            }
+            if live { continuation.yield(pcm) }
+        }
+
+        func start() throws {}
+        func finish() {}
+        func stop() {
+            lock.withLock { isStopped = true }
+            continuation.finish()
+        }
+        func capturedPCM16() -> Data { lock.withLock { recorded } }
     }
 
     private actor Finished {

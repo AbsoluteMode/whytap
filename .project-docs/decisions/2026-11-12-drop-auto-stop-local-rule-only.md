@@ -18,6 +18,9 @@ sources:
     reference: Sources/Sidekey/Streaming/BYOK/ElevenLabsBYOKAdapter.swift
     confirmed_at: 2026-11-12
   - type: repository
+    reference: Sources/Sidekey/Streaming/BYOK/DirectProviderStreamingSession.swift
+    confirmed_at: 2026-11-12
+  - type: repository
     reference: Sources/Sidekey/AppDelegate.swift
     confirmed_at: 2026-11-12
   - type: repository
@@ -50,15 +53,18 @@ segment cap.
   `com.sidekey.drop.autoStop.quietSeconds`), or no words arrive within 5 s. The
   stop is the ordinary one, so the manual commit joins every segment, as in a
   take ended by the key.
-- **A connection lost before the stop is recovered, not delivered.** With
+- **A connection lost before the stop does not end an auto-stop take.** With
   manual commit, ElevenLabs reports the segments it holds as done when its
-  socket closes. For an auto-stop take this now follows the existing rule for
-  every take (`AppDelegate.resolveDelivery`): a transcript that arrives
-  without a requested stop is a fragment, so the retained audio is
-  batch-transcribed and the fragment is only the fallback. Tried and dropped:
-  degrading the session on an early done event to keep capturing; it left
-  manual takes waiting for a stop that the early result used to make
-  unnecessary (`testDoneResolvesToTranscript`).
+  socket closes. Nobody holds a key in an auto-stop take, so the speaker goes
+  on: the session is built with `endsOnlyByStop`, and a done event before the
+  stop degrades it like a transport error. The microphone keeps recording
+  until the quiet rule (or the existing no-progress limit) stops the take,
+  and the whole recording is batch-transcribed. Takes ended by a key keep the
+  existing rule (`AppDelegate.resolveDelivery`): the fragment resolves at
+  once without a requested stop and the audio so far is recovered. Applying
+  the degrade to every resilient take was tried and dropped: a manual take
+  then waited for a stop the early result used to make unnecessary
+  (`testDoneResolvesToTranscript`).
 - Removed: the hands-free adapter path (`handsFree`, `endsTurnItself`,
   `makeMeteredHandsFree`) and the `providerSilenceSeconds` default. A stored
   value of that default is ignored.
@@ -75,10 +81,13 @@ segment cap.
 - `testASegmentCommitMidSpeechKeepsAnAutoStopTakeRunning`: a commit at 36 s
   followed by more speech keeps the session running, the rule keeps listening,
   and the stop delivers both segments.
-- `testAConnectionLostAfterASegmentIsRecoveredFromTheRetainedAudio`: a
-  segment, more speech, then a closed socket before any stop: the session
-  reports the fragment with the audio retained, and delivery pastes the batch
-  transcription of that audio, never the fragment.
+- `testAnAutoStopTakeKeepsRecordingAfterTheConnectionDrops`: a segment, more
+  speech, a closed socket, then more recorded audio: the take stays open with
+  the microphone on, and the stop resolves `.degraded` with all the audio,
+  which delivery batch-transcribes.
+- `testAManualTakeStillResolvesAtTheDropAndRecoversItsAudio`: without
+  `endsOnlyByStop` the fragment resolves at once and delivery pastes the
+  batch transcription, never the fragment.
 - `testEveryTakeAsksForAManualCommit`, `testProviderCommitsNeverEndATakeBeforeItsStop`.
 
 ## Not verified

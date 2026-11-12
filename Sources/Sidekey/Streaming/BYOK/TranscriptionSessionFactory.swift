@@ -27,10 +27,12 @@ struct TranscriptionSessionFactory {
     /// recovery and must be `true` ONLY for the Drop flow; agent-voice and
     /// Google-search pass `false` so they can never resolve `.degraded` (their
     /// handlers treat it as a no-op, which would silently drop dictation).
+    /// `endsOnlyByStop` marks a Drop auto-stop take: see the session's field.
     func make(
         feature: AIFeature,
         language: String?,
-        resilient: Bool = false
+        resilient: Bool = false,
+        endsOnlyByStop: Bool = false
     ) throws -> StreamingSessionRunning {
         guard let route = resolver.route(for: feature) else {
             throw FeatureRouteError.notSet(feature)
@@ -48,7 +50,8 @@ struct TranscriptionSessionFactory {
             adapter: adapter,
             language: language,
             terms: vocab.terms,
-            resilient: resilient
+            resilient: resilient,
+            endsOnlyByStop: endsOnlyByStop
         )
     }
 }

@@ -206,16 +206,15 @@ Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   of recording: always an ordinary stop, never a cancel, so silence pastes
   nothing and a connection lost before the first word still goes to batch
   recovery. The streaming session publishes committed finals as live text
-  (Deepgram sends no partials). On ElevenLabs scribe_v3_live such a take
-  (TranscriptionSessionFactory handsFree) also asks for
-  commit_strategy=turn_prediction; the provider's first commit with words ends
-  it as .endpointDetected, and a closed socket is a transport error, never a
-  turn end. Other models keep manual commit. A self-hosted server route sends
-  no words before a commit, so the press starts a normal Toggle take there.
-  Both timings can be overridden through DropAutoStopTuning defaults while
-  they are calibrated (no UI yet). turn_prediction is unverified against a
-  live socket. The wake word built the same day was removed. WHY:
-  .project-docs/decisions/2026-11-11-drop-auto-stop.md
+  (Deepgram sends no partials). Only this rule ends such a take: every provider
+  keeps its manual commit, because a provider commit cannot be told from
+  Scribe's ~36 s segment cap (turn prediction cut takes there and was
+  removed). A self-hosted server route sends no words before a commit, so the
+  press starts a normal Toggle take there. The quiet period can be overridden
+  through the DropAutoStopTuning default while it is calibrated (no UI yet).
+  The wake word built the same day was removed. WHY:
+  .project-docs/decisions/2026-11-11-drop-auto-stop.md,
+  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
 
 Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   The Agent voice ticker shows the selected model author's bundled mark instead

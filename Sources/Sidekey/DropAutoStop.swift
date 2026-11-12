@@ -22,32 +22,21 @@ final class DropAutoStopPreferences {
     }
 }
 
-/// End-of-speech timings, adjustable without a rebuild while they are being
+/// End-of-speech timing, adjustable without a rebuild while it is being
 /// calibrated on real speech:
 ///
 ///     defaults write com.rootwise.sidekey com.sidekey.drop.autoStop.quietSeconds -float 1.5
-///     defaults write com.rootwise.sidekey com.sidekey.drop.autoStop.providerSilenceSeconds -float 1.0
 ///
 /// Read when a take starts. Out-of-range or missing values use the defaults.
 enum DropAutoStopTuning {
     static let quietSecondsKey = "com.sidekey.drop.autoStop.quietSeconds"
-    static let providerSilenceSecondsKey = "com.sidekey.drop.autoStop.providerSilenceSeconds"
 
     static let defaultQuietSeconds: TimeInterval = 2
     static let quietSecondsRange: ClosedRange<TimeInterval> = 0.5...5
-    static let defaultProviderSilenceSeconds: Double = 1.5
-    /// ElevenLabs accepts 0.192...3.0 for `vad_silence_threshold_secs`.
-    static let providerSilenceSecondsRange: ClosedRange<Double> = 0.3...3
 
     /// Quiet in the live transcript that ends the take (every provider).
     static func quietSeconds(_ defaults: UserDefaults = .standard) -> TimeInterval {
         value(defaults, quietSecondsKey, in: quietSecondsRange, fallback: defaultQuietSeconds)
-    }
-
-    /// Silence after which a turn-predicting provider commits on its own.
-    static func providerSilenceSeconds(_ defaults: UserDefaults = .standard) -> Double {
-        value(defaults, providerSilenceSecondsKey, in: providerSilenceSecondsRange,
-              fallback: defaultProviderSilenceSeconds)
     }
 
     private static func value(
@@ -63,8 +52,10 @@ enum DropAutoStopTuning {
 /// transcript stops changing, or when no words came at all. It is always an
 /// ordinary stop, never a cancel: the delivery ladder then pastes nothing for
 /// silence and still recovers the retained audio if the connection dropped.
-/// Works for every provider; one that predicts the end of a turn simply
-/// finishes the take earlier. Pure: the caller supplies the clock.
+/// The same rule for every provider: a provider's own commit never ends a
+/// take, since Scribe also commits at its ~36 s segment cap mid-sentence.
+/// WHY: .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
+/// Pure: the caller supplies the clock.
 struct DropAutoStopRule: Equatable {
     enum Decision: Equatable {
         case keepListening

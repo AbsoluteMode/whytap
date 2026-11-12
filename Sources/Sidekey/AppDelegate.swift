@@ -2921,7 +2921,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session = try await makeStreamingSession(
                     feature: DropTake.shared.feature,
                     resilient: AgentFeatureGate.resilientDropDeliveryEnabled,
-                    handsFree: dropAutoStopTakeActive
+                    endsOnlyByStop: dropAutoStopTakeActive
                 )
             } catch {
                 // Stale-turn gate: a newer turn claimed the window while we
@@ -3061,7 +3061,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeStreamingSession(
         feature: AIFeature,
         resilient: Bool = false,
-        handsFree: Bool = false
+        endsOnlyByStop: Bool = false
     ) async throws -> any StreamingSessionRunning {
         let factory = TranscriptionSessionFactory()
         do {
@@ -3069,7 +3069,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 feature: feature,
                 language: PrivacyPreferences.shared.selectedLanguage?.code,
                 resilient: resilient,
-                handsFree: handsFree
+                endsOnlyByStop: endsOnlyByStop
             )
         } catch let error as FeatureRouteError {
             os_log(

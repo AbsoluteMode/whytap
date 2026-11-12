@@ -8,26 +8,14 @@ enum RealtimeAdapterFactory {
         AIUsageMeteredAdapter(adapter: try make(route), context: AIUsageContext(route))
     }
 
-    /// Runtime, for a take nobody ends with a key (Drop auto-stop): where the
-    /// route's model can end the turn itself, ask it to.
-    static func makeMeteredHandsFree(_ route: ResolvedRoute) throws -> BYOKTranscriptionAdapter {
-        AIUsageMeteredAdapter(adapter: try build(route, handsFree: true), context: AIUsageContext(route))
-    }
-
     static func make(_ route: ResolvedRoute) throws -> BYOKTranscriptionAdapter {
-        try build(route, handsFree: false)
-    }
-
-    private static func build(_ route: ResolvedRoute, handsFree: Bool) throws -> BYOKTranscriptionAdapter {
         switch route.account {
         case .soniox:
             return SonioxBYOKAdapter(apiKey: try requiredKey(route), model: route.model)
         case .deepgram:
             return DeepgramBYOKAdapter(apiKey: try requiredKey(route), model: route.model)
         case .elevenLabs:
-            return ElevenLabsBYOKAdapter(
-                apiKey: try requiredKey(route), model: route.model, handsFree: handsFree
-            )
+            return ElevenLabsBYOKAdapter(apiKey: try requiredKey(route), model: route.model)
         case .server:
             // No default host: a server without a usable address fails here
             // instead of reaching any other host.

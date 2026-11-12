@@ -1,8 +1,8 @@
 import XCTest
 @testable import Sidekey
 
-/// An auto-stop Drop take has no key release: on a model that predicts turns the
-/// provider ends it, and the app must treat that as a normal finish.
+/// An auto-stop Drop take has no key release. The quiet rule alone ends it:
+/// the provider's commits are live text, never the end of the take.
 @MainActor
 final class HandsFreeTakeTests: XCTestCase {
     private func query(_ url: URL) -> [String: String] {
@@ -13,83 +13,20 @@ final class HandsFreeTakeTests: XCTestCase {
         )
     }
 
-    // MARK: - ElevenLabs URL
+    // MARK: - ElevenLabs: the provider never ends a take
 
-    func testHandsFreeAsksForTurnPredictionOnlyOnAModelThatHasIt() {
-        XCTAssertTrue(ElevenLabsRealtimeURL.supportsTurnPrediction(model: "scribe_v3_live"))
-        XCTAssertFalse(ElevenLabsRealtimeURL.supportsTurnPrediction(model: "scribe_v2_realtime"))
-
-        let handsFree = query(ElevenLabsRealtimeURL.make(
-            model: "scribe_v3_live", language: "ru", terms: ["Whytap"], providerEndsTurn: true
-        ))
-        XCTAssertEqual(handsFree["commit_strategy"], "turn_prediction")
-        XCTAssertEqual(handsFree["vad_silence_threshold_secs"], "1.50")
-        let tuned = query(ElevenLabsRealtimeURL.make(
-            model: "scribe_v3_live", language: nil, terms: [], providerEndsTurn: true, turnSilenceSeconds: 0.8
-        ))
-        XCTAssertEqual(tuned["vad_silence_threshold_secs"], "0.80")
-        XCTAssertEqual(handsFree["model_id"], "scribe_v3_live")
-        XCTAssertEqual(handsFree["language_code"], "ru")
-        XCTAssertEqual(handsFree["no_verbatim"], "true")
-
-        let held = query(ElevenLabsRealtimeURL.make(model: "scribe_v3_live", language: nil, terms: []))
-        XCTAssertEqual(held["commit_strategy"], "manual")
-        XCTAssertNil(held["vad_silence_threshold_secs"])
+    /// Scribe commits a segment at its ~36 s cap in the middle of a sentence,
+    /// so its commit is never the end of a take, auto-stop or not.
+    func testEveryTakeAsksForAManualCommit() {
+        let url = query(ElevenLabsRealtimeURL.make(model: "scribe_v3_live", language: "ru", terms: ["Whytap"]))
+        XCTAssertEqual(url["commit_strategy"], "manual")
+        XCTAssertNil(url["vad_silence_threshold_secs"])
+        XCTAssertEqual(url["model_id"], "scribe_v3_live")
+        XCTAssertEqual(url["language_code"], "ru")
+        XCTAssertEqual(url["no_verbatim"], "true")
     }
 
-    func testHandsFreeOnAnOlderModelStaysManual() {
-        XCTAssertFalse(ElevenLabsBYOKAdapter(apiKey: "k", model: "scribe_v2_realtime", handsFree: true).endsTurnItself)
-        XCTAssertTrue(ElevenLabsBYOKAdapter(apiKey: "k", model: "scribe_v3_live", handsFree: true).endsTurnItself)
-        XCTAssertFalse(ElevenLabsBYOKAdapter(apiKey: "k", model: "scribe_v3_live").endsTurnItself)
-    }
-
-    // MARK: - ElevenLabs commits
-
-    func testProviderCommitWithWordsEndsAHandsFreeTake() async throws {
-        let stub = StubWebSocketTransport()
-        let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live", providerEndsTurn: true) { _, _ in stub }
-        let session = try await adapter.open(language: nil, terms: [])
-        var events = session.events.makeAsyncIterator()
-
-        // Silence before speech can be committed empty: keep listening.
-        stub.deliverText(#"{"message_type":"committed_transcript","text":"  "}"#)
-        let empty = await events.next()
-        XCTAssertEqual(empty, .final("  "))
-        stub.deliverText(#"{"message_type":"partial_transcript","text":"напиши"}"#)
-        let partial = await events.next()
-        XCTAssertEqual(partial, .partial("напиши"))
-
-        stub.deliverText(#"{"message_type":"committed_transcript","text":"Напиши письмо."}"#)
-        let final = await events.next()
-        XCTAssertEqual(final, .final("Напиши письмо."))
-        let done = await events.next()
-        XCTAssertEqual(done, .done("Напиши письмо."))
-        let end = await events.next()
-        XCTAssertNil(end)
-        await session.close()
-    }
-
-    /// A dropped connection is not the speaker finishing: it must surface as
-    /// a transport error so the retained audio is recovered, whatever was
-    /// committed before.
-    func testSocketCloseDuringAHandsFreeTakeIsAnErrorNotATurnEnd() async throws {
-        let stub = StubWebSocketTransport()
-        let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live", providerEndsTurn: true) { _, _ in stub }
-        let session = try await adapter.open(language: nil, terms: [])
-        var events = session.events.makeAsyncIterator()
-        stub.deliverText(#"{"message_type":"committed_transcript","text":""}"#)
-        let empty = await events.next()
-        XCTAssertEqual(empty, .final(""))
-        stub.deliverText(#"{"message_type":"partial_transcript","text":"напиши пись"}"#)
-        let partial = await events.next()
-        XCTAssertEqual(partial, .partial("напиши пись"))
-        stub.deliver(.failure(URLError(.networkConnectionLost)))
-        let closed = await events.next()
-        XCTAssertEqual(closed, .error("transport"))
-        await session.close()
-    }
-
-    func testHeldTakeStillIgnoresProviderCommitsUntilRelease() async throws {
+    func testProviderCommitsNeverEndATakeBeforeItsStop() async throws {
         let stub = StubWebSocketTransport()
         let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live") { _, _ in stub }
         let session = try await adapter.open(language: nil, terms: [])
@@ -103,42 +40,201 @@ final class HandsFreeTakeTests: XCTestCase {
         await session.close()
     }
 
-    // MARK: - Session result
+    // MARK: - A dictation longer than one provider segment
 
-    private struct TurnEndingAdapter: BYOKTranscriptionAdapter {
-        let session: DirectProviderStreamingSessionTests.FakeSession
-        let endsTurnItself: Bool
-        func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession { session }
-    }
-
-    private func result(endsTurnItself: Bool, stopFirst: Bool) async -> StreamingSessionResult {
+    /// The reported failure: with auto-stop on, a take was cut and pasted at
+    /// ~36 s of continuous speech. A segment commit is live text like any
+    /// other; only quiet ends the take, and the stop delivers every segment.
+    func testASegmentCommitMidSpeechKeepsAnAutoStopTakeRunning() async {
         let upstream = DirectProviderStreamingSessionTests.FakeSession()
         let session = DirectProviderStreamingSession(
             audioEngine: DirectProviderStreamingSessionTests.FakeAudio(),
-            adapter: TurnEndingAdapter(session: upstream, endsTurnItself: endsTurnItself),
-            language: nil, terms: []
+            adapter: PlainAdapter(session: upstream), language: nil, terms: []
         )
-        let run = Task { await session.run() }
-        try? await Task.sleep(for: .milliseconds(30))
-        if stopFirst {
-            await session.stop()
-            try? await Task.sleep(for: .milliseconds(30))
+        var updates: [String] = []
+        var clock: TimeInterval = 0
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        session.onTranscriptUpdate = {
+            updates.append($0)
+            rule.transcriptChanged($0, now: clock)
         }
-        upstream.cont.yield(.done("готово"))
-        return await run.value
+        let finished = Finished()
+        let run = Task<StreamingSessionResult, Never> {
+            let result = await session.run()
+            await finished.set()
+            return result
+        }
+        try? await Task.sleep(for: .milliseconds(30))
+
+        clock = 35
+        upstream.cont.yield(.partial("первая часть"))
+        clock = 36
+        upstream.cont.yield(.final("первая часть"))
+        for _ in 0..<100 where updates.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        clock = 37
+        upstream.cont.yield(.partial("вторая"))
+        for _ in 0..<100 where updates.count < 3 { try? await Task.sleep(for: .milliseconds(10)) }
+
+        XCTAssertEqual(updates.last, "первая часть вторая")
+        let endedEarly = await finished.value
+        XCTAssertFalse(endedEarly, "the provider's segment commit must not end the take")
+        XCTAssertEqual(rule.decision(now: 38), .keepListening)
+        XCTAssertEqual(rule.decision(now: 39), .finish)
+
+        await session.stop()
+        upstream.cont.yield(.done("первая часть вторая часть"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("первая часть вторая часть"))
     }
 
-    func testProviderEndedTurnResolvesAsEndpointNotAbnormalClose() async {
-        let handsFree = await result(endsTurnItself: true, stopFirst: false)
-        XCTAssertEqual(handsFree, .endpointDetected("готово"))
-        // `.endpointDetected` always delivers its text (DropDeliveryResolverTests).
+    /// The connection drops after a committed segment while the speaker of an
+    /// auto-stop take goes on. The take must not end there: the microphone
+    /// keeps recording, and the stop recovers all of it, the speech after the
+    /// drop included, from the retained audio.
+    func testAnAutoStopTakeKeepsRecordingAfterTheConnectionDrops() async throws {
+        // ElevenLabs: a close with segments held reports them as done.
+        let stub = StubWebSocketTransport()
+        let adapter = ElevenLabsBYOKAdapter(model: "scribe_v3_live") { _, _ in stub }
+        let provider = try await adapter.open(language: nil, terms: [])
+        var events = provider.events.makeAsyncIterator()
+        stub.deliverText(#"{"message_type":"committed_transcript","text":"первая часть"}"#)
+        _ = await events.next()
+        stub.deliverText(#"{"message_type":"partial_transcript","text":"вторая"}"#)
+        _ = await events.next()
+        stub.deliver(.failure(URLError(.networkConnectionLost)))
+        let closed = await events.next()
+        XCTAssertEqual(closed, .done("первая часть"))
+        await provider.close()
+
+        let audio = RecordingAudio()
+        let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
+        let session = DirectProviderStreamingSession(
+            audioEngine: audio,
+            adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
+            language: nil, terms: [], resilient: true, endsOnlyByStop: true
+        )
+        let finished = Finished()
+        let run = Task<StreamingSessionResult, Never> {
+            let result = await session.run()
+            await finished.set()
+            return result
+        }
+        try? await Task.sleep(for: .milliseconds(40))
+        audio.record(Data([0x01, 0x02]))
+        upstream.emit(.final("первая часть"))
+        upstream.emit(.partial("вторая"))
+        upstream.emit(.done("первая часть"))
+        try? await Task.sleep(for: .milliseconds(60))
+
+        // Speech after the drop is still recorded and the take is still open.
+        audio.record(Data([0x03, 0x04]))
+        audio.record(Data([0x05, 0x06]))
+        try? await Task.sleep(for: .milliseconds(60))
+        let endedEarly = await finished.value
+        XCTAssertFalse(endedEarly, "the drop must not end the take")
+        XCTAssertFalse(audio.stopped, "the microphone stays on after the drop")
+
+        await session.stop()
+        let result = await run.value
+        XCTAssertEqual(result, .degraded)
+        let whole = Data([0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+        XCTAssertEqual(session.capturedAudioPCM16(), whole)
+
+        // Delivery transcribes the whole recording.
+        var delivered: [String] = []
+        var transcribed: [Data] = []
+        let sink = AppDelegate.DropBatchRecoverySink(
+            setPhase: { _ in },
+            deliver: { delivered.append($0); return true },
+            retainForRetry: { _ in },
+            clearPendingRetry: {},
+            failTelemetry: { _ in },
+            pasteRaw: { delivered.append("raw: " + $0); return true },
+            requiresProcessingForPartial: false
+        )
+        await AppDelegate.resolveDelivery(
+            result: result, stopRequested: true,
+            capturedPCM: session.capturedAudioPCM16(), lastPartial: "первая часть вторая",
+            hasBatchTranscriber: true,
+            transcribe: { transcribed.append($0); return "первая часть вторая часть" },
+            sink: sink
+        )
+        XCTAssertEqual(transcribed, [whole])
+        XCTAssertEqual(delivered, ["первая часть вторая часть"])
     }
 
-    func testOrdinaryTakesKeepResolvingAsTranscript() async {
-        let ordinary = await result(endsTurnItself: false, stopFirst: false)
-        XCTAssertEqual(ordinary, .transcript("готово"))
-        let stopped = await result(endsTurnItself: true, stopFirst: true)
-        XCTAssertEqual(stopped, .transcript("готово"))
+    /// A take ended by a key keeps its existing rule: the fragment resolves at
+    /// once without a requested stop, and delivery recovers the audio so far.
+    func testAManualTakeStillResolvesAtTheDropAndRecoversItsAudio() async {
+        let audio = RecordingAudio()
+        let upstream = DirectProviderStreamingSessionDegradedTests.DrivableUpstream()
+        let session = DirectProviderStreamingSession(
+            audioEngine: audio,
+            adapter: DirectProviderStreamingSessionDegradedTests.DrivableAdapter(session: upstream),
+            language: nil, terms: [], resilient: true
+        )
+        let run = Task<StreamingSessionResult, Never> { await session.run() }
+        try? await Task.sleep(for: .milliseconds(40))
+        audio.record(Data([0x01, 0x02]))
+        upstream.emit(.final("первая часть"))
+        upstream.emit(.done("первая часть"))
+        let result = await run.value
+        XCTAssertEqual(result, .transcript("первая часть"))
+
+        var delivered: [String] = []
+        let sink = AppDelegate.DropBatchRecoverySink(
+            setPhase: { _ in },
+            deliver: { delivered.append($0); return true },
+            retainForRetry: { _ in },
+            clearPendingRetry: {},
+            failTelemetry: { _ in },
+            pasteRaw: { delivered.append("raw: " + $0); return true },
+            requiresProcessingForPartial: false
+        )
+        await AppDelegate.resolveDelivery(
+            result: result, stopRequested: false,
+            capturedPCM: session.capturedAudioPCM16(), lastPartial: "первая часть",
+            hasBatchTranscriber: true,
+            transcribe: { _ in "первая часть целиком" }, sink: sink
+        )
+        XCTAssertEqual(delivered, ["первая часть целиком"], "never the fragment")
+    }
+
+    /// A microphone that keeps what it records, like the real engine's tee.
+    private final class RecordingAudio: StreamingAudioSourcing, @unchecked Sendable {
+        let chunks: AsyncStream<Data>
+        private let continuation: AsyncStream<Data>.Continuation
+        private let lock = NSLock()
+        private var recorded = Data()
+        private var isStopped = false
+
+        init() {
+            (chunks, continuation) = AsyncStream<Data>.makeStream()
+        }
+
+        var stopped: Bool { lock.withLock { isStopped } }
+
+        func record(_ pcm: Data) {
+            let live = lock.withLock { () -> Bool in
+                guard !isStopped else { return false }
+                recorded.append(pcm)
+                return true
+            }
+            if live { continuation.yield(pcm) }
+        }
+
+        func start() throws {}
+        func finish() {}
+        func stop() {
+            lock.withLock { isStopped = true }
+            continuation.finish()
+        }
+        func capturedPCM16() -> Data { lock.withLock { recorded } }
+    }
+
+    private actor Finished {
+        private(set) var value = false
+        func set() { value = true }
     }
 
     // MARK: - What the auto-stop rule can see and recover
@@ -205,37 +301,5 @@ final class HandsFreeTakeTests: XCTestCase {
         let result = await run.value
         XCTAssertEqual(result, .degraded)
         XCTAssertEqual(session.capturedAudioPCM16(), retained)
-    }
-
-    // MARK: - Factory
-
-    func testOnlyAHandsFreeTakeUsesTheHandsFreeAdapterOnTheSameRoute() throws {
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        let routing = AIRoutingStore(defaults: defaults)
-        let tokens = InMemoryTokenStore.Box()
-        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: tokens) })
-        routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"), for: .dropFast)
-        try keys.save("key", account: try XCTUnwrap(ProviderAccount.elevenLabs.keychainAccount(in: routing)))
-
-        var ordinary: [ResolvedRoute] = []
-        var handsFree: [ResolvedRoute] = []
-        let factory = TranscriptionSessionFactory(
-            resolver: FeatureRouteResolver(routing: routing, keys: keys),
-            vocab: VocabularyCache(defaults: UserDefaults(suiteName: "vocab.\(UUID().uuidString)")!),
-            makeAdapter: { ordinary.append($0); return try RealtimeAdapterFactory.make($0) },
-            makeHandsFreeAdapter: { handsFree.append($0); return try RealtimeAdapterFactory.makeMeteredHandsFree($0) }
-        )
-        _ = try factory.make(feature: .dropFast, language: nil, resilient: true)
-        XCTAssertEqual(ordinary.count, 1)
-        XCTAssertTrue(handsFree.isEmpty)
-
-        _ = try factory.make(feature: .dropFast, language: nil, resilient: true, handsFree: true)
-        XCTAssertEqual(handsFree.count, 1)
-        XCTAssertEqual(handsFree.first?.model, "scribe_v3_live")
-        XCTAssertEqual(handsFree.first?.account, .elevenLabs)
-        XCTAssertTrue(try RealtimeAdapterFactory.makeMeteredHandsFree(try XCTUnwrap(handsFree.first)).endsTurnItself)
-        XCTAssertFalse(try RealtimeAdapterFactory.makeMetered(try XCTUnwrap(handsFree.first)).endsTurnItself)
     }
 }

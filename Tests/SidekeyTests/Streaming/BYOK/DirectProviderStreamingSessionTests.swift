@@ -211,7 +211,7 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         _ = await runTask.value
 
         // The committed final is live text on its own (final-only providers,
-        // and a hands-free take's end rule, depend on it), then the tail joins.
+        // and Drop auto-stop's quiet rule, depend on it), then the tail joins.
         XCTAssertEqual(updates, ["Privet", "Privet mir"])
     }
 

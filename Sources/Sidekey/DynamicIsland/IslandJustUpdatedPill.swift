@@ -44,7 +44,7 @@ struct IslandJustUpdatedPill: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
             Text(label)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.85))
         }
         .contentShape(Capsule())

@@ -9,7 +9,6 @@ struct TranscriptionSessionFactory {
     private let resolver: FeatureRouteResolver
     private let vocab: VocabularyCache
     private let makeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
-    private let makeHandsFreeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
 
     /// `vocab` defaults to the shared cache, looked up when the session is
     /// built: a literal `.shared` default does not compile for a main-actor
@@ -17,27 +16,21 @@ struct TranscriptionSessionFactory {
     init(
         resolver: FeatureRouteResolver = FeatureRouteResolver(),
         vocab: VocabularyCache? = nil,
-        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered,
-        makeHandsFreeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter
-            = RealtimeAdapterFactory.makeMeteredHandsFree
+        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered
     ) {
         self.resolver = resolver
         self.vocab = vocab ?? .shared
         self.makeAdapter = makeAdapter
-        self.makeHandsFreeAdapter = makeHandsFreeAdapter
     }
 
     /// Build the session for `feature`. `resilient` enables degraded-turn batch
     /// recovery and must be `true` ONLY for the Drop flow; agent-voice and
     /// Google-search pass `false` so they can never resolve `.degraded` (their
     /// handlers treat it as a no-op, which would silently drop dictation).
-    /// `handsFree` marks a take that no key press ends (Drop auto-stop): the same
-    /// route and key, with the provider asked to end the turn where it can.
     func make(
         feature: AIFeature,
         language: String?,
-        resilient: Bool = false,
-        handsFree: Bool = false
+        resilient: Bool = false
     ) throws -> StreamingSessionRunning {
         guard let route = resolver.route(for: feature) else {
             throw FeatureRouteError.notSet(feature)
@@ -49,7 +42,7 @@ struct TranscriptionSessionFactory {
             throw FeatureRouteError.invalidLanguageConfiguration(feature, error)
         }
         let resolved = try resolver.resolve(route, for: feature)
-        let adapter = try handsFree ? makeHandsFreeAdapter(resolved) : makeAdapter(resolved)
+        let adapter = try makeAdapter(resolved)
         return DirectProviderStreamingSession(
             audioEngine: StreamingAudioEngine(),
             adapter: adapter,

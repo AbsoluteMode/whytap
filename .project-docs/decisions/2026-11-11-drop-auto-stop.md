@@ -20,10 +20,14 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropAutoStop/DropAutoStopTests.swift
     confirmed_at: 2026-11-11
-related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-11-12-drop-auto-stop-local-rule-only.md]
 ---
 
 # Drop auto-stop
+
+Provider turn prediction and the `providerSilenceSeconds` default described
+below were removed on 2026-11-12; only the quiet rule ends a take. See
+`2026-11-12-drop-auto-stop-local-rule-only.md`.
 
 ## Context
 

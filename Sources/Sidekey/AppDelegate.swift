@@ -2920,8 +2920,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // which would silently drop the dictation).
                 session = try await makeStreamingSession(
                     feature: DropTake.shared.feature,
-                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled,
-                    handsFree: dropAutoStopTakeActive
+                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled
                 )
             } catch {
                 // Stale-turn gate: a newer turn claimed the window while we
@@ -3060,16 +3059,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// were accidentally inherited.
     private func makeStreamingSession(
         feature: AIFeature,
-        resilient: Bool = false,
-        handsFree: Bool = false
+        resilient: Bool = false
     ) async throws -> any StreamingSessionRunning {
         let factory = TranscriptionSessionFactory()
         do {
             return try factory.make(
                 feature: feature,
                 language: PrivacyPreferences.shared.selectedLanguage?.code,
-                resilient: resilient,
-                handsFree: handsFree
+                resilient: resilient
             )
         } catch let error as FeatureRouteError {
             os_log(

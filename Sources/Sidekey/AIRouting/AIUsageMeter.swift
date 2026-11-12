@@ -32,7 +32,6 @@ struct AIUsageMeteredAdapter: BYOKTranscriptionAdapter {
     let adapter: BYOKTranscriptionAdapter
     let context: AIUsageContext
     var record: (AIUsageEvent) -> Void = AIUsageRecorder.record
-    var endsTurnItself: Bool { adapter.endsTurnItself }
     func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession {
         let upstream = try await adapter.open(language: language, terms: terms)
         return AIUsageMeteredSession(upstream: upstream, context: context, record: record)

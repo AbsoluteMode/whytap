@@ -333,14 +333,11 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                 )
                 // A provider can deliver words as finals with no partial
                 // before them (Deepgram's final event): they are live text
-                // too, for the island and for a hands-free take's end.
+                // too, for the island and for Drop auto-stop's quiet rule.
                 emitLiveTranscript(committedLiveTranscript)
                 continue
             case .done(let text):
                 await teardown(session)
-                // A hands-free take: the provider ended the turn before any
-                // stop, which is a legitimate finish, not an abnormal close.
-                if adapter.endsTurnItself, !stopped { return .endpointDetected(text) }
                 return .transcript(text)
             case .error(let code):
                 if resilient, !stopped, Self.isTransportClass(code) {

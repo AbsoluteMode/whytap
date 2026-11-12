@@ -60,16 +60,11 @@ final class DropAutoStopTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         XCTAssertEqual(DropAutoStopTuning.quietSeconds(defaults), 2)
-        XCTAssertEqual(DropAutoStopTuning.providerSilenceSeconds(defaults), 1.5)
         defaults.set(1.2, forKey: DropAutoStopTuning.quietSecondsKey)
-        defaults.set(0.9, forKey: DropAutoStopTuning.providerSilenceSecondsKey)
         XCTAssertEqual(DropAutoStopTuning.quietSeconds(defaults), 1.2)
-        XCTAssertEqual(DropAutoStopTuning.providerSilenceSeconds(defaults), 0.9)
         for bad in [0.0, -1, 99, Double.nan] {
             defaults.set(bad, forKey: DropAutoStopTuning.quietSecondsKey)
-            defaults.set(bad, forKey: DropAutoStopTuning.providerSilenceSecondsKey)
             XCTAssertEqual(DropAutoStopTuning.quietSeconds(defaults), 2)
-            XCTAssertEqual(DropAutoStopTuning.providerSilenceSeconds(defaults), 1.5)
         }
         defaults.set("fast", forKey: DropAutoStopTuning.quietSecondsKey)
         XCTAssertEqual(DropAutoStopTuning.quietSeconds(defaults), 2)

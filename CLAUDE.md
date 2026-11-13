@@ -202,8 +202,9 @@ Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
-  after the live transcript stops changing, or when no words arrive within 5 s
-  of recording: always an ordinary stop, never a cancel, so silence pastes
+  after the live transcript stops changing and the microphone last heard a
+  voice (9 dB above the take's quietest level; sound holds a quiet transcript
+  for at most 6 s), or when no words arrive within 5 s of recording: always an ordinary stop, never a cancel, so silence pastes
   nothing and a connection lost before the first word still goes to batch
   recovery. The streaming session publishes committed finals as live text
   (Deepgram sends no partials). Only this rule ends such a take: every provider
@@ -214,7 +215,8 @@ Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   through the DropAutoStopTuning default while it is calibrated (no UI yet).
   The wake word built the same day was removed. WHY:
   .project-docs/decisions/2026-11-11-drop-auto-stop.md,
-  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
+  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md,
+  .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 
 Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   The Agent voice ticker shows the selected model author's bundled mark instead

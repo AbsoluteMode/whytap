@@ -50,6 +50,82 @@ final class DropAutoStopTests: XCTestCase {
         }
     }
 
+    // MARK: - The microphone still hears the speaker
+
+    /// The cut seen on build 1622: 35 s into continuous speech the provider
+    /// held its live text back for longer than the quiet period.
+    func testProviderHoldingItsTextBackDoesNotCutContinuousSpeech() {
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        rule.microphoneLevel(0.1, now: 0.2)  // the room before the first word
+        for tick in 1...165 {  // words and voice up to 33 s
+            let now = TimeInterval(tick) * 0.2
+            rule.microphoneLevel(0.6, now: now)
+            rule.transcriptChanged("слово \(tick)", now: now)
+        }
+        for tick in 166...182 {  // 3.4 s of speech with no new text
+            let now = TimeInterval(tick) * 0.2
+            rule.microphoneLevel(0.6, now: now)
+            XCTAssertEqual(rule.decision(now: now), .keepListening, "cut at \(now) s")
+        }
+        rule.transcriptChanged("текст после сегмента", now: 36.6)
+        rule.microphoneLevel(0.1, now: 36.8)
+        XCTAssertEqual(rule.decision(now: 38.0), .keepListening)
+        XCTAssertEqual(rule.decision(now: 38.1), .finish)
+    }
+
+    func testAQuietMicrophoneEndsTheTakeAfterTheQuietPeriod() {
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        rule.microphoneLevel(0.1, now: 0.2)
+        rule.microphoneLevel(0.6, now: 1)
+        rule.transcriptChanged("готово", now: 1.4)  // text trails the voice
+        rule.microphoneLevel(0.12, now: 2)
+        XCTAssertEqual(rule.decision(now: 2.8), .keepListening)
+        XCTAssertEqual(rule.decision(now: 2.9), .finish)
+    }
+
+    /// Music or other people talking must not keep the microphone on.
+    func testSoundThatBringsNoWordsHoldsATakeOnlyUpToTheLimit() {
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        rule.microphoneLevel(0.1, now: 0.2)
+        rule.transcriptChanged("готово", now: 1)
+        for tick in 6...40 {
+            let now = TimeInterval(tick) * 0.2
+            rule.microphoneLevel(0.7, now: now)
+            let expected: DropAutoStopRule.Decision =
+                now - 1 >= DropAutoStopRule.voiceHoldLimit ? .finish : .keepListening
+            XCTAssertEqual(rule.decision(now: now), expected, "at \(now) s")
+        }
+    }
+
+    /// A steady hum is the room, not a voice: it is the level the take
+    /// measures a voice against.
+    func testSteadyNoiseIsNotAVoice() {
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        rule.transcriptChanged("готово", now: 1)
+        for tick in 1...15 {
+            rule.microphoneLevel(0.45 + Float(tick % 3) * 0.04, now: TimeInterval(tick) * 0.2)
+        }
+        XCTAssertEqual(rule.decision(now: 2.5), .finish)
+    }
+
+    func testDroppedBuffersTeachNothingAboutTheRoom() {
+        var rule = DropAutoStopRule(now: 0, quietAfterSpeech: 1.5)
+        rule.transcriptChanged("готово", now: 1)
+        rule.microphoneLevel(0.5, now: 1.2)
+        rule.microphoneLevel(0, now: 1.4)    // would make 0.5 look like a voice
+        rule.microphoneLevel(0.5, now: 2.4)
+        XCTAssertEqual(rule.decision(now: 2.5), .finish)
+    }
+
+    func testTheWatchPassesMicrophoneLevelsToItsRule() {
+        let watch = DropAutoStopWatch(quietSeconds: { 1.5 })
+        watch.microphoneLevel(0.1, now: 0.2)  // also starts the take's clock
+        watch.transcriptChanged("слово", now: 1)
+        watch.microphoneLevel(0.6, now: 2.4)
+        XCTAssertEqual(watch.decision(now: 2.6), .keepListening)
+        XCTAssertEqual(watch.decision(now: 3.9), .finish)
+    }
+
     func testCalibratedTimingsApplyAndBadValuesFallBack() {
         var quick = DropAutoStopRule(now: 0, quietAfterSpeech: 0.8)
         quick.transcriptChanged("готово", now: 1)

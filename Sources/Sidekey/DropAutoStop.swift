@@ -55,6 +55,12 @@ enum DropAutoStopTuning {
 /// The same rule for every provider: a provider's own commit never ends a
 /// take, since Scribe also commits at its ~36 s segment cap mid-sentence.
 /// WHY: .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
+///
+/// A provider can also hold its live text back while the speaker goes on
+/// (Scribe did for over 1.5 s before its segment cap), so a quiet transcript
+/// ends the take only once the microphone is quiet too. Sound that is not
+/// speech cannot hold a take open for longer than `voiceHoldLimit`.
+/// WHY: .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 /// Pure: the caller supplies the clock.
 struct DropAutoStopRule: Equatable {
     enum Decision: Equatable {
@@ -67,10 +73,20 @@ struct DropAutoStopRule: Equatable {
     /// the provider connection first.
     static let noSpeechTimeout: TimeInterval = 5
 
+    /// Longest a quiet transcript is kept open by sound in the microphone.
+    /// Past it the sound is taken for the room, not the speaker.
+    static let voiceHoldLimit: TimeInterval = 6
+
+    /// How far above the quietest level of this take the microphone must be
+    /// to count as a voice (normalized level, 0.15 = 9 dB).
+    static let voiceMargin: Float = 0.15
+
     private let startedAt: TimeInterval
     private let quietAfterSpeech: TimeInterval
     private var lastText = ""
     private var lastChangeAt: TimeInterval?
+    private var quietestLevel: Float?
+    private var lastVoiceAt: TimeInterval?
 
     /// - Parameter now: when recording began (after session setup).
     init(now: TimeInterval, quietAfterSpeech: TimeInterval = DropAutoStopTuning.defaultQuietSeconds) {
@@ -85,11 +101,26 @@ struct DropAutoStopRule: Equatable {
         lastChangeAt = now
     }
 
+    /// The loudest microphone level since the previous call (normalized
+    /// 0...1). Exact zero is a dropped buffer and teaches nothing.
+    mutating func microphoneLevel(_ level: Float, now: TimeInterval) {
+        guard level > 0 else { return }
+        let quietest = min(quietestLevel ?? level, level)
+        quietestLevel = quietest
+        if level >= quietest + Self.voiceMargin { lastVoiceAt = now }
+    }
+
     func decision(now: TimeInterval) -> Decision {
         guard !lastText.isEmpty, let lastChangeAt else {
             return now - startedAt >= Self.noSpeechTimeout ? .finish : .keepListening
         }
-        return now - lastChangeAt >= quietAfterSpeech ? .finish : .keepListening
+        let transcriptQuiet = now - lastChangeAt
+        guard transcriptQuiet >= quietAfterSpeech else { return .keepListening }
+        if transcriptQuiet < Self.voiceHoldLimit,
+           let lastVoiceAt, now - lastVoiceAt < quietAfterSpeech {
+            return .keepListening
+        }
+        return .finish
     }
 }
 
@@ -116,6 +147,11 @@ final class DropAutoStopWatch {
     func transcriptChanged(_ text: String, now: TimeInterval) {
         recordingBegan(now: now)
         rule?.transcriptChanged(text, now: now)
+    }
+
+    func microphoneLevel(_ level: Float, now: TimeInterval) {
+        recordingBegan(now: now)
+        rule?.microphoneLevel(level, now: now)
     }
 
     /// The decision for a take that is recording.

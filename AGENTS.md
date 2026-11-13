@@ -198,6 +198,18 @@ Voice flow (Drop / dictation):
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md
 
+Live text in the recording wing (Drop and agent voice):
+  IslandLiveTextTicker draws the provider's live transcript instead of a plain
+  Text. LiveTextPacer reveals it at the speaker's rate, holding a reserve
+  sized from the observed gap between batches so the line does not stop, and
+  no character waits more than 1.4 s after delivery (current before smooth).
+  Each new character gathers from 14 grains over 0.35 s; a rewritten visible
+  character gathers again in place, a rewrite of more than 12 swaps at once.
+  A face rebuilt mid-take shows its text at once. Reduce Motion keeps the
+  plain Text. Display only: pasted text, auto-stop and face width use the
+  provider's text; the same for every provider. WHY:
+  .project-docs/decisions/2026-11-13-live-text-sand.md
+
 Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts

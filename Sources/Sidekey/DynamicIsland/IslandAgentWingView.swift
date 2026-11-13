@@ -150,6 +150,8 @@ struct IslandAgentWingView: View {
         return false
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         // Each face carries `.transition(.identity)` so a face↔face swap is an
         // INSTANT replace, never a cross-dissolve. The recording→thinking swap
@@ -180,13 +182,25 @@ struct IslandAgentWingView: View {
                                 height: Self.recordingMarkSide
                             )
                     }
-                    Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
-                        .lineLimit(1)
-                        .truncationMode(.head)   // виден ХВОСТ транскрипта
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
+                    ZStack(alignment: .leading) {
+                        if reduceMotion || transcript.isEmpty {
+                            Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
+                                .lineLimit(1)
+                                .truncationMode(.head)   // виден ХВОСТ транскрипта
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if !reduceMotion {
+                            // Always in the tree while recording, so the first
+                            // words gather too; a face rebuilt mid-take shows
+                            // its text at once (`prime`).
+                            IslandLiveTextTicker(text: transcript)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                 }
                 .padding(
                     .leading,

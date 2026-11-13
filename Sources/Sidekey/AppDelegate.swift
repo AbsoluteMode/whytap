@@ -2485,6 +2485,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropAutoStopTask = nil
     }
 
+    /// Meter levels covering one 200 ms poll of the watcher, with one to spare.
+    private static let dropAutoStopLevelsPerPoll = 7
+
     /// Watches an auto-stop take and stops it when the speaker has finished.
     /// A second press of the shortcut stops it sooner through the normal
     /// toggle route; this loop then sees the stop and leaves.
@@ -2502,6 +2505,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // The clock starts when recording does, not during setup; a
                 // transcript that arrived before this poll already started it.
                 let now = ProcessInfo.processInfo.systemUptime
+                // The levels published since the previous poll (30 per second).
+                if let loudest = AppState.shared.audioLevels.suffix(Self.dropAutoStopLevelsPerPoll).max() {
+                    self.dropAutoStopWatch.microphoneLevel(loudest, now: now)
+                }
                 guard self.dropAutoStopWatch.decision(now: now) == .finish else { continue }
                 // Always an ordinary stop, never a cancel. With no words the
                 // delivery ladder pastes nothing; if the connection dropped

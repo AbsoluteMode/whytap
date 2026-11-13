@@ -94,7 +94,8 @@ segment cap.
 
 - A live auto-stop dictation longer than 36 s on the installed app.
 - Whether partials pause for longer than the quiet period inside continuous
-  speech; if they do, raise `quietSeconds`.
+  speech. Observed on 2026-11-13; see
+  `2026-11-13-drop-auto-stop-voice-guard.md`.
 
 ## Rejected
 

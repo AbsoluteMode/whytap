@@ -126,7 +126,7 @@ final class PlannerStore: ObservableObject {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-        try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try data.write(to: url, options: PlannerTodoFile.writeOptions)
         // The containing directory is private; a metadata failure after atomic save must not report lost data.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }) {
@@ -271,8 +271,12 @@ final class PlannerStore: ObservableObject {
     }
 
     private func readDisk() throws -> Data? {
-        do { return try Data(contentsOf: url) }
+        let data: Data
+        do { data = try Data(contentsOf: url) }
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
+        // Earlier builds saved a class that locks agents out while the screen is locked.
+        PlannerTodoFile.relaxProtection(at: url)
+        return data
     }
 
     /// Atomic saves replace the file, so the folder is watched rather than the file.

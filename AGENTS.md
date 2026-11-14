@@ -205,8 +205,10 @@ Live text in the recording wing (Drop and agent voice):
   no character waits more than 1.4 s after delivery (current before smooth).
   Each new character gathers from 14 grains over 0.35 s; a rewritten visible
   character gathers again in place, a rewrite of more than 12 swaps at once.
-  A face rebuilt mid-take shows its text at once. Reduce Motion keeps the
-  plain Text. Display only: pasted text, auto-stop and face width use the
+  A face rebuilt mid-take shows its text at once; text revealed past its
+  deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
+  that join across characters (canDrawPerCharacter) keep the plain Text.
+  Display only: pasted text, auto-stop and face width use the
   provider's text; the same for every provider. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 

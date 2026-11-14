@@ -127,6 +127,8 @@ struct LiveTextTicker {
     private(set) var characters: [Character] = []
     /// When each revealed character appeared. `-.infinity` is "long ago".
     private(set) var bornAt: [TimeInterval] = []
+    /// When the provider delivered each character.
+    private var deliveredAt: [TimeInterval] = []
     private var pacer = LiveTextPacer()
 
     var revealed: Double { pacer.shown }
@@ -136,6 +138,7 @@ struct LiveTextTicker {
     mutating func prime(_ text: String, now: TimeInterval) {
         characters = Array(text)
         bornAt = Array(repeating: -.infinity, count: characters.count)
+        deliveredAt = Array(repeating: now, count: characters.count)
         pacer.delivered(count: characters.count, now: now)
         pacer.revealAll()
     }
@@ -152,15 +155,26 @@ struct LiveTextTicker {
         } else {
             bornAt.append(contentsOf: Array(repeating: .infinity, count: next.count - bornAt.count))
         }
+        if deliveredAt.count > next.count {
+            deliveredAt.removeLast(deliveredAt.count - next.count)
+        } else {
+            deliveredAt.append(contentsOf: Array(repeating: now, count: next.count - deliveredAt.count))
+        }
         pacer.delivered(count: next.count, now: now)
     }
 
+    /// A character revealed after its deadline (the main thread stalled and
+    /// the pacer caught up in one step) is shown solid at once: it is already
+    /// late, and gathering would keep it unreadable for longer still.
     mutating func advance(now: TimeInterval) {
         let before = revealedCount
         pacer.advance(now: now)
         let after = min(revealedCount, bornAt.count)
         guard after > before else { return }
-        for index in before..<after { bornAt[index] = now }
+        for index in before..<after {
+            let overdue = now - deliveredAt[index] >= LiveTextPacer.lagCap
+            bornAt[index] = overdue ? -.infinity : now
+        }
     }
 
     /// 0 while a character is still dust, 1 once it has gathered.
@@ -168,4 +182,35 @@ struct LiveTextTicker {
         guard index < revealedCount, index < bornAt.count else { return 0 }
         return min(1, max(0, (now - bornAt[index]) / Self.gatherSeconds))
     }
+
+    /// Whether the text can be drawn one character at a time, left to right.
+    /// Right-to-left scripts (Arabic, Hebrew and others), explicit direction
+    /// controls and scripts whose letters join or reorder across characters
+    /// (Indic, Tibetan, Myanmar, Khmer, Mongolian and others) need the whole
+    /// line shaped together, so the wing shows them as plain text instead.
+    static func canDrawPerCharacter(_ text: String) -> Bool {
+        !text.unicodeScalars.contains { scalar in
+            wholeLineScalars.contains { $0.contains(scalar.value) }
+        }
+    }
+
+    private static let wholeLineScalars: [ClosedRange<UInt32>] = [
+        0x0590...0x08FF,    // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic
+        0x0900...0x0DFF,    // Devanagari to Sinhala
+        0x0F00...0x109F,    // Tibetan, Myanmar
+        0x1780...0x18AF,    // Khmer, Mongolian
+        0x1A00...0x1AAF,    // Buginese, Tai Tham
+        0x1B00...0x1BFF,    // Balinese, Sundanese, Batak
+        0x200F...0x200F,    // right-to-left mark
+        0x202A...0x202E,    // directional embeddings and overrides
+        0x2066...0x2069,    // directional isolates
+        0xA800...0xA8FF,    // Syloti Nagri, Phags-pa, Saurashtra, Devanagari Extended
+        0xA980...0xAAFF,    // Javanese, Myanmar Extended, Cham, Tai Viet, Meetei Mayek Ext.
+        0xABC0...0xABFF,    // Meetei Mayek
+        0xFB1D...0xFDFF,    // Hebrew and Arabic presentation forms
+        0xFE70...0xFEFC,    // Arabic presentation forms B
+        0x10800...0x10FFF,  // historic right-to-left scripts
+        0x11000...0x11FFF,  // Brahmi and other historic Indic scripts
+        0x1E800...0x1EFFF,  // Mende Kikakui, Adlam, Arabic mathematical symbols
+    ]
 }

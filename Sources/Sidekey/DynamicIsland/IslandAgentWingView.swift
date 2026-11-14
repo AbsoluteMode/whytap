@@ -182,8 +182,9 @@ struct IslandAgentWingView: View {
                                 height: Self.recordingMarkSide
                             )
                     }
+                    let animated = !reduceMotion && LiveTextTicker.canDrawPerCharacter(transcript)
                     ZStack(alignment: .leading) {
-                        if reduceMotion || transcript.isEmpty {
+                        if !animated || transcript.isEmpty {
                             Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
@@ -191,10 +192,13 @@ struct IslandAgentWingView: View {
                                 .truncationMode(.head)   // виден ХВОСТ транскрипта
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if !reduceMotion {
+                        if animated {
                             // Always in the tree while recording, so the first
                             // words gather too; a face rebuilt mid-take shows
-                            // its text at once (`prime`).
+                            // its text at once (`prime`). Text that needs the
+                            // whole line shaped (Arabic, Hebrew, Indic) stays
+                            // plain: drawn per character it would lose its
+                            // joining and its right-to-left order.
                             IslandLiveTextTicker(text: transcript)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }

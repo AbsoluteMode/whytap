@@ -182,6 +182,44 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertEqual(ticker.revealedCount, 19, "only the new words are paced")
     }
 
+    /// After a long main-thread stall the late text appears in one step; it
+    /// must be readable on that very frame, not start gathering from dust.
+    func testTextRevealedPastItsDeadlineIsSolidAtOnce() {
+        var ticker = LiveTextTicker()
+        ticker.prime("", now: 0)
+        ticker.textArrived(String(repeating: "a", count: 200), now: 0)
+        ticker.advance(now: 0.016)
+        let early = ticker.revealedCount
+        XCTAssertLessThan(early, 200)
+        ticker.advance(now: 3)  // the main thread was busy for three seconds
+        ticker.advance(now: 3.016)
+        XCTAssertEqual(ticker.revealedCount, 200)
+        for index in early..<200 {
+            XCTAssertEqual(ticker.gatherProgress(at: index, now: 3.016), 1, "character \(index)")
+        }
+    }
+
+    func testTextRevealedOnTimeStillGathers() {
+        var ticker = LiveTextTicker()
+        ticker.textArrived("привет", now: 0)
+        var now = 0.0
+        while ticker.revealedCount < 6 {
+            now += 1.0 / 60
+            ticker.advance(now: now)
+        }
+        XCTAssertLessThan(now, LiveTextPacer.lagCap)
+        XCTAssertLessThan(ticker.gatherProgress(at: 5, now: now), 0.2)
+    }
+
+    func testOnlyLeftToRightUnjoinedScriptsAreDrawnPerCharacter() {
+        for text in ["", "привет мир", "hello, world!", "café naïve", "日本語のテキスト", "한국어", "👍🏽 👨‍👩‍👧 ok", "ภาษาไทย"] {
+            XCTAssertTrue(LiveTextTicker.canDrawPerCharacter(text), text)
+        }
+        for text in ["سلام", "שלום", "привет سلام", "नमस्ते", "ক্ষমা", "ܫܠܡܐ", "abc\u{202E}def", "abc\u{200F}"] {
+            XCTAssertFalse(LiveTextTicker.canDrawPerCharacter(text), text)
+        }
+    }
+
     func testShorterTextDropsItsTail() {
         var ticker = settled("раз два три")
         ticker.textArrived("раз два", now: 10)
@@ -246,5 +284,15 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertGreaterThan(settled.lit, 200)
         XCTAssertGreaterThan(settled.rightmost, 320, "the tail sits at the right edge")
         XCTAssertLessThan(settled.rightmost, 360, "and stays inside the wing")
+    }
+
+    @MainActor
+    func testLateTextIsVisibleOnTheFirstFrameAfterAStall() {
+        let model = IslandLiveTextTickerModel()
+        model.textArrived(String(repeating: "a", count: 200), now: 0)
+        _ = render(model, now: 0.016, name: "skip")
+        let resumed = render(model, now: 3, name: "3-after-stall")
+        XCTAssertGreaterThan(resumed.lit, 200, "the caught-up line is drawn solid")
+        XCTAssertGreaterThan(resumed.rightmost, 320, "up to its newest character")
     }
 }

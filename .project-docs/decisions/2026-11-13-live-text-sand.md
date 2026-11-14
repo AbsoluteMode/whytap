@@ -46,8 +46,8 @@ gather from dust.
 - **No character waits longer than 1.4 s after it was delivered**
   (`LiveTextPacer.lagCap`). Every batch has that deadline and the pacer goes
   at least as fast as the nearest one needs; text already past its deadline
-  (a stalled main thread) is shown at once. Being current comes before being
-  smooth.
+  (a stalled main thread) is shown at once and solid, without gathering:
+  it is already late. Being current comes before being smooth.
 - `LiveTextTicker` records when each character appeared. The view draws a
   character as 14 grains that start up to 86 pt ahead of it, scattered over
   the wing's height, and land inside it over 0.35 s while the glyph fades in.
@@ -56,6 +56,11 @@ gather from dust.
   line) is swapped without the effect.
 - A face rebuilt mid-take shows its text at once; only new words are paced.
 - With Reduce Motion the previous `Text` is used unchanged.
+- Text in a right-to-left script (Arabic, Hebrew and others), with explicit
+  direction controls, or in a script whose letters join or reorder across
+  characters (Indic, Tibetan, Myanmar, Khmer, Mongolian) also uses the plain
+  `Text` (`LiveTextTicker.canDrawPerCharacter`). Drawn one character at a
+  time, left to right, it would lose its joining and its order.
 - Display only. Pasted text, auto-stop, the face width and every provider
   path read the provider's text as before. The wing sees only a string, so
   the behaviour is the same for Soniox, Deepgram, ElevenLabs and a server.
@@ -76,9 +81,14 @@ gather from dust.
   and never exceeds 1.6 times speech rate; uneven batches; no character older
   than the cap at 9, 15 and 26 characters per second with batches up to 2.5 s
   apart; a 3.5 s provider pause; the last words after speech ends; shorter
-  text; a short and a long main-thread stall; rewrites; rebuilt face.
-- One offscreen render: nothing before the first character, grains while
-  gathering, a long line keeps its tail at the right edge inside the wing.
+  text; a short and a long main-thread stall; rewrites; rebuilt face;
+  characters revealed past their deadline are solid on the same frame, on-time
+  ones still gather; which scripts are drawn per character.
+- Offscreen renders: nothing before the first character, grains while
+  gathering, a long line keeps its tail at the right edge inside the wing,
+  and after a 3 s stall the caught-up line is drawn on the first frame.
+- Build review (queue ticket 212) found both the overdue-text and the
+  right-to-left problems; this is the fix.
 
 ## Not verified
 
@@ -96,3 +106,6 @@ gather from dust.
   from random points inside the glyph's box.
 - Pacing the text in the store: the pasted text and auto-stop must keep the
   provider's own timing.
+- Shaping the whole line with CoreText and animating its glyph runs for
+  right-to-left and joined scripts: much more code for scripts the user does
+  not dictate in; the plain line shows them correctly.

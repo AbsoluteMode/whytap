@@ -40,6 +40,13 @@ final class IslandLiveTextTickerModel {
     /// Left edge of every character, plus the end of the last one.
     private var edges: [CGFloat] = [0]
     private var widths: [Character: CGFloat] = [:]
+    /// A rewrite that changes the line's length would move its end in one
+    /// frame. The difference is kept here and eased out, so the line slides.
+    private var slide: CGFloat = 0
+    private var wingWidth: CGFloat = 0
+    private var lastDrawAt: TimeInterval?
+    /// How fast a slide is eased out (time constant).
+    static let slideSeconds: TimeInterval = 0.12
     private let font = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
 
     func prime(_ text: String, now: TimeInterval) {
@@ -48,8 +55,24 @@ final class IslandLiveTextTickerModel {
     }
 
     func textArrived(_ text: String, now: TimeInterval) {
+        let before = lineEnd
         ticker.textArrived(text, now: now)
         measure()
+        // Ordinary growth does not move the end: new text is not revealed yet.
+        slide += before - lineEnd
+    }
+
+    /// Where the revealed text ends on screen, before any slide.
+    private var lineEnd: CGFloat { min(revealedWidth, wingWidth) }
+
+    /// Where the revealed text ends on screen right now (for tests).
+    var visibleLineEnd: CGFloat { lineEnd + slide }
+
+    private var revealedWidth: CGFloat {
+        let count = min(ticker.revealedCount, ticker.characters.count)
+        let fraction = CGFloat(ticker.revealed - Double(count))
+        let nextWidth = count < ticker.characters.count ? edges[count + 1] - edges[count] : 0
+        return edges[count] + fraction * nextWidth
     }
 
     private func measure() {
@@ -71,11 +94,14 @@ final class IslandLiveTextTickerModel {
 
     func draw(in context: inout GraphicsContext, size: CGSize, now: TimeInterval) {
         ticker.advance(now: now)
+        wingWidth = size.width
+        let step = max(0, now - (lastDrawAt ?? now))
+        lastDrawAt = now
+        slide *= CGFloat(exp(-step / Self.slideSeconds))
+        if abs(slide) < 0.05 { slide = 0 }
         let count = min(ticker.revealedCount, ticker.characters.count)
         guard count > 0 else { return }
-        let fraction = CGFloat(ticker.revealed - Double(count))
-        let nextWidth = count < ticker.characters.count ? edges[count + 1] - edges[count] : 0
-        let offset = min(0, size.width - (edges[count] + fraction * nextWidth))
+        let offset = min(0, size.width - revealedWidth) + slide
         let middle = size.height / 2
 
         var first = count - 1
@@ -105,7 +131,7 @@ final class IslandLiveTextTickerModel {
                     )
                 }
             }
-            guard offset < 0 else { return }
+            guard offset < -0.5 else { return }
             layer.opacity = 1
             layer.blendMode = .destinationOut
             layer.fill(

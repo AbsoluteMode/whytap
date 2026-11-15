@@ -9,6 +9,9 @@ canonical_for: [parallel-development, shared-working-application]
 verified_at: 2026-10-22
 sources:
   - type: user-confirmed
+    reference: On 2026-11-15 the user asked to remove the Rosetta installation check from local candidate validation after macOS displayed a compatibility notification.
+    confirmed_at: 2026-11-15
+  - type: user-confirmed
     reference: On 2026-10-22 the user requested urgent disk cleanup, required all coding sessions to survive, authorized removing other cleanup candidates and questioned accumulating developer backups.
     confirmed_at: 2026-10-22
   - type: user-confirmed
@@ -290,6 +293,12 @@ Under the lock:
    version mismatch between the installed app and main before preparing it.
    Inspect scripts before running them: their behavior may differ across
    branches. Do not run a publish/upload command for a local refresh.
+
+   On Apple Silicon, run the candidate's `--installation-check` in native
+   arm64 only. Launching its x86_64 slice through Rosetta can trigger the macOS
+   compatibility notification. Check both slices of the universal executable
+   and CLI helper with `lipo -archs` and verify the bundle with
+   `codesign --verify --deep --strict --all-architectures`.
 5. Preserve the last known working signed bundle privately before replacement.
    A data migration also needs a consistent private backup using the store's
    backup mechanism or a quiescent copy; copying an open SQLite file is not a

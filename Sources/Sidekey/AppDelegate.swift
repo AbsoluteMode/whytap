@@ -123,10 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let autoPasteEngine = AutoPasteEngine()
     private var hotkey: HotkeyShortcutMonitor?
     private var helpHotkey: CarbonHotkeyMonitor?
-    /// ROO-208: unified `⌥V` hotkey for the history strip. Replaces the
-    /// trio of per-mode `⌥1` / `⌥2` / `⌥3` monitors that used to live
-    /// in `historyHotkeys: [CarbonHotkeyMonitor]`.
-    private var historyHotkey: CarbonHotkeyMonitor?
     /// Independent monitors for the user's tool bindings, regardless of layout.
     private var toolHotkeys: [HotkeyShortcutMonitor] = []
     /// Manual Meeting-record toggle (default ⌥M) — tap starts a recording
@@ -573,7 +569,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // open (idle, or a recorder-fallback run).
         cancelStreamingSessionIfNeeded()
         hotkey?.stop()
-        stopHistoryHotkey()
         agentController?.stop()
         clipboardWatcher?.stop()
         // Terminate the MediaRemote `run.pl stream` child synchronously;
@@ -1037,12 +1032,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// idempotent and `start()` self-stops, so a redundant call is cheap.
     private func teardownHotkeyMonitorsForRebuild() {
         Self.teardownHotkeyMonitorsForRebuild(
-            [hotkey, helpHotkey, historyHotkey, meetingRecordHotkey] + toolHotkeys
+            [hotkey, helpHotkey, meetingRecordHotkey] + toolHotkeys
         )
         hotkey = nil
         dropMonitorGeneration = UUID()
         helpHotkey = nil
-        historyHotkey = nil
         meetingRecordHotkey = nil
         toolHotkeys = []
         // The setting stays; registerHotkey installs the tap again.
@@ -1451,7 +1445,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropShortcut: HotkeyShortcut? = nil,
         dropGesture: HotkeyGesture? = nil
     ) {
-        registerHistoryHotkey()
         registerHelpHotkey()
         registerToolHotkeys()
         registerMeetingRecordHotkey()
@@ -1537,38 +1530,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             publishDropHotkeyStatus()
         }
-    }
-
-    /// ROO-208: registers the unified `⌥V` strip hotkey. Calls
-    /// `HistoryStripController.toggleUnified()` so the controller picks
-    /// the last-remembered filter (defaulting to Clipboard) and
-    /// open/close-toggles in place.
-    private func registerHistoryHotkey() {
-        guard historyHotkey == nil else { return }
-        guard historyStripController != nil else { return }
-
-        let monitor = CarbonHotkeyMonitor(
-            keyCode: CarbonHotkeyMonitor.vKeyCode,
-            modifiers: CarbonHotkeyMonitor.optionModifier,
-            hotKeyIDValue: CarbonHotkeyMonitor.historyUnifiedHotKeyID
-        ) { [weak self] in
-            self?.toggleUnifiedHistoryStrip()
-        }
-        do {
-            try monitor.start()
-            self.historyHotkey = monitor
-        } catch {
-            os_log(
-                "registerHistoryHotkey failed: %{public}@",
-                log: Self.hotkeyLog, type: .error,
-                String(describing: error)
-            )
-        }
-    }
-
-    private func stopHistoryHotkey() {
-        historyHotkey?.stop()
-        historyHotkey = nil
     }
 
     private func registerHelpHotkey() {
@@ -1908,8 +1869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// what the frontmost app was — so the bottom hint bar would render
     /// only "Click to copy" with no right-hand "Paste to <App> ↵"
     /// affordance, and the local Enter handler would silently no-op
-    /// (because `controller.targetAppName` stays `nil`). Mirroring the
-    /// `⌥V` hotkey's pre-open capture aligns all three entry points.
+    /// (because `controller.targetAppName` stays `nil`).
     private func toggleHistoryStrip(_ mode: HistoryStripMode) {
         captureAndValidatePasteTargetIfOpening()
         historyStripController?.toggle(mode)
@@ -1937,7 +1897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copiedToastController?.show()
     }
 
-    /// Delete… on a clipboard row in any History surface. The ⌥V strip
+    /// Delete… on a clipboard row in any History surface. The floating strip
     /// reads the feed on every render, so a revision bump refreshes it even
     /// when the request came from the island or Toolbox.
     /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
@@ -1972,17 +1932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the user's real app is still frontmost — once
     /// `HistoryStripPanel.applyVisibility` calls `makeKey()`, AppKit
     /// briefly hands key status to the panel and `frontmostApplication`
-    /// would return Sidekey itself. Cheap on the close path (we just
-    /// overwrite the remembered target with whatever's frontmost; the
-    /// next `toggleUnified` close branch clears `targetAppName`
-    /// anyway).
-    ///
-    /// Shared by all three open entry points:
-    ///   * `toggleUnifiedHistoryStrip()` — `⌥V` Carbon hotkey.
-    ///   * `toggleHistoryStrip(_:)` — Dynamic Island clipboard icon
-    ///     (via `IslandActions.openClipboard`) and orb-action icons
-    ///     (`OrbActionsView.IconID.{agent, drop, clipboard}` →
-    ///     `handleOrbAction`).
+    /// would return Sidekey itself. The strip clears its target on close.
     private func captureAndValidatePasteTargetIfOpening() {
         autoPasteEngine.rememberTargetBeforeRecording()
         // Only validate when we're OPENING the strip — the close path
@@ -2009,40 +1959,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return target?.name
         }
         return nil
-    }
-
-    /// ROO-208: `⌥V` entry point. Routes through
-    /// `HistoryStripController.toggleUnified()` so the strip opens on
-    /// the user's last-picked filter (defaults to Clipboard) and closes
-    /// regardless of the active filter on a re-press.
-    ///
-    /// ROO-208 iter 15: capture the frontmost app BEFORE the strip
-    /// panel orders front. Once the panel becomes key on hover, AppKit
-    /// briefly reports Sidekey active and `frontmostApplication` would
-    /// return Sidekey itself — too late to know which app the user was
-    /// just typing in. Capturing here mirrors the drop-pipeline's
-    /// `rememberTargetBeforeRecording()` callsite (also pre-UI).
-    /// Cheap when the strip is being closed (we just overwrite the
-    /// remembered target with whatever's frontmost; nothing reads it
-    /// until the next paste).
-    ///
-    /// ROO-208 iter 17: gate the "Paste to <App> ↵" hint on whether
-    /// the captured app actually has a focused text-editing element.
-    /// `rememberTargetBeforeRecording()` captures ANY frontmost app
-    /// (Finder/Safari/Desktop included); without the validation step
-    /// the hint reads "Paste to Finder ↵" but pressing Enter posts
-    /// Cmd+V to a non-editable surface and nothing lands — the user
-    /// sees a silent failure. `PasteTargetValidator` queries the AX
-    /// API for the captured pid's focused element; only roles like
-    /// `AXTextField` / `AXTextArea` / `AXComboBox` / `AXWebArea`
-    /// (or subroles `AXSearchField` / `AXContentEditableElement`)
-    /// produce a non-nil `targetAppName` on the controller, and only
-    /// a non-nil value renders the hint and arms the Enter-paste
-    /// handler.
-    private func toggleUnifiedHistoryStrip() {
-        registerIslandHotkeyActivity()
-        captureAndValidatePasteTargetIfOpening()
-        historyStripController?.toggleUnified()
     }
 
     // MARK: - Capability reconciliation

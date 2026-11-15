@@ -2,25 +2,7 @@ import AppKit
 import Combine
 import Foundation
 
-/// Source of frontmost-app updates while the history strip is open.
-/// Production wiring (see `AppDelegate.toggleUnifiedHistoryStrip`)
-/// pre-captures the frontmost app and the AX text-focus status BEFORE
-/// the strip's panel orders front, then pushes a single value via
-/// `setTargetAppName(_:)`. Tests drive `setTargetAppName(_:)` directly.
-///
-/// ROO-208 iter 17: the controller no longer observes
-/// `NSWorkspace.didActivateApplicationNotification`. Iter 15's dynamic
-/// update was rejected by Maxim — the user's real paste target is the
-/// app they were TYPING IN when they pressed ⌥V; Cmd+Tabbing with the
-/// strip on screen is a preview action, not a re-target. The target
-/// is frozen at strip-open and cleared at strip-close.
-
-/// Identifies which history filter is currently active in the unified
-/// bottom strip (ROO-208). One of three filters — Clipboard / Drop /
-/// Agent — selectable via the in-strip left sidebar and pre-set by orb
-/// action taps. Pre-ROO-208 this enum also identified the three
-/// independent `⌥1` / `⌥2` / `⌥3` hotkeys; those have been folded into
-/// the single `⌥V` unified-strip hotkey.
+/// The filters shared by the History surfaces.
 enum HistoryStripMode: String, CaseIterable, Equatable {
     case agent
     case drop
@@ -83,18 +65,9 @@ final class HistoryStripController: ObservableObject {
     /// selected). Always cleared when the strip closes.
     @Published private(set) var hoveredCard: HistoryStripCard?
 
-    /// ROO-208 iter 17: display name of the validated paste target,
-    /// or `nil` when the captured app has no editable focused element
-    /// (Desktop / Finder / Safari with no text input). Set ONCE at
-    /// strip-open from `AppDelegate.toggleUnifiedHistoryStrip` AFTER
-    /// the AX text-focus validation in `PasteTargetValidator`, and
-    /// CLEARED at strip-close. Deliberately does NOT track frontmost-
-    /// app changes while the strip is on screen — Maxim's contract is
-    /// "the target is the app I was typing in when I hit ⌥V; switching
-    /// apps with the strip up is a preview, not a re-target". When
-    /// `nil`, the "Paste to <App> ↵" hint is hidden and Enter on a
-    /// hovered card is a silent no-op (the user can still click the
-    /// card to copy and paste manually elsewhere via Cmd+V).
+    /// The app whose focused text input was validated when History opened.
+    /// The strip keeps this target while it is open and clears it on close.
+    /// With no target, the paste hint is hidden and Return does nothing.
     @Published private(set) var targetAppName: String?
 
     /// Bumped when a stored entry disappears outside the strip's own
@@ -147,23 +120,6 @@ final class HistoryStripController: ObservableObject {
         hoveredCard = nil
         openMode = mode
         rememberFilter(mode)
-    }
-
-    /// ROO-208: single-hotkey entry point for the unified strip. Closes
-    /// the strip if open; otherwise opens it on the last-remembered
-    /// filter (defaults to `.clipboard` on first use within an app
-    /// session — Maxim's "default filter on open = Clipboard, most
-    /// frequent use case").
-    func toggleUnified() {
-        if openMode != nil {
-            close()
-            return
-        }
-        let filter = lastFilter ?? .clipboard
-        expandedEntry = nil
-        hoveredCard = nil
-        openMode = filter
-        rememberFilter(filter)
     }
 
     /// ROO-208: sidebar filter tap. Switches the active filter while the
@@ -303,9 +259,8 @@ final class HistoryStripController: ObservableObject {
     }
 
     /// Sets the validated paste target's display name (or `nil` to
-    /// indicate "no editable target"). Called once at strip-open from
-    /// `AppDelegate.toggleUnifiedHistoryStrip` after the AX text-focus
-    /// validation; tests call directly to assert hint behaviour.
+    /// indicate "no editable target"). Called after the AX text-focus
+    /// validation when opening History.
     func setTargetAppName(_ name: String?) {
         targetAppName = name
     }

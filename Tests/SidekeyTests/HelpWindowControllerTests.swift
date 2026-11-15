@@ -27,33 +27,10 @@ final class HelpWindowControllerTests: XCTestCase {
         XCTAssertTrue(rows.contains { $0.title == "Drop — voice" })
     }
 
-    func testHelpWindowDocumentsUnifiedHistoryHotkey() {
-        // ROO-208: the three per-mode `⌥1` / `⌥2` / `⌥3` rows were
-        // collapsed into a single "History" row for `⌥V`. The unified
-        // strip exposes filter selection via an in-strip sidebar.
+    func testHelpDoesNotAdvertiseOptionVForHistory() {
         let rows = HelpWindowContent.hotkeyRows
-
-        XCTAssertTrue(rows.contains(HelpHotkeyRowSpec(
-            title: "History",
-            detail: "Open the bottom strip with clipboard, voice drops, and agent history.",
-            iconName: "clock",
-            prefix: nil,
-            contents: [.text(HotkeyGlyph.option), .text("V")]
-        )))
-
-        // Old rows must NOT be present.
-        XCTAssertFalse(
-            rows.contains(where: { $0.title == "Agent history" }),
-            "Agent history row removed by ROO-208"
-        )
-        XCTAssertFalse(
-            rows.contains(where: { $0.title == "Drop history" }),
-            "Drop history row removed by ROO-208"
-        )
-        XCTAssertFalse(
-            rows.contains(where: { $0.title == "Clipboard history" }),
-            "Clipboard history row removed by ROO-208"
-        )
+        XCTAssertFalse(rows.contains { $0.contents == [.text(HotkeyGlyph.option), .text("V")] })
+        XCTAssertTrue(rows.contains { $0.title == "History — paste" })
     }
 
     func testHelpWindowDocumentsEscapeCloseHotkey() {

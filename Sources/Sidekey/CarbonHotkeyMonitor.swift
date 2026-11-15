@@ -54,12 +54,6 @@ final class CarbonHotkeyMonitor {
     static let hKeyCode: UInt32 = 4
     /// kVK_ANSI_Q. Response-panel close hotkey key code.
     static let qKeyCode: UInt32 = 12
-    /// kVK_ANSI_V. ROO-208 unified history-strip hotkey key code. The
-    /// `V` mnemonic is paste-adjacent — the strip's primary surface is
-    /// the clipboard filter, and `⌥V` reads as "view what's about to
-    /// paste". Replaces the three `⌥1` / `⌥2` / `⌥3` hotkeys that lived
-    /// on `oneKeyCode` / `twoKeyCode` / `threeKeyCode` pre-ROO-208.
-    static let vKeyCode: UInt32 = 9
     /// kVK_LeftArrow / kVK_RightArrow / kVK_UpArrow / kVK_DownArrow from
     /// Carbon HIToolbox/Events.h. Used by the useful_links rolling-hint
     /// chip for ⌥ ←/→/↑/↓ selection nav while a useful_links block is
@@ -88,11 +82,7 @@ final class CarbonHotkeyMonitor {
     static let usefulLinksOpenHotKeyID: UInt32 = 5
     static let usefulLinksDownHotKeyID: UInt32 = 6
     static let usefulLinksUpHotKeyID: UInt32 = 7
-    /// ROO-208: single unified history-strip hotkey. Replaces the trio
-    /// of per-mode IDs 8/9/10 that previously routed `⌥1` / `⌥2` / `⌥3`
-    /// to agent/drop/clipboard mode respectively. The strip now exposes
-    /// filter selection via an in-strip sidebar.
-    static let historyUnifiedHotKeyID: UInt32 = 8
+    // ID 8 retired with the fixed History shortcut.
     // ID 9 retired twice: first with the ROO-208 trio, then as the bare-Escape
     // close hotkey — the answer uses a scoped `EscapeCloseEventMonitor`
     // session tap instead of a Carbon bare-Escape registration.

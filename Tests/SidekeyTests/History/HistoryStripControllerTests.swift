@@ -159,50 +159,23 @@ final class HistoryStripControllerTests: XCTestCase {
 
     // MARK: - ROO-208: Unified strip filter
 
-    func testToggleUnifiedOpensWithClipboardOnFirstUse() {
-        // ROO-208: the unified strip's single hotkey opens with the
-        // Clipboard filter as the default on first use within an app
-        // session (no prior filter remembered).
-        let controller = makeController()
-        controller.toggleUnified()
-        XCTAssertEqual(controller.openMode, .clipboard)
+    func testRememberedFilterDefaultsToClipboard() {
+        XCTAssertEqual(makeController().rememberedFilter(), .clipboard)
     }
 
-    func testToggleUnifiedClosesWhenAlreadyOpen() {
-        // Re-pressing the unified hotkey closes the strip regardless of
-        // the active filter.
-        let controller = makeController()
-        controller.toggleUnified()
-        controller.toggleUnified()
-        XCTAssertNil(controller.openMode)
-    }
-
-    func testToggleUnifiedRemembersLastFilterAcrossSessions() {
-        // Between two opens within the same controller instance, the
-        // second open restores the filter the user last viewed before
-        // closing.
-        let controller = makeController()
-        controller.toggleUnified()                  // open with .clipboard (default)
-        controller.setFilter(.drop)                 // user picks Drop
-        controller.toggleUnified()                  // close
-        controller.toggleUnified()                  // re-open
-        XCTAssertEqual(controller.openMode, .drop)
-    }
-
-    func testToggleUnifiedPersistsLastFilterAcrossControllerInstances() {
+    func testRememberedFilterPersistsAcrossControllerInstances() {
         let suiteName = "history-strip-controller-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let first = HistoryStripController(userDefaults: defaults)
-        first.toggleUnified()
+        first.toggle(.clipboard)
         first.setFilter(.drop)
         first.close()
 
         let second = HistoryStripController(userDefaults: defaults)
-        second.toggleUnified()
-
-        XCTAssertEqual(second.openMode, .drop)
+        XCTAssertEqual(second.rememberedFilter(), .drop)
     }
 
     func testSetFilterSwitchesActiveModeWithoutClosing() {
@@ -210,7 +183,7 @@ final class HistoryStripControllerTests: XCTestCase {
         // open. Equivalent to mode switch but without the toggle-to-close
         // branch that `toggle(_:)` carries for legacy orb taps.
         let controller = makeController()
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         XCTAssertEqual(controller.openMode, .clipboard)
         controller.setFilter(.agent)
         XCTAssertEqual(controller.openMode, .agent, "sidebar pick switches filter")
@@ -229,7 +202,7 @@ final class HistoryStripControllerTests: XCTestCase {
         // expanded panel for a card from the OLD filter — same guard as
         // `toggle(_:)` for mode switches.
         let controller = makeController()
-        controller.toggleUnified()                  // .clipboard
+        controller.toggle(.clipboard)
         controller.expand(.clipboard(.text("a")))
         controller.setFilter(.drop)
         XCTAssertNil(controller.expandedEntry)
@@ -239,7 +212,7 @@ final class HistoryStripControllerTests: XCTestCase {
         // Re-tapping the active sidebar filter must not re-emit a change
         // (avoids cross-fade flash) and must not collapse any expanded.
         let controller = makeController()
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.expand(.clipboard(.text("a")))
         controller.setFilter(.clipboard)
         XCTAssertEqual(controller.openMode, .clipboard)
@@ -265,7 +238,7 @@ final class HistoryStripControllerTests: XCTestCase {
 
     func testSetHoveredCardStoresEnterTransition() {
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         let card = Self.makeClipboardCard(id: 1, text: "alpha")
         controller.setHoveredCard(card, from: card)
         XCTAssertEqual(controller.hoveredCard, card)
@@ -273,7 +246,7 @@ final class HistoryStripControllerTests: XCTestCase {
 
     func testSetHoveredCardExitClearsWhenEmitterMatches() {
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         let card = Self.makeClipboardCard(id: 1, text: "alpha")
         controller.setHoveredCard(card, from: card)
         controller.setHoveredCard(nil, from: card)
@@ -284,7 +257,7 @@ final class HistoryStripControllerTests: XCTestCase {
         // Fast diagonal cursor sweep: enter B fires before A's exit.
         // The stale exit from A must not clear B's hover state.
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         let a = Self.makeClipboardCard(id: 1, text: "a")
         let b = Self.makeClipboardCard(id: 2, text: "b")
         controller.setHoveredCard(a, from: a)
@@ -295,7 +268,7 @@ final class HistoryStripControllerTests: XCTestCase {
 
     func testCloseClearsHoverAndTargetApp() {
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.setHoveredCard(Self.makeClipboardCard(id: 1, text: "a"), from: nil)
         controller.setTargetAppName("TextEdit")
         controller.close()
@@ -303,11 +276,11 @@ final class HistoryStripControllerTests: XCTestCase {
         XCTAssertNil(controller.targetAppName)
     }
 
-    func testToggleUnifiedClearsHoverOnSwitch() {
+    func testSwitchingFiltersClearsHover() {
         // Switching filters while a card is hovered would point the
         // hover state at a card that's no longer in the visible feed.
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.setHoveredCard(Self.makeClipboardCard(id: 1, text: "a"), from: nil)
         controller.setFilter(.drop)
         XCTAssertNil(controller.hoveredCard)
@@ -318,7 +291,7 @@ final class HistoryStripControllerTests: XCTestCase {
         // AX text-focus check; this test exercises the published-value
         // contract that the strip view observes.
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.setTargetAppName("Slack")
         XCTAssertEqual(controller.targetAppName, "Slack")
         // The setter still accepts overwrite — tests may simulate
@@ -333,19 +306,16 @@ final class HistoryStripControllerTests: XCTestCase {
         // with no text input). The hint must collapse and Enter must
         // become a silent no-op when this is the active value.
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.setTargetAppName(nil)
         XCTAssertNil(controller.targetAppName)
     }
 
-    func testToggleUnifiedClosesClearsTargetApp() {
-        // Closing the strip via a second `toggleUnified()` press
-        // clears the published target so the next open starts from a
-        // clean slate (and the AppDelegate must re-validate at open).
+    func testTogglingTheCurrentFilterClosedClearsTargetApp() {
         let controller = makeController(ownBundleIdentifier: nil)
-        controller.toggleUnified()
+        controller.toggle(.clipboard)
         controller.setTargetAppName("Slack")
-        controller.toggleUnified()              // close
+        controller.toggle(.clipboard)
         XCTAssertNil(controller.targetAppName)
     }
 }

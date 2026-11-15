@@ -1109,7 +1109,7 @@ sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
 without deleting other retained rows. A clipboard row's context menu offers
-Delete… in hover History, Toolbox History and the ⌥V strip; ClipboardEntryDeletion
+Delete… in hover History, Toolbox History and the floating strip; ClipboardEntryDeletion
 asks Cancel-first like meeting delete and never quotes the copy. deleteClipboardEntry
 removes the image sidecar, then the row with secure_delete and a truncating WAL
 checkpoint, in one store-queue hop; a sidecar that cannot be removed keeps the

@@ -236,7 +236,7 @@ the Tools section provides an optional additional shortcut for the same action.
 
 Assigned hints above tiles and named Help rows read the same configuration.
 Unassigned tools have no hint or Help hotkey row. Conflicts use the existing
-physical-key model, including the fixed Help and History-strip shortcuts.
+physical-key model, including the fixed Help shortcut.
 If macOS cannot register a binding, its saved row shows an unavailable message
 with permission/shortcut recovery guidance.
 

@@ -75,6 +75,9 @@ struct ModelPicker: View {
                     .padding(6)
                 }
                 .frame(height: 300)
+                // A filtered list needs a fresh viewport. Reusing the lazy
+                // layout can leave even a nonempty result set visually blank.
+                .id(query)
                 .onChange(of: activeID) { _, id in
                     if let id { scroll.scrollTo(id) }
                 }

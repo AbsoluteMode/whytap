@@ -1338,8 +1338,7 @@ extension HotkeyConfiguration {
                 binding: HotkeyBinding(gesture: .tap, key: shortcut.bindingKey)
             )
         } + [
-            HotkeyBindingAssignment(actionTitle: "Help", binding: HotkeyBinding(gesture: .tap, key: .combo(HotkeyTapCombo(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(optionKey), keyTitle: "H")))),
-            HotkeyBindingAssignment(actionTitle: "History strip", binding: HotkeyBinding(gesture: .tap, key: .combo(HotkeyTapCombo(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(optionKey), keyTitle: "V"))))
+            HotkeyBindingAssignment(actionTitle: "Help", binding: HotkeyBinding(gesture: .tap, key: .combo(HotkeyTapCombo(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(optionKey), keyTitle: "H"))))
         ]
     }
 

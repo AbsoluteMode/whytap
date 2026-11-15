@@ -128,8 +128,7 @@ final class HoverHotkeyTests: XCTestCase {
     /// #313 turned the Clipboard tile into the History inline hover panel
     /// (`HoverTool.clipboard` is now `.inlinePanel`, title "History"). The ⌥N
     /// hotkey for that slot must therefore open the History panel in-place
-    /// (D1: same as the tile click, which sets `panelMode = .history`), NOT
-    /// fire the old bottom-strip `openClipboard` action.
+    /// (D1: same as the tile click, which sets `panelMode = .history`).
     func test_router_maps_clipboard_slot_to_history_panel() {
         XCTAssertEqual(HoverSlotRouter.effect(for: .clipboard), .openPanel(.history))
     }
@@ -165,11 +164,11 @@ final class HoverHotkeyTests: XCTestCase {
 
     func test_activate_hover_slot_invokes_slot_action() {
         var didToggleDropMode = false
-        var didOpenClipboard = false
+        var didOpenHistory = false
         var didOpenSettings = false
         let actions = spyActions(
             toggleDropMode: { didToggleDropMode = true },
-            openClipboard: { didOpenClipboard = true },
+            openHistory: { didOpenHistory = true },
             openSettings: { didOpenSettings = true }
         )
 
@@ -179,15 +178,14 @@ final class HoverHotkeyTests: XCTestCase {
         // — see test_toggle_drop_mode_effect_is_noop_in_invoke.
         HoverSlotRouter.effect(for: .dropMode).invoke(on: actions)
         XCTAssertFalse(didToggleDropMode)
-        XCTAssertFalse(didOpenClipboard)
+        XCTAssertFalse(didOpenHistory)
         XCTAssertFalse(didOpenSettings)
 
         // Slot 3 (default layout) = .clipboard → .openPanel(.history) after
         // #313. Inline-panel effects are driven by the view (panel mode), so
-        // invoking on `actions` is a no-op — the old bottom-strip openClipboard
-        // closure must NOT fire from a hover slot anymore.
+        // invoking the route leaves opening History to the island view.
         HoverSlotRouter.effect(for: .clipboard).invoke(on: actions)
-        XCTAssertFalse(didOpenClipboard)
+        XCTAssertFalse(didOpenHistory)
 
         // Slot 5 (locked) = .settings → openSettings.
         HoverSlotRouter.effect(for: .settings).invoke(on: actions)
@@ -248,7 +246,7 @@ final class HoverHotkeyTests: XCTestCase {
         var anyClosureFired = false
         let actions = spyActions(
             toggleDropMode: { anyClosureFired = true },
-            openClipboard: { anyClosureFired = true },
+            openHistory: { anyClosureFired = true },
             openSettings: { anyClosureFired = true },
             openHotkeys: { anyClosureFired = true },
             openNotes: { anyClosureFired = true },
@@ -272,7 +270,7 @@ final class HoverHotkeyTests: XCTestCase {
         var anyClosureFired = false
         let actions = spyActions(
             toggleDropMode: { anyClosureFired = true },
-            openClipboard: { anyClosureFired = true },
+            openHistory: { anyClosureFired = true },
             openSettings: { anyClosureFired = true },
             openHotkeys: { anyClosureFired = true },
             openNotes: { anyClosureFired = true },
@@ -385,7 +383,7 @@ final class HoverHotkeyTests: XCTestCase {
     /// dozens of unrelated closures.
     private func spyActions(
         toggleDropMode: @escaping () -> Void = {},
-        openClipboard: @escaping () -> Void = {},
+        openHistory: @escaping () -> Void = {},
         openSettings: @escaping () -> Void = {},
         openHotkeys: @escaping () -> Void = {},
         openNotes: @escaping () -> Void = {},
@@ -393,7 +391,10 @@ final class HoverHotkeyTests: XCTestCase {
     ) -> IslandActions {
         var actions = IslandActions.noOp
         actions.toggleDropMode = { toggleDropMode(); return .fast }
-        actions.openClipboard = openClipboard
+        actions.openHistory = {
+            openHistory()
+            return .clipboard
+        }
         actions.openSettings = openSettings
         actions.openHotkeys = openHotkeys
         actions.openMeetings = openNotes

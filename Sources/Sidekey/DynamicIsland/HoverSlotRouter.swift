@@ -124,9 +124,6 @@ enum HoverSlotRouter {
         case .notifs:
             return .openPanel(.notifications)
         case .clipboard:
-            // #313: the Clipboard tile is now the History inline hover panel.
-            // Open it in-place (D1: same as the tile click → `panelMode =
-            // .history`) instead of the retired bottom-strip openClipboard.
             return .openPanel(.history)
         case .settings:
             return .openSettings

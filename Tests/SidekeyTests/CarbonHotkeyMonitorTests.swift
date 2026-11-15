@@ -24,38 +24,6 @@ final class CarbonHotkeyMonitorTests: XCTestCase {
         XCTAssertEqual(recorder.registerCalls[0].modifiers, UInt32(optionKey))
     }
 
-    // ROO-208: the old per-mode `⌥1` / `⌥2` / `⌥3` hotkeys were replaced
-    // with a single `⌥V` hotkey that opens the unified strip with a
-    // sidebar filter. The per-mode `historyMode(forKeyCode:)` resolver
-    // and `historyHotkeyRegistrations` table are gone.
-    func testUnifiedHistoryHotkeyRegistersOptionV() throws {
-        let recorder = SeamRecorder()
-        let monitor = CarbonHotkeyMonitor(
-            keyCode: CarbonHotkeyMonitor.vKeyCode,
-            modifiers: CarbonHotkeyMonitor.optionModifier,
-            hotKeyIDValue: CarbonHotkeyMonitor.historyUnifiedHotKeyID,
-            onHotkey: {},
-            registerHotKey: recorder.register(slot: Self.fakeHotKeyRef),
-            unregisterHotKey: recorder.unregister(),
-            installHandler: recorder.install(slot: Self.fakeHandlerRef),
-            removeHandler: recorder.remove(),
-            dispatchOnMain: { $0() }
-        )
-
-        try monitor.start()
-
-        XCTAssertEqual(recorder.registerCalls.count, 1)
-        XCTAssertEqual(recorder.registerCalls[0].keyCode, CarbonHotkeyMonitor.vKeyCode)
-        XCTAssertEqual(recorder.registerCalls[0].modifiers, UInt32(optionKey))
-        XCTAssertEqual(recorder.registerCalls[0].hotKeyIDValue, CarbonHotkeyMonitor.historyUnifiedHotKeyID)
-        XCTAssertEqual(recorder.registerCalls[0].signature, CarbonHotkeyMonitor.signature)
-
-        monitor.stop()
-
-        XCTAssertEqual(recorder.unregisterCalls, 1)
-        XCTAssertEqual(recorder.removeCalls, 1)
-    }
-
     func testStartInstallsEventHandlerBeforeRegistering() throws {
         let recorder = SeamRecorder()
         let monitor = CarbonHotkeyMonitor(

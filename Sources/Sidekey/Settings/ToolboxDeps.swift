@@ -8,8 +8,6 @@ struct ToolboxDeps {
     var toggleDropMode: () -> TranscriptionMode = { .fast }
     /// Current Drop transcription mode.
     var currentDropMode: () -> TranscriptionMode = { .fast }
-    /// Open the floating clipboard history strip.
-    var openClipboard: () -> Void = {}
     var historyCards: (HistoryStripMode) async -> [HistoryStripCard] = { _ in [] }
     var copyHistoryCard: (HistoryStripCard) -> Void = { _ in }
     /// Confirms and deletes a clipboard row; `true` when the list must reload.

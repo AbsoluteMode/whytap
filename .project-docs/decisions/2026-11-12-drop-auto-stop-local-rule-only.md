@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropAutoStop/HandsFreeTakeTests.swift
     confirmed_at: 2026-11-12
-related: [2026-11-11-drop-auto-stop.md]
+related: [2026-11-11-drop-auto-stop.md, 2026-11-13-live-text-sand.md]
 ---
 
 # Only the quiet rule ends an auto-stop take

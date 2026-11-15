@@ -198,6 +198,20 @@ Voice flow (Drop / dictation):
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md
 
+Live text in the recording wing (Drop and agent voice):
+  IslandLiveTextTicker draws the provider's live transcript instead of a plain
+  Text. LiveTextPacer reveals it at the speaker's rate, holding a reserve
+  sized from the observed gap between batches so the line does not stop, and
+  no character waits more than 1.4 s after delivery (current before smooth).
+  Each new character gathers from 14 grains over 0.35 s; a rewritten visible
+  character gathers again in place, a rewrite of more than 12 swaps at once.
+  A face rebuilt mid-take shows its text at once; text revealed past its
+  deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
+  that join across characters (canDrawPerCharacter) keep the plain Text.
+  Display only: pasted text, auto-stop and face width use the
+  provider's text; the same for every provider. WHY:
+  .project-docs/decisions/2026-11-13-live-text-sand.md
+
 Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
@@ -1097,7 +1111,7 @@ sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
 without deleting other retained rows. A clipboard row's context menu offers
-Delete… in hover History, Toolbox History and the ⌥V strip; ClipboardEntryDeletion
+Delete… in hover History and Toolbox History; ClipboardEntryDeletion
 asks Cancel-first like meeting delete and never quotes the copy. deleteClipboardEntry
 removes the image sidecar, then the row with secure_delete and a truncating WAL
 checkpoint, in one store-queue hop; a sidecar that cannot be removed keeps the

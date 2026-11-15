@@ -35,12 +35,6 @@ struct IslandActions {
     /// `right ⌘ tap` — agent text input toggle. Mirrors
     /// `AgentController.handleTap()`.
     var openTextAgent: () -> Void
-    /// Toolbar entry point for the unified history strip's Clipboard
-    /// filter. Mirrors `HistoryStripController.toggle(.clipboard)` —
-    /// post-ROO-208 the strip exposes filter selection via an in-strip
-    /// sidebar, so the toolbar button pre-selects Clipboard but the
-    /// user can pivot to Drop / Agent without re-opening.
-    var openClipboard: () -> Void
     /// Hover History entry point. Captures the paste target while the
     /// user's app is still frontmost and returns the mode to show first.
     var openHistory: () -> HistoryStripMode = { .clipboard }
@@ -147,7 +141,6 @@ struct IslandActions {
         startVoiceAgent: {},
         stopVoiceAgent: {},
         openTextAgent: {},
-        openClipboard: {},
         openUsefulLinks: {},
         openMeetings: {},
         openSettings: {},

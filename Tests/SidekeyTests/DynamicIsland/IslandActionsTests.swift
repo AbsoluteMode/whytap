@@ -24,7 +24,7 @@ final class IslandActionsTests: XCTestCase {
         actions.startVoiceAgent()
         actions.stopVoiceAgent()
         actions.openTextAgent()
-        actions.openClipboard()
+        _ = actions.openHistory()
         actions.openUsefulLinks()
         actions.openMeetings()
         actions.openSettings()
@@ -63,7 +63,10 @@ final class IslandActionsTests: XCTestCase {
             startVoiceAgent: { fired.append("startVoiceAgent") },
             stopVoiceAgent:  { fired.append("stopVoiceAgent") },
             openTextAgent:   { fired.append("openTextAgent") },
-            openClipboard:   { fired.append("openClipboard") },
+            openHistory: {
+                fired.append("openHistory")
+                return .clipboard
+            },
             openUsefulLinks: { fired.append("openUsefulLinks") },
             openMeetings:    { fired.append("openMeetings") },
             openSettings:    { fired.append("openSettings") },
@@ -87,7 +90,7 @@ final class IslandActionsTests: XCTestCase {
         actions.startVoiceAgent()
         actions.stopVoiceAgent()
         actions.openTextAgent()
-        actions.openClipboard()
+        _ = actions.openHistory()
         actions.openUsefulLinks()
         actions.openMeetings()
         actions.openSettings()
@@ -108,7 +111,7 @@ final class IslandActionsTests: XCTestCase {
                 "startVoiceAgent",
                 "stopVoiceAgent",
                 "openTextAgent",
-                "openClipboard",
+                "openHistory",
                 "openUsefulLinks",
                 "openMeetings",
                 "openSettings",
@@ -129,7 +132,10 @@ final class IslandActionsTests: XCTestCase {
             startVoiceAgent: { fired.append("startVoiceAgent") },
             stopVoiceAgent:  { fired.append("stopVoiceAgent") },
             openTextAgent:   { fired.append("openTextAgent") },
-            openClipboard:   { fired.append("openClipboard") },
+            openHistory: {
+                fired.append("openHistory")
+                return .clipboard
+            },
             openUsefulLinks: { fired.append("openUsefulLinks") },
             openMeetings:    { fired.append("openMeetings") },
             openSettings:    { fired.append("openSettings") },

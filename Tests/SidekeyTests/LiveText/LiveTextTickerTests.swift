@@ -165,12 +165,85 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertEqual(ticker.gatherProgress(at: 9, now: 10), 1)
     }
 
-    func testARewriteThatShiftsTheLineChangesAtOnce() {
+    /// The stumble the user reported: the provider takes repeated words back.
+    func testAStumbleTakenBackKeepsTheRestInPlace() {
+        var ticker = settled("я я я хочу кофе")
+        ticker.textArrived("я хочу кофе", now: 10)
+        XCTAssertEqual(ticker.revealedCount, 11, "the reveal point stays at the end of the text")
+        for index in 0..<11 {
+            XCTAssertEqual(ticker.gatherProgress(at: index, now: 10), 1, "character \(index) gathered again")
+        }
+    }
+
+    func testAWordInsertedEarlierGathersAloneAndKeepsTheRevealPoint() {
         var ticker = settled("сегодня мы обсудим новую функцию")
         ticker.textArrived("сегодня вечером мы обсудим новую функцию", now: 10)
+        XCTAssertEqual(ticker.revealedCount, 40)
+        for index in 0..<40 {
+            let inserted = (8..<16).contains(index)
+            XCTAssertEqual(ticker.gatherProgress(at: index, now: 10), inserted ? 0 : 1, "character \(index)")
+        }
+    }
+
+    func testARewriteBeforeTheRevealPointDoesNotRevealOrHideTheTail() {
+        var ticker = LiveTextTicker()
+        ticker.textArrived("раз раз два три четыре пять шесть", now: 0)
+        var now = 0.0
+        while ticker.revealedCount < 12 {
+            now += 1.0 / 60
+            ticker.advance(now: now)
+        }
+        // "раз раз два " is on screen; the provider drops the repeated word.
+        ticker.textArrived("раз два три четыре пять шесть", now: now)
+        XCTAssertEqual(ticker.revealedCount, 8, "still up to the end of 'два '")
+        XCTAssertEqual(ticker.gatherProgress(at: 8, now: now), 0, "'три' is not revealed early")
+    }
+
+    func testTextReplacedAtTheRevealPointIsPacedAgainFromThere() {
+        var ticker = LiveTextTicker()
+        ticker.textArrived("один два три четыре", now: 0)
+        var now = 0.0
+        while ticker.revealedCount < 7 {
+            now += 1.0 / 60
+            ticker.advance(now: now)
+        }
+        let sharedStart = ticker.gatherProgress(at: 4, now: now)
+        ticker.textArrived("один сто пять", now: now)
+        XCTAssertEqual(ticker.revealedCount, 7)
+        XCTAssertEqual(ticker.gatherProgress(at: 4, now: now), sharedStart, "the shared start is untouched")
+        XCTAssertEqual(ticker.gatherProgress(at: 5, now: now), 0, "the replaced letters gather")
+    }
+
+    func testALongRewriteChangesAtOnce() {
+        var ticker = settled("короткое начало и потом совсем другая длинная фраза конец")
+        ticker.textArrived("короткое начало а дальше провайдер услышал иначе конец", now: 10)
         for index in 0..<ticker.revealedCount {
             XCTAssertEqual(ticker.gatherProgress(at: index, now: 10), 1, "character \(index)")
         }
+    }
+
+    /// A rewrite that changes the line's length moves its end smoothly.
+    @MainActor
+    func testTheLineSlidesInsteadOfJumpingWhenARewriteChangesItsLength() {
+        let model = IslandLiveTextTickerModel()
+        var now = 0.0
+        func frames(_ seconds: TimeInterval) {
+            let until = now + seconds
+            while now < until {
+                now += 1.0 / 60
+                _ = render(model, now: now, name: "skip")
+            }
+        }
+        model.textArrived("я я я хочу", now: now)
+        frames(4)
+        let before = model.visibleLineEnd
+        XCTAssertGreaterThan(before, 40)
+        model.textArrived("я хочу", now: now)
+        XCTAssertEqual(model.visibleLineEnd, before, accuracy: 0.01, "no jump on the frame of the rewrite")
+        frames(1.0 / 60)
+        XCTAssertLessThan(before - model.visibleLineEnd, 4, "one frame moves a little")
+        frames(1)
+        XCTAssertLessThan(model.visibleLineEnd, before - 15, "and it settles at the shorter line")
     }
 
     func testAFaceRebuiltMidTakeShowsItsTextAtOnce() {

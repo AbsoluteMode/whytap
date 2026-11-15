@@ -80,7 +80,7 @@ Modifier glyphs and their VoiceOver pronunciations live on
   `.hold` gesture; other shortcuts keep the user's current gesture choice
   (`.hold` = release-to-stop, `.tap`/Toggle = second-tap-to-stop). The gesture
   switch is live for non-Space bindings and locked on Hold for Space. All Drop
-  hint surfaces (Help, onboarding, idle chip, History strip, Dynamic Island
+  hint surfaces (Help, onboarding, idle chip, Dynamic Island
   passive hints, Toolbox caption) source the caps from
   `configuration.dropVoiceShortcut` and the gesture word from
   `configuration.normalizedDropGesture.voiceTitle`, so a rebind propagates

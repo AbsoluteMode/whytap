@@ -145,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// rounded-rect frame + 3-row actions cluster. Lifecycle tied to
     /// `panel` — created lazily once the orb panel exists so the
     /// overlay can read its frame.
-    private var actionsOverlayPanel: OrbActionsOverlayPanel?
     private var postProcessor: PostProcessor?
     /// Resilient-Drop manual-retry state (Task 7). When degraded batch recovery
     /// also fails (total offline), the captured PCM + its paste target are
@@ -237,14 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// flips the "Hide Helpers" preference.
     private var cancellables: Set<AnyCancellable> = []
 
-    // MARK: - History Strip
-    /// Bottom-strip orchestrator. Mode state + Esc / outside-click
-    /// handling. SwiftUI views inside `HistoryStripPanel` and
-    /// `HistoryExpandedPanel` observe its `@Published` properties.
-    private var historyStripController: HistoryStripController?
+    // MARK: - History
+    private var historyInteraction: HistoryInteractionState?
     private var historyStripFeed: HistoryStripFeed?
-    private var historyStripPanel: HistoryStripPanel?
-    private var historyExpandedPanel: HistoryExpandedPanel?
     private var copiedToastController: CopiedToastController?
     private var copiedToastPanel: CopiedToastPanel?
     private var clipboardWatcher: ClipboardWatcher?
@@ -433,11 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the History window) keeps surfacing new turns post-migration.
                 self.chatStackStore = ChatStackStore(store: store)
 
-            // History strip: assets dir for clipboard image sidecars,
-            // clipboard watcher, strip controller + feed. Feed is a
-            // read-only adapter over the same store; controller owns
-            // open/close state and orchestrates the strip + expanded
-            // panels via @Published events.
+            // History uses the same store for its feed and clipboard image sidecars.
                 let assets = try HistoryStoreLocation.prepareAssetsDirectory()
                 self.assetsDirectory = assets
             // Clipboard history belongs to the local workspace and survives
@@ -480,16 +470,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
-                let controller = HistoryStripController()
-                self.historyStripController = controller
+                self.historyInteraction = HistoryInteractionState()
                 let feed = HistoryStripFeed(store: store)
                 self.historyStripFeed = feed
 
-            // Round 2 UX 5: "Copied" toast — centered pill that flashes
-            // when the user clicks a strip card's body. Tied to a
-            // singleton controller so any code path that copies via
-            // the strip can opt-in via `controller.show()` without
-            // owning its own NSPanel.
+            // Shared "Copied" toast for History rows in the island and Toolbox.
                 let toast = CopiedToastController()
                 self.copiedToastController = toast
         } catch {
@@ -722,7 +707,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startReady() {
         didCompleteReadyStartup = true
         runtimeAccessibilityGranted = PermissionsHelper.accessibilityGranted(prompt: false)
-        showFloatingPanelIfNeeded()
+        prepareCopiedToastIfNeeded()
         // The island and Settings are available immediately. Permissions and
         // provider configuration gate the corresponding action, never launch.
         IslandPanel.shared.actions = makeIslandActions()
@@ -782,7 +767,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ensureSettingsWindowController().configure(toolboxDeps: ToolboxDeps(
             toggleDropMode: actions.toggleDropMode,
             currentDropMode: actions.currentDropMode,
-            openClipboard: actions.openClipboard,
             historyCards: actions.historyCards,
             copyHistoryCard: actions.copyHistoryCard,
             deleteHistoryCard: actions.deleteHistoryCard,
@@ -931,7 +915,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Full-wake path reboots via `startReady() → registerHotkey()`, whose
         // registrars early-return on a live ref. Clear the WHOLE monitor set
         // (incl. ⌥M / ⌥1..⌥5) here so they actually rebuild on wake, not just
-        // Drop / Help / History.
+        // Drop / Help.
         teardownHotkeyMonitorsForRebuild()
 
         agentController?.stop()
@@ -942,8 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Order the orb panel OUT so its SwiftUI TimelineView stops
         // ticking before the system suspends the process. On wake,
         // `rearmRuntimeAfterWake(reason: .full)` calls `startReady()`
-        // which re-runs `showFloatingPanelIfNeeded` → `panel?.showOnTop()`
-        // to put it back. The panel instance is retained (orderOut does
+        // to show the island again. The panel instance is retained (orderOut does
         // not destroy it) so the panel-level subscriptions and
         // luminance window-ID bookkeeping survive the sleep.
         panel?.orderOut(nil)
@@ -999,7 +982,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Tears down and re-registers all event monitors that the kernel
     /// power-management layer can silently invalidate during sleep:
-    /// Carbon `RegisterEventHotKey` (drop / help / history hotkeys) and
+    /// Carbon `RegisterEventHotKey` (drop / help hotkeys) and
     /// the Right-Cmd `NSEvent.addGlobalMonitorForEvents` inside
     /// `AgentController`.
     ///
@@ -1053,84 +1036,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showFloatingPanelIfNeeded() {
-        // Bottom-right orb panels (FloatingDotPanel, KeybindingsHintPanel,
-        // OrbActionsOverlayPanel) moved to IslandPanel (PoC). Classes kept
-        // for easy revert. The history strip still anchors to the orb's
-        // frame; with the orb absent it falls back to `.zero` and the
-        // strip uses the full visible width.
-        showHistoryStripPanelsIfNeeded()
-    }
-
-    private func showActionsOverlayPanelIfNeeded() {
-        if actionsOverlayPanel == nil {
-            let overlay = OrbActionsOverlayPanel(
-                orbFrame: { [weak self] in self?.panel?.frame ?? .zero },
-                hintFrame: { [weak self] in self?.keybindingsHintPanel?.frame },
-                onAction: { [weak self] id in
-                    self?.handleOrbAction(id)
-                }
-            )
-            // Start ordered out — the orderFront happens on the first
-            // `orbHovered = true` tick from the SwiftUI subscription
-            // inside the overlay itself.
-            self.actionsOverlayPanel = overlay
-        }
-        // Tell the orb panel where the overlay sits so its hover
-        // controller can include the overlay's frame in the hover
-        // region (the overlay extends past orb+hint, so the cursor
-        // must stay latched while it travels over the cluster).
-        panel?.overlayFrameProvider = { [weak self] in
-            guard let overlay = self?.actionsOverlayPanel, overlay.isVisible else {
-                return nil
-            }
-            return overlay.frame
-        }
-
-        showHistoryStripPanelsIfNeeded()
-    }
-
-    /// Lazy-creates the bottom strip + centered expanded panel. Both
-    /// panels stay alive across mode switches; they order themselves
-    /// in / out based on `HistoryStripController` published events.
-    private func showHistoryStripPanelsIfNeeded() {
-        guard let controller = historyStripController,
-              let feed = historyStripFeed,
-              let assets = assetsDirectory
-        else {
-            return
-        }
-
-        if historyStripPanel == nil {
-            // ROO-208 iter 4: the strip spans the full screen width
-            // (`visible.minX + sideMargin` … `visible.maxX - sideMargin`),
-            // so no orb-hover-frame closure is needed here. The orb +
-            // strip no longer share a horizontal band visually — the
-            // 5-up rubbery cards row needs the full width to fan out.
-            let strip = HistoryStripPanel(
-                controller: controller,
-                feed: feed,
-                assetsDirectory: assets,
-                toast: copiedToastController,
-                autoPasteEngine: autoPasteEngine,
-                deleteCard: { [weak self] card in
-                    await self?.deleteHistoryCard(card) ?? false
-                }
-            )
-            self.historyStripPanel = strip
-        }
-
-        if historyExpandedPanel == nil {
-            let expanded = HistoryExpandedPanel(
-                controller: controller,
-                assetsDirectory: assets
-            )
-            self.historyExpandedPanel = expanded
-        }
-
-        if copiedToastPanel == nil, let toast = copiedToastController {
-            self.copiedToastPanel = CopiedToastPanel(controller: toast)
-        }
+    private func prepareCopiedToastIfNeeded() {
+        guard copiedToastPanel == nil, let copiedToastController else { return }
+        copiedToastPanel = CopiedToastPanel(controller: copiedToastController)
     }
 
     /// Builds the `IslandActions` struct fed into `IslandPanel.shared`
@@ -1157,9 +1065,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openTextAgent: { [weak self] in
                 self?.agentController?.triggerTextAgent()
             },
-            openClipboard: { [weak self] in
-                self?.toggleHistoryStrip(.clipboard)
-            },
             openHistory: { [weak self] in
                 self?.openHistoryFromIsland() ?? .clipboard
             },
@@ -1172,7 +1077,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await IslandHistoryCards.load(mode: mode) { feed.cards(for: $0) }
             },
             selectHistoryMode: { [weak self] mode in
-                self?.historyStripController?.rememberFilter(mode)
+                self?.historyInteraction?.rememberFilter(mode)
             },
             copyHistoryCard: { [weak self] card in
                 self?.copyHistoryCardFromIsland(card)
@@ -1187,7 +1092,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self?.deleteHistoryCard(card) ?? false
             },
             historyPasteTargetName: { [weak self] in
-                self?.historyStripController?.targetAppName
+                self?.historyInteraction?.targetAppName
             },
             openUsefulLinks: {
                 // No global Useful Links entry point — the hotkey only
@@ -1368,17 +1273,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         return settingsWindowController!
-    }
-
-    /// Orb-action click handler. Mode-icon clicks toggle / switch /
-    /// close the strip via `HistoryStripController`.
-    private func handleOrbAction(_ id: OrbActionsView.IconID) {
-        guard historyStripController != nil else { return }
-        switch id {
-        case .agent: toggleHistoryStrip(.agent)
-        case .drop: toggleHistoryStrip(.drop)
-        case .clipboard: toggleHistoryStrip(.clipboard)
-        }
     }
 
     private func showKeybindingsHintIfNeeded() {
@@ -1862,26 +1756,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         helpWindowController?.show()
     }
 
-    /// ROO-208 iter 22: Dynamic Island toolbar (clipboard icon) and
-    /// orb-action mode switches enter the strip through this single
-    /// `toggle(_:)` path. Without `captureAndValidatePasteTargetIfOpening()`
-    /// here, the strip would open without ever asking `AutoPasteEngine`
-    /// what the frontmost app was — so the bottom hint bar would render
-    /// only "Click to copy" with no right-hand "Paste to <App> ↵"
-    /// affordance, and the local Enter handler would silently no-op
-    /// (because `controller.targetAppName` stays `nil`).
-    private func toggleHistoryStrip(_ mode: HistoryStripMode) {
-        captureAndValidatePasteTargetIfOpening()
-        historyStripController?.toggle(mode)
-    }
-
     private func openHistoryFromIsland() -> HistoryStripMode {
         captureAndValidatePasteTargetForHistory()
-        return historyStripController?.rememberedFilter() ?? .clipboard
+        return historyInteraction?.rememberedFilter() ?? .clipboard
     }
 
     private func copyHistoryCardFromIsland(_ card: HistoryStripCard) {
-        guard let controller = historyStripController,
+        guard let historyInteraction,
               let assets = assetsDirectory
         else {
             return
@@ -1893,59 +1774,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipboardSuppression.shared.setSuppressed(false)
         }
 
-        controller.writeCardToPasteboard(card, assetsDirectory: assets)
+        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         copiedToastController?.show()
     }
 
-    /// Delete… on a clipboard row in any History surface. The floating strip
-    /// reads the feed on every render, so a revision bump refreshes it even
-    /// when the request came from the island or Toolbox.
+    /// Delete a clipboard row so the requesting History view can reload its feed.
     /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
     private func deleteHistoryCard(_ card: HistoryStripCard) async -> Bool {
         guard let store = historyStore, let assets = assetsDirectory else { return false }
         let outcome = await ClipboardEntryDeletion(store: store, assetsDirectory: assets).delete(card)
-        guard outcome.removesEntry else { return false }
-        historyStripController?.clipboardEntryRemoved(card)
-        return true
+        return outcome.removesEntry
     }
 
     private func pasteHistoryCardFromIsland(_ card: HistoryStripCard) {
-        guard let controller = historyStripController,
-              controller.targetAppName != nil,
+        guard let historyInteraction,
+              historyInteraction.targetAppName != nil,
               let assets = assetsDirectory
         else {
             return
         }
 
-        controller.writeCardToPasteboard(card, assetsDirectory: assets)
+        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         Task { @MainActor in
             _ = await autoPasteEngine.pasteAlreadyOnPasteboard()
         }
     }
 
-    /// Captures the user's last-focused app via `AutoPasteEngine` and
-    /// runs `PasteTargetValidator.appHasFocusedTextInput` on it. Pushes
-    /// the result (or `nil` when the target failed AX validation /
-    /// is in the blacklist) into `historyStripController.setTargetAppName`.
-    ///
-    /// Called BEFORE the strip's toggle so the capture happens while
-    /// the user's real app is still frontmost — once
-    /// `HistoryStripPanel.applyVisibility` calls `makeKey()`, AppKit
-    /// briefly hands key status to the panel and `frontmostApplication`
-    /// would return Sidekey itself. The strip clears its target on close.
-    private func captureAndValidatePasteTargetIfOpening() {
-        autoPasteEngine.rememberTargetBeforeRecording()
-        // Only validate when we're OPENING the strip — the close path
-        // doesn't need a target. `openMode == nil` here means the
-        // upcoming `toggle*()` call will transition to open.
-        let willOpen = historyStripController?.openMode == nil
-        guard willOpen else { return }
-        historyStripController?.setTargetAppName(validatedPasteTargetName())
-    }
-
+    /// Capture the focused app before opening the island's History.
     private func captureAndValidatePasteTargetForHistory() {
         autoPasteEngine.rememberTargetBeforeRecording()
-        historyStripController?.setTargetAppName(validatedPasteTargetName())
+        historyInteraction?.setTargetAppName(validatedPasteTargetName())
     }
 
     private func validatedPasteTargetName() -> String? {
@@ -4001,10 +3859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `UsefulLinksBlockView`'s rolling chip) observe the preference
     /// directly through `@ObservedObject` and don't need a sink here.
     ///
-    /// `dropFirst()` skips the initial value emission so toggling the
-    /// menu item is the only event that flows through this sink — the
-    /// startup state is already handled by `showFloatingPanelIfNeeded`
-    /// reading `DisplayPreferences.shared.hideHelpers` synchronously.
+    /// `dropFirst()` limits this sink to changes after startup.
     private func installDisplayPreferenceObserver() {
         DisplayPreferences.shared.$hideHelpers
             .dropFirst()

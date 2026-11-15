@@ -2,16 +2,11 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Tiny centered NSPanel that pops up when the user clicks a strip
-/// card's body. Hosts a SwiftUI `DarkGlassCard` pill that says
-/// "Copied" + a checkmark, fades in / holds / fades out.
+/// The centered "Copied" toast that appears after copying a History row.
 @MainActor
 final class CopiedToastPanel: NSPanel {
     static let panelSize = NSSize(width: 130, height: 44)
-    /// NSWindow level for the "Copied" toast. Sits at the same tier as
-    /// `HistoryStripPanel.windowLevel` / `HistoryExpandedPanel.windowLevel`
-    /// (above the Dock). Because the toast is ordered front each time
-    /// it's shown, it wins the tie and overlays the other two panels.
+    /// Keep the toast above the Dock.
     static let windowLevel: NSWindow.Level = .statusBar
 
     private let controller: CopiedToastController

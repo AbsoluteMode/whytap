@@ -1,9 +1,23 @@
+import AppKit
 import Combine
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
 @MainActor
 final class CopiedToastControllerTests: XCTestCase {
+    func testToastOrdersAboveTheDock() {
+        XCTAssertGreaterThan(CopiedToastPanel.windowLevel.rawValue, Int(CGWindowLevelForKey(.dockWindow)))
+    }
+
+    func testToastViewCanRenderHiddenAndVisibleStates() {
+        let controller = CopiedToastController(schedule: { _, _ in })
+        XCTAssertNotNil(NSHostingController(rootView: CopiedToastView(controller: controller)).view)
+
+        controller.show()
+        XCTAssertNotNil(NSHostingController(rootView: CopiedToastView(controller: controller)).view)
+    }
+
     func testInitiallyHidden() {
         let controller = CopiedToastController()
         XCTAssertFalse(controller.isVisible)

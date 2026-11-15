@@ -311,36 +311,6 @@ final class ClipboardEntryDeletionFlowTests: XCTestCase {
         XCTAssertTrue(alert.informativeText.contains("The files themselves are not touched."))
     }
 
-    // MARK: - Strip refresh
-
-    /// Break caught: after a delete the ⌥V strip keeps the stale card, keeps
-    /// it hovered for Enter, or keeps its expanded view open.
-    func testStripControllerDropsHoverAndExpandedViewOfTheRemovedCopy() {
-        let suite = "clipboard-delete-strip-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let controller = HistoryStripController(userDefaults: defaults)
-        let removed = HistoryStripCard.clipboard(.init(id: 7, createdAt: Date(), payload: .text("secret")))
-        let other = HistoryStripCard.clipboard(.init(id: 8, createdAt: Date(), payload: .text("other")))
-        controller.toggle(.clipboard)
-        controller.setHoveredCard(removed)
-        controller.expand(.clipboard(.text("secret")))
-        let revision = controller.contentRevision
-
-        controller.clipboardEntryRemoved(removed)
-
-        XCTAssertNil(controller.hoveredCard)
-        XCTAssertNil(controller.expandedEntry)
-        XCTAssertEqual(controller.contentRevision, revision + 1)
-
-        controller.setHoveredCard(other)
-        controller.expand(.clipboard(.text("other")))
-        controller.clipboardEntryRemoved(removed)
-
-        XCTAssertEqual(controller.hoveredCard, other)
-        XCTAssertEqual(controller.expandedEntry, .clipboard(.text("other")))
-    }
-
     // MARK: - Helpers
 
     private func deletion(

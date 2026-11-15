@@ -111,11 +111,9 @@ enum HelpWindowContent {
                 prefix: nil,
                 contents: [.text(CaseApprovalKey.timed.keycap)]
             ),
-            // ROO-208 iter 15: Raycast-style hover+Enter paste from the
-            // bottom strip into the previously focused app.
             HelpHotkeyRowSpec(
                 title: "History — paste",
-                detail: "Hover a card in the bottom strip and press Return to paste it into the previously focused app.",
+                detail: "Hover a card in the island’s History and press Return to paste it into the previously focused app.",
                 iconName: "return",
                 prefix: nil,
                 contents: [.text("\u{21A9}")]

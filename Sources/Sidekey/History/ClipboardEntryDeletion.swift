@@ -18,8 +18,7 @@ struct ClipboardEntryDeletionPrompts {
 }
 
 /// Deletes one clipboard history entry after the user confirms. Shared by
-/// every surface that lists clipboard rows (hover History, Toolbox History,
-/// the floating strip); each one reloads its feed when `removesEntry` is true.
+/// island History and Toolbox History, which reload when `removesEntry` is true.
 /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
 @MainActor
 struct ClipboardEntryDeletion {

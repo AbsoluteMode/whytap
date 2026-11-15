@@ -217,7 +217,10 @@ final class ScreenshotCanvas: NSView, NSTextViewDelegate {
         let point = bounded(convert(event.locationInWindow, from: nil), to: bounds)
         if var annotation = drawing {
             let inside = bounded(point, to: selection)
-            if annotation.tool == .pen { annotation.points.append(inside) }
+            if annotation.tool == .pen, event.modifierFlags.contains(.shift) {
+                // Shift: one straight stroke from the press, snapped to 45°.
+                annotation.points = [start, ScreenshotGeometry.straightLineEnd(from: start, toward: point, within: selection)]
+            } else if annotation.tool == .pen { annotation.points.append(inside) }
             else { annotation.points = [start, inside] }
             drawing = annotation
         } else if let id = movingAnnotation, let original = beforeDrag?.annotations.first(where: { $0.id == id }),

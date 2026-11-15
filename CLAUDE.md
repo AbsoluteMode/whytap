@@ -1281,7 +1281,8 @@ and the passive instruction strip is removed. Return copies the selected area
 and closes, waiting for pending Blur. Download writes collision-safe timestamped
 PNG files into Downloads and shows the actual filename without closing. Arrow,
 Shape, Pen, Text, Blur, Numbered steps, Copy text and system sharing remain on the main
-toolbar. There is no Select/crop button or V shortcut; initial area selection
+toolbar. Pen with Shift held draws one straight line from the press, snapped to
+45 degrees and shortened (never bent) at the crop edge. There is no Select/crop button or V shortcut; initial area selection
 remains a drag. Clicking the active tool again stops drawing and permits
 selection/annotation adjustment without an extra selector. Highlighter,
 Spotlight, Pin above windows and

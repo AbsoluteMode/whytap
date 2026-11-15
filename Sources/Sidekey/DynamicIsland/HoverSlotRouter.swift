@@ -73,6 +73,16 @@ enum HoverSlotEffect: Equatable {
         }
     }
 
+    /// The translation window a tool hotkey toggles. Tile clicks, tool search
+    /// and `whytap://` links keep the open-only `invoke` path.
+    var hotkeyTranslationToggle: TranslationWindowController.Mode? {
+        switch self {
+        case .openTranslate: return .text
+        case .openSubtitles: return .subtitles
+        default: return nil
+        }
+    }
+
     /// Fire the matching `IslandActions` closure for an action/navigate effect.
     /// `.openPanel` effects are handled by the view (panel-mode state) and
     /// `.toggleDropMode` by `AppDelegate.onToolHotkeyActivated`, so both are

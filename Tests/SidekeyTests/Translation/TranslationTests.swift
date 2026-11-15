@@ -531,6 +531,81 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(text, 1); XCTAssertEqual(audio, 1)
     }
 
+    func testOnlyTranslationToolHotkeysToggleTheWindow() {
+        XCTAssertEqual(HoverSlotRouter.effect(for: .translate).hotkeyTranslationToggle, .text)
+        XCTAssertEqual(HoverSlotRouter.effect(for: .subtitles).hotkeyTranslationToggle, .subtitles)
+        for tool in HoverTool.allCases where tool != .translate && tool != .subtitles {
+            XCTAssertNil(HoverSlotRouter.effect(for: tool).hotkeyTranslationToggle, "\(tool)")
+        }
+        // Tile clicks and tool search keep the open-only path: two activations open twice.
+        var opened = 0
+        var actions = IslandActions.noOp
+        actions.openTranslate = { opened += 1 }
+        HoverSlotRouter.effect(for: .translate).invoke(on: actions)
+        HoverSlotRouter.effect(for: .translate).invoke(on: actions)
+        XCTAssertEqual(opened, 2)
+    }
+
+    func testToggleClosesTheSameVisibleModeAndReleasesItsMonitors() async throws {
+        let (controller, _, activity) = try makeWindowController(service: FixtureTranslator())
+        defer { controller.window.close() }
+        controller.toggle(.text)
+        XCTAssertTrue(controller.window.isVisible)
+        XCTAssertEqual(controller.mode, .text)
+        XCTAssertEqual(activity.last, true)
+        XCTAssertTrue(controller.hasOutsideClickMonitors)
+        controller.toggle(.text)
+        XCTAssertFalse(controller.window.isVisible)
+        XCTAssertFalse(controller.hasOutsideClickMonitors)
+        // Activity clears once the shared capture cleanup finishes.
+        await waitUntil { activity.last == false }
+        controller.toggle(.text)
+        XCTAssertTrue(controller.window.isVisible, "A third press opens it again")
+    }
+
+    func testToggleSwitchesAnotherVisibleModeInsteadOfClosing() throws {
+        let (controller, _, _) = try makeWindowController(service: FixtureTranslator())
+        defer { controller.window.close() }
+        controller.show(.subtitles)
+        XCTAssertTrue(controller.window.isVisible)
+        controller.toggle(.text)
+        XCTAssertTrue(controller.window.isVisible)
+        XCTAssertEqual(controller.mode, .text)
+    }
+
+    func testToggleClosingCancelsAnInFlightTranslation() async throws {
+        let gate = TranslationGate()
+        let (controller, text, activity) = try makeWindowController(service: gate)
+        defer { controller.window.close() }
+        controller.toggle(.text)
+        text.input = "unsent fixture"
+        let task = try XCTUnwrap(text.translate())
+        await waitUntil { await gate.inputs.count == 1 }
+        controller.toggle(.text)
+        XCTAssertFalse(controller.window.isVisible)
+        XCTAssertFalse(text.isTranslating)
+        await waitUntil { activity.last == false }
+        await gate.answer("late result")
+        await task.value
+        XCTAssertEqual(text.result, "")
+    }
+
+    private final class ActivityLog { var values: [Bool] = []; var last: Bool? { values.last } }
+
+    private func makeWindowController(service: TextTranslating) throws
+        -> (TranslationWindowController, TextTranslationModel, ActivityLog) {
+        let suite = "translation-toggle-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let text = TextTranslationModel(makeService: { service })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                          makeService: { FixtureTranslator() })
+        let activity = ActivityLog()
+        let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
+                                                      openSettings: { _ in }, activityChanged: { activity.values.append($0) })
+        return (controller, text, activity)
+    }
+
     private func waitUntil(_ condition: () async -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<200 {
             if await condition() { return }

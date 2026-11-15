@@ -317,6 +317,8 @@ Translation tools:
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
+  A tool hotkey toggles (TranslationWindowController.toggle): pressing it again
+  while its mode is visible closes and cancels; clicks, search and links only open.
   Saved targets and secondary actions stay in the
   context menu; long output scrolls. TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction

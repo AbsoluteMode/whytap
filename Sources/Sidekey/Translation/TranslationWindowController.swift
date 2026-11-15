@@ -101,6 +101,15 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         text.onActivityChange?()
     }
 
+    var mode: Mode { presentation.mode }
+    var hasOutsideClickMonitors: Bool { localMouseMonitor != nil || globalMouseMonitor != nil }
+
+    /// A tool hotkey's second press closes the same visible mode; the other
+    /// mode switches the open window instead of closing it.
+    func toggle(_ mode: Mode) {
+        if panel.isVisible && presentation.mode == mode { dismiss() } else { show(mode) }
+    }
+
     private func resize(for mode: Mode) {
         let isText = mode == .text
         configureChrome(for: mode)

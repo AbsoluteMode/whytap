@@ -6,7 +6,7 @@ summary: On build 1622 an auto-stop take was still cut at about 36 s of continuo
 status: confirmed
 tags: [drop, dictation, auto-stop, elevenlabs, microphone-level]
 canonical_for: [drop-auto-stop-voice-guard]
-verified_at: 2026-11-13
+verified_at: 2026-11-15
 sources:
   - type: user-confirmed
     reference: On 2026-11-13 the user reported that Whytap again stopped by itself after about 36 seconds.
@@ -14,6 +14,15 @@ sources:
   - type: trace
     reference: Build 1622 unified log, 2026-11-13. An auto-stop take started 17:18:43.455, an ordinary finish was requested 17:19:19.019 (35.6 s), the finish gate fired with reason=maxTail (no silence in the tail) and 402 characters were delivered. No degrade or transport event. Quiet period 1.5 s.
     confirmed_at: 2026-11-13
+  - type: user-confirmed
+    reference: On 2026-11-15 the user reported the same cut again on build 1625, which does not include this change.
+    confirmed_at: 2026-11-15
+  - type: trace
+    reference: Build 1625 unified log, 2026-11-15. Auto-stop take (Toggle, quiet period 1.5 s, ElevenLabs) started 21:23:59.149; an ordinary finish was requested 21:24:36.607 (37.5 s) without a key press; finish gate reason=maxTail.
+    confirmed_at: 2026-11-15
+  - type: trace
+    reference: Live provider probe 2026-11-15, scribe_v2_realtime with commit_strategy=manual, 72 s of continuous synthesized Russian speech streamed in real time. The segment cap commit arrived at 35.80 s and the next partial at 38.57 s, 2.77 s without new text while audio kept arriving.
+    confirmed_at: 2026-11-15
   - type: repository
     reference: Sources/Sidekey/DropAutoStop.swift
     confirmed_at: 2026-11-13
@@ -39,8 +48,11 @@ It does. On build 1622, with a quiet period of 1.5 s, a take was stopped by the
 rule 35.6 s after it started, while the user was speaking: the finish gate
 found no silence in the tail (`maxTail`). The stop was the ordinary one, so the
 text up to that point was pasted. The time matches Scribe's segment cap of
-about 36 s; the trace does not show the provider's events, so "Scribe holds
-its live text back before the cap" is an inference from the timing.
+about 36 s. A live probe on 2026-11-15 confirmed the provider's side:
+with `scribe_v2_realtime` and a manual commit, the segment cap commit came at
+35.8 s of continuous speech and the next words only 2.8 s later. Build 1625
+(without this change) cut a take at 37.5 s, the cap plus the 1.5 s quiet
+period.
 
 ## Decision
 
@@ -77,11 +89,11 @@ its live text back before the cap" is an inference from the timing.
 
 ## Not verified
 
-- A live auto-stop dictation longer than 36 s on the installed app.
+- A live auto-stop dictation longer than 36 s on the installed app. The
+  provider gap it must cover (2.8 s) is measured and inside the 6 s limit.
 - The 9 dB margin on real rooms and microphones: it is not calibrated. Too low
   delays stops by up to 6 s in a noisy room; too high cuts quiet speech during
   a provider pause.
-- What the provider sends around its segment cap.
 
 ## Rejected
 

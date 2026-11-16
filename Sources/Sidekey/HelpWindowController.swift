@@ -170,7 +170,7 @@ enum HelpWindowContent {
     private static func screenshotEditorRows(for configuration: HotkeyConfiguration) -> [HelpHotkeyRowSpec] {
         ScreenshotArrow.allCases.map { arrow in
             let action = configuration.screenshotArrowBindings[arrow]
-            return HelpHotkeyRowSpec(title: "Screenshot — \(arrow.glyph)", detail: "\(action.title). Screenshot takes priority over Agent; text fields keep cursor navigation.",
+            return HelpHotkeyRowSpec(title: "Screenshot — \(arrow.glyph)", detail: "\(action.title). Screenshot takes priority over Agent. Arrows can switch tools from a new empty label.",
                                      iconName: action.symbol, prefix: nil, contents: [.text(arrow.glyph)])
         } + ScreenshotEditorKeys.tools.map { entry in
             HelpHotkeyRowSpec(title: "Screenshot — \(entry.title)", detail: entry.tool == .text ? "Click inside the selection to type. Click a label to edit; drag its hover handle to move." : "While the screenshot editor is open.",

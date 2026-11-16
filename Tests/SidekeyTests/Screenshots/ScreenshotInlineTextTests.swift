@@ -4,12 +4,14 @@ import XCTest
 
 @MainActor
 final class ScreenshotInlineTextTests: XCTestCase {
-    private func withCanvas(size: CGSize = CGSize(width: 800, height: 400), _ body: (ScreenshotCanvas, ScreenshotCapturePanel) throws -> Void) throws {
+    private func withCanvas(size: CGSize = CGSize(width: 800, height: 400),
+                            arrowBindings: @escaping () -> ScreenshotArrowBindings = { .defaults },
+                            _ body: (ScreenshotCanvas, ScreenshotCapturePanel) throws -> Void) throws {
         _ = NSApplication.shared
         let context = try XCTUnwrap(CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
             bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.setFillColor(NSColor.white.cgColor); context.fill(CGRect(origin: .zero, size: size))
-        let canvas = ScreenshotCanvas(image: try XCTUnwrap(context.makeImage()), size: size)
+        let canvas = ScreenshotCanvas(image: try XCTUnwrap(context.makeImage()), size: size, arrowBindings: arrowBindings)
         canvas.selection = CGRect(origin: .zero, size: size).insetBy(dx: 10, dy: 10)
         let panel = ScreenshotCapturePanel(contentRect: CGRect(origin: CGPoint(x: -20_000, y: -20_000), size: size),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -56,6 +58,35 @@ final class ScreenshotInlineTextTests: XCTestCase {
             XCTAssertNil(canvas.textEditor)
             canvas.undo(); XCTAssertEqual(canvas.annotations.map(\.text), ["К архивации"])
             canvas.redo(); XCTAssertEqual(canvas.annotations.map(\.text), ["К архивации", "Second label"])
+        }
+    }
+
+    func testArrowSwitchesToolFromNewEmptyLabelWithoutCreatingAnAnnotation() throws {
+        var bindings = ScreenshotArrowBindings.defaults
+        bindings[.down] = .copy
+        try withCanvas(arrowBindings: { bindings }) { canvas, panel in
+            let crop = canvas.selection
+            canvas.selectTool(.text)
+            try click(canvas, at: CGPoint(x: 130, y: 280), panel: panel)
+            let editor = try XCTUnwrap(canvas.textEditor)
+            XCTAssertTrue(panel.firstResponder === editor)
+            XCTAssertTrue(editor.string.isEmpty)
+
+            var commands: [ScreenshotCommand] = []
+            canvas.onCommand = { commands.append($0) }
+            panel.sendEvent(try key(ScreenshotArrow.down.keyCode, panel: panel))
+            panel.sendEvent(try key(ScreenshotArrow.right.keyCode, panel: panel, modifiers: .shift))
+            XCTAssertTrue(commands.isEmpty, "An empty text field only yields to tool switches")
+            XCTAssertTrue(panel.firstResponder === editor)
+            XCTAssertEqual(canvas.tool, .text)
+
+            panel.sendEvent(try key(ScreenshotArrow.right.keyCode, panel: panel))
+            XCTAssertEqual(canvas.tool, .pen)
+            XCTAssertNil(canvas.textEditor)
+            XCTAssertTrue(panel.firstResponder === canvas)
+            XCTAssertTrue(canvas.annotations.isEmpty)
+            XCTAssertFalse(canvas.canUndo)
+            XCTAssertEqual(canvas.selection, crop)
         }
     }
 

@@ -321,6 +321,15 @@ final class ScreenshotCanvas: NSView, NSTextViewDelegate {
             self?.finishTextEditing()
             (self?.window as? ScreenshotCapturePanel)?.onAdvanceFocus?(backwards)
         }
+        if isNew {
+            editor.onEmptyLabelToolShortcut = { [weak self] event in
+                guard let self, let arrow = ScreenshotArrow(keyCode: event.keyCode),
+                      event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+                      let nextTool = self.arrowBindings()[arrow].tool, nextTool != .text else { return false }
+                if !event.isARepeat { self.selectTool(nextTool) }
+                return true
+            }
+        }
         textEditor = editor; addSubview(editor)
         editor.delegate = self
         updateTextEditorStyle()

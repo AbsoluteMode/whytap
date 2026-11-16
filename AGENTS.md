@@ -1306,7 +1306,9 @@ only that destination, or click anywhere in the pair for a native assignment men
 reset. Changes save immediately through HotkeyPreferences.screenshotArrowBindings;
 Help and settings backups share it. Custom mappings survive this placement change; the previous unmodified stock map
 migrates once to the new four drawing defaults.
-The earlier Settings-only assignment surface is removed. Bare arrows use those actions,
+The earlier Settings-only assignment surface is removed. Bare arrows use those actions.
+An arrow assigned to another tool also switches from a new empty label.
+Entered text and marked input keep native cursor navigation.
 Shift-arrows move the crop and Option-arrows resize it. Agent Useful Links
 releases its Carbon registrations while Screenshot is active, restores the
 latest visible actions afterwards, and invalidates stale callbacks. Blur defaults to Text and numbers, including

@@ -260,14 +260,35 @@ final class TodoHoverPreviewTests: XCTestCase {
     }
 
     func testOffscreenPreviewBubble() async throws {
-        guard let output = ProcessInfo.processInfo.environment["WHYTap_TODO_RENDER_DIR"] else {
-            throw XCTSkip("Set WHYTap_TODO_RENDER_DIR for the synthetic preview render")
-        }
+        let output = ProcessInfo.processInfo.environment["WHYTap_TODO_RENDER_DIR"]
         _ = NSApplication.shared
         let task = PlannerTask(title: "ВкусВилл: схема персонализации ленты под 5 отделов (тег отдела на карточке, своя лента в аккаунте)",
                                status: "жду фидбека Светы по схеме, потом созвон с аналитиками в четверг")
+        let light = try await renderPreview(task, backdrop: .white, scheme: .light)
+        let dark = try await renderPreview(task, backdrop: .black, scheme: .dark)
+
+        func surfaceBrightness(_ bitmap: NSBitmapImageRep) throws -> CGFloat {
+            // Sample in the padding, away from text and the rounded border.
+            let y = 14 * bitmap.pixelsWide / 300
+            let color = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: y)?.usingColorSpace(.sRGB))
+            return max(color.redComponent, color.greenComponent, color.blueComponent)
+        }
+        let lightSurface = try surfaceBrightness(light)
+        let darkSurface = try surfaceBrightness(dark)
+        XCTAssertLessThan(lightSurface, 0.25, "The white-window backdrop must not wash out the preview")
+        XCTAssertEqual(lightSurface, darkSurface, accuracy: 0.02, "The preview surface must mask the window behind it")
+
+        if let output {
+            for (name, bitmap) in [("preview-bubble-light", light), ("preview-bubble-dark", dark)] {
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
+            }
+        }
+    }
+
+    private func renderPreview(_ task: PlannerTask, backdrop: Color, scheme: ColorScheme) async throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: TodoHoverPreviewBubble(task: task, parentTitle: "Созвон со Светой 3 ноября", subtasks: 2)
-            .padding(10).background(Color(white: 0.3)).environment(\.colorScheme, .dark))
+            .padding(10).background(backdrop).environment(\.colorScheme, scheme))
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: host.fittingSize),
                               styleMask: .borderless, backing: .buffered, defer: true)
@@ -278,8 +299,7 @@ final class TodoHoverPreviewTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
-        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-            .write(to: URL(fileURLWithPath: output).appendingPathComponent("preview-bubble.png"))
         XCTAssertFalse(window.isVisible || window.isKeyWindow)
+        return bitmap
     }
 }

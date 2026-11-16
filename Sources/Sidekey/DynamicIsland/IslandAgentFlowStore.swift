@@ -75,7 +75,10 @@ final class IslandAgentFlowStore: ObservableObject {
     var wingFaceWidth: CGFloat {
         switch wing {
         case .hidden: return 0
-        case .recording: return IslandFrameLayout.agentWingRecordingWidth
+        case .recording(let transcript):
+            return transcript.isEmpty
+                ? IslandAgentWingView.listeningFaceWidth(providerMarkVisible: recordingProviderBrand != nil)
+                : IslandFrameLayout.agentWingRecordingWidth
         case .composing: return IslandAgentWingView.composingFaceWidth(text: composingText)
         case .acting:
             return IslandAgentWingView.actingFaceWidth(
@@ -211,11 +214,11 @@ final class IslandAgentFlowStore: ObservableObject {
     }
 
     func transcriptUpdated(_ text: String) {
-        // Same transient-empty latch as the drop wing (display-only — the agent
+        // Same transient-blank latch as the drop wing (display-only — the agent
         // query uses the session's resolved result). Non-empty always shown so
         // the ticker stays LIVE; do NOT length-gate (it froze the drop wing on
         // long dictations). `transcript` resets to "" at turn start/idle.
-        guard !text.isEmpty else { return }
+        guard text.contains(where: { !$0.isWhitespace }) else { return }
         transcript = text
         recompute()
     }
@@ -240,7 +243,7 @@ final class IslandAgentFlowStore: ObservableObject {
     /// streaming session's `onTranscriptUpdate` (the same sink the agent voice
     /// flow uses, inherited via `StreamingSessionRunning`).
     func dropTranscriptUpdated(_ text: String) {
-        // Latch through a transient EMPTY partial only. ElevenLabs commits a
+        // Latch through a transient blank partial. ElevenLabs commits a
         // segment on a speech pause and briefly emits "" before the next
         // utterance; without this the wing collapses to "listening…" mid-turn.
         // Everything non-empty is shown so the ticker stays LIVE.
@@ -249,9 +252,9 @@ final class IslandAgentFlowStore: ObservableObject {
         // On a long dictation (~20-30s) the provider re-segments and revises
         // the tail, so the snapshot stops strictly growing — a length gate then
         // FREEZES the wing on the peak line while the user keeps talking. The
-        // recording face has a fixed width. Paste uses the resolved result.
+        // recording face grows once on the first visible text. Paste uses the resolved result.
         // `.idle` clears the displayed text for the next turn.
-        guard !text.isEmpty else { return }
+        guard text.contains(where: { !$0.isWhitespace }) else { return }
         dropTranscript = text
         recompute()
     }

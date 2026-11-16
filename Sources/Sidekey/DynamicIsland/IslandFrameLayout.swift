@@ -60,8 +60,8 @@ enum IslandFrameLayout {
     /// flush against the capsule, reading as the island stretching rather
     /// than a separate component.
     static let agentWingGap: CGFloat = 8
-    /// Fixed width for the whole voice recording, including the listening
-    /// placeholder. Live text moves inside the wing without resizing it.
+    /// Width after the first visible live text. Later partials scroll inside
+    /// the wing without resizing it.
     static let agentWingRecordingWidth: CGFloat = 260
     /// Wing width while composing text (R-Cmd tap input field).
     static let agentWingComposingWidth: CGFloat = 300

@@ -708,6 +708,17 @@ struct IslandView: View {
         return false
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceRecordingWidthMotion
+
+    private var wingWidthAnimation: Animation? {
+        if wingSnapsWidth { return nil }
+        if case .recording(let transcript) = agentFlow.wing {
+            if reduceRecordingWidthMotion { return nil }
+            if !transcript.isEmpty { return .easeInOut(duration: 0.28) }
+        }
+        return Self.widthGrowth
+    }
+
     var body: some View {
         // Top-trailing ZStack so the island row stays pinned to the notch
         // while the agent answer column hangs below it. When the agent flow
@@ -728,9 +739,9 @@ struct IslandView: View {
         .animation(Self.hoverMotion, value: wingFaceID)
         // Acting label and per-keystroke composer growth change width too fast
         // for a spring (it shakes / trails the typed text, leaking it past the
-        // capsule). Snap those; keep the spring for opening the recording or
-        // composing face. Partial transcripts no longer resize the recording face.
-        .animation(wingSnapsWidth ? nil : Self.widthGrowth, value: activeWingFaceWidth)
+        // capsule). Snap those. The first text eases the recording face open;
+        // subsequent transcripts keep the same width target.
+        .animation(wingWidthAnimation, value: activeWingFaceWidth)
         .animation(Self.hoverMotion, value: agentFlow.answerPanelVisible)
         // Strip slides in / out with the same reveal spring as the rest of
         // the island when a track starts / stops (height + transition).

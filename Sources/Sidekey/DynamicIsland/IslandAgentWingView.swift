@@ -82,6 +82,22 @@ struct IslandAgentWingView: View {
     /// optically aligns where the bare text used to start.
     static let recordingMarkLeadingPadding: CGFloat = 10
 
+    private static let recordingPlaceholderWidth = ceil(
+        (recordingPlaceholder as NSString).size(
+            withAttributes: [.font: NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)]
+        ).width
+    )
+
+    static func listeningFaceWidth(providerMarkVisible: Bool) -> CGFloat {
+        let leading = providerMarkVisible
+            ? recordingMarkLeadingPadding + recordingMarkSide + recordingMarkSpacing
+            : contentHorizontalPadding
+        return max(
+            IslandFrameLayout.agentWingInCapsuleWidth,
+            leading + recordingPlaceholderWidth + contentHorizontalPadding
+        )
+    }
+
     static func actingMeasuredContentWidth(
         label: String,
         providerMarkVisible: Bool
@@ -180,7 +196,10 @@ struct IslandAgentWingView: View {
                         : Self.recordingMarkLeadingPadding
                 )
                 .padding(.trailing, Self.contentHorizontalPadding)
-                .frame(width: faceWidth, height: height)
+                // The outer capsule clips this fixed viewport as it opens.
+                // Resizing the Canvas itself would move the ticker's scroll
+                // offset at the same time as the text begins to appear.
+                .frame(width: IslandFrameLayout.agentWingRecordingWidth, height: height)
                 .transition(.identity)
             case .acting:
                 HStack(spacing: recordingProviderBrand == nil ? 6 : Self.recordingMarkSpacing) {

@@ -2,11 +2,12 @@
 
 ## Recording wing width — 2026-11-16
 
-Drop and agent voice open the recording wing at its full 260 pt width.
-Keep the opening animation and scroll the live text inside that width. A
-longer partial used to retarget the width animation, even with the earlier
-guard against shrinking. The stable viewport keeps the capsule edge and
-pointer hit area in place through pauses, new batches and corrections.
+Drop and agent voice open a compact wing fitted to `listening…` and the
+provider mark. The first visible transcript expands the capsule once, with
+a 0.28 s ease in and out. Reduce Motion applies the width at once. The
+ticker renders at its final width throughout so opening the capsule does
+not shift its scroll position. Later updates and pauses keep the same
+capsule and pointer width until recording ends.
 
 ## Agent voice model mark — 2026-10-22
 

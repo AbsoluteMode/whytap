@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class IslandAgentWingViewTests: XCTestCase {
     func test_recordingTranscriptUpdateDoesNotNotifyComposingFocusChange() {
-        let model = WingHarnessModel(wing: .recording(transcript: "first words"))
+        let model = WingHarnessModel(wing: .recording(transcript: ""))
         let recorder = FocusRecorder()
         let hosting = NSHostingController(
             rootView: WingHarness(model: model, recorder: recorder)
@@ -17,9 +17,11 @@ final class IslandAgentWingViewTests: XCTestCase {
 
         XCTAssertEqual(recorder.values, [])
 
-        model.wing = .recording(transcript: "second words")
-        drainRunLoop()
-        hosting.view.layoutSubtreeIfNeeded()
+        for text in ["first words", "first words while listening", "corrected words"] {
+            model.wing = .recording(transcript: text)
+            drainRunLoop()
+            hosting.view.layoutSubtreeIfNeeded()
+        }
 
         XCTAssertEqual(
             recorder.values,
@@ -58,7 +60,9 @@ private struct WingHarness: View {
     var body: some View {
         IslandAgentWingView(
             wing: model.wing,
-            faceWidth: 260,
+            faceWidth: model.wing == .recording(transcript: "")
+                ? IslandAgentWingView.listeningFaceWidth(providerMarkVisible: false)
+                : IslandFrameLayout.agentWingRecordingWidth,
             activityLabel: "thinking...",
             height: 32,
             onComposingFocusChange: recorder.record

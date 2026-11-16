@@ -5,24 +5,6 @@ import XCTest
 
 @MainActor
 final class IslandAgentWingViewTests: XCTestCase {
-    /// The recording face is measured and rendered in `IslandAgentWingView`, so
-    /// `IslandView` and `IslandPanel` share the same width contract. When the
-    /// breathing provider mark is shown, the rendered row adds the mark + its
-    /// gap and trades the leading inset down; the measurement widens by
-    /// `recordingProviderMarkSlack`. Locking the formula (and its current
-    /// value) keeps the two from drifting — a drift reads as a clipped
-    /// transcript tail or dead trailing space in the live ticker.
-    func test_providerMarkSlackMatchesRenderedMarkLayout() {
-        XCTAssertEqual(
-            IslandAgentWingView.recordingProviderMarkSlack,
-            IslandAgentWingView.recordingMarkSide
-                + IslandAgentWingView.recordingMarkSpacing
-                + IslandAgentWingView.recordingMarkLeadingPadding
-                - IslandAgentWingView.contentHorizontalPadding
-        )
-        XCTAssertEqual(IslandAgentWingView.recordingProviderMarkSlack, 21)
-    }
-
     func test_recordingTranscriptUpdateDoesNotNotifyComposingFocusChange() {
         let model = WingHarnessModel(wing: .recording(transcript: "first words"))
         let recorder = FocusRecorder()

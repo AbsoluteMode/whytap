@@ -1,5 +1,13 @@
 # Interface decisions
 
+## Recording wing width — 2026-11-16
+
+Drop and agent voice open the recording wing at its full 260 pt width.
+Keep the opening animation and scroll the live text inside that width. A
+longer partial used to retarget the width animation, even with the earlier
+guard against shrinking. The stable viewport keeps the capsule edge and
+pointer hit area in place through pauses, new batches and corrections.
+
 ## Agent voice model mark — 2026-10-22
 
 The user speaks to the agent and wants to recognize the selected model's author.

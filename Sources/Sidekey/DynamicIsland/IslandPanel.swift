@@ -958,27 +958,7 @@ final class IslandPanel: NSPanel {
     /// (`active: false`, zero sizes) when the flow is idle, so the no-agent
     /// layout stays untouched.
     private func syncAgentSurfaces() {
-        let faceWidth: CGFloat = {
-            switch agentFlow.wing {
-            case .recording:
-                return IslandAgentWingView.recordingFaceWidth(
-                    text: agentFlow.recordingFaceWidthHint,
-                    providerMarkVisible: agentFlow.recordingProviderBrand != nil
-                )
-            case .composing:
-                return IslandAgentWingView.composingFaceWidth(text: agentFlow.composingText)
-            case .acting:
-                return IslandAgentWingView.actingFaceWidth(
-                    label: agentFlow.activityLabel,
-                    providerMarkVisible: agentFlow.recordingProviderBrand != nil
-                )
-            case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
-            case .failed: return IslandFrameLayout.agentWingFailedWidth
-            case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
-            case .hidden: return 0
-            }
-        }()
-        let wingWidth = IslandFrameLayout.agentWingExtension(faceWidth: faceWidth)
+        let wingWidth = IslandFrameLayout.agentWingExtension(faceWidth: agentFlow.wingFaceWidth)
         setAgentSurfaces(
             active: agentFlow.isActive,
             wingWidth: wingWidth,

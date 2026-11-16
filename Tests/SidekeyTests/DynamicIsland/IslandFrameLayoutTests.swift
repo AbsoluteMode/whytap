@@ -1320,10 +1320,7 @@ final class IslandFrameLayoutTests: XCTestCase {
         )
     }
 
-    func test_adaptiveWingFloor_isBelowPlaceholderNeighbourhood() {
-        // Floor must sit below the natural "listening…" placeholder width so
-        // the placeholder (not the floor) sets the compact start; the floor
-        // only catches shorter strings / a zero measurement.
+    func test_adaptiveWingFloor_keepsContentSizedFacesCompact() {
         XCTAssertGreaterThan(IslandFrameLayout.adaptiveWingFloor, 0)
         XCTAssertLessThan(IslandFrameLayout.adaptiveWingFloor, 96)
     }

@@ -1061,6 +1061,8 @@ Later query parts that start a key-name word add to a partial match; parts of th
   280pt full-text bubble left of the drawer, placed like the History preview:
   parent title, full title, full status and open subtask count. It is
   non-interactive and clears on leave, inline editing and panel changes.
+  Use an opaque charcoal surface for the bubble so its white text stays
+  legible over light and dark windows behind the island.
   User feedback 2026-11-03: hover must show the whole text, as in History.
 
 ## Compact To-do in hover — 2026-10-20

@@ -3,11 +3,11 @@
 ## Recording wing width — 2026-11-16
 
 Drop and agent voice open a compact wing fitted to `listening…` and the
-provider mark. The first visible transcript expands the capsule once, with
-a 0.28 s ease in and out. Reduce Motion applies the width at once. The
-ticker renders at its final width throughout so opening the capsule does
-not shift its scroll position. Later updates and pauses keep the same
-capsule and pointer width until recording ends.
+provider mark. The right edge follows the width of the letters as they appear
+and holds its furthest position through pauses and shorter revisions. At the
+width limit the line scrolls to keep its newest letters visible. The letters
+and their particles use the space up to the capsule edge, with a 1 pt inset.
+Reduce Motion fits each visible transcript update immediately.
 
 ## Agent voice model mark — 2026-10-22
 

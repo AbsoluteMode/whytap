@@ -61,7 +61,7 @@ private struct WingHarness: View {
         IslandAgentWingView(
             wing: model.wing,
             faceWidth: model.wing == .recording(transcript: "")
-                ? IslandAgentWingView.listeningFaceWidth(providerMarkVisible: false)
+                ? IslandAgentWingView.recordingFaceWidth(textWidth: 0, providerMarkVisible: false)
                 : IslandFrameLayout.agentWingRecordingWidth,
             activityLabel: "thinking...",
             height: 32,

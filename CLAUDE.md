@@ -211,9 +211,10 @@ Live text in the recording wing (Drop and agent voice):
   A face rebuilt mid-take shows its text at once; text revealed past its
   deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
   that join across characters (canDrawPerCharacter) keep the plain Text.
-  The recording face starts compact for listening and expands once with the
-  first visible transcript. Later updates retain the capsule and hit-zone
-  width. The ticker uses a fixed viewport during the opening animation.
+  The recording face starts compact for listening. The capsule and hit zone
+  follow the revealed glyph width frame by frame and hold their widest extent
+  through pauses and shorter revisions. The ticker scrolls within a fixed
+  viewport after reaching the cap. Glyphs and particles use a 1 pt right inset.
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 

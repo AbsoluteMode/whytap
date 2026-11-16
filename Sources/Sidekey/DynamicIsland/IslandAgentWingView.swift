@@ -43,6 +43,7 @@ struct IslandAgentWingView: View {
     var deliveryHitBridge: IslandHoverHitBridge? = nil
     var onRetryDelivery: () -> Void = {}
     var onDismissDeliveryFailure: () -> Void = {}
+    var onRecordingTextWidthChange: (CGFloat, String) -> Void = { _, _ in }
 
     /// Shown until the first non-empty live partial.
     static let recordingPlaceholder = "listening…"
@@ -82,19 +83,28 @@ struct IslandAgentWingView: View {
     /// optically aligns where the bare text used to start.
     static let recordingMarkLeadingPadding: CGFloat = 10
 
-    private static let recordingPlaceholderWidth = ceil(
-        (recordingPlaceholder as NSString).size(
-            withAttributes: [.font: NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)]
-        ).width
-    )
+    private static let recordingTrailingPadding: CGFloat = 1
+    private static let recordingFont = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
+    private static let recordingPlaceholderWidth = measuredRecordingTextWidth(recordingPlaceholder)
 
-    static func listeningFaceWidth(providerMarkVisible: Bool) -> CGFloat {
-        let leading = providerMarkVisible
+    private static func measuredRecordingTextWidth(_ text: String) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: recordingFont]).width)
+    }
+
+    private static func recordingLeadingWidth(providerMarkVisible: Bool) -> CGFloat {
+        providerMarkVisible
             ? recordingMarkLeadingPadding + recordingMarkSide + recordingMarkSpacing
             : contentHorizontalPadding
-        return max(
-            IslandFrameLayout.agentWingInCapsuleWidth,
-            leading + recordingPlaceholderWidth + contentHorizontalPadding
+    }
+
+    static func recordingFaceWidth(textWidth: CGFloat, providerMarkVisible: Bool) -> CGFloat {
+        let measured = recordingLeadingWidth(providerMarkVisible: providerMarkVisible) + max(
+            recordingPlaceholderWidth + contentHorizontalPadding,
+            textWidth + recordingTrailingPadding
+        )
+        return min(
+            IslandFrameLayout.agentWingRecordingWidth,
+            max(IslandFrameLayout.agentWingInCapsuleWidth, measured)
         )
     }
 
@@ -169,11 +179,17 @@ struct IslandAgentWingView: View {
                     ZStack(alignment: .leading) {
                         if !animated || transcript.isEmpty {
                             Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: IslandLiveTextTickerModel.fontSize, weight: .medium))
                                 .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
                                 .lineLimit(1)
                                 .truncationMode(.head)   // виден ХВОСТ транскрипта
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .onChange(of: transcript, initial: true) { _, text in
+                                    // The plain-text fallback draws the whole shaped line at once.
+                                    if !animated, !text.isEmpty {
+                                        onRecordingTextWidthChange(Self.measuredRecordingTextWidth(text), text)
+                                    }
+                                }
                         }
                         if animated {
                             // Always in the tree while recording, so the first
@@ -182,8 +198,15 @@ struct IslandAgentWingView: View {
                             // whole line shaped (Arabic, Hebrew, Indic) stays
                             // plain: drawn per character it would lose its
                             // joining and its right-to-left order.
-                            IslandLiveTextTicker(text: transcript)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            IslandLiveTextTicker(
+                                text: transcript,
+                                visibleWidth: faceWidth - Self.recordingLeadingWidth(
+                                    providerMarkVisible: recordingProviderBrand != nil
+                                ) - Self.recordingTrailingPadding
+                            ) { width in
+                                onRecordingTextWidthChange(width, transcript)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -195,10 +218,9 @@ struct IslandAgentWingView: View {
                         ? Self.contentHorizontalPadding
                         : Self.recordingMarkLeadingPadding
                 )
-                .padding(.trailing, Self.contentHorizontalPadding)
-                // The outer capsule clips this fixed viewport as it opens.
-                // Resizing the Canvas itself would move the ticker's scroll
-                // offset at the same time as the text begins to appear.
+                .padding(.trailing, Self.recordingTrailingPadding)
+                // The outer clip moves with the revealed text. The fixed
+                // viewport starts scrolling only at the maximum width.
                 .frame(width: IslandFrameLayout.agentWingRecordingWidth, height: height)
                 .transition(.identity)
             case .acting:

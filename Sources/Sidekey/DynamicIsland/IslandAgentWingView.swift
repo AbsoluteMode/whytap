@@ -13,17 +13,15 @@ import SwiftUI
 /// positioned over this slot by `IslandPanel`.
 struct IslandAgentWingView: View {
     let wing: IslandAgentFlowStore.Wing
-    /// Width the active face is laid out at. Owned by `IslandView`
-    /// (`activeWingFaceWidth`) so the rendered face, the black capsule's
-    /// rightward stretch, and the face offset all key off one value.
+    /// Width the active face is laid out at. The flow store supplies the
+    /// same value to this face, the capsule, and AppKit's hit zones.
     let faceWidth: CGFloat
     let activityLabel: String
     var recordingProviderBrand: TranscriptionProviderBrand? = nil
     let height: CGFloat
     let onComposingFocusChange: (Bool) -> Void
 
-    /// Horizontal padding inside recording/composing faces. Shared so
-    /// `IslandView`'s width measurement adds the exact same inset it renders.
+    /// Horizontal padding inside recording/composing faces.
     static let contentHorizontalPadding: CGFloat = 12
 
     /// Composer placeholder. Shared with `IslandView`'s width measurement so
@@ -46,9 +44,7 @@ struct IslandAgentWingView: View {
     var onRetryDelivery: () -> Void = {}
     var onDismissDeliveryFailure: () -> Void = {}
 
-    /// Recording placeholder. Used both for rendering and width measurement so
-    /// the face never shrinks below the initial listening state when the first
-    /// live partial is visually shorter than this word.
+    /// Shown until the first non-empty live partial.
     static let recordingPlaceholder = "listening…"
 
     /// Extra width reserved past the measured text so the caret (and one more
@@ -79,41 +75,12 @@ struct IslandAgentWingView: View {
         )
     }
 
-    /// Layout of the breathing provider mark inside the recording face.
-    /// `IslandView`'s width measurement derives its extra allowance from
-    /// these exact values (`recordingProviderMarkSlack`), so the rendered
-    /// face and the measured face can never drift apart.
+    /// Layout of the breathing provider mark inside the right wing.
     static let recordingMarkSide: CGFloat = 16
     static let recordingMarkSpacing: CGFloat = 7
     /// Slightly tighter leading inset when the mark is present, so the mark
     /// optically aligns where the bare text used to start.
     static let recordingMarkLeadingPadding: CGFloat = 10
-
-    /// Extra width the recording face needs beyond the measured text content
-    /// when the provider mark is shown: the mark + its gap, minus the leading
-    /// inset the mark variant gives back versus the text-only variant.
-    static var recordingProviderMarkSlack: CGFloat {
-        recordingMarkSide + recordingMarkSpacing
-            + recordingMarkLeadingPadding - contentHorizontalPadding
-    }
-
-    static func recordingMeasuredContentWidth(text: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let measurementText = text.isEmpty ? recordingPlaceholder : text
-        let textWidth = ceil((measurementText as NSString).size(withAttributes: [.font: font]).width)
-        return textWidth + contentHorizontalPadding * 2
-    }
-
-    static func recordingFaceWidth(
-        text: String,
-        providerMarkVisible: Bool
-    ) -> CGFloat {
-        let markSlack = providerMarkVisible ? recordingProviderMarkSlack : 0
-        return IslandFrameLayout.adaptiveWingWidth(
-            measuredContentWidth: recordingMeasuredContentWidth(text: text) + markSlack,
-            cap: IslandFrameLayout.agentWingRecordingWidth
-        )
-    }
 
     static func actingMeasuredContentWidth(
         label: String,

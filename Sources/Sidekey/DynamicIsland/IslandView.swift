@@ -671,48 +671,9 @@ struct IslandView: View {
         }
     }
 
-    /// Intrinsic width of the current wing face's CONTENT — `0` when no wing
-    /// is shown. The face is laid out at this width by `IslandAgentWingView`;
-    /// the first `agentWingInCapsuleWidth` of it is hosted inside the compact
-    /// capsule's right band and the rest overflows into the form extension
-    /// (`activeWingExtension`). Recording transcript partials only change this
-    /// when they set a new rendered-width peak; shorter/narrower live updates
-    /// keep the prior width, so the ticker stays live without repeated shrink
-    /// springs (the body's `wingFaceID` spring keys off the coarse face, not the
-    /// string).
-    private var activeWingFaceWidth: CGFloat {
-        switch agentFlow.wing {
-        case .hidden: return 0
-        case .recording:
-            // Size to the turn's WIDEST rendered transcript (monotonic), NOT the
-            // live one: the width grows then holds, so a transient provider
-            // re-segment (a shorter/narrower partial) never shrinks/jumps the
-            // wing — while the displayed text stays live. The store resets the
-            // hint per turn.
-            return IslandAgentWingView.recordingFaceWidth(
-                text: agentFlow.recordingFaceWidthHint,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .composing:
-            // Grows with the typed text from the placeholder floor up to the
-            // composing cap, then the composer field scrolls. Single source of
-            // truth shared with the hit zone + field rect in `IslandPanel`.
-            return IslandAgentWingView.composingFaceWidth(text: agentFlow.composingText)
-        case .acting:
-            // Content-size the acting slot like recording/composing: hug the
-            // status mark + label so short labels ("Editing") leave no dead
-            // space to the right, while long tool labels cap at
-            // agentWingActingWidth and truncate with an ellipsis (the face's own
-            // .truncationMode(.tail)).
-            return IslandAgentWingView.actingFaceWidth(
-                label: agentFlow.activityLabel,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
-        case .failed: return IslandFrameLayout.agentWingFailedWidth
-        case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
-        }
-    }
+    /// The part that fits in the compact band's width is drawn there; the
+    /// remainder extends the right edge of the capsule.
+    private var activeWingFaceWidth: CGFloat { agentFlow.wingFaceWidth }
 
     /// How far the single island surface stretches RIGHTWARD for the current
     /// face — only the face's overflow past the right band
@@ -767,9 +728,8 @@ struct IslandView: View {
         .animation(Self.hoverMotion, value: wingFaceID)
         // Acting label and per-keystroke composer growth change width too fast
         // for a spring (it shakes / trails the typed text, leaking it past the
-        // capsule). Snap those; keep the spring for the recording grow and the
-        // composer's OPEN, where the width moves monotonically as one smooth
-        // stretch. See `wingSnapsWidth`.
+        // capsule). Snap those; keep the spring for opening the recording or
+        // composing face. Partial transcripts no longer resize the recording face.
         .animation(wingSnapsWidth ? nil : Self.widthGrowth, value: activeWingFaceWidth)
         .animation(Self.hoverMotion, value: agentFlow.answerPanelVisible)
         // Strip slides in / out with the same reveal spring as the rest of
@@ -810,7 +770,7 @@ struct IslandView: View {
     /// stack, and — while the agent flow is active — the right-side wing
     /// zone. The wing zone is a FIXED `rightAgentZoneWidth` reservation so
     /// the island capsule's right edge stays put as the wing changes width
-    /// (recording adaptive up to 260 / composing 300 / acting 120). The wing is
+    /// (recording 260 / composing up to 300 / acting up to 120). The wing is
     /// left-aligned inside the zone (gap, then wing) so its left edge sits
     /// at `windowRight - rightAgentZoneWidth + agentWingGap` — matching
     /// `IslandAgentHitZones.wingRect`.

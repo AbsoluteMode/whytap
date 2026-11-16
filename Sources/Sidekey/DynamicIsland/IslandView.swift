@@ -696,7 +696,7 @@ struct IslandView: View {
     }
 
     /// Snap (don't spring) the wing width when content drives rapid width
-    /// changes the spring would lag behind: the acting label (live narration),
+    /// changes: live narration, the recording ticker's frame-by-frame reveal,
     /// and the composer once text is being typed. The composer's content lives
     /// in a separate, instantly-resized panel (`IslandAgentComposerPanel`), so a
     /// springing black capsule would trail the typed text and briefly leak it
@@ -704,6 +704,7 @@ struct IslandView: View {
     /// OPEN to the placeholder floor — only the per-keystroke grow snaps.
     private var wingSnapsWidth: Bool {
         if wingIsActing { return true }
+        if case .recording(let transcript) = agentFlow.wing { return !transcript.isEmpty }
         if case .composing = agentFlow.wing { return !agentFlow.composingText.isEmpty }
         return false
     }
@@ -712,10 +713,7 @@ struct IslandView: View {
 
     private var wingWidthAnimation: Animation? {
         if wingSnapsWidth { return nil }
-        if case .recording(let transcript) = agentFlow.wing {
-            if reduceRecordingWidthMotion { return nil }
-            if !transcript.isEmpty { return .easeInOut(duration: 0.28) }
-        }
+        if case .recording = agentFlow.wing, reduceRecordingWidthMotion { return nil }
         return Self.widthGrowth
     }
 
@@ -737,10 +735,8 @@ struct IslandView: View {
         // `.recording(transcript:)` to a single token so the live ticker
         // doesn't re-trigger the layout spring on each delta.
         .animation(Self.hoverMotion, value: wingFaceID)
-        // Acting label and per-keystroke composer growth change width too fast
-        // for a spring (it shakes / trails the typed text, leaking it past the
-        // capsule). Snap those. The first text eases the recording face open;
-        // subsequent transcripts keep the same width target.
+        // The ticker already paces the recording width. A second animation
+        // would continuously restart and lag behind the emerging letters.
         .animation(wingWidthAnimation, value: activeWingFaceWidth)
         .animation(Self.hoverMotion, value: agentFlow.answerPanelVisible)
         // Strip slides in / out with the same reveal spring as the rest of
@@ -986,9 +982,8 @@ struct IslandView: View {
                         meetingSuggestionActive: appState.meetingSuggestionActive
                             || appState.caseApprovalActive,
                         trailingExtension: activeWingExtension,
-                        // Snap the surface for acting and per-keystroke composer
-                        // growth (see `wingSnapsWidth`) so the black wing never
-                        // lags behind the text and leaks it past the capsule.
+                        // Use the same width as the content clip for each
+                        // ticker frame or rapidly changing label or input.
                         animatesWidthChange: !wingSnapsWidth
                     )
                     .frame(
@@ -1059,7 +1054,8 @@ struct IslandView: View {
                                 isGoogle: agentFlow.activeSourceIsGoogle,
                                 deliveryHitBridge: hoverHitBridge,
                                 onRetryDelivery: actions.retryDelivery,
-                                onDismissDeliveryFailure: actions.dismissDeliveryFailure
+                                onDismissDeliveryFailure: actions.dismissDeliveryFailure,
+                                onRecordingTextWidthChange: agentFlow.recordingTextWidthChanged
                             )
                             .frame(height: compactHeight, alignment: .top)
                             .offset(x: compactWidth + activeWingExtension - activeWingFaceWidth)

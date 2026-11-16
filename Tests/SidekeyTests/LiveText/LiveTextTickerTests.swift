@@ -303,15 +303,36 @@ final class LiveTextTickerTests: XCTestCase {
 
     // MARK: - Drawing
 
+    @MainActor
+    func testRevealedWidthGrowsFrameByFrameEvenWhenTheFirstBatchIsLong() {
+        let model = IslandLiveTextTickerModel()
+        model.textArrived(String(repeating: "wide ", count: 14), now: 0)
+        XCTAssertEqual(model.advance(now: 0), 0)
+
+        let first = model.advance(now: 1.0 / 60)
+        let second = model.advance(now: 2.0 / 60)
+        XCTAssertGreaterThan(first, 0)
+        XCTAssertGreaterThan(second, first)
+        XCTAssertLessThan(second, 20)
+        XCTAssertEqual(model.advance(now: 2.0 / 60), second)
+
+        for frame in 3...120 { model.advance(now: Double(frame) / 60) }
+        XCTAssertGreaterThan(model.advance(now: 2), IslandFrameLayout.agentWingRecordingWidth)
+    }
+
     /// Renders one frame offscreen. `LIVE_TEXT_RENDER_DIR` keeps the frames
     /// for a look at them; nothing is shown on screen.
     @MainActor
-    private func render(_ model: IslandLiveTextTickerModel, now: TimeInterval, name: String) -> (lit: Int, rightmost: Int) {
+    private func render(
+        _ model: IslandLiveTextTickerModel, now: TimeInterval, name: String, visibleWidth: CGFloat = 180
+    ) -> (lit: Int, rightmost: Int) {
         let size = CGSize(width: 180, height: 28)
         let view = Canvas { context, canvasSize in
-            model.draw(in: &context, size: canvasSize, now: now)
+            model.draw(in: &context, size: canvasSize, now: now, visibleWidth: visibleWidth)
         }
         .frame(width: size.width, height: size.height)
+        .frame(width: visibleWidth, alignment: .leading)
+        .clipped()
         .background(Color.black)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
@@ -331,6 +352,21 @@ final class LiveTextTickerTests: XCTestCase {
             }
         }
         return (lit, rightmost)
+    }
+
+    @MainActor
+    func testGatheringUsesTheRightEdgeBeforeTheWingIsFull() {
+        let model = IslandLiveTextTickerModel()
+        model.textArrived(String(repeating: "W", count: 20), now: 0)
+        _ = model.advance(now: 0)
+        var reach: CGFloat = -.infinity
+        for frame in 1...40 {
+            let now = Double(frame) / 60
+            let visibleWidth = max(64, ceil(model.advance(now: now)) + 1)
+            let rendered = render(model, now: now, name: "growing-\(frame)", visibleWidth: visibleWidth)
+            if rendered.lit > 0 { reach = max(reach, CGFloat(rendered.rightmost) / 2 - visibleWidth) }
+        }
+        XCTAssertGreaterThan(reach, -5, "the gathering line uses the last few points inside the capsule")
     }
 
     @MainActor

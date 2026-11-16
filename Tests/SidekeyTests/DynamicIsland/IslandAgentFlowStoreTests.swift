@@ -291,7 +291,7 @@ final class IslandAgentFlowStoreTests: XCTestCase {
         XCTAssertEqual(store.wing, .recording(transcript: "шесть"))
     }
 
-    func testDropOpensAtListeningWidthAndOnlyExpandsForTheFirstVisibleText() {
+    func testDropGrowsWithTheRevealThenKeepsItsWidthAcrossRevisionsAndPauses() {
         for brand in ["Soniox", "ElevenLabs"] {
             let (store, _) = makeStore(dropProviderBrand: {
                 TranscriptionProviderBrand(assetName: brand.lowercased(), label: brand)
@@ -304,15 +304,31 @@ final class IslandAgentFlowStoreTests: XCTestCase {
             XCTAssertEqual(store.wing, .recording(transcript: ""))
             XCTAssertEqual(store.wingFaceWidth, listeningWidth)
 
-            for text in ["да", "да, это более длинная фраза", "короче", String(repeating: "текст ", count: 80)] {
-                store.dropTranscriptUpdated(text)
-                XCTAssertEqual(store.wing, .recording(transcript: text))
-                XCTAssertEqual(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
-            }
+            let delivered = String(repeating: "текст ", count: 80)
+            store.dropTranscriptUpdated(delivered)
+            XCTAssertEqual(store.wingFaceWidth, listeningWidth)
+
+            store.recordingTextWidthChanged(72, transcript: delivered)
+            let firstWidth = store.wingFaceWidth
+            XCTAssertGreaterThan(firstWidth, listeningWidth)
+            store.recordingTextWidthChanged(110, transcript: delivered)
+            let secondWidth = store.wingFaceWidth
+            XCTAssertGreaterThan(secondWidth, firstWidth)
+            XCTAssertLessThan(secondWidth, IslandFrameLayout.agentWingRecordingWidth)
+
+            store.dropTranscriptUpdated("короче")
+            store.recordingTextWidthChanged(45, transcript: "короче")
+            store.recordingTextWidthChanged(300, transcript: delivered)
+            XCTAssertEqual(store.wingFaceWidth, secondWidth)
+
             let beforePause = store.wing
             store.dropTranscriptUpdated("")
             store.dropTranscriptUpdated(" ")
             XCTAssertEqual(store.wing, beforePause)
+            XCTAssertEqual(store.wingFaceWidth, secondWidth)
+
+            store.dropTranscriptUpdated(delivered)
+            store.recordingTextWidthChanged(300, transcript: delivered)
             XCTAssertEqual(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
 
             store.dropPhaseChanged(.idle)
@@ -322,17 +338,18 @@ final class IslandAgentFlowStoreTests: XCTestCase {
         }
     }
 
-    func testAgentVoiceAlsoExpandsOnceAfterListening() {
+    func testAgentVoiceAlsoGrowsWithItsRevealedText() {
         let (store, _) = makeStore(agentProviderBrand: { nil })
         store.agentPhaseChanged(.voiceRecording)
         let listeningWidth = store.wingFaceWidth
         XCTAssertLessThan(listeningWidth, IslandFrameLayout.agentWingRecordingWidth)
 
-        for text in ["one", "one two three four five", "five"] {
-            store.transcriptUpdated(text)
-            XCTAssertEqual(store.wing, .recording(transcript: text))
-            XCTAssertEqual(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
-        }
+        let text = "one two three four five"
+        store.transcriptUpdated(text)
+        XCTAssertEqual(store.wingFaceWidth, listeningWidth)
+        store.recordingTextWidthChanged(90, transcript: text)
+        XCTAssertGreaterThan(store.wingFaceWidth, listeningWidth)
+        XCTAssertLessThan(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
 
         store.agentPhaseChanged(.idle)
         XCTAssertEqual(store.wingFaceWidth, 0)

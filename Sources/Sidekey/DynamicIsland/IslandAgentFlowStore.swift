@@ -28,7 +28,13 @@ final class IslandAgentFlowStore: ObservableObject {
         case deliveryFailed(message: String)
     }
 
-    @Published private(set) var wing: Wing = .hidden
+    @Published private(set) var wing: Wing = .hidden {
+        didSet {
+            if case .recording(let text) = wing, !text.isEmpty { return }
+            if recordingTextWidth > 0 { recordingTextWidth = 0 }
+        }
+    }
+    @Published private var recordingTextWidth: CGFloat = 0
     @Published private(set) var answerPanelVisible = false
     /// True only while the `.acting` wing belongs to an AGENT execution
     /// (`phase != .idle`), never a Drop's `.finishing`/`.verifying`/`.inserting`
@@ -75,10 +81,11 @@ final class IslandAgentFlowStore: ObservableObject {
     var wingFaceWidth: CGFloat {
         switch wing {
         case .hidden: return 0
-        case .recording(let transcript):
-            return transcript.isEmpty
-                ? IslandAgentWingView.listeningFaceWidth(providerMarkVisible: recordingProviderBrand != nil)
-                : IslandFrameLayout.agentWingRecordingWidth
+        case .recording:
+            return IslandAgentWingView.recordingFaceWidth(
+                textWidth: recordingTextWidth,
+                providerMarkVisible: recordingProviderBrand != nil
+            )
         case .composing: return IslandAgentWingView.composingFaceWidth(text: composingText)
         case .acting:
             return IslandAgentWingView.actingFaceWidth(
@@ -89,6 +96,20 @@ final class IslandAgentFlowStore: ObservableObject {
         case .failed: return IslandFrameLayout.agentWingFailedWidth
         case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
         }
+    }
+
+    /// The ticker reports revealed text, including the fraction of the next
+    /// glyph. Keep the high-water width for this take so revisions cannot
+    /// shrink the shell. Do not publish once the visible width stops changing.
+    func recordingTextWidthChanged(_ width: CGFloat, transcript: String) {
+        guard case .recording(let current) = wing, current == transcript, !current.isEmpty,
+              width.isFinite, width > 0 else { return }
+        let next = min(IslandFrameLayout.agentWingRecordingWidth, width.rounded(.up))
+        guard IslandAgentWingView.recordingFaceWidth(
+            textWidth: next,
+            providerMarkVisible: recordingProviderBrand != nil
+        ) > wingFaceWidth else { return }
+        recordingTextWidth = next
     }
 
     /// The response store the island views render from. Exposed read-only
@@ -252,7 +273,7 @@ final class IslandAgentFlowStore: ObservableObject {
         // On a long dictation (~20-30s) the provider re-segments and revises
         // the tail, so the snapshot stops strictly growing — a length gate then
         // FREEZES the wing on the peak line while the user keeps talking. The
-        // recording face grows once on the first visible text. Paste uses the resolved result.
+        // recording face grows with revealed text. Paste uses the resolved result.
         // `.idle` clears the displayed text for the next turn.
         guard text.contains(where: { !$0.isWhitespace }) else { return }
         dropTranscript = text

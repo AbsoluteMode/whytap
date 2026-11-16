@@ -60,8 +60,7 @@ enum IslandFrameLayout {
     /// flush against the capsule, reading as the island stretching rather
     /// than a separate component.
     static let agentWingGap: CGFloat = 8
-    /// Width after the first visible live text. Later partials scroll inside
-    /// the wing without resizing it.
+    /// Maximum live dictation width. Once reached, the ticker scrolls inside it.
     static let agentWingRecordingWidth: CGFloat = 260
     /// Wing width while composing text (R-Cmd tap input field).
     static let agentWingComposingWidth: CGFloat = 300

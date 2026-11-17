@@ -155,12 +155,12 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertEqual(ticker.gatherProgress(at: 9, now: now), 0, "not revealed yet")
     }
 
-    func testARewrittenWordGathersAgainInPlace() {
+    func testARewrittenWordStaysReadableInPlace() {
         var ticker = settled("я хочу кофе сейчас")
         XCTAssertEqual(ticker.gatherProgress(at: 8, now: 10), 1)
         ticker.textArrived("я хочу кафе сейчас", now: 10)
         XCTAssertEqual(ticker.revealedCount, 18, "nothing is hidden again")
-        XCTAssertEqual(ticker.gatherProgress(at: 8, now: 10), 0, "the changed letter")
+        XCTAssertEqual(ticker.gatherProgress(at: 8, now: 10), 1, "the corrected letter is immediately readable")
         XCTAssertEqual(ticker.gatherProgress(at: 7, now: 10), 1)
         XCTAssertEqual(ticker.gatherProgress(at: 9, now: 10), 1)
     }
@@ -175,13 +175,12 @@ final class LiveTextTickerTests: XCTestCase {
         }
     }
 
-    func testAWordInsertedEarlierGathersAloneAndKeepsTheRevealPoint() {
+    func testAWordInsertedEarlierIsSolidAndKeepsTheRevealPoint() {
         var ticker = settled("сегодня мы обсудим новую функцию")
         ticker.textArrived("сегодня вечером мы обсудим новую функцию", now: 10)
         XCTAssertEqual(ticker.revealedCount, 40)
         for index in 0..<40 {
-            let inserted = (8..<16).contains(index)
-            XCTAssertEqual(ticker.gatherProgress(at: index, now: 10), inserted ? 0 : 1, "character \(index)")
+            XCTAssertEqual(ticker.gatherProgress(at: index, now: 10), 1, "character \(index)")
         }
     }
 
@@ -211,7 +210,7 @@ final class LiveTextTickerTests: XCTestCase {
         ticker.textArrived("один сто пять", now: now)
         XCTAssertEqual(ticker.revealedCount, 7)
         XCTAssertEqual(ticker.gatherProgress(at: 4, now: now), sharedStart, "the shared start is untouched")
-        XCTAssertEqual(ticker.gatherProgress(at: 5, now: now), 0, "the replaced letters gather")
+        XCTAssertEqual(ticker.gatherProgress(at: 5, now: now), 1, "visible replacements are solid")
     }
 
     func testALongRewriteChangesAtOnce() {
@@ -222,28 +221,90 @@ final class LiveTextTickerTests: XCTestCase {
         }
     }
 
-    /// A rewrite that changes the line's length moves its end smoothly.
-    @MainActor
-    func testTheLineSlidesInsteadOfJumpingWhenARewriteChangesItsLength() {
-        let model = IslandLiveTextTickerModel()
-        var now = 0.0
-        func frames(_ seconds: TimeInterval) {
-            let until = now + seconds
-            while now < until {
-                now += 1.0 / 60
-                _ = render(model, now: now, name: "skip")
-            }
+    func testMixedCorrectionAndAppendKeepsSpokenWordsAtTheFrontier() {
+        var ticker = settled("я говорю")
+        ticker.textArrived("Я сейчас говорю дальше", now: 10)
+        let shown = String(ticker.characters.prefix(ticker.revealedCount))
+        XCTAssertEqual(shown, "Я сейчас говорю")
+        for i in 0..<ticker.revealedCount {
+            XCTAssertEqual(ticker.gatherProgress(at: i, now: 10), 1)
         }
-        model.textArrived("я я я хочу", now: now)
-        frames(4)
-        let before = model.visibleLineEnd
-        XCTAssertGreaterThan(before, 40)
-        model.textArrived("я хочу", now: now)
-        XCTAssertEqual(model.visibleLineEnd, before, accuracy: 0.01, "no jump on the frame of the rewrite")
-        frames(1.0 / 60)
-        XCTAssertLessThan(before - model.visibleLineEnd, 4, "one frame moves a little")
-        frames(1)
-        XCTAssertLessThan(model.visibleLineEnd, before - 15, "and it settles at the shorter line")
+        var now = 10.0
+        while ticker.revealedCount <= shown.count + 1, now < 11.5 {
+            now += 1.0 / 60
+            ticker.advance(now: now)
+        }
+        XCTAssertGreaterThan(ticker.revealedCount, shown.count + 1)
+        XCTAssertLessThan(ticker.gatherProgress(at: shown.count + 1, now: now), 1)
+    }
+
+    func testRepeatedEndOfWordDoesNotSkipOverNewSpeech() {
+        for (old, next, visible) in [
+            ("сказать что", "сказать, что это", "сказать, что"),
+            ("я говорю", "Я говорю и снова говорю", "Я говорю")
+        ] {
+            var ticker = settled(old)
+            ticker.textArrived(next, now: 10)
+            XCTAssertEqual(String(ticker.characters.prefix(ticker.revealedCount)), visible)
+        }
+    }
+
+    func testEarlyCorrectionInLongTakeKeepsTheCurrentWord() {
+        let passage = String(repeating: "короткая пауза ", count: 90) + "здесь уникальное окончание"
+        var ticker = settled("я " + passage)
+        ticker.textArrived("Сейчас я " + passage + " продолжаю", now: 10)
+        XCTAssertEqual(String(ticker.characters.prefix(ticker.revealedCount)), "Сейчас я " + passage)
+        XCTAssertEqual(ticker.gatherProgress(at: ticker.revealedCount - 1, now: 10), 1)
+    }
+
+    func testWithdrawnPartialCanReturnInPiecesWithoutGatheringTwice() {
+        var ticker = settled("я говорю")
+        for text in ["я гово", "я", "я г", "я гово", "я говорю дальше"] {
+            ticker.textArrived(text, now: 10.1)
+            let restored = min(text.count, "я говорю".count)
+            XCTAssertEqual(ticker.revealedCount, restored, text)
+            for i in 0..<restored { XCTAssertEqual(ticker.gatherProgress(at: i, now: 10.1), 1) }
+        }
+        ticker.prime("", now: 11)
+        ticker.textArrived("я говорю", now: 11.1)
+        XCTAssertEqual(ticker.revealedCount, 0, "a new take starts a new reveal")
+    }
+
+    func testDifferentSpeechAfterTruncationGetsItsOwnReveal() {
+        var ticker = settled("я пишу письмо")
+        ticker.textArrived("я ", now: 10.1)
+        ticker.textArrived("я отвечаю", now: 10.2)
+        XCTAssertEqual(ticker.revealedCount, 2)
+    }
+
+    @MainActor
+    func testShortCorrectionKeepsPrefixStillAndRevisedLettersVisible() {
+        let model = IslandLiveTextTickerModel()
+        model.prime("я говорю", now: 0)
+        _ = render(model, now: 1, name: "rewrite-before")
+        model.textArrived("Я говорю дальше", now: 1.01)
+        let first = render(model, now: 1.01, name: "rewrite-corrected")
+        XCTAssertGreaterThan(first.lit, 80)
+        XCTAssertEqual(model.glyphX(at: 0), 0)
+        _ = render(model, now: 1.12, name: "rewrite-new-speech")
+        XCTAssertEqual(model.glyphX(at: 0), 0)
+    }
+
+    @MainActor
+    func testOverflowingCorrectionKeepsVisiblePrefixStillOnItsFirstFrame() {
+        let model = IslandLiveTextTickerModel()
+        let phrase = String(repeating: "привет ", count: 10)
+        model.prime(phrase + "узко", now: 0)
+        _ = render(model, now: 1, name: "overflow-before")
+        let before = model.glyphX(at: phrase.count - 20)
+        XCTAssertGreaterThan(before, 0)
+        model.textArrived(phrase + "широко", now: 1)
+        _ = render(model, now: 1, name: "overflow-corrected")
+        XCTAssertEqual(model.glyphX(at: phrase.count - 20), before, accuracy: 4)
+        let tip = model.glyphX(at: phrase.count + "широко".count - 1)
+        XCTAssertLessThan(tip, 180, "the live edge stays inside the viewport even during scrolling")
+        _ = render(model, now: 1.02, name: "overflow-moving")
+        XCTAssertLessThan(abs(model.glyphX(at: phrase.count - 20) - before), 7)
     }
 
     func testAFaceRebuiltMidTakeShowsItsTextAtOnce() {

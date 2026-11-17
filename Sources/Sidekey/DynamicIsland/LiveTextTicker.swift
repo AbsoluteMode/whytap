@@ -74,11 +74,6 @@ struct LiveTextPacer {
         for index in deadlines.indices { deadlines[index].end = max(0, deadlines[index].end + delta) }
     }
 
-    /// The reveal point moves back to `count` (the text after it was replaced).
-    mutating func pullBack(to count: Int) {
-        shown = min(shown, Double(max(0, count)))
-    }
-
     /// Everything delivered is shown at once (text that was already on screen).
     mutating func revealAll() {
         shown = Double(delivered)
@@ -126,20 +121,15 @@ struct LiveTextPacer {
 /// The live transcript as the recording wing shows it: which characters are
 /// visible and when each one appeared, so the view can draw it gathering.
 ///
-/// A provider also rewrites text it has already sent (a stumble it takes
-/// back, a word it hears differently). The old and new text are matched from
-/// both ends, so only the part that really changed is touched: everything
-/// after it keeps its place in the reveal and does not gather again, and the
-/// reveal point stays on the same character even when the length changed.
-/// Rewritten characters that are on screen gather in place; a rewrite longer
-/// than `maxAnimatedRevisions` is swapped without the effect.
+/// Particles mark the first reveal at the live edge. Corrections behind that
+/// edge are already readable, even when one update also appends new speech.
 /// WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
-/// Pure: the caller supplies the clock.
 struct LiveTextTicker {
-    /// How long one character takes to gather.
     static let gatherSeconds: TimeInterval = 0.35
-    /// More rewritten characters than this in one update change at once.
-    static let maxAnimatedRevisions = 12
+
+    /// A strict truncation can be a transient partial. Retain only one visible
+    /// prefix for this take so its return can restore already displayed text.
+    private var withdrawn: ArraySlice<Character> = []
 
     private(set) var characters: [Character] = []
     /// When each revealed character appeared. `-.infinity` is "long ago".
@@ -153,6 +143,7 @@ struct LiveTextTicker {
 
     /// Text that was already on screen (the face was rebuilt mid-take).
     mutating func prime(_ text: String, now: TimeInterval) {
+        withdrawn = []
         characters = Array(text)
         bornAt = Array(repeating: -.infinity, count: characters.count)
         deliveredAt = Array(repeating: now, count: characters.count)
@@ -168,29 +159,111 @@ struct LiveTextTicker {
         var suffix = 0
         while suffix < shortest - prefix,
               characters[characters.count - 1 - suffix] == next[next.count - 1 - suffix] { suffix += 1 }
-        let oldMiddleEnd = characters.count - suffix
-        let newMiddle = next.count - suffix - prefix
-        let revealed = revealedCount
-
-        // How much of the replaced part is on screen after the change.
-        let visibleMiddle: Int
-        if suffix > 0, revealed >= oldMiddleEnd {
-            visibleMiddle = newMiddle
-            pacer.shiftShown(by: next.count - characters.count)
-        } else if revealed > prefix {
-            visibleMiddle = min(revealed - prefix, newMiddle)
-            pacer.pullBack(to: prefix + visibleMiddle)
-        } else {
-            visibleMiddle = 0
+        // A new word may end like the previous one ("что" -> "что это").
+        // Prefer the earlier, equally good or stronger match: words after it
+        // are new speech and must still pass through the reveal point.
+        var revisionEnd = next.count
+        if suffix > 0, next.count > characters.count {
+            let shortestAnchor = max(3, suffix)
+            let longestAnchor = max(suffix, min(24, characters.count - prefix))
+            for length in stride(from: longestAnchor, through: shortestAnchor, by: -1) {
+                if let match = next[prefix...].firstRange(of: characters.suffix(length)) {
+                    revisionEnd = match.upperBound
+                    suffix = length
+                    break
+                }
+            }
         }
-        let stamp: TimeInterval = visibleMiddle > Self.maxAnimatedRevisions ? -.infinity : now
+        let shown = revealedCount
+        let oldEnd = characters.count - suffix
+        let newEnd = revisionEnd - suffix
         var born = Array(bornAt[..<prefix])
-        born.append(contentsOf: Array(repeating: stamp, count: visibleMiddle))
-        born.append(contentsOf: Array(repeating: .infinity, count: newMiddle - visibleMiddle))
-        born.append(contentsOf: bornAt[oldMiddleEnd...])
         var delivered = Array(deliveredAt[..<prefix])
-        delivered.append(contentsOf: Array(repeating: now, count: newMiddle))
-        delivered.append(contentsOf: deliveredAt[oldMiddleEnd...])
+
+        // The common ends handle ordinary appends and single corrections.
+        // In a mixed revision (e.g. punctuation plus new speech), also match
+        // the unchanged runs inside the edit so the reveal stays on its word.
+        let oldMiddle = characters[prefix..<oldEnd]
+        let newMiddle = next[prefix..<newEnd]
+        var old = prefix
+        var new = prefix
+        func replace(upTo oldLimit: Int, withNewUpTo newLimit: Int) {
+            let count = newLimit - new
+            let onScreen: Int
+            if old < shown, oldLimit <= shown, oldLimit < characters.count {
+                onScreen = count
+            } else {
+                onScreen = min(count, max(0, shown - old))
+            }
+            born.append(contentsOf: repeatElement(-.infinity, count: onScreen))
+            born.append(contentsOf: repeatElement(.infinity, count: count - onScreen))
+            delivered.append(contentsOf: repeatElement(now, count: count))
+            old = oldLimit
+            new = newLimit
+        }
+        func keep(_ oldRun: Range<Int>, at newStart: Int) {
+            replace(upTo: oldRun.lowerBound, withNewUpTo: newStart)
+            born.append(contentsOf: bornAt[oldRun])
+            delivered.append(contentsOf: deliveredAt[oldRun])
+            old = oldRun.upperBound
+            new = newStart + oldRun.count
+        }
+        // Never run an unbounded edit search on the animation thread. For a
+        // wholesale replacement, settle the visible span and pace the tail.
+        if !oldMiddle.isEmpty, !newMiddle.isEmpty,
+           max(oldMiddle.count, newMiddle.count) <= 512, old < shown {
+            let edits = newMiddle.difference(from: oldMiddle)
+            var removed = Set<Int>(), inserted = Set<Int>()
+            for change in edits {
+                switch change {
+                case .remove(let offset, _, _): removed.insert(offset)
+                case .insert(let offset, _, _): inserted.insert(offset)
+                }
+            }
+            var oldMatch = old, newMatch = new
+            while oldMatch < oldEnd, newMatch < newEnd {
+                while oldMatch < oldEnd, removed.contains(oldMatch - prefix) { oldMatch += 1 }
+                while newMatch < newEnd, inserted.contains(newMatch - prefix) { newMatch += 1 }
+                let oldStart = oldMatch, newStart = newMatch
+                while oldMatch < oldEnd, newMatch < newEnd,
+                      !removed.contains(oldMatch - prefix), !inserted.contains(newMatch - prefix) {
+                    oldMatch += 1
+                    newMatch += 1
+                }
+                // A stray matching letter in a different word is a poor
+                // anchor for where the speaker is now.
+                guard oldMatch - oldStart >= 3 else { continue }
+                keep(oldStart..<oldMatch, at: newStart)
+            }
+        } else if max(oldMiddle.count, newMiddle.count) > 512, shown > prefix {
+            // A correction near the beginning and an append far past it may
+            // enclose a long unchanged passage. Locate the live edge by a
+            // short unique run without diffing the entire passage.
+            let end = min(shown, oldEnd)
+            let anchor = max(prefix, end - 24)..<end
+            if anchor.count >= 3, let match = newMiddle.firstRange(of: characters[anchor]),
+               newMiddle[match.upperBound...].firstRange(of: characters[anchor]) == nil {
+                keep(anchor, at: match.lowerBound)
+            }
+        }
+        replace(upTo: oldEnd, withNewUpTo: newEnd)
+        born.append(contentsOf: bornAt[oldEnd...])
+        delivered.append(contentsOf: deliveredAt[oldEnd...])
+        born.append(contentsOf: repeatElement(.infinity, count: next.count - revisionEnd))
+        delivered.append(contentsOf: repeatElement(now, count: next.count - revisionEnd))
+
+        if prefix == next.count, next.count < shown {
+            let visible = characters.prefix(shown)
+            if !withdrawn.starts(with: visible) { withdrawn = visible }
+        } else if !withdrawn.isEmpty {
+            let restored = zip(next, withdrawn).prefix { $0 == $1 }.count
+            for index in prefix..<max(prefix, restored) where born[index] == .infinity {
+                born[index] = -.infinity
+            }
+            if restored < next.count || restored == withdrawn.count { withdrawn = [] }
+        }
+        let nextShown = born.firstIndex(of: .infinity) ?? born.count
+        pacer.shiftShown(by: nextShown - shown)
         characters = next
         bornAt = born
         deliveredAt = delivered

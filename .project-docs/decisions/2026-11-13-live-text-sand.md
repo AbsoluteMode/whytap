@@ -51,9 +51,9 @@ gather from dust.
 - `LiveTextTicker` records when each character appeared. The view draws a
   character as 14 grains that start up to 86 pt ahead of it, scattered over
   the wing's height, and land inside it over 0.35 s while the glyph fades in.
-- A character the provider rewrites gathers again in place. A rewrite that
-  touches more than 12 visible characters (an earlier insertion shifts the
-  line) is swapped without the effect.
+- The original revision effect was superseded on 2026-11-17. Already visible
+  corrections are solid; only the live edge gathers. See the related rewrite
+  decision.
 - A face rebuilt mid-take shows its text at once; only new words are paced.
 - With Reduce Motion the previous `Text` is used unchanged.
 - Text in a right-to-left script (Arabic, Hebrew and others), with explicit
@@ -72,8 +72,8 @@ gather from dust.
   least delay each provider allows.
 - A fixed delay would be too long for a fast provider and too short for a
   slow one.
-- Grain positions are derived from the character's index, so there is no
-  particle state to keep or leak.
+- A character's reveal time and scalar seed its grains, so earlier edits can
+  move it without restarting its particle path.
 
 ## What was tested
 

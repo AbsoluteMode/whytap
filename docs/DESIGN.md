@@ -7,7 +7,10 @@ provider mark. The right edge follows the width of the letters as they appear
 and holds its furthest position through pauses and shorter revisions. At the
 width limit the line scrolls to keep its newest letters visible. The letters
 and their particles use the space up to the capsule edge, with a 1 pt inset.
-Reduce Motion fits each visible transcript update immediately.
+During a correction, the reader's attention stays on the word being dictated.
+Only first reveals at the advancing edge use particles. Earlier corrections
+appear legibly in place. In a full wing, any scroll adjustment tapers to zero
+at the current word. Reduce Motion fits each visible transcript update immediately.
 
 ## Agent voice model mark — 2026-10-22
 

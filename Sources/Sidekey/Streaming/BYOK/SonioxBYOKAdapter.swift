@@ -64,6 +64,7 @@ actor SonioxBYOKSession: BYOKUpstreamSession {
     /// Soniox emits one `.final` per token; tokens carry their own leading
     /// spaces, so live composition must concatenate verbatim (same semantics
     /// so words are never split into syllables).
+    nonisolated let emitsPartialAfterFrameFinals = true
     nonisolated let finalsJoin: BYOKTranscriptJoin = .verbatim
 
     nonisolated let events: AsyncStream<BYOKStreamEvent>

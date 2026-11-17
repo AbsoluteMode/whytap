@@ -344,7 +344,9 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
                 // A provider can deliver words as finals with no partial
                 // before them (Deepgram's final event): they are live text
                 // too, for the island and for Drop auto-stop's quiet rule.
-                emitLiveTranscript(committedLiveTranscript)
+                if !session.emitsPartialAfterFrameFinals {
+                    emitLiveTranscript(committedLiveTranscript)
+                }
                 continue
             case .done(let text):
                 if resilient, endsOnlyByStop, !stopped {

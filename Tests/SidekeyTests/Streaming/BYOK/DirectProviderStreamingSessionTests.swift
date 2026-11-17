@@ -22,6 +22,7 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         let cont: AsyncStream<BYOKStreamEvent>.Continuation
         private(set) var sent: [Data] = []
         private(set) var ended = false
+        var emitsPartialAfterFrameFinals = false
         var finalsJoin: BYOKTranscriptJoin = .wordBoundary
         init() { var c: AsyncStream<BYOKStreamEvent>.Continuation!; events = AsyncStream { c = $0 }; cont = c }
         func sendAudio(_ pcm: Data) async { sent.append(pcm) }
@@ -184,10 +185,7 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         XCTAssertEqual(upstream.sent, [Data([0x01])])
     }
 
-    /// Soniox-shaped hub/BYOK streams emit committed final segments separately
-    /// from the current non-final tail. The live wing must receive the combined
-    /// display snapshot once, not blink through "committed prefix" and then
-    /// "tail only" as two separate transcript updates.
+    /// Segment-based providers can send a final on its own, then a partial tail.
     func testLiveTranscriptCombinesCommittedFinalWithPartialTail() async {
         let audio = FakeAudio()
         let upstream = FakeSession()
@@ -213,6 +211,27 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         // The committed final is live text on its own (final-only providers,
         // and Drop auto-stop's quiet rule, depend on it), then the tail joins.
         XCTAssertEqual(updates, ["Privet", "Privet mir"])
+    }
+
+    func testSonioxFrameDoesNotRetractAndRepublishItsVisibleTail() async {
+        let upstream = FakeSession()
+        upstream.finalsJoin = .verbatim
+        upstream.emitsPartialAfterFrameFinals = true
+        let session = DirectProviderStreamingSession(
+            audioEngine: FakeAudio(), adapter: FakeAdapter(session: upstream), language: nil, terms: []
+        )
+        var updates = [String]()
+        session.onTranscriptUpdate = { updates.append($0) }
+        upstream.cont.yield(.partial("я говорю"))
+        upstream.cont.yield(.final("я"))
+        upstream.cont.yield(.partial(" говорю дальше"))
+        upstream.cont.yield(.final(" говорю"))
+        upstream.cont.yield(.final(" дальше."))
+        upstream.cont.yield(.partial(""))
+        upstream.cont.yield(.done("я говорю дальше."))
+        let result = await session.run()
+        XCTAssertEqual(updates, ["я говорю", "я говорю дальше", "я говорю дальше."])
+        XCTAssertEqual(result, .transcript("я говорю дальше."))
     }
 
     /// Soniox emits per-token finals whose texts carry their own leading

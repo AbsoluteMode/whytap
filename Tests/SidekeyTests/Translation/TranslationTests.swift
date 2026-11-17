@@ -546,48 +546,37 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(opened, 2)
     }
 
-    func testToggleClosesTheSameVisibleModeAndReleasesItsMonitors() async throws {
-        let (controller, _, activity) = try makeWindowController(service: FixtureTranslator())
-        defer { controller.window.close() }
-        controller.toggle(.text)
-        XCTAssertTrue(controller.window.isVisible)
-        XCTAssertEqual(controller.mode, .text)
-        XCTAssertEqual(activity.last, true)
-        XCTAssertTrue(controller.hasOutsideClickMonitors)
-        controller.toggle(.text)
-        XCTAssertFalse(controller.window.isVisible)
-        XCTAssertFalse(controller.hasOutsideClickMonitors)
-        // Activity clears once the shared capture cleanup finishes.
-        await waitUntil { activity.last == false }
-        controller.toggle(.text)
-        XCTAssertTrue(controller.window.isVisible, "A third press opens it again")
-    }
-
-    func testToggleSwitchesAnotherVisibleModeInsteadOfClosing() throws {
-        let (controller, _, _) = try makeWindowController(service: FixtureTranslator())
-        defer { controller.window.close() }
-        controller.show(.subtitles)
-        XCTAssertTrue(controller.window.isVisible)
-        controller.toggle(.text)
-        XCTAssertTrue(controller.window.isVisible)
-        XCTAssertEqual(controller.mode, .text)
+    // These tests never order the panel onto the screen: the visible state is
+    // passed in, so no window appears and no mouse monitor is installed.
+    func testToggleClosesOnlyTheSameVisibleMode() {
+        typealias Policy = TranslationHotkeyTogglePolicy
+        XCTAssertTrue(Policy.closes(isVisible: true, visibleMode: .text, requested: .text))
+        XCTAssertTrue(Policy.closes(isVisible: true, visibleMode: .subtitles, requested: .subtitles))
+        XCTAssertFalse(Policy.closes(isVisible: true, visibleMode: .subtitles, requested: .text),
+                       "The other tool's hotkey switches modes")
+        XCTAssertFalse(Policy.closes(isVisible: true, visibleMode: .text, requested: .subtitles))
+        XCTAssertFalse(Policy.closes(isVisible: false, visibleMode: .text, requested: .text),
+                       "A press with the window hidden opens it, also after a close")
+        XCTAssertFalse(Policy.closes(isVisible: false, visibleMode: .subtitles, requested: .subtitles))
     }
 
     func testToggleClosingCancelsAnInFlightTranslation() async throws {
         let gate = TranslationGate()
         let (controller, text, activity) = try makeWindowController(service: gate)
         defer { controller.window.close() }
-        controller.toggle(.text)
         text.input = "unsent fixture"
         let task = try XCTUnwrap(text.translate())
         await waitUntil { await gate.inputs.count == 1 }
-        controller.toggle(.text)
+        XCTAssertEqual(activity.last, true)
+        controller.toggle(.text, windowVisible: true)
         XCTAssertFalse(controller.window.isVisible)
         XCTAssertFalse(text.isTranslating)
+        // Activity clears once the shared capture cleanup finishes.
         await waitUntil { activity.last == false }
         await gate.answer("late result")
         await task.value
         XCTAssertEqual(text.result, "")
+        XCTAssertEqual(text.input, "unsent fixture")
     }
 
     private final class ActivityLog { var values: [Bool] = []; var last: Bool? { values.last } }

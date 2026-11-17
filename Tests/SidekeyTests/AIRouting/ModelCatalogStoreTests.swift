@@ -197,4 +197,33 @@ final class ModelCatalogStoreTests: XCTestCase {
         XCTAssertEqual(fetcher.fetchCount, 0)
         XCTAssertNotNil(store.snapshot(for: account))
     }
+
+    func test_cache_without_prices_is_kept_offline_then_refreshed_once() async throws {
+        // What 2.2.24 wrote: dates known (metadata version 3), no prices.
+        let legacy = #"{"openRouter":{"models":[{"id":"vendor/cached","catalogDate":0}],"fetchedAt":0,"lastRefreshFailed":false,"limited":false,"metadataVersion":3}}"#
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(legacy.utf8).write(to: fileURL)
+        let decoded = try JSONDecoder().decode([String: CatalogSnapshot].self, from: Data(legacy.utf8))
+        XCTAssertEqual(Array(decoded.keys), [ProviderAccount.openRouter.storageID])
+        // Fresh by age: only the metadata version may refetch it.
+        clock = try XCTUnwrap(decoded.values.first?.fetchedAt)
+        let priced = CatalogModel(
+            id: "vendor/cached",
+            tokenPrice: CatalogTokenPrice(promptPerToken: Decimal(string: "0.0000003"),
+                                          completionPerToken: Decimal(string: "0.0000025")))
+        XCTAssertNotNil(priced.tokenPrice)
+        let fetcher = FakeCatalogFetcher([.failure(.offline), .success([priced])])
+        let store = makeStore(fetcher)
+        XCTAssertNil(store.snapshot(for: .openRouter)?.models.first?.tokenPrice)
+
+        await store.refreshIfStale(.openRouter, apiKey: nil, server: nil)
+        XCTAssertEqual(store.snapshot(for: .openRouter)?.models.first?.id, "vendor/cached", "offline keeps the old list")
+        XCTAssertNil(store.snapshot(for: .openRouter)?.models.first?.tokenPrice)
+
+        await store.refreshIfStale(.openRouter, apiKey: nil, server: nil)
+        await store.refreshIfStale(.openRouter, apiKey: nil, server: nil)
+        XCTAssertEqual(fetcher.fetchCount, 2, "one failed and one successful refresh, then the TTL applies")
+        XCTAssertEqual(store.snapshot(for: .openRouter)?.models, [priced])
+        XCTAssertEqual(makeStore(fetcher).snapshot(for: .openRouter)?.models, [priced])
+    }
 }

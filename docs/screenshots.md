@@ -30,12 +30,18 @@ Highlighter, Spotlight, Pin above windows and Output size are removed.
 Copy & exit shows Return in a separate centered keycap within the same button.
 Blur is text-only; Download is the downward arrow with a tooltip. On narrower
 displays the toolbar wraps onto more rows.
+
+Hold Shift while drawing with Pen to draw one straight line from the point
+where the drag started. It snaps to the nearest 45 degrees (horizontal,
+vertical or diagonal) and stops at the crop edge without bending. Releasing
+Shift mid-drag continues freehand. Shift does not change other tools.
 Color, width, shape and blur mode appear in a **separate adjacent settings
 panel** for the current tool; color/width are remembered per tool. Choose Text,
 click anywhere inside the crop and type directly there. Click an existing label
 to place the caret and edit; native selection, clipboard commands and text undo
-stay in the label. Shift-Return adds a line. Hover shows an outlined label and a
-separate move handle; drag that handle to reposition the label without moving
+stay in the label. From a new empty label, press an arrow assigned to another
+tool to switch immediately. Shift-Return adds a line. Hover shows an outlined
+label and a separate move handle; drag that handle to reposition it without moving
 the crop. The selected label keeps its handle visible. Tab can focus the handle;
 arrows move its label one point (Shift: ten), and Return edits it. Empty labels
 are discarded. Escape restores the text before this edit or discards a new label;

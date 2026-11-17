@@ -671,48 +671,9 @@ struct IslandView: View {
         }
     }
 
-    /// Intrinsic width of the current wing face's CONTENT — `0` when no wing
-    /// is shown. The face is laid out at this width by `IslandAgentWingView`;
-    /// the first `agentWingInCapsuleWidth` of it is hosted inside the compact
-    /// capsule's right band and the rest overflows into the form extension
-    /// (`activeWingExtension`). Recording transcript partials only change this
-    /// when they set a new rendered-width peak; shorter/narrower live updates
-    /// keep the prior width, so the ticker stays live without repeated shrink
-    /// springs (the body's `wingFaceID` spring keys off the coarse face, not the
-    /// string).
-    private var activeWingFaceWidth: CGFloat {
-        switch agentFlow.wing {
-        case .hidden: return 0
-        case .recording:
-            // Size to the turn's WIDEST rendered transcript (monotonic), NOT the
-            // live one: the width grows then holds, so a transient provider
-            // re-segment (a shorter/narrower partial) never shrinks/jumps the
-            // wing — while the displayed text stays live. The store resets the
-            // hint per turn.
-            return IslandAgentWingView.recordingFaceWidth(
-                text: agentFlow.recordingFaceWidthHint,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .composing:
-            // Grows with the typed text from the placeholder floor up to the
-            // composing cap, then the composer field scrolls. Single source of
-            // truth shared with the hit zone + field rect in `IslandPanel`.
-            return IslandAgentWingView.composingFaceWidth(text: agentFlow.composingText)
-        case .acting:
-            // Content-size the acting slot like recording/composing: hug the
-            // status mark + label so short labels ("Editing") leave no dead
-            // space to the right, while long tool labels cap at
-            // agentWingActingWidth and truncate with an ellipsis (the face's own
-            // .truncationMode(.tail)).
-            return IslandAgentWingView.actingFaceWidth(
-                label: agentFlow.activityLabel,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
-        case .failed: return IslandFrameLayout.agentWingFailedWidth
-        case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
-        }
-    }
+    /// The part that fits in the compact band's width is drawn there; the
+    /// remainder extends the right edge of the capsule.
+    private var activeWingFaceWidth: CGFloat { agentFlow.wingFaceWidth }
 
     /// How far the single island surface stretches RIGHTWARD for the current
     /// face — only the face's overflow past the right band
@@ -735,7 +696,7 @@ struct IslandView: View {
     }
 
     /// Snap (don't spring) the wing width when content drives rapid width
-    /// changes the spring would lag behind: the acting label (live narration),
+    /// changes: live narration, the recording ticker's frame-by-frame reveal,
     /// and the composer once text is being typed. The composer's content lives
     /// in a separate, instantly-resized panel (`IslandAgentComposerPanel`), so a
     /// springing black capsule would trail the typed text and briefly leak it
@@ -743,8 +704,17 @@ struct IslandView: View {
     /// OPEN to the placeholder floor — only the per-keystroke grow snaps.
     private var wingSnapsWidth: Bool {
         if wingIsActing { return true }
+        if case .recording(let transcript) = agentFlow.wing { return !transcript.isEmpty }
         if case .composing = agentFlow.wing { return !agentFlow.composingText.isEmpty }
         return false
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceRecordingWidthMotion
+
+    private var wingWidthAnimation: Animation? {
+        if wingSnapsWidth { return nil }
+        if case .recording = agentFlow.wing, reduceRecordingWidthMotion { return nil }
+        return Self.widthGrowth
     }
 
     var body: some View {
@@ -765,12 +735,9 @@ struct IslandView: View {
         // `.recording(transcript:)` to a single token so the live ticker
         // doesn't re-trigger the layout spring on each delta.
         .animation(Self.hoverMotion, value: wingFaceID)
-        // Acting label and per-keystroke composer growth change width too fast
-        // for a spring (it shakes / trails the typed text, leaking it past the
-        // capsule). Snap those; keep the spring for the recording grow and the
-        // composer's OPEN, where the width moves monotonically as one smooth
-        // stretch. See `wingSnapsWidth`.
-        .animation(wingSnapsWidth ? nil : Self.widthGrowth, value: activeWingFaceWidth)
+        // The ticker already paces the recording width. A second animation
+        // would continuously restart and lag behind the emerging letters.
+        .animation(wingWidthAnimation, value: activeWingFaceWidth)
         .animation(Self.hoverMotion, value: agentFlow.answerPanelVisible)
         // Strip slides in / out with the same reveal spring as the rest of
         // the island when a track starts / stops (height + transition).
@@ -810,7 +777,7 @@ struct IslandView: View {
     /// stack, and — while the agent flow is active — the right-side wing
     /// zone. The wing zone is a FIXED `rightAgentZoneWidth` reservation so
     /// the island capsule's right edge stays put as the wing changes width
-    /// (recording adaptive up to 260 / composing 300 / acting 120). The wing is
+    /// (recording 260 / composing up to 300 / acting up to 120). The wing is
     /// left-aligned inside the zone (gap, then wing) so its left edge sits
     /// at `windowRight - rightAgentZoneWidth + agentWingGap` — matching
     /// `IslandAgentHitZones.wingRect`.
@@ -1015,9 +982,8 @@ struct IslandView: View {
                         meetingSuggestionActive: appState.meetingSuggestionActive
                             || appState.caseApprovalActive,
                         trailingExtension: activeWingExtension,
-                        // Snap the surface for acting and per-keystroke composer
-                        // growth (see `wingSnapsWidth`) so the black wing never
-                        // lags behind the text and leaks it past the capsule.
+                        // Use the same width as the content clip for each
+                        // ticker frame or rapidly changing label or input.
                         animatesWidthChange: !wingSnapsWidth
                     )
                     .frame(
@@ -1088,7 +1054,8 @@ struct IslandView: View {
                                 isGoogle: agentFlow.activeSourceIsGoogle,
                                 deliveryHitBridge: hoverHitBridge,
                                 onRetryDelivery: actions.retryDelivery,
-                                onDismissDeliveryFailure: actions.dismissDeliveryFailure
+                                onDismissDeliveryFailure: actions.dismissDeliveryFailure,
+                                onRecordingTextWidthChange: agentFlow.recordingTextWidthChanged
                             )
                             .frame(height: compactHeight, alignment: .top)
                             .offset(x: compactWidth + activeWingExtension - activeWingFaceWidth)

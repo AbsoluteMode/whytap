@@ -1,5 +1,14 @@
 # Interface decisions
 
+## Recording wing width — 2026-11-16
+
+Drop and agent voice open a compact wing fitted to `listening…` and the
+provider mark. The right edge follows the width of the letters as they appear
+and holds its furthest position through pauses and shorter revisions. At the
+width limit the line scrolls to keep its newest letters visible. The letters
+and their particles use the space up to the capsule edge, with a 1 pt inset.
+Reduce Motion fits each visible transcript update immediately.
+
 ## Agent voice model mark — 2026-10-22
 
 The user speaks to the agent and wants to recognize the selected model's author.
@@ -1061,6 +1070,8 @@ Later query parts that start a key-name word add to a partial match; parts of th
   280pt full-text bubble left of the drawer, placed like the History preview:
   parent title, full title, full status and open subtask count. It is
   non-interactive and clears on leave, inline editing and panel changes.
+  Use an opaque charcoal surface for the bubble so its white text stays
+  legible over light and dark windows behind the island.
   User feedback 2026-11-03: hover must show the whole text, as in History.
 
 ## Compact To-do in hover — 2026-10-20

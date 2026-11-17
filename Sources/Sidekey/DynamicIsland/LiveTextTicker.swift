@@ -66,6 +66,19 @@ struct LiveTextPacer {
         for index in deadlines.indices { deadlines[index].end = min(deadlines[index].end, delivered) }
     }
 
+    /// The provider rewrote text before the reveal point and its length
+    /// changed by `delta`: the reveal point stays on the same character.
+    mutating func shiftShown(by delta: Int) {
+        guard delta != 0 else { return }
+        shown = max(0, shown + Double(delta))
+        for index in deadlines.indices { deadlines[index].end = max(0, deadlines[index].end + delta) }
+    }
+
+    /// The reveal point moves back to `count` (the text after it was replaced).
+    mutating func pullBack(to count: Int) {
+        shown = min(shown, Double(max(0, count)))
+    }
+
     /// Everything delivered is shown at once (text that was already on screen).
     mutating func revealAll() {
         shown = Double(delivered)
@@ -113,10 +126,14 @@ struct LiveTextPacer {
 /// The live transcript as the recording wing shows it: which characters are
 /// visible and when each one appeared, so the view can draw it gathering.
 ///
-/// A provider also rewrites text it has already sent. A rewritten character
-/// that is on screen gathers again in place; a rewrite that touches many of
-/// them at once (a word inserted earlier shifts everything after it) is
-/// swapped without the effect.
+/// A provider also rewrites text it has already sent (a stumble it takes
+/// back, a word it hears differently). The old and new text are matched from
+/// both ends, so only the part that really changed is touched: everything
+/// after it keeps its place in the reveal and does not gather again, and the
+/// reveal point stays on the same character even when the length changed.
+/// Rewritten characters that are on screen gather in place; a rewrite longer
+/// than `maxAnimatedRevisions` is swapped without the effect.
+/// WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
 /// Pure: the caller supplies the clock.
 struct LiveTextTicker {
     /// How long one character takes to gather.
@@ -145,21 +162,38 @@ struct LiveTextTicker {
 
     mutating func textArrived(_ text: String, now: TimeInterval) {
         let next = Array(text)
-        let visible = min(revealedCount, next.count, characters.count)
-        let rewritten = (0..<visible).filter { characters[$0] != next[$0] }
-        let stamp: TimeInterval = rewritten.count > Self.maxAnimatedRevisions ? -.infinity : now
-        for index in rewritten { bornAt[index] = stamp }
+        let shortest = min(characters.count, next.count)
+        var prefix = 0
+        while prefix < shortest, characters[prefix] == next[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < shortest - prefix,
+              characters[characters.count - 1 - suffix] == next[next.count - 1 - suffix] { suffix += 1 }
+        let oldMiddleEnd = characters.count - suffix
+        let newMiddle = next.count - suffix - prefix
+        let revealed = revealedCount
+
+        // How much of the replaced part is on screen after the change.
+        let visibleMiddle: Int
+        if suffix > 0, revealed >= oldMiddleEnd {
+            visibleMiddle = newMiddle
+            pacer.shiftShown(by: next.count - characters.count)
+        } else if revealed > prefix {
+            visibleMiddle = min(revealed - prefix, newMiddle)
+            pacer.pullBack(to: prefix + visibleMiddle)
+        } else {
+            visibleMiddle = 0
+        }
+        let stamp: TimeInterval = visibleMiddle > Self.maxAnimatedRevisions ? -.infinity : now
+        var born = Array(bornAt[..<prefix])
+        born.append(contentsOf: Array(repeating: stamp, count: visibleMiddle))
+        born.append(contentsOf: Array(repeating: .infinity, count: newMiddle - visibleMiddle))
+        born.append(contentsOf: bornAt[oldMiddleEnd...])
+        var delivered = Array(deliveredAt[..<prefix])
+        delivered.append(contentsOf: Array(repeating: now, count: newMiddle))
+        delivered.append(contentsOf: deliveredAt[oldMiddleEnd...])
         characters = next
-        if bornAt.count > next.count {
-            bornAt.removeLast(bornAt.count - next.count)
-        } else {
-            bornAt.append(contentsOf: Array(repeating: .infinity, count: next.count - bornAt.count))
-        }
-        if deliveredAt.count > next.count {
-            deliveredAt.removeLast(deliveredAt.count - next.count)
-        } else {
-            deliveredAt.append(contentsOf: Array(repeating: now, count: next.count - deliveredAt.count))
-        }
+        bornAt = born
+        deliveredAt = delivered
         pacer.delivered(count: next.count, now: now)
     }
 

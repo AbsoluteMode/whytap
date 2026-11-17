@@ -48,8 +48,10 @@ final class ScreenshotInlineTextView: NSTextView {
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
     var onTab: ((Bool) -> Void)?
+    var onEmptyLabelToolShortcut: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
+        if string.isEmpty, !hasMarkedText(), onEmptyLabelToolShortcut?(event) == true { return }
         if [36, 76].contains(event.keyCode), !event.modifierFlags.contains(.shift), !hasMarkedText() {
             onFinish?(); return
         }

@@ -51,14 +51,15 @@ struct TodoHoverPreviewBubble: View {
     let subtasks: Int
 
     var body: some View {
-        if IslandHoverGlass.usesNativeLiquidGlass {
-            content.padding(HistoryHoverPreviewPolicy.contentPadding).islandHoverGlassSurface(cornerRadius: 11)
-        } else {
-            content.padding(HistoryHoverPreviewPolicy.contentPadding)
-                .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.black.opacity(0.46))
-                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)))
-        }
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        content
+            .padding(HistoryHoverPreviewPolicy.contentPadding)
+            .background {
+                // The preview sits outside the drawer over other apps. Its
+                // white text needs the same contrast over any window behind it.
+                shape.fill(Color(white: 0.14))
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+            }
     }
 
     private var content: some View {

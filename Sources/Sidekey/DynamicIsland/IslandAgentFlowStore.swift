@@ -28,7 +28,13 @@ final class IslandAgentFlowStore: ObservableObject {
         case deliveryFailed(message: String)
     }
 
-    @Published private(set) var wing: Wing = .hidden
+    @Published private(set) var wing: Wing = .hidden {
+        didSet {
+            if case .recording(let text) = wing, !text.isEmpty { return }
+            if recordingTextWidth > 0 { recordingTextWidth = 0 }
+        }
+    }
+    @Published private var recordingTextWidth: CGFloat = 0
     @Published private(set) var answerPanelVisible = false
     /// True only while the `.acting` wing belongs to an AGENT execution
     /// (`phase != .idle`), never a Drop's `.finishing`/`.verifying`/`.inserting`
@@ -71,6 +77,41 @@ final class IslandAgentFlowStore: ObservableObject {
     /// and right-band priority.
     var isActive: Bool { wing != .hidden || answerPanelVisible }
 
+    /// Shared by the visible surface and AppKit's pointer routing.
+    var wingFaceWidth: CGFloat {
+        switch wing {
+        case .hidden: return 0
+        case .recording:
+            return IslandAgentWingView.recordingFaceWidth(
+                textWidth: recordingTextWidth,
+                providerMarkVisible: recordingProviderBrand != nil
+            )
+        case .composing: return IslandAgentWingView.composingFaceWidth(text: composingText)
+        case .acting:
+            return IslandAgentWingView.actingFaceWidth(
+                label: activityLabel,
+                providerMarkVisible: recordingProviderBrand != nil
+            )
+        case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
+        case .failed: return IslandFrameLayout.agentWingFailedWidth
+        case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
+        }
+    }
+
+    /// The ticker reports revealed text, including the fraction of the next
+    /// glyph. Keep the high-water width for this take so revisions cannot
+    /// shrink the shell. Do not publish once the visible width stops changing.
+    func recordingTextWidthChanged(_ width: CGFloat, transcript: String) {
+        guard case .recording(let current) = wing, current == transcript, !current.isEmpty,
+              width.isFinite, width > 0 else { return }
+        let next = min(IslandFrameLayout.agentWingRecordingWidth, width.rounded(.up))
+        guard IslandAgentWingView.recordingFaceWidth(
+            textWidth: next,
+            providerMarkVisible: recordingProviderBrand != nil
+        ) > wingFaceWidth else { return }
+        recordingTextWidth = next
+    }
+
     /// The response store the island views render from. Exposed read-only
     /// for view construction; the store itself stays private.
     var responseStoreForViews: AskResponseStore { responseStore }
@@ -94,17 +135,6 @@ final class IslandAgentFlowStore: ObservableObject {
     private var dropPhase: AppPhase = .idle
     private var dropDeliveryFailureMessage: String?
     private var dropTranscript: String = ""
-
-    /// Widest transcript seen in the current recording turn — drives the
-    /// recording wing's WIDTH only (so it grows, then HOLDS, never shrinking on
-    /// a transient provider re-segment), while the displayed transcript stays
-    /// the latest (live) value so the ticker never freezes. Reset to "" wherever
-    /// the turn's transcript resets. Read by `IslandView.activeWingFaceWidth`.
-    ///
-    /// Empty means the initial "listening…" placeholder is still the width peak.
-    /// Width is measured in rendered points, not `String.count`: a longer
-    /// partial can be visually narrower and must not shrink the wing.
-    private(set) var recordingFaceWidthHint: String = ""
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -166,7 +196,6 @@ final class IslandAgentFlowStore: ObservableObject {
         }
         if newPhase == .voiceRecording || newPhase == .textInputActive {
             transcript = ""
-            recordingFaceWidthHint = ""
             // A fresh recording / composing phase begins a NEW turn — the
             // prior turn's answer panel must close so the input/recording wing
             // can take over. The orb-era controller force-closed the response
@@ -190,7 +219,6 @@ final class IslandAgentFlowStore: ObservableObject {
         }
         if newPhase == .idle {
             transcript = ""
-            recordingFaceWidthHint = ""
             // A turn that finished with answer content (success or a
             // dispatched-turn error) drives the controller to `.idle`, but its
             // result must stay on screen until the next turn or an explicit
@@ -207,13 +235,12 @@ final class IslandAgentFlowStore: ObservableObject {
     }
 
     func transcriptUpdated(_ text: String) {
-        // Same transient-empty latch as the drop wing (display-only — the agent
+        // Same transient-blank latch as the drop wing (display-only — the agent
         // query uses the session's resolved result). Non-empty always shown so
         // the ticker stays LIVE; do NOT length-gate (it froze the drop wing on
         // long dictations). `transcript` resets to "" at turn start/idle.
-        guard !text.isEmpty else { return }
+        guard text.contains(where: { !$0.isWhitespace }) else { return }
         transcript = text
-        promoteRecordingFaceWidthHint(text)
         recompute()
     }
 
@@ -229,7 +256,6 @@ final class IslandAgentFlowStore: ObservableObject {
         dropDeliveryFailureMessage = failureMessage
         if newPhase == .idle {
             dropTranscript = ""
-            recordingFaceWidthHint = ""
         }
         recompute()
     }
@@ -238,7 +264,7 @@ final class IslandAgentFlowStore: ObservableObject {
     /// streaming session's `onTranscriptUpdate` (the same sink the agent voice
     /// flow uses, inherited via `StreamingSessionRunning`).
     func dropTranscriptUpdated(_ text: String) {
-        // Latch through a transient EMPTY partial only. ElevenLabs commits a
+        // Latch through a transient blank partial. ElevenLabs commits a
         // segment on a speech pause and briefly emits "" before the next
         // utterance; without this the wing collapses to "listening…" mid-turn.
         // Everything non-empty is shown so the ticker stays LIVE.
@@ -247,12 +273,10 @@ final class IslandAgentFlowStore: ObservableObject {
         // On a long dictation (~20-30s) the provider re-segments and revises
         // the tail, so the snapshot stops strictly growing — a length gate then
         // FREEZES the wing on the peak line while the user keeps talking. The
-        // visual jump it tried to fix is a width-spring concern, not a
-        // text-value one. Display-only (paste uses the resolved result); `.idle`
-        // (dropPhaseChanged) clears it for the next turn.
-        guard !text.isEmpty else { return }
+        // recording face grows with revealed text. Paste uses the resolved result.
+        // `.idle` clears the displayed text for the next turn.
+        guard text.contains(where: { !$0.isWhitespace }) else { return }
         dropTranscript = text
-        promoteRecordingFaceWidthHint(text)
         recompute()
     }
 
@@ -403,14 +427,4 @@ final class IslandAgentFlowStore: ObservableObject {
     /// Non-alarming copy for the persistent total-offline Drop-delivery failure
     /// wing (`AppPhase.deliveryFailed`). The Retry affordance sits beside it.
     static let deliveryFailedMessage = "Couldn't deliver — offline"
-
-    private func promoteRecordingFaceWidthHint(_ text: String) {
-        let candidateWidth = IslandAgentWingView.recordingMeasuredContentWidth(text: text)
-        let currentWidth = IslandAgentWingView.recordingMeasuredContentWidth(
-            text: recordingFaceWidthHint
-        )
-        if candidateWidth > currentWidth {
-            recordingFaceWidthHint = text
-        }
-    }
 }

@@ -205,19 +205,26 @@ Live text in the recording wing (Drop and agent voice):
   no character waits more than 1.4 s after delivery (current before smooth).
   Each new character gathers from 14 grains over 0.35 s; a rewritten visible
   character gathers again in place, a rewrite of more than 12 swaps at once.
+  A rewrite is matched from both ends: the rest of the line keeps its place,
+  the reveal point stays on its character and a change of length is eased
+  (0.12 s). WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
   A face rebuilt mid-take shows its text at once; text revealed past its
   deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
   that join across characters (canDrawPerCharacter) keep the plain Text.
-  Display only: pasted text, auto-stop and face width use the
-  provider's text; the same for every provider. WHY:
+  The recording face starts compact for listening. The capsule and hit zone
+  follow the revealed glyph width frame by frame and hold their widest extent
+  through pauses and shorter revisions. The ticker scrolls within a fixed
+  viewport after reaching the cap. Glyphs and particles use a 1 pt right inset.
+  Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
 Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
-  after the live transcript stops changing, or when no words arrive within 5 s
-  of recording: always an ordinary stop, never a cancel, so silence pastes
+  after the live transcript stops changing and the microphone last heard a
+  voice (9 dB above the take's quietest level; sound holds a quiet transcript
+  for at most 6 s), or when no words arrive within 5 s of recording: always an ordinary stop, never a cancel, so silence pastes
   nothing and a connection lost before the first word still goes to batch
   recovery. The streaming session publishes committed finals as live text
   (Deepgram sends no partials). Only this rule ends such a take: every provider
@@ -228,7 +235,8 @@ Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   through the DropAutoStopTuning default while it is calibrated (no UI yet).
   The wake word built the same day was removed. WHY:
   .project-docs/decisions/2026-11-11-drop-auto-stop.md,
-  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
+  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md,
+  .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 
 Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   The Agent voice ticker shows the selected model author's bundled mark instead
@@ -317,8 +325,8 @@ Translation tools:
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
-  A tool hotkey toggles (TranslationWindowController.toggle): pressing it again
-  while its mode is visible closes and cancels; clicks, search and links only open.
+  Pressing the same Translate or Subtitles tool hotkey again closes its visible
+  mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the
   context menu; long output scrolls. TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
@@ -1283,7 +1291,8 @@ and the passive instruction strip is removed. Return copies the selected area
 and closes, waiting for pending Blur. Download writes collision-safe timestamped
 PNG files into Downloads and shows the actual filename without closing. Arrow,
 Shape, Pen, Text, Blur, Numbered steps, Copy text and system sharing remain on the main
-toolbar. There is no Select/crop button or V shortcut; initial area selection
+toolbar. Pen with Shift held draws one straight line from the press, snapped to
+45 degrees and shortened (never bent) at the crop edge. There is no Select/crop button or V shortcut; initial area selection
 remains a drag. Clicking the active tool again stops drawing and permits
 selection/annotation adjustment without an extra selector. Highlighter,
 Spotlight, Pin above windows and
@@ -1302,7 +1311,9 @@ only that destination, or click anywhere in the pair for a native assignment men
 reset. Changes save immediately through HotkeyPreferences.screenshotArrowBindings;
 Help and settings backups share it. Custom mappings survive this placement change; the previous unmodified stock map
 migrates once to the new four drawing defaults.
-The earlier Settings-only assignment surface is removed. Bare arrows use those actions,
+The earlier Settings-only assignment surface is removed. Bare arrows use those actions.
+An arrow assigned to another tool also switches from a new empty label.
+Entered text and marked input keep native cursor navigation.
 Shift-arrows move the crop and Option-arrows resize it. Agent Useful Links
 releases its Carbon registrations while Screenshot is active, restores the
 latest visible actions afterwards, and invalidates stale callbacks. Blur defaults to Text and numbers, including

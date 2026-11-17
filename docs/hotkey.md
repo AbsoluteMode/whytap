@@ -399,9 +399,10 @@ the source stays available. Click anywhere in a pair to choose any tool/command 
 native menu or reset that direction. Changes save immediately and preserve the
 screenshot. The physical arrow keys execute the assigned functions. Shift-arrows move the crop 10 points; Option-arrows resize it. Assign
 Move crop in an arrow menu for 1-point movement. Copy text remains available in the same assignment catalog without a new default shortcut; custom assignments are preserved. Screenshot temporarily releases
-Agent Useful Links hotkeys so it owns arrows first, including while an annotation
-text field is focused (native cursor movement). Agent registrations return after
-the editor closes, using the latest visible actions. Delete removes a selected
+Agent Useful Links hotkeys so it owns arrows first. A bare arrow assigned to
+another tool switches from a new empty label. While editing text, arrows move
+the caret. Agent registrations return after the editor closes, using the
+latest visible actions. Delete removes a selected
 annotation. Tab and Shift-Tab move between enabled toolbar/settings controls and
 the visible text move handle. With that handle focused, arrows move its label
 one point (Shift: ten), and Return reopens text editing instead of exporting.

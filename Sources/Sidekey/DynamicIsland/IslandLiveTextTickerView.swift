@@ -8,13 +8,20 @@ import SwiftUI
 /// WHY: .project-docs/decisions/2026-11-13-live-text-sand.md
 struct IslandLiveTextTicker: View {
     let text: String
+    let visibleWidth: CGFloat
+    let onRevealedWidthChange: (CGFloat) -> Void
 
     @State private var model = IslandLiveTextTickerModel()
 
     var body: some View {
         TimelineView(.animation) { timeline in
+            let now = timeline.date.timeIntervalSinceReferenceDate
+            let revealedWidth = model.advance(now: now)
             Canvas { context, size in
-                model.draw(in: &context, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
+                model.draw(in: &context, size: size, now: now, visibleWidth: visibleWidth)
+            }
+            .onChange(of: revealedWidth, initial: true) { _, width in
+                onRevealedWidthChange(width)
             }
         }
         .onAppear { model.prime(text, now: Date.now.timeIntervalSinceReferenceDate) }
@@ -40,6 +47,13 @@ final class IslandLiveTextTickerModel {
     /// Left edge of every character, plus the end of the last one.
     private var edges: [CGFloat] = [0]
     private var widths: [Character: CGFloat] = [:]
+    /// A rewrite that changes the line's length would move its end in one
+    /// frame. The difference is kept here and eased out, so the line slides.
+    private var slide: CGFloat = 0
+    private var wingWidth: CGFloat = 0
+    private var lastFrameAt: TimeInterval?
+    /// How fast a slide is eased out (time constant).
+    static let slideSeconds: TimeInterval = 0.12
     private let font = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
 
     func prime(_ text: String, now: TimeInterval) {
@@ -48,8 +62,24 @@ final class IslandLiveTextTickerModel {
     }
 
     func textArrived(_ text: String, now: TimeInterval) {
+        let before = lineEnd
         ticker.textArrived(text, now: now)
         measure()
+        // Ordinary growth does not move the end: new text is not revealed yet.
+        slide += before - lineEnd
+    }
+
+    /// Where the revealed text ends on screen, before any slide.
+    private var lineEnd: CGFloat { min(revealedWidth, wingWidth) }
+
+    /// Where the revealed text ends on screen right now (for tests).
+    var visibleLineEnd: CGFloat { lineEnd + slide }
+
+    private var revealedWidth: CGFloat {
+        let count = min(ticker.revealedCount, ticker.characters.count)
+        let fraction = CGFloat(ticker.revealed - Double(count))
+        let nextWidth = count < ticker.characters.count ? edges[count + 1] - edges[count] : 0
+        return edges[count] + fraction * nextWidth
     }
 
     private func measure() {
@@ -69,13 +99,23 @@ final class IslandLiveTextTickerModel {
         return measured
     }
 
-    func draw(in context: inout GraphicsContext, size: CGSize, now: TimeInterval) {
+    @discardableResult
+    func advance(now: TimeInterval) -> CGFloat {
+        let previous = lastFrameAt ?? now
+        if lastFrameAt != nil, now <= previous { return revealedWidth }
         ticker.advance(now: now)
+        lastFrameAt = now
+        slide *= CGFloat(exp(-(now - previous) / Self.slideSeconds))
+        if abs(slide) < 0.05 { slide = 0 }
+        return revealedWidth
+    }
+
+    func draw(in context: inout GraphicsContext, size: CGSize, now: TimeInterval, visibleWidth: CGFloat) {
+        advance(now: now)
+        wingWidth = size.width
         let count = min(ticker.revealedCount, ticker.characters.count)
         guard count > 0 else { return }
-        let fraction = CGFloat(ticker.revealed - Double(count))
-        let nextWidth = count < ticker.characters.count ? edges[count + 1] - edges[count] : 0
-        let offset = min(0, size.width - (edges[count] + fraction * nextWidth))
+        let offset = min(0, size.width - revealedWidth) + slide
         let middle = size.height / 2
 
         var first = count - 1
@@ -101,11 +141,11 @@ final class IslandLiveTextTickerModel {
                     drawGrains(
                         in: &layer, index: index, progress: progress,
                         origin: CGPoint(x: x, y: middle), width: edges[index + 1] - edges[index],
-                        height: size.height
+                        height: size.height, rightEdge: min(size.width, visibleWidth)
                     )
                 }
             }
-            guard offset < 0 else { return }
+            guard offset < -0.5 else { return }
             layer.opacity = 1
             layer.blendMode = .destinationOut
             layer.fill(
@@ -123,13 +163,16 @@ final class IslandLiveTextTickerModel {
     /// Positions come from the character's index, so nothing is stored.
     private func drawGrains(
         in layer: inout GraphicsContext, index: Int, progress: Double,
-        origin: CGPoint, width: CGFloat, height: CGFloat
+        origin: CGPoint, width: CGFloat, height: CGFloat, rightEdge: CGFloat
     ) {
         var random = GrainRandom(seed: UInt64(truncatingIfNeeded: index))
+        // Fit the spawn spread into the visible wing, so particles can gather
+        // while it is still narrow, all the way up to its moving edge.
+        let reach = min(86, max(0, rightEdge - origin.x))
         for _ in 0..<Self.grains {
             let home = CGPoint(x: origin.x + random.next() * width, y: origin.y + (random.next() - 0.5) * 8)
             let start = CGPoint(
-                x: origin.x + 16 + random.next() * 70,
+                x: max(home.x, origin.x + reach * (16 + random.next() * 70) / 86),
                 y: origin.y + (random.next() - 0.5) * height * 1.1
             )
             let delay = random.next() * 0.3

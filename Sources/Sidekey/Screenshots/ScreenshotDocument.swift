@@ -51,6 +51,26 @@ enum ScreenshotGeometry {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 
+    /// Shift-drag with Pen: the end of a straight line from `start` toward the
+    /// pointer, turned to the nearest multiple of 45 degrees and as long as the
+    /// pointer's distance along it, shortened (never bent) to stay in `bounds`.
+    static func straightLineEnd(from start: CGPoint, toward point: CGPoint, within bounds: CGRect) -> CGPoint {
+        let dx = point.x - start.x, dy = point.y - start.y
+        guard dx != 0 || dy != 0 else { return start }
+        let step = CGFloat.pi / 4
+        let angle = (atan2(dy, dx) / step).rounded() * step
+        var direction = CGVector(dx: cos(angle), dy: sin(angle))
+        if abs(direction.dx) < 1e-9 { direction.dx = 0 }
+        if abs(direction.dy) < 1e-9 { direction.dy = 0 }
+        var length = max(0, dx * direction.dx + dy * direction.dy)
+        if direction.dx > 0 { length = min(length, (bounds.maxX - start.x) / direction.dx) }
+        if direction.dx < 0 { length = min(length, (bounds.minX - start.x) / direction.dx) }
+        if direction.dy > 0 { length = min(length, (bounds.maxY - start.y) / direction.dy) }
+        if direction.dy < 0 { length = min(length, (bounds.minY - start.y) / direction.dy) }
+        length = max(0, length)
+        return CGPoint(x: start.x + direction.dx * length, y: start.y + direction.dy * length)
+    }
+
     static func pixelRect(_ rect: CGRect, size: CGSize, pixels: CGSize) -> CGRect {
         guard size.width > 0, size.height > 0 else { return .null }
         let clipped = rect.standardized.intersection(CGRect(origin: .zero, size: size))

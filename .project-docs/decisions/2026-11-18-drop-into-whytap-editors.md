@@ -47,8 +47,11 @@ selection. The SwiftUI binding, undo and input filtering follow normal
 typing. Fast, Smart, batch recovery and raw partials share the delivery path.
 
 A direct delivery requires the original window to own the keyboard and the
-same editor to remain focused. A late result goes nowhere else. The ordinary
-processed take is recorded in Drop history. Smart uses plain formatting and
+same editor to remain focused. A take started in a hover editor keeps the drawer
+mounted while the Drop recording and processing wing is visible. Explicit
+dismissal still works. If the original field is gone, History receives the
+finished text or the recovered raw partial. A status notice tells the user
+where to find a saved take. Smart uses plain formatting and
 omits Accessibility context from the app behind the panel.
 
 The prior experiment lengthened the opportunity for a queued paste to run.
@@ -60,5 +63,5 @@ available for the user's next paste.
 Offscreen checks use the real Translate field and its SwiftUI binding, a
 synthetic file name and an instrumented clipboard. They cover caret and
 selection replacement, paragraphs, closure and focus changes, Finder behind
-the panel and ordinary external delivery. Live physical dictation and marked
+the panel, Settings fields, the island search field and external delivery. Live physical dictation and marked
 text in an input method remain installed-app acceptance.

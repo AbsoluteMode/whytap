@@ -77,6 +77,20 @@ final class IslandAgentFlowStore: ObservableObject {
     /// and right-band priority.
     var isActive: Bool { wing != .hidden || answerPanelVisible }
 
+    /// Keep the original drawer editor mounted through recording, cleanup
+    /// and insertion. An answer, agent turn or parked failure still owns the island.
+    func blocksHoverDrawer(dropTargetsDrawer: Bool) -> Bool {
+        if dropTargetsDrawer, phase == .idle, !answerPanelVisible {
+            switch (dropPhase, wing) {
+            case (.recording, .recording), (.transcribing, .recording),
+                 (.verifying, .acting), (.finishing, .acting), (.inserting, .acting):
+                return false
+            default: break
+            }
+        }
+        return isActive
+    }
+
     /// Shared by the visible surface and AppKit's pointer routing.
     var wingFaceWidth: CGFloat {
         switch wing {

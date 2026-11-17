@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -114,6 +115,33 @@ final class DropLocalEditorTests: XCTestCase {
 
     // MARK: - Any native editor of the app
 
+    func testIslandSearchReceivesTheTakeWithTheCaretAtTheEnd() throws {
+        let window = Self.offscreenWindow()
+        let search = IslandHoverSearchNativeField(frame: window.contentView!.bounds)
+        window.contentView?.addSubview(search)
+        XCTAssertTrue(window.makeFirstResponder(search))
+        let target = try XCTUnwrap(DropLocalEditor(focusedIn: window, isPresented: { _ in true }))
+        XCTAssertTrue(target.insert("translate"))
+        XCTAssertEqual(search.stringValue, "translate")
+        XCTAssertEqual((window.firstResponder as? NSTextView)?.selectedRange(), NSRange(location: 9, length: 0))
+    }
+
+    func testSettingsFieldsReceiveTextThroughTheirBindings() throws {
+        for secure in [false, true] {
+            var value = ""
+            let window = Self.offscreenWindow()
+            let fieldView = MacField(placeholder: "Input", text: Binding(get: { value }, set: { value = $0 }), isSecure: secure)
+            let host = NSHostingView(rootView: fieldView)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            let field = try XCTUnwrap(Self.editableField(in: host))
+            XCTAssertTrue(window.makeFirstResponder(field))
+            let target = try XCTUnwrap(DropLocalEditor(focusedIn: window, isPresented: { _ in true }))
+            XCTAssertTrue(target.insert("sample"))
+            XCTAssertEqual(value, "sample")
+        }
+    }
+
     func testATextViewTakesTheDictationAtItsSelection() throws {
         let window = Self.offscreenWindow()
         let view = NSTextView(frame: window.contentView!.bounds)
@@ -220,6 +248,11 @@ final class DropLocalEditorTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private static func editableField(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.isEditable { return field }
+        return view.subviews.lazy.compactMap(editableField).first
+    }
+
     private static func offscreenWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 120),
@@ -260,11 +293,7 @@ final class DropLocalEditorTests: XCTestCase {
             )
             let content = try XCTUnwrap(controller.window.contentView)
             content.layoutSubtreeIfNeeded()
-            func editableField(in view: NSView) -> NSTextField? {
-                if let field = view as? NSTextField, field.isEditable { return field }
-                return view.subviews.lazy.compactMap(editableField).first
-            }
-            let field = try XCTUnwrap(editableField(in: content), "The Translate input is a native text field")
+            let field = try XCTUnwrap(DropLocalEditorTests.editableField(in: content), "The Translate input is a native text field")
             XCTAssertTrue(controller.window.makeFirstResponder(field))
             editor = try XCTUnwrap(controller.window.firstResponder as? NSTextView)
         }

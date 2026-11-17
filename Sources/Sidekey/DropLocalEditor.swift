@@ -30,7 +30,7 @@ struct DropLocalEditor {
     }
 
     /// Nil unless `window` is shown and its first responder is an editable
-    /// native text editor. Web content (meeting notes) is not one.
+    /// native text editor.
     init?(focusedIn window: NSWindow?, isPresented: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible && $0 === Self.keyWindow }) {
         guard let window, isPresented(window),
               let editor = window.firstResponder as? NSTextView, editor.isEditable else { return nil }

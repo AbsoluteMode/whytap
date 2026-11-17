@@ -13,7 +13,8 @@ struct DropHistoryRecorder {
         self.clock = clock
     }
 
-    func record(rawTranscript: String, formattedText: String, targetApp: String?) {
+    @discardableResult
+    func record(rawTranscript: String, formattedText: String, targetApp: String?) -> Bool {
         do {
             try store.insertDropEntry(
                 createdAt: clock(),
@@ -21,8 +22,9 @@ struct DropHistoryRecorder {
                 formattedText: formattedText,
                 targetApp: targetApp
             )
+            return true
         } catch {
-            // best-effort
+            return false
         }
     }
 }

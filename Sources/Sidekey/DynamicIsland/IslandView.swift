@@ -583,6 +583,7 @@ struct IslandView: View {
         guard !appState.screenshotPreparing else { return }
         guard hoverPanelMode != .caseVault || !caseViewModel.isSystemInteractionActive else { return }
         guard hoverPanelMode != .calendar || !appState.calendarHoverConnectionActive else { return }
+        appState.dropTargetsHoverEditor = false
         hoverPanelMode = .controls
         hoverSearchFocused = false
         hoverVocabularyFocused = false
@@ -603,7 +604,7 @@ struct IslandView: View {
             && IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
-                agentFlowActive: agentFlow.isActive,
+                agentFlowActive: agentFlow.blocksHoverDrawer(dropTargetsDrawer: appState.dropTargetsHoverEditor),
                 caseApprovalActive: appState.caseApprovalActive
             )
     }
@@ -1456,6 +1457,7 @@ struct IslandView: View {
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
             if !expanded {
+                appState.dropTargetsHoverEditor = false
                 hoverSearchFocused = false
                 hoverPanelGlance = false
                 hoverVocabularyFocused = false

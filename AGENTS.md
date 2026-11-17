@@ -174,9 +174,9 @@ Voice flow (Drop / dictation):
             and inserts the final text into its selection: no clipboard, no
             Cmd+V, and Smart stays plain without Accessibility context from the
             frontmost app. Delivery, batch recovery, the raw partial and Retry
-            share it. If that editor lost the keyboard or its window closed,
-            nothing is delivered anywhere else. Web content (meeting notes)
-            keeps the Cmd+V path. WHY:
+            share it. An active take keeps its original hover editor mounted.
+            If the editor loses focus, Drop saves the result or recovered
+            partial in History and shows the delivery status. WHY:
             .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
        Resilient delivery: local audio is the truth. A degraded stream goes
             to batch recovery over the retained PCM through the

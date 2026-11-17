@@ -234,4 +234,56 @@ final class ModelCatalogFetcherTests: XCTestCase {
             XCTAssertEqual(error as? CatalogFetchError, expected, file: file, line: line)
         }
     }
+
+    func test_openrouter_prices_are_per_million_and_unknown_amounts_stay_unknown() throws {
+        let body = """
+        {"data":[
+          {"id":"a/priced","pricing":{"prompt":"0.00000125","completion":"0.00001"}},
+          {"id":"a/free","pricing":{"prompt":"0","completion":"0"}},
+          {"id":"a/numeric","pricing":{"prompt":0.0000003,"completion":0.0000025}},
+          {"id":"a/no-completion","pricing":{"prompt":"0.000001"}},
+          {"id":"a/no-pricing"},
+          {"id":"a/garbage","pricing":{"prompt":"1abc","completion":"0.000001"}},
+          {"id":"a/empty","pricing":{"prompt":"","completion":""}},
+          {"id":"a/wrong-shape","pricing":"cheap"},
+          {"id":"a/negative-output","pricing":{"prompt":"0.000001","completion":"-1"}},
+          {"id":"openrouter/auto","pricing":{"prompt":"-1","completion":"-1"}},
+          {"id":"openrouter/other-router","pricing":{"prompt":-1,"completion":-1}}
+        ]}
+        """
+        let models = try ModelCatalogFetcher.parseOpenRouter(Data(body.utf8))
+        let prices = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0.tokenPrice) })
+        XCTAssertEqual(models.count, 10, "optional price metadata never drops a model; routers at -1 still do")
+        XCTAssertNil(prices["openrouter/other-router"] ?? nil)
+
+        let priced = try XCTUnwrap(prices["a/priced"] ?? nil)
+        XCTAssertEqual(priced.inputPerMillion, 1.25, accuracy: 1e-9)
+        XCTAssertEqual(priced.outputPerMillion, 10, accuracy: 1e-9)
+        let free = try XCTUnwrap(prices["a/free"] ?? nil)
+        XCTAssertEqual(free.inputPerMillion, 0)
+        XCTAssertEqual(free.outputPerMillion, 0)
+        let numeric = try XCTUnwrap(prices["a/numeric"] ?? nil)
+        XCTAssertEqual(numeric.inputPerMillion, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(numeric.outputPerMillion, 2.5, accuracy: 1e-9)
+
+        for id in ["a/no-completion", "a/no-pricing", "a/garbage", "a/empty", "a/wrong-shape",
+                   "a/negative-output", "openrouter/auto"] {
+            XCTAssertTrue(prices.keys.contains(id), id)
+            XCTAssertNil(prices[id] ?? nil, "\(id) must have no price, never a zero")
+        }
+    }
+
+    func test_only_openrouter_catalogs_carry_prices_and_they_survive_the_cache_format() throws {
+        let openAI = try ModelCatalogFetcher.parseOpenAI(
+            Data(#"{"data":[{"id":"gpt-priced","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}"#.utf8))
+        XCTAssertNil(openAI.first?.tokenPrice)
+
+        let model = try XCTUnwrap(ModelCatalogFetcher.parseOpenRouter(
+            Data(#"{"data":[{"id":"a/b","pricing":{"prompt":"0.000000075","completion":"0.0000003"}}]}"#.utf8)).first)
+        let restored = try JSONDecoder().decode(CatalogModel.self, from: JSONEncoder().encode(model))
+        XCTAssertEqual(restored, model)
+        // A cache written before prices existed decodes without one.
+        let legacy = try JSONDecoder().decode(CatalogModel.self, from: Data(#"{"id":"a/b"}"#.utf8))
+        XCTAssertNil(legacy.tokenPrice)
+    }
 }

@@ -1,5 +1,27 @@
 import Foundation
 
+/// A provider's list price for one model, in USD per million tokens. Present
+/// only when the catalog states both sides as non-negative amounts; a zero is
+/// the catalog's own zero, never a stand-in for "unknown".
+// WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
+struct CatalogTokenPrice: Codable, Equatable, Sendable {
+    let inputPerMillion: Double
+    let outputPerMillion: Double
+
+    /// `nil` unless both per-token amounts are known and not negative
+    /// (OpenRouter prices its routers at -1: the price depends on the route).
+    init?(promptPerToken: Decimal?, completionPerToken: Decimal?) {
+        guard let promptPerToken, let completionPerToken,
+              promptPerToken >= 0, completionPerToken >= 0
+        else { return nil }
+        let input = NSDecimalNumber(decimal: promptPerToken * 1_000_000).doubleValue
+        let output = NSDecimalNumber(decimal: completionPerToken * 1_000_000).doubleValue
+        guard input.isFinite, output.isFinite else { return nil }
+        inputPerMillion = input
+        outputPerMillion = output
+    }
+}
+
 /// One model as a provider's catalog describes it. Fields a provider does not
 /// report stay `nil`.
 struct CatalogModel: Codable, Equatable, Sendable {
@@ -23,6 +45,8 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// Anthropic: released; OpenAI: created; OpenRouter: added to its catalog.
     /// These meanings are deliberately kept distinct in the picker label.
     var catalogDate: Date?
+    /// OpenRouter `pricing.prompt` / `pricing.completion`. Display only.
+    var tokenPrice: CatalogTokenPrice?
 
     init(
         id: String,
@@ -35,7 +59,8 @@ struct CatalogModel: Codable, Equatable, Sendable {
         reasoning: OpenRouterReasoningCapabilities? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
-        catalogDate: Date? = nil
+        catalogDate: Date? = nil,
+        tokenPrice: CatalogTokenPrice? = nil
     ) {
         self.id = id
         self.uses = uses
@@ -48,6 +73,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
         self.catalogDate = catalogDate
+        self.tokenPrice = tokenPrice
     }
 }
 
@@ -309,7 +335,35 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 let outputModalities: [String]?
                 enum CodingKeys: String, CodingKey { case outputModalities = "output_modalities" }
             }
-            struct Pricing: Decodable { let prompt: String? }
+            /// USD per token, sent as decimal strings. Optional metadata: an
+            /// amount of another shape is unknown, never a failed catalog.
+            struct Pricing: Decodable {
+                let prompt: Decimal?
+                let completion: Decimal?
+
+                enum CodingKeys: String, CodingKey { case prompt, completion }
+
+                init(from decoder: Decoder) throws {
+                    let container = try? decoder.container(keyedBy: CodingKeys.self)
+                    prompt = container.flatMap { Self.amount(in: $0, .prompt) }
+                    completion = container.flatMap { Self.amount(in: $0, .completion) }
+                }
+
+                private static func amount(
+                    in container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys
+                ) -> Decimal? {
+                    if let text = try? container.decode(String.self, forKey: key) {
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // `Decimal(string:)` accepts a numeric prefix; `Double` does not.
+                        guard let number = Double(trimmed), number.isFinite else { return nil }
+                        return Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+                    }
+                    if let number = try? container.decode(Double.self, forKey: key), number.isFinite {
+                        return Decimal(number)
+                    }
+                    return nil
+                }
+            }
             struct TopProvider: Decodable {
                 let maxCompletionTokens: Int?
                 enum CodingKeys: String, CodingKey { case maxCompletionTokens = "max_completion_tokens" }
@@ -349,7 +403,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             // Text must be an output (a missing list is read as text, as the LLM client does).
             if let outputs = model.architecture?.outputModalities, !outputs.contains("text"), !isDecision { return nil }
             // Routers priced at -1 are not models, except the one the app has always offered.
-            if model.pricing?.prompt == "-1", id != "openrouter/auto" { return nil }
+            if model.pricing?.prompt == -1, id != "openrouter/auto" { return nil }
             let parameters = model.supportedParameters
             let tools = parameters?.contains("tools")
             var uses: Set<ModelUse> = isDecision ? [.decision] : [.chat]
@@ -363,7 +417,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 supportsReasoning: parameters?.contains("reasoning"),
                 reasoning: model.reasoning,
                 expiresAt: model.expirationDate.flatMap(parseDate),
-                catalogDate: model.created?.date
+                catalogDate: model.created?.date,
+                tokenPrice: CatalogTokenPrice(
+                    promptPerToken: model.pricing?.prompt, completionPerToken: model.pricing?.completion)
             )
         }
     }

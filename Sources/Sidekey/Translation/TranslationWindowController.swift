@@ -9,6 +9,14 @@ enum TranslationOutsideClickPolicy {
     }
 }
 
+// WHY: .project-docs/decisions/2026-10-20-translation-tools.md
+enum TranslationHotkeyTogglePolicy {
+    static func closes(isVisible: Bool, visibleMode: TranslationWindowController.Mode,
+                       requested: TranslationWindowController.Mode) -> Bool {
+        isVisible && visibleMode == requested
+    }
+}
+
 @MainActor
 final class TranslationWindowController: NSObject, NSWindowDelegate {
     enum Mode: String, CaseIterable { case text = "Text", subtitles = "Subtitles" }
@@ -99,6 +107,21 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         if mode == .text { presentation.requestInputFocus() }
         updateOutsideClickMonitors(for: mode)
         text.onActivityChange?()
+    }
+
+    /// A tool hotkey's second press closes the same visible mode; the other
+    /// mode switches the open window instead of closing it.
+    func toggle(_ mode: Mode) { toggle(mode, windowVisible: panel.isVisible) }
+
+    /// Visibility is a parameter so tests reach the close path without
+    /// putting the panel on the user's screen.
+    func toggle(_ mode: Mode, windowVisible: Bool) {
+        if TranslationHotkeyTogglePolicy.closes(isVisible: windowVisible, visibleMode: presentation.mode,
+                                                requested: mode) {
+            dismiss()
+        } else {
+            show(mode)
+        }
     }
 
     private func resize(for mode: Mode) {

@@ -1603,6 +1603,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func onToolHotkeyActivated(_ tool: HoverTool) {
         if tool != .screenshot { registerIslandHotkeyActivity() }
         let effect = HoverSlotRouter.effect(for: tool)
+        if let mode = effect.hotkeyTranslationToggle {
+            // A second press of the same tool hotkey closes the window.
+            openTranslation(mode, toggles: true)
+            return
+        }
 
         switch effect {
         case .openPanel(let panel):
@@ -1720,9 +1725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func openTranslation(_ mode: TranslationWindowController.Mode) {
+    private func openTranslation(_ mode: TranslationWindowController.Mode, toggles: Bool = false) {
         registerIslandHotkeyActivity()
-        ensureTranslationController().show(mode)
+        let controller = ensureTranslationController()
+        if toggles { controller.toggle(mode) } else { controller.show(mode) }
     }
 
     private func ensureTranslationController() -> TranslationWindowController {

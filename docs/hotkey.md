@@ -231,6 +231,8 @@ produces registrations with independent Carbon IDs, and `AppDelegate` captures
 the tool directly. Tile clicks, search and hotkeys share `HoverSlotRouter`.
 Inline panels request the existing policy-gated hover expansion; actions and
 navigation run directly. Output Language retains its Smart Mode requirement.
+Translate and Subtitles hotkeys toggle: a second press closes the window if that
+mode is visible; the other mode's hotkey switches it instead.
 The existing Meeting record row remains the primary record toggle; Record in
 the Tools section provides an optional additional shortcut for the same action.
 

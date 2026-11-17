@@ -3,6 +3,7 @@
 Open **Translate** or **Subtitles** from the island's tool search. Add either
 button in **Settings → Toolbox** if you want it pinned. Each tool can have its
 own shortcut in **Settings → Hotkeys**; no existing shortcut or layout changes.
+Pressing the same shortcut again closes its window.
 In Toolbox, select either tile to use it directly in the right pane. The floating
 window and Toolbox share translation content and language preferences. Leaving
 the mini app or closing Settings cancels its work unless the floating translator

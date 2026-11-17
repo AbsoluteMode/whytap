@@ -531,6 +531,70 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(text, 1); XCTAssertEqual(audio, 1)
     }
 
+    func testOnlyTranslationToolHotkeysToggleTheWindow() {
+        XCTAssertEqual(HoverSlotRouter.effect(for: .translate).hotkeyTranslationToggle, .text)
+        XCTAssertEqual(HoverSlotRouter.effect(for: .subtitles).hotkeyTranslationToggle, .subtitles)
+        for tool in HoverTool.allCases where tool != .translate && tool != .subtitles {
+            XCTAssertNil(HoverSlotRouter.effect(for: tool).hotkeyTranslationToggle, "\(tool)")
+        }
+        // Tile clicks and tool search keep the open-only path: two activations open twice.
+        var opened = 0
+        var actions = IslandActions.noOp
+        actions.openTranslate = { opened += 1 }
+        HoverSlotRouter.effect(for: .translate).invoke(on: actions)
+        HoverSlotRouter.effect(for: .translate).invoke(on: actions)
+        XCTAssertEqual(opened, 2)
+    }
+
+    // These tests never order the panel onto the screen: the visible state is
+    // passed in, so no window appears and no mouse monitor is installed.
+    func testToggleClosesOnlyTheSameVisibleMode() {
+        typealias Policy = TranslationHotkeyTogglePolicy
+        XCTAssertTrue(Policy.closes(isVisible: true, visibleMode: .text, requested: .text))
+        XCTAssertTrue(Policy.closes(isVisible: true, visibleMode: .subtitles, requested: .subtitles))
+        XCTAssertFalse(Policy.closes(isVisible: true, visibleMode: .subtitles, requested: .text),
+                       "The other tool's hotkey switches modes")
+        XCTAssertFalse(Policy.closes(isVisible: true, visibleMode: .text, requested: .subtitles))
+        XCTAssertFalse(Policy.closes(isVisible: false, visibleMode: .text, requested: .text),
+                       "A press with the window hidden opens it, also after a close")
+        XCTAssertFalse(Policy.closes(isVisible: false, visibleMode: .subtitles, requested: .subtitles))
+    }
+
+    func testToggleClosingCancelsAnInFlightTranslation() async throws {
+        let gate = TranslationGate()
+        let (controller, text, activity) = try makeWindowController(service: gate)
+        defer { controller.window.close() }
+        text.input = "unsent fixture"
+        let task = try XCTUnwrap(text.translate())
+        await waitUntil { await gate.inputs.count == 1 }
+        XCTAssertEqual(activity.last, true)
+        controller.toggle(.text, windowVisible: true)
+        XCTAssertFalse(controller.window.isVisible)
+        XCTAssertFalse(text.isTranslating)
+        // Activity clears once the shared capture cleanup finishes.
+        await waitUntil { activity.last == false }
+        await gate.answer("late result")
+        await task.value
+        XCTAssertEqual(text.result, "")
+        XCTAssertEqual(text.input, "unsent fixture")
+    }
+
+    private final class ActivityLog { var values: [Bool] = []; var last: Bool? { values.last } }
+
+    private func makeWindowController(service: TextTranslating) throws
+        -> (TranslationWindowController, TextTranslationModel, ActivityLog) {
+        let suite = "translation-toggle-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let text = TextTranslationModel(makeService: { service })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                          makeService: { FixtureTranslator() })
+        let activity = ActivityLog()
+        let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
+                                                      openSettings: { _ in }, activityChanged: { activity.values.append($0) })
+        return (controller, text, activity)
+    }
+
     private func waitUntil(_ condition: () async -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<200 {
             if await condition() { return }

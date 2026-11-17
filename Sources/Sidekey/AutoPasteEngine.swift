@@ -48,6 +48,10 @@ struct PasteboardSnapshot: Equatable {
 ///    user's clipboard is not left holding the dictation. Suppression
 ///    flag is cleared.
 ///
+/// A take that began in one of Whytap's own text editors skips all of the
+/// above: `paste(_:)` inserts the text into that editor's selection, without
+/// the clipboard or a key event (`rememberDropTarget()`).
+///
 /// All collaborators are injectable for unit tests via the designated
 /// initialiser. The convenience init binds the production defaults.
 @MainActor
@@ -72,6 +76,15 @@ final class AutoPasteEngine {
     typealias SetClipboardSuppressionFn = (Bool) -> Void
     typealias SuppressClipboardThroughFn = (Int) -> Void
     typealias CurrentChangeCountFn = () -> Int
+
+    /// A text editor of this app that had keyboard focus when a Drop take
+    /// began. `insert` puts the text into its selection and returns false
+    /// once that editor is gone.
+    struct LocalEditorTarget {
+        let name: String
+        let insert: (String) -> Bool
+    }
+    typealias LocalEditorFn = () -> LocalEditorTarget?
 
     /// Logger seam. The string passed in is already formatted with the
     /// diagnostic-line key/value pairs (`autopaste_foo k=v`); the production
@@ -124,10 +137,16 @@ final class AutoPasteEngine {
     private let setClipboardSuppression: SetClipboardSuppressionFn
     private let suppressClipboardThrough: SuppressClipboardThroughFn
     private let currentChangeCount: CurrentChangeCountFn
+    private let localEditor: LocalEditorFn
 
     // MARK: - State
 
     private var remembered: RememberedTarget?
+    /// The current Drop take's own-app editor, if it began in one. Only
+    /// `rememberDropTarget()` changes it: opening History re-captures the
+    /// frontmost app, and a Retry afterwards must still not paste elsewhere.
+    private var dropEditor: LocalEditorTarget?
+    var hasLocalDropTarget: Bool { dropEditor != nil }
 
     // MARK: - Initialisers
 
@@ -152,7 +171,12 @@ final class AutoPasteEngine {
             pasteboardRestore: Pasteboard.restore,
             setClipboardSuppression: { flag in suppression.setSuppressed(flag) },
             suppressClipboardThrough: { count in suppression.suppressThrough(changeCount: count) },
-            currentChangeCount: { NSPasteboard.general.changeCount }
+            currentChangeCount: { NSPasteboard.general.changeCount },
+            localEditor: {
+                guard let editor = DropLocalEditor(focusedIn: DropLocalEditor.keyWindow) else { return nil }
+                let name = NSRunningApplication.current.localizedName ?? "Whytap"
+                return LocalEditorTarget(name: name, insert: { editor.insert($0) })
+            }
         )
     }
 
@@ -172,7 +196,8 @@ final class AutoPasteEngine {
         pasteboardRestore: @escaping PasteboardRestoreFn = { _ in },
         setClipboardSuppression: @escaping SetClipboardSuppressionFn = { _ in },
         suppressClipboardThrough: @escaping SuppressClipboardThroughFn = { _ in },
-        currentChangeCount: @escaping CurrentChangeCountFn = { 0 }
+        currentChangeCount: @escaping CurrentChangeCountFn = { 0 },
+        localEditor: @escaping LocalEditorFn = { nil }
     ) {
         self.flagsState = flagsState
         self.frontmostAppInfo = frontmostAppInfo
@@ -190,6 +215,7 @@ final class AutoPasteEngine {
         self.setClipboardSuppression = setClipboardSuppression
         self.suppressClipboardThrough = suppressClipboardThrough
         self.currentChangeCount = currentChangeCount
+        self.localEditor = localEditor
     }
 
     // MARK: - Public API
@@ -205,6 +231,27 @@ final class AutoPasteEngine {
         }
         remembered = target
         logEmit(.info, "autopaste_target_remembered name=\(target.name) pid=\(target.pid)")
+    }
+
+    /// Start of a Drop take. Besides the frontmost app this remembers a text
+    /// editor of Whytap itself that has the keyboard (the floating Translate
+    /// input is key while another app stays frontmost). Such a take is
+    /// delivered into that editor and nowhere else.
+    /// WHY: .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
+    func rememberDropTarget() {
+        dropEditor = localEditor()
+        rememberTargetBeforeRecording()
+        if dropEditor != nil {
+            logEmit(.info, "autopaste_target_local_editor")
+        }
+    }
+
+    /// What the take's processing may know about its destination. An editor
+    /// of this app has no pid: the frontmost app is not where the text goes,
+    /// so Smart reads no Accessibility context from it and keeps plain text.
+    func currentDropTarget() -> (name: String?, pid: pid_t?) {
+        if let dropEditor { return (dropEditor.name, nil) }
+        return (remembered?.name, remembered?.pid)
     }
 
     /// Returns the last value captured by `rememberTargetBeforeRecording()`.
@@ -239,6 +286,21 @@ final class AutoPasteEngine {
     func paste(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
         guard !text.isEmpty else {
             return false
+        }
+
+        // A take that began in one of Whytap's own editors goes straight
+        // into it. Cmd+V would be handled on this thread only after the
+        // clipboard restore below, pasting the user's previous clipboard;
+        // and once that editor is gone the keys would reach another app.
+        // WHY: .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
+        if let dropEditor {
+            let inserted = dropEditor.insert(text)
+            if inserted {
+                logEmit(.info, "autopaste_local_editor_inserted chars=\(text.count)")
+            } else {
+                logEmit(.error, "autopaste_failed step=local_editor reason=target_gone")
+            }
+            return inserted
         }
 
         // Step 1: snapshot the current pasteboard so we can restore the

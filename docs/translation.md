@@ -44,6 +44,11 @@ result, translating status or an actionable error; configuration errors open
 **API & Models** when clicked. Escape closes the palette and cancels its work.
 Long input scrolls horizontally; long output wraps and scrolls in the second row.
 
+You can also dictate into the input with Drop. The text is inserted at the
+cursor (replacing a selection) without passing through the clipboard. If the
+palette is closed before the text arrives, the dictation is not pasted into
+another app; find it in History.
+
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
 Russian. Right-click the palette for **Translate to**, **Copy translation**,
 **Clear** or **Cancel translation**. The floating palette also offers **Subtitles**;

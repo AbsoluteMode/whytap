@@ -1301,21 +1301,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cleaned = text
         AppState.shared.phase = .inserting
         let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
-        if !pasted {
-            // Fallback: text is already in the clipboard (AutoPasteEngine
-            // writes up-front). No UI toast surface exists in this PR;
-            // user can press ⌘V manually.
-            // TODO: surface a transient "Copied, press ⌘V" notification.
-            os_log(
-                "autopaste_fallback_clipboard_only",
-                log: Self.log,
-                type: .info
-            )
-        }
-        // The user-visible deliverable landed (either direct paste or
-        // clipboard fallback). Either way the turn closes as completed.
         discardPendingRetry()
-        completeDropTurnTelemetry()
+        if !pasted && autoPasteEngine.hasLocalDropTarget {
+            // The input closed or lost focus. Keep the take in History. Its
+            // transcript was never put on the clipboard or sent to another app.
+            failDropTurnTelemetry(reason: "local_editor_unavailable")
+        } else {
+            if !pasted {
+                os_log("autopaste_external_delivery_failed", log: Self.log, type: .info)
+            }
+            completeDropTurnTelemetry()
+        }
         dropHistoryRecorder?.record(
             rawTranscript: rawTranscript,
             formattedText: cleaned,
@@ -2409,11 +2405,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // wrong target. (FloatingDotPanel is non-activating today, so this
             // is belt-and-suspenders, but it is the contract the engine
             // documents.)
-            autoPasteEngine.rememberTargetBeforeRecording()
+            autoPasteEngine.rememberDropTarget()
             startDropTurnTelemetry()
             startDropVoiceCapture()
         case .startRecording:
-            autoPasteEngine.rememberTargetBeforeRecording()
+            autoPasteEngine.rememberDropTarget()
             startDropTurnTelemetry()
             startRecording()
         case .stopStreamingSession:
@@ -2584,14 +2580,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopRecordingAndTranscribe() {
         dropTurnTrace?.mark(.stopRequested)
-        // `AutoPasteEngine.rememberTargetBeforeRecording()` ran at hotkey-down
+        // `AutoPasteEngine.rememberDropTarget()` ran at hotkey-down
         // time (see `onHotkey`), so the engine's captured target is the
         // authoritative source. Fall back to the live frontmost only if the
         // engine has nothing (e.g. the very first hotkey before remember runs).
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         let wav: Data
         do {
@@ -2934,10 +2930,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hotkey can't apply a pending stop to a finished session.
         clearStreamingSetupWindow()
 
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         switch result {
         case .cancelled:

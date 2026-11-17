@@ -506,6 +506,105 @@ final class AutoPasteEngineTests: XCTestCase {
         engine.rememberTargetBeforeRecording()
         XCTAssertEqual(engine.currentTargetName, Self.targetA.name)
     }
+
+    // MARK: - Drop into one of Whytap's own editors
+    // WHY: .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
+
+    /// The reported defect: the floating Translate input is key while another
+    /// app is frontmost. The old path wrote the clipboard, posted Cmd+V and
+    /// restored the clipboard before Whytap could handle its own key event.
+    func testDropIntoAWhytapEditorInsertsWithoutClipboardKeysOrFocusChange() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[.maskCommand]], permission: false)
+        env.initialPasteboardItems = [["public.utf8-plain-text": Data("copied-file.pdf".utf8)]]
+        env.localEditorAccepts = true
+        let engine = env.makeEngine()
+        engine.rememberDropTarget()
+
+        // A rich destination profile cannot apply to a Whytap editor either.
+        let result = await engine.paste("dictated text", formatting: .slack)
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(env.localEditorInsertions, ["dictated text"])
+        XCTAssertNil(env.pastedText, "The dictation must not pass through the clipboard")
+        XCTAssertEqual(env.snapshotCalls, 0, "The live clipboard must not be read")
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+        XCTAssertTrue(env.suppressionEventOrder.isEmpty)
+        XCTAssertTrue(env.postedEvents.isEmpty, "No Cmd+V: held modifiers and Post Event access do not matter")
+        XCTAssertTrue(env.activatedPids.isEmpty)
+        XCTAssertTrue(env.sleepCalls.isEmpty)
+        XCTAssertTrue(env.logs.contains { $0.message == "autopaste_target_local_editor" })
+        XCTAssertTrue(env.logs.contains { $0.message == "autopaste_local_editor_inserted chars=13" })
+        XCTAssertFalse(env.logs.contains { $0.message.contains("dictated") }, "Logs carry counts, never the text")
+    }
+
+    func testDropWhoseWhytapEditorIsGoneIsDeliveredNowhere() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        env.localEditorAccepts = false   // closed palette, moved focus, released window
+        let engine = env.makeEngine()
+        engine.rememberDropTarget()
+
+        let result = await engine.paste("dictated text")
+
+        XCTAssertFalse(result)
+        XCTAssertEqual(env.localEditorInsertions, ["dictated text"])
+        XCTAssertNil(env.pastedText)
+        XCTAssertEqual(env.snapshotCalls, 0)
+        XCTAssertTrue(env.postedEvents.isEmpty, "The frontmost app must not receive the dictation instead")
+        XCTAssertTrue(env.activatedPids.isEmpty)
+        XCTAssertTrue(env.logs.contains { $0.level == .error && $0.message == "autopaste_failed step=local_editor reason=target_gone" })
+    }
+
+    /// Opening History re-captures the frontmost app in the same engine. A
+    /// Retry of the take afterwards still belongs to its editor; only the
+    /// next take chooses a destination again.
+    func testWhytapEditorBelongsToTheTakeUntilTheNextOneStarts() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        env.localEditorAccepts = true
+        let engine = env.makeEngine()
+        engine.rememberDropTarget()
+
+        env.frontmost = Self.targetB
+        engine.rememberTargetBeforeRecording()          // History opened
+        XCTAssertEqual(engine.currentTarget(), Self.targetB)
+        let retried = await engine.paste("first take")
+        XCTAssertTrue(retried)
+        XCTAssertEqual(env.localEditorInsertions, ["first take"])
+        XCTAssertTrue(env.postedEvents.isEmpty)
+
+        env.localEditorAccepts = nil                    // next take starts in another app
+        engine.rememberDropTarget()
+        let pasted = await engine.paste("second take")
+        XCTAssertTrue(pasted)
+        XCTAssertEqual(env.localEditorInsertions, ["first take"])
+        XCTAssertEqual(env.pastedText, "second take")
+        XCTAssertEqual(env.postedEvents.count, 4)
+        XCTAssertEqual(env.restoreCalls.count, 1)
+    }
+
+    /// Smart reads Accessibility context and picks a paste format from the
+    /// take's app. For a Whytap editor the frontmost app is unrelated.
+    func testDropTargetIdentityHidesTheFrontmostAppBehindAWhytapEditor() {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        XCTAssertNil(engine.currentDropTarget().name)
+        XCTAssertNil(engine.currentDropTarget().pid)
+
+        engine.rememberDropTarget()
+        XCTAssertEqual(engine.currentDropTarget().name, "TextEdit")
+        XCTAssertEqual(engine.currentDropTarget().pid, 100)
+        XCTAssertFalse(env.logs.contains { $0.message == "autopaste_target_local_editor" })
+
+        env.localEditorAccepts = true
+        engine.rememberDropTarget()
+        XCTAssertEqual(engine.currentDropTarget().name, "Whytap")
+        XCTAssertNil(engine.currentDropTarget().pid)
+        XCTAssertEqual(engine.currentTarget(), Self.targetA, "History's app target is still captured")
+        XCTAssertEqual(
+            SmartFormattingProfile.resolve(bundleID: nil, appName: engine.currentDropTarget().name,
+                                           documentURL: nil, focusedRole: nil),
+            .plain
+        )
+    }
 }
 
 // MARK: - Test environment
@@ -566,6 +665,11 @@ private final class TestEnv {
     /// Default = 0 (no calls to `changeCount` made before the engine
     /// asks). Tests override to exercise the threshold race path.
     var changeCountAfterRestore: Int = 0
+
+    /// nil = the take starts outside Whytap. Otherwise a Whytap editor has
+    /// the keyboard at take start and accepts (true) or has gone (false).
+    var localEditorAccepts: Bool?
+    var localEditorInsertions: [String] = []
 
     private var simulatedClockMs: UInt64 = 0
 
@@ -654,6 +758,13 @@ private final class TestEnv {
             },
             currentChangeCount: { [weak self] in
                 self?.changeCountAfterRestore ?? 0
+            },
+            localEditor: { [weak self] in
+                guard let self, self.localEditorAccepts != nil else { return nil }
+                return AutoPasteEngine.LocalEditorTarget(name: "Whytap") { [weak self] text in
+                    self?.localEditorInsertions.append(text)
+                    return self?.localEditorAccepts ?? false
+                }
             }
         )
     }

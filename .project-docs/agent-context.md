@@ -168,6 +168,16 @@ Voice flow (Drop / dictation):
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->
             CGEvent Cmd+V (4-event sequence)
+       A take that starts with the keyboard in one of Whytap's own native text
+            editors (the floating Translate input, Settings fields) remembers
+            that editor (AutoPasteEngine.rememberDropTarget, DropLocalEditor)
+            and inserts the final text into its selection: no clipboard, no
+            Cmd+V, and Smart stays plain without Accessibility context from the
+            frontmost app. Delivery, batch recovery, the raw partial and Retry
+            share it. If that editor lost the keyboard or its window closed,
+            nothing is delivered anywhere else. Web content (meeting notes)
+            keeps the Cmd+V path. WHY:
+            .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
        Resilient delivery: local audio is the truth. A degraded stream goes
             to batch recovery over the retained PCM through the
             `BatchTranscribing` seam (bounded by BatchRecoveryDeadline, 30s),
@@ -322,6 +332,10 @@ Translation tools:
   gap or inset field container. Each floating Text show requests input focus,
   guarded against late focus after dismissal/mode changes. The input has no
   hint/border and text mode has no window title bar.
+  Drop dictated into the focused input is inserted at its selection without
+  the clipboard (see Voice flow); a palette closed before the text arrives
+  receives nothing. WHY:
+  .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.

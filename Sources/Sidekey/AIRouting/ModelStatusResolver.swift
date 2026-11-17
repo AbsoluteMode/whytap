@@ -26,6 +26,8 @@ struct PickerOption: Equatable {
     let hint: String?
     var dateLabel: String? = nil
     var catalogDate: Date? = nil
+    /// OpenRouter's list price; display only, never part of search or routing.
+    var priceLabel: String? = nil
 }
 
 /// One provider account's block in a feature's model picker.
@@ -171,7 +173,8 @@ struct ModelStatusResolver {
                     model: id, state: state, isSelected: isSelected(id),
                     hint: hint(model: id, account: account, feature: feature, use: use),
                     dateLabel: dateLabel,
-                    catalogDate: dateLabel == nil ? nil : date
+                    catalogDate: dateLabel == nil ? nil : date,
+                    priceLabel: Self.catalogPriceLabel(entry?.tokenPrice, account: account)
                 ))
             }
             return PickerSection(
@@ -200,6 +203,38 @@ struct ModelStatusResolver {
         default: return nil
         }
         return "\(title) \(catalogDateFormatter.string(from: date))"
+    }
+
+    /// OpenRouter only: `$1.25 in / $10 out per 1M tokens`, or `Free` when the
+    /// catalog states zero for both. An unknown price has no label.
+    // WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
+    static func catalogPriceLabel(_ price: CatalogTokenPrice?, account: ProviderAccount) -> String? {
+        guard account == .openRouter, let price,
+              let input = priceAmount(price.inputPerMillion),
+              let output = priceAmount(price.outputPerMillion)
+        else { return nil }
+        if price.inputPerMillion == 0, price.outputPerMillion == 0 { return "Free" }
+        return "$\(input) in / $\(output) out per 1M tokens"
+    }
+
+    /// Two decimals from $1 up; three significant digits below, so a small
+    /// price is never rounded to zero.
+    private static func priceAmount(_ value: Double) -> String? {
+        guard value.isFinite, value >= 0 else { return nil }
+        if value == 0 { return "0" }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        if value >= 1 {
+            formatter.minimumFractionDigits = 0
+            formatter.maximumFractionDigits = 2
+        } else {
+            formatter.usesSignificantDigits = true
+            formatter.minimumSignificantDigits = 1
+            formatter.maximumSignificantDigits = 3
+        }
+        return formatter.string(from: NSNumber(value: value))
     }
 
     private static let catalogDateFormatter: DateFormatter = {

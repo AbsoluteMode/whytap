@@ -308,6 +308,14 @@ The closed control retains the shared 30 pt popup label and existing widths.
   UTC day in the user's date locale; dates participate in search announcements.
   Refresh older metadata caches once on opening, retaining offline results.
   No new controls or motion; the existing full-row feedback covers the date.
+- Show OpenRouter's list price as one more secondary line under the date:
+  `$1.25 in / $10 out per 1M tokens`, or `Free` when the catalog states zero for
+  both sides. Why: the cost of a model was invisible at the moment of choosing
+  it. Per-million units match provider price pages; two decimals from $1, three
+  significant digits below, so a small price never reads as zero. An unknown,
+  malformed or router (-1) price has no line and no placeholder. Other providers
+  show none: their catalogs carry no prices. The line joins the search
+  announcement but is not searchable text.
   Sources: [Anthropic](https://platform.claude.com/docs/en/api/models/list),
   [OpenAI](https://developers.openai.com/api/reference/resources/models),
   [OpenRouter](https://openrouter.ai/docs/guides/overview/models#model-object-schema).

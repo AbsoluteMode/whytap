@@ -3,7 +3,7 @@ import Foundation
 /// What the app last learned about one account's model catalog. Model metadata
 /// only: no keys, no URLs, no response bodies.
 struct CatalogSnapshot: Codable, Equatable {
-    static let currentMetadataVersion = 3
+    static let currentMetadataVersion = 4
     var models: [CatalogModel]
     /// Last successful load.
     var fetchedAt: Date?
@@ -12,7 +12,8 @@ struct CatalogSnapshot: Codable, Equatable {
     var lastRefreshFailed: Bool
     /// The key may not list models: only the built-in registry applies.
     var limited: Bool
-    /// Older caches remain readable offline, but refresh for dates/capabilities.
+    /// Older caches remain readable offline, but refresh once for dates,
+    /// capabilities and OpenRouter prices (version 4).
     var metadataVersion: Int?
 
     init(models: [CatalogModel] = [], fetchedAt: Date? = nil, lastRefreshFailed: Bool = false, limited: Bool = false) {
@@ -70,9 +71,9 @@ final class ModelCatalogStore: ObservableObject {
     /// Loads the catalog unless the cached one is younger than the TTL and its
     /// last refresh worked.
     func refreshIfStale(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async {
-        let needsDateMetadata = [ProviderAccount.openAI, .anthropic, .openRouter].contains(account)
+        let needsCurrentMetadata = [ProviderAccount.openAI, .anthropic, .openRouter].contains(account)
         if let snapshot = snapshots[account.storageID],
-           (!needsDateMetadata || snapshot.metadataVersion == CatalogSnapshot.currentMetadataVersion),
+           (!needsCurrentMetadata || snapshot.metadataVersion == CatalogSnapshot.currentMetadataVersion),
            let fetchedAt = snapshot.fetchedAt,
            !snapshot.lastRefreshFailed,
            now().timeIntervalSince(fetchedAt) < ttl {

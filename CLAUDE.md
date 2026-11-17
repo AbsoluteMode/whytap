@@ -881,6 +881,13 @@ MacPopupLabel. Name/size terms match in any order (`qwen 27`, `qwen27`), ignorin
 case/separators. Search never changes routes; explicit picks retain verification.
 Known catalog dates appear under model IDs: Anthropic Released, OpenAI Created,
 OpenRouter Added to OpenRouter. Unknown/epoch dates stay hidden.
+OpenRouter rows also show the catalog's list price on their own line
+(`$1.25 in / $10 out per 1M tokens`), read from the `pricing` field of the same
+free /models response; `Free` only when the catalog states zero for both sides.
+A missing, malformed or negative (router) amount shows nothing, never a zero.
+Display only: not searchable, no effect on routes, checks or Costs. Other
+providers show no price. Caches written before prices refresh once on opening.
+WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
 Speech models: Deepgram Updated uses cached newest version dates;
 Soniox/ElevenLabs Released uses exact stable IDs with verified official launch
 dates in ModelRegistry. Unknown models/aliases inherit no release date. Nonempty search

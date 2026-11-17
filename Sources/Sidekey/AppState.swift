@@ -32,6 +32,8 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var phase: AppPhase = .idle
+    /// True if this take began in an editor inside the island's hover drawer.
+    @Published var dropTargetsHoverEditor = false
     /// Fixed, privacy-safe copy for a retained Smart-processing failure.
     @Published var dropDeliveryFailureMessage: String?
     @Published var agentPhase: AgentPhase = .idle

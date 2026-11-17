@@ -1301,28 +1301,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cleaned = text
         AppState.shared.phase = .inserting
         let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
-        if !pasted {
-            // Fallback: text is already in the clipboard (AutoPasteEngine
-            // writes up-front). No UI toast surface exists in this PR;
-            // user can press ⌘V manually.
-            // TODO: surface a transient "Copied, press ⌘V" notification.
-            os_log(
-                "autopaste_fallback_clipboard_only",
-                log: Self.log,
-                type: .info
-            )
-        }
-        // The user-visible deliverable landed (either direct paste or
-        // clipboard fallback). Either way the turn closes as completed.
         discardPendingRetry()
-        completeDropTurnTelemetry()
-        dropHistoryRecorder?.record(
-            rawTranscript: rawTranscript,
-            formattedText: cleaned,
-            targetApp: targetApp
-        )
+        if !pasted && autoPasteEngine.hasLocalDropTarget {
+            _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
+            failDropTurnTelemetry(reason: "local_editor_unavailable")
+        } else {
+            if !pasted {
+                os_log("autopaste_external_delivery_failed", log: Self.log, type: .info)
+            }
+            completeDropTurnTelemetry()
+            dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+        }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    private func saveUndeliveredLocalDrop(raw: String, formatted: String, targetApp: String?) -> Bool {
+        let saved = dropHistoryRecorder?.record(rawTranscript: raw, formattedText: formatted, targetApp: targetApp) == true
+        // Only the status appears outside the original field. The transcript
+        // stays in Drop history under the same rules as an ordinary take.
+        let notice = LocalNotificationEvent(
+            id: UUID().uuidString, source: "builtin.drop", sourceName: "Drop",
+            title: "Couldn’t insert dictation",
+            body: saved ? "Find your text in History → Drop." : "The text field is unavailable.",
+            link: nil, timestamp: Date()
+        )
+        Task { await LocalNotificationHub.shared.receive(notice) }
+        return saved
     }
 
     private static func pipelineErrorDescription(_ error: Error) -> String {
@@ -2380,6 +2385,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.phase = .idle
     }
 
+    private func rememberDropTarget() {
+        autoPasteEngine.rememberDropTarget()
+        AppState.shared.dropTargetsHoverEditor = autoPasteEngine.hasLocalDropTarget && DropLocalEditor.keyWindow is IslandPanel
+    }
+
     private func handleDropHotkeyRoute(_ route: DropFlowRoute) {
         if DropHotkeyRecovery.requiresStartPermission(route) {
             let snapshot = PermissionsHelper.snapshot()
@@ -2409,11 +2419,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // wrong target. (FloatingDotPanel is non-activating today, so this
             // is belt-and-suspenders, but it is the contract the engine
             // documents.)
-            autoPasteEngine.rememberTargetBeforeRecording()
+            rememberDropTarget()
             startDropTurnTelemetry()
             startDropVoiceCapture()
         case .startRecording:
-            autoPasteEngine.rememberTargetBeforeRecording()
+            rememberDropTarget()
             startDropTurnTelemetry()
             startRecording()
         case .stopStreamingSession:
@@ -2584,14 +2594,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopRecordingAndTranscribe() {
         dropTurnTrace?.mark(.stopRequested)
-        // `AutoPasteEngine.rememberTargetBeforeRecording()` ran at hotkey-down
+        // `AutoPasteEngine.rememberDropTarget()` ran at hotkey-down
         // time (see `onHotkey`), so the engine's captured target is the
         // authoritative source. Fall back to the live frontmost only if the
         // engine has nothing (e.g. the very first hotkey before remember runs).
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         let wav: Data
         do {
@@ -2934,10 +2944,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hotkey can't apply a pending stop to a finished session.
         clearStreamingSetupWindow()
 
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         switch result {
         case .cancelled:
@@ -3185,10 +3195,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // for retry) instead of silently losing the dictation. Only a
                 // SUCCESSFUL paste parks the phase at `.idle`; on failure the
                 // caller owns the phase (it flips to `.deliveryFailed`).
-                guard let self else { return false }
+                guard let self, generation == self.streamingSetupGeneration else { return false }
                 let pasted = await self.autoPasteEngine.paste(raw)
                 if pasted { AppState.shared.phase = .idle }
                 return pasted
+            },
+            saveUndeliveredPartial: { [weak self] raw in
+                guard let self, generation == self.streamingSetupGeneration,
+                      self.autoPasteEngine.hasLocalDropTarget else { return false }
+                return self.saveUndeliveredLocalDrop(raw: raw, formatted: raw, targetApp: targetApp)
             },
             requiresProcessingForPartial: mode == .smart
         )
@@ -3351,6 +3366,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// through to `.deliveryFailed` (retain for retry) instead of silently
         /// losing the dictation.
         var pasteRaw: (String) async -> Bool = { _ in true }
+        /// A closed native field can park a raw partial in History without
+        /// retaining audio for a retry into an editor that no longer exists.
+        var saveUndeliveredPartial: (String) -> Bool = { _ in false }
         /// A Smart take must process recovered partials before delivering them.
         var requiresProcessingForPartial: Bool = false
     }
@@ -3550,6 +3568,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let pasted = await sink.pasteRaw(lastPartial)          // rung 3
                 if pasted {
                     sink.failTelemetry("salvaged_partial")
+                } else if sink.saveUndeliveredPartial(lastPartial) {
+                    sink.clearPendingRetry()
+                    sink.failTelemetry("local_editor_unavailable")
+                    sink.setPhase(.idle)
                 } else if !pcm.isEmpty && armRetry {
                     // The raw-partial paste itself failed (pasteboard write /
                     // modifier timeout). Don't silently lose the dictation —

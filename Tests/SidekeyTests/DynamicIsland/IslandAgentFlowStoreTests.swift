@@ -78,6 +78,20 @@ final class IslandAgentFlowStoreTests: XCTestCase {
         XCTAssertFalse(store.answerPanelVisible)
     }
 
+    func testOnlyADropIntoTheOpenDrawerKeepsItsEditorMounted() {
+        let (store, _) = makeStore()
+        for phase: AppPhase in [.transcribing, .recording, .finishing, .verifying, .inserting] {
+            store.dropPhaseChanged(phase)
+            XCTAssertFalse(store.blocksHoverDrawer(dropTargetsDrawer: true))
+            XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: false))
+        }
+        store.dropPhaseChanged(.deliveryFailed)
+        XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: true))
+        store.dropPhaseChanged(.recording)
+        store.agentPhaseChanged(.voiceRecording)
+        XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: true))
+    }
+
     func testSmartFailureShowsItsOwnMessageAndClearsOnNewTake() async {
         let (store, _) = makeStore()
         AppState.shared.dropDeliveryFailureMessage = "Smart failed (503)"

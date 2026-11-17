@@ -693,16 +693,17 @@ final class SpaceHoldMonitor: HotkeyShortcutMonitoring {
     /// never run on the main thread, so hop onto it synchronously here — this
     /// runs from `requestEditableCheck`, which is already off the tap callback.
     private static func defaultIsEditable(pid: pid_t, bundleId: String?) -> Bool {
-        if Thread.isMainThread {
-            return MainActor.assumeIsolated {
-                PasteTargetValidator.appHasFocusedTextInput(pid: pid, bundleIdentifier: bundleId)
-            }
+        @MainActor func check() -> Bool {
+            isEditableForDrop(pid: pid, bundleId: bundleId, localEditor: DropLocalEditor(focusedIn: DropLocalEditor.keyWindow))
         }
-        return DispatchQueue.main.sync {
-            MainActor.assumeIsolated {
-                PasteTargetValidator.appHasFocusedTextInput(pid: pid, bundleIdentifier: bundleId)
-            }
-        }
+        if Thread.isMainThread { return MainActor.assumeIsolated { check() } }
+        return DispatchQueue.main.sync { MainActor.assumeIsolated { check() } }
+    }
+
+    // A nonactivating Translate field can own the keyboard over Finder.
+    // Ask the same native editor that will receive the take before consulting AX.
+    @MainActor static func isEditableForDrop(pid: pid_t, bundleId: String?, localEditor: DropLocalEditor?) -> Bool {
+        localEditor != nil || PasteTargetValidator.appHasFocusedTextInput(pid: pid, bundleIdentifier: bundleId)
     }
 
     /// Synthesizes one key event, mirroring `AutoPasteEngine.defaultPostEvent`

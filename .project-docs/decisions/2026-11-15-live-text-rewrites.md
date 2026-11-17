@@ -6,8 +6,11 @@ summary: When the speaker stumbled and the provider rewrote earlier live text, t
 status: confirmed
 tags: [island, dictation, live-transcript, animation]
 canonical_for: [recording-wing-live-text-rewrites]
-verified_at: 2026-11-15
+verified_at: 2026-11-17
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-17 the maintainer reported repeated gathering of already displayed letters and asked to keep attention on the current speech.
+    confirmed_at: 2026-11-17
   - type: user-confirmed
     reference: On 2026-11-15 the user reported that when they stumble and the provider changes a letter near the start, the line in the wing jumps, and asked for a fix.
     confirmed_at: 2026-11-15
@@ -41,7 +44,29 @@ text before the reveal point:
 
 The user saw this as the line jumping whenever they stumbled.
 
-## Decision
+## Current behavior (2026-11-17)
+
+A common example is a capitalized first word and a newly appended word in
+the same snapshot. A comparison of only the two ends groups the already
+visible words with the new word and makes them gather a second time.
+
+- Correct the visible span immediately. Preserve the original reveal time
+  of unchanged runs, and pace newly delivered text past the reveal point.
+  Bound the interior edit search to 512 characters on each side; very large
+  replacements use a short unique anchor at the live edge when available.
+  A final punctuation mark carried to a new clause does not reveal that clause early.
+- Restore the matching visible part when a provider briefly retracts a tail.
+  The ticker retains one previous visible prefix within the current take.
+  Restoring visible characters does not count as newly arriving speech.
+- In a full wing, compensate a changed scroll position only when its visible
+  prefix survives. Taper the adjustment to zero at the live edge so the
+  current word stays visible. A short line keeps its left origin.
+- Soniox emits final tokens followed by a partial tail for each token frame.
+  Publish its combined snapshot once at that boundary. A final-only frame
+  still publishes through its empty partial. Segment-based providers continue
+  to publish individual finals.
+
+## Original decision (2026-11-15)
 
 - Old and new text are matched by their common start and common end. Only the
   part between them is treated as rewritten.

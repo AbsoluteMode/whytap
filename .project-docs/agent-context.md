@@ -203,11 +203,12 @@ Live text in the recording wing (Drop and agent voice):
   Text. LiveTextPacer reveals it at the speaker's rate, holding a reserve
   sized from the observed gap between batches so the line does not stop, and
   no character waits more than 1.4 s after delivery (current before smooth).
-  Each new character gathers from 14 grains over 0.35 s; a rewritten visible
-  character gathers again in place, a rewrite of more than 12 swaps at once.
-  A rewrite is matched from both ends: the rest of the line keeps its place,
-  the reveal point stays on its character and a change of length is eased
-  (0.12 s). WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
+  Only the advancing edge gathers from 14 grains over 0.35 s. Visible
+  corrections are solid. Unchanged runs keep their reveal times, including
+  when a correction and new speech arrive together. A returning truncated
+  prefix restores its visible text. Scrolling keeps the live edge in view.
+  Soniox publishes the complete live snapshot once per token frame.
+  WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
   A face rebuilt mid-take shows its text at once; text revealed past its
   deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
   that join across characters (canDrawPerCharacter) keep the plain Text.

@@ -61,6 +61,10 @@ protocol BYOKUpstreamSession: AnyObject {
     /// ONE provider's token shape for its whole lifetime.
     var finalsJoin: BYOKTranscriptJoin { get }
 
+    /// Token-framed providers end every transcript frame with its partial
+    /// tail (possibly empty). Only that event has the complete display text.
+    var emitsPartialAfterFrameFinals: Bool { get }
+
     func sendAudio(_ pcm: Data) async
     func endInput() async
     func close() async
@@ -75,6 +79,7 @@ struct BYOKUsageSnapshot: Sendable {
 
 extension BYOKUpstreamSession {
     func usageSnapshot() async -> BYOKUsageSnapshot? { nil }
+    var emitsPartialAfterFrameFinals: Bool { false }
     /// Default matches the historical behavior: BYOK providers emit whole
     /// words/segments, so segments are joined at word boundaries.
     var finalsJoin: BYOKTranscriptJoin { .wordBoundary }

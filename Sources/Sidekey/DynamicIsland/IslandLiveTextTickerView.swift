@@ -47,8 +47,7 @@ final class IslandLiveTextTickerModel {
     /// Left edge of every character, plus the end of the last one.
     private var edges: [CGFloat] = [0]
     private var widths: [Character: CGFloat] = [:]
-    /// A rewrite that changes the line's length would move its end in one
-    /// frame. The difference is kept here and eased out, so the line slides.
+    /// Temporary compensation for scrolling a surviving visible prefix.
     private var slide: CGFloat = 0
     private var wingWidth: CGFloat = 0
     private var lastFrameAt: TimeInterval?
@@ -57,23 +56,36 @@ final class IslandLiveTextTickerModel {
     private let font = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
 
     func prime(_ text: String, now: TimeInterval) {
+        slide = 0
         ticker.prime(text, now: now)
         measure()
     }
 
     func textArrived(_ text: String, now: TimeInterval) {
-        let before = lineEnd
+        let oldOffset = scrollOffset
+        // If a surviving prefix is visible, keep it still on the rewrite
+        // frame. Edits entirely to its left are already anchored by the tail.
+        let oldFirstVisible = max(0, (edges.firstIndex { $0 > -oldOffset } ?? edges.count) - 1)
+        let visiblePrefixSurvives = oldFirstVisible < ticker.revealedCount &&
+            text.prefix(oldFirstVisible + 1).elementsEqual(ticker.characters.prefix(oldFirstVisible + 1))
         ticker.textArrived(text, now: now)
         measure()
-        // Ordinary growth does not move the end: new text is not revealed yet.
-        slide += before - lineEnd
+        if visiblePrefixSurvives, wingWidth > 0 {
+            slide = min(wingWidth / 2, max(-wingWidth / 2, slide + oldOffset - scrollOffset))
+        } else {
+            slide = 0
+        }
     }
 
-    /// Where the revealed text ends on screen, before any slide.
-    private var lineEnd: CGFloat { min(revealedWidth, wingWidth) }
+    private var scrollOffset: CGFloat { min(0, wingWidth - revealedWidth) }
 
-    /// Where the revealed text ends on screen right now (for tests).
-    var visibleLineEnd: CGFloat { lineEnd + slide }
+    /// Earlier letters ease into a changed scroll position. Compensation falls
+    /// to zero at the revealed edge so the current word always stays in view.
+    func glyphX(at index: Int) -> CGFloat {
+        let behindTip = max(0, revealedWidth - edges[index + 1])
+        let weight = min(1, behindTip / max(1, wingWidth))
+        return edges[index] + scrollOffset + slide * weight
+    }
 
     private var revealedWidth: CGFloat {
         let count = min(ticker.revealedCount, ticker.characters.count)
@@ -115,18 +127,18 @@ final class IslandLiveTextTickerModel {
         wingWidth = size.width
         let count = min(ticker.revealedCount, ticker.characters.count)
         guard count > 0 else { return }
-        let offset = min(0, size.width - revealedWidth) + slide
+        let offset = scrollOffset
         let middle = size.height / 2
 
         var first = count - 1
-        while first > 0, edges[first] + offset > -24 { first -= 1 }
+        while first > 0, glyphX(at: first) > -24 { first -= 1 }
 
         context.drawLayer { layer in
             for index in first..<count {
                 let character = ticker.characters[index]
                 guard !character.isWhitespace else { continue }
                 let progress = ticker.gatherProgress(at: index, now: now)
-                let x = edges[index] + offset
+                let x = glyphX(at: index)
                 let solid = Self.smooth((progress - 0.5) / 0.5)
                 if solid > 0.01 {
                     layer.opacity = solid * Self.textOpacity
@@ -139,7 +151,7 @@ final class IslandLiveTextTickerModel {
                 }
                 if progress < 1 {
                     drawGrains(
-                        in: &layer, index: index, progress: progress,
+                        in: &layer, seed: ticker.bornAt[index].bitPattern ^ UInt64(character.unicodeScalars.first!.value), progress: progress,
                         origin: CGPoint(x: x, y: middle), width: edges[index + 1] - edges[index],
                         height: size.height, rightEdge: min(size.width, visibleWidth)
                     )
@@ -160,12 +172,12 @@ final class IslandLiveTextTickerModel {
 
     /// The dust of one character: every grain starts ahead of the text (to the
     /// right), scattered over the wing's height, and lands inside the glyph.
-    /// Positions come from the character's index, so nothing is stored.
+    /// The seed follows the revealed character through an earlier text insertion.
     private func drawGrains(
-        in layer: inout GraphicsContext, index: Int, progress: Double,
+        in layer: inout GraphicsContext, seed: UInt64, progress: Double,
         origin: CGPoint, width: CGFloat, height: CGFloat, rightEdge: CGFloat
     ) {
-        var random = GrainRandom(seed: UInt64(truncatingIfNeeded: index))
+        var random = GrainRandom(seed: seed)
         // Fit the spawn spread into the visible wing, so particles can gather
         // while it is still narrow, all the way up to its moving edge.
         let reach = min(86, max(0, rightEdge - origin.x))

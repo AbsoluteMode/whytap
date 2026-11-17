@@ -241,7 +241,10 @@ final class LiveTextTickerTests: XCTestCase {
     func testRepeatedEndOfWordDoesNotSkipOverNewSpeech() {
         for (old, next, visible) in [
             ("сказать что", "сказать, что это", "сказать, что"),
-            ("я говорю", "Я говорю и снова говорю", "Я говорю")
+            ("я говорю", "Я говорю и снова говорю", "Я говорю"),
+            ("да я", "Да, я думаю", "Да, я"),
+            ("да", "Да, да", "Да"),
+            ("Ты где?", "Ты где сейчас?", "Ты где")
         ] {
             var ticker = settled(old)
             ticker.textArrived(next, now: 10)
@@ -268,6 +271,14 @@ final class LiveTextTickerTests: XCTestCase {
         ticker.prime("", now: 11)
         ticker.textArrived("я говорю", now: 11.1)
         XCTAssertEqual(ticker.revealedCount, 0, "a new take starts a new reveal")
+    }
+
+    func testReturnAfterShorterAlternateHypothesisRestoresTheWordsAlreadyShown() {
+        var ticker = settled("hello world how")
+        ticker.textArrived("hello word", now: 10)
+        ticker.textArrived("hello world how are", now: 10.1)
+        XCTAssertEqual(String(ticker.characters.prefix(ticker.revealedCount)), "hello world how")
+        XCTAssertEqual(ticker.gatherProgress(at: ticker.revealedCount - 1, now: 10.1), 1)
     }
 
     func testDifferentSpeechAfterTruncationGetsItsOwnReveal() {

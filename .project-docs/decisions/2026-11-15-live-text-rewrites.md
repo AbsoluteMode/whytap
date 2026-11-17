@@ -53,9 +53,11 @@ visible words with the new word and makes them gather a second time.
 - Correct the visible span immediately. Preserve the original reveal time
   of unchanged runs, and pace newly delivered text past the reveal point.
   Bound the interior edit search to 512 characters on each side; very large
-  replacements swap the visible span directly.
+  replacements use a short unique anchor at the live edge when available.
+  A final punctuation mark carried to a new clause does not reveal that clause early.
 - Restore the matching visible part when a provider briefly retracts a tail.
   The ticker retains one previous visible prefix within the current take.
+  Restoring visible characters does not count as newly arriving speech.
 - In a full wing, compensate a changed scroll position only when its visible
   prefix survives. Taper the adjustment to zero at the live edge so the
   current word stays visible. A short line keeps its left origin.

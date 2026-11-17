@@ -217,8 +217,10 @@ final class DirectProviderStreamingSessionTests: XCTestCase {
         let upstream = FakeSession()
         upstream.finalsJoin = .verbatim
         upstream.emitsPartialAfterFrameFinals = true
+        let metered = AIUsageMeteredAdapter(adapter: FakeAdapter(session: upstream),
+            context: .init(feature: .dropFast, account: .soniox, model: "fixture"), record: { _ in })
         let session = DirectProviderStreamingSession(
-            audioEngine: FakeAudio(), adapter: FakeAdapter(session: upstream), language: nil, terms: []
+            audioEngine: FakeAudio(), adapter: metered, language: nil, terms: []
         )
         var updates = [String]()
         session.onTranscriptUpdate = { updates.append($0) }

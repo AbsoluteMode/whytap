@@ -71,6 +71,7 @@ struct LiveTextPacer {
     mutating func shiftShown(by delta: Int) {
         guard delta != 0 else { return }
         shown = max(0, shown + Double(delta))
+        delivered = max(0, delivered + delta) // a revised visible span is not new speech
         for index in deadlines.indices { deadlines[index].end = max(0, deadlines[index].end + delta) }
     }
 
@@ -127,7 +128,7 @@ struct LiveTextPacer {
 struct LiveTextTicker {
     static let gatherSeconds: TimeInterval = 0.35
 
-    /// A strict truncation can be a transient partial. Retain only one visible
+    /// A shorter alternate transcript can be transient. Retain only one visible
     /// prefix for this take so its return can restore already displayed text.
     private var withdrawn: ArraySlice<Character> = []
 
@@ -155,7 +156,12 @@ struct LiveTextTicker {
         let next = Array(text)
         let shortest = min(characters.count, next.count)
         var prefix = 0
-        while prefix < shortest, characters[prefix] == next[prefix] { prefix += 1 }
+        while prefix < shortest {
+            let previous = characters[prefix], current = next[prefix]
+            guard previous == current || (previous.isLetter && current.isLetter &&
+                previous.lowercased() == current.lowercased()) else { break }
+            prefix += 1
+        }
         var suffix = 0
         while suffix < shortest - prefix,
               characters[characters.count - 1 - suffix] == next[next.count - 1 - suffix] { suffix += 1 }
@@ -175,6 +181,13 @@ struct LiveTextTicker {
             }
         }
         let shown = revealedCount
+        // A recognizer may carry its period to the end of a new clause.
+        // That punctuation is not a stable anchor beyond the live word.
+        let continuingBeforePunctuation = next.count > characters.count && prefix < shortest &&
+            characters[prefix...].allSatisfy { $0.isPunctuation || $0.isWhitespace } &&
+            next[prefix...].contains { $0.isLetter || $0.isNumber }
+        if continuingBeforePunctuation { suffix = 0; revisionEnd = next.count }
+        let shownInEdit = continuingBeforePunctuation ? min(prefix, shown) : shown
         let oldEnd = characters.count - suffix
         let newEnd = revisionEnd - suffix
         var born = Array(bornAt[..<prefix])
@@ -190,10 +203,10 @@ struct LiveTextTicker {
         func replace(upTo oldLimit: Int, withNewUpTo newLimit: Int) {
             let count = newLimit - new
             let onScreen: Int
-            if old < shown, oldLimit <= shown, oldLimit < characters.count {
+            if old < shownInEdit, oldLimit <= shownInEdit, oldLimit < characters.count {
                 onScreen = count
             } else {
-                onScreen = min(count, max(0, shown - old))
+                onScreen = min(count, max(0, shownInEdit - old))
             }
             born.append(contentsOf: repeatElement(-.infinity, count: onScreen))
             born.append(contentsOf: repeatElement(.infinity, count: count - onScreen))
@@ -232,7 +245,11 @@ struct LiveTextTicker {
                 }
                 // A stray matching letter in a different word is a poor
                 // anchor for where the speaker is now.
-                guard oldMatch - oldStart >= 3 else { continue }
+                let wholeShortWord = oldMatch - oldStart == 2 && characters[oldStart].isWhitespace &&
+                    characters[oldStart + 1].isLetter &&
+                    (oldMatch == characters.count || !characters[oldMatch].isLetter) &&
+                    (newMatch == next.count || !next[newMatch].isLetter)
+                guard oldMatch - oldStart >= 3 || wholeShortWord else { continue }
                 keep(oldStart..<oldMatch, at: newStart)
             }
         } else if max(oldMiddle.count, newMiddle.count) > 512, shown > prefix {
@@ -252,7 +269,7 @@ struct LiveTextTicker {
         born.append(contentsOf: repeatElement(.infinity, count: next.count - revisionEnd))
         delivered.append(contentsOf: repeatElement(now, count: next.count - revisionEnd))
 
-        if prefix == next.count, next.count < shown {
+        if next.count < shown {
             let visible = characters.prefix(shown)
             if !withdrawn.starts(with: visible) { withdrawn = visible }
         } else if !withdrawn.isEmpty {

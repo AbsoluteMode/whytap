@@ -221,6 +221,60 @@ final class MeetingsStagedAudioRetentionTests: XCTestCase {
         XCTAssertEqual(state?.status, .ready)
     }
 
+    /// Break caught: the retry was claimed only after the row had been read,
+    /// so clicks that arrived during that read all went on to the notes
+    /// model, and each one is a paid request for the same note.
+    func test_parallel_retries_of_one_meeting_ask_the_notes_model_once() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        try await store.upsertProgress(meta: meta(id: id, status: .failed), status: .failed, failureReason: "out of credit")
+        try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
+        let processor = SpyDirectProcessor()
+        let segments = keptSegments
+        processor.writeNotes = { retry, store in
+            // The notes model takes its time.
+            try await Task.sleep(for: .milliseconds(50))
+            _ = try await store?.storeProcessedRecording(
+                recordingId: retry.meetingId, startedAt: retry.startedAt, endedAt: retry.endedAt,
+                duration: retry.durationSeconds, title: "Release plan", markdown: "# Release plan",
+                transcript: segments, continuation: nil)
+            return true
+        }
+        let coordinator = makeCoordinator(store: store, processor: processor)
+
+        let outcomes = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<8 {
+                group.addTask { @MainActor in await coordinator.retryNotes(meetingId: id) }
+            }
+            var all: [Bool] = []
+            for await outcome in group { all.append(outcome) }
+            return all
+        }
+
+        XCTAssertEqual(processor.notesRetries.count, 1, "one paid request, whatever the number of clicks")
+        XCTAssertEqual(outcomes.filter { $0 }.count, 1)
+        let state = try await store.progressState(id: id)
+        XCTAssertEqual(state?.status, .ready)
+    }
+
+    func test_parallel_retries_with_the_recording_staged_process_it_once() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        try await store.upsertProgress(meta: meta(id: id, status: .failed), status: .failed, failureReason: "out of credit")
+        try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
+        _ = try stageRecording(id: id, lastChunkHoursAgo: 2)
+        let processor = SpyDirectProcessor()
+        let coordinator = makeCoordinator(store: store, processor: processor)
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<8 {
+                group.addTask { @MainActor in _ = await coordinator.retryNotes(meetingId: id) }
+            }
+        }
+
+        XCTAssertEqual(processor.processedIds, [id], "the staged recording is processed once")
+    }
+
     func test_meeting_cannot_be_deleted_while_its_notes_are_being_written() async throws {
         let store = try makeStore()
         let id = UUID()

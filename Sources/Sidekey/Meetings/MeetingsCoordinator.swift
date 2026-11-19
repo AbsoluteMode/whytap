@@ -1921,14 +1921,23 @@ final class MeetingsCoordinator {
     func retryNotes(meetingId: UUID) async -> Bool {
         guard let store = meetingsStore, let directProcessor,
               activeReconnect?.continuation.meetingId != meetingId, processingTails[meetingId] == nil,
-              !notesRetries.contains(meetingId),
-              let meta = (try? await store.list())?.first(where: { $0.id == meetingId }),
-              meta.progressStatus == .failed
+              !notesRetries.contains(meetingId)
         else {
             // The pane is showing "Writing the notes…": put its real state back.
             refreshOpenWindowIfNeeded()
             return false
         }
+        // Claimed before the first suspension: a second click (or several
+        // windows) arriving while the row is being read must find the retry
+        // taken, or each would pay the notes model for the same note.
+        notesRetries.insert(meetingId)
+        defer {
+            notesRetries.remove(meetingId)
+            refreshOpenWindowIfNeeded()
+        }
+        guard let meta = (try? await store.list())?.first(where: { $0.id == meetingId }),
+              meta.progressStatus == .failed
+        else { return false }
         // While the recording is still staged, the retry is the ordinary
         // queued run: it keeps the language and reconnect markers captured at
         // Stop, cannot overlap launch recovery, and reuses the kept
@@ -1946,13 +1955,7 @@ final class MeetingsCoordinator {
                 reconnectMarkers: entry.manifest.reconnectMarkers ?? [],
                 language: entry.manifest.language, continuation: nil
             )
-            refreshOpenWindowIfNeeded()
             return ((try? await store.progressState(id: meetingId)) ?? nil)?.status == .ready
-        }
-        notesRetries.insert(meetingId)
-        defer {
-            notesRetries.remove(meetingId)
-            refreshOpenWindowIfNeeded()
         }
         let retry = MeetingNotesRetry(
             meetingId: meetingId, startedAt: meta.startedAt,

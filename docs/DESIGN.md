@@ -272,7 +272,7 @@ The chosen direction is the user's tile-to-inline-form request.
   captures clicks or shifts fields/buttons. Existing keys are never read back.
   A failed Tavily deletion uses "Couldn’t remove key" in the same brief notice,
   so a storage failure is not described as a rejected credential.
-  Add-key entry points in Models/API hints open this same API keys surface.
+  Add-key entry points in Models open this same API keys surface.
 - OpenAI and Anthropic are ordinary LLM providers for all text modes. Adding a
   key never assigns routes silently; model selection retains its own synthetic
   check. Why: the user rejected limiting API setup by individual features.
@@ -1433,9 +1433,10 @@ supersedes the former window presentation. See
   web search for Agent with a neutral globe symbol. Reason: a search API should
   not appear as another LLM model.
 - Lay out all offers dynamically: two columns from 560pt, with the odd final
-  card spanning both; below 560pt use one column. Keep the offer grid scrollable
-  and footer controls outside it. Reason: five offers must not leave an empty
-  half-row or hide the last provider.
+  card spanning both; below 560pt use one column. Keep the offer grid scrollable.
+  Reason: five offers must not leave an empty half-row or hide the last provider.
+  The tab has no footer since 2026-11-19 (user request): no explanatory lines
+  and no Add API key button under the offers.
 - Show verification dates on each card: existing offers retain October 19, Tavily
   uses October 22. Reason: adding one verified offer does not reverify the rest.
 - Point all key setup, including Tavily, to API & Models → API keys.

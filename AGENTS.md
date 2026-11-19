@@ -961,8 +961,8 @@ links, including Tavily web search for Agent (1,000 monthly search credits,
 basic search costs one credit, no card required). It distinguishes starter
 credit, monthly allowance and paid-plan benefits. Dates are per-card: Tavily
 October 22, 2026; the four earlier offers October 19, 2026. The odd final card spans
-two columns; narrow surfaces use one column. Add API key opens the
-existing API-key form. Tavily has its own search tile there, without model routing.
+two columns; narrow surfaces use one column. The tab has no footer: only the
+offers. Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
 

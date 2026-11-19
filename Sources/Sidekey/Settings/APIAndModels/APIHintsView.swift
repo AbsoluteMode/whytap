@@ -36,11 +36,12 @@ struct APIHintsView: View {
                         }
                     }
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, embedded ? 24 : 16)
                 }
             }
 
-            footer
+            // The tab shows only the offers: the user removed its footer on 2026-11-19.
+            if !embedded { footer }
         }
         .background(embedded ? MacSettingsTheme.bgCard : Color(nsColor: .windowBackgroundColor))
         .onExitCommand(perform: onClose)
@@ -128,10 +129,8 @@ struct APIHintsView: View {
                 .foregroundStyle(MacSettingsTheme.text2)
                 Spacer(minLength: 16)
                 MacButton(title: "Add API key", style: .default, action: onAddKey)
-                if !embedded {
-                    MacButton(title: "Done", style: .primary, action: onClose)
-                        .keyboardShortcut(.defaultAction)
-                }
+                MacButton(title: "Done", style: .primary, action: onClose)
+                    .keyboardShortcut(.defaultAction)
             }
             .controlSize(.regular)
         }

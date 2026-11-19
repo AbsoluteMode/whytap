@@ -36,14 +36,20 @@ reading the system log.
 ## Decision
 
 - `ProviderFailure` turns a batch transcription error into a cause, from the
-  status code or the error kind only: refused key (401, 403), out of credit
-  (402), busy (429), not responding (5xx, an unfinished job), no connection
-  (URLError). Other errors keep the existing wording.
+  status code, the error kind or an allowlisted ElevenLabs refusal code:
+  refused key (401), missing permission, out of credit (402 or a named
+  quota), refused (403), busy (429), not responding (5xx, an unfinished job,
+  a timeout), no connection (the request never left the Mac). Other errors
+  keep the existing wording. It is applied only when the take ends
+  undelivered.
 - The Drop failure face shows that cause with the provider's name. The audio
   stays for Retry as before.
-- A refused key or empty balance also records the refusal for the key
-  (`KeyStatusStore`), so its tile and the feature's row show a key problem,
-  and opens API & Models on the take's row, as Smart cleanup already does.
+- A refused key, missing permission or empty balance also records the
+  refusal for the key (`KeyStatusStore`), so its tile and the feature's row
+  show a key problem, and opens API & Models on the take's row once per
+  take, as Smart cleanup already does. A 403 is not recorded: it can come
+  from a plan, a region or a proxy. A later dictation that works forgets the
+  record.
 - The free key check that runs when Settings opens does not replace a
   recorded refusal with "limited": it cannot see what the dictation saw.
 - Saving a key or Check now: when the ElevenLabs account endpoint answers
@@ -74,7 +80,20 @@ reading the system log.
   key that can transcribe stays "limited"; the free check is unchanged.
 - Reopening Settings keeps a recorded refusal against a "limited" answer;
   Check now replaces it.
-- Not seen in a running app, and not tried against the real ElevenLabs API.
+- An independent review of the first commit found seven defects, fixed in
+  the second: the reason is applied only when the take ends undelivered
+  (Settings no longer opens for a take whose partial was pasted); a Retry
+  that fails for another reason clears the earlier reason; Settings opens
+  once per take; a working dictation forgets a recorded refusal, so a key
+  whose healthy free answer is "limited" is not marked forever; a 403 is
+  shown but not recorded against the key; ElevenLabs refusals are told apart
+  by the parsed `detail.status` (missing permission, quota, invalid key), so
+  an exhausted quota does not read as a missing permission and an
+  unexplained 401 does not block saving a scoped key; only errors that mean
+  the request never left the Mac read as "No connection".
+- Not seen in a running app, and not tried against the real ElevenLabs API:
+  the three `detail.status` values are the ones the account endpoint and the
+  reported case show, and their use by the speech endpoint is assumed.
 
 ## Rejected
 

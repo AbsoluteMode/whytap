@@ -206,10 +206,19 @@ struct ProviderKeyChecker: ProviderKeyChecking {
         do {
             _ = try await transcriber.transcribe(audio: silence, language: nil)
             return .limited
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .missingPermissions) {
+            // The speech endpoint itself says the key may not transcribe.
+            return .rejected(.missingSpeechPermission)
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .quotaExceeded),
+                ProviderBatchTranscriptionError.httpStatus(402) {
+            return .rejected(.outOfCredit)
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .invalidKey) {
+            return .rejected(.invalidKey)
         } catch ProviderBatchTranscriptionError.httpStatus(401) {
-            // A scoped key that the account endpoint recognised is real: its
-            // refusal here is the missing permission, not a wrong key.
-            return .rejected(scoped ? .missingSpeechPermission : .invalidKey)
+            // An unexplained 401. A key the account endpoint recognised
+            // (scoped) is real, and one unnamed refusal is not grounds to
+            // turn it away; an unrecognised key is dead.
+            return scoped ? .limited : .rejected(.invalidKey)
         } catch is URLError {
             return .unreachable
         } catch {

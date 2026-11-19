@@ -207,7 +207,8 @@ final class APIAndModelsViewModel: ObservableObject {
                 let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: false)
                 // The free check cannot see what a dictation or a paid check
                 // found (a key without the speech permission answers
-                // "limited" here), so it never clears a refusal on its own.
+                // "limited" here), so it does not clear a refusal on its own.
+                // A dictation that works clears it (`forgetDropKeyRefusal`).
                 if status == .limited, case .rejected = keyStatuses.record(for: account)?.status { continue }
                 keyStatuses.set(status, for: account, at: now())
             }

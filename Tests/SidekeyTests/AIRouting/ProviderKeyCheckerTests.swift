@@ -269,6 +269,25 @@ final class ProviderKeyCheckerTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.path }, ["/v1/user", "/v1/speech-to-text"])
     }
 
+    func test_elevenlabs_scoped_key_with_an_exhausted_quota_is_out_of_credit_not_a_missing_permission() async {
+        let missing = #"{"detail":{"status":"missing_permissions","message":"user_read"}}"#
+        let quota = #"{"detail":{"status":"quota_exceeded","message":"quota"}}"#
+        let checker = makeChecker { request in
+            (401, [:], Data((request.url?.path == "/v1/speech-to-text" ? quota : missing).utf8))
+        }
+        let status = await check(checker, .elevenLabs, paidProbe: true)
+        XCTAssertEqual(status, .rejected(.outOfCredit))
+    }
+
+    func test_elevenlabs_scoped_key_is_not_turned_away_for_an_unexplained_401() async {
+        let missing = #"{"detail":{"status":"missing_permissions","message":"user_read"}}"#
+        let checker = makeChecker { request in
+            request.url?.path == "/v1/speech-to-text" ? (401, [:], Data("{}".utf8)) : (401, [:], Data(missing.utf8))
+        }
+        let status = await check(checker, .elevenLabs, paidProbe: true)
+        XCTAssertEqual(status, .limited, "only a named refusal blocks saving a key the account recognises")
+    }
+
     /// No connection during the paid probe says nothing about the key
     /// (final review M4).
     func test_elevenlabs_paid_probe_offline_is_unreachable() async {

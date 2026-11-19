@@ -1,19 +1,24 @@
 import Foundation
 
 /// Why a provider turned a request down, in terms a user can act on. Built
-/// from the status code or the kind of error only: a provider's own message
-/// can quote dictated text and is never read here.
+/// from the status code, the kind of error or an allowlisted refusal code
+/// only: a provider's own message can quote dictated text and is never read.
 // WHY: .project-docs/decisions/2026-11-19-provider-failure-reasons.md
 enum ProviderFailure: Equatable, Sendable {
-    /// 401 or 403: the key is wrong, revoked, or lacks the permission.
+    /// 401: the key is wrong or revoked.
     case keyRefused
-    /// 402: the account has no credit left.
+    /// The key is real but may not transcribe.
+    case missingPermission
+    /// 402, or a quota the provider names: no credit left.
     case outOfCredit
+    /// 403: refused, but not necessarily by the key (a plan, a region, a
+    /// proxy in between). Shown, never recorded against the key.
+    case refused
     /// 429: a rate or usage limit.
     case busy
-    /// 5xx, or a job the provider never finished.
+    /// 5xx, an unfinished job, or a connection the provider did not keep.
     case notResponding
-    /// The request did not reach the provider.
+    /// The request did not leave this Mac.
     case noConnection
 
     /// `nil` for a failure that says nothing about the provider (a cancelled
@@ -22,8 +27,12 @@ enum ProviderFailure: Equatable, Sendable {
     init?(_ error: Error) {
         if let failure = error as? ProviderBatchTranscriptionError {
             switch failure {
-            case .httpStatus(401), .httpStatus(403): self = .keyRefused
+            case .elevenLabs(_, .missingPermissions): self = .missingPermission
+            case .elevenLabs(_, .quotaExceeded): self = .outOfCredit
+            case .elevenLabs(_, .invalidKey): self = .keyRefused
+            case .httpStatus(401): self = .keyRefused
             case .httpStatus(402): self = .outOfCredit
+            case .httpStatus(403): self = .refused
             case .httpStatus(429): self = .busy
             case .httpStatus(let status) where status >= 500: self = .notResponding
             case .timedOut, .jobFailed: self = .notResponding
@@ -32,8 +41,17 @@ enum ProviderFailure: Equatable, Sendable {
             return
         }
         if let urlError = error as? URLError {
-            guard urlError.code != .cancelled else { return nil }
-            self = .noConnection
+            switch urlError.code {
+            case .cancelled:
+                return nil
+            case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
+                 .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff:
+                self = .noConnection
+            default:
+                // A timeout, a broken TLS handshake or a garbled answer is the
+                // far end's trouble, not the user's network.
+                self = .notResponding
+            }
             return
         }
         return nil
@@ -44,7 +62,9 @@ enum ProviderFailure: Equatable, Sendable {
     func dropMessage(provider: String) -> String {
         switch self {
         case .keyRefused: return "\(provider) refused the key"
+        case .missingPermission: return "\(provider) key: no Speech to Text access"
         case .outOfCredit: return "\(provider): out of credit"
+        case .refused: return "\(provider) refused the request"
         case .busy: return "\(provider) is busy, try again"
         case .notResponding: return "\(provider) is not responding"
         case .noConnection: return "No connection"
@@ -56,8 +76,9 @@ enum ProviderFailure: Equatable, Sendable {
     var keyStatus: KeyStatus? {
         switch self {
         case .keyRefused: return .rejected(.invalidKey)
+        case .missingPermission: return .rejected(.missingSpeechPermission)
         case .outOfCredit: return .rejected(.outOfCredit)
-        case .busy, .notResponding, .noConnection: return nil
+        case .refused, .busy, .notResponding, .noConnection: return nil
         }
     }
 

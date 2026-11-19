@@ -66,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// provider.
     /// WHY: .project-docs/decisions/2026-10-18-provider-batch-transcription.md
     private let dropBatchTranscriber: any BatchTranscribing = ProviderBatchTranscriber.forDrop()
+    /// The last batch attempt of the current take failed, and why when a
+    /// provider said so. Applied when the take ends undelivered.
+    private var dropBatchFailed = false
+    private var pendingDropProviderFailure: ProviderFailure?
+    /// API & Models was opened for this take's failure; a Retry that is
+    /// refused again does not take the user out of their app a second time.
+    private var dropFailureSettingsShown = false
     /// Batch transcriber for the agent's voice path: the Agent voice route.
     private let agentBatchTranscriber: any BatchTranscribing = ProviderBatchTranscriber.forFeature(.agentVoice)
     /// In-flight streaming session for the Drop flow. Both `.fast` and
@@ -2491,6 +2498,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         endDropAutoStop()
         dropAutoStopTakeActive = dropAutoStopStartPending
         AppState.shared.dropDeliveryFailureMessage = nil
+        pendingDropProviderFailure = nil
+        dropBatchFailed = false
+        dropFailureSettingsShown = false
         lastDropPartial = ""
         let trace = DropTurnTrace()
         dropTurnTrace = trace
@@ -3165,9 +3175,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = DropTake.shared.mode
         let generation = streamingSetupGeneration
         return DropBatchRecoverySink(
-            setPhase: { AppState.shared.phase = $0 },
+            setPhase: { [weak self] phase in
+                // The reason is applied only when the take really ends
+                // undelivered: a take whose partial was pasted after all must
+                // not open Settings or mark the key.
+                if phase == .deliveryFailed, let self, generation == self.streamingSetupGeneration {
+                    self.applyDropProviderFailure()
+                }
+                AppState.shared.phase = phase
+            },
             deliver: { [weak self] raw in
                 guard let self, generation == self.streamingSetupGeneration else { return false }
+                // A transcript exists, so the speech provider accepted the
+                // key: an earlier refusal recorded for it no longer holds.
+                self.forgetDropKeyRefusal()
                 return await self.runPostProcessAndPaste(
                     rawText: raw, targetApp: targetApp, targetPID: targetPID, mode: mode
                 )
@@ -3190,7 +3211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             noteBatchFailure: { [weak self] error in
                 guard let self, generation == self.streamingSetupGeneration else { return }
-                self.noteDropProviderFailure(error)
+                self.pendingDropProviderFailure = ProviderFailure(error)
+                self.dropBatchFailed = true
             },
             pasteRaw: { [weak self] raw in
                 // Direct paste of the raw realtime partial — no cleanup
@@ -3270,20 +3292,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sink: dropDeliverySink(targetApp: targetApp, targetPID: targetPID))
     }
 
-    /// A provider turned the take down: say which provider and why next to
-    /// Retry instead of "offline", mark its key in API & Models, and open
-    /// that row when only the user can fix it. The audio stays for Retry.
+    /// The take ends undelivered after a batch attempt. A provider's refusal
+    /// is named next to Retry instead of "offline", its key is marked in
+    /// API & Models, and that row opens once per take when only the user can
+    /// fix it. Any other batch failure clears an earlier reason, so a Retry
+    /// that fails differently does not keep blaming the key. The audio stays
+    /// for Retry.
     // WHY: .project-docs/decisions/2026-11-19-provider-failure-reasons.md
-    private func noteDropProviderFailure(_ error: Error) {
-        guard let failure = ProviderFailure(error), let route = DropTake.shared.route else { return }
+    private func applyDropProviderFailure() {
+        guard dropBatchFailed else { return }
+        dropBatchFailed = false
+        let failure = pendingDropProviderFailure
+        pendingDropProviderFailure = nil
+        guard let failure, let route = DropTake.shared.route else {
+            AppState.shared.dropDeliveryFailureMessage = nil
+            return
+        }
         let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
         AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
         if let status = failure.keyStatus {
             KeyStatusStore.shared.set(status, for: route.account, at: Date())
         }
-        if failure.needsSettings {
+        if failure.needsSettings, !dropFailureSettingsShown {
+            dropFailureSettingsShown = true
             openSettingsWindow(tab: .apiAndModels, feature: DropTake.shared.feature)
         }
+    }
+
+    /// A take produced a transcript on its provider: a refusal recorded for
+    /// that key by an earlier take is out of date. The next visit to
+    /// API & Models checks the key afresh.
+    private func forgetDropKeyRefusal() {
+        guard let account = DropTake.shared.route?.account, account != .thisMac,
+              case .rejected = KeyStatusStore.shared.record(for: account)?.status else { return }
+        KeyStatusStore.shared.forget(account)
     }
 
     /// Drop the retained total-offline take (Task 7): clears the PCM kept for a
@@ -3643,7 +3685,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard await sink.deliver(raw) else { return }
             sink.clearPendingRetry()
-        } catch is BatchRecoveryTimeout {
+        } catch let timeout as BatchRecoveryTimeout {
+            sink.noteBatchFailure(timeout)
             // Stuck decode cut by the deadline: same salvage ladder, but the
             // reason distinguishes the hang from an ordinary batch error.
             await salvageOrFail(batchFailureReason: "degraded_batch_timeout")

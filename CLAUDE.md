@@ -229,6 +229,28 @@ Voice flow (Drop / dictation):
             docs/decisions/2026-07-26-empty-batch-is-silence-not-offline.md,
             docs/decisions/2026-06-24-deliveryfailed-escapable-and-retry-robust.md,
             .project-docs/decisions/2026-10-18-provider-batch-transcription.md
+       A provider's refusal of the batch rung or of Retry is named instead
+            of "offline": ProviderFailure reads only the status code, the
+            error kind or one of three ElevenLabs refusal codes (401 key
+            refused, missing permission, 402 or quota out of credit, 403
+            refused, 429 busy, 5xx or an unfinished job or a timeout not
+            responding, no route to the network no connection). It is applied
+            only when the take ends undelivered: the failure face shows
+            "<Provider> refused the key" and the like, and a take whose
+            partial was pasted after all changes nothing. A refused key,
+            missing permission or empty balance also marks the key's tile and
+            the feature row (KeyStatusStore) and opens API & Models on the
+            take's row once per take; a 403 is shown but not recorded against
+            the key. The audio stays for Retry. A later dictation that works
+            forgets the mark; the free key check on opening Settings does not
+            clear it with a mere "limited". Saving an ElevenLabs key whose
+            account endpoint answers missing_permissions asks the
+            speech-to-text endpoint with a second of silence: only a named
+            missing_permissions there is "No Speech to Text access on this
+            key" (not saved), a named quota is out of credit, an unexplained
+            401 leaves the key "limited". The key form's notice shows the
+            reason a key was not saved. WHY:
+            .project-docs/decisions/2026-11-19-provider-failure-reasons.md
        Transcript join (BYOKTranscriptJoin): Soniox tokens carry their own
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md

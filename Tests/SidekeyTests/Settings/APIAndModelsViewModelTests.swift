@@ -591,6 +591,37 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.keyStatuses.record(for: .openRouter)?.checkedAt, env.now)
     }
 
+    /// A dictation was refused and marked the key. The free check on the next
+    /// visit answers "limited" for the same scoped key: that proves nothing
+    /// about speech, so the mark stays until a real check or a new key.
+    func test_reopening_settings_does_not_clear_a_refusal_with_a_mere_limited_answer() async throws {
+        let env = try makeEnv(keyed: [.elevenLabs])
+        env.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v2_realtime"), for: .dropFast)
+        env.keyStatuses.set(.rejected(.invalidKey), for: .elevenLabs, at: env.now.addingTimeInterval(-600))
+        env.checker.set(.limited, for: .elevenLabs)
+        let vm = env.makeViewModel()
+
+        await vm.onAppear()
+
+        XCTAssertEqual(env.keyStatuses.record(for: .elevenLabs)?.status, .rejected(.invalidKey))
+        XCTAssertEqual(vm.rows.first { $0.feature == .dropFast }?.status, .keyProblem)
+
+        // Check now may spend a paid probe, and its verdict does count.
+        await vm.checkKey(.elevenLabs)
+        XCTAssertEqual(env.keyStatuses.record(for: .elevenLabs)?.status, .limited)
+    }
+
+    func test_saving_a_key_without_speech_access_says_so_and_keeps_the_previous_key() async throws {
+        let env = try makeEnv(keyed: [.elevenLabs])
+        env.checker.set(.rejected(.missingSpeechPermission), for: .elevenLabs)
+        let vm = env.makeViewModel()
+
+        let failure = await vm.replaceKey("new-key-without-speech", for: .elevenLabs)
+
+        XCTAssertEqual(failure, "No Speech to Text access on this key")
+        XCTAssertEqual(env.lookup(.elevenLabs), .key("key"), "the working key is not replaced")
+    }
+
     func test_reopening_settings_recovers_a_cached_credit_refusal_without_replacing_the_key() async throws {
         let env = try makeEnv(keyed: [.openRouter])
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openai/gpt-6-sol"), for: .dropSmartCleanup)

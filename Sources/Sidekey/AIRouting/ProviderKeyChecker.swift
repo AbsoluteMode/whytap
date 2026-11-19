@@ -7,6 +7,9 @@ enum KeyRejection: String, Codable {
     case invalidKey
     /// The key is fine but the account has no credit left.
     case outOfCredit
+    /// The key is real but may not do speech-to-text (an ElevenLabs key
+    /// created without that permission).
+    case missingSpeechPermission
 }
 
 /// What a key check found out.
@@ -79,7 +82,11 @@ struct ProviderKeyChecker: ProviderKeyChecking {
                 return await paidProbe(apiKey: key)
             }
             if case .status(401, let body) = answer, Self.elevenLabsMissingPermissions(body) {
-                return .limited
+                // The key cannot read the account, which is fine. Whether it
+                // can transcribe is what matters here, and only a request to
+                // that endpoint tells: a key with Speech to Text switched off
+                // looks the same until the first dictation fails.
+                return allowPaidProbe ? await paidProbe(apiKey: key, scoped: true) : .limited
             }
             return Self.interpret(answer, forbidden: .limited, paymentRequired: .rejected(.outOfCredit))
         case .openRouter:
@@ -190,7 +197,7 @@ struct ProviderKeyChecker: ProviderKeyChecking {
     /// One second of silence through the recorded-speech endpoint. Only a 401
     /// condemns the key and no connection says nothing; any other answer
     /// leaves it a working scoped key.
-    private func paidProbe(apiKey: String) async -> KeyStatus {
+    private func paidProbe(apiKey: String, scoped: Bool = false) async -> KeyStatus {
         let transcriber = ProviderBatchTranscriber(
             route: { .elevenLabs(apiKey: apiKey, model: "scribe_v2") },
             session: session
@@ -199,8 +206,19 @@ struct ProviderKeyChecker: ProviderKeyChecking {
         do {
             _ = try await transcriber.transcribe(audio: silence, language: nil)
             return .limited
-        } catch ProviderBatchTranscriptionError.httpStatus(401) {
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .missingPermissions) {
+            // The speech endpoint itself says the key may not transcribe.
+            return .rejected(.missingSpeechPermission)
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .quotaExceeded),
+                ProviderBatchTranscriptionError.httpStatus(402) {
+            return .rejected(.outOfCredit)
+        } catch ProviderBatchTranscriptionError.elevenLabs(_, .invalidKey) {
             return .rejected(.invalidKey)
+        } catch ProviderBatchTranscriptionError.httpStatus(401) {
+            // An unexplained 401. A key the account endpoint recognised
+            // (scoped) is real, and one unnamed refusal is not grounds to
+            // turn it away; an unrecognised key is dead.
+            return scoped ? .limited : .rejected(.invalidKey)
         } catch is URLError {
             return .unreachable
         } catch {
@@ -216,6 +234,7 @@ struct ProviderKeyChecker: ProviderKeyChecking {
         case .limited: return "limited"
         case .rejected(.invalidKey): return "invalid_key"
         case .rejected(.outOfCredit): return "out_of_credit"
+        case .rejected(.missingSpeechPermission): return "missing_speech_permission"
         case .unreachable: return "unreachable"
         }
     }

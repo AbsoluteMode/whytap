@@ -78,6 +78,28 @@ enum ProviderBatchTranscriptionError: Error, Equatable {
     case jobFailed
     /// The Soniox job did not finish within `jobTimeout`.
     case timedOut
+    /// ElevenLabs refused with a reason it names in `detail.status`. Its 401
+    /// covers a wrong key, a missing permission and an exhausted quota alike,
+    /// so the status code cannot tell them apart.
+    case elevenLabs(status: Int, refusal: ElevenLabsRefusal)
+}
+
+/// The refusals of ElevenLabs the app tells apart. Only these three values of
+/// the parsed `detail.status` field are recognised; nothing else of the body
+/// is read, kept or logged.
+enum ElevenLabsRefusal: String, Equatable, Sendable {
+    case missingPermissions = "missing_permissions"
+    case quotaExceeded = "quota_exceeded"
+    case invalidKey = "invalid_api_key"
+
+    init?(body: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let detail = object["detail"] as? [String: Any],
+              let status = detail["status"] as? String,
+              let refusal = ElevenLabsRefusal(rawValue: status)
+        else { return nil }
+        self = refusal
+    }
 }
 
 /// Whole-take transcription with the user's own provider key, for the
@@ -238,7 +260,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
-        let data = try await send(request, body: form.finished(), onResponse: { response in
+        let data = try await send(request, body: form.finished(), elevenLabs: true, onResponse: { response in
             if let id = response.value(forHTTPHeaderField: "request-id"), !id.isEmpty, id.count <= 256 { onReference(id) }
         })
         return try Self.text(in: data)
@@ -346,14 +368,19 @@ struct ProviderBatchTranscriber: BatchTranscribing {
     // MARK: HTTP
 
     /// The body of a 2xx answer; any other status is thrown.
-    private func send(_ request: URLRequest, body: Data? = nil,
+    private func send(_ request: URLRequest, body: Data? = nil, elevenLabs: Bool = false,
                       onResponse: ((HTTPURLResponse) -> Void)? = nil) async throws -> Data {
         var request = request
         request.httpBody = body
         let (data, response) = try await session.data(for: request)
         if let response = response as? HTTPURLResponse { onResponse?(response) }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw ProviderBatchTranscriptionError.httpStatus(status) }
+        guard (200..<300).contains(status) else {
+            if elevenLabs, let refusal = ElevenLabsRefusal(body: data) {
+                throw ProviderBatchTranscriptionError.elevenLabs(status: status, refusal: refusal)
+            }
+            throw ProviderBatchTranscriptionError.httpStatus(status)
+        }
         return data
     }
 
@@ -394,6 +421,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             case .malformedResponse: return "malformed_response"
             case .jobFailed: return "job_failed"
             case .timedOut: return "timed_out"
+            case .elevenLabs(let status, let refusal): return "http_\(status)_\(refusal.rawValue)"
             }
         }
         if error is CancellationError { return "cancelled" }

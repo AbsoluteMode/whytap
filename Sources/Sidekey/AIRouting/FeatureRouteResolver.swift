@@ -49,6 +49,7 @@ struct FeatureRouteResolver {
     /// `nil` means the shared store, looked up when a route is resolved.
     private let injectedRouting: AIRoutingStore?
     private let keys: ProviderKeyStore
+    private let onDevice: OnDeviceSpeechReadiness
 
     private var routing: AIRoutingStore { injectedRouting ?? .shared }
 
@@ -56,9 +57,13 @@ struct FeatureRouteResolver {
     /// state and is `nonisolated`, so `FeatureRouteResolver()` can be a default
     /// argument of a main-actor init or function: Swift 5 evaluates default
     /// arguments outside the actor, where a main-actor init cannot be called.
-    nonisolated init(routing: AIRoutingStore? = nil, keys: ProviderKeyStore = ProviderKeyStore()) {
+    nonisolated init(
+        routing: AIRoutingStore? = nil, keys: ProviderKeyStore = ProviderKeyStore(),
+        onDevice: OnDeviceSpeechReadiness = .live
+    ) {
         self.injectedRouting = routing
         self.keys = keys
+        self.onDevice = onDevice
     }
 
     /// The stored route, for a caller that has to look at it before the key is
@@ -97,6 +102,15 @@ struct FeatureRouteResolver {
             case .unreadable: throw FeatureRouteError.missingKey(feature)
             }
             return ResolvedRoute(feature: feature, account: route.account, model: model, apiKey: apiKey, server: server)
+
+        case .thisMac:
+            // The downloaded model is this account's credential. Without it
+            // the route cannot run, and nothing is sent to a provider instead.
+            guard feature.modelUse(on: .onDevice) != nil, OnDeviceSpeechModel(rawValue: model) != nil else {
+                throw FeatureRouteError.notSet(feature)
+            }
+            guard onDevice.isReady() else { throw FeatureRouteError.missingKey(feature) }
+            return ResolvedRoute(feature: feature, account: route.account, model: model, apiKey: nil, server: nil)
 
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
             // A built-in provider cannot run without its own key, absent or

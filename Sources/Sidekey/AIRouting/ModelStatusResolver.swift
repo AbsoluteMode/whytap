@@ -76,13 +76,14 @@ extension OpenRouterLLMError {
 struct ModelStatusResolver {
     static let refusedReason = "The provider refused this model"
 
-    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic]
+    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac]
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
     private let catalogs: ModelCatalogStore
     private let checks: ModelCheckStore
     private let keyStatuses: KeyStatusStore
+    private let onDevice: OnDeviceSpeechReadiness
     private let adapterVersion: (AIProviderKind, ModelUse) -> Int
 
     init(
@@ -91,8 +92,10 @@ struct ModelStatusResolver {
         catalogs: ModelCatalogStore,
         checks: ModelCheckStore,
         keyStatuses: KeyStatusStore,
+        onDevice: OnDeviceSpeechReadiness = .live,
         adapterVersion: @escaping (AIProviderKind, ModelUse) -> Int = ModelRegistry.adapterVersion
     ) {
+        self.onDevice = onDevice
         self.routing = routing
         self.keys = keys
         self.catalogs = catalogs
@@ -253,12 +256,14 @@ struct ModelStatusResolver {
 
     func missingProviderHint(for feature: AIFeature) -> String? {
         guard sections(for: feature).isEmpty else { return nil }
-        let names = AIProviderKind.allCases
-            .filter { feature.modelUse(on: $0) != nil }
-            .map(Self.phrase(for:))
+        let kinds = AIProviderKind.allCases.filter { feature.modelUse(on: $0) != nil }
+        let names = kinds.filter { $0 != .onDevice }.map(Self.phrase(for:))
+        // The keyless way to start, where this Mac can run the model.
+        let download = kinds.contains(.onDevice) && OnDeviceSpeechModelStore.isSupportedHost
+            ? ", or download the On this Mac model" : ""
         guard let last = names.last else { return nil }
-        if names.count == 1 { return "Add a key for \(last)" }
-        return "Add a key for \(names.dropLast().joined(separator: ", ")) or \(last)"
+        if names.count == 1 { return "Add a key for \(last)\(download)" }
+        return "Add a key for \(names.dropLast().joined(separator: ", ")) or \(last)\(download)"
     }
 
     /// `ignoringStoredFailure` — what the model would be without a failed
@@ -316,6 +321,8 @@ struct ModelStatusResolver {
     /// A built-in provider needs its key; a server may run without one. An
     /// unreadable Keychain item is a key problem, never "no key".
     private func credential(of account: ProviderAccount) -> Credential {
+        // On this Mac has no key: its downloaded model is the credential.
+        if account == .thisMac { return onDevice.isReady() ? .present : .missing }
         guard let keychainAccount = account.keychainAccount(in: routing) else { return .missing }
         switch keys.lookup(account: keychainAccount) {
         case .key: return .present
@@ -406,7 +413,7 @@ struct ModelStatusResolver {
 
     private static func phrase(for kind: AIProviderKind) -> String {
         switch kind {
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic: return kind.displayName
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .onDevice: return kind.displayName
         case .openAICompatible: return "an OpenAI-compatible server"
         }
     }

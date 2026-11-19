@@ -62,6 +62,8 @@ struct ProviderKeyChecker: ProviderKeyChecking {
     private func run(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
         let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         switch account {
+        case .thisMac:
+            return .valid
         case .soniox:
             guard let key else { return .rejected(.invalidKey) }
             let answer = await get(Self.sonioxURL, header: "Authorization", value: "Bearer \(key)")

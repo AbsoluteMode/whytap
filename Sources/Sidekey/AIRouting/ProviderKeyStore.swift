@@ -21,6 +21,8 @@ extension ProviderAccount {
         case .openRouter: return OpenRouterLLMKeyStore.account
         case .openAI: return Self.openAIKeychainAccount
         case .anthropic: return Self.anthropicKeychainAccount
+        // No key exists for it; readiness is the model's files.
+        case .thisMac: return nil
         case .server(let id): return routing.server(id)?.keyAccount
         }
     }

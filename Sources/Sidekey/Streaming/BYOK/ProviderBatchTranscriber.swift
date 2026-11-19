@@ -10,6 +10,8 @@ enum ProviderBatchRoute: Equatable, Sendable {
     case elevenLabs(apiKey: String, model: String)
     /// A server's key is optional: without one no `Authorization` is sent.
     case selfHosted(apiKey: String?, endpoint: URL, model: String)
+    /// The model on this Mac: no request leaves it.
+    case onDevice(model: String)
 
     /// The batch counterpart of a resolved route; nil when the route's provider
     /// has no batch transcription (OpenRouter, Anthropic), the key a hosted provider needs
@@ -35,6 +37,8 @@ enum ProviderBatchRoute: Equatable, Sendable {
         case .server:
             guard let server = route.server, let endpoint = selfHostedEndpoint(baseURL: server.baseURL) else { return nil }
             return .selfHosted(apiKey: key, endpoint: endpoint, model: route.model)
+        case .thisMac:
+            return .onDevice(model: route.model)
         case .openRouter, .openAI, .anthropic:
             return nil
         }
@@ -53,12 +57,14 @@ enum ProviderBatchRoute: Equatable, Sendable {
         return components.url
     }
 
-    fileprivate var provider: BYOKProvider {
+    /// For the log only.
+    fileprivate var providerName: String {
         switch self {
-        case .soniox: return .soniox
-        case .deepgram: return .deepgram
-        case .elevenLabs: return .elevenLabs
-        case .selfHosted: return .selfHosted
+        case .soniox: return BYOKProvider.soniox.rawValue
+        case .deepgram: return BYOKProvider.deepgram.rawValue
+        case .elevenLabs: return BYOKProvider.elevenLabs.rawValue
+        case .selfHosted: return BYOKProvider.selfHosted.rawValue
+        case .onDevice: return "on_device"
         }
     }
 }
@@ -92,6 +98,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
     private let pollInterval: Duration
     private let jobTimeout: Duration
     private let usageSink: (AIUsageEvent) -> Void
+    private let onDevice: any BatchTranscribing
 
     /// `jobTimeout` bounds Soniox polling on the paths without the recovery
     /// deadline (recorder fallback, agent voice) and the retried deletion of
@@ -101,27 +108,32 @@ struct ProviderBatchTranscriber: BatchTranscribing {
         session: URLSession = .shared,
         pollInterval: Duration = .milliseconds(500),
         jobTimeout: Duration = .seconds(30),
-        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record
+        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
+        onDevice: any BatchTranscribing = OnDeviceBatchTranscriber()
     ) {
         self.route = { route().map { Selection(route: $0, usage: nil) } }
         self.session = session
         self.pollInterval = pollInterval
         self.jobTimeout = jobTimeout
         self.usageSink = usageSink
+        self.onDevice = onDevice
     }
 
     private init(resolvedRoute: @escaping @MainActor @Sendable () -> ResolvedRoute?, session: URLSession,
-                 pollInterval: Duration) {
+                 pollInterval: Duration, onDevice: any BatchTranscribing) {
         self.route = {
             guard let resolved = resolvedRoute(), let route = ProviderBatchRoute.make(for: resolved) else { return nil }
             let model: String
             switch route {
             case .soniox(_, let value), .deepgram(_, let value), .elevenLabs(_, let value), .selfHosted(_, _, let value): model = value
+            // Nothing is billed and no provider is called: Costs has no row.
+            case .onDevice: return Selection(route: route, usage: nil)
             }
             return Selection(route: route, usage: .init(feature: resolved.feature, account: resolved.account, model: model))
         }
         self.session = session; self.pollInterval = pollInterval; self.jobTimeout = .seconds(30)
         self.usageSink = AIUsageRecorder.record
+        self.onDevice = onDevice
     }
 
     func isAvailable() async -> Bool {
@@ -157,7 +169,8 @@ struct ProviderBatchTranscriber: BatchTranscribing {
                 result = try await elevenLabs(wav, apiKey: apiKey, model: model, language: language,
                                              onReference: { providerReference = $0 })
             case .selfHosted(let apiKey, let endpoint, let model):
-                result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)
+                result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)            case .onDevice:
+                result = try await onDevice.transcribe(audio: audio, language: language)
             }
             let text = result.trimmingCharacters(in: .whitespacesAndNewlines)
             if let context = selection.usage {
@@ -165,7 +178,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             }
             os_log("batch transcription provider=%{public}@ audio_bytes=%{public}d ms=%{public}d chars=%{public}d",
                    log: Self.log, type: .info,
-                   route.provider.rawValue, wav.count, Self.milliseconds(since: started), text.count)
+                   route.providerName, wav.count, Self.milliseconds(since: started), text.count)
             return text
         } catch {
             if let context = selection.usage {
@@ -173,7 +186,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             }
             os_log("batch transcription failed provider=%{public}@ ms=%{public}d reason=%{public}@",
                    log: Self.log, type: .error,
-                   route.provider.rawValue, Self.milliseconds(since: started), Self.reason(error))
+                   route.providerName, Self.milliseconds(since: started), Self.reason(error))
             throw error
         }
     }
@@ -401,7 +414,8 @@ extension ProviderBatchTranscriber {
         take: DropTake? = nil,
         resolver: FeatureRouteResolver = FeatureRouteResolver(),
         session: URLSession = .shared,
-        pollInterval: Duration = .milliseconds(500)
+        pollInterval: Duration = .milliseconds(500),
+        onDevice: any BatchTranscribing = OnDeviceBatchTranscriber()
     ) -> ProviderBatchTranscriber {
         let take = take ?? .shared
         return ProviderBatchTranscriber(
@@ -411,7 +425,8 @@ extension ProviderBatchTranscriber {
                 return resolved
             },
             session: session,
-            pollInterval: pollInterval
+            pollInterval: pollInterval,
+            onDevice: onDevice
         )
     }
 
@@ -422,7 +437,8 @@ extension ProviderBatchTranscriber {
         _ feature: AIFeature,
         resolver: FeatureRouteResolver = FeatureRouteResolver(),
         session: URLSession = .shared,
-        pollInterval: Duration = .milliseconds(500)
+        pollInterval: Duration = .milliseconds(500),
+        onDevice: any BatchTranscribing = OnDeviceBatchTranscriber()
     ) -> ProviderBatchTranscriber {
         ProviderBatchTranscriber(
             resolvedRoute: {
@@ -430,7 +446,8 @@ extension ProviderBatchTranscriber {
                 return resolved
             },
             session: session,
-            pollInterval: pollInterval
+            pollInterval: pollInterval,
+            onDevice: onDevice
         )
     }
 }

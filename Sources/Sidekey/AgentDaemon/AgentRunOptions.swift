@@ -41,7 +41,7 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
         case .openRouter: self = .openRouter
         case .openAI: self = .openAI
         case .anthropic: self = .anthropic
-        case .soniox, .deepgram, .elevenLabs, .server: return nil
+        case .soniox, .deepgram, .elevenLabs, .server, .thisMac: return nil
         }
     }
 }

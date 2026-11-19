@@ -103,28 +103,32 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .realtime:
             switch kind {
             case .soniox, .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
+            // The microphone features only: subtitles read system audio
+            // through a provider adapter, which the on-device model has none of.
+            case .onDevice: return self == .subtitlesAudio ? nil : .realtimeSTT
             case .openRouter, .openAI, .anthropic: return nil
             }
         case .recorded:
             switch kind {
             case .soniox: return .asyncSTT
             case .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
-            case .openRouter, .openAI, .anthropic: return nil
+            // Meetings need speaker labels, which come from the provider.
+            case .openRouter, .openAI, .anthropic, .onDevice: return nil
             }
         case .llm:
             switch kind {
             case .openRouter, .openAI, .anthropic, .openAICompatible: return .chat
-            case .soniox, .deepgram, .elevenLabs: return nil
+            case .soniox, .deepgram, .elevenLabs, .onDevice: return nil
             }
         case .decision:
             switch kind {
             case .openRouter, .openAI: return .decision
-            case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible: return nil
+            case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible, .onDevice: return nil
             }
         case .llmWithTools:
             switch kind {
             case .openRouter, .openAI, .anthropic: return .chatWithTools
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible: return nil
+            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return nil
             }
         }
     }
@@ -155,6 +159,8 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
     /// Anthropic's own Messages API and OpenCode's `anthropic` provider.
     case anthropic
     case openAICompatible
+    /// Speech recognition by a model downloaded to this Mac: no key, no network.
+    case onDevice
 
     var displayName: String {
         switch self {
@@ -165,6 +171,7 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
         case .openAI: return "OpenAI"
         case .anthropic: return "Anthropic"
         case .openAICompatible: return "OpenAI-compatible server"
+        case .onDevice: return "On this Mac"
         }
     }
 }

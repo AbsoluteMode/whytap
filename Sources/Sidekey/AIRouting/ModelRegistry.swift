@@ -13,6 +13,8 @@ enum ModelRegistry {
     /// ElevenLabs Scribe v2 for recorded audio; `scribe_v2_realtime` is the
     /// streaming model and is not accepted by the speech-to-text endpoint.
     static let elevenLabsRecordedModel = "scribe_v2"
+    /// The speech model the On this Mac provider downloads and runs.
+    static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
     static let anthropicAgentModel = "claude-sonnet-5-5"
 }
@@ -55,6 +57,7 @@ extension ModelRegistry {
         RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: "scribe_v2_realtime", uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: false),
+        RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
         RegistryModel(kind: .anthropic, id: anthropicAgentModel, uses: [.chatWithTools], diarization: false),
@@ -116,6 +119,8 @@ extension ModelRegistry {
             return nil
         case .openAICompatible:
             return nil
+        case .onDevice:
+            return feature.modelUse(on: .onDevice) == nil ? nil : onDeviceSpeechModel
         }
     }
 
@@ -136,7 +141,7 @@ extension ModelRegistry {
         switch kind {
         case .deepgram:
             return id.hasPrefix("flux-") ? "needs Deepgram's v2 streaming API" : nil
-        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible:
+        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice:
             return nil
         }
     }

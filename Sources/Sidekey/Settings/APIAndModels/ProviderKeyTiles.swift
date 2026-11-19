@@ -12,7 +12,6 @@ struct ProviderKeyTiles: View {
 
     @ObservedObject var viewModel: APIAndModelsViewModel
     @StateObject private var tavily: TavilySettings
-    @ObservedObject private var onDeviceModel = OnDeviceSpeechModelController.shared
     let onRemoveFailure: () -> Void
     let onSaveResult: (Bool) -> Void
     /// Why a key was not saved, after `onSaveResult(false)`.
@@ -34,9 +33,9 @@ struct ProviderKeyTiles: View {
     }
 
     private var targets: [Target] {
-        // On this Mac is offered only where its model can run (Apple Silicon).
+        // On this Mac is not a key: it has its own card above the tiles.
         AIProviderKind.allCases
-            .filter { $0 != .onDevice || OnDeviceSpeechModelStore.isSupportedHost }
+            .filter { $0 != .onDevice }
             .map(Target.provider) + [.tavily]
             + viewModel.chips.compactMap { chip in
                 if case .server = chip.account { return .server(chip.account) }
@@ -51,8 +50,6 @@ struct ProviderKeyTiles: View {
             if let expanded {
                 if expanded == .tavily {
                     TavilyKeyForm(settings: tavily, onSaveResult: onSaveResult, onRemoveFailure: onRemoveFailure, onClose: close)
-                } else if expanded == .provider(.onDevice) {
-                    OnDeviceModelForm(viewModel: viewModel, model: onDeviceModel)
                 } else if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
                                 onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
@@ -61,7 +58,6 @@ struct ProviderKeyTiles: View {
                 }
             }
         }
-        .task { await onDeviceModel.refresh() }
         .onKeyPress(.escape) {
             guard expanded != nil, !busy, !tavily.saving else { return .ignored }
             close()
@@ -73,10 +69,8 @@ struct ProviderKeyTiles: View {
         let provider = kind(target)
         let chip = account(target).flatMap { account in viewModel.chips.first { $0.account == account } }
         let title = target == .tavily ? "Tavily" : chip?.title ?? (provider == .openAICompatible ? "Custom server" : provider?.displayName ?? "")
-        let status = target == .provider(.onDevice) ? OnDeviceModelForm.tileStatus(onDeviceModel.status)
-            : target == .tavily ? (tavily.configured ? "Key saved" : "Add API key") : chip?.statusText ?? "Add API key"
-        let hasKey = target == .provider(.onDevice) ? onDeviceModel.status == .ready
-            : target == .tavily ? tavily.configured : chip != nil
+        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key") : chip?.statusText ?? "Add API key"
+        let hasKey = target == .tavily ? tavily.configured : chip != nil
         let selected = expanded == target
         return Button {
             expanded = selected ? nil : target
@@ -116,9 +110,7 @@ struct ProviderKeyTiles: View {
         .focused($focused, equals: target)
         .accessibilityLabel(title)
         .accessibilityValue("\(status), \(selected ? "Expanded" : "Collapsed")")
-        .accessibilityHint(target == .provider(.onDevice)
-            ? (selected ? "Close model settings" : "Open model settings")
-            : (selected ? "Close key settings" : "Open key settings"))
+        .accessibilityHint(selected ? "Close key settings" : "Open key settings")
     }
 
     private func kind(_ target: Target) -> AIProviderKind? {
@@ -191,82 +183,6 @@ extension AIProviderKind {
         case .soniox, .deepgram, .elevenLabs, .onDevice: return "Speech recognition"
         case .openRouter, .openAI, .anthropic: return "Language models"
         case .openAICompatible: return "Your own endpoint"
-        }
-    }
-}
-
-/// On this Mac has no key: its form downloads or removes the speech model.
-/// The download belongs to the shared controller, so it survives closing the
-/// form. A finished download offers the model for features without one;
-/// removing it leaves the features that ran on it Not set.
-// WHY: .project-docs/decisions/2026-11-19-on-device-dictation.md
-@MainActor
-struct OnDeviceModelForm: View {
-    @ObservedObject var viewModel: APIAndModelsViewModel
-    @ObservedObject var model: OnDeviceSpeechModelController
-
-    static func tileStatus(_ status: OnDeviceSpeechModelStatus) -> String {
-        switch status {
-        case .notDownloaded: return "Download model"
-        case .downloading(let fraction): return "Downloading \(Int((fraction * 100).rounded(.down)))%"
-        case .ready: return "Model downloaded"
-        case .failed: return "Download failed"
-        }
-    }
-
-    private var message: String {
-        let model = OnDeviceSpeechModel.parakeetTdtV3
-        switch self.model.status {
-        case .notDownloaded:
-            return "\(model.displayName) recognizes speech on this Mac. No key, and audio never leaves it. The download is \(model.approximateSize)."
-        case .downloading:
-            return "Downloading \(model.displayName), \(model.approximateSize). You can close this form."
-        case .ready:
-            return "\(model.displayName) is on this Mac. Choose it for Drop in Models."
-        case .failed:
-            return "The download didn't finish. Check your connection and try again."
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            if case .downloading(let fraction) = model.status {
-                ProgressView(value: fraction)
-                    .accessibilityLabel("Downloading speech model")
-            }
-            HStack(spacing: 10) {
-                switch model.status {
-                case .downloading:
-                    APIModelAction(title: "Cancel", style: .danger, isEnabled: true, action: remove)
-                    Spacer(minLength: 0)
-                case .ready:
-                    APIModelAction(title: "Remove", style: .danger, isEnabled: true, action: remove)
-                    Spacer(minLength: 0)
-                case .notDownloaded, .failed:
-                    Spacer(minLength: 0)
-                    APIModelAction(title: "Download", style: .primary, isEnabled: true, action: download)
-                }
-            }
-        }
-        .foregroundStyle(MacSettingsTheme.text)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func download() {
-        Task {
-            if await model.download() { viewModel.onDeviceModelChanged() }
-        }
-    }
-
-    private func remove() {
-        Task {
-            if await model.remove() { viewModel.onDeviceModelChanged() }
         }
     }
 }

@@ -342,7 +342,7 @@ final class MeetingsContentController: NSViewController {
                     await applyDetail(id: id, markdown: snapshot.markdown, transcript: snapshot.transcript,
                         version: snapshot.version, title: snapshot.title, preservingTab: preservingTab)
                 } else {
-                    await showUnavailable(id: id, generation: generation)
+                    await showUnavailable(id: id, generation: generation, preservingTab: preservingTab)
                 }
                 return
             }
@@ -352,7 +352,7 @@ final class MeetingsContentController: NSViewController {
                     log: Self.log, type: .error,
                     id.uuidString
                 )
-                await showUnavailable(id: id, generation: generation)
+                await showUnavailable(id: id, generation: generation, preservingTab: preservingTab)
                 return
             }
             guard mayApplyDetailLoad(id: id, generation: generation) else { return }
@@ -422,7 +422,7 @@ final class MeetingsContentController: NSViewController {
 
     /// A meeting without a note: its status message, plus the kept transcript
     /// and Retry notes when a failed attempt left one.
-    private func showUnavailable(id: UUID, generation: UInt64) async {
+    private func showUnavailable(id: UUID, generation: UInt64, preservingTab: Bool = false) async {
         let kept = (try? await notesRecovery?.keptTranscript(id)) ?? nil
         guard mayApplyDetailLoad(id: id, generation: generation) else { return }
         let meta = sidebarController.meetings.first { $0.id == id }
@@ -440,7 +440,8 @@ final class MeetingsContentController: NSViewController {
                     id: id, message: "Writing the notes from the saved transcript…", isLoading: true, transcript: kept
                 )
                 Task { @MainActor in await recovery.retryNotes(id) }
-            } : nil
+            } : nil,
+            preservingTab: preservingTab
         )
     }
 

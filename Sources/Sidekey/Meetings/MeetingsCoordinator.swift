@@ -115,6 +115,10 @@ final class MeetingsCoordinator {
     static let recordingExpiredMessage =
         "The recording was deleted after 24 hours without a finished note."
 
+    /// A notes retry was cut short by quitting Whytap.
+    static let notesInterruptedMessage =
+        "Writing the notes was interrupted. " + MeetingNotesFailure.transcriptKept
+
     /// The same, when the transcript was already made: only the audio goes.
     static let recordingExpiredTranscriptKeptMessage =
         "The recording was deleted after 24 hours. " + MeetingNotesFailure.transcriptKept
@@ -1334,6 +1338,7 @@ final class MeetingsCoordinator {
     func recoverFinalizeManifestsOnLaunch() async {
         guard let stagingRoot = recorderStagingRoot else { return }
         await releaseUnneededStagedRecordings(in: stagingRoot)
+        await failInterruptedNotesRetries(stagingRoot: stagingRoot)
         guard config.isEnabled else { return }
         let entries = manifestStore.scan(stagingRoot: stagingRoot)
         guard !entries.isEmpty else { return }
@@ -1731,7 +1736,12 @@ final class MeetingsCoordinator {
         let ready = committed || keepsNote
         // A transcript made before the note failed outlives the audio.
         var keptTranscript = false
-        if !ready {
+        if entry.manifest.continuation != nil {
+            // A continued call's part that never got its notes: its meeting
+            // keeps the earlier note, and nothing can show or retry this
+            // transcript once the audio is gone.
+            try? await meetingsStore?.removePendingTranscript(recordingId: recordingId)
+        } else if !ready {
             let kept = (try? await meetingsStore?.pendingTranscript(recordingId: recordingId)) ?? nil
             keptTranscript = kept?.isEmpty == false
         }
@@ -1914,7 +1924,31 @@ final class MeetingsCoordinator {
               !notesRetries.contains(meetingId),
               let meta = (try? await store.list())?.first(where: { $0.id == meetingId }),
               meta.progressStatus == .failed
-        else { return false }
+        else {
+            // The pane is showing "Writing the notes…": put its real state back.
+            refreshOpenWindowIfNeeded()
+            return false
+        }
+        // While the recording is still staged, the retry is the ordinary
+        // queued run: it keeps the language and reconnect markers captured at
+        // Stop, cannot overlap launch recovery, and reuses the kept
+        // transcript, so the speech provider is still not called.
+        if let stagingRoot = recorderStagingRoot,
+           let entry = manifestStore.scan(stagingRoot: stagingRoot).first(where: {
+               $0.manifest.recorderMeetingId == meetingId && $0.manifest.continuation == nil
+           }),
+           let event = Self.finalizedEvent(from: entry.manifest, in: entry.dir) {
+            await dispatchFinalizedForProcessing(
+                event: event,
+                startedAt: entry.manifest.startedAt,
+                endedAt: entry.manifest.isFinal ? entry.manifest.endedAt
+                    : entry.manifest.startedAt.addingTimeInterval(event.totalDurationSeconds),
+                reconnectMarkers: entry.manifest.reconnectMarkers ?? [],
+                language: entry.manifest.language, continuation: nil
+            )
+            refreshOpenWindowIfNeeded()
+            return ((try? await store.progressState(id: meetingId)) ?? nil)?.status == .ready
+        }
         notesRetries.insert(meetingId)
         defer {
             notesRetries.remove(meetingId)
@@ -1926,14 +1960,11 @@ final class MeetingsCoordinator {
             durationSeconds: TimeInterval(meta.durationSeconds)
         )
         do {
+            // The recording is gone, and with it the language captured at
+            // Stop: the current preference is the best hint left.
             guard try await directProcessor.writeNotesFromKeptTranscript(
-                retry, language: PrivacyPreferences.shared.selectedLanguage?.code, meetingsStore: store
+                retry, language: config.preferredLanguage, meetingsStore: store
             ) else { return false }
-            // The note is stored: its staged audio, if any is left, is done.
-            if let dir = stagingRootProvider?().appendingPathComponent(meetingId.uuidString),
-               FileManager.default.fileExists(atPath: dir.path) {
-                releaseStagedRecording(in: dir)
-            }
             eventsContinuation.yield(.newMeetingAvailable(id: meetingId))
             return true
         } catch {
@@ -1950,9 +1981,29 @@ final class MeetingsCoordinator {
         }
     }
 
+    /// A notes retry that the app quit in the middle of leaves its meeting
+    /// "preparing the note" with no recording to recover it from. Such a
+    /// meeting goes back to failed, with its transcript and Retry notes.
+    private func failInterruptedNotesRetries(stagingRoot: URL) async {
+        guard let store = meetingsStore, let metas = try? await store.list() else { return }
+        let staged = Set(manifestStore.scan(stagingRoot: stagingRoot).map {
+            $0.manifest.continuation?.meetingId ?? $0.manifest.recorderMeetingId
+        })
+        for meta in metas where meta.progressStatus == .generatingProtocol
+            && !staged.contains(meta.id) && processingTails[meta.id] == nil
+            && !notesRetries.contains(meta.id) && activeRecorder?.meetingId != meta.id {
+            guard let kept = (try? await store.pendingTranscript(recordingId: meta.id)) ?? nil,
+                  !kept.isEmpty else { continue }
+            _ = try? await store.updateProgress(
+                id: meta.id, status: .failed, failureReason: Self.notesInterruptedMessage
+            )
+        }
+    }
+
     func deleteMeeting(id: UUID) async -> Bool {
         guard let store = meetingsStore else { return false }
-        guard activeReconnect?.continuation.meetingId != id, processingTails[id] == nil else { return false }
+        guard activeReconnect?.continuation.meetingId != id, processingTails[id] == nil,
+              !notesRetries.contains(id) else { return false }
         guard let status = (try? await store.progressStatus(id: id)) ?? nil else {
             os_log(
                 "deleteMeeting refused: unknown meeting (meetingId: %{public}@)",
@@ -1971,7 +2022,8 @@ final class MeetingsCoordinator {
         }
         // The store lookup above suspends the MainActor; a Reconnect or a
         // processing job may have begun while that lookup was in flight.
-        guard activeReconnect?.continuation.meetingId != id, processingTails[id] == nil else { return false }
+        guard activeReconnect?.continuation.meetingId != id, processingTails[id] == nil,
+              !notesRetries.contains(id) else { return false }
         if let stagedDir = stagingRootProvider?().appendingPathComponent(id.uuidString),
            FileManager.default.fileExists(atPath: stagedDir.path) {
             do {

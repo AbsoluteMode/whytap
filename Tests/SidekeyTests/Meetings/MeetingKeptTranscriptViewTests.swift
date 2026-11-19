@@ -29,6 +29,19 @@ final class MeetingKeptTranscriptViewTests: XCTestCase {
         _ = retried
     }
 
+    func test_background_refresh_leaves_the_reader_on_the_transcript_tab() {
+        let view = MeetingsDetailView(bundleURL: nil, bundleAccessRoot: nil)
+        let id = UUID()
+        view.loadUnavailableMeeting(id: id, message: "Out of credit.", transcript: transcript)
+        view.showTab(.transcribe)
+
+        view.loadUnavailableMeeting(id: id, message: "Out of credit.", transcript: transcript, preservingTab: true)
+        XCTAssertEqual(view.currentTab, .transcribe)
+
+        view.loadUnavailableMeeting(id: UUID(), message: "Out of credit.", transcript: transcript, preservingTab: true)
+        XCTAssertEqual(view.currentTab, .note, "another meeting opens on its Note tab")
+    }
+
     func test_meeting_without_a_kept_transcript_keeps_the_transcript_tab_disabled() {
         let view = MeetingsDetailView(bundleURL: nil, bundleAccessRoot: nil)
         var states: [(Int, Bool)] = []

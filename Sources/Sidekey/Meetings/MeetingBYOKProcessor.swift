@@ -24,12 +24,18 @@ protocol MeetingDirectProcessing: AnyObject {
 // WHY: .project-docs/decisions/2026-11-19-meeting-transcript-kept.md
 struct MeetingNotesFailure: Error, CustomStringConvertible, Equatable {
     let reason: String
+    /// A Reconnect part: its meeting keeps showing the earlier note, so there
+    /// is no Transcript tab or Retry notes to point at.
+    let isLaterPart: Bool
 
-    var description: String { "\(reason) \(Self.transcriptKept)" }
+    var description: String { "\(reason) \(isLaterPart ? Self.partTranscriptKept : Self.transcriptKept)" }
 
     static let transcriptKept = "The transcript is saved: open the Transcript tab, or retry the notes."
+    static let partTranscriptKept =
+        "The transcript of the continued call is saved; its notes are retried when Whytap starts."
 
-    init(_ error: Error) {
+    init(_ error: Error, isLaterPart: Bool = false) {
+        self.isLaterPart = isLaterPart
         switch error as? OpenRouterLLMError {
         case .notConfigured, .missingModel:
             reason = "Meeting notes has no model. Choose one in Settings > API & Models."
@@ -176,8 +182,19 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             let legacyNote = continuation.precedingRecordingId == continuation.meetingId && previousNote != nil
             guard previousCommitted || legacyNote else { throw MeetingContinuationError.previousPartNotReady }
         }
-        guard let route = try await notesRoute.routeIfEnabled() else {
-            throw MeetingBYOKProcessingError.directLLMDisabled
+        // With a transcript already kept, a notes route that cannot run is a
+        // notes failure like any other: fixed copy, transcript still offered.
+        let keptBefore = try await meetingsStore.pendingTranscript(recordingId: event.meetingId)
+        let hasKept = keptBefore?.isEmpty == false
+        let route: DirectLLMRoute
+        do {
+            guard let enabled = try await notesRoute.routeIfEnabled() else {
+                throw hasKept ? OpenRouterLLMError.notConfigured as Error
+                    : MeetingBYOKProcessingError.directLLMDisabled
+            }
+            route = enabled
+        } catch let error as OpenRouterLLMError where hasKept {
+            throw MeetingNotesFailure(error, isLaterPart: continuation != nil)
         }
 
         let endedAt = endedAt ?? startedAt.addingTimeInterval(max(0, event.totalDurationSeconds))
@@ -186,7 +203,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         let segments: [TranscriptSegment]
         // An earlier attempt already transcribed this recording and only the
         // note failed: the speech provider is not called (or paid) again.
-        if let kept = try await meetingsStore.pendingTranscript(recordingId: event.meetingId), !kept.isEmpty {
+        if let kept = keptBefore, !kept.isEmpty {
             segments = kept
             transcript = Self.transcriptText(kept)
         } else if case let transcriptionRoute = try resolveMeetingsRoute(), transcriptionRoute.account == .soniox {
@@ -236,7 +253,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
                 interruptedBySleep: event.interruptedBySleep
             )
         } catch let error where !(error is CancellationError) {
-            throw MeetingNotesFailure(error)
+            throw MeetingNotesFailure(error, isLaterPart: continuation != nil)
         }
         let normalizedMarkdown = Self.normalizedProtocolMarkdown(markdown)
         let title = MeetingProtocolParser.parse(normalizedMarkdown)?.name
@@ -277,7 +294,11 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         } catch {
             throw MeetingNotesFailure(error)
         }
-        _ = try await meetingsStore.updateProgress(id: retry.meetingId, status: .generatingProtocol)
+        // No row any more: the meeting was deleted, and a note stored now
+        // would bring it back.
+        guard try await meetingsStore.updateProgress(id: retry.meetingId, status: .generatingProtocol) else {
+            return false
+        }
         let markdown: String
         do {
             markdown = try await generateNoteMarkdown(

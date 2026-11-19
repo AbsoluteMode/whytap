@@ -135,8 +135,12 @@ final class MeetingsDetailView: NSView {
     /// `onRetryNotes` adds a Retry notes button under the message.
     func loadUnavailableMeeting(
         id: UUID, message: String, isLoading: Bool = false,
-        transcript: [TranscriptSegment]? = nil, onRetryNotes: (() -> Void)? = nil
+        transcript: [TranscriptSegment]? = nil, onRetryNotes: (() -> Void)? = nil,
+        preservingTab: Bool = false
     ) {
+        // A background refresh must not pull a reader off the Transcript tab.
+        let keepTranscriptTab = preservingTab && currentTab == .transcribe
+            && currentMeetingId == id && transcript?.isEmpty == false
         editBridge?.attachMeeting(id: id)
         model.loadUnavailable(id: id, message: message, isLoading: isLoading)
         if let transcript, !transcript.isEmpty {
@@ -146,7 +150,7 @@ final class MeetingsDetailView: NSView {
             )
         }
         model.onRetryNotes = onRetryNotes
-        switchTo(.note)
+        switchTo(keepTranscriptTab ? .transcribe : .note)
     }
 
     /// Wire the edit bridge so Done-in-editor persists. Stored weakly — the

@@ -168,13 +168,12 @@ final class MeetingsStagedAudioRetentionTests: XCTestCase {
         XCTAssertEqual(kept, keptSegments, "the transcript outlives the audio")
     }
 
-    func test_retry_notes_writes_the_note_without_the_recording_and_releases_leftover_audio() async throws {
+    func test_retry_notes_writes_the_note_after_the_recording_is_gone() async throws {
         let store = try makeStore()
         let id = UUID()
         let row = meta(id: id, status: .failed)
         try await store.upsertProgress(meta: row, status: .failed, failureReason: "out of credit")
         try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
-        let dir = try stageRecording(id: id, lastChunkHoursAgo: 2)
         let processor = SpyDirectProcessor()
         let segments = keptSegments
         processor.writeNotes = { retry, store in
@@ -192,14 +191,93 @@ final class MeetingsStagedAudioRetentionTests: XCTestCase {
         XCTAssertEqual(processor.notesRetries.map(\.meetingId), [id])
         XCTAssertEqual(processor.notesRetries.first.map { Int($0.startedAt.timeIntervalSince1970) },
                        Int(row.startedAt.timeIntervalSince1970), "the note keeps the meeting's own time")
-        XCTAssertTrue(processor.processedIds.isEmpty, "the recording is not processed again")
+        XCTAssertTrue(processor.processedIds.isEmpty, "there is no recording to process")
         let state = try await store.progressState(id: id)
         XCTAssertEqual(state?.status, .ready)
         let markdown = try await store.markdown(id: id)
         XCTAssertEqual(markdown, "# Release plan")
         let stillKept = try await store.pendingTranscript(recordingId: id)
         XCTAssertNil(stillKept, "the note carries the transcript now")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "audio of a stored note is released")
+    }
+
+    /// Break caught: the button wrote the note beside the queue, so launch
+    /// recovery could run the same recording at the same time and the
+    /// language and reconnect markers captured at Stop were dropped.
+    func test_retry_notes_with_the_recording_still_staged_goes_through_the_ordinary_queue() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        try await store.upsertProgress(meta: meta(id: id, status: .failed), status: .failed, failureReason: "out of credit")
+        try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
+        _ = try stageRecording(id: id, lastChunkHoursAgo: 2)
+        let processor = SpyDirectProcessor()
+        let coordinator = makeCoordinator(store: store, processor: processor)
+
+        let wrote = await coordinator.retryNotes(meetingId: id)
+
+        XCTAssertTrue(wrote)
+        XCTAssertEqual(processor.processedIds, [id], "the staged recording is processed by the queue")
+        XCTAssertTrue(processor.notesRetries.isEmpty, "no second path beside it")
+        let state = try await store.progressState(id: id)
+        XCTAssertEqual(state?.status, .ready)
+    }
+
+    func test_meeting_cannot_be_deleted_while_its_notes_are_being_written() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        try await store.upsertProgress(meta: meta(id: id, status: .failed), status: .failed, failureReason: "x")
+        try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
+        let processor = SpyDirectProcessor()
+        let coordinator = makeCoordinator(store: store, processor: processor)
+        var deletedMidway: Bool?
+        processor.writeNotes = { _, _ in
+            deletedMidway = await coordinator.deleteMeeting(id: id)
+            return false
+        }
+
+        _ = await coordinator.retryNotes(meetingId: id)
+
+        XCTAssertEqual(deletedMidway, false, "a note stored after Delete would bring the meeting back")
+        let stillListed = try await store.list().contains { $0.id == id }
+        XCTAssertTrue(stillListed)
+    }
+
+    func test_notes_retry_cut_short_by_quitting_goes_back_to_failed_with_its_transcript() async throws {
+        let store = try makeStore()
+        let id = UUID()
+        // What a quit in the middle of Retry notes leaves: no recording, no
+        // note, the row still "preparing the note".
+        try await store.upsertProgress(meta: meta(id: id, status: .generatingProtocol), status: .generatingProtocol)
+        try await store.savePendingTranscript(recordingId: id, meetingId: id, segments: keptSegments)
+        let coordinator = makeCoordinator(store: store, processor: SpyDirectProcessor())
+
+        await coordinator.recoverFinalizeManifestsOnLaunch()
+
+        let state = try await store.progressState(id: id)
+        XCTAssertEqual(state?.status, .failed, "it can be retried and deleted again")
+        XCTAssertEqual(state?.failureReason, MeetingsCoordinator.notesInterruptedMessage)
+    }
+
+    func test_expired_reconnect_part_drops_its_unreachable_kept_transcript() async throws {
+        let store = try makeStore()
+        let meetingId = UUID()
+        let partId = UUID()
+        let started = Date().addingTimeInterval(-3 * 86_400)
+        _ = try await store.storeProcessedRecording(
+            recordingId: meetingId, startedAt: started, endedAt: started.addingTimeInterval(60), duration: 60,
+            title: "Call", markdown: "# Call", transcript: keptSegments, continuation: nil)
+        let continuation = MeetingContinuation(
+            meetingId: meetingId, precedingRecordingId: meetingId, startedAt: started,
+            audioOffsetSeconds: 60, gapSeconds: 30, partNumber: 2)
+        try await store.savePendingTranscript(recordingId: partId, meetingId: meetingId, segments: keptSegments)
+        _ = try stageRecording(id: partId, lastChunkHoursAgo: 25, continuation: continuation)
+        let coordinator = makeCoordinator(store: store, processor: SpyDirectProcessor())
+
+        await coordinator.recoverFinalizeManifestsOnLaunch()
+
+        let kept = try await store.pendingTranscript(recordingId: partId)
+        XCTAssertNil(kept, "nothing can show or retry it once the audio is gone")
+        let state = try await store.progressState(id: meetingId)
+        XCTAssertEqual(state?.status, .ready, "the meeting keeps its earlier note")
     }
 
     func test_retry_notes_that_fails_again_keeps_the_meeting_failed_with_the_new_reason() async throws {

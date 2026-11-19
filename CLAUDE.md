@@ -407,7 +407,10 @@ Meeting Notes:
   "The transcript is saved". The note pane then enables the Transcript tab
   and shows Retry notes. A retry, by button or by launch recovery, reuses the
   kept transcript and never calls the speech provider again; the button
-  (MeetingsCoordinator.retryNotes) needs no recording. After 24 hours only
+  (MeetingsCoordinator.retryNotes) runs the ordinary queued processing while
+  the recording is staged and needs no recording afterwards. Delete is
+  refused while notes are being written; a retry cut short by quitting goes
+  back to failed on launch. After 24 hours only
   the audio is deleted: the kept transcript and Retry notes remain. Storing
   the note or deleting the meeting removes the kept copy. A Reconnect part's
   kept transcript is reused but not shown, because its meeting still shows

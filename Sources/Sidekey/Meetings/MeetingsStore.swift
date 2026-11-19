@@ -500,6 +500,12 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
             values: [recordingId.uuidString, meetingId.uuidString, encoded])
     }
 
+    /// Drops the kept transcript of a recording that will never get a note.
+    func removePendingTranscript(recordingId: UUID) throws {
+        try executeBound("DELETE FROM meeting_pending_transcripts WHERE recording_id = ?",
+            values: [recordingId.uuidString])
+    }
+
     /// The kept transcript of one recording, or `nil` when there is none.
     func pendingTranscript(recordingId: UUID) throws -> [TranscriptSegment]? {
         var statement: OpaquePointer?

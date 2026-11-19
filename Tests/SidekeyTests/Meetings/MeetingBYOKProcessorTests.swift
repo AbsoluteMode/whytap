@@ -255,6 +255,17 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         ]
         try await store.savePendingTranscript(recordingId: meetingId, meetingId: meetingId, segments: segments)
 
+        // Kept, but the meeting itself was deleted meanwhile: nothing is written.
+        let deleted = try await processor.writeNotesFromKeptTranscript(retry, language: "en", meetingsStore: store)
+        XCTAssertFalse(deleted, "a note must not bring a deleted meeting back")
+        XCTAssertEqual(llm.transcriptsSeen.count, 0, "and the notes model is not paid for it")
+
+        try await store.upsertProgress(
+            meta: MeetingMetaWithLocalState(
+                id: meetingId, startedAt: started, endedAt: started.addingTimeInterval(60), durationSeconds: 60,
+                title: nil, syncStatus: .new, serverVersion: 1, createdAt: started),
+            status: .failed, failureReason: "out of credit")
+
         let wrote = try await processor.writeNotesFromKeptTranscript(retry, language: "en", meetingsStore: store)
 
         XCTAssertTrue(wrote)
@@ -266,6 +277,35 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         XCTAssertEqual(meta?.progressStatus, .ready)
         XCTAssertEqual(meta?.durationSeconds, 60)
         await store.close()
+    }
+
+    func test_kept_transcript_with_the_notes_key_removed_fails_with_fixed_copy_not_a_raw_error() async throws {
+        let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
+        let processor = setup.processor(openRouterClient: SwitchableLLMClient(), sonioxSession: session) { _ in
+            FixedTranscriptAdapter(text: "unused")
+        }
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        try await store.savePendingTranscript(
+            recordingId: meetingId, meetingId: meetingId,
+            segments: [TranscriptSegment(speaker: nil, start: 0, end: 1, text: "We ship on Friday.")])
+        try setup.keys.delete(account: OpenRouterLLMKeyStore.account)
+        let event = MeetingRecorder.FinalizedEvent(meetingId: meetingId, chunkURLs: [], totalDurationSeconds: 1, reason: .user)
+
+        do {
+            _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+            XCTFail("expected a notes failure")
+        } catch let failure as MeetingNotesFailure {
+            XCTAssertTrue(failure.description.contains("key of the Meeting notes provider is missing"))
+            XCTAssertTrue(failure.description.hasSuffix(MeetingNotesFailure.transcriptKept))
+        }
+        await store.close()
+    }
+
+    func test_a_continued_calls_notes_failure_does_not_point_at_a_tab_it_cannot_open() {
+        let failure = MeetingNotesFailure(OpenRouterLLMError.unexpectedStatus(402, nil), isLaterPart: true)
+        XCTAssertTrue(failure.description.hasSuffix(MeetingNotesFailure.partTranscriptKept))
+        XCTAssertFalse(failure.description.contains("Transcript tab"))
     }
 
     func test_notes_failure_wording_names_the_cause_and_never_quotes_the_provider() {

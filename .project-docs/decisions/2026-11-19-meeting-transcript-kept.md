@@ -49,6 +49,10 @@ checkpoint were deleted and the transcript was gone.
   kept transcript without the recording.
 - The 24-hour retention deletes the audio only. The kept transcript stays
   until the note is stored or the meeting is deleted.
+- While the recording is still staged, Retry notes is the ordinary queued
+  processing of that recording (it reuses the kept transcript). Once the
+  audio is gone it writes the note from the kept transcript alone, with the
+  current language preference as the hint.
 - Only a first recording's kept transcript is shown. A Reconnect part's is
   reused on retry but not shown: its meeting still shows the earlier note.
 
@@ -72,6 +76,16 @@ checkpoint were deleted and the transcript was gone.
   repeated failure keeps the meeting failed with the new reason; a meeting
   that is not failed is refused.
 - Deleting a meeting removes its kept transcript.
+- An independent review of the first commit found seven defects, fixed in
+  the second: Delete during Retry notes could bring the meeting back (delete
+  is refused while notes are written, and a missing row aborts the retry);
+  a retry cut short by quitting left the meeting stuck (launch sets it back
+  to failed); with the recording still staged the button now runs the
+  ordinary queued processing, which keeps the captured language and markers
+  and cannot overlap launch recovery; the pane no longer stays on a spinner
+  or jumps off the Transcript tab on refresh; a removed notes key with a
+  kept transcript shows fixed copy; a continued call's part has its own
+  wording and its kept transcript is dropped when its audio expires.
 - The note pane was not seen in a running app; its model and tab state are
   covered by tests.
 

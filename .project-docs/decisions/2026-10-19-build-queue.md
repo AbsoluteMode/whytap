@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/test-build-queue.py
     confirmed_at: 2026-10-19
-related: [2026-10-19-shared-working-app.md, ../processes/shared-app-development.md]
+related: [2026-10-19-shared-working-app.md, ../processes/shared-app-development.md, 2026-11-19-on-demand-build-queue-builder.md]
 ---
 
 # Persistent build queue
@@ -85,6 +85,10 @@ Empty or unchanged queue checks remain silent. Explicit recovery avoids a
 timeout starting a second build while the original process still runs.
 
 ## Supersedes / superseded by
+
+The designated always-open builder chat and its five-minute automation are
+superseded by the [on-demand builder](2026-11-19-on-demand-build-queue-builder.md);
+the queue, its states and callbacks remain.
 
 Supersedes the permission for any feature session to integrate its own work in
 the earlier shared-app policy. All review, exact-head/base, local validation,

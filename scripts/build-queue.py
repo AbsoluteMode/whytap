@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -41,6 +42,74 @@ def common_dir():
     return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
 
 
+DOCUMENTATION_SCRIPTS_ENV = "WHYTAP_PROJECT_DOCUMENTATION_SCRIPTS"
+DOCUMENTATION_CHECKS = (
+    ("sync_agent_guidance.py", ("--check",),
+     "AGENTS.md / CLAUDE.md differ from .project-docs/agent-context.md. Edit only "
+     "agent-context.md, then run sync_agent_guidance.py --project-root . --write."),
+    ("validate_project_documentation.py", ("--tracked-documentation",),
+     "Project documentation validation failed (English-only records, reciprocal "
+     "related links, sources, sensitive content)."),
+)
+
+
+def documentation_scripts():
+    """Locate the project-documentation skill without naming anyone's home path."""
+    override = os.environ.get(DOCUMENTATION_SCRIPTS_ENV)
+    if override:
+        candidates = [Path(override).expanduser()]
+    else:
+        home = Path.home()
+        tail = "skills/project-documentation/scripts"
+        candidates = [found for root in (".codex", ".claude") for found in
+                      (home / root / "plugins" / "cache").glob("*/project-documentation/*/" + tail)]
+        candidates += [home / root / tail for root in (".claude", ".codex", ".agents")]
+    usable = [c for c in candidates
+              if all((c / name).is_file() for name, _, _ in DOCUMENTATION_CHECKS)]
+    if override and not usable:
+        raise ValueError(DOCUMENTATION_SCRIPTS_ENV + " does not contain the validators")
+    # Several installed copies can coexist; the most recently updated one wins.
+    return max(usable, key=lambda c: max((c / name).stat().st_mtime
+                                         for name, _, _ in DOCUMENTATION_CHECKS), default=None)
+
+
+def documentation_preflight(head):
+    """Reject mechanical documentation failures at submission, not after a build turn.
+
+    WHY: .project-docs/decisions/2026-11-19-on-demand-build-queue-builder.md
+    The reviewed commit is checked, not the caller's working tree. The builder
+    still validates the integrated result; this only removes the cheap round trip.
+    """
+    try:
+        git("cat-file", "-e", head + ":.project-docs/agent-context.md")
+    except subprocess.CalledProcessError:
+        return "not_applicable"
+    scripts = documentation_scripts()
+    if scripts is None:
+        return "unavailable"
+    scratch = Path(tempfile.mkdtemp(prefix="whytap-enqueue-docs-"))
+    tree = scratch / "tree"
+    try:
+        git("worktree", "add", "--detach", "--quiet", str(tree), head)
+        for name, flags, hint in DOCUMENTATION_CHECKS:
+            result = subprocess.run(
+                [sys.executable, str(scripts / name), "--project-root", str(tree), *flags],
+                capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                output = (result.stdout + result.stderr).strip().replace(str(tree) + "/", "")
+                raise ValueError("Not queued: " + hint + " Fix it on the branch, push and "
+                                 "enqueue the newly reviewed head.\n" + name + " output:\n"
+                                 + output[-3000:])
+    except subprocess.TimeoutExpired:
+        raise ValueError("Not queued: documentation checks timed out")
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", str(tree)],
+                       capture_output=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], capture_output=True)
+    return "passed"
+
+
 def canonical_pr(url):
     match = re.fullmatch(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/([1-9]\d*)", url)
     remote = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([\w.-]+)/([\w.-]+?)"
@@ -56,6 +125,12 @@ def canonical_pr(url):
     if (owner.lower(), repo.lower()) != (remote_owner.lower(), remote_repo.lower()):
         raise ValueError("The PR does not belong to this repository's origin")
     return f"https://github.com/{remote_owner}/{remote_repo}/pull/{number}"
+
+
+def validate_head(head):
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise ValueError("--head must be the exact full 40-character reviewed commit SHA")
+    git("cat-file", "-e", head + "^{commit}")
 
 
 @contextmanager
@@ -87,6 +162,10 @@ def database():
                 acknowledged_at TEXT
             );
         """)
+        if "retry" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
+            # '' = wait for a person or a handoff; 'meeting' = the watcher retries the
+            # deferred local install whenever the meeting gate is clear.
+            db.execute("ALTER TABLE tickets ADD COLUMN retry TEXT NOT NULL DEFAULT ''")
         db.execute("BEGIN IMMEDIATE")
         yield db
         db.commit()
@@ -147,9 +226,7 @@ def run(args):
             if not config(db).get("builder_thread"):
                 raise ValueError("Configure the builder before submitting work")
             args.pr = canonical_pr(args.pr)
-            if not re.fullmatch(r"[0-9a-f]{40}", args.head):
-                raise ValueError("--head must be the exact full 40-character reviewed commit SHA")
-            git("cat-file", "-e", args.head + "^{commit}")
+            validate_head(args.head)
             if not args.session:
                 raise ValueError("Set --session (Codex defaults to CODEX_THREAD_ID)")
             existing = db.execute("SELECT * FROM tickets WHERE pr=? AND head=?",
@@ -177,8 +254,10 @@ def run(args):
                 "dependencies,queued_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
                  args.checks, json.dumps(args.acceptance), args.dependencies, stamp, stamp))
-            event(db, cursor.lastrowid, "queued", "Accepted into the build queue")
+            event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
+                  "checks at submission: " + args.documentation_checks)
             return {"created": True, "builder": config(db),
+                    "documentation_checks": args.documentation_checks,
                     "ticket": ticket_json(db, cursor.lastrowid)}
 
         if args.command == "status":
@@ -210,11 +289,14 @@ def run(args):
             item = row(db, args.ticket)
             if args.status not in TRANSITIONS.get(item["status"], set()):
                 raise ValueError("Invalid transition: " + item["status"] + " -> " + args.status)
+            if args.retry_install and args.status != "pending_install":
+                raise ValueError("--retry-install applies only to pending_install")
             stamp = now()
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
-            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, "
+            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
                        "queued_at=CASE WHEN ?='queued' THEN ? ELSE queued_at END WHERE id=?",
-                       (args.status, args.note, stamp, args.status, stamp, args.ticket))
+                       (args.status, args.note, stamp, "meeting" if args.retry_install else "",
+                        args.status, stamp, args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 
@@ -240,7 +322,8 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--actor", default=os.environ.get("CODEX_THREAD_ID", ""))
+    parser.add_argument("--actor", default=os.environ.get("WHYTAP_BUILD_QUEUE_ACTOR")
+                        or os.environ.get("CODEX_THREAD_ID", ""))
     commands = parser.add_subparsers(dest="command", required=True)
     setup = commands.add_parser("configure")
     setup.add_argument("--builder-thread", required=True)
@@ -261,6 +344,9 @@ def main():
     update.add_argument("--ticket", type=int, required=True)
     update.add_argument("--status", choices=STATES, required=True)
     update.add_argument("--note", required=True)
+    update.add_argument("--retry-install", action="store_true",
+                        help="pending_install only: the checked candidate waits for the "
+                             "meeting gate; the watcher retries the install by itself")
     events = commands.add_parser("events")
     events.add_argument("--ticket", type=int)
     events.add_argument("--pending", action="store_true")
@@ -277,10 +363,14 @@ def main():
             temporary.replace(destination)
             result = {"helper": str(destination)}
         else:
+            if args.command == "enqueue":
+                # Outside the queue transaction: the checks take seconds.
+                validate_head(args.head)
+                args.documentation_checks = documentation_preflight(args.head)
             result = run(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, sqlite3.Error, subprocess.CalledProcessError, OSError) as error:
-        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
         return 1
     return 0
 

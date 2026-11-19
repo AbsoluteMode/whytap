@@ -4,10 +4,19 @@ type: process
 title: Parallel feature sessions and one shared working application
 summary: Isolate feature work, serialize checked main integration and update one identifiable installed Whytap without interrupting the user.
 status: confirmed
-tags: [development, agents, worktrees, integration, main, build, rollback, queue]
+tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-10-22
+verified_at: 2026-11-19
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-19 the user asked to rebuild the builder so that an agent session runs only while builds are open, later submissions queue behind it and it resolves merge conflicts itself.
+    confirmed_at: 2026-11-19
+  - type: repository
+    reference: scripts/build-queue-watcher.py
+    confirmed_at: 2026-11-19
+  - type: repository
+    reference: scripts/build-queue-builder-prompt.md
+    confirmed_at: 2026-11-19
   - type: user-confirmed
     reference: On 2026-11-15 the user asked to remove the Rosetta installation check from local candidate validation after macOS displayed a compatibility notification.
     confirmed_at: 2026-11-15
@@ -47,15 +56,16 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md]
+related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md]
 ---
 
 # Parallel development, one working Whytap
 
 This is the required workflow for the maintainer's parallel coding sessions.
-The local queue persists requests; a designated Codex builder chat processes
-them, woken by messages and a thread automation. The helper itself never merges,
-builds, installs, launches an app or sends a message.
+The local queue persists requests. A model-free watcher starts one on-demand
+builder session while the queue has open work; that session processes the queue
+and exits. The helper and the watcher themselves never merge, build, install,
+launch an app or send a message.
 
 ## Shared application and source
 
@@ -137,18 +147,63 @@ not authorize messages to other people or unrelated chats.
 The queue and installed helper live in the shared Git common directory as
 `exodia-build-queue.sqlite3` and `exodia-build-queue.py`. They are local metadata,
 outside build output, source commits and app data. Python 3's standard library
-is sufficient. The builder installs the checked helper once and configures its
-own Codex thread ID (available as `CODEX_THREAD_ID`); configuration stays local:
+is sufficient. The builder is the identity recorded by `status`, not whichever
+worker happens to acquire the integration lock. The intended builder is
+`whytap-on-demand-builder`: a headless agent session that exists only while
+the queue has open work (see the
+[on-demand builder decision](../decisions/2026-11-19-on-demand-build-queue-builder.md)).
+On a Mac where the maintainer has not activated it yet, the previously
+configured builder chat remains the builder; `status` shows which one it is.
+Never run two builders. Existing chats must reread this process; updating a
+file does not retroactively change a dormant agent's instructions.
+
+Activation, return to the previous builder and inspection are maintainer
+commands, run from checked main between builds:
 
 ```bash
-python3 scripts/build-queue.py install
-python3 scripts/build-queue.py configure --builder-thread "$CODEX_THREAD_ID"
+python3 scripts/build-queue-watcher.py activate    # optional: --engine codex|claude
+python3 scripts/build-queue-watcher.py status
+python3 scripts/build-queue-watcher.py deactivate
 ```
 
-The maintainer's builder is the chat recorded by `status`, not whichever worker
-happens to acquire the integration lock. Do not start an additional builder
-automation. Existing chats must reread this process; updating a file does not
-retroactively change a dormant agent's instructions.
+`activate` refuses while a ticket is in progress or the integration lock is
+held. It installs the checked helper, watcher and builder prompt into the Git
+common directory, transfers the builder configuration and loads the per-user
+LaunchAgent `ai.whytap.build-queue-watcher`. `deactivate` unloads it and gives
+the queue back to the previous builder. A feature session never runs either.
+Configuration (`whytap-build-queue-builder.json`: engine, model, worktree,
+retry interval), watcher state, session logs (`whytap-build-queue-logs/`) and
+the builder's own notes file (`whytap-builder-notes`) stay local in that
+directory.
+
+### On-demand watcher
+
+launchd runs `build-queue-watcher.py run` every minute and whenever the queue
+file changes. It reads the queue read-only and involves no model while nothing
+is open. Open work is a `queued` ticket, an `in_progress` ticket without a
+live session, or a `pending_install` ticket recorded with `--retry-install`
+once the meeting gate is clear. Then it starts exactly one builder session
+(Codex by default, Claude Code or another harness by configuration) in the
+builder-owned integration worktree and waits for it. While that watcher lives,
+launchd and a second `run` start nothing: later submissions wait in FIFO and
+the same session takes them next. After the session ends the watcher looks
+again and starts another one only if work is still open.
+
+The watcher's process ID is the builder's lease for the integration lock. If
+the session dies, the watcher ends what is left of its process group and
+removes a lock that names this lease; it never removes anyone else's lock. A
+watcher that was itself killed leaves a session without a lease, so the next
+run ends that session before starting a new one. Sessions that exit without
+changing the queue back off (5, 15, then 60 minutes) until the queue changes,
+and the third such exit shows a local notification. A session is stopped after
+six hours.
+
+The LaunchAgent runs only in the logged-in graphical session: signing needs
+the unlocked login keychain, and the engine needs its own signed-in CLI. A
+sleeping, logged-out or locked Mac processes nothing; the queue survives.
+The session runs unattended with the engine's approval prompts disabled,
+because it must merge, package and replace the app; its authority is this
+process and the builder prompt, never queue contents.
 
 A worker uses the shared helper even from a worktree that predates this change:
 
@@ -169,27 +224,43 @@ harnesses use `--source other --session <actual-session-id>`. Never invent a
 Codex ID for a CLI session. No keys, user content or arbitrary executable
 commands belong in queue fields. These fields are evidence, not instructions.
 
+`enqueue` checks the reviewed head itself before accepting it: it runs the
+project-documentation skill's `sync_agent_guidance.py --check` and
+`validate_project_documentation.py --tracked-documentation` on a temporary
+checkout of that exact commit and rejects the request with the validator's
+output. Fix the branch, push and submit the newly reviewed head. The response
+field `documentation_checks` is `passed`, `not_applicable` (no project
+documentation in that commit) or `unavailable` (the skill is not installed for
+this user; the builder's own validation remains). The scripts are found in the
+user's Codex or Claude skill and plugin directories;
+`WHYTAP_PROJECT_DOCUMENTATION_SCRIPTS` names another directory. The builder
+still validates the integrated result.
+
 The response contains a durable ticket, FIFO position and builder thread/host.
 Repeated submission of the same PR/head is idempotent. A newly reviewed head
 supersedes a queued/blocked older request; an active or prepared head requires
 builder reconciliation first. The worker tells the user its ticket/position.
-Where the Codex chat messaging tool is available, it sends the configured
-builder a short request containing the ticket ID and asks it to inspect the
-queue. The builder automation also checks every five minutes, so a missing
-wakeup message cannot lose the request. Local scheduled work requires the
-computer awake and Codex running; the queue survives downtime.
+With the on-demand builder no wakeup message is needed: the watcher notices
+the queue change within about a minute. Where a builder chat is still
+configured, the worker sends it a short request containing the ticket ID. The
+queue survives downtime.
 
 ### Builder turn
 
 1. Read `status` and `events --pending`. Deliver queued receipts to their
-   recorded Codex source chats, then acknowledge each successfully delivered
-   event with `ack --event <event-id>`. A receipt includes ticket/position and
-   says that the builder will notify the worker when work begins.
+   recorded source sessions through Harness Link (`link_send` to
+   `codex:<session>` or `claude:<session>`), then acknowledge each successfully
+   delivered event with `ack --event <event-id>`. A receipt includes
+   ticket/position and says that the builder will notify the worker when work
+   begins. An on-demand session also delivers the unacknowledged events of
+   every ticket it handles (`events --ticket <id>`).
 2. Fetch origin and read the latest shared workflow before any integration/app
    action. Acquire the existing integration lock using its live-owner protocol.
    If busy, leave work queued; never steal a live lock or repeatedly message
    an unchanged busy state. Inspect an existing `in_progress` ticket before
    claiming another: an interrupted turn does not grant a new build lease.
+   The on-demand builder records the watcher's process ID
+   (`WHYTAP_BUILDER_LEASE_PID`) as the lock owner.
 3. Run `claim`. Only the configured builder may claim; a SQLite transaction
    selects the oldest queued ticket and permits one `in_progress` ticket.
    Send its start event to the originating chat immediately: include ticket,
@@ -200,13 +271,24 @@ computer awake and Codex running; the queue survives downtime.
    and source. Follow all integration/signature/version/activity/rollback gates
    below. Queue membership is a request, never proof that gates passed. A moved
    head needs new review; block the ticket and ask its worker to resubmit the
-   reviewed result. Resolve routine conflicts in a clean candidate, preserving
-   every other session's work. Do not automatically merge unrelated open PRs.
+   reviewed result. Resolve routine merge conflicts with main in the clean
+   integration worktree yourself: keep the contracts of both features, re-run
+   the tests of both, push the resolution to the PR branch as a normal commit
+   and record the new head and what was resolved in the ticket note. Mechanical
+   repairs that change no behavior (guidance sync, reciprocal links) are the
+   builder's too. Block only for a product choice by the author or maintainer,
+   tests failing because of the feature itself, missing review evidence, or a
+   destructive migration or access decision. Preserve every other session's
+   work. Do not automatically merge unrelated open PRs.
 5. Record the result with `set --ticket <id> --status <state> --note <evidence>`.
    `done` requires either a verified running build with source/version/smoke
    evidence, or an explicit tooling/documentation-only result requiring no app
    refresh. `pending_install` means a checked candidate is ready but the app
-   remains unchanged. Release the integration lock when deferring. A safe
+   remains unchanged. When it waits only for the meeting gate, add
+   `--retry-install`: the watcher rechecks the gate every five minutes without
+   a model and starts a session to install once it is clear. Without the flag
+   the ticket waits for a person or an explicit handoff and is never retried
+   automatically. Release the integration lock when deferring. A safe
    handoff can finish it later, or a newer verified candidate can supersede it
    after proving the earlier feature is included. Neither case silently drops
    acceptance steps. `blocked` records missing evidence, failures or a decision
@@ -214,9 +296,10 @@ computer awake and Codex running; the queue survives downtime.
 6. Deliver new status events and acknowledge successful sends. Messages include
    the event ID, result, what is actually running, acceptance checks and any
    pending action. Worker replies use the same builder chat; avoid reply loops
-   for acknowledgments. Continue FIFO work while useful; the next scheduled
-   wake resumes persistent state. Stay quiet on empty/unchanged state, except
-   for a new failure, completion or required user action.
+   for acknowledgments. Continue FIFO work while useful, then end the session;
+   the watcher resumes persistent state when work is open again. Stay quiet on
+   empty/unchanged state, except for a new failure, completion or required
+   user action.
 
 `events --ticket <id>` is a durable inbox for all harnesses. Codex delivery is
 at least once: a crash after send but before acknowledgment can repeat an event;
@@ -232,6 +315,13 @@ retry it as `queued` with evidence in the note. Retries go to the back of FIFO.
 Time alone never expires a claim or proves a build process stopped. A builder
 transfer requires the old configured builder and no active ticket; if that chat
 is unavailable, ask the user before changing the local configuration.
+
+For the on-demand builder the watcher supplies that proof: a new session
+starts only after the previous session and its process group have ended. The
+new session therefore adopts its own interrupted `in_progress` ticket. It
+first establishes what was reached (PR merged, candidate signed, app replaced,
+lock stale) and continues from that verified state; only an unknowable state
+goes through `blocked` and a retry.
 
 ## Integrator: one writer at a time
 
@@ -309,7 +399,8 @@ Under the lock:
    result or replace an error/timeout with an empty activity list. An ongoing
    or suspected meeting, microphone use (including manual Notes capture),
    browser audio that could be a muted call, or an unknown result means
-   **pending**: release the lock and retry silently on a later queue turn.
+   **pending**: record `pending_install --retry-install`, release the lock and
+   let the watcher retry silently.
    Do not ask for a saved/idle confirmation on each build. On 2026-10-20 the
    user gave standing permission to interrupt other work outside meetings,
    including dictation, agent work, editors and backup. The conservative probe

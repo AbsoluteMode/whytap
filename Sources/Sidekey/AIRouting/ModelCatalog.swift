@@ -152,6 +152,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         case .openAI:
             guard let apiKey, !apiKey.isEmpty else { throw CatalogFetchError.http(401, code: nil) }
             return try Self.parseOpenAI(await get(Self.openAIModelsURL, bearer: apiKey))
+        case .thisMac:
+            // Its models are the app's own registry; nothing is fetched.
+            return []
         case .server:
             guard let url = server?.modelsURL else { throw CatalogFetchError.malformed }
             let data = try await get(url, bearer: apiKey)

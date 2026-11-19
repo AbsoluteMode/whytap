@@ -34,7 +34,8 @@ Also in the island: Translate and live Subtitles, Vocab, To-do, Calendar and Mon
 
 ## Your keys, your Mac
 
-- Use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI or Anthropic, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
+- Dictate on this Mac with a downloaded speech model: no key, no account, audio never leaves it (Apple Silicon).
+- Or use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI or Anthropic, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
 - Audio and text go only to the provider you chose for that feature. There is no Whytap account, backend or telemetry.
 - Free and open source under the MIT license.
 
@@ -50,7 +51,7 @@ More in [Install and update](docs/install.md).
 ## Quick start
 
 1. Open Whytap. Hover the island at the top of the screen and click **Settings**.
-2. In **Permissions**, allow Microphone and Accessibility. In **API & Models**, add a speech key and pick a model for Drop.
+2. In **Permissions**, allow Microphone and Accessibility. In **API & Models**, download the On this Mac model or add a speech key, then pick a model for Drop.
 3. Click into any text field, hold <kbd>Space</kbd>, speak and release.
 
 | Action | Default |

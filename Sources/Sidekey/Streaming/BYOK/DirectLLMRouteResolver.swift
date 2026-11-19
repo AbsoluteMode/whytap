@@ -88,7 +88,7 @@ struct DirectLLMRouteResolver {
             }
             return DirectLLMRoute(endpoint: .custom(baseURL: baseURL, apiKey: key), model: model,
                                   usageContext: .init(feature: feature, account: snapshot.route.account, model: model))
-        case .soniox, .deepgram, .elevenLabs:
+        case .soniox, .deepgram, .elevenLabs, .thisMac:
             return nil
         }
     }

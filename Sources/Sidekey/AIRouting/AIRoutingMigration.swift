@@ -119,6 +119,9 @@ struct AIRoutingMigration {
         switch account {
         case .server:
             return true
+        case .thisMac:
+            // Never a migration target: the old settings had no such choice.
+            return false
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
             guard let keyAccount = account.keychainAccount(in: routing) else { return false }
             return keys.lookup(account: keyAccount) != .absent

@@ -61,16 +61,19 @@ you can return from the island's Settings control:
 1. In **Permissions**, allow Microphone and Accessibility. macOS may open
    **System Settings → Privacy & Security** to grant them. Reopen Whytap if
    macOS asks you to quit after changing a permission.
-2. In **API & Models**, click **Add key**, choose a speech provider and enter its
-   API key. Whytap checks it and stores it in macOS Keychain; then pick a model
-   for Drop Fast and Drop Smart.
+2. In **API & Models**, choose how speech is recognized. Without any account:
+   open **API keys**, click **On this Mac** and **Download** (Apple Silicon,
+   about 470 MB), then use it for Drop Fast. With a provider: click a speech
+   provider's tile and enter its API key; Whytap checks it and stores it in
+   macOS Keychain. Then pick a model for Drop Fast and Drop Smart.
 3. Optionally add OpenRouter, OpenAI, Anthropic or your own endpoint and pick
    models for Smart cleanup and meeting summaries.
 4. Focus a text field, hold **Space**, speak, then release Space.
 
 Whytap is free. Your selected provider handles API billing; there are no Whytap
-accounts, plans or credits. On-device speech and text models were removed; if
-you used **Local** before, choose a speech model in **API & Models** to dictate
+accounts, plans or credits. Dictation can also run on this Mac with a downloaded speech
+model, for free and without a key. On-device text models were removed; if you
+used **Local** before, choose a speech model in **API & Models** to dictate
 again.
 
 For the optional agent, add an OpenRouter, OpenAI or Anthropic key, choose the

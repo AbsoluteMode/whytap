@@ -291,6 +291,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
             "Add a key for Soniox, Deepgram, ElevenLabs or an OpenAI-compatible server"
+                + (HostArchitecture.isAppleSilicon ? ", or download the On this Mac model" : "")
         )
         env.addKey(.soniox)
         XCTAssertNil(env.resolver.missingProviderHint(for: .dropFast))

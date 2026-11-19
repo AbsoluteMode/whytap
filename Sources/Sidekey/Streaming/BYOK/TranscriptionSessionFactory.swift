@@ -9,6 +9,7 @@ struct TranscriptionSessionFactory {
     private let resolver: FeatureRouteResolver
     private let vocab: VocabularyCache
     private let makeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
+    private let makeOnDeviceSession: @MainActor (String?) -> StreamingSessionRunning
 
     /// `vocab` defaults to the shared cache, looked up when the session is
     /// built: a literal `.shared` default does not compile for a main-actor
@@ -16,11 +17,15 @@ struct TranscriptionSessionFactory {
     init(
         resolver: FeatureRouteResolver = FeatureRouteResolver(),
         vocab: VocabularyCache? = nil,
-        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered
+        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered,
+        makeOnDeviceSession: @escaping @MainActor (String?) -> StreamingSessionRunning = {
+            OnDeviceTranscriptionSession(language: $0)
+        }
     ) {
         self.resolver = resolver
         self.vocab = vocab ?? .shared
         self.makeAdapter = makeAdapter
+        self.makeOnDeviceSession = makeOnDeviceSession
     }
 
     /// Build the session for `feature`. `resilient` enables degraded-turn batch
@@ -44,6 +49,12 @@ struct TranscriptionSessionFactory {
             throw FeatureRouteError.invalidLanguageConfiguration(feature, error)
         }
         let resolved = try resolver.resolve(route, for: feature)
+        // On this Mac: no adapter and no socket. The session keeps the take's
+        // audio itself, so it never resolves `.degraded`.
+        // WHY: .project-docs/decisions/2026-11-19-on-device-dictation.md
+        if resolved.account == .thisMac {
+            return makeOnDeviceSession(language)
+        }
         let adapter = try makeAdapter(resolved)
         return DirectProviderStreamingSession(
             audioEngine: StreamingAudioEngine(),

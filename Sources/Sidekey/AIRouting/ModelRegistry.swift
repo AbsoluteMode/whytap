@@ -114,7 +114,7 @@ extension ModelRegistry {
             case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return anthropicAgentModel
             case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
-        case .openAI:
+        case .openAI, .groq:
             // The authenticated live catalog is the source of available IDs.
             return nil
         case .openAICompatible:
@@ -141,7 +141,7 @@ extension ModelRegistry {
         switch kind {
         case .deepgram:
             return id.hasPrefix("flux-") ? "needs Deepgram's v2 streaming API" : nil
-        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice:
+        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .openAICompatible, .onDevice:
             return nil
         }
     }

@@ -127,6 +127,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
     private static let openRouterURL = URL(string: "https://openrouter.ai/api/v1/models")!
     static let anthropicModelsURL = URL(string: "https://api.anthropic.com/v1/models")!
     static let openAIModelsURL = URL(string: "https://api.openai.com/v1/models")!
+    static let groqModelsURL = URL(string: "https://api.groq.com/openai/v1/models")!
     static let anthropicVersion = "2023-06-01"
     /// A stop for a catalog that keeps saying `has_more`.
     private static let anthropicMaxPages = 20
@@ -152,6 +153,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         case .openAI:
             guard let apiKey, !apiKey.isEmpty else { throw CatalogFetchError.http(401, code: nil) }
             return try Self.parseOpenAI(await get(Self.openAIModelsURL, bearer: apiKey))
+        case .groq:
+            guard let apiKey, !apiKey.isEmpty else { throw CatalogFetchError.http(401, code: nil) }
+            return try Self.parseGroq(await get(Self.groqModelsURL, bearer: apiKey))
         case .thisMac:
             // Its models are the app's own registry; nothing is fetched.
             return []
@@ -493,6 +497,45 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
 
     static func parseServer(_ data: Data) throws -> [CatalogModel] {
         try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id) }
+    }
+
+    /// Groq lists speech, voice and moderation models next to its text models
+    /// and has no field that tells them apart, so those families are left out
+    /// by name. Groq documents tool use for every text model it hosts; each
+    /// pick still passes the synthetic model check. A model Groq marks
+    /// inactive is not offered.
+    static func parseGroq(_ data: Data) throws -> [CatalogModel] {
+        struct Response: Decodable {
+            struct Model: Decodable {
+                let id: String
+                let active: Bool?
+                let created: ModelDateTimestamp?
+                let contextWindow: Int?
+                let maxCompletionTokens: Int?
+
+                enum CodingKeys: String, CodingKey {
+                    case id, active, created
+                    case contextWindow = "context_window"
+                    case maxCompletionTokens = "max_completion_tokens"
+                }
+            }
+            let data: [Model]
+        }
+        let notText = ["whisper", "tts", "orpheus", "guard", "safeguard", "embed"]
+        return try decode(Response.self, from: data).data.compactMap { model in
+            let id = model.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, model.active != false else { return nil }
+            let lowered = id.lowercased()
+            guard !notText.contains(where: lowered.contains) else { return nil }
+            return CatalogModel(
+                id: id,
+                uses: [.chat, .chatWithTools],
+                contextLength: model.contextWindow.flatMap { $0 > 0 ? $0 : nil },
+                maxOutputTokens: model.maxCompletionTokens.flatMap { $0 > 0 ? $0 : nil },
+                supportsTools: true,
+                catalogDate: model.created?.date
+            )
+        }.sorted { $0.id < $1.id }
     }
 
     /// OpenAI's list has IDs, not endpoint capabilities. Offer text families;

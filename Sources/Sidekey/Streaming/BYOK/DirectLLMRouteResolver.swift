@@ -53,12 +53,16 @@ struct DirectLLMRouteResolver {
         guard !model.isEmpty else { return nil }
 
         switch snapshot.route.account {
-        case .openAI, .anthropic:
+        case .openAI, .anthropic, .groq:
             guard let account = snapshot.keyAccount, case .key(let key) = keys.lookup(account: account) else {
                 throw OpenRouterLLMError.missingKey
             }
-            let endpoint: OpenAICompatibleLLMEndpoint = snapshot.route.account == .openAI
-                ? .openAI(apiKey: key) : .anthropic(apiKey: key)
+            let endpoint: OpenAICompatibleLLMEndpoint
+            switch snapshot.route.account {
+            case .openAI: endpoint = .openAI(apiKey: key)
+            case .groq: endpoint = .groq(apiKey: key)
+            default: endpoint = .anthropic(apiKey: key)
+            }
             return DirectLLMRoute(endpoint: endpoint, model: model,
                                   usageContext: .init(feature: feature, account: snapshot.route.account, model: model))
         case .openRouter:

@@ -6,6 +6,8 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
     case openRouter = "openrouter"
     case openAI = "openai"
     case anthropic
+    /// Native Whytap Agent only: OpenCode was never configured for it.
+    case groq
 
     /// OpenCode's provider id, the prefix of `--model <id>/<model>`.
     var openCodeID: String { rawValue }
@@ -15,6 +17,7 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
         case .openRouter: return "OpenRouter"
         case .openAI: return "OpenAI"
         case .anthropic: return "Anthropic"
+        case .groq: return "Groq"
         }
     }
 
@@ -24,6 +27,7 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
         case .openRouter: return "OPENROUTER_API_KEY"
         case .openAI: return "OPENAI_API_KEY"
         case .anthropic: return "ANTHROPIC_API_KEY"
+        case .groq: return "GROQ_API_KEY"
         }
     }
 
@@ -32,8 +36,13 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
         case .openRouter: return .openRouter
         case .openAI: return .openAI
         case .anthropic: return .anthropic
+        case .groq: return .groq
         }
     }
+
+    /// OpenRouter's and Groq's Chat Completions wire format: system message
+    /// first, `tool_calls`, `role: tool` results.
+    var usesChatCompletions: Bool { self == .openRouter || self == .groq }
 
     /// The provider of an Agent route, or `nil` for one OpenCode cannot run.
     init?(account: ProviderAccount) {
@@ -41,6 +50,7 @@ enum OpenCodeModelProvider: String, Equatable, Sendable {
         case .openRouter: self = .openRouter
         case .openAI: self = .openAI
         case .anthropic: self = .anthropic
+        case .groq: self = .groq
         case .soniox, .deepgram, .elevenLabs, .server, .thisMac: return nil
         }
     }

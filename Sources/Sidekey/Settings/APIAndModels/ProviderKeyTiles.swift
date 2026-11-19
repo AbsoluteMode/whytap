@@ -189,7 +189,7 @@ extension AIProviderKind {
     var keyTileDetail: String {
         switch self {
         case .soniox, .deepgram, .elevenLabs, .onDevice: return "Speech recognition"
-        case .openRouter, .openAI, .anthropic: return "Language models"
+        case .openRouter, .openAI, .anthropic, .groq: return "Language models"
         case .openAICompatible: return "Your own endpoint"
         }
     }

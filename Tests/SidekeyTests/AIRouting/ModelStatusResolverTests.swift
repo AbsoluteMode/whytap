@@ -287,7 +287,7 @@ final class ModelStatusResolverTests: XCTestCase {
 
     func test_missing_provider_hint_lists_providers_for_the_feature() throws {
         let env = try makeEnv()
-        XCTAssertEqual(env.resolver.missingProviderHint(for: .agent), "Add a key for OpenRouter, OpenAI or Anthropic")
+        XCTAssertEqual(env.resolver.missingProviderHint(for: .agent), "Add a key for OpenRouter, OpenAI, Anthropic or Groq")
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
             "Add a key for Soniox, Deepgram, ElevenLabs or an OpenAI-compatible server"

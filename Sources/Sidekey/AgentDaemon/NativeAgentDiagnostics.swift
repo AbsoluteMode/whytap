@@ -6,7 +6,7 @@ import os.log
 enum NativeAgentDiagnostics {
     enum Stage: String, Codable { case request, failed, accepted }
     enum Failure: String, Codable { case cancelled, timeout, network, response }
-    enum Provider: String, Codable { case openRouter, openAI, anthropic }
+    enum Provider: String, Codable { case openRouter, openAI, anthropic, groq }
     enum Scope: String, Codable { case agent }
     enum Finish: String, Codable { case stop, tool_calls, length, error, end_turn, tool_use, completed, other }
     enum Envelope: String, Codable { case http, root200, choice200 }
@@ -140,7 +140,7 @@ enum NativeAgentDiagnostics {
                   error: ErrorShape? = nil, failure: Failure? = nil, finish: Finish? = nil) {
             let elapsed = started.duration(to: .now).components
             let service: Provider
-            switch provider { case .openRouter: service = .openRouter; case .openAI: service = .openAI; case .anthropic: service = .anthropic }
+            switch provider { case .openRouter: service = .openRouter; case .openAI: service = .openAI; case .anthropic: service = .anthropic; case .groq: service = .groq }
             sink(Event(turn: turn, request: request, provider: service,
                 scope: .agent,
                 pinned: pinned, toolsCount: toolsCount, outputLimit: outputLimit, stage: stage,

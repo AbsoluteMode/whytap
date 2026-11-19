@@ -16,6 +16,11 @@ struct NativeAgentToolResult {
 /// Keeps provider-native assistant items intact within a turn, including
 /// OpenAI reasoning items and Anthropic thinking signatures.
 struct NativeAgentModel {
+    static let groqChatURL = OpenAICompatibleLLMEndpoint.groqBaseURL
+        .appendingPathComponent("chat").appendingPathComponent("completions")
+    /// Enough for an answer or a tool call, small beside Groq's per-minute token limits.
+    static let groqOutputLimit = 2048
+
     let options: AgentRunOptions
     let key: String
     let system: String
@@ -48,7 +53,11 @@ struct NativeAgentModel {
         }
         count(messages)
         guard textSize < textBudget else { throw NativeAgentError.message("This task filled the agent’s context. Start a shorter request.") }
-        let outputLimit = min(8192, options.openCodeModelSpec?.outputLimit ?? 8192)
+        // Groq counts the requested output against its tokens-per-minute
+        // limit together with the prompt, so the agent asks for less there.
+        // WHY: .project-docs/decisions/2026-11-19-groq-provider.md
+        let outputCap = options.openCodeProvider == .groq ? Self.groqOutputLimit : 8192
+        let outputLimit = min(outputCap, options.openCodeModelSpec?.outputLimit ?? outputCap)
         var request: URLRequest
         switch options.openCodeProvider {
         case .openAI:
@@ -70,6 +79,19 @@ struct NativeAgentModel {
             request.setValue(nil, forHTTPHeaderField: "Authorization")
             request.setValue(key, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        case .groq:
+            // Plain Chat Completions on Groq's own host: no OpenRouter routing
+            // fields or headers. `strict` is left out: Groq does not say which
+            // models accept it, and the final answer is validated locally.
+            request = try NativeAgentHTTP.request(url: Self.groqChatURL, key: key, body: [
+                "model": model, "messages": [["role": "system", "content": system]] + messages,
+                "max_completion_tokens": outputLimit,
+                "tools": tools.map { tool -> [String: Any] in
+                    var function = tool
+                    function.removeValue(forKey: "strict")
+                    return ["type": "function", "function": function]
+                }
+            ])
         case .openRouter:
             var body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system]] + messages,
                                       "max_tokens": outputLimit, "tools": tools.map { ["type": "function", "function": $0] }]
@@ -104,7 +126,7 @@ struct NativeAgentModel {
             provider: options.openCodeProvider,
             pinned: options.openCodeProvider == .openRouter && options.openRouterProvider != nil,
             toolsCount: tools.count, outputLimit: outputLimit, sink: diagnosticsSink)
-        let wireMessages = options.openCodeProvider == .openRouter ? [["role": "system", "content": system]] + messages : messages
+        let wireMessages = options.openCodeProvider.usesChatCompletions ? [["role": "system", "content": system]] + messages : messages
         trace.emit(.request, bytes: request.httpBody?.count, shape: .init(messages: wireMessages))
         var responseStatus: Int?, responseBytes: Int?
         do {
@@ -123,7 +145,8 @@ struct NativeAgentModel {
             switch options.openCodeProvider {
             case .openRouter: cost = AIUsageNumber.nonnegative(usage?["cost"]); basis = .reported
             case .anthropic: cost = AnthropicUsagePrices.cost(model: model, usage: usage); basis = .estimated
-            case .openAI: cost = nil; basis = .unavailable
+            // Groq reports tokens only; no price is invented for them.
+            case .openAI, .groq: cost = nil; basis = .unavailable
             }
             usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
                                         currency: .usd, amount: cost, basis: cost == nil ? .unavailable : basis))
@@ -180,7 +203,7 @@ struct NativeAgentModel {
                     calls.append(try call(id: block["id"], name: block["name"], arguments: block["input"]))
                 } else { text += block["text"] as? String ?? "" }
             }
-        case .openRouter:
+        case .openRouter, .groq:
             guard let choice = (response["choices"] as? [[String: Any]])?.first,
                   ["stop", "tool_calls"].contains(choice["finish_reason"] as? String ?? ""),
                   let message = choice["message"] as? [String: Any] else {
@@ -208,7 +231,10 @@ struct NativeAgentModel {
                         "arguments": arguments]]
                 }
             }
-            if let details = message["reasoning_details"] as? [[String: Any]], !details.isEmpty {
+            // Groq returns `reasoning` but does not document it as a request
+            // property, so it is not sent back there.
+            if options.openCodeProvider == .groq {
+            } else if let details = message["reasoning_details"] as? [[String: Any]], !details.isEmpty {
                 replay["reasoning_details"] = details
             } else if let reasoning = message["reasoning"] as? String ?? message["reasoning_content"] as? String {
                 replay["reasoning"] = reasoning

@@ -44,7 +44,7 @@ struct ModelProbe: ModelProbing {
                 let task = URLSession.shared.webSocketTask(with: SonioxBYOKAdapter.handshakeRequest(apiKey: key))
                 return URLSessionWebSocketTransport(task: task)
             })
-        case .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .server, .thisMac:
+        case .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .server, .thisMac:
             return try RealtimeAdapterFactory.make(route)
         }
     }
@@ -215,6 +215,10 @@ struct ModelProbe: ModelProbing {
         case .openAI:
             guard key != nil else { return .inconclusive(reason: "Key problem") }
             url = URL(string: "https://api.openai.com/v1")!
+            isOpenRouter = false
+        case .groq:
+            guard key != nil else { return .inconclusive(reason: "Key problem") }
+            url = OpenAICompatibleLLMEndpoint.groqBaseURL
             isOpenRouter = false
         case .soniox, .deepgram, .elevenLabs, .thisMac:
             return .inconclusive(reason: "Not supported yet")

@@ -43,6 +43,7 @@ final class NativeAgentProvider: CLIProvider {
         case .openRouter: account = OpenRouterLLMKeyStore.account
         case .openAI: account = ProviderAccount.openAIKeychainAccount
         case .anthropic: account = ProviderAccount.anthropicKeychainAccount
+        case .groq: account = ProviderAccount.groqKeychainAccount
         }
         return keys.read(account: account)
     }

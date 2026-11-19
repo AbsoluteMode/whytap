@@ -35,7 +35,7 @@ Also in the island: Translate and live Subtitles, Vocab, To-do, Calendar and Mon
 ## Your keys, your Mac
 
 - Dictate on this Mac with a downloaded speech model: no key, no account, audio never leaves it (Apple Silicon).
-- Or use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI or Anthropic, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
+- Or use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI, Anthropic or Groq, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
 - Audio and text go only to the provider you chose for that feature. There is no Whytap account, backend or telemetry.
 - Free and open source under the MIT license.
 

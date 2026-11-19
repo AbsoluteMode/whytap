@@ -19,7 +19,7 @@ current macOS user's directory. Whytap retains the historical `Sidekey`, `whytap
 and `Whytap` store names to preserve existing keys, notes and memory. Do not
 rename them without an explicit migration and recovery path.
 
-The app's native agent calls the selected OpenRouter, OpenAI or Anthropic model directly; Tavily search has its own Keychain key. Actions are
+The app's native agent calls the selected OpenRouter, OpenAI, Anthropic or Groq model directly; Tavily search has its own Keychain key. Actions are
 enabled by default so implementation and review can edit files and run tests;
 the user may disable them in Settings. The dedicated neutral workspace is not a filesystem sandbox. Source customization can use any coding harness.
 

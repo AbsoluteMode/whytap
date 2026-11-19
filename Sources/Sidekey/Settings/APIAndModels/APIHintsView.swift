@@ -121,6 +121,8 @@ struct APIHintsView: View {
         let category: Category
         let provider: String
         let assetName: String?
+        /// Shown when Whytap bundles no mark for the provider.
+        var symbol = "globe"
         let allowance: String
         let cadence: String
         let access: Access
@@ -166,8 +168,20 @@ struct APIHintsView: View {
             detail: "Choose a :free model. Limit: 20 requests a minute. Tool support and availability vary; agent turns may use several requests.",
             url: URL(string: "https://openrouter.ai/models?max_price=0")!
         ),
-        // List only offers whose key works in Whytap as it is: Groq and Cloudflare
-        // wait for their own provider support (user decision, 2026-11-19).
+        // List only offers whose key works in Whytap as it is (user decision,
+        // 2026-11-19). Groq has its own key tile; Cloudflare still waits.
+        Hint(
+            category: .models,
+            provider: "Groq",
+            assetName: nil,
+            symbol: ProviderKindIcon.systemName(for: .groq),
+            allowance: "1,000 / day",
+            cadence: "free model requests",
+            access: .noCard,
+            detail: "Free plan, per model: about 30 requests and 8,000 tokens a minute, so long Agent tasks can hit the limit. Add the Groq key in API keys; it works for Agent, Drop Smart cleanup, meeting notes and translation.",
+            url: URL(string: "https://console.groq.com/docs/rate-limits")!,
+            checked: "2026-11-19"
+        ),
         Hint(
             category: .models,
             provider: "Claude Max",
@@ -233,7 +247,7 @@ struct APIHintsView: View {
                     if let assetName = hint.assetName {
                         ProviderBrandIcon(assetName: assetName, size: 17, color: MacSettingsTheme.text)
                     } else {
-                        Image(systemName: "globe")
+                        Image(systemName: hint.symbol)
                             .font(.system(size: 17))
                             .foregroundStyle(MacSettingsTheme.text)
                     }

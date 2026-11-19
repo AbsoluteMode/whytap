@@ -26,7 +26,7 @@ struct NativeAgentHTTP {
         let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw NativeAgentError.message("The service returned an invalid response.") }
         guard (200..<300).contains(http.statusCode) else {
-            if [401, 402, 403, 429].contains(http.statusCode) {
+            if [401, 402, 403, 413, 429].contains(http.statusCode) {
                 throw Self.serviceError(status: http.statusCode, object: nil)
             }
             var data = Data()
@@ -107,6 +107,8 @@ struct NativeAgentHTTP {
         switch status {
         case 401, 403: return failure("The service refused this API key. Check Settings.")
         case 402: return failure("The provider has insufficient credit.")
+        // Groq answers 413 when one request exceeds the plan's tokens per minute.
+        case 413: return failure("This request is larger than the provider allows at once. Try a shorter request or another model.")
         case 429: return failure("The service is busy or its usage limit was reached. Try again later.")
         case 200: return failure("The selected provider returned an error. Try again.")
         default: return failure("The service returned HTTP \(status). Try again.")

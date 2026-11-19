@@ -12,6 +12,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
     case openRouter
     case openAI
     case anthropic
+    case groq
     /// The speech model downloaded to this Mac. It has no key: the model's
     /// files are its credential (`OnDeviceSpeechReadiness`).
     case thisMac
@@ -27,12 +28,13 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case .openRouter: return .openRouter
         case .openAI: return .openAI
         case .anthropic: return .anthropic
+        case .groq: return .groq
         case .thisMac: return .onDevice
         case .server: return .openAICompatible
         }
     }
 
-    /// `"soniox"`, `"deepgram"`, `"elevenLabs"`, `"openRouter"`, `"anthropic"`, `"thisMac"` or
+    /// `"soniox"`, `"deepgram"`, `"elevenLabs"`, `"openRouter"`, `"anthropic"`, `"groq"`, `"thisMac"` or
     /// `"server:<uuid, lower case>"`.
     var storageID: String {
         switch self {
@@ -42,6 +44,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case .openRouter: return "openRouter"
         case .openAI: return "openAI"
         case .anthropic: return "anthropic"
+        case .groq: return "groq"
         case .thisMac: return "thisMac"
         case .server(let id): return Self.serverPrefix + id.uuidString.lowercased()
         }
@@ -57,6 +60,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case "openRouter": parsed = .openRouter
         case "openAI": parsed = .openAI
         case "anthropic": parsed = .anthropic
+        case "groq": parsed = .groq
         case "thisMac": parsed = .thisMac
         default:
             guard storageID.hasPrefix(Self.serverPrefix),

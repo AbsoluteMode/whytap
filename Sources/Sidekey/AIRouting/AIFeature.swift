@@ -106,28 +106,28 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             // The microphone features only: subtitles read system audio
             // through a provider adapter, which the on-device model has none of.
             case .onDevice: return self == .subtitlesAudio ? nil : .realtimeSTT
-            case .openRouter, .openAI, .anthropic: return nil
+            case .openRouter, .openAI, .anthropic, .groq: return nil
             }
         case .recorded:
             switch kind {
             case .soniox: return .asyncSTT
             case .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
             // Meetings need speaker labels, which come from the provider.
-            case .openRouter, .openAI, .anthropic, .onDevice: return nil
+            case .openRouter, .openAI, .anthropic, .groq, .onDevice: return nil
             }
         case .llm:
             switch kind {
-            case .openRouter, .openAI, .anthropic, .openAICompatible: return .chat
+            case .openRouter, .openAI, .anthropic, .groq, .openAICompatible: return .chat
             case .soniox, .deepgram, .elevenLabs, .onDevice: return nil
             }
         case .decision:
             switch kind {
             case .openRouter, .openAI: return .decision
-            case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible, .onDevice: return nil
+            case .soniox, .deepgram, .elevenLabs, .anthropic, .groq, .openAICompatible, .onDevice: return nil
             }
         case .llmWithTools:
             switch kind {
-            case .openRouter, .openAI, .anthropic: return .chatWithTools
+            case .openRouter, .openAI, .anthropic, .groq: return .chatWithTools
             case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return nil
             }
         }
@@ -158,6 +158,10 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
     case openAI
     /// Anthropic's own Messages API and OpenCode's `anthropic` provider.
     case anthropic
+    /// Groq's OpenAI-compatible Chat Completions, text models only. Its Whisper
+    /// transcribes finished recordings and has no adapter here.
+    // WHY: .project-docs/decisions/2026-11-19-groq-provider.md
+    case groq
     case openAICompatible
     /// Speech recognition by a model downloaded to this Mac: no key, no network.
     case onDevice
@@ -170,6 +174,7 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
         case .openRouter: return "OpenRouter"
         case .openAI: return "OpenAI"
         case .anthropic: return "Anthropic"
+        case .groq: return "Groq"
         case .openAICompatible: return "OpenAI-compatible server"
         case .onDevice: return "On this Mac"
         }

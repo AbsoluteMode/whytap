@@ -76,7 +76,7 @@ extension OpenRouterLLMError {
 struct ModelStatusResolver {
     static let refusedReason = "The provider refused this model"
 
-    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac]
+    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .thisMac]
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
@@ -201,7 +201,7 @@ struct ModelStatusResolver {
         switch account {
         case .anthropic, .soniox, .elevenLabs: title = "Released"
         case .deepgram: title = "Updated"
-        case .openAI: title = "Created"
+        case .openAI, .groq: title = "Created"
         case .openRouter: title = "Added to OpenRouter"
         default: return nil
         }
@@ -413,7 +413,7 @@ struct ModelStatusResolver {
 
     private static func phrase(for kind: AIProviderKind) -> String {
         switch kind {
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .onDevice: return kind.displayName
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .onDevice: return kind.displayName
         case .openAICompatible: return "an OpenAI-compatible server"
         }
     }

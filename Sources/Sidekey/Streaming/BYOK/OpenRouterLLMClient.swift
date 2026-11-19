@@ -46,6 +46,13 @@ struct OpenAICompatibleLLMEndpoint: Equatable {
               requiresAPIKey: true, sendsOpenRouterHeaders: false, textAPI: .anthropic)
     }
 
+    /// Groq speaks plain Chat Completions on its own host, with its own key.
+    static let groqBaseURL = URL(string: "https://api.groq.com/openai/v1")!
+
+    static func groq(apiKey: String?) -> OpenAICompatibleLLMEndpoint {
+        .init(baseURL: groqBaseURL, apiKey: apiKey, requiresAPIKey: true, sendsOpenRouterHeaders: false)
+    }
+
     static func openRouter(apiKey: String?, provider: String? = nil) -> OpenAICompatibleLLMEndpoint {
         OpenAICompatibleLLMEndpoint(
             baseURL: URL(string: "https://openrouter.ai/api/v1")!,
@@ -202,6 +209,15 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         ))
     }
 
+    /// Drops one leading `<think>…</think>` block. An unclosed block means the
+    /// answer never started, so nothing of it is kept.
+    static func withoutLeadingThinkBlock(_ content: String) -> String {
+        let trimmed = content.drop(while: \.isWhitespace)
+        guard trimmed.hasPrefix("<think>") else { return content }
+        guard let end = trimmed.range(of: "</think>") else { return "" }
+        return String(trimmed[end.upperBound...].drop(while: \.isWhitespace))
+    }
+
     func complete(endpoint: OpenAICompatibleLLMEndpoint, model: String, messages: [OpenRouterChatMessage]) async throws -> String {
         let trimmedKey = endpoint.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if endpoint.requiresAPIKey, trimmedKey.isEmpty { throw OpenRouterLLMError.missingKey }
@@ -295,9 +311,15 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
                        discoveryMs, requestMs, decoded.usage?.completion_tokens ?? -1,
                        decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1)
             }
-            guard let content = decoded.choices.first?.message.content,
-                  !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else {
+            guard var content = decoded.choices.first?.message.content else {
+                throw OpenRouterLLMError.emptyContent
+            }
+            // Without tools Groq's reasoning models may put their thinking in
+            // the text itself; it must never be pasted as the user's words.
+            if endpoint.baseURL == OpenAICompatibleLLMEndpoint.groqBaseURL {
+                content = Self.withoutLeadingThinkBlock(content)
+            }
+            guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw OpenRouterLLMError.emptyContent
             }
             return content

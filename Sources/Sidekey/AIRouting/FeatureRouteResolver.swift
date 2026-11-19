@@ -112,7 +112,7 @@ struct FeatureRouteResolver {
             guard onDevice.isReady() else { throw FeatureRouteError.missingKey(feature) }
             return ResolvedRoute(feature: feature, account: route.account, model: model, apiKey: nil, server: nil)
 
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq:
             // A built-in provider cannot run without its own key, absent or
             // unreadable, and never borrows another provider's. (`keychainAccount`
             // answers `nil` only for a removed server.)

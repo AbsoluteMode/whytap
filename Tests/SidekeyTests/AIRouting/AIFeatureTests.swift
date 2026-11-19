@@ -27,10 +27,10 @@ final class AIFeatureTests: XCTestCase {
     }
 
     func test_provider_kinds_carry_their_ui_names() {
-        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice])
+        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .openAICompatible, .onDevice])
         XCTAssertEqual(
             AIProviderKind.allCases.map(\.displayName),
-            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "OpenAI-compatible server", "On this Mac"]
+            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "Groq", "OpenAI-compatible server", "On this Mac"]
         )
     }
 
@@ -50,6 +50,8 @@ final class AIFeatureTests: XCTestCase {
             case .openRouter: return openRouter
             case .openAI: return openRouter
             case .anthropic: return anthropic
+            // Text and Agent, no separate decision stage and no speech: Anthropic's column.
+            case .groq: return anthropic
             case .openAICompatible: return openAICompatible
             // The microphone features only: not subtitles, meetings or text.
             case .onDevice:
@@ -106,7 +108,7 @@ final class AIFeatureTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(visited, 88)
+        XCTAssertEqual(visited, 99)
     }
 
     func test_direct_llm_providers_are_available_for_all_text_modes_only() {

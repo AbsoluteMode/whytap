@@ -47,6 +47,7 @@ final class OpenCodeProvider: CLIProvider {
         case .openRouter: return try OpenRouterLLMKeyStore().read()
         case .openAI: return ProviderKeyStore().read(account: ProviderAccount.openAIKeychainAccount)
         case .anthropic: return ProviderKeyStore().read(account: ProviderAccount.anthropicKeychainAccount)
+        case .groq: return ProviderKeyStore().read(account: ProviderAccount.groqKeychainAccount)
         }
     }
 
@@ -60,12 +61,13 @@ final class OpenCodeProvider: CLIProvider {
         switch provider {
         case .openRouter: return await validateOpenRouterKey(key)
         case .anthropic: return await validateAnthropicKey(key)
-        case .openAI:
-            switch await ProviderKeyChecker().check(.openAI, apiKey: key, server: nil, allowPaidProbe: false) {
+        case .openAI, .groq:
+            let name = provider.displayName
+            switch await ProviderKeyChecker().check(provider.account, apiKey: key, server: nil, allowPaidProbe: false) {
             case .valid, .limited: return .connected(sessionID: nil)
             case .rejected(.invalidKey), .rejected(.missingSpeechPermission): return .notLoggedIn
             case .rejected(.outOfCredit): return .billing
-            case .unreachable: return .failed(code: "openai_unavailable", message: "Couldn’t reach OpenAI. Check your connection and retry.")
+            case .unreachable: return .failed(code: "\(provider.openCodeID)_unavailable", message: "Couldn’t reach \(name). Check your connection and retry.")
             }
         }
     }

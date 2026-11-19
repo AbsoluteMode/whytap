@@ -114,7 +114,7 @@ final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var providerLists: [String: ProviderList] = [:]
 
     /// Built-in providers in the order the tab lists them and Set up picks them.
-    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac]
+    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .thisMac]
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
@@ -284,7 +284,7 @@ final class APIAndModelsViewModel: ObservableObject {
         }
         switch account {
         case .server(let id): routing.removeServer(id)
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac: routing.clearRoutes(using: account)
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .thisMac: routing.clearRoutes(using: account)
         }
         catalogs.forget(account)
         keyStatuses.forget(account)
@@ -468,7 +468,7 @@ final class APIAndModelsViewModel: ObservableObject {
             server = endpoint
         case .thisMac:
             return "On this Mac needs no key"
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq:
             guard !key.isEmpty else { return "Enter a key" }
             server = nil
         }
@@ -626,7 +626,7 @@ final class APIAndModelsViewModel: ObservableObject {
         case .deepgram:
             return DeepgramLanguagePolicy.configurationError(model: route.model, language: inputLanguage())?
                 .localizedDescription
-        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .server, .thisMac:
+        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .groq, .server, .thisMac:
             return nil
         }
     }
@@ -657,7 +657,7 @@ final class APIAndModelsViewModel: ObservableObject {
         case .rejected(.invalidKey):
             switch account {
             case .soniox, .elevenLabs: return "Key not accepted. Regional keys aren't supported yet."
-            case .deepgram, .openRouter, .openAI, .anthropic, .server, .thisMac: return "Key not accepted"
+            case .deepgram, .openRouter, .openAI, .anthropic, .groq, .server, .thisMac: return "Key not accepted"
             }
         }
     }
@@ -698,7 +698,7 @@ final class APIAndModelsViewModel: ObservableObject {
             }
         case .thisMac:
             return onDevice.isReady() ? Access(apiKey: nil, server: nil) : nil
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .groq:
             guard case .key(let key) = lookup(account) else { return nil }
             return Access(apiKey: key, server: nil)
         }
@@ -717,6 +717,7 @@ final class APIAndModelsViewModel: ObservableObject {
         case .openRouter: return .openRouter
         case .openAI: return .openAI
         case .anthropic: return .anthropic
+        case .groq: return .groq
         case .onDevice: return .thisMac
         case .openAICompatible: return nil
         }

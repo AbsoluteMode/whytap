@@ -39,7 +39,7 @@ enum ProviderBatchRoute: Equatable, Sendable {
             return .selfHosted(apiKey: key, endpoint: endpoint, model: route.model)
         case .thisMac:
             return .onDevice(model: route.model)
-        case .openRouter, .openAI, .anthropic:
+        case .openRouter, .openAI, .anthropic, .groq:
             return nil
         }
     }

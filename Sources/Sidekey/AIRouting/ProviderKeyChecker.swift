@@ -112,6 +112,11 @@ struct ProviderKeyChecker: ProviderKeyChecking {
             guard let key else { return .rejected(.invalidKey) }
             let answer = await get(ModelCatalogFetcher.openAIModelsURL, header: "Authorization", value: "Bearer \(key)")
             return Self.interpret(answer, forbidden: .limited, paymentRequired: .rejected(.outOfCredit))
+        case .groq:
+            // The free models list; nothing is generated.
+            guard let key else { return .rejected(.invalidKey) }
+            let answer = await get(ModelCatalogFetcher.groqModelsURL, header: "Authorization", value: "Bearer \(key)")
+            return Self.interpret(answer, forbidden: .limited, paymentRequired: .rejected(.outOfCredit))
         case .server:
             guard let url = server?.modelsURL else { return .unreachable }
             let answer = await get(url, header: key == nil ? nil : "Authorization", value: key.map { "Bearer \($0)" })

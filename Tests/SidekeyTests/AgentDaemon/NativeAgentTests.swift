@@ -178,13 +178,15 @@ final class NativeAgentTests: XCTestCase {
             case .openRouter: account = OpenRouterLLMKeyStore.account
             case .openAI: account = ProviderAccount.openAIKeychainAccount
             case .anthropic: account = ProviderAccount.anthropicKeychainAccount
+            // Groq's request shape has its own tests (GroqProviderTests).
+            case .groq: account = ProviderAccount.groqKeychainAccount
             }
             try keys.save("key", account: account)
             let args = finalArguments("The price is about $2,314.", sources: [["url": "https://example.com/phone", "title": "Phone"]])
             let json = String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)
             StubURLProtocol.handler = { _ in
                 switch route {
-                case .openRouter: return self.serve(self.completion("The price is about $2,314.", sources: [["url": "https://example.com/phone", "title": "Phone"]]))
+                case .openRouter, .groq: return self.serve(self.completion("The price is about $2,314.", sources: [["url": "https://example.com/phone", "title": "Phone"]]))
                 case .openAI: return self.serve(["status": "completed", "output": [
                     ["type": "message", "content": [["type": "output_text", "text": "NARRATION_NOT_THE_ANSWER"]]],
                     ["type": "function_call", "call_id": "final", "name": "finish_answer", "arguments": json]]])

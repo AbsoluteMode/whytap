@@ -7,6 +7,8 @@ extension ProviderAccount {
     /// The Anthropic key's Keychain account. New with Anthropic, so it was
     /// never written to a `.token` file and needs no credential migration.
     static let anthropicKeychainAccount = "byok.anthropic.api_key"
+    /// New with Groq; no earlier credential to migrate.
+    static let groqKeychainAccount = "byok.groq.api_key"
 
     /// The Keychain account this provider account's API key is stored under, or
     /// `nil` for a server that has been removed. The built-in providers keep
@@ -21,6 +23,7 @@ extension ProviderAccount {
         case .openRouter: return OpenRouterLLMKeyStore.account
         case .openAI: return Self.openAIKeychainAccount
         case .anthropic: return Self.anthropicKeychainAccount
+        case .groq: return Self.groqKeychainAccount
         // No key exists for it; readiness is the model's files.
         case .thisMac: return nil
         case .server(let id): return routing.server(id)?.keyAccount

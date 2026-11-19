@@ -145,7 +145,7 @@ Voice flow (Drop / dictation):
        finalize + text EOF. A final <fin> acknowledgement completes the take;
        finished=true also completes it. The 10s watchdog remains the backstop.
        -> cleanup (PostProcessor, route of dropSmartCleanup):
-            OpenRouter, OpenAI or Anthropic with the user's key / a custom OpenAI-compatible
+            OpenRouter, OpenAI, Anthropic or Groq with the user's key / a custom OpenAI-compatible
             server (Ollama, LM Studio, vLLM) through DirectLLMRouteResolver.
             The mode is captured at take start:
             Fast bypasses AI text processing. Smart makes one request to the
@@ -305,7 +305,7 @@ Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
   .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md,
   .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 
-Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
+Agent flow (native Whytap runtime; OpenRouter, OpenAI, Anthropic or Groq):
   The Agent voice ticker shows the selected model author's bundled mark instead
   of the generic star; OpenRouter's hosting-provider pin does not change authorship.
   OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Mistral, Cohere and Perplexity have
@@ -327,7 +327,16 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Settings -> API & Models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
-  Anthropic uses Messages. Provider-native reasoning/tool items survive within
+  Anthropic uses Messages. Groq uses its own Chat Completions host with only
+  the Groq key: no OpenRouter fields, max_completion_tokens capped at 2,048
+  for its per-minute token limit, no strict flag and no reasoning replay; 413
+  has its own fixed message. Groq also serves the text features (a leading
+  <think> block is removed from its text), never speech; its models come from
+  its live list minus speech/voice/moderation families; calls are recorded
+  without a price. Request shape follows Groq's documentation and stubbed
+  tests; not yet tried with a real key. WHY:
+  .project-docs/decisions/2026-11-19-groq-provider.md
+  Provider-native reasoning/tool items survive within
   the turn. OpenRouter continuations normalize tool arguments to JSON strings,
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
@@ -915,7 +924,7 @@ Update flow (download-on-action):
 
 Presentation: Settings -> API & Models has four internal tabs: API keys,
 Models (the initial tab), Costs and API hints. API keys holds the provider keys (Soniox,
-Deepgram, ElevenLabs, OpenRouter, OpenAI, Anthropic, and the user's
+Deepgram, ElevenLabs, OpenRouter, OpenAI, Anthropic, Groq, and the user's
 OpenAI-compatible servers) and one model per AI feature (Drop Fast, Drop
 Smart, Drop Smart cleanup, Meetings, Meeting notes, Agent, Agent voice, Voice
 search); Local was removed. Models come from provider catalogs plus the
@@ -962,8 +971,8 @@ takes to start (No card needed, Card required or Paid plan, in that order
 within a group), the allowance with its period, and Get offer. Hovering or
 focusing Get offer opens the conditions and that offer's check date in a
 popover beside the button. The header says Reviewed monthly and shows the
-newest check date. List only offers whose key works in Whytap as it is; Groq
-and Cloudflare wait for their own provider support. The tab has no footer.
+newest check date. List only offers whose key works in Whytap as it is: Groq
+is listed since it has its own key tile, Cloudflare still waits. No footer.
 Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md

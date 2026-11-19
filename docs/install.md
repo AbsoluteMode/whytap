@@ -66,7 +66,7 @@ you can return from the island's Settings control:
    about 470 MB), then use it for Drop Fast. With a provider: click a speech
    provider's tile and enter its API key; Whytap checks it and stores it in
    macOS Keychain. Then pick a model for Drop Fast and Drop Smart.
-3. Optionally add OpenRouter, OpenAI, Anthropic or your own endpoint and pick
+3. Optionally add OpenRouter, OpenAI, Anthropic, Groq or your own endpoint and pick
    models for Smart cleanup and meeting summaries.
 4. Focus a text field, hold **Space**, speak, then release Space.
 
@@ -76,7 +76,7 @@ model, for free and without a key. On-device text models were removed; if you
 used **Local** before, choose a speech model in **API & Models** to dictate
 again.
 
-For the optional agent, add an OpenRouter, OpenAI or Anthropic key, choose the
+For the optional agent, add an OpenRouter, OpenAI, Anthropic or Groq key, choose the
 Agent model in **API & Models**, then click **Connect** in **Settings → Agents**
 ([Whytap Agent](agent.md)). Meeting recording may also request **System Audio
 Recording** permission.

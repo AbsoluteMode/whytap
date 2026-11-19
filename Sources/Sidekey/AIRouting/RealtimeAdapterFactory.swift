@@ -26,8 +26,8 @@ enum RealtimeAdapterFactory {
         case .thisMac:
             // Not a socket: `TranscriptionSessionFactory` builds its session.
             throw FeatureRouteError.notSet(route.feature)
-        case .openRouter, .openAI, .anthropic:
-            // OpenRouter and Anthropic serve text models only.
+        case .openRouter, .openAI, .anthropic, .groq:
+            // These serve text models only here.
             throw FeatureRouteError.notSet(route.feature)
         }
     }

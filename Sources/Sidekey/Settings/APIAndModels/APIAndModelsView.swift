@@ -509,6 +509,8 @@ struct ProviderKindIcon: View {
         switch kind {
         case .anthropic: return TranscriptionProviderBrand.anthropicSystemName
         case .onDevice: return "laptopcomputer"
+        // Whytap bundles no Groq mark; a neutral symbol, like Tavily's globe.
+        case .groq: return "bolt"
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .openAICompatible: return "server.rack"
         }
     }
@@ -520,7 +522,7 @@ struct ProviderKindIcon: View {
         case .elevenLabs: return "elevenlabs"
         case .openRouter: return "openrouter"
         case .openAI: return "openai"
-        case .anthropic, .openAICompatible, .onDevice: return nil
+        case .anthropic, .groq, .openAICompatible, .onDevice: return nil
         }
     }
 }

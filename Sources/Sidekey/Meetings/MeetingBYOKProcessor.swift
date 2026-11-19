@@ -12,9 +12,64 @@ protocol MeetingDirectProcessing: AnyObject {
         continuation: MeetingContinuation?,
         endedAt: Date?
     ) async throws -> UUID
+    /// Writes the note from a kept transcript, without the recording. `false`
+    /// when there is no kept transcript.
+    func writeNotesFromKeptTranscript(
+        _ retry: MeetingNotesRetry, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool
+}
+
+/// Why a meeting's note could not be written although its transcript exists.
+/// Fixed copy only: a provider's own message can quote the transcript.
+// WHY: .project-docs/decisions/2026-11-19-meeting-transcript-kept.md
+struct MeetingNotesFailure: Error, CustomStringConvertible, Equatable {
+    let reason: String
+
+    var description: String { "\(reason) \(Self.transcriptKept)" }
+
+    static let transcriptKept = "The transcript is saved: open the Transcript tab, or retry the notes."
+
+    init(_ error: Error) {
+        switch error as? OpenRouterLLMError {
+        case .notConfigured, .missingModel:
+            reason = "Meeting notes has no model. Choose one in Settings > API & Models."
+        case .missingKey:
+            reason = "The key of the Meeting notes provider is missing. Add it in Settings > API & Models."
+        case .missingBaseURL, .invalidBaseURL:
+            reason = "The Meeting notes server has no usable address. Check it in Settings > API & Models."
+        case .unexpectedStatus(401, _), .unexpectedStatus(403, _):
+            reason = "The Meeting notes provider refused the key. Check it in Settings > API & Models."
+        case .unexpectedStatus(402, _):
+            reason = "The Meeting notes provider is out of credit."
+        case .unexpectedStatus(429, _):
+            reason = "The Meeting notes provider is busy or its limit was reached."
+        case .unexpectedStatus(let status, _) where status >= 500:
+            reason = "The Meeting notes provider is not responding (\(status))."
+        case .unexpectedStatus(let status, _):
+            reason = "The Meeting notes model refused the request (\(status)). Try another model in Settings > API & Models."
+        case .emptyContent, .outputLimitReached, .inputRejected, .decoding:
+            reason = "The Meeting notes model returned no usable note. Try another model in Settings > API & Models."
+        case nil:
+            reason = error is URLError ? "No connection to the Meeting notes provider."
+                : "The meeting note could not be written."
+        }
+    }
+}
+
+/// What a notes-only retry needs from the meeting's row.
+struct MeetingNotesRetry: Equatable, Sendable {
+    let meetingId: UUID
+    let startedAt: Date
+    let endedAt: Date
+    let durationSeconds: TimeInterval
 }
 
 extension MeetingDirectProcessing {
+    /// The default suits processors that keep no transcript.
+    func writeNotesFromKeptTranscript(
+        _ retry: MeetingNotesRetry, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool { false }
+
     func process(event: MeetingRecorder.FinalizedEvent, startedAt: Date, language: String?,
                  meetingsStore: MeetingsStore?) async throws -> UUID {
         try await process(event: event, startedAt: startedAt, language: language,
@@ -126,10 +181,15 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         }
 
         let endedAt = endedAt ?? startedAt.addingTimeInterval(max(0, event.totalDurationSeconds))
-        let transcriptionRoute = try resolveMeetingsRoute()
+        let targetMeetingId = continuation?.meetingId ?? event.meetingId
         let transcript: String
         let segments: [TranscriptSegment]
-        if transcriptionRoute.account == .soniox {
+        // An earlier attempt already transcribed this recording and only the
+        // note failed: the speech provider is not called (or paid) again.
+        if let kept = try await meetingsStore.pendingTranscript(recordingId: event.meetingId), !kept.isEmpty {
+            segments = kept
+            transcript = Self.transcriptText(kept)
+        } else if case let transcriptionRoute = try resolveMeetingsRoute(), transcriptionRoute.account == .soniox {
             guard let key = transcriptionRoute.apiKey, !key.isEmpty else {
                 throw MeetingBYOKProcessingError.missingTranscriptionKey
             }
@@ -147,7 +207,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             transcript = TranscriptMarkdownFormatter.format(segments)
         } else {
             transcript = try await MeetingBYOKTranscriber(
-                adapter: try makeAdapterMapped(transcriptionRoute), terms: vocab.terms
+                adapter: try makeAdapterMapped(try resolveMeetingsRoute()), terms: vocab.terms
             ).transcribe(chunkURLs: event.chunkURLs, language: language)
             segments = [TranscriptSegment(speaker: nil, start: 0,
                 end: max(0, event.totalDurationSeconds), text: transcript)]
@@ -155,19 +215,29 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
 
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { throw MeetingBYOKProcessingError.noTranscript }
+        // Kept before the notes model is asked: whatever happens to the note,
+        // the transcript the user paid for is on disk.
+        try await meetingsStore.savePendingTranscript(
+            recordingId: event.meetingId, meetingId: targetMeetingId, segments: segments
+        )
         if continuation == nil {
             _ = try await meetingsStore.updateProgress(id: event.meetingId, status: .generatingProtocol)
         }
 
         let durationSeconds = MeetingsCoordinator.roundedDurationSeconds(event.totalDurationSeconds)
-        let markdown = try await generateNoteMarkdown(
-            transcript: trimmedTranscript,
-            route: route,
-            language: language,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            interruptedBySleep: event.interruptedBySleep
-        )
+        let markdown: String
+        do {
+            markdown = try await generateNoteMarkdown(
+                transcript: trimmedTranscript,
+                route: route,
+                language: language,
+                startedAt: startedAt,
+                endedAt: endedAt,
+                interruptedBySleep: event.interruptedBySleep
+            )
+        } catch let error where !(error is CancellationError) {
+            throw MeetingNotesFailure(error)
+        }
         let normalizedMarkdown = Self.normalizedProtocolMarkdown(markdown)
         let title = MeetingProtocolParser.parse(normalizedMarkdown)?.name
             ?? Self.firstMarkdownHeading(in: normalizedMarkdown)
@@ -187,6 +257,53 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             durationSeconds
         )
         return meetingId
+    }
+
+    /// The note of a meeting whose transcript was kept by an earlier attempt,
+    /// written without its recording (which may be gone after 24 hours).
+    /// First recordings only: a Reconnect part still has its meeting's note.
+    func writeNotesFromKeptTranscript(
+        _ retry: MeetingNotesRetry, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool {
+        guard let meetingsStore else { throw MeetingBYOKProcessingError.missingStore }
+        guard let segments = try await meetingsStore.pendingTranscript(recordingId: retry.meetingId),
+              !segments.isEmpty else { return false }
+        let route: DirectLLMRoute
+        do {
+            guard let enabled = try await notesRoute.routeIfEnabled() else {
+                throw OpenRouterLLMError.notConfigured
+            }
+            route = enabled
+        } catch {
+            throw MeetingNotesFailure(error)
+        }
+        _ = try await meetingsStore.updateProgress(id: retry.meetingId, status: .generatingProtocol)
+        let markdown: String
+        do {
+            markdown = try await generateNoteMarkdown(
+                transcript: Self.transcriptText(segments), route: route, language: language,
+                startedAt: retry.startedAt, endedAt: retry.endedAt, interruptedBySleep: false
+            )
+        } catch let error where !(error is CancellationError) {
+            throw MeetingNotesFailure(error)
+        }
+        let normalized = Self.normalizedProtocolMarkdown(markdown)
+        _ = try await meetingsStore.storeProcessedRecording(
+            recordingId: retry.meetingId, startedAt: retry.startedAt, endedAt: retry.endedAt,
+            duration: retry.durationSeconds,
+            title: MeetingProtocolParser.parse(normalized)?.name ?? Self.firstMarkdownHeading(in: normalized),
+            markdown: normalized, transcript: segments, continuation: nil
+        )
+        return true
+    }
+
+    /// What the notes model reads: speaker-attributed turns when the provider
+    /// labelled them, the plain text otherwise.
+    private static func transcriptText(_ segments: [TranscriptSegment]) -> String {
+        let labelled = segments.contains { $0.speaker != nil }
+        let text = labelled ? TranscriptMarkdownFormatter.format(segments)
+            : segments.map(\.text).joined(separator: "\n")
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// A recording without speech is finished, not failed: store a short note

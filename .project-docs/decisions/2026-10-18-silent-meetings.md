@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Meetings/MeetingBYOKProcessorTests.swift
     confirmed_at: 2026-10-18
-related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-18-provider-batch-transcription.md, 2026-09-07-soniox-meeting-files.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-18-remove-local-models.md, 2026-10-22-no-retained-meeting-audio.md]
+related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-18-provider-batch-transcription.md, 2026-09-07-soniox-meeting-files.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-18-remove-local-models.md, 2026-10-22-no-retained-meeting-audio.md, 2026-11-19-meeting-transcript-kept.md]
 ---
 
 # Silent meetings

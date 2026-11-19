@@ -172,6 +172,141 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         await store.close()
     }
 
+    // MARK: - Transcript kept when the notes fail
+
+    /// Speech is transcribed and paid for; the notes provider is out of
+    /// credit. The transcript must be on disk and readable, the failure must
+    /// say what happened in fixed words, and the retry must not transcribe
+    /// (pay) again.
+    func test_notes_out_of_credit_keeps_the_transcript_and_a_retry_does_not_transcribe_again() async throws {
+        let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
+        var transcriptions = 0
+        let llm = SwitchableLLMClient()
+        llm.failure = OpenRouterLLMError.unexpectedStatus(402, "Insufficient credits. We ship on Friday.")
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+            transcriptions += 1
+            return FixedTranscriptAdapter(text: "We ship on Friday.")
+        }
+        let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let chunk = staging.appendingPathComponent("chunk-000.wav")
+        try Self.wav(samples: [1, 2, 3, 4]).write(to: chunk)
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        let event = MeetingRecorder.FinalizedEvent(
+            meetingId: meetingId, chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user
+        )
+
+        do {
+            _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+            XCTFail("expected the notes failure")
+        } catch let failure as MeetingNotesFailure {
+            XCTAssertEqual(failure.description,
+                           "The Meeting notes provider is out of credit. " + MeetingNotesFailure.transcriptKept)
+            XCTAssertFalse(failure.description.contains("Friday"), "the provider's own text is never shown")
+        }
+        XCTAssertEqual(transcriptions, 1)
+        let kept = try await store.transcriptAwaitingNote(meetingId: meetingId)
+        XCTAssertEqual(kept?.map(\.text), ["We ship on Friday."], "the transcript is readable without a note")
+        let noteBefore = try await store.markdown(id: meetingId)
+        XCTAssertNil(noteBefore)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: chunk.path), "the audio stays for the retry")
+
+        // The user tops up; launch recovery runs the same recording again.
+        llm.failure = nil
+        _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+
+        XCTAssertEqual(transcriptions, 1, "the speech provider is not called or paid a second time")
+        XCTAssertEqual(llm.transcriptsSeen.count, 2)
+        XCTAssertTrue(llm.transcriptsSeen.last?.contains("We ship on Friday.") == true)
+        let note = try await store.markdown(id: meetingId)
+        XCTAssertNotNil(note)
+        let stored = try await store.transcript(id: meetingId)
+        XCTAssertEqual(stored?.map(\.text), ["We ship on Friday."])
+        let leftover = try await store.pendingTranscript(recordingId: meetingId)
+        XCTAssertNil(leftover)
+        let awaiting = try await store.transcriptAwaitingNote(meetingId: meetingId)
+        XCTAssertNil(awaiting)
+        await store.close()
+    }
+
+    func test_notes_are_written_from_the_kept_transcript_after_the_recording_is_gone() async throws {
+        let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
+        let llm = SwitchableLLMClient()
+        var transcriptions = 0
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+            transcriptions += 1
+            return FixedTranscriptAdapter(text: "unused")
+        }
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        let started = Date(timeIntervalSince1970: 1_000)
+        let retry = MeetingNotesRetry(
+            meetingId: meetingId, startedAt: started, endedAt: started.addingTimeInterval(60), durationSeconds: 60
+        )
+
+        let nothingKept = try await processor.writeNotesFromKeptTranscript(retry, language: nil, meetingsStore: store)
+        XCTAssertFalse(nothingKept, "no transcript, nothing to write")
+        XCTAssertEqual(llm.transcriptsSeen.count, 0)
+
+        let segments = [
+            TranscriptSegment(speaker: "Speaker 1", start: 0, end: 3, text: "We ship on Friday."),
+            TranscriptSegment(speaker: "Speaker 2", start: 3, end: 6, text: "Agreed."),
+        ]
+        try await store.savePendingTranscript(recordingId: meetingId, meetingId: meetingId, segments: segments)
+
+        let wrote = try await processor.writeNotesFromKeptTranscript(retry, language: "en", meetingsStore: store)
+
+        XCTAssertTrue(wrote)
+        XCTAssertEqual(transcriptions, 0, "no recording, no speech provider")
+        XCTAssertTrue(llm.transcriptsSeen.first?.contains("Speaker 2") == true, "speaker labels reach the notes model")
+        let stored = try await store.transcript(id: meetingId)
+        XCTAssertEqual(stored, segments)
+        let meta = try await store.list().first { $0.id == meetingId }
+        XCTAssertEqual(meta?.progressStatus, .ready)
+        XCTAssertEqual(meta?.durationSeconds, 60)
+        await store.close()
+    }
+
+    func test_notes_failure_wording_names_the_cause_and_never_quotes_the_provider() {
+        let cases: [(Error, String)] = [
+            (OpenRouterLLMError.missingKey, "key of the Meeting notes provider is missing"),
+            (OpenRouterLLMError.notConfigured, "Meeting notes has no model"),
+            (OpenRouterLLMError.unexpectedStatus(401, "secret body"), "refused the key"),
+            (OpenRouterLLMError.unexpectedStatus(402, "secret body"), "out of credit"),
+            (OpenRouterLLMError.unexpectedStatus(429, "secret body"), "busy or its limit"),
+            (OpenRouterLLMError.unexpectedStatus(503, "secret body"), "not responding (503)"),
+            (OpenRouterLLMError.unexpectedStatus(404, "secret body"), "refused the request (404)"),
+            (URLError(.notConnectedToInternet), "No connection"),
+        ]
+        for (error, expected) in cases {
+            let text = MeetingNotesFailure(error).description
+            XCTAssertTrue(text.contains(expected), "\(error): \(text)")
+            XCTAssertFalse(text.contains("secret body"))
+            XCTAssertTrue(text.hasSuffix(MeetingNotesFailure.transcriptKept))
+        }
+    }
+
+    func test_deleting_a_meeting_removes_its_kept_transcript() async throws {
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let id = UUID()
+        let started = Date(timeIntervalSince1970: 1_000)
+        try await store.upsertProgress(
+            meta: MeetingMetaWithLocalState(
+                id: id, startedAt: started, endedAt: started, durationSeconds: 1, title: nil,
+                syncStatus: .new, serverVersion: 1, createdAt: started),
+            status: .failed, failureReason: "x")
+        try await store.savePendingTranscript(
+            recordingId: id, meetingId: id,
+            segments: [TranscriptSegment(speaker: nil, start: 0, end: 1, text: "private words")])
+
+        try await store.delete(id: id)
+
+        let kept = try await store.pendingTranscript(recordingId: id)
+        XCTAssertNil(kept)
+        await store.close()
+    }
+
     func test_notes_model_refusal_is_recorded_for_meeting_notes() async throws {
         let setup = Setup(
             meetings: FeatureRoute(account: .deepgram, model: "nova-3"),
@@ -200,8 +335,8 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         do {
             _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
             XCTFail("Expected the refusal to reach the caller")
-        } catch let error as OpenRouterLLMError {
-            XCTAssertEqual(error, .unexpectedStatus(404, nil))
+        } catch let error as MeetingNotesFailure {
+            XCTAssertEqual(error, MeetingNotesFailure(OpenRouterLLMError.unexpectedStatus(404, nil)))
         }
         XCTAssertEqual(checks.refusedModel(for: .meetingNotes), "vendor/gone")
         XCTAssertNil(checks.refusedModel(for: .meetings))
@@ -429,6 +564,21 @@ private final class SpyLLMClient: OpenRouterLLMClienting {
         models.append(model)
         endpoints.append(endpoint)
         return "<!-- protocol:v1 -->\n# Unexpected note"
+    }
+}
+
+/// Fails with `failure` while it is set, then writes a note. Remembers the
+/// transcript each request carried.
+private final class SwitchableLLMClient: OpenRouterLLMClienting {
+    var failure: Error?
+    private(set) var transcriptsSeen: [String] = []
+
+    func listModels(endpoint: OpenAICompatibleLLMEndpoint) async throws -> [OpenRouterModelOption] { [] }
+
+    func complete(endpoint: OpenAICompatibleLLMEndpoint, model: String, messages: [OpenRouterChatMessage]) async throws -> String {
+        transcriptsSeen.append(messages.last?.content ?? "")
+        if let failure { throw failure }
+        return "<!-- protocol:v1 -->\n# Release plan"
     }
 }
 

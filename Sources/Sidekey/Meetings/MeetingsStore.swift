@@ -488,6 +488,41 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
             version: meta.serverVersion, title: meta.title)
     }
 
+    // MARK: - Transcript kept while the note is missing
+
+    /// Keeps the transcript of a recording whose note is not written yet.
+    /// Replaces an earlier copy for the same recording.
+    func savePendingTranscript(recordingId: UUID, meetingId: UUID, segments: [TranscriptSegment]) throws {
+        let encoded = String(decoding: try JSONEncoder().encode(segments), as: UTF8.self)
+        try executeBound(
+            "INSERT INTO meeting_pending_transcripts(recording_id, meeting_id, content) VALUES (?, ?, ?) "
+                + "ON CONFLICT(recording_id) DO UPDATE SET meeting_id = excluded.meeting_id, content = excluded.content",
+            values: [recordingId.uuidString, meetingId.uuidString, encoded])
+    }
+
+    /// The kept transcript of one recording, or `nil` when there is none.
+    func pendingTranscript(recordingId: UUID) throws -> [TranscriptSegment]? {
+        var statement: OpaquePointer?
+        let result = sqlite3_prepare_v2(db,
+            "SELECT content FROM meeting_pending_transcripts WHERE recording_id = ?", -1, &statement, nil)
+        defer { sqlite3_finalize(statement) }
+        guard result == SQLITE_OK else {
+            throw MeetingsStoreError.sqlitePrepareFailed(code: result, message: lastErrorMessage())
+        }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, recordingId.uuidString, -1, transient)
+        guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else { return nil }
+        return try JSONDecoder().decode([TranscriptSegment].self, from: Data(String(cString: text).utf8))
+    }
+
+    /// The transcript to show for a meeting that has no note: the kept
+    /// transcript of its first recording. A Reconnect part's kept transcript
+    /// is not shown, because the meeting still shows its earlier note.
+    func transcriptAwaitingNote(meetingId: UUID) throws -> [TranscriptSegment]? {
+        guard try markdown(id: meetingId) == nil else { return nil }
+        return try pendingTranscript(recordingId: meetingId)
+    }
+
     /// Returns the persisted diarized transcript for a meeting, or
     /// `nil` when no sidecar exists (meetings finalized before the
     /// transcript-persistence change ship without one). Decoding
@@ -588,6 +623,9 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
                 values: [id.uuidString, encoded])
             try executeBound("INSERT INTO meeting_recording_receipts(recording_id, meeting_id) VALUES (?, ?)",
                 values: [recordingId.uuidString, id.uuidString])
+            // The note now carries the transcript; the kept copy has done its job.
+            try executeBound("DELETE FROM meeting_pending_transcripts WHERE recording_id = ?",
+                values: [recordingId.uuidString])
             if continuation != nil, !newTranscript.isEmpty {
                 try executeBound("INSERT INTO meeting_note_additions(meeting_id, version, content) VALUES (?, ?, ?)",
                     values: [id.uuidString, String(meta.serverVersion), addition])
@@ -634,6 +672,7 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
         try executeBound("DELETE FROM meeting_recording_receipts WHERE meeting_id = ?", values: [id.uuidString])
         try executeBound("DELETE FROM meeting_content_commits WHERE meeting_id = ?", values: [id.uuidString])
         try executeBound("DELETE FROM meeting_note_additions WHERE meeting_id = ?", values: [id.uuidString])
+        try executeBound("DELETE FROM meeting_pending_transcripts WHERE meeting_id = ?", values: [id.uuidString])
     }
 
     private func noteAdditions(id: UUID, after version: Int) throws -> [String] {
@@ -771,6 +810,14 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
         try executeRaw(db: dbHandle, sql: """
             CREATE TABLE IF NOT EXISTS meeting_content_commits (
                 meeting_id TEXT PRIMARY KEY, content TEXT NOT NULL
+            )
+            """)
+        // A transcript whose note is not written yet: kept so a failed notes
+        // model never costs the user the transcription they already paid for.
+        // WHY: .project-docs/decisions/2026-11-19-meeting-transcript-kept.md
+        try executeRaw(db: dbHandle, sql: """
+            CREATE TABLE IF NOT EXISTS meeting_pending_transcripts (
+                recording_id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL, content TEXT NOT NULL
             )
             """)
         try executeRaw(db: dbHandle, sql: """

@@ -399,6 +399,20 @@ Meeting Notes:
           WHY: .project-docs/decisions/2026-10-18-silent-meetings.md,
           .project-docs/decisions/2026-10-18-remove-local-models.md
        -> MeetingsStore (local SQLite) -> notes window (BlockNote in WKWebView)
+  A transcript is kept as soon as it exists (meeting_pending_transcripts in
+  the meetings database), before the notes model is asked. When the note
+  fails, the meeting is failed with fixed copy that names the cause
+  (MeetingNotesFailure: missing key, refused key, out of credit, busy, not
+  responding, refused model; never the provider's own text) and ends with
+  "The transcript is saved". The note pane then enables the Transcript tab
+  and shows Retry notes. A retry, by button or by launch recovery, reuses the
+  kept transcript and never calls the speech provider again; the button
+  (MeetingsCoordinator.retryNotes) needs no recording. After 24 hours only
+  the audio is deleted: the kept transcript and Retry notes remain. Storing
+  the note or deleting the meeting removes the kept copy. A Reconnect part's
+  kept transcript is reused but not shown, because its meeting still shows
+  the earlier note. WHY:
+  .project-docs/decisions/2026-11-19-meeting-transcript-kept.md
   Delete: a finished meeting (ready or failed) has "Delete…" in its row
   context menu behind a confirmation whose default button is Cancel.
   MeetingsCoordinator.deleteMeeting removes the staged recording first (while

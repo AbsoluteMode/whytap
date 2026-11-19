@@ -26,7 +26,7 @@ sources:
   - type: url
     reference: https://platform.claude.com/docs/en/api/overview
     confirmed_at: 2026-10-21
-related: [2026-10-19-api-and-models.md, 2026-10-20-model-search.md]
+related: [2026-10-19-api-and-models.md, 2026-10-20-model-search.md, 2026-11-19-provider-failure-reasons.md]
 ---
 
 ## Context

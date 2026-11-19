@@ -239,15 +239,53 @@ final class ProviderKeyCheckerTests: XCTestCase {
     /// (final review I4, ruling R18). Any other 401 stays invalid.
     func test_elevenlabs_401_missing_permissions_is_limited() async {
         let missing = #"{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission user_read"}}"#
-        for paid in [false, true] {
-            let status = await check(checker(status: 401, body: missing), .elevenLabs, paidProbe: paid)
-            XCTAssertEqual(status, .limited, "paid probe allowed: \(paid)")
+        let free = await check(checker(status: 401, body: missing), .elevenLabs, paidProbe: false)
+        XCTAssertEqual(free, .limited, "the free check cannot tell more")
+        // Saving the key or Check now asks the endpoint dictation uses.
+        let working = makeChecker { request in
+            request.url?.path == "/v1/speech-to-text"
+                ? (200, [:], Data(#"{"text":""}"#.utf8)) : (401, [:], Data(missing.utf8))
         }
+        let scoped = await check(working, .elevenLabs, paidProbe: true)
+        XCTAssertEqual(scoped, .limited, "a scoped key that can transcribe is a working key")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.path }, ["/v1/user", "/v1/speech-to-text"])
         let invalid = #"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#
         let rejected = await check(checker(status: 401, body: invalid), .elevenLabs, paidProbe: true)
         XCTAssertEqual(rejected, .rejected(.invalidKey))
         let unparsable = await check(checker(status: 401, body: "missing_permissions"), .elevenLabs)
         XCTAssertEqual(unparsable, .rejected(.invalidKey), "only the parsed detail.status counts")
+    }
+
+    /// The case a user hit: an ElevenLabs key created with Speech to Text set
+    /// to No Access. `/v1/user` says "missing_permissions" like any scoped
+    /// key, the key was saved as working, and every dictation then failed.
+    func test_elevenlabs_key_without_speech_to_text_is_refused_when_saved() async {
+        let missing = #"{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission user_read"}}"#
+        let noSpeech = makeChecker { _ in (401, [:], Data(missing.utf8)) }
+
+        let status = await check(noSpeech, .elevenLabs, paidProbe: true)
+
+        XCTAssertEqual(status, .rejected(.missingSpeechPermission))
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.path }, ["/v1/user", "/v1/speech-to-text"])
+    }
+
+    func test_elevenlabs_scoped_key_with_an_exhausted_quota_is_out_of_credit_not_a_missing_permission() async {
+        let missing = #"{"detail":{"status":"missing_permissions","message":"user_read"}}"#
+        let quota = #"{"detail":{"status":"quota_exceeded","message":"quota"}}"#
+        let checker = makeChecker { request in
+            (401, [:], Data((request.url?.path == "/v1/speech-to-text" ? quota : missing).utf8))
+        }
+        let status = await check(checker, .elevenLabs, paidProbe: true)
+        XCTAssertEqual(status, .rejected(.outOfCredit))
+    }
+
+    func test_elevenlabs_scoped_key_is_not_turned_away_for_an_unexplained_401() async {
+        let missing = #"{"detail":{"status":"missing_permissions","message":"user_read"}}"#
+        let checker = makeChecker { request in
+            request.url?.path == "/v1/speech-to-text" ? (401, [:], Data("{}".utf8)) : (401, [:], Data(missing.utf8))
+        }
+        let status = await check(checker, .elevenLabs, paidProbe: true)
+        XCTAssertEqual(status, .limited, "only a named refusal blocks saving a key the account recognises")
     }
 
     /// No connection during the paid probe says nothing about the key

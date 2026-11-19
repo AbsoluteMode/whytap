@@ -205,6 +205,11 @@ final class APIAndModelsViewModel: ObservableObject {
             await catalogs.refreshIfStale(account, apiKey: access.apiKey, server: access.server)
             if keyStatuses.needsCheck(account, now: now()) {
                 let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: false)
+                // The free check cannot see what a dictation or a paid check
+                // found (a key without the speech permission answers
+                // "limited" here), so it does not clear a refusal on its own.
+                // A dictation that works clears it (`forgetDropKeyRefusal`).
+                if status == .limited, case .rejected = keyStatuses.record(for: account)?.status { continue }
                 keyStatuses.set(status, for: account, at: now())
             }
         }
@@ -648,6 +653,7 @@ final class APIAndModelsViewModel: ObservableObject {
         case .limited: return "Limited key"
         case .unreachable: return "Couldn't check"
         case .rejected(.outOfCredit): return "Out of credit or key limit reached"
+        case .rejected(.missingSpeechPermission): return "No Speech to Text access on this key"
         case .rejected(.invalidKey):
             switch account {
             case .soniox, .elevenLabs: return "Key not accepted. Regional keys aren't supported yet."

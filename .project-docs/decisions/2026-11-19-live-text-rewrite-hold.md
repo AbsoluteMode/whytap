@@ -25,7 +25,7 @@ related: [2026-11-15-live-text-rewrites.md, 2026-11-13-live-text-sand.md]
 ## Context
 
 A screen recording of 2026-11-19 showed the live line in the recording wing
-jerking: the provider dropped the clause "Как ты думаешь," for a fraction of a
+jerking: the provider dropped a clause of three words for a fraction of a
 second and returned it. The same day's change to
 [rewrites](2026-11-15-live-text-rewrites.md) made the line move as rigid
 pieces, but every intermediate snapshot was still drawn, so a clause taken

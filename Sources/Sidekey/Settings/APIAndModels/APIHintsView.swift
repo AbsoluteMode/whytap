@@ -201,6 +201,17 @@ struct APIHintsView: View {
             url: URL(string: "https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans")!
         ),
         Hint(
+            category: .models,
+            provider: "ChatGPT Pro",
+            assetName: "openai",
+            allowance: "$100–500",
+            cadence: "API credit each month",
+            access: .paidPlan,
+            detail: "Pro tiers: $100, $200 or $500; Business: up to $500 per workspace. After seven days, claim it in ChatGPT's billing settings and link an API organization you own. Use its OpenAI key for Agent. Credits expire each cycle.",
+            url: URL(string: "https://developers.openai.com/api/docs/guides/chatgpt-api-credits")!,
+            checked: "2026-11-19"
+        ),
+        Hint(
             category: .search,
             provider: "Tavily",
             assetName: nil,

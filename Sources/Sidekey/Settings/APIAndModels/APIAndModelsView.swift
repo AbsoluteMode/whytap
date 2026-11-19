@@ -507,6 +507,7 @@ struct ProviderKindIcon: View {
     static func systemName(for kind: AIProviderKind) -> String {
         switch kind {
         case .anthropic: return TranscriptionProviderBrand.anthropicSystemName
+        case .onDevice: return "laptopcomputer"
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .openAICompatible: return "server.rack"
         }
     }
@@ -518,7 +519,7 @@ struct ProviderKindIcon: View {
         case .elevenLabs: return "elevenlabs"
         case .openRouter: return "openrouter"
         case .openAI: return "openai"
-        case .anthropic, .openAICompatible: return nil
+        case .anthropic, .openAICompatible, .onDevice: return nil
         }
     }
 }

@@ -44,7 +44,7 @@ struct ModelProbe: ModelProbing {
                 let task = URLSession.shared.webSocketTask(with: SonioxBYOKAdapter.handshakeRequest(apiKey: key))
                 return URLSessionWebSocketTransport(task: task)
             })
-        case .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .server:
+        case .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .server, .thisMac:
             return try RealtimeAdapterFactory.make(route)
         }
     }
@@ -52,6 +52,9 @@ struct ModelProbe: ModelProbing {
     func probe(_ route: ResolvedRoute, use: ModelUse, catalog: CatalogModel?) async -> ProbeOutcome {
         let started = ContinuousClock.now
         let outcome: ProbeOutcome
+        // A resolved On this Mac route already means its model is in place;
+        // there is no provider to ask.
+        if route.account == .thisMac { return .passed }
         switch use {
         case .realtimeSTT: outcome = await probeRealtime(route)
         case .asyncSTT: outcome = await probeAsync(route)
@@ -213,7 +216,7 @@ struct ModelProbe: ModelProbing {
             guard key != nil else { return .inconclusive(reason: "Key problem") }
             url = URL(string: "https://api.openai.com/v1")!
             isOpenRouter = false
-        case .soniox, .deepgram, .elevenLabs:
+        case .soniox, .deepgram, .elevenLabs, .thisMac:
             return .inconclusive(reason: "Not supported yet")
         }
 

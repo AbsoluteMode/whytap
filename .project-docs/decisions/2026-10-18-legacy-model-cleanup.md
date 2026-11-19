@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LegacyLocalModelCleanupTests.swift
     confirmed_at: 2026-10-18
-related: [../project.md, 2026-10-18-remove-local-models.md]
+related: [../project.md, 2026-10-18-remove-local-models.md, 2026-11-19-on-device-dictation.md]
 ---
 
 # Remove leftover on-device model weights

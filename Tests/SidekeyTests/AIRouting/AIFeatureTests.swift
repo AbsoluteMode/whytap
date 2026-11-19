@@ -27,10 +27,10 @@ final class AIFeatureTests: XCTestCase {
     }
 
     func test_provider_kinds_carry_their_ui_names() {
-        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible])
+        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice])
         XCTAssertEqual(
             AIProviderKind.allCases.map(\.displayName),
-            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "OpenAI-compatible server"]
+            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "OpenAI-compatible server", "On this Mac"]
         )
     }
 
@@ -51,6 +51,10 @@ final class AIFeatureTests: XCTestCase {
             case .openAI: return openRouter
             case .anthropic: return anthropic
             case .openAICompatible: return openAICompatible
+            // The microphone features only: not subtitles, meetings or text.
+            case .onDevice:
+                let microphone: Set<AIFeature> = [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
+                return features.allSatisfy(microphone.contains) ? .realtimeSTT : nil
             }
         }
     }
@@ -58,7 +62,12 @@ final class AIFeatureTests: XCTestCase {
     func test_model_use_matches_the_provider_table() {
         let rows = [
             TableRow(
-                features: [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio],
+                features: [.dropFast, .dropSmart, .agentVoice, .voiceSearch],
+                soniox: .realtimeSTT, deepgram: .realtimeSTT, elevenLabs: .realtimeSTT,
+                openRouter: nil, anthropic: nil, openAICompatible: .realtimeSTT
+            ),
+            TableRow(
+                features: [.subtitlesAudio],
                 soniox: .realtimeSTT, deepgram: .realtimeSTT, elevenLabs: .realtimeSTT,
                 openRouter: nil, anthropic: nil, openAICompatible: .realtimeSTT
             ),
@@ -97,7 +106,7 @@ final class AIFeatureTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(visited, 77)
+        XCTAssertEqual(visited, 88)
     }
 
     func test_direct_llm_providers_are_available_for_all_text_modes_only() {

@@ -23,6 +23,9 @@ enum RealtimeAdapterFactory {
                 throw FeatureRouteError.invalidBaseURL(route.feature)
             }
             return OpenAIRealtimeAdapter(apiKey: route.apiKey ?? "", url: url, model: route.model)
+        case .thisMac:
+            // Not a socket: `TranscriptionSessionFactory` builds its session.
+            throw FeatureRouteError.notSet(route.feature)
         case .openRouter, .openAI, .anthropic:
             // OpenRouter and Anthropic serve text models only.
             throw FeatureRouteError.notSet(route.feature)

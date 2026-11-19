@@ -107,6 +107,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Route | Where data goes | When |
 |---|---|---|
 | Meeting detector (FluidAudio Silero VAD) | nowhere; a one-time download from Hugging Face fetches the model | the first time the detector checks for speech |
+| On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in API & Models; recognition while a feature set to On this Mac is in use |
 | Your key: speech (Soniox, Deepgram, ElevenLabs, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
 | Agent (native) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key; tool actions may access destinations needed by your request | when you submit an agent request |
 | Agent model mark | public image files on OpenRouter for the displayed model author; no API key, cookies, audio, prompt or reply. Bundled marks appear immediately; a small local cache is disposable | asynchronously when the voice mark is shown, at most weekly per cached author; failures retain usable artwork |

@@ -216,7 +216,8 @@ Live text in the recording wing (Drop and agent voice):
   Only the advancing edge gathers from 14 grains over 0.35 s. Visible
   corrections are solid. Unchanged runs keep their reveal times, including
   when a correction and new speech arrive together. A returning truncated
-  prefix restores its visible text. Scrolling keeps the live edge in view.
+  prefix restores its visible text. A rewrite of visible text glides the line
+  as two rigid pieces (before and after the change), never stretching it.
   Soniox publishes the complete live snapshot once per token frame.
   WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
   A face rebuilt mid-take shows its text at once; text revealed past its

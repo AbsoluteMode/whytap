@@ -119,7 +119,10 @@ Voice flow (Drop / dictation):
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
             the same route mechanism, for Drop Fast, Drop Smart, Agent voice
             and Voice search only (not Meetings, Subtitles or text). The API
-            keys tab has an On this Mac tile that downloads or removes
+            keys tab has an On this Mac card above the key tiles
+            (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
+            button is in the card, with an animated progress bar and symbol
+            that respect Reduce Motion) that downloads or removes
             Parakeet TDT v3 (about 470 MB from Hugging Face, kept in
             Application Support/Sidekey/OnDeviceSpeechModels, outside backups
             and LegacyLocalModelCleanup). The downloaded model is the

@@ -106,6 +106,18 @@ through Core ML with no further dependency.
   start without a click. Avoiding it needs a load path that never downloads.
 - English terms inside Russian speech are transliterated by the model.
 
+## Follow-up: its own card
+
+The first build showed On this Mac as one more tile among the keys. Its status
+line "Download model" read as a button and did nothing: the real button was in
+a form under the row of tiles, often below the visible area. On the user's
+feedback the same day it became a card above the tiles, titled as its own
+block, with the one action (Download, Cancel or Remove) in the card and motion
+for the download (a progress bar with a travelling highlight, a pulsing arrow,
+a checkmark that bounces once). Reduce Motion leaves a plain bar and symbol.
+The card was checked in offscreen renders of all four states in both
+appearances, not in a running app.
+
 ## Rejected
 
 - Apple's system speech (`DictationTranscriber`): reports Russian and English

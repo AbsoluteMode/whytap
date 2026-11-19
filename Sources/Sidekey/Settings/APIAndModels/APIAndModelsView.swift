@@ -70,7 +70,13 @@ struct APIAndModelsView: View {
                     case .keys, .models:
                         ScrollView {
                             VStack(alignment: .leading, spacing: 22) {
-                                if section == .keys { keysBlock } else { modelsBlock }
+                                if section == .keys {
+                                    // Where its model can run (Apple Silicon).
+                                    if OnDeviceSpeechModelStore.isSupportedHost { onDeviceBlock }
+                                    keysBlock
+                                } else {
+                                    modelsBlock
+                                }
                             }
                             .padding(18)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -182,6 +188,15 @@ struct APIAndModelsView: View {
                 viewModel.proposal = nil
             }
         )
+    }
+
+    // MARK: - On this Mac
+
+    private var onDeviceBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "On this Mac")
+            OnDeviceSpeechCard(viewModel: viewModel, model: .shared)
+        }
     }
 
     // MARK: - API keys

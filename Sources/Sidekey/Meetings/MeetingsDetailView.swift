@@ -342,17 +342,11 @@ private struct MeetingDetailContentView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
             if let retry = model.onRetryNotes {
-                Button(action: retry) {
-                    Text("Retry notes")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(MacSettingsTheme.accentFill))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
-                .help("Write the notes again from the saved transcript")
+                // The shared button: hover, pressed and keyboard-focus states
+                // over its whole hit area, like Retry in the meeting list.
+                MacButton(title: "Retry notes", style: .primary, action: retry)
+                    .padding(.top, 4)
+                    .help("Write the notes again from the saved transcript")
             }
         }
         .padding(.horizontal, 24)

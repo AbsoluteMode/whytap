@@ -26,7 +26,7 @@ Maintainer sessions developing features in parallel follow
 [the shared application procedure](.project-docs/processes/shared-app-development.md).
 They compile/test in separate worktrees, automatically enqueue their reviewed
 PR/head, and leave integration, app packaging, installation and launch to the
-designated builder chat. The standalone commands below
+designated queue builder. The standalone commands below
 must not be run from a parallel feature session.
 
 Use macOS 14.2 or newer and Xcode 26 or newer with a Swift 6 toolchain

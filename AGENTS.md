@@ -41,11 +41,16 @@ feature sessions with regular checked integration and one working application.
 - Finished feature agents automatically submit their reviewed PR/exact head,
   checks, dependencies and acceptance steps to the persistent build queue
   (`scripts/build-queue.py`; installed helper in the Git common directory).
-  The configured builder chat processes FIFO, sends queue/start/result messages
-  to the originating sessions and alone integrates/packages/promotes. These
-  queue messages are user-authorized. Workers follow the result and report
-  issues without starting competing builds. Follow the runbook for CLI inboxes,
-  pending installs, recovery and the five-minute builder automation.
+  `enqueue` rejects a head whose guidance sync or documentation validation
+  fails. The configured builder processes FIFO, sends queue/start/result
+  messages to the originating sessions and alone integrates/packages/promotes;
+  it resolves routine merge conflicts itself. It is an on-demand headless
+  session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
+  starts only while the queue has open work; only the maintainer activates or
+  deactivates it. These queue messages are user-authorized. Workers follow the
+  result and report issues without starting competing builds. Follow the
+  runbook for CLI inboxes, pending installs, their automatic retry and
+  recovery. WHY: .project-docs/decisions/2026-11-19-on-demand-build-queue-builder.md
 - The builder holds the shared `exodia-integration.lock` in
   `git rev-parse --git-common-dir` for protected operations. Queue claims never
   replace that lock or any validation gate. Preserve all other sessions' WIP;

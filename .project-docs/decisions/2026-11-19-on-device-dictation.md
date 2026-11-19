@@ -9,7 +9,7 @@ canonical_for: [on-device-speech]
 verified_at: 2026-11-19
 sources:
   - type: user-confirmed
-    reference: On 2026-11-19 the user asked to build dictation that works out of the box first ("диктовку из под капота"), after a comparison with other dictation apps showed that needing a provider key before the first dictation is the main barrier for a new user.
+    reference: On 2026-11-19 the user asked to build dictation that works out of the box first, after a comparison with other dictation apps showed that needing a provider key before the first dictation is the main barrier for a new user.
     confirmed_at: 2026-11-19
   - type: repository
     reference: Sources/Sidekey/Streaming/OnDevice/OnDeviceSpeechModelStore.swift
@@ -78,11 +78,11 @@ through Core ML with no further dependency.
 - 2026-11-19, M4 Pro, macOS 27.2, through the new code
   (`OnDeviceSpeechEndToEndTests`, opt-in): download and first load 74 s;
   three synthetic 2.5-3 s phrases decoded in 78-92 ms each, offline after the
-  download. Russian and English came out verbatim ("ё" written as "е").
-- The mixed phrase "Открой GitHub и проверь последний pull request" came out
-  as "Открой гитхаб и проверь последний пул реквест", with and without the
-  script filter. English terms inside Russian speech are transliterated by
-  the model itself. Not measured on a live voice.
+  download. Russian and English came out verbatim (the Russian letter yo is written as ye).
+- In a mixed Russian phrase containing "GitHub" and "pull request", both
+  terms came out transliterated into Cyrillic, with and without the script
+  filter. English terms inside Russian speech are transliterated by the model
+  itself. Not measured on a live voice.
 - Scenario tests with a fake decoder (`OnDeviceDictationTests`): route without
   any key, missing model with a provider key stored, the offer after a
   download, removal, a take latched before a route change, silence, decode

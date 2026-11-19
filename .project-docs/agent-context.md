@@ -1,8 +1,8 @@
 # Whytap
 
-Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK only: the
-user's provider keys or their own OpenAI-compatible endpoints, no on-device
-models; free, MIT. Two hotkeys: hold Space in an editable
+Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
+user's provider keys or their own OpenAI-compatible endpoints, plus optional
+dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
 native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers,
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
@@ -111,6 +111,31 @@ Voice flow (Drop / dictation):
             is checked before the key (invalidLanguageConfiguration). WHY:
             .project-docs/decisions/2026-10-18-remove-local-models.md,
             .project-docs/decisions/2026-10-19-api-and-models.md
+       On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
+            the same route mechanism, for Drop Fast, Drop Smart, Agent voice
+            and Voice search only (not Meetings, Subtitles or text). The API
+            keys tab has an On this Mac tile that downloads or removes
+            Parakeet TDT v3 (about 470 MB from Hugging Face, kept in
+            Application Support/Sidekey/OnDeviceSpeechModels, outside backups
+            and LegacyLocalModelCleanup). The downloaded model is the
+            account's credential (OnDeviceSpeechReadiness): without it the
+            route throws .missingKey, the row is Not set and nothing goes to a
+            provider. A finished download only offers the model for features
+            without a route; removing it un-sets its features. The factory
+            builds OnDeviceTranscriptionSession (no adapter, no socket): live
+            text re-decodes the last 14 s about every 0.8 s, the pasted text
+            is one pass over the whole take (the session's own copy of the
+            stream, not the engine's capped turn buffer); a take under 0.3 s
+            is silence. Live text counts only a changed ending as new, so a
+            scrolled window does not hold Drop auto-stop. Decodes hold the
+            model (acquire/release), so idle eviction and Remove never unload
+            it mid-decode.
+            Batch recovery, Retry and agent batch voice use
+            OnDeviceBatchTranscriber and stay on this Mac. FluidAudio's
+            language is a script filter: kept for Latin-script languages,
+            none for Cyrillic ones. The loaded model is released after five
+            idle minutes. No Costs rows. WHY:
+            .project-docs/decisions/2026-11-19-on-device-dictation.md
        Soniox Stop: drain all captured audio -> 200ms PCM silence -> explicit
        finalize + text EOF. A final <fin> acknowledgement completes the take;
        finished=true also completes it. The 10s watchdog remains the backstop.
@@ -1504,7 +1529,8 @@ input layout, including live recording and previously saved non-English titles.
 
 1. **No Whytap-owned services.** The app never contacts a Whytap backend,
    has no account and sends no telemetry. Network traffic is limited to
-   the meeting detector's Silero VAD download from Hugging Face, providers
+   the meeting detector's Silero VAD download from Hugging Face, the On this
+   Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),
    notification sources accessed by user-configured local scripts, calendar providers
    explicitly connected by the user (Google, Microsoft and Zoom), direct agent provider
@@ -1525,16 +1551,19 @@ input layout, including live recording and previously saved non-English titles.
    transcripts, prompts, replies or keys (`LocalPathLoggingInvariantTests`).
    Key contents read by the hotkey tap or the Brightness keys tap are never
    logged or persisted.
-3. **No on-device models and no silent route change.** Speech, cleanup and
-   meeting processing run only on providers or endpoints the user chose. A
+3. **No on-device LLM and no silent route change.** Cleanup and meeting
+   processing run only on providers or endpoints the user chose; speech runs
+   there or, for the microphone features, on the On this Mac model the user
+   downloaded and picked (never chosen for them; WHY:
+   .project-docs/decisions/2026-11-19-on-device-dictation.md). A
    stored retired `local` level, or no stored level on Apple Silicon (where
    Local was the default), reads as not configured even when a key is stored;
    Intel keeps its Your key default (`SelfKeyPreferences`,
    `RetiredLocalRouteTests`). Each feature's data, including its fallback and
    probe, goes only to the provider of its own route in Settings -> API &
    Models; a removed key leaves the feature Not set and moves nothing. WHY:
-   .project-docs/decisions/2026-10-19-api-and-models.md FluidAudio stays only for the meeting detector's
-   Silero VAD; launch removes the retired models' weights under
+   .project-docs/decisions/2026-10-19-api-and-models.md FluidAudio serves the meeting detector's
+   Silero VAD and On this Mac speech; launch removes the retired models' weights under
    Application Support/Sidekey once per flavor and never touches FluidAudio's
    cache (`LegacyLocalModelCleanup`, WHY:
    .project-docs/decisions/2026-10-18-legacy-model-cleanup.md). There is no

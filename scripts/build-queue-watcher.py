@@ -439,10 +439,19 @@ def command_run(root):
     lock_fd = acquire(root)
     if lock_fd is None:
         return 0  # a watcher or its builder session is alive; arrivals simply wait in FIFO
+    try:
+        return watch(root)
+    finally:
+        os.close(lock_fd)
+
+
+def watch(root):
     config = load_config(root)
-    if not reap_orphan(root, read_json(root / STATE, {})):
-        return 0
     while True:
+        # Before every start, also after our own session: while anything of an
+        # earlier session is left, its record and lock stay and nothing new starts.
+        if not reap_orphan(root, read_json(root / STATE, {})):
+            return 0
         state = read_json(root / STATE, {})
         work = open_work(root)
         before = json.dumps(state, sort_keys=True)

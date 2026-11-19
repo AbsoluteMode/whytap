@@ -3,9 +3,11 @@
 fake builder session, fake meeting gate and fake launchctl. Nothing here reaches
 a real model, the real queue, launchd or an application."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -300,6 +302,41 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse((self.root / "exodia-integration.lock").exists())
         self.assertEqual(self.statuses(), {ticket: "done"})
 
+    def test_unfinished_cleanup_blocks_the_next_session_and_keeps_its_record(self):
+        """Processes of the first session that cannot be ended must keep their
+        record and stop every later start, also for a newly arrived ticket."""
+        spec = importlib.util.spec_from_file_location("watcher_under_test", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        watcher.stop_group = lambda *_arguments, **_keywords: False
+        watcher.log = lambda _message: None
+        (self.control / "detach").touch()
+        (self.control / "crash").touch()
+        first = self.enqueue(1)
+        saved = dict(os.environ)
+        os.environ.update(self.env)
+        try:
+            self.assertEqual(watcher.command_run(self.root), 0)
+            leftover = int((self.control / "detached.pid").read_text())
+            self.addCleanup(lambda: self.alive(leftover) and os.kill(leftover, signal.SIGKILL))
+            state_path = self.root / "whytap-build-queue-watcher-state.json"
+            record = json.loads(state_path.read_text())["session"]
+            self.assertIn(str(leftover), record["tree"])
+            self.assertEqual(len(self.sessions()), 1)
+            self.assertTrue((self.root / "exodia-integration.lock").exists())
+            second = self.enqueue(2)  # the queue changes; still no second session
+            self.assertEqual(watcher.command_run(self.root), 0)
+            self.assertEqual(len(self.sessions()), 1)
+            self.assertEqual(json.loads(state_path.read_text())["session"], record)
+            self.assertEqual(self.statuses(), {first: "in_progress", second: "queued"})
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        self.watcher("run")  # a watcher that can end the leftovers recovers everything
+        self.assertFalse(self.alive(leftover))
+        self.assertFalse((self.root / "exodia-integration.lock").exists())
+        self.assertEqual(self.statuses(), {first: "done", second: "done"})
+
     def test_engine_that_cannot_start_backs_off_without_piling_up_logs(self):
         self.configure_watcher(command=[str(self.base / "no-such-engine")])
         self.enqueue(1)
@@ -343,7 +380,7 @@ class ActivationTests(WatcherTests):
                      "whytap-build-queue-builder-prompt.md"):
             self.assertTrue((self.root / name).is_file(), name)
         plist = self.launch_agent().read_text()
-        self.assertNotIn("@", plist)
+        self.assertIsNone(re.search(r"@[A-Z_]+@", plist))  # a path may contain "@"
         self.assertIn(str(self.root / "whytap-build-queue-watcher.py"), plist)
         self.assertIn(str(self.root / "exodia-build-queue.sqlite3"), plist)
         if sys.platform == "darwin":

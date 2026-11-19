@@ -291,6 +291,7 @@ final class LiveTextTickerTests: XCTestCase {
     @MainActor
     func testShortCorrectionKeepsPrefixStillAndRevisedLettersVisible() {
         let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
         model.prime("я говорю", now: 0)
         _ = render(model, now: 1, name: "rewrite-before")
         model.textArrived("Я говорю дальше", now: 1.01)
@@ -302,20 +303,95 @@ final class LiveTextTickerTests: XCTestCase {
     }
 
     @MainActor
-    func testOverflowingCorrectionKeepsVisiblePrefixStillOnItsFirstFrame() {
+    func testOverflowingCorrectionGlidesAsOneRigidLine() {
         let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
         let phrase = String(repeating: "привет ", count: 10)
         model.prime(phrase + "узко", now: 0)
         _ = render(model, now: 1, name: "overflow-before")
-        let before = model.glyphX(at: phrase.count - 20)
+        let near = phrase.count - 20, far = phrase.count - 2
+        let before = model.glyphX(at: near)
+        let spacing = model.glyphX(at: far) - before
         XCTAssertGreaterThan(before, 0)
         model.textArrived(phrase + "широко", now: 1)
         _ = render(model, now: 1, name: "overflow-corrected")
-        XCTAssertEqual(model.glyphX(at: phrase.count - 20), before, accuracy: 4)
-        let tip = model.glyphX(at: phrase.count + "широко".count - 1)
-        XCTAssertLessThan(tip, 180, "the live edge stays inside the viewport even during scrolling")
-        _ = render(model, now: 1.02, name: "overflow-moving")
-        XCTAssertLessThan(abs(model.glyphX(at: phrase.count - 20) - before), 7)
+        XCTAssertEqual(model.glyphX(at: near), before, accuracy: 0.01, "no jump on the rewrite frame")
+        var previous = before
+        for frame in 1...60 {
+            _ = render(model, now: 1 + Double(frame) / 60, name: "overflow-moving-\(frame)")
+            let x = model.glyphX(at: near)
+            XCTAssertEqual(model.glyphX(at: far) - x, spacing, accuracy: 0.01, "letters never spread apart")
+            XCTAssertLessThan(abs(x - previous), 3, "the line glides, frame \(frame)")
+            previous = x
+        }
+        let last = phrase.count + "широко".count - 1
+        XCTAssertLessThan(model.glyphX(at: last), 180, "the live edge settles inside the viewport")
+        XCTAssertLessThan(previous, before, "the longer word moved the line left")
+    }
+
+    /// A word taken back in the middle of the visible line: the text on both
+    /// sides stays where it was and the gap closes smoothly.
+    @MainActor
+    func testAWordRemovedMidLineLeavesBothSidesInPlace() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        let start = String(repeating: "привет ", count: 8)
+        model.prime(start + "лишнее слово в конце", now: 0)
+        _ = render(model, now: 1, name: "mid-before")
+        let left = start.count - 3, right = start.count + "лишнее ".count + 2
+        let leftBefore = model.glyphX(at: left), rightBefore = model.glyphX(at: right)
+        XCTAssertGreaterThan(leftBefore, 0)
+        model.textArrived(start + "слово в конце", now: 1)
+        _ = render(model, now: 1, name: "mid-corrected")
+        let moved = right - "лишнее ".count
+        XCTAssertEqual(model.glyphX(at: left), leftBefore, accuracy: 0.01)
+        XCTAssertEqual(model.glyphX(at: moved), rightBefore, accuracy: 0.01)
+        _ = render(model, now: 1 + 1.0 / 60, name: "mid-moving")
+        XCTAssertLessThan(abs(model.glyphX(at: left) - leftBefore), 8)
+        XCTAssertEqual(model.glyphX(at: moved), rightBefore, accuracy: 0.01)
+        _ = render(model, now: 3, name: "mid-settled")
+        XCTAssertEqual(model.glyphX(at: moved) - model.glyphX(at: left),
+                       rightBefore - leftBefore - 46, accuracy: 12, "the gap is closed")
+    }
+
+    /// The recorded case (2026-11-19): the provider dropped "Как ты думаешь, "
+    /// for a moment and brought it back. The words at the live edge must not
+    /// move or change their spacing on the way.
+    @MainActor
+    func testAClauseTakenBackAndRestoredKeepsTheLiveWordsStill() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        let start = "Что у тебя нового? Подумай насчёт завтра. "
+        model.prime(start + "Чем стоит по", now: 0)
+        _ = render(model, now: 1, name: "restore-before")
+        let old = start.count + 2
+        let before = model.glyphX(at: old), spacing = model.glyphX(at: old + 8) - before
+        model.textArrived(start + "Как ты думаешь, чем стоит по", now: 1)
+        let new = old + "Как ты думаешь, ".count
+        for frame in 0...30 {
+            _ = render(model, now: 1 + Double(frame) / 60, name: "restore-\(frame)")
+            XCTAssertEqual(model.glyphX(at: new), before, accuracy: 0.01, "frame \(frame)")
+            XCTAssertEqual(model.glyphX(at: new + 8) - model.glyphX(at: new), spacing, accuracy: 0.01)
+        }
+    }
+
+    /// A word inserted left of the viewport must not disturb the visible text.
+    @MainActor
+    func testARewriteOfTheVisibleStartDoesNotJumpTheLine() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        let phrase = String(repeating: "привет ", count: 10)
+        model.prime(phrase, now: 0)
+        _ = render(model, now: 1, name: "start-before")
+        let index = phrase.count - 3
+        let before = model.glyphX(at: index)
+        // A word inserted at the very start: no prefix of the line survives.
+        model.textArrived("очень " + phrase, now: 1)
+        _ = render(model, now: 1, name: "start-corrected")
+        let moved = index + "очень ".count
+        XCTAssertEqual(model.glyphX(at: moved), before, accuracy: 0.01)
+        _ = render(model, now: 1 + 1.0 / 60, name: "start-moving")
+        XCTAssertLessThan(abs(model.glyphX(at: moved) - before), 1)
     }
 
     func testAFaceRebuiltMidTakeShowsItsTextAtOnce() {
@@ -371,6 +447,47 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertEqual(ticker.revealedCount, 7)
         XCTAssertEqual(ticker.characters.count, 7)
         XCTAssertEqual(ticker.bornAt.count, 7)
+    }
+
+    // MARK: - Held rewrites
+
+    /// Words taken back and returned within the hold never reach the screen.
+    @MainActor
+    func testWordsTakenBackAndReturnedQuicklyAreNeverShownChanging() {
+        let model = IslandLiveTextTickerModel()
+        let full = "Подумай насчёт завтра. Как ты думаешь, чем"
+        model.prime(full, now: 0)
+        _ = render(model, now: 1, name: "hold-before")
+        model.textArrived("Подумай насчёт завтра. Чем", now: 1)
+        _ = render(model, now: 1.3, name: "hold-waiting")
+        XCTAssertEqual(model.shownText, full, "the shorter text is waiting")
+        model.textArrived(full + " стоит", now: 1.35)
+        XCTAssertEqual(model.shownText, full + " стоит", "new words are shown at once")
+        _ = render(model, now: 3, name: "hold-after")
+        XCTAssertEqual(model.shownText, full + " стоит", "the waiting rewrite was dropped")
+    }
+
+    /// A real correction is shown once, half a second later, in its newest form.
+    @MainActor
+    func testARewriteThatStaysIsShownOnceAfterTheHold() {
+        let model = IslandLiveTextTickerModel()
+        model.prime("я пишу письмо", now: 0)
+        _ = render(model, now: 1, name: "stay-before")
+        model.textArrived("я пишу письма", now: 1)
+        model.textArrived("я пишу письма маме", now: 1.2)
+        _ = render(model, now: 1.49, name: "stay-waiting")
+        XCTAssertEqual(model.shownText, "я пишу письмо")
+        _ = render(model, now: 1.5, name: "stay-shown")
+        XCTAssertEqual(model.shownText, "я пишу письма маме")
+    }
+
+    /// Text that is not on screen yet is never held.
+    @MainActor
+    func testARewriteOfTextNotYetRevealedIsNotHeld() {
+        let model = IslandLiveTextTickerModel()
+        model.textArrived("первые слова", now: 0)
+        model.textArrived("другие слова", now: 0.01)
+        XCTAssertEqual(model.shownText, "другие слова")
     }
 
     // MARK: - Drawing

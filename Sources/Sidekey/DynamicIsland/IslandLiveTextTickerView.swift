@@ -47,44 +47,109 @@ final class IslandLiveTextTickerModel {
     /// Left edge of every character, plus the end of the last one.
     private var edges: [CGFloat] = [0]
     private var widths: [Character: CGFloat] = [:]
-    /// Temporary compensation for scrolling a surviving visible prefix.
+    /// What is left of a position change caused by a rewrite, for the text
+    /// before the last rewrite (`slide`) and from `tailStart` on (`tailSlide`).
     private var slide: CGFloat = 0
+    private var tailSlide: CGFloat = 0
+    private var tailStart = 0
+    /// How long a rewrite of visible text waits for the provider to settle.
+    /// Short enough for the pacer's reserve of new words to last through it.
+    var rewriteHoldSeconds: TimeInterval = 0.5
+    private var heldRewrite: String?
+    private var heldRewriteUntil: TimeInterval = 0
     private var wingWidth: CGFloat = 0
     private var lastFrameAt: TimeInterval?
     /// How fast a slide is eased out (time constant).
     static let slideSeconds: TimeInterval = 0.12
+    /// Unchanged text at the live edge at least this wide never moves when
+    /// longer text is written before it.
+    static let steadyTailWidth: CGFloat = 24
     private let font = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
 
     func prime(_ text: String, now: TimeInterval) {
         slide = 0
+        tailSlide = 0
+        heldRewrite = nil
         ticker.prime(text, now: now)
         measure()
     }
 
+    /// A provider may take visible words back and return them a moment later,
+    /// or rewrite a chunk in several quick steps. A snapshot that changes text
+    /// already on screen waits up to `rewriteHoldSeconds`; the newest one is
+    /// then shown in one step. A snapshot that keeps the visible text (new
+    /// words at the end) is shown at once and cancels a waiting rewrite.
+    /// The same for every provider: only the text is compared.
+    /// WHY: .project-docs/decisions/2026-11-19-live-text-rewrite-hold.md
     func textArrived(_ text: String, now: TimeInterval) {
-        let oldOffset = scrollOffset
-        // If a surviving prefix is visible, keep it still on the rewrite
-        // frame. Edits entirely to its left are already anchored by the tail.
-        let oldFirstVisible = max(0, (edges.firstIndex { $0 > -oldOffset } ?? edges.count) - 1)
-        let visiblePrefixSurvives = oldFirstVisible < ticker.revealedCount &&
-            text.prefix(oldFirstVisible + 1).elementsEqual(ticker.characters.prefix(oldFirstVisible + 1))
-        ticker.textArrived(text, now: now)
-        measure()
-        if visiblePrefixSurvives, wingWidth > 0 {
-            slide = min(wingWidth / 2, max(-wingWidth / 2, slide + oldOffset - scrollOffset))
+        let visible = ticker.characters.prefix(ticker.revealedCount)
+        if rewriteHoldSeconds <= 0 || text.starts(with: visible) {
+            heldRewrite = nil
+            show(text, now: now)
         } else {
-            slide = 0
+            if heldRewrite == nil { heldRewriteUntil = now + rewriteHoldSeconds }
+            heldRewrite = text
         }
     }
 
+    private func show(_ text: String, now: TimeInterval) {
+        let oldCharacters = ticker.characters
+        let oldShown = min(ticker.revealedCount, oldCharacters.count)
+        let oldEdges = edges
+        let oldOffset = scrollOffset
+        let oldWidth = revealedWidth
+        ticker.textArrived(text, now: now)
+        measure()
+        guard wingWidth > 0, oldShown > 0 else {
+            slide = 0
+            tailSlide = 0
+            return
+        }
+        // A rewrite of visible text splits the line in two rigid pieces: the
+        // text before the change and the unchanged text after it. Each piece
+        // stays where it was on this frame and glides to its new place, so
+        // nothing jumps and the spacing inside a piece never changes.
+        // WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
+        let characters = ticker.characters
+        let shown = min(ticker.revealedCount, characters.count)
+        let shortest = min(oldShown, shown)
+        var prefix = 0
+        while prefix < shortest, oldCharacters[prefix] == characters[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < shortest - prefix,
+              oldCharacters[oldShown - 1 - suffix] == characters[shown - 1 - suffix] { suffix += 1 }
+        let scrolled = scrollOffset - oldOffset
+        let tailMoved = edges[shown - suffix] - oldEdges[oldShown - suffix] + scrolled
+        let grown = (edges[shown - suffix] - edges[prefix]) - (oldEdges[oldShown - suffix] - oldEdges[prefix])
+        var leftKeep = -scrolled
+        var tailKeep = -tailMoved
+        if grown > 0 {
+            // Longer text does not fit between two pieces that both stay.
+            // The words at the live edge stay and the text before them makes
+            // room at once. Only when the change is the live word itself
+            // (almost no tail), or the line is short, does the start stay.
+            let tailVisible = min(wingWidth, max(0, oldWidth - oldEdges[oldShown - suffix]))
+            if tailVisible < Self.steadyTailWidth || scrollOffset == 0 {
+                tailKeep += grown
+            } else {
+                leftKeep -= grown
+            }
+        }
+        let limit = wingWidth / 2
+        slide = min(limit, max(-limit, slide + leftKeep))
+        tailSlide = min(limit, max(-limit, tailSlide + tailKeep))
+        tailStart = shown - suffix
+    }
+
+    /// The text the line currently draws from (a waiting rewrite is not in it).
+    var shownText: String { String(ticker.characters) }
+
     private var scrollOffset: CGFloat { min(0, wingWidth - revealedWidth) }
 
-    /// Earlier letters ease into a changed scroll position. Compensation falls
-    /// to zero at the revealed edge so the current word always stays in view.
+    /// A letter moves together with its whole piece of the line: the same
+    /// amount for every letter in it (a per-letter amount stretched the text).
     func glyphX(at index: Int) -> CGFloat {
-        let behindTip = max(0, revealedWidth - edges[index + 1])
-        let weight = min(1, behindTip / max(1, wingWidth))
-        return edges[index] + scrollOffset + slide * weight
+        edges[index] + scrollOffset + (index < tailStart ? slide : tailSlide)
     }
 
     private var revealedWidth: CGFloat {
@@ -113,12 +178,17 @@ final class IslandLiveTextTickerModel {
 
     @discardableResult
     func advance(now: TimeInterval) -> CGFloat {
+        if let rewrite = heldRewrite, now >= heldRewriteUntil {
+            heldRewrite = nil
+            show(rewrite, now: now)
+        }
         let previous = lastFrameAt ?? now
         if lastFrameAt != nil, now <= previous { return revealedWidth }
         ticker.advance(now: now)
         lastFrameAt = now
-        slide *= CGFloat(exp(-(now - previous) / Self.slideSeconds))
-        if abs(slide) < 0.05 { slide = 0 }
+        let decay = CGFloat(exp(-(now - previous) / Self.slideSeconds))
+        slide = abs(slide * decay) < 0.05 ? 0 : slide * decay
+        tailSlide = abs(tailSlide * decay) < 0.05 ? 0 : tailSlide * decay
         return revealedWidth
     }
 
@@ -127,7 +197,7 @@ final class IslandLiveTextTickerModel {
         wingWidth = size.width
         let count = min(ticker.revealedCount, ticker.characters.count)
         guard count > 0 else { return }
-        let offset = scrollOffset
+        let offset = scrollOffset + slide
         let middle = size.height / 2
 
         var first = count - 1

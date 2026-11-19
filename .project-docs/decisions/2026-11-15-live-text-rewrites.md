@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LiveText/LiveTextTickerTests.swift
     confirmed_at: 2026-11-15
-related: [2026-11-13-live-text-sand.md]
+related: [2026-11-13-live-text-sand.md, 2026-11-19-live-text-rewrite-hold.md]
 ---
 
 # Rewrites keep the line in place
@@ -58,9 +58,21 @@ visible words with the new word and makes them gather a second time.
 - Restore the matching visible part when a provider briefly retracts a tail.
   The ticker retains one previous visible prefix within the current take.
   Restoring visible characters does not count as newly arriving speech.
-- In a full wing, compensate a changed scroll position only when its visible
-  prefix survives. Taper the adjustment to zero at the live edge so the
-  current word stays visible. A short line keeps its left origin.
+- A rewrite of visible text splits the line in two rigid pieces: the text
+  before the change and the unchanged text after it. Each piece stays where
+  it was on that frame and glides to its new place (0.12 s time constant, at
+  most half the wing); every letter of a piece moves by the same amount.
+  A short line keeps its left origin. Changed 2026-11-19: the earlier taper
+  (full adjustment at the left, zero at the live edge) moved letters by
+  different amounts, which the user saw as the text stretching; and a rewrite
+  of the first visible letter dropped the glide, which they saw as a jump.
+  Longer replacement text cannot fit between two pieces that both stay: the
+  words at the live edge stay and the text before them makes room in one
+  frame (the recorded case of 2026-11-19, a clause dropped and restored:
+  nothing at the live edge moves). When the change is the live word itself
+  (under 24 pt of unchanged text after it), the start stays instead and the
+  longer word's end is behind the right edge for about a quarter of a second. A rewrite that arrives while an earlier glide
+  is still running reuses its two offsets (not tracked per rewrite).
 - Soniox emits final tokens followed by a partial tail for each token frame.
   Publish its combined snapshot once at that boundary. A final-only frame
   still publishes through its empty partial. Segment-based providers continue

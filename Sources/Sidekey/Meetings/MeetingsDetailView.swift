@@ -129,10 +129,28 @@ final class MeetingsDetailView: NSView {
     /// This is deliberately a real model transition, not just an overlay: the
     /// previous meeting id/content/edit target must be cleared immediately or a
     /// failed in-flight row appears to open the previously viewed meeting.
-    func loadUnavailableMeeting(id: UUID, message: String, isLoading: Bool = false) {
+    ///
+    /// `transcript` is a transcript kept while the note is missing: the
+    /// Transcript tab then works although the Note tab shows `message`.
+    /// `onRetryNotes` adds a Retry notes button under the message.
+    func loadUnavailableMeeting(
+        id: UUID, message: String, isLoading: Bool = false,
+        transcript: [TranscriptSegment]? = nil, onRetryNotes: (() -> Void)? = nil,
+        preservingTab: Bool = false
+    ) {
+        // A background refresh must not pull a reader off the Transcript tab.
+        let keepTranscriptTab = preservingTab && currentTab == .transcribe
+            && currentMeetingId == id && transcript?.isEmpty == false
         editBridge?.attachMeeting(id: id)
         model.loadUnavailable(id: id, message: message, isLoading: isLoading)
-        switchTo(.note)
+        if let transcript, !transcript.isEmpty {
+            model.attachKeptTranscript(
+                blocks: MeetingNoteMarkdownParser.parse(TranscriptMarkdownFormatter.format(transcript)),
+                copyText: TranscriptMarkdownFormatter.plainText(transcript)
+            )
+        }
+        model.onRetryNotes = onRetryNotes
+        switchTo(keepTranscriptTab ? .transcribe : .note)
     }
 
     /// Wire the edit bridge so Done-in-editor persists. Stored weakly — the
@@ -193,6 +211,8 @@ final class MeetingDetailModel: ObservableObject {
     /// `MeetingsDetailView` to the edit bridge.
     var onSave: ((_ markdown: String, _ version: Int) -> Void)?
     var onEditingFinished: (() -> Void)?
+    /// Set while a meeting without a note can have its notes written again.
+    @Published var onRetryNotes: (() -> Void)?
 
     private let meetingSharePresenter: @MainActor (MeetingSharePayload) -> Void
 
@@ -214,6 +234,7 @@ final class MeetingDetailModel: ObservableObject {
         currentMeetingId = id
         unavailableMessage = nil
         unavailableIsLoading = false
+        onRetryNotes = nil
         self.noteMarkdown = noteMarkdown
         self.noteBlocks = noteBlocks
         self.noteProtocol = MeetingProtocolParser.parse(noteMarkdown)
@@ -243,6 +264,15 @@ final class MeetingDetailModel: ObservableObject {
         version = 1
         activeTab = .note
         isEditing = false
+        onRetryNotes = nil
+    }
+
+    /// The transcript of a meeting whose note is missing. The note fields
+    /// stay empty, so nothing here can be edited or shared as a note.
+    func attachKeptTranscript(blocks: [NoteBlock], copyText: String) {
+        transcriptBlocks = blocks
+        transcriptCopyText = copyText
+        hasTranscript = !blocks.isEmpty
     }
 
     /// Commit an edit: re-render locally for an instant update, then persist.
@@ -281,7 +311,9 @@ private struct MeetingDetailContentView: View {
 
     var body: some View {
         Group {
-            if let message = model.unavailableMessage {
+            // A meeting without a note can still have its transcript: the
+            // message owns the Note tab only.
+            if let message = model.unavailableMessage, model.activeTab == .note || !model.hasTranscript {
                 unavailable(message)
             } else if model.activeTab == .transcribe && !model.hasTranscript {
                 placeholder
@@ -309,6 +341,13 @@ private struct MeetingDetailContentView: View {
                 .foregroundStyle(MacSettingsTheme.text2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
+            if let retry = model.onRetryNotes {
+                // The shared button: hover, pressed and keyboard-focus states
+                // over its whole hit area, like Retry in the meeting list.
+                MacButton(title: "Retry notes", style: .primary, action: retry)
+                    .padding(.top, 4)
+                    .help("Write the notes again from the saved transcript")
+            }
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

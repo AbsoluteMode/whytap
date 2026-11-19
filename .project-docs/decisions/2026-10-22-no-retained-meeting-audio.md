@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Meetings/MeetingsStagedAudioRetentionTests.swift
     confirmed_at: 2026-10-22
-related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-21-backup-essentials-only.md, 2026-10-18-silent-meetings.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-20-meeting-continuations.md]
+related: [2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-21-backup-essentials-only.md, 2026-10-18-silent-meetings.md, 2026-10-18-meeting-recovery-dark-wake.md, 2026-10-20-meeting-continuations.md, 2026-11-19-meeting-transcript-kept.md]
 ---
 
 # Keep meeting audio only while it can still become a note

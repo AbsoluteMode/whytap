@@ -10,7 +10,9 @@ is a verifiable claim rather than a slogan.
   and, for meetings, staged as WAV chunks under `~/Library/Application
   Support/` only while the meeting is recorded and its note is created. If
   processing fails, the recording is kept for retries for at most 24 hours
-  after it ended and then deleted; the meeting stays listed as failed.
+  after it ended and then deleted; the meeting stays listed as failed. A
+  transcript that was already made stays on this Mac with the meeting, so the
+  notes can be written again later without the recording.
   Packaged builds keep no research recordings.
 - Transcripts, agent history, clipboard history and meeting notes live in
   SQLite databases under `~/Library/Application Support/`. Delete them from

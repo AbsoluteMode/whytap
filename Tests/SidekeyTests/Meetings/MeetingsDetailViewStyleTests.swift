@@ -28,6 +28,27 @@ final class MeetingsDetailViewStyleTests: XCTestCase {
         XCTAssertTrue(controller.contains("NotesTopBar"))
     }
 
+    /// Retry notes is the shared `MacButton`, which carries hover, pressed and
+    /// keyboard-focus feedback over its whole hit area; a hand-rolled plain
+    /// button with a fixed fill had none of them.
+    func test_retry_notes_uses_the_shared_button_with_interaction_states() throws {
+        let root = try projectRoot()
+        let detail = try String(
+            contentsOf: root.appendingPathComponent("Sources/Sidekey/Meetings/MeetingsDetailView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(detail.contains(#"MacButton(title: "Retry notes", style: .primary, action: retry)"#))
+        XCTAssertFalse(detail.contains(#"Text("Retry notes")"#), "no second, hand-rolled Retry notes button")
+
+        let button = try String(
+            contentsOf: root.appendingPathComponent("Sources/Sidekey/Settings/MacUI/MacButton.swift"),
+            encoding: .utf8
+        )
+        for state in ["hovered: isHovered", "pressed: configuration.isPressed", "focused: focused"] {
+            XCTAssertTrue(button.contains(state), "MacButton lost its \(state) feedback")
+        }
+    }
+
     func test_linear_task_action_uses_linear_logo_not_external_link_icon() throws {
         let root = try projectRoot()
 

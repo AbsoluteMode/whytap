@@ -52,6 +52,11 @@ final class IslandLiveTextTickerModel {
     private var slide: CGFloat = 0
     private var tailSlide: CGFloat = 0
     private var tailStart = 0
+    /// How long a rewrite of visible text waits for the provider to settle.
+    /// Short enough for the pacer's reserve of new words to last through it.
+    var rewriteHoldSeconds: TimeInterval = 0.5
+    private var heldRewrite: String?
+    private var heldRewriteUntil: TimeInterval = 0
     private var wingWidth: CGFloat = 0
     private var lastFrameAt: TimeInterval?
     /// How fast a slide is eased out (time constant).
@@ -64,11 +69,30 @@ final class IslandLiveTextTickerModel {
     func prime(_ text: String, now: TimeInterval) {
         slide = 0
         tailSlide = 0
+        heldRewrite = nil
         ticker.prime(text, now: now)
         measure()
     }
 
+    /// A provider may take visible words back and return them a moment later,
+    /// or rewrite a chunk in several quick steps. A snapshot that changes text
+    /// already on screen waits up to `rewriteHoldSeconds`; the newest one is
+    /// then shown in one step. A snapshot that keeps the visible text (new
+    /// words at the end) is shown at once and cancels a waiting rewrite.
+    /// The same for every provider: only the text is compared.
+    /// WHY: .project-docs/decisions/2026-11-19-live-text-rewrite-hold.md
     func textArrived(_ text: String, now: TimeInterval) {
+        let visible = ticker.characters.prefix(ticker.revealedCount)
+        if rewriteHoldSeconds <= 0 || text.starts(with: visible) {
+            heldRewrite = nil
+            show(text, now: now)
+        } else {
+            if heldRewrite == nil { heldRewriteUntil = now + rewriteHoldSeconds }
+            heldRewrite = text
+        }
+    }
+
+    private func show(_ text: String, now: TimeInterval) {
         let oldCharacters = ticker.characters
         let oldShown = min(ticker.revealedCount, oldCharacters.count)
         let oldEdges = edges
@@ -117,6 +141,9 @@ final class IslandLiveTextTickerModel {
         tailStart = shown - suffix
     }
 
+    /// The text the line currently draws from (a waiting rewrite is not in it).
+    var shownText: String { String(ticker.characters) }
+
     private var scrollOffset: CGFloat { min(0, wingWidth - revealedWidth) }
 
     /// A letter moves together with its whole piece of the line: the same
@@ -151,6 +178,10 @@ final class IslandLiveTextTickerModel {
 
     @discardableResult
     func advance(now: TimeInterval) -> CGFloat {
+        if let rewrite = heldRewrite, now >= heldRewriteUntil {
+            heldRewrite = nil
+            show(rewrite, now: now)
+        }
         let previous = lastFrameAt ?? now
         if lastFrameAt != nil, now <= previous { return revealedWidth }
         ticker.advance(now: now)

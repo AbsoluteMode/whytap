@@ -87,7 +87,7 @@ def documentation_preflight(head):
     scripts = documentation_scripts()
     if scripts is None:
         return "unavailable"
-    scratch = Path(tempfile.mkdtemp(prefix="whytap-enqueue-docs-"))
+    scratch = Path(tempfile.mkdtemp(prefix="whytap-enqueue-docs-")).resolve()
     tree = scratch / "tree"
     try:
         git("worktree", "add", "--detach", "--quiet", str(tree), head)
@@ -106,7 +106,6 @@ def documentation_preflight(head):
         subprocess.run(["git", "worktree", "remove", "--force", str(tree)],
                        capture_output=True)
         shutil.rmtree(scratch, ignore_errors=True)
-        subprocess.run(["git", "worktree", "prune"], capture_output=True)
     return "passed"
 
 
@@ -162,11 +161,12 @@ def database():
                 acknowledged_at TEXT
             );
         """)
+        db.execute("BEGIN IMMEDIATE")
+        # Inside the write lock: concurrent first calls after an upgrade migrate once.
         if "retry" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
             # '' = wait for a person or a handoff; 'meeting' = the watcher retries the
             # deferred local install whenever the meeting gate is clear.
             db.execute("ALTER TABLE tickets ADD COLUMN retry TEXT NOT NULL DEFAULT ''")
-        db.execute("BEGIN IMMEDIATE")
         yield db
         db.commit()
     finally:
@@ -208,6 +208,18 @@ def ticket_json(db, ticket):
     return result
 
 
+def submitted(db, args):
+    """Cheap argument checks; returns the ticket this exact PR/head already has."""
+    if not config(db).get("builder_thread"):
+        raise ValueError("Configure the builder before submitting work")
+    args.pr = canonical_pr(args.pr)
+    validate_head(args.head)
+    if not args.session:
+        raise ValueError("Set --session (Codex defaults to CODEX_THREAD_ID)")
+    return db.execute("SELECT * FROM tickets WHERE pr=? AND head=?",
+                      (args.pr, args.head)).fetchone()
+
+
 def run(args):
     with database() as db:
         if args.command == "configure":
@@ -223,14 +235,7 @@ def run(args):
             return config(db)
 
         if args.command == "enqueue":
-            if not config(db).get("builder_thread"):
-                raise ValueError("Configure the builder before submitting work")
-            args.pr = canonical_pr(args.pr)
-            validate_head(args.head)
-            if not args.session:
-                raise ValueError("Set --session (Codex defaults to CODEX_THREAD_ID)")
-            existing = db.execute("SELECT * FROM tickets WHERE pr=? AND head=?",
-                                  (args.pr, args.head)).fetchone()
+            existing = submitted(db, args)
             if existing:
                 if (existing["source"], existing["session"], existing["host"]) != (
                         args.source, args.session, args.host):
@@ -364,9 +369,12 @@ def main():
             result = {"helper": str(destination)}
         else:
             if args.command == "enqueue":
-                # Outside the queue transaction: the checks take seconds.
-                validate_head(args.head)
-                args.documentation_checks = documentation_preflight(args.head)
+                with database() as db:
+                    known = submitted(db, args)
+                # Outside the queue transaction: the checks take seconds. An already
+                # accepted PR/head stays idempotent and is not checked again.
+                args.documentation_checks = (None if known
+                                             else documentation_preflight(args.head))
             result = run(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, sqlite3.Error, subprocess.CalledProcessError, OSError) as error:

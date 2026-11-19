@@ -166,8 +166,8 @@ python3 scripts/build-queue-watcher.py status
 python3 scripts/build-queue-watcher.py deactivate
 ```
 
-`activate` refuses while a ticket is in progress or the integration lock is
-held. It installs the checked helper, watcher and builder prompt into the Git
+`activate` refuses while a ticket is in progress, the integration lock is
+held or a builder session is running. It installs the checked helper, watcher and builder prompt into the Git
 common directory, transfers the builder configuration and loads the per-user
 LaunchAgent `ai.whytap.build-queue-watcher`. `deactivate` unloads it and gives
 the queue back to the previous builder. A feature session never runs either.
@@ -191,10 +191,13 @@ again and starts another one only if work is still open.
 
 The watcher's process ID is the builder's lease for the integration lock. If
 the session dies, the watcher ends what is left of its process group and
-removes a lock that names this lease; it never removes anyone else's lock. A
+removes a lock that names this lease; it never removes anyone else's lock.
+That includes tool processes the session started outside its own group; while
+any of them survives, the lock stays and nothing new starts. A
 watcher that was itself killed leaves a session without a lease, so the next
 run ends that session before starting a new one. Sessions that exit without
-changing the queue back off (5, 15, then 60 minutes) until the queue changes,
+changing the queue, a session that cannot start and an install retry that
+fails with a clear gate back off (5, 15, then 60 minutes) until the queue changes,
 and the third such exit shows a local notification. A session is stopped after
 six hours.
 

@@ -227,6 +227,26 @@ class QueueTests(unittest.TestCase):
         missing = {"WHYTAP_PROJECT_DOCUMENTATION_SCRIPTS": str(empty_home)}
         self.enqueue(pr=2, head=head, ok=False, env=missing)
 
+    def test_accepted_head_stays_idempotent_whatever_the_validators_say_later(self):
+        head = self.commit({".project-docs/agent-context.md": "guidance\n",
+                            "AGENTS.md": "drifted\n"})
+        empty_home = Path(self.temp.name) / "home"
+        empty_home.mkdir()
+        first = self.enqueue(head=head, env={"HOME": str(empty_home)})
+        again = self.enqueue(head=head, env=self.fake_validators())
+        self.assertFalse(again["created"])
+        self.assertEqual(again["ticket"]["id"], first["ticket"]["id"])
+
+    def test_concurrent_first_calls_after_an_upgrade_migrate_once(self):
+        import sqlite3
+        for _ in range(5):
+            db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+            db.execute("ALTER TABLE tickets DROP COLUMN retry")
+            db.commit()
+            db.close()
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(lambda _: self.call("status"), range(8)))
+
     def test_repository_without_project_documentation_skips_the_checks(self):
         self.assertEqual(self.enqueue(env=self.fake_validators())["documentation_checks"],
                          "not_applicable")

@@ -41,6 +41,7 @@ DEFAULTS = {
     "worktree": "",                # empty: ~/.whytap-builder/integration
     "retry_install_seconds": 300,  # how often a deferred install rechecks the meeting gate
     "max_session_seconds": 6 * 3600,
+    "poll_seconds": 2,             # how often the session's process tree is recorded
     "notify": True,
 }
 BACKOFF_SECONDS = (300, 900, 3600)
@@ -90,15 +91,29 @@ def open_work(root):
     work = {"queued": [], "in_progress": [], "retry_install": [], "waiting_install": []}
     if not path.is_file():
         return {**work, "fingerprint": ""}
-    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    def read():
+        db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+        try:
+            retry = "retry" if "retry" in {c[1] for c in db.execute(
+                "PRAGMA table_info(tickets)")} else "''"
+            return db.execute(
+                "SELECT id, status, updated_at, " + retry + " FROM tickets WHERE status IN "
+                "('queued', 'in_progress', 'pending_install') ORDER BY queued_at, id"
+            ).fetchall()
+        finally:
+            db.close()
+
     try:
-        retry = "retry" if "retry" in {c[1] for c in db.execute(
-            "PRAGMA table_info(tickets)")} else "''"
-        rows = db.execute(
-            "SELECT id, status, updated_at, " + retry + " FROM tickets WHERE status IN "
-            "('queued', 'in_progress', 'pending_install') ORDER BY queued_at, id").fetchall()
-    finally:
-        db.close()
+        rows = read()
+    except sqlite3.OperationalError:
+        # A writer killed mid-transaction leaves a journal that a read-only
+        # connection cannot roll back. An ordinary open recovers it; no data changes.
+        db = sqlite3.connect(path, timeout=30)
+        try:
+            db.execute("SELECT COUNT(*) FROM tickets").fetchone()
+        finally:
+            db.close()
+        rows = read()
     seen = []
     for ticket, status, updated, retry in rows:
         if status == "pending_install":
@@ -132,7 +147,12 @@ def decide(work, state, config, now, gate):
                               f"{int(wait - (now - state.get('last_exit', 0)))}s"
         return True, "recover_in_progress" if work["in_progress"] else "queued"
     if work["retry_install"]:
-        if now - state.get("last_install_attempt", 0) < config["retry_install_seconds"]:
+        wait = config["retry_install_seconds"]
+        failures = state.get("no_progress", 0)
+        if failures and state.get("fingerprint") == work["fingerprint"]:
+            # The gate was clear but the install still did not happen: slow down too.
+            wait = max(wait, BACKOFF_SECONDS[min(failures, len(BACKOFF_SECONDS)) - 1])
+        if now - state.get("last_install_attempt", 0) < wait:
             return False, "deferred install: next meeting check not due"
         state["last_install_attempt"] = now
         if not gate(config):
@@ -181,23 +201,76 @@ def group_alive(pgid):
         return True
 
 
-def stop_group(pgid, grace, reap=lambda: None):
-    """End what is left of our own session; other processes are never signalled.
-    `reap` collects our own exited child, which otherwise still counts as alive."""
-    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 10)):
+def process_table():
+    """{pid: (ppid, start)} with a locale- and zone-independent start time."""
+    result = subprocess.run(["ps", "-axo", "pid=,ppid=,lstart="], capture_output=True,
+                            text=True, env={"PATH": "/bin:/usr/bin", "LC_ALL": "C", "TZ": "UTC"})
+    table = {}
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), parts[2].strip())
+    return table
+
+
+def started_at(pid):
+    return process_table().get(pid, (0, ""))[1]
+
+
+def remember_tree(known, leader):
+    """Tool commands of an agent CLI often run in their own process groups, and
+    are reparented when the CLI dies. Record every descendant seen while it lives."""
+    table = process_table()
+    for pid in [p for p, start in known.items() if table.get(p, (0, ""))[1] != start]:
+        del known[pid]
+    children = {}
+    for pid, (parent, _start) in table.items():
+        children.setdefault(parent, []).append(pid)
+    pending = [leader]
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in known:
+                known[child] = table[child][1]
+                pending.append(child)
+
+
+def survivors(known):
+    table = process_table()
+    return [pid for pid, start in known.items() if table.get(pid, (0, ""))[1] == start]
+
+
+def stop_group(pgid, grace, reap=lambda: None, known=None):
+    """End what is left of our own session: its process group and the recorded
+    descendants that left the group. Other processes are never signalled.
+    `reap` collects our own exited child, which otherwise still counts as alive.
+    Returns True when nothing of the session is left."""
+    def left():
         reap()
-        if not group_alive(pgid):
-            return
+        return (pgid is not None and group_alive(pgid), survivors(known) if known else [])
+
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 10)):
+        group, others = left()
+        if not group and not others:
+            return True
         try:
-            os.killpg(pgid, sig)
+            if group:
+                os.killpg(pgid, sig)
         except ProcessLookupError:
-            return
+            pass
+        except PermissionError:
+            group = False  # only zombies awaiting their parent are left in the group
+        for pid in others:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
-            reap()
-            if not group_alive(pgid):
-                return
+            now_group, others = left()
+            if not (group and now_group) and not others:
+                return True
             time.sleep(0.1)
+    return False
 
 
 def release_integration_lock(root, lease_pid):
@@ -210,26 +283,28 @@ def release_integration_lock(root, lease_pid):
         log("released the integration lock left by the ended session")
 
 
-def started_at(pid):
-    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
-                            capture_output=True, text=True)
-    return result.stdout.strip()
-
-
 def reap_orphan(root, state):
     """A watcher that was killed outright leaves its session without a live lease.
-    End that session before anything else; the next one recovers the ticket."""
-    session = state.pop("session", None)
+    End that session before anything else; the next one recovers the ticket.
+    Returns False while something of that session could not be ended."""
+    session = state.get("session")
     if not session:
-        return
+        return True
     pgid = session["pgid"]
+    known = {int(pid): start for pid, start in session.get("tree", {}).items()}
     leader = started_at(pgid)
-    if group_alive(pgid) and leader in ("", session["started"]):
+    ours = leader in ("", session["started"])  # otherwise the PID belongs to someone else
+    gone = True
+    if (ours and group_alive(pgid)) or survivors(known):
         log("ending a builder session whose watcher is gone")
-        stop_group(pgid, 60)
-    if not group_alive(pgid) or leader not in ("", session["started"]):
-        release_integration_lock(root, session["lease_pid"])
+        gone = stop_group(pgid if ours else None, 60, known=known)
+    if not gone:
+        log("that session did not end; nothing new is started")
+        return False
+    release_integration_lock(root, session["lease_pid"])
+    del state["session"]
     write_json(root / STATE, state)
+    return True
 
 
 def prune_logs(directory):
@@ -239,7 +314,11 @@ def prune_logs(directory):
 
 
 def run_session(root, config, reason, work):
-    worktree = ensure_worktree(root, config)
+    try:
+        worktree = ensure_worktree(root, config)
+    except (OSError, subprocess.CalledProcessError) as error:
+        log(f"the integration worktree is not usable: {error}")
+        return 127
     logs = root / LOGS
     logs.mkdir(mode=0o700, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -259,47 +338,78 @@ def run_session(root, config, reason, work):
                    "WHYTAP_BUILDER_LEASE_PID": str(os.getpid()),
                    "WHYTAP_BUILD_QUEUE_GIT_DIR": str(root)}
     log(f"starting {config['engine']} builder session ({reason}); log {session_log.name}")
+    stops = {signal.SIGTERM, signal.SIGINT}
+    known = {}
     with open(session_log, "ab") as output:
         os.chmod(session_log, 0o600)
-        process = subprocess.Popen(
-            engine_command(config, worktree), stdin=subprocess.PIPE, stdout=output,
-            stderr=subprocess.STDOUT, cwd=worktree, env=environment, start_new_session=True)
+        # No stop signal may land between the start and its record: a session
+        # nobody remembers would get a second one beside it.
+        signal.pthread_sigmask(signal.SIG_BLOCK, stops)
+        try:
+            process = subprocess.Popen(
+                engine_command(config, worktree), stdin=subprocess.PIPE, stdout=output,
+                stderr=subprocess.STDOUT, cwd=worktree, env=environment,
+                start_new_session=True,
+                preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, stops))
+        except OSError as error:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
+            output.close()
+            session_log.unlink(missing_ok=True)
+            log(f"the builder session could not start: {error}")
+            return 127
         pgid = process.pid
-        state = read_json(root / STATE, {})
-        state["session"] = {"pgid": pgid, "started": started_at(pgid),
-                            "lease_pid": os.getpid(), "log": str(session_log)}
-        write_json(root / STATE, state)
 
-        def finish():
-            release_integration_lock(root, os.getpid())
+        def record():
             state = read_json(root / STATE, {})
-            state.pop("session", None)
+            state["session"] = {"pgid": pgid, "started": started, "lease_pid": os.getpid(),
+                                "log": str(session_log), "tree": known}
+            write_json(root / STATE, state)
+
+        def finish(gone):
+            state = read_json(root / STATE, {})
+            if gone:
+                release_integration_lock(root, os.getpid())
+                state.pop("session", None)
+            else:
+                # Keep the lock and the record: the next run deals with what is left.
+                log("part of the session is still running; its lock is kept")
             write_json(root / STATE, state)
 
         def forward(signum, _frame):
             log("watcher is stopping; ending the builder session")
-            stop_group(pgid, 60, process.poll)
-            finish()
+            finish(stop_group(pgid, 60, process.poll, known))
             sys.exit(128 + signum)
 
-        previous = {s: signal.signal(s, forward) for s in (signal.SIGTERM, signal.SIGINT)}
+        started = started_at(pgid)
+        record()
+        previous = {s: signal.signal(s, forward) for s in stops}
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
         try:
             try:
                 process.stdin.write(prompt.encode())
                 process.stdin.close()
             except BrokenPipeError:
                 pass
-            try:
-                code = process.wait(timeout=config["max_session_seconds"])
-            except subprocess.TimeoutExpired:
-                log("session exceeded max_session_seconds; stopping it")
-                stop_group(pgid, 60, process.poll)
-                code = process.wait()
-            stop_group(pgid, 15)  # background leftovers of a finished session
+            deadline = time.monotonic() + config["max_session_seconds"]
+            while True:
+                try:
+                    code = process.wait(timeout=config["poll_seconds"])
+                    break
+                except subprocess.TimeoutExpired:
+                    before = dict(known)
+                    remember_tree(known, pgid)
+                    if known != before:
+                        record()
+                if time.monotonic() > deadline:
+                    log("session exceeded max_session_seconds; stopping it")
+                    stop_group(pgid, 60, process.poll, known)
+                    code = process.wait()
+                    break
+            gone = stop_group(pgid, 15, known=known)  # leftovers of a finished session
         finally:
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
-    finish()
+    finish(gone)
     prune_logs(logs)
     log(f"builder session exited with {code}")
     return code
@@ -330,7 +440,8 @@ def command_run(root):
     if lock_fd is None:
         return 0  # a watcher or its builder session is alive; arrivals simply wait in FIFO
     config = load_config(root)
-    reap_orphan(root, read_json(root / STATE, {}))
+    if not reap_orphan(root, read_json(root / STATE, {})):
+        return 0
     while True:
         state = read_json(root / STATE, {})
         work = open_work(root)
@@ -351,11 +462,10 @@ def command_run(root):
         unchanged = after["fingerprint"] == work["fingerprint"]
         if reason == "retry_install":
             state["last_install_attempt"] = time.time()
-        else:
-            state["no_progress"] = state.get("no_progress", 0) + 1 if unchanged else 0
-            if unchanged and state["no_progress"] == len(BACKOFF_SECONDS):
-                notify(config, "The builder session keeps exiting without progress. "
-                               "Run the watcher's status command.")
+        state["no_progress"] = state.get("no_progress", 0) + 1 if unchanged else 0
+        if unchanged and state["no_progress"] == len(BACKOFF_SECONDS):
+            notify(config, "The builder session keeps exiting without progress. "
+                           "Run the watcher's status command.")
         state.update(last_exit=time.time(), last_exit_code=code,
                      fingerprint=after["fingerprint"])
         write_json(root / STATE, state)
@@ -400,6 +510,18 @@ def agent_plist():
 
 
 def command_activate(root, arguments):
+    probe = acquire(root)
+    if probe is None:
+        raise ValueError("A builder session is running; activate after it finishes")
+    try:
+        # Holding the session lock keeps a freshly loaded agent from starting a
+        # session before the builder configuration is transferred.
+        return activate(root, arguments)
+    finally:
+        os.close(probe)
+
+
+def activate(root, arguments):
     status = helper(root, "", "status")
     previous = status["builder"].get("builder_thread")
     if not previous:
@@ -421,11 +543,6 @@ def command_activate(root, arguments):
     shutil.copyfile(SOURCES / "build-queue-builder-prompt.md", root / INSTALLED_PROMPT)
     write_json(root / CONFIG, config)
     (root / LOGS).mkdir(mode=0o700, exist_ok=True)
-    state = read_json(root / STATE, {})
-    if previous != ACTOR:
-        state["previous_builder"] = previous
-        write_json(root / STATE, state)
-        helper(root, previous, "configure", "--builder-thread", ACTOR)
     values = {"LABEL": LABEL, "PYTHON": sys.executable,
               "WATCHER": str(root / INSTALLED_WATCHER), "GIT_DIR": str(root),
               "QUEUE": str(root / QUEUE), "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -438,7 +555,18 @@ def command_activate(root, arguments):
     plist.write_text(template)
     domain = f"gui/{os.getuid()}"
     launchctl("bootout", f"{domain}/{LABEL}", check=False)
+    deadline = time.monotonic() + 120  # an earlier agent may still be unloading
+    while launchctl("print", f"{domain}/{LABEL}", check=False).returncode == 0:
+        if time.monotonic() > deadline:
+            raise ValueError("The previous LaunchAgent is still unloading; try again")
+        time.sleep(1)
     launchctl("bootstrap", domain, str(plist))
+    # Only now: a failed load must not leave the queue pointing at a builder nobody runs.
+    state = read_json(root / STATE, {})
+    if previous != ACTOR:
+        state["previous_builder"] = previous
+        write_json(root / STATE, state)
+        helper(root, previous, "configure", "--builder-thread", ACTOR)
     return {"activated": True, "builder": ACTOR, "previous_builder": state.get("previous_builder"),
             "engine": config["engine"], "launch_agent": str(plist),
             "next": "Keep the old builder chat's automation paused; it must not claim work."}

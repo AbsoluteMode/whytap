@@ -44,6 +44,12 @@ while True:
     ticket = claim.get("ticket") or claim.get("active")
     if not ticket:
         break
+    if (control / "detach").exists():
+        # Like an agent CLI running a tool command in its own process group.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                                 start_new_session=True)
+        (control / "detached.pid").write_text(str(child.pid))
+        time.sleep(1)
     if (control / "crash").exists():
         (control / "crash").unlink()
         lock = Path(root) / "exodia-integration.lock"
@@ -72,7 +78,10 @@ sys.exit(1 if busy else 0)
 '''
 
 FAKE_LAUNCHCTL = r'''#!/bin/sh
+[ "$1" = print ] && exit 113
 echo "$@" >> "$FAKE_CONTROL/launchctl.log"
+[ "$1" = bootstrap ] && [ -e "$FAKE_CONTROL/bootstrap-fails" ] && exit 5
+exit 0
 '''
 
 
@@ -110,7 +119,7 @@ class WatcherTests(unittest.TestCase):
             "engine": "custom", "command": [sys.executable, str(self.base / "session.py")],
             "meeting_gate_command": [sys.executable, str(self.base / "gate.py")],
             "worktree": str(self.base / "integration"), "retry_install_seconds": 0,
-            "notify": False, **overrides}))
+            "poll_seconds": 0.1, "notify": False, **overrides}))
 
     def git(self, *args):
         return subprocess.check_output(["git", *args], cwd=self.repo, text=True)
@@ -279,6 +288,35 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(self.alive(orphan))
         self.assertEqual(len(self.sessions()), 2)
         self.assertEqual(self.statuses(), {ticket: "done"})
+        state = json.loads((self.root / "whytap-build-queue-watcher-state.json").read_text())
+        self.assertNotIn("session", state)
+
+    def test_tool_processes_outside_the_session_group_do_not_outlive_it(self):
+        (self.control / "detach").touch()
+        (self.control / "crash").touch()
+        ticket = self.enqueue(1)
+        self.watcher("run")
+        self.assertFalse(self.alive(int((self.control / "detached.pid").read_text())))
+        self.assertFalse((self.root / "exodia-integration.lock").exists())
+        self.assertEqual(self.statuses(), {ticket: "done"})
+
+    def test_engine_that_cannot_start_backs_off_without_piling_up_logs(self):
+        self.configure_watcher(command=[str(self.base / "no-such-engine")])
+        self.enqueue(1)
+        for _ in range(3):
+            self.watcher("run")
+        self.assertEqual(list((self.root / "whytap-build-queue-logs").glob("session-*")), [])
+        self.assertIn("backoff", json.loads(self.watcher("status").stdout)["reason"])
+
+    def test_install_that_keeps_failing_with_a_clear_gate_backs_off(self):
+        (self.control / "defer").touch()
+        self.enqueue(1)
+        self.watcher("run")  # builds, defers; the retry session then changes nothing
+        (self.control / "noop").touch()
+        before = len(self.sessions())
+        self.watcher("run")
+        self.watcher("run")
+        self.assertLessEqual(len(self.sessions()) - before, 1)
 
     def test_stopping_the_watcher_stops_its_session(self):
         (self.control / "hold").touch()
@@ -333,6 +371,25 @@ class ActivationTests(WatcherTests):
         self.assertIn("lock", json.loads(self.watcher("activate", ok=False).stderr)["error"])
         self.assertFalse(self.launch_agent().exists())
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
+
+    def test_activation_that_cannot_load_the_agent_keeps_the_previous_builder(self):
+        (self.control / "bootstrap-fails").touch()
+        self.watcher("activate", ok=False)
+        self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
+
+    def test_activation_never_interrupts_a_running_session(self):
+        self.watcher("activate")
+        (self.control / "hold").touch()
+        self.enqueue(1)
+        self.env["WHYTAP_BUILD_QUEUE_ACTOR"] = ACTOR
+        running = self.start_watcher()
+        self.wait_for((self.control / "holding").exists, "the session to hold its build")
+        log = len(self.lines("launchctl.log"))
+        self.assertIn("running", json.loads(self.watcher("activate", ok=False).stderr)["error"])
+        self.assertIn("running", json.loads(self.watcher("deactivate", ok=False).stderr)["error"])
+        self.assertEqual(len(self.lines("launchctl.log")), log)
+        (self.control / "holding").unlink()
+        self.assertEqual(running.wait(timeout=30), 0)
 
 
 def load_tests(loader, _tests, _pattern):

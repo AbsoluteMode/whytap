@@ -27,13 +27,18 @@ actor ParakeetSpeechDecoder: OnDeviceSpeechDecoding {
     }
 
     func decode(samples: [Float], language: String?) async throws -> String {
-        let manager = try await store.loadManager()
-        var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-        let result = try await manager.transcribe(
-            samples, decoderState: &state, language: Self.scriptFilter(for: language)
-        )
-        await store.noteUse()
-        return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manager = try await store.acquire()
+        do {
+            var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
+            let result = try await manager.transcribe(
+                samples, decoderState: &state, language: Self.scriptFilter(for: language)
+            )
+            await store.release()
+            return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            await store.release()
+            throw error
+        }
     }
 
     /// FluidAudio's `language` is a script filter, not a hint: it drops tokens
@@ -60,8 +65,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// `partialWindowSamples`), so the per-tick cost is roughly constant but
     /// non-trivial (a padded-to-15 s encoder pass); ~800 ms gives that decode
     /// comfortable headroom to finish before the next tick on Apple Silicon.
-    /// Decodes are serialised (`await emitPartial`), so if one ever overruns the
-    /// cadence the loop simply drops ticks — work never piles up.
+    /// Decodes are serialised (`await emitPartial`): one in flight at a time.
     private static let partialByteStride = 25_600  // ~800 ms @ 16 kHz PCM16
 
     /// Trailing window (in samples) re-decoded for each live partial. Kept
@@ -84,6 +88,10 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// that floor so an early tick never throws.
     private static let minPartialSampleCount = 8_000  // 0.5 s @ 16 kHz
 
+    /// Characters at the end of a partial that must differ for it to count as
+    /// new live text.
+    private static let stableTailLength = 32
+
     private enum Signal {
         case stop
         case cancel
@@ -105,6 +113,15 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// window scrolls once speech exceeds it, so newer text is often shorter,
     /// and a length-monotonic guard would freeze the ticker.
     private var lastEmittedPartial: String = ""
+
+    /// Every chunk of the take, kept by the session itself: the engine's turn
+    /// buffer stops at 20 MB (about 11 minutes), and the pasted text must
+    /// cover a longer take too.
+    private var streamed = Data()
+    private var bytesSinceLastDecode = 0
+    /// Set by `stop()`: chunks still in the stream are kept, but no further
+    /// partial is decoded, so the final pass starts at once.
+    private var stopping = false
 
     init(
         audioEngine: any StreamingAudioSourcing = StreamingAudioEngine(),
@@ -129,52 +146,22 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
             return .failed(.transportFailed)
         }
 
-        // Drain the chunk stream AND run throttled partial decodes over a BOUNDED
-        // TRAILING WINDOW of the audio captured so far. Each tick re-decodes the
-        // last ~14 s (`partialWindowSamples`) with a FRESH decoder state — capped
-        // below FluidAudio's single-chunk threshold (240k / 15 s) so it stays on
-        // the constant-cost single-chunk encoder path and never falls into the
-        // O(buffer) `ChunkProcessor` path that pegged a core and fell ~6 s behind
-        // speech. The full PCM is teed inside the engine (`turnAudio`)
-        // and read back via `capturedPCM16()` for both this windowed partial and
-        // the authoritative final decode — the partials are display-only.
+        // Keep every chunk and, about every 0.8 s, re-decode a bounded trailing
+        // window (`partialWindowSamples`, under FluidAudio's 15 s single-chunk
+        // threshold, so each pass costs the same however long the take is)
+        // with a fresh decoder state. Partials are display-only; the final
+        // pass on stop covers the whole take.
         //
-        // WHY a windowed re-decode and not a carried-state incremental pass:
-        // FluidAudio's public `transcribe` hardcodes `isLastChunk: true` (it
-        // finalises decoder state every call), and the internal `transcribeChunk`
-        // (which would carry state across slices) is not callable without forking
-        // the package. A bounded fresh-state re-decode is the cleanest CORRECT
-        // partial the public API allows, at constant cost. See
-        // `ParakeetSpeechDecoder`.
-        //
-        // `.utility` priority keeps the decode loop off the main thread's QoS so
-        // the hover CGEventTap + UI stay responsive while a dictation runs. The
-        // decoder is an `actor`, so the actual Core ML inference already runs off
-        // the main actor; the priority hint keeps the surrounding slice work off
-        // it too. `await emitPartial` suspends this loop until the decode
-        // returns, so decodes stay serialized (one in flight at a time): if a
-        // decode ever overruns the ~800 ms cadence the loop just drops ticks.
+        // This task runs on the main actor, so the work it does itself is kept
+        // small: appending a chunk and converting at most 14 s of samples.
+        // Core ML inference runs on the decoder's actor. `await emitPartial`
+        // keeps one decode in flight; chunks that arrive meanwhile are kept
+        // and the next decode covers them.
         drainTask = Task(priority: .utility) { [weak self, audioEngine] in
-            var bytesSinceLastDecode = 0
             for await chunk in audioEngine.chunks {
-                bytesSinceLastDecode += chunk.count
-                guard bytesSinceLastDecode >= Self.partialByteStride else { continue }
-                bytesSinceLastDecode = 0
-
-                // Re-decode a bounded trailing window of the captured buffer
-                // (the last ~14 s, < 15 s threshold → constant cost, not
-                // O(buffer)). Reading the captured buffer (not disjoint slices)
-                // gives the decoder full acoustic context for that window, so the
-                // partial is a clean, growing transcript.
-                let samples = Self.floatSamples(
-                    fromPCM16LittleEndian: audioEngine.capturedPCM16()
-                )
-                guard samples.count >= Self.minPartialSampleCount else { continue }
-                let window = samples.count > Self.partialWindowSamples
-                    ? Array(samples.suffix(Self.partialWindowSamples))
-                    : samples
-
-                await self?.emitPartial(samples: window)
+                guard let self else { return }
+                guard let window = self.ingest(chunk) else { continue }
+                await self.emitPartial(samples: window)
             }
         }
 
@@ -198,7 +185,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
         case .stop:
             await drainTask?.value
             failureWatchTask?.cancel()
-            let pcm = audioEngine.capturedPCM16()
+            let pcm = takeAudio()
             do {
                 let text = try await transcribe(pcm: pcm)
                 onTranscriptUpdate?(text)
@@ -218,6 +205,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     }
 
     func stop() async {
+        stopping = true
         audioEngine.finish()
         signal(.stop)
     }
@@ -228,8 +216,30 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     }
 
     func capturedAudioPCM16() -> Data {
-        audioEngine.capturedPCM16()
+        takeAudio()
     }
+
+    /// The whole take: the session's own copy of the stream, or the engine's
+    /// turn buffer when that holds more (a source that tees without streaming).
+    private func takeAudio() -> Data {
+        let captured = audioEngine.capturedPCM16()
+        return streamed.count >= captured.count ? streamed : captured
+    }
+
+    /// Keeps `chunk` and, once about 0.8 s of new audio has arrived, returns
+    /// the trailing window to decode. `nil` between ticks, after `stop()` and
+    /// while the take is shorter than Parakeet accepts.
+    private func ingest(_ chunk: Data) -> [Float]? {
+        streamed.append(chunk)
+        bytesSinceLastDecode += chunk.count
+        guard bytesSinceLastDecode >= Self.partialByteStride else { return nil }
+        bytesSinceLastDecode = 0
+        guard !stopping else { return nil }
+        let audio = takeAudio()
+        guard audio.count / 2 >= Self.minPartialSampleCount else { return nil }
+        return Self.floatSamples(fromPCM16LittleEndian: audio.suffix(Self.partialWindowSamples * 2))
+    }
+
 
     /// Run one partial decode over a bounded trailing window of the captured
     /// audio (fresh decoder state) and forward the transcript to the island.
@@ -246,16 +256,16 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
                 language: languageCode
             )
             let trimmed = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            // Emit on CHANGE, not on growth. The island is a trailing-window
-            // ticker: once speech exceeds `partialWindowSamples` (~14 s), the
-            // windowed transcript SCROLLS (older audio falls off the front), so
-            // a later partial is routinely shorter-or-equal in length than the
-            // longest text seen. A length-monotonic guard (`count >= lastCount`)
-            // would freeze the island at that longest frame ("after a certain
-            // number of words it stops writing"). Emitting whenever the
-            // text differs keeps the ticker scrolling; the rare momentary
-            // backtrack within the window is far cheaper than freezing.
-            guard !trimmed.isEmpty, trimmed != lastEmittedPartial else { return }
+            // Emit when the END of the text changes. Past 14 s the window
+            // scrolls: older words fall off the front on every tick, also
+            // while the speaker is silent. Comparing whole strings would keep
+            // "changing" the live text through a pause, which erases the
+            // ticker and holds Drop auto-stop (it waits for the transcript to
+            // stop changing). New speech always changes the tail. Length is
+            // not compared: a scrolled window is often shorter.
+            guard !trimmed.isEmpty,
+                  trimmed.suffix(Self.stableTailLength) != lastEmittedPartial.suffix(Self.stableTailLength)
+            else { return }
             lastEmittedPartial = trimmed
             onTranscriptUpdate?(trimmed)
         } catch {
@@ -303,20 +313,13 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     }
 
     nonisolated static func floatSamples(fromPCM16LittleEndian data: Data) -> [Float] {
-        guard data.count >= 2 else { return [] }
-
-        var samples: [Float] = []
-        samples.reserveCapacity(data.count / 2)
-        var index = data.startIndex
-        while index < data.endIndex {
-            let next = data.index(after: index)
-            guard next < data.endIndex else { break }
-            let low = UInt16(data[index])
-            let high = UInt16(data[next]) << 8
-            let sample = Int16(bitPattern: high | low)
-            samples.append(Float(sample) / Float(Int16.max))
-            index = data.index(after: next)
+        let count = data.count / 2
+        guard count > 0 else { return [] }
+        return data.withUnsafeBytes { bytes in
+            (0..<count).map { index in
+                let sample = Int16(bitPattern: UInt16(bytes[2 * index]) | (UInt16(bytes[2 * index + 1]) << 8))
+                return Float(sample) / Float(Int16.max)
+            }
         }
-        return samples
     }
 }

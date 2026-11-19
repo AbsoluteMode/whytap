@@ -124,7 +124,12 @@ Voice flow (Drop / dictation):
             without a route; removing it un-sets its features. The factory
             builds OnDeviceTranscriptionSession (no adapter, no socket): live
             text re-decodes the last 14 s about every 0.8 s, the pasted text
-            is one pass over the whole take; a take under 0.3 s is silence.
+            is one pass over the whole take (the session's own copy of the
+            stream, not the engine's capped turn buffer); a take under 0.3 s
+            is silence. Live text counts only a changed ending as new, so a
+            scrolled window does not hold Drop auto-stop. Decodes hold the
+            model (acquire/release), so idle eviction and Remove never unload
+            it mid-decode.
             Batch recovery, Retry and agent batch voice use
             OnDeviceBatchTranscriber and stay on this Mac. FluidAudio's
             language is a script filter: kept for Latin-script languages,

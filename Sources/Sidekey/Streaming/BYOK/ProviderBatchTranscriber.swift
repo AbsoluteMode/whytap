@@ -169,7 +169,8 @@ struct ProviderBatchTranscriber: BatchTranscribing {
                 result = try await elevenLabs(wav, apiKey: apiKey, model: model, language: language,
                                              onReference: { providerReference = $0 })
             case .selfHosted(let apiKey, let endpoint, let model):
-                result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)            case .onDevice:
+                result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)
+            case .onDevice:
                 result = try await onDevice.transcribe(audio: audio, language: language)
             }
             let text = result.trimmingCharacters(in: .whitespacesAndNewlines)

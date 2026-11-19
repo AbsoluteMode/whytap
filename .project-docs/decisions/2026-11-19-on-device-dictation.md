@@ -89,6 +89,23 @@ through Core ML with no further dependency.
   failure, Escape, a dead microphone, and that no on-device path makes a
   network request.
 
+- An independent review of the first commit found eight defects, fixed in
+  the second: a take past the engine's 20 MB turn buffer (about 11 minutes)
+  was pasted cut short, so the session keeps its own copy of the stream; live
+  text counted a scrolled window as new text, which held Drop auto-stop
+  through a pause, so only a changed ending counts; idle eviction or Remove
+  could unload the model under a decode, so decodes hold the model
+  (`acquire`/`release`); a download finishing replaced another provider's
+  open offer; partial decodes kept running after stop.
+
+## Known limits
+
+- FluidAudio answers a failed model load by deleting the files and
+  downloading them again. The load has a 60 s deadline: past it the take
+  fails and the tile offers Download again, but a short re-download can still
+  start without a click. Avoiding it needs a load path that never downloads.
+- English terms inside Russian speech are transliterated by the model.
+
 ## Rejected
 
 - Apple's system speech (`DictationTranscriber`): reports Russian and English

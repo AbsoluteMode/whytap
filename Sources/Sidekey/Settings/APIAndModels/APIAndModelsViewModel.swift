@@ -303,7 +303,9 @@ final class APIAndModelsViewModel: ObservableObject {
     func onDeviceModelChanged() {
         if onDevice.isReady() {
             keyStatuses.set(.valid, for: .thisMac, at: now())
-            proposeSetup(for: .thisMac)
+            // A download can finish while another provider's offer is open;
+            // that offer is the user's current question and is left alone.
+            if proposal == nil { proposeSetup(for: .thisMac) }
         } else {
             remove(.thisMac)
         }

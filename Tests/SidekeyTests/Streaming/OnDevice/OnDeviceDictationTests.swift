@@ -176,6 +176,20 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertNil(vm.sections(for: .meetings).first { $0.account == .thisMac }, "not offered to Meetings")
     }
 
+    func test_download_finishing_does_not_replace_another_providers_open_offer() {
+        let flag = ModelFlag()
+        let (vm, _) = makeSettings(flag)
+        vm.proposeSetup(for: .soniox)
+        XCTAssertEqual(vm.proposal?.title, "Use Soniox for")
+
+        flag.set(true)
+        vm.onDeviceModelChanged()
+
+        XCTAssertEqual(vm.proposal?.title, "Use Soniox for")
+        XCTAssertEqual(vm.proposal?.items.map(\.account), Array(repeating: .soniox, count: vm.proposal?.items.count ?? 0))
+        XCTAssertEqual(vm.chips.map(\.account), [.thisMac], "the model is still listed")
+    }
+
     func test_user_picks_the_model_in_the_picker_without_a_probe() async {
         let flag = ModelFlag()
         flag.set(true)
@@ -376,6 +390,90 @@ final class OnDeviceDictationTests: XCTestCase {
         let calls = await decoder.calls
         XCTAssertEqual(calls.first?.samples, OnDeviceTranscriptionSession.partialWindowSamples)
         XCTAssertEqual(calls.last?.samples, 320_000, "the final pass is the whole take")
+    }
+
+    /// Answers each decode with the next line of a script.
+    private actor ScriptedDecoder: OnDeviceSpeechDecoding {
+        private var lines: [String]
+        private(set) var count = 0
+        init(_ lines: [String]) { self.lines = lines }
+        func decode(samples: [Float], language: String?) async throws -> String {
+            count += 1
+            return lines.isEmpty ? "" : lines.removeFirst()
+        }
+    }
+
+    private func waitForDecodes(_ expected: Int, _ decoder: ScriptedDecoder) async {
+        for _ in 0..<500 {
+            if await decoder.count >= expected { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("expected \(expected) decodes")
+    }
+
+    func test_take_longer_than_the_engine_buffer_is_pasted_whole() async {
+        // The engine's turn buffer stopped early (it is capped); the stream did not.
+        let audio = CapturingStubAudioSource(captured: pcm(seconds: 1))
+        let decoder = FakeDecoder { "decoded \($0)" }
+        let session = OnDeviceTranscriptionSession(audioEngine: audio, decoder: decoder, language: nil)
+
+        async let result = session.run()
+        await Task.yield()
+        for _ in 0..<30 { audio.emit(pcm(seconds: 0.1)) }
+        await session.stop()
+        audio.stop()
+        let outcome = await result
+
+        XCTAssertEqual(outcome, .transcript("decoded 48000"), "all 3 s of the stream, not the 1 s the engine kept")
+        XCTAssertEqual(session.capturedAudioPCM16().count, 96_000, "Retry gets the whole take too")
+    }
+
+    func test_live_text_holds_still_while_only_the_window_scrolls() async {
+        let audio = CapturingStubAudioSource(captured: pcm(seconds: 1))
+        let spoken = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        let decoder = ScriptedDecoder([
+            spoken,
+            "gamma delta epsilon zeta eta theta iota kappa",  // a pause: only the head fell off
+            "delta epsilon zeta eta theta iota kappa lambda",  // new speech
+            "final text",
+        ])
+        let session = OnDeviceTranscriptionSession(audioEngine: audio, decoder: decoder, language: nil)
+        var live: [String] = []
+        session.onTranscriptUpdate = { live.append($0) }
+
+        async let result = session.run()
+        await Task.yield()
+        for tick in 1...3 {
+            audio.emit(Data(count: 25_600))
+            await waitForDecodes(tick, decoder)
+        }
+        await Task.yield()
+        let beforeStop = live
+        await session.stop()
+        audio.stop()
+        _ = await result
+
+        XCTAssertEqual(beforeStop, [spoken, "delta epsilon zeta eta theta iota kappa lambda"],
+                       "a scrolled window is not new text: Drop auto-stop can see the pause")
+    }
+
+    func test_no_partial_is_decoded_after_stop() async {
+        let audio = CapturingStubAudioSource(captured: pcm(seconds: 1))
+        let decoder = ScriptedDecoder(["final text"])
+        let session = OnDeviceTranscriptionSession(audioEngine: audio, decoder: decoder, language: nil)
+
+        async let result = session.run()
+        await Task.yield()
+        await session.stop()
+        // The word tail still arrives after the key is released.
+        audio.emit(Data(count: 25_600))
+        audio.emit(Data(count: 25_600))
+        audio.stop()
+        let outcome = await result
+
+        XCTAssertEqual(outcome, .transcript("final text"))
+        let decodes = await decoder.count
+        XCTAssertEqual(decodes, 1, "only the final pass")
     }
 
     // MARK: - Script filter

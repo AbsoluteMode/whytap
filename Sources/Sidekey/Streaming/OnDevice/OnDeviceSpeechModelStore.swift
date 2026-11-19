@@ -43,6 +43,7 @@ struct OnDeviceSpeechReadiness: Sendable {
         !isTestRun && OnDeviceSpeechModelStore.isSupportedHost && OnDeviceSpeechModelStore.modelFilesExist()
     }
     private static let isTestRun = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || NSClassFromString("XCTestCase") != nil
     static let ready = OnDeviceSpeechReadiness { true }
     static let unavailable = OnDeviceSpeechReadiness { false }
 }
@@ -53,10 +54,11 @@ protocol OnDeviceSpeechModelManaging: Sendable {
     func status() async -> OnDeviceSpeechModelStatus
     func download(progress: (@Sendable (Double) -> Void)?) async throws
     func delete() async throws
-    func loadManager() async throws -> AsrManager
-    /// Called after every decode: the loaded model is released once nothing
-    /// has used it for `idleEviction`.
-    func noteUse() async
+    /// The loaded model for one decode. Every `acquire` is paired with a
+    /// `release`: the model is never unloaded while a decode holds it, and is
+    /// released once nothing has used it for `idleEviction`.
+    func acquire() async throws -> AsrManager
+    func release() async
 }
 
 /// Downloads, loads and removes the Parakeet Core ML model. The files live in
@@ -82,16 +84,20 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
     private var downloadProgress: Double = 0
     private var failed = false
     private var evictionTask: Task<Void, Never>?
+    private var inUse = 0
+    private let loadDeadline: Duration
 
     init(
         model: OnDeviceSpeechModel = .parakeetTdtV3,
         rootDirectory: URL = OnDeviceSpeechModelStore.defaultRootDirectory(),
         idleEviction: Duration = .seconds(300),
+        loadDeadline: Duration = .seconds(60),
         downloadAndLoad: @escaping DownloadAndLoad = OnDeviceSpeechModelStore.defaultDownloadAndLoad
     ) {
         self.model = model
         self.rootDirectory = rootDirectory
         self.idleEviction = idleEviction
+        self.loadDeadline = loadDeadline
         self.downloadAndLoad = downloadAndLoad
     }
 
@@ -182,26 +188,58 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         failed = false
         evictionTask?.cancel()
         evictionTask = nil
-        await cachedManager?.cleanup()
+        // A decode in flight keeps its own reference and finishes on the
+        // loaded model; only an idle one is cleaned up here.
+        let manager = cachedManager
         cachedManager = nil
+        if inUse == 0 { await manager?.cleanup() }
         if FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
         }
     }
 
-    func loadManager() async throws -> AsrManager {
-        if let cachedManager { return cachedManager }
-        guard filesExist else { throw OnDeviceSpeechError.modelNotDownloaded }
-        let models = try await AsrModels.load(
-            from: directory, version: model.version, encoderPrecision: model.encoderPrecision
-        )
-        let manager = AsrManager(config: .default, models: models)
-        cachedManager = manager
-        return manager
+    func acquire() async throws -> AsrManager {
+        inUse += 1
+        evictionTask?.cancel()
+        do {
+            return try await loadedManager()
+        } catch {
+            inUse -= 1
+            throw error
+        }
     }
 
-    func noteUse() {
-        scheduleEviction()
+    func release() {
+        inUse = max(0, inUse - 1)
+        if inUse == 0 { scheduleEviction() }
+    }
+
+    private func loadedManager() async throws -> AsrManager {
+        if let cachedManager { return cachedManager }
+        guard filesExist else { throw OnDeviceSpeechError.modelNotDownloaded }
+        let directory = self.directory
+        let model = self.model
+        // FluidAudio answers a failed load by deleting the files and
+        // downloading them again. A dictation must not wait on, or start, a
+        // download nobody asked for: past the deadline the load is cancelled
+        // and the take fails; the tile then offers Download again.
+        let manager = try await withThrowingTaskGroup(of: AsrManager.self) { group in
+            group.addTask {
+                let models = try await AsrModels.load(
+                    from: directory, version: model.version, encoderPrecision: model.encoderPrecision
+                )
+                return AsrManager(config: .default, models: models)
+            }
+            group.addTask { [loadDeadline] in
+                try await Task.sleep(for: loadDeadline)
+                throw OnDeviceSpeechError.modelNotDownloaded
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
+        if let cachedManager { return cachedManager }
+        cachedManager = manager
+        return manager
     }
 
     /// Reloading a compiled model takes about 0.1 s, so an idle app does not
@@ -212,13 +250,14 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         evictionTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            await self?.evict()
+            await self?.evictIfIdle()
         }
     }
 
-    private func evict() async {
-        await cachedManager?.cleanup()
+    private func evictIfIdle() async {
+        guard inUse == 0, let manager = cachedManager else { return }
         cachedManager = nil
+        await manager.cleanup()
     }
 
     private func record(progress: Double) {

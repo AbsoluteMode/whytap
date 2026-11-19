@@ -190,9 +190,10 @@ struct APIAndModelsView: View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "API keys")
             ProviderKeyTiles(viewModel: viewModel,
-                onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") }) {
-                    keyNotice = KeyNotice(accepted: $0)
-                }
+                onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") },
+                onSaveResult: { keyNotice = KeyNotice(accepted: $0) },
+                // The reason replaces the bare "Key not accepted".
+                onSaveFailure: { keyNotice = KeyNotice(accepted: false, failureText: $0) })
         }
     }
 

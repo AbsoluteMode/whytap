@@ -3188,6 +3188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failTelemetry: { [weak self] reason in
                 self?.failDropTurnTelemetry(reason: reason)
             },
+            noteBatchFailure: { [weak self] error in
+                guard let self, generation == self.streamingSetupGeneration else { return }
+                self.noteDropProviderFailure(error)
+            },
             pasteRaw: { [weak self] raw in
                 // Direct paste of the raw realtime partial — no cleanup
                 // (salvage rung). Returns whether the paste landed so
@@ -3264,6 +3268,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     language: prefs.selectedLanguage?.code)
             },
             sink: dropDeliverySink(targetApp: targetApp, targetPID: targetPID))
+    }
+
+    /// A provider turned the take down: say which provider and why next to
+    /// Retry instead of "offline", mark its key in API & Models, and open
+    /// that row when only the user can fix it. The audio stays for Retry.
+    // WHY: .project-docs/decisions/2026-11-19-provider-failure-reasons.md
+    private func noteDropProviderFailure(_ error: Error) {
+        guard let failure = ProviderFailure(error), let route = DropTake.shared.route else { return }
+        let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
+        AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
+        if let status = failure.keyStatus {
+            KeyStatusStore.shared.set(status, for: route.account, at: Date())
+        }
+        if failure.needsSettings {
+            openSettingsWindow(tab: .apiAndModels, feature: DropTake.shared.feature)
+        }
     }
 
     /// Drop the retained total-offline take (Task 7): clears the PCM kept for a
@@ -3359,6 +3379,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var clearPendingRetry: () -> Void
         /// Close the turn's diagnostics with a failure reason.
         var failTelemetry: (String) -> Void
+        /// The error the batch transcription ended with, before the take is
+        /// parked as undelivered: the production sink turns a provider's
+        /// refusal into the reason shown next to Retry.
+        var noteBatchFailure: (Error) -> Void = { _ in }
         /// Paste a RAW transcript (the realtime partial) directly, bypassing
         /// cleanup — used only on the salvage rung. Async because the paste
         /// tail awaits AutoPaste.
@@ -3422,6 +3446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // (re)delivery clears any armed retry from a prior failed attempt.
             sink.clearPendingRetry()
         } catch {
+            sink.noteBatchFailure(error)
             // Keep the audio so the user can retry, surface the non-alarming
             // .deliveryFailed state, and NEVER paste an empty/partial result.
             // A deadline-cut hang reports its own reason so a stuck decode can
@@ -3623,6 +3648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // reason distinguishes the hang from an ordinary batch error.
             await salvageOrFail(batchFailureReason: "degraded_batch_timeout")
         } catch {
+            sink.noteBatchFailure(error)
             await salvageOrFail()
         }
     }

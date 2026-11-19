@@ -63,7 +63,7 @@ final class OpenCodeProvider: CLIProvider {
         case .openAI:
             switch await ProviderKeyChecker().check(.openAI, apiKey: key, server: nil, allowPaidProbe: false) {
             case .valid, .limited: return .connected(sessionID: nil)
-            case .rejected(.invalidKey): return .notLoggedIn
+            case .rejected(.invalidKey), .rejected(.missingSpeechPermission): return .notLoggedIn
             case .rejected(.outOfCredit): return .billing
             case .unreachable: return .failed(code: "openai_unavailable", message: "Couldn’t reach OpenAI. Check your connection and retry.")
             }
@@ -74,7 +74,7 @@ final class OpenCodeProvider: CLIProvider {
     static func validateAnthropicKey(_ key: String) async -> ConnectOutcome {
         switch await ProviderKeyChecker().check(.anthropic, apiKey: key, server: nil, allowPaidProbe: false) {
         case .valid, .limited: return .connected(sessionID: nil)
-        case .rejected(.invalidKey): return .notLoggedIn
+        case .rejected(.invalidKey), .rejected(.missingSpeechPermission): return .notLoggedIn
         case .rejected(.outOfCredit): return .billing
         case .unreachable:
             return .failed(code: "anthropic_unavailable", message: "Couldn’t reach Anthropic. Check your connection and retry.")

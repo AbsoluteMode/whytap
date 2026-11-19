@@ -229,6 +229,21 @@ Voice flow (Drop / dictation):
             docs/decisions/2026-07-26-empty-batch-is-silence-not-offline.md,
             docs/decisions/2026-06-24-deliveryfailed-escapable-and-retry-robust.md,
             .project-docs/decisions/2026-10-18-provider-batch-transcription.md
+       A provider's refusal of the batch rung or of Retry is named instead
+            of "offline": ProviderFailure reads only the status code or error
+            kind (401/403 key refused, 402 out of credit, 429 busy, 5xx or an
+            unfinished job not responding, URLError no connection) and the
+            failure face shows "<Provider> refused the key" and the like. A
+            refused key or empty balance also marks the key's tile and the
+            feature row (KeyStatusStore) and opens API & Models on the take's
+            row; the audio stays for Retry. The free key check on opening
+            Settings never clears such a mark with a mere "limited". Saving
+            an ElevenLabs key whose account endpoint answers
+            missing_permissions asks the speech-to-text endpoint with a second
+            of silence: a refusal there is "No Speech to Text access on this
+            key" and the key is not saved. The key form's notice shows the
+            reason a key was not saved. WHY:
+            .project-docs/decisions/2026-11-19-provider-failure-reasons.md
        Transcript join (BYOKTranscriptJoin): Soniox tokens carry their own
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md

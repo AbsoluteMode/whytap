@@ -15,15 +15,19 @@ struct ProviderKeyTiles: View {
     @ObservedObject private var onDeviceModel = OnDeviceSpeechModelController.shared
     let onRemoveFailure: () -> Void
     let onSaveResult: (Bool) -> Void
+    /// Why a key was not saved, after `onSaveResult(false)`.
+    let onSaveFailure: (String) -> Void
     @State private var expanded: Target?
     @State private var busy = false
     @FocusState private var focused: Target?
 
     init(viewModel: APIAndModelsViewModel, initiallyExpanded: Target? = nil,
          tavily: TavilySettings? = nil, onRemoveFailure: @escaping () -> Void = {},
-         onSaveResult: @escaping (Bool) -> Void = { _ in }) {
+         onSaveResult: @escaping (Bool) -> Void = { _ in },
+         onSaveFailure: @escaping (String) -> Void = { _ in }) {
         self.viewModel = viewModel
         self.onSaveResult = onSaveResult
+        self.onSaveFailure = onSaveFailure
         self.onRemoveFailure = onRemoveFailure
         _tavily = StateObject(wrappedValue: tavily ?? viewModel.makeTavilySettings())
         _expanded = State(initialValue: initiallyExpanded)
@@ -51,7 +55,8 @@ struct ProviderKeyTiles: View {
                     OnDeviceModelForm(viewModel: viewModel, model: onDeviceModel)
                 } else if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
-                                onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult, onClose: close)
+                                onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
+                                onSaveFailure: onSaveFailure, onClose: close)
                     .id(expanded)
                 }
             }
@@ -275,6 +280,7 @@ struct ProviderKeyForm: View {
     let account: ProviderAccount?
     var onBusyChanged: (Bool) -> Void = { _ in }
     var onSaveResult: (Bool) -> Void = { _ in }
+    var onSaveFailure: (String) -> Void = { _ in }
     let onClose: () -> Void
 
     @State private var key = ""
@@ -341,6 +347,7 @@ struct ProviderKeyForm: View {
             saving = false
             onBusyChanged(false)
             onSaveResult(failure == nil)
+            if let failure { onSaveFailure(failure) }
             if failure == nil {
                 key = ""
                 if newServer { onClose() }

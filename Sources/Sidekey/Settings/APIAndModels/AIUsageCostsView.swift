@@ -253,20 +253,25 @@ struct AIUsageCostsView: View {
     }
 
     private var table: some View {
-        VStack(spacing: 0) {
+        let rows = AIUsageCostRow.grouped(model.pricedEvents)
+        return VStack(spacing: 0) {
+            // The total leads: it is the answer the period was chosen for, and
+            // it no longer sits under a list that can be longer than the pane.
+            divider
+            HStack(spacing: 12) {
+                Text("Total").frame(maxWidth: .infinity, alignment: .leading)
+                AIUsagePriceLabel(events: model.pricedEvents)
+            }.font(.system(size: 13, weight: .semibold)).monospacedDigit().padding(18)
+            divider
             HStack(spacing: 12) {
                 Text("Feature").frame(maxWidth: .infinity, alignment: .leading)
                 Text("Price").frame(width: 190, alignment: .trailing)
             }.font(.system(size: 11.5)).foregroundStyle(MacSettingsTheme.text2).padding(.horizontal, 18).padding(.vertical, 10)
             divider
-            ForEach(AIUsageCostRow.grouped(model.pricedEvents)) { row in
+            ForEach(rows) { row in
                 AIUsageFeatureCostRow(row: row)
-                divider
+                if row.id != rows.last?.id { divider }
             }
-            HStack(spacing: 12) {
-                Text("Total").frame(maxWidth: .infinity, alignment: .leading)
-                AIUsagePriceLabel(events: model.pricedEvents)
-            }.font(.system(size: 13, weight: .semibold)).monospacedDigit().padding(18)
         }
     }
     private var divider: some View { Rectangle().fill(MacSettingsTheme.rowSeparator).frame(height: 0.5) }
@@ -330,13 +335,13 @@ private struct AIUsageFeatureCostRow: View {
     @State private var shown = false
     @State private var hovered = false
     @State private var pinned = false
+    /// The pointer is over the open detail, which may cover part of the row.
+    @State private var overPopover = false
     @State private var closeTask: Task<Void, Never>?
     @FocusState private var focused: Bool
     var body: some View {
         HStack(spacing: 12) {
-            Button {
-                pinned.toggle(); shown = pinned
-            } label: {
+            Button(action: togglePinned) {
                 HStack(spacing: 9) {
                     Text(row.title).font(.system(size: 13, weight: .medium))
                     Text("\(row.models.count) \(row.models.count == 1 ? "model" : "models")")
@@ -346,37 +351,50 @@ private struct AIUsageFeatureCostRow: View {
             }
             .buttonStyle(AIUsageControlStyle(hovered: false, focused: focused)).focused($focused)
             .accessibilityLabel("\(row.title), \(row.models.count) models used. Show model costs")
-            .onHover { inside in
-                let inside = inside && isEnabled
-                hovered = inside
-                closeTask?.cancel()
-                if inside { shown = true } else { scheduleClose() }
-            }
             .onChange(of: focused) { _, value in
                 if value { shown = true } else { scheduleClose() }
             }
+            // Anchored to the name, so the detail opens beside it wherever on
+            // the row the pointer is.
             .popover(isPresented: $shown, arrowEdge: .trailing) {
                 AIUsageModelsPopover(row: row)
-                    .onHover { inside in closeTask?.cancel(); if !inside { scheduleClose() } }
+                    .onHover { inside in
+                        overPopover = inside
+                        closeTask?.cancel()
+                        if !inside { scheduleClose() }
+                    }
                     .onExitCommand { shown = false; pinned = false }
             }
             Spacer(minLength: 0)
             AIUsagePriceLabel(events: row.events)
         }
         .font(.system(size: 13)).monospacedDigit().padding(.horizontal, 18).padding(.vertical, 10)
-        .background(isEnabled && hovered ? MacSettingsTheme.hover : .clear)
-        .onChange(of: isEnabled) { _, enabled in
-            if !enabled { shown = false; hovered = false; closeTask?.cancel() }
+        .background(isEnabled && (hovered || shown) ? MacSettingsTheme.hover : .clear)
+        // The whole row is the target: its empty middle and its price open
+        // the detail too, and a click anywhere pins it.
+        .contentShape(Rectangle())
+        .onHover { inside in
+            let inside = inside && isEnabled
+            hovered = inside
+            closeTask?.cancel()
+            if inside { shown = true } else { scheduleClose() }
         }
-        .onChange(of: shown) { _, value in if !value { pinned = false } }
+        .onTapGesture { if isEnabled { togglePinned() } }
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled { shown = false; hovered = false; overPopover = false; closeTask?.cancel() }
+        }
+        .onChange(of: shown) { _, value in if !value { pinned = false; overPopover = false } }
         .onExitCommand { shown = false; pinned = false }
         .onDisappear { closeTask?.cancel() }
+    }
+    private func togglePinned() {
+        pinned.toggle(); shown = pinned
     }
     private func scheduleClose() {
         closeTask?.cancel()
         closeTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled, !hovered, !focused, !pinned else { return }
+            guard !Task.isCancelled, !hovered, !overPopover, !focused, !pinned else { return }
             shown = false
         }
     }
@@ -442,7 +460,14 @@ struct AIUsageModelsPopover: View {
     let row: AIUsageCostRow
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(row.title) · Models used").font(.system(size: 12.5, weight: .semibold)).padding(.bottom, 10)
+            // The feature's total leads here as well, above its models.
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                Text("\(row.title) · Models used").font(.system(size: 12.5, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                AIUsagePriceLabel(events: row.events, width: 150)
+                    .font(.system(size: 12.5, weight: .semibold)).monospacedDigit()
+            }.padding(.bottom, 10)
+            Divider()
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(row.models) { item in

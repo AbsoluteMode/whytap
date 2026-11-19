@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/PermissionsHelper.swift
     confirmed_at: 2026-10-26
-related: [../project.md, 2026-10-17-local-workspace.md, 2026-10-20-screenshot-toolbar.md]
+related: [../project.md, 2026-10-17-local-workspace.md, 2026-10-20-screenshot-toolbar.md, 2026-11-19-permission-request-before-settings.md]
 ---
 
 # Decision

@@ -31,9 +31,9 @@ Showing this screen requests no permissions automatically. Each Allow button is
 still the explicit permission action. No onboarding wizard is added.
 
 The Screen Recording Allow button makes an asynchronous ScreenCaptureKit content
-request, discards the returned metadata and captures no image or audio. If that
-request fails and access is still missing, open the system screen-recording pane
-after it completes. A pending native request shows a small progress indicator in
+request, discards the returned metadata and captures no image or audio. Opening
+the system pane after a failed request was replaced on 2026-11-19 by
+`2026-11-19-permission-request-before-settings.md`: the pane is a later press. A pending native request shows a small progress indicator in
 the existing action slot and cannot be repeated. Refresh and activation stay
 passive. Screen access remains optional for voice and launch readiness.
 

@@ -14,6 +14,7 @@ struct SettingsPermissionsView: View {
                             icon: "keyboard.fill",
                             title: "Keyboard control",
                             granted: viewModel.snapshot.accessibilityGranted,
+                            requested: viewModel.accessibilityRequested,
                             action: viewModel.requestAccessibility
                         )
                         MacRowSeparator()
@@ -29,6 +30,7 @@ struct SettingsPermissionsView: View {
                             title: "Screen Recording",
                             subtitle: "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
                             granted: viewModel.screenRecordingGranted,
+                            requested: viewModel.screenRecordingRequested,
                             isRequesting: viewModel.isRequestingScreenRecording,
                             action: { Task { await viewModel.requestScreenRecording() } }
                         )
@@ -53,6 +55,7 @@ struct SettingsPermissionsView: View {
         title: String,
         subtitle: String? = nil,
         granted: Bool,
+        requested: Bool = false,
         isRequesting: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
@@ -77,11 +80,13 @@ struct SettingsPermissionsView: View {
                             .controlSize(.small)
                             .accessibilityLabel("Waiting for \(title) permission")
                     } else {
-                        MacButton(title: "Allow", style: .default, action: action)
-                            .accessibilityLabel("Allow \(title)")
+                        // After the system request the same button leads to the pane.
+                        MacButton(title: requested ? "Open Settings" : "Allow", style: .default, action: action)
+                            .fixedSize()
+                            .accessibilityLabel(requested ? "Open System Settings for \(title)" : "Allow \(title)")
                     }
                 }
-                .frame(width: 60, height: 26)
+                .frame(minWidth: 60, minHeight: 26)
             }
         )
     }

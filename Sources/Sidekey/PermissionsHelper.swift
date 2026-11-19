@@ -50,13 +50,13 @@ enum PermissionsHelper {
         return AXIsProcessTrustedWithOptions(options)
     }
 
+    /// Asks macOS to register Whytap and show its own Accessibility dialog.
+    /// Never opens System Settings in the same action: that dialog has its
+    /// own button, and a pane opened beside the request listed no Whytap.
+    // WHY: .project-docs/decisions/2026-11-19-permission-request-before-settings.md
     @discardableResult
-    static func requestAccessibility() -> Bool {
-        let granted = accessibilityGranted(prompt: true)
-        if !granted {
-            openAccessibilitySettings()
-        }
-        return granted
+    static func promptAccessibility() -> Bool {
+        accessibilityGranted(prompt: true)
     }
 
     /// Whether this process is allowed to post synthesised keyboard events
@@ -193,9 +193,10 @@ enum PermissionsHelper {
     }
 }
 
-/// Ask through the framework that captures screenshots before opening its
-/// privacy pane. Opening the pane alone cannot register an unrequested app.
-// WHY: .project-docs/decisions/2026-10-26-first-launch-permissions.md
+/// Ask through the framework that captures screenshots. Opening the privacy
+/// pane cannot register an unrequested app, and opening it in the same action
+/// as the request showed a list without Whytap, so the pane is a later action.
+// WHY: .project-docs/decisions/2026-11-19-permission-request-before-settings.md
 @MainActor
 enum ScreenRecordingPermissionRequest {
     static func request(
@@ -204,16 +205,10 @@ enum ScreenRecordingPermissionRequest {
             // Enumerate only to request authorization. No image or audio is captured,
             // and the returned display/window metadata is immediately discarded.
             _ = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-        },
-        openSettings: () -> Void = PermissionsHelper.openScreenRecordingSettings
+        }
     ) async {
         guard !isGranted() else { return }
-        do {
-            try await requestContent()
-        } catch {
-            // A denial needs the system toggle. Do not open Settings over the
-            // native request while it is still waiting for the user's answer.
-            if !isGranted() { openSettings() }
-        }
+        // The request fails while macOS is still showing its own dialog.
+        try? await requestContent()
     }
 }

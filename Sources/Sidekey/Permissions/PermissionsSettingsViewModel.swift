@@ -8,6 +8,11 @@ final class PermissionsSettingsViewModel: ObservableObject {
     @Published private(set) var snapshot: PermissionsHelper.Snapshot
     @Published private(set) var screenRecordingGranted: Bool
     @Published private(set) var isRequestingScreenRecording = false
+    /// Set by the first Allow of this launch. The next press of the same
+    /// button opens System Settings instead of asking macOS again.
+    // WHY: .project-docs/decisions/2026-11-19-permission-request-before-settings.md
+    @Published private(set) var accessibilityRequested = false
+    @Published private(set) var screenRecordingRequested = false
     @Published private(set) var dropHotkeyStatus = AppState.shared.dropHotkeyStatus
 
     private var onComplete: () -> Void
@@ -15,6 +20,9 @@ final class PermissionsSettingsViewModel: ObservableObject {
     private let snapshotProvider: () -> PermissionsHelper.Snapshot
     private let screenRecordingAccessProvider: () -> Bool
     private let screenRecordingRequester: () async -> Void
+    private let accessibilityRequester: () -> Void
+    private let openAccessibilitySettings: () -> Void
+    private let openScreenRecordingSettings: () -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
     /// When `false`, `completeIfReady` is a no-op even when every
@@ -29,6 +37,9 @@ final class PermissionsSettingsViewModel: ObservableObject {
         snapshotProvider: @escaping () -> PermissionsHelper.Snapshot = PermissionsHelper.snapshot,
         screenRecordingAccessProvider: @escaping () -> Bool = PermissionsHelper.screenRecordingGranted,
         screenRecordingRequester: @escaping () async -> Void = PermissionsHelper.requestScreenRecording,
+        accessibilityRequester: @escaping () -> Void = { PermissionsHelper.promptAccessibility() },
+        openAccessibilitySettings: @escaping () -> Void = PermissionsHelper.openAccessibilitySettings,
+        openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
                 userInfo: ["retry": retry, "resumePolling": resumePolling])
@@ -39,6 +50,9 @@ final class PermissionsSettingsViewModel: ObservableObject {
         self.snapshotProvider = snapshotProvider
         self.screenRecordingAccessProvider = screenRecordingAccessProvider
         self.screenRecordingRequester = screenRecordingRequester
+        self.accessibilityRequester = accessibilityRequester
+        self.openAccessibilitySettings = openAccessibilitySettings
+        self.openScreenRecordingSettings = openScreenRecordingSettings
         self.runtimeRefresh = runtimeRefresh
         self.snapshot = snapshotProvider()
         self.screenRecordingGranted = screenRecordingAccessProvider()
@@ -80,8 +94,14 @@ final class PermissionsSettingsViewModel: ObservableObject {
 
     func requestScreenRecording() async {
         guard !isRequestingScreenRecording else { return }
+        guard !screenRecordingAccessProvider() else { return refresh() }
+        guard !screenRecordingRequested else {
+            openScreenRecordingSettings()
+            return refresh()
+        }
         isRequestingScreenRecording = true
         defer { isRequestingScreenRecording = false }
+        screenRecordingRequested = true
         await screenRecordingRequester()
         refresh()
     }
@@ -103,10 +123,16 @@ final class PermissionsSettingsViewModel: ObservableObject {
     }
 
     func requestAccessibility() {
-        // Stay menu-bar-only — no Dock icon flip. System Settings will
-        // take focus on its own; the host window remains a normal app
-        // window when the user returns.
-        PermissionsHelper.requestAccessibility()
+        // Stay menu-bar-only — no Dock icon flip. The first press only asks
+        // macOS, whose dialog leads to System Settings itself.
+        if snapshotProvider().accessibilityGranted {
+            // Nothing to ask.
+        } else if accessibilityRequested {
+            openAccessibilitySettings()
+        } else {
+            accessibilityRequested = true
+            accessibilityRequester()
+        }
         refresh()
     }
 

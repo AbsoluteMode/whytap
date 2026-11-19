@@ -166,30 +166,8 @@ struct APIHintsView: View {
             detail: "Choose a :free model. Limit: 20 requests a minute. Tool support and availability vary; agent turns may use several requests.",
             url: URL(string: "https://openrouter.ai/models?max_price=0")!
         ),
-        // Groq and Cloudflare have no tile of their own: they connect as an
-        // OpenAI-compatible server, which serves the text features but not Agent.
-        Hint(
-            category: .models,
-            provider: "Groq",
-            assetName: nil,
-            allowance: "1,000 / day",
-            cadence: "free model requests",
-            access: .noCard,
-            detail: "Add it in API keys as an OpenAI-compatible server: https://api.groq.com/openai/v1. Limits differ by model, about 30 requests and 8,000 tokens a minute. For Drop Smart cleanup, meeting notes and translation; not Agent.",
-            url: URL(string: "https://console.groq.com/docs/rate-limits")!,
-            checked: "2026-11-19"
-        ),
-        Hint(
-            category: .models,
-            provider: "Cloudflare Workers AI",
-            assetName: nil,
-            allowance: "10,000",
-            cadence: "free Neurons each day",
-            access: .noCard,
-            detail: "Add it in API keys as an OpenAI-compatible server, with an API token and your account ID in the address. All models share the daily budget; requests stop when it runs out. For Drop Smart cleanup, meeting notes and translation; not Agent.",
-            url: URL(string: "https://developers.cloudflare.com/workers-ai/platform/pricing/")!,
-            checked: "2026-11-19"
-        ),
+        // List only offers whose key works in Whytap as it is: Groq and Cloudflare
+        // wait for their own provider support (user decision, 2026-11-19).
         Hint(
             category: .models,
             provider: "Claude Max",

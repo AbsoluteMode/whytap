@@ -962,8 +962,8 @@ takes to start (No card needed, Card required or Paid plan, in that order
 within a group), the allowance with its period, and Get offer. Hovering or
 focusing Get offer opens the conditions and that offer's check date in a
 popover beside the button. The header says Reviewed monthly and shows the
-newest check date. Groq and Cloudflare Workers AI connect as an
-OpenAI-compatible server (text features, not Agent). The tab has no footer.
+newest check date. List only offers whose key works in Whytap as it is; Groq
+and Cloudflare wait for their own provider support. The tab has no footer.
 Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md

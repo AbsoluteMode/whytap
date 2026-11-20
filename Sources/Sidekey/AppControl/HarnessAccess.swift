@@ -1,4 +1,3 @@
-import CryptoKit
 import Darwin
 import Foundation
 import Security
@@ -58,105 +57,124 @@ struct HarnessCallerResolver: HarnessCallerResolving {
 
 // MARK: Remembered answers
 
-/// Answers live in a file whose contents are authenticated with a key only
-/// Whytap's Keychain item holds: another process of the same user can delete
-/// or corrupt the file (every harness is then asked again) but cannot write
-/// itself an `allow`.
-@MainActor
-final class HarnessAccessStore: ObservableObject {
-    private struct Envelope: Codable {
-        let payload: Data
-        let mac: Data
+enum HarnessAccessStored: Equatable {
+    /// The storage cannot be read now (Keychain locked): trust nothing, retry.
+    case unavailable
+    case empty
+    case data(Data)
+}
+
+protocol HarnessAccessPersisting {
+    func load() -> HarnessAccessStored
+    func save(_ data: Data) -> Bool
+}
+
+/// Answers live in one Keychain item of this app. A file, even a signed one,
+/// could be put back by another process after the user turned access off.
+struct HarnessAccessKeychain: HarnessAccessPersisting {
+    static let account = "harness_access.answers"
+    let service: String
+
+    private var query: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: Self.account,
+         kSecAttrSynchronizable as String: false]
     }
 
+    func load() -> HarnessAccessStored {
+        var read = query
+        read[kSecReturnData as String] = true
+        read[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        switch SecItemCopyMatching(read as CFDictionary, &item) {
+        case errSecSuccess: return (item as? Data).map(HarnessAccessStored.data) ?? .unavailable
+        case errSecItemNotFound: return .empty
+        default: return .unavailable
+        }
+    }
+
+    func save(_ data: Data) -> Bool {
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        var add = query
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
+}
+
+@MainActor
+final class HarnessAccessStore: ObservableObject {
     @Published private(set) var grants: [HarnessGrant] = []
 
     /// The running app's store, for Settings -> Agents. Nil outside a packaged app.
     static weak var active: HarnessAccessStore?
 
-    private let fileURL: URL?
-    private let key: () -> SymmetricKey?
+    private let persistence: HarnessAccessPersisting?
     private var loaded = false
+    /// An answer of this launch that the storage has not taken yet.
+    private var unsaved = false
 
-    /// `fileURL == nil` keeps answers for this launch only.
-    init(fileURL: URL?, key: @escaping () -> SymmetricKey?) {
-        self.fileURL = fileURL
-        self.key = key
+    /// Without `persistence` answers last for this launch only.
+    init(persistence: HarnessAccessPersisting?) {
+        self.persistence = persistence
+        loaded = persistence == nil
     }
 
     func decision(for identity: HarnessIdentity) -> HarnessDecision? {
         loadIfNeeded()
+        // A refused write is retried, so a No given here is not lost at quit.
+        if unsaved { persist() }
         return grants.first { $0.identity == identity }?.decision
     }
 
-    func record(_ decision: HarnessDecision, for client: HarnessClient, at date: Date) {
+    /// The answer applies at once; false when it could not be stored yet.
+    @discardableResult
+    func record(_ decision: HarnessDecision, for client: HarnessClient, at date: Date) -> Bool {
         loadIfNeeded()
         grants.removeAll { $0.identity == client.identity }
         grants.append(HarnessGrant(identity: client.identity, name: client.name, decision: decision, decidedAt: date))
-        save()
+        return persist()
     }
 
     /// Forgets the answer: the harness is asked again on its next request.
-    func forget(_ identity: HarnessIdentity) {
+    @discardableResult
+    func forget(_ identity: HarnessIdentity) -> Bool {
         loadIfNeeded()
         grants.removeAll { $0.identity == identity }
-        save()
+        return persist()
     }
 
-    /// Reads the file once a key is available. Without the key (Keychain not
-    /// readable yet) nothing is trusted and the read is retried later.
+    /// Reads the stored answers once the storage is readable. Until then
+    /// nothing is trusted and nothing stored is overwritten.
     func loadIfNeeded() {
-        guard !loaded, let key = key() else { return }
-        loaded = true
-        guard let fileURL, let data = try? Data(contentsOf: fileURL),
-              let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
-              HMAC<SHA256>.isValidAuthenticationCode(envelope.mac, authenticating: envelope.payload, using: key),
-              let stored = try? JSONDecoder().decode([HarnessGrant].self, from: envelope.payload)
-        else { return }
-        // Answers given before the Keychain became readable win over the file.
-        let fresh = Set(grants.map(\.identity))
-        grants = stored.filter { !fresh.contains($0.identity) } + grants
-    }
-
-    private func save() {
-        guard loaded, let fileURL, let key = key(),
-              let payload = try? JSONEncoder().encode(grants) else { return }
-        let mac = Data(HMAC<SHA256>.authenticationCode(for: payload, using: key))
-        guard let data = try? JSONEncoder().encode(Envelope(payload: payload, mac: mac)) else { return }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
-    }
-}
-
-/// The signing key of the answers file: device-bound, never synchronized.
-enum HarnessAccessKeychain {
-    static let account = "harness_access.signing_key"
-
-    static func key(service: String) -> SymmetricKey? {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: false,
-        ]
-        var read = base
-        read[kSecReturnData as String] = true
-        read[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(read as CFDictionary, &item)
-        if status == errSecSuccess, let data = item as? Data, data.count == 32 {
-            return SymmetricKey(data: data)
+        guard !loaded, let persistence else { return }
+        switch persistence.load() {
+        case .unavailable:
+            return
+        case .empty:
+            loaded = true
+        case .data(let data):
+            loaded = true
+            let stored = (try? JSONDecoder().decode([HarnessGrant].self, from: data)) ?? []
+            // Answers given before the storage became readable win over it.
+            let fresh = Set(grants.map(\.identity))
+            grants = stored.filter { !fresh.contains($0.identity) } + grants
         }
-        // Any other failure (locked, dark wake) must not replace an existing key.
-        guard status == errSecItemNotFound else { return nil }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return nil }
-        var add = base
-        add[kSecValueData as String] = Data(bytes)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return nil }
-        return SymmetricKey(data: Data(bytes))
+        if unsaved { persist() }
+    }
+
+    @discardableResult
+    private func persist() -> Bool {
+        guard let persistence else { return true }
+        guard loaded, let data = try? JSONEncoder().encode(grants), persistence.save(data) else {
+            unsaved = true
+            return false
+        }
+        unsaved = false
+        return true
     }
 }
 
@@ -186,7 +204,8 @@ final class HarnessAccessGate {
     private let store: HarnessAccessStore
     private weak var presenter: HarnessAccessPresenting?
     private let now: () -> Date
-    private var pending: [HarnessIdentity: Task<HarnessAccessOutcome, Never>] = [:]
+    private var prompting: Set<HarnessIdentity> = []
+    private var waiters: [HarnessIdentity: [UUID: CheckedContinuation<HarnessAccessOutcome?, Never>]] = [:]
     /// A prompt the user left unanswered is not shown again just because the
     /// harness started another session; a real request still asks.
     private var askedUnprompted: Set<HarnessIdentity> = []
@@ -197,6 +216,20 @@ final class HarnessAccessGate {
         self.store = store
         self.presenter = presenter
         self.now = now
+    }
+
+    /// Answers a request: refused here, or performed and then released only
+    /// if the harness is still allowed and still there.
+    func handle(_ request: AppControlRequest, peerPID: pid_t,
+                perform: (AppControlRequest) async -> AppControlResponse) async -> AppControlResponse {
+        if let refusal = await intercept(request, peerPID: peerPID) { return refusal }
+        let response = await perform(request)
+        guard Self.gatedOperations.contains(request.operation) else { return response }
+        // Access turned off, or the client gone, while the content was read.
+        guard !Task.isCancelled else { return Self.cancelled }
+        guard let client = resolver.client(peerPID: peerPID) else { return Self.unsupported }
+        guard store.decision(for: client.identity) == .allow else { return Self.denied(client) }
+        return response
     }
 
     /// `nil` lets the request through to the application controls.
@@ -210,8 +243,8 @@ final class HarnessAccessGate {
             case .allow: return Self.status(client, "allowed")
             case .deny: return Self.status(client, "denied")
             case nil:
-                if pending[client.identity] == nil, askedUnprompted.insert(client.identity).inserted {
-                    _ = ask(client)
+                if !prompting.contains(client.identity), askedUnprompted.insert(client.identity).inserted {
+                    startPrompt(client)
                 }
                 return Self.status(client, "pending")
             }
@@ -224,9 +257,8 @@ final class HarnessAccessGate {
         case .deny:
             return Self.denied(client)
         case nil:
-            let outcome = await ask(client).value
-            // The client went away while the prompt was up: it gets nothing.
-            guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled.") }
+            // nil: this client went away while the prompt was up; it gets nothing.
+            guard let outcome = await answer(for: client), !Task.isCancelled else { return Self.cancelled }
             switch outcome {
             case .allow: break
             case .deny: return Self.denied(client)
@@ -242,24 +274,41 @@ final class HarnessAccessGate {
         return nil
     }
 
+    /// Waits for the harness's prompt. A request that is cancelled stops
+    /// waiting at once; the prompt stays for the user and for other requests.
+    private func answer(for client: HarnessClient) async -> HarnessAccessOutcome? {
+        let waiter = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { return continuation.resume(returning: nil) }
+                waiters[client.identity, default: [:]][waiter] = continuation
+                startPrompt(client)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.waiters[client.identity]?.removeValue(forKey: waiter)?.resume(returning: nil)
+            }
+        }
+    }
+
     /// One prompt per harness however many requests wait for it. It does not
     /// belong to the request that started it, so a session that ends does not
     /// take the question away from the user.
-    private func ask(_ client: HarnessClient) -> Task<HarnessAccessOutcome, Never> {
-        if let running = pending[client.identity] { return running }
-        let task = Task { @MainActor [weak self] () -> HarnessAccessOutcome in
-            guard let self, let presenter = self.presenter else { return .timedOut }
-            let outcome = await presenter.requestAccess(for: client)
-            self.pending[client.identity] = nil
+    private func startPrompt(_ client: HarnessClient) {
+        guard prompting.insert(client.identity).inserted else { return }
+        Task { @MainActor [weak self] in
+            let outcome = await self?.presenter?.requestAccess(for: client) ?? .timedOut
+            guard let self else { return }
+            self.prompting.remove(client.identity)
             switch outcome {
             case .allow: self.store.record(.allow, for: client, at: self.now())
             case .deny: self.store.record(.deny, for: client, at: self.now())
             case .timedOut: break
             }
-            return outcome
+            for continuation in (self.waiters.removeValue(forKey: client.identity) ?? [:]).values {
+                continuation.resume(returning: outcome)
+            }
         }
-        pending[client.identity] = task
-        return task
     }
 
     private static func status(_ client: HarnessClient, _ access: String) -> AppControlResponse {
@@ -270,6 +319,8 @@ final class HarnessAccessGate {
         .failure("access_denied",
             "The user has not allowed \(client.name) to use Whytap. They can change it in Whytap Settings → Agents. Do not retry.")
     }
+
+    private static let cancelled = AppControlResponse.failure("cancelled", "Request cancelled.")
 
     private static let unsupported = AppControlResponse.failure("unsupported_client",
         "These Whytap tools work only from the Whytap MCP server that Claude Code or Codex started itself. A script or a shell command cannot use them.")

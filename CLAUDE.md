@@ -1213,14 +1213,17 @@ Code use Whytap?", No / Yes, Y after 0.3 s of a quiet keyboard, 60 s timeout,
 then "Claude Code connected" for 1.4 s); the prompt is shared by sessions that
 start together and outlives the request that caused it. The MCP server answers
 initialize at once and sends request_access afterwards through the client that
-never launches Whytap. Yes and No are remembered per Mac in harness-access.json
-beside the broker socket, authenticated with a device-bound Keychain key
-(HarnessAccessStore); Settings -> Agents -> Coding tools has a switch per
-tool, read on every request. Gated today: whytap_meetings_search (every query
+never launches Whytap. Yes and No are remembered per Mac in one Keychain item
+of the app (HarnessAccessStore; a file could be put back after access was
+turned off); an answer that could not be stored holds for the launch and is
+stored on the next read. Settings -> Agents -> Coding tools has a switch per
+tool; the gate reads the answer before a request and again before its
+response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,
 whytap_meeting_transcript (by index or around a moment, bounded by replies and
-bytes) and whytap_meeting_open. One Yes covers future content and action tools
+bytes, a longer reply continued by fromOffset) and whytap_meeting_open (busy
+while a note is being edited; a meeting link then shows nothing). One Yes covers future content and action tools
 except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:

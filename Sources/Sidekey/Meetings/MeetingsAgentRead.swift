@@ -57,17 +57,21 @@ enum MeetingTextSearch {
 
     /// Words of the query, each cut to a stem so an inflected form still
     /// matches. A Cyrillic word of five or more letters loses its last two
-    /// ("ценах" finds "цены"), any other word of five or more its last one
-    /// ("prices" finds "price"). Shorter words and words with digits stay whole.
+    /// ("ценах" finds "цены"); one of four letters loses a final vowel
+    /// ("цены" finds "ценах", "Егор" stays whole). Any other word of five or
+    /// more letters loses its last one ("prices" finds "price"). Words with
+    /// digits stay whole.
     static func needles(_ query: String) -> [String] {
         var seen: Set<String> = []
         return query
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { $0.count >= 2 }
             .map { word -> String in
-                guard word.count >= 5, word.allSatisfy(\.isLetter) else { return word }
+                guard word.count >= 4, word.allSatisfy(\.isLetter) else { return word }
                 let cyrillic = word.unicodeScalars.contains { (0x400...0x4FF).contains($0.value) }
-                return String(word.dropLast(cyrillic ? 2 : 1))
+                if word.count >= 5 { return String(word.dropLast(cyrillic ? 2 : 1)) }
+                guard cyrillic, let last = word.lowercased().last, "аеёиоуыэюяьй".contains(last) else { return word }
+                return String(word.dropLast())
             }
             .filter { seen.insert($0.lowercased()).inserted }
             .prefix(maxTerms)

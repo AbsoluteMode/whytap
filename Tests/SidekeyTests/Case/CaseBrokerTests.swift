@@ -169,9 +169,10 @@ final class CaseBrokerTests: XCTestCase {
         let controls = CaseBroker(
             service: service, resolver: resolver, approvals: approvals, authenticator: auth,
             appControl: { request in reached.append(request.operation); return .success(.null) },
-            harnessAccess: { request, pid in
+            harnessAccess: { request, pid, perform in
                 asked.append((request.operation, pid))
-                return request.operation == "meetings_search" ? .failure("access_denied", "no") : nil
+                if request.operation == "meetings_search" { return .failure("access_denied", "no") }
+                return await perform(request)
             })
         let refused = await controls.handle(.appControl(AppControlRequest("meetings_search")), peerPID: 900)
         XCTAssertEqual(refused, .appControl(.failure("access_denied", "no")))

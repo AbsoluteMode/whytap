@@ -1761,12 +1761,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens Settings -> Meetings on one note. Only shows it.
+    /// Opens Settings -> Meetings on one note. Only shows it, and never over a
+    /// note the user is editing: leaving that note would drop the edit.
     @discardableResult
-    private func showMeetingNote(id: UUID) -> Bool {
+    private func showMeetingNote(id: UUID) -> AppControlMeetings.OpenResult {
+        let controller = ensureSettingsWindowController()
+        guard !controller.isEditingNote else { return .editing }
         openSettingsWindow(tab: .notes)
-        ensureSettingsWindowController().selectNoteMeeting(id: id)
-        return true
+        controller.selectNoteMeeting(id: id)
+        return .shown
     }
 
     private func openTranslation(_ mode: TranslationWindowController.Mode, toggles: Bool = false) {
@@ -3856,7 +3859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let inspector = CaseSystemProcessInspector()
         let controls = AppControlController(meetings: AppControlMeetings(
             source: { [weak self] in self?.meetingsStore },
-            open: { [weak self] id in self?.showMeetingNote(id: id) ?? false }))
+            open: { [weak self] id in self?.showMeetingNote(id: id) ?? .unavailable }))
         appControlController = controls
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
@@ -3865,13 +3868,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { $0 != nil }
             .removeDuplicates()
             .sink { active in AppState.shared.caseApprovalActive = active }
-        // Answers are per Mac: the file sits beside the broker socket and is
-        // signed with a device-bound Keychain key.
+        // Answers are per Mac, in this app's Keychain.
         // WHY: .project-docs/decisions/2026-11-20-harness-access.md
         let harnessStore = HarnessAccessStore(
-            fileURL: CaseBrokerPaths.socketURL(bundleID: bundleID)
-                .deletingLastPathComponent().appendingPathComponent("harness-access.json"),
-            key: { HarnessAccessKeychain.key(service: BuildConfig.keychainService) })
+            persistence: HarnessAccessKeychain(service: BuildConfig.keychainService))
         harnessAccessStore = harnessStore
         HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(
@@ -3884,7 +3884,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             approvals: approvals,
             authenticator: LocalCaseAuthenticator(),
             appControl: { [controls] request in await controls.handle(request) },
-            harnessAccess: { [harnessGate] request, peerPID in await harnessGate.intercept(request, peerPID: peerPID) })
+            harnessAccess: { [harnessGate] request, peerPID, perform in
+                await harnessGate.handle(request, peerPID: peerPID, perform: perform)
+            })
         let server = CaseBrokerServer(
             socketURL: CaseBrokerPaths.socketURL(bundleID: bundleID),
             broker: broker,

@@ -30,6 +30,8 @@ public final class AppControlMCPServer {
         let pending = AppControlPendingCalls()
         let output = NSLock()
         let group = DispatchGroup()
+        var initialized = false
+        var probed = false
         func emit(_ line: String?) {
             guard let line else { return }
             output.withLock { write(line) }
@@ -53,9 +55,13 @@ public final class AppControlMCPServer {
                     group.leave()
                 }
             } else {
-                if request?["method"] == .string("notifications/initialized"), !screenOnly, let accessProbe {
-                    group.enter()
-                    DispatchQueue.global(qos: .utility).async { accessProbe(); group.leave() }
+                if request?["method"] == .string("initialize") { initialized = true }
+                // Once per connection, after its handshake, and never waited
+                // for: the server exits on EOF whatever the app is doing.
+                if request?["method"] == .string("notifications/initialized"), initialized, !probed,
+                   !screenOnly, let accessProbe {
+                    probed = true
+                    DispatchQueue.global(qos: .utility).async { accessProbe() }
                 }
                 emit(handle(line: line))
             }
@@ -224,9 +230,10 @@ public final class AppControlMCPServer {
             tool("meeting_get", "Read one meeting's note (Markdown) by id from whytap_meetings_search. noteTruncated tells when maxBytes cut it. transcriptSegments is how many replies the transcript has.",
                  ["id": string,
                   "maxBytes": .object(["type": .string("integer"), "minimum": .int(1000), "maximum": .int(200_000)])], ["id"]),
-            tool("meeting_transcript", "Read a meeting's transcript as replies with index, startMs, endMs, speaker and text. Start at fromIndex, or at aroundMs to read the conversation around a moment from a search match (a few replies earlier). Continue with nextIndex until it is null.",
+            tool("meeting_transcript", "Read a meeting's transcript as replies with index, startMs, endMs, speaker and text. Start at fromIndex, or at aroundMs to read the conversation around a moment from a search match (a few replies earlier). Continue with nextIndex until it is null; when nextOffset is not null, pass it as fromOffset with the same index to read the rest of a long reply.",
                  ["id": string,
                   "fromIndex": .object(["type": .string("integer"), "minimum": .int(0)]),
+                  "fromOffset": .object(["type": .string("integer"), "minimum": .int(0)]),
                   "aroundMs": .object(["type": .string("integer"), "minimum": .int(0)]),
                   "limit": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(500)]),
                   "maxBytes": .object(["type": .string("integer"), "minimum": .int(1000), "maximum": .int(200_000)])], ["id"]),

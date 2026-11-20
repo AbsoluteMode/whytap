@@ -45,12 +45,12 @@ with finding and reading meetings, and wants connecting to cost one answer.
   Code use Whytap?" with No and Yes. It is the Case approval card and queue:
   one prompt at a time, armed after 0.3 s of a quiet keyboard, Y / N / Escape,
   denied as unanswered after 60 s. Yes shows "Claude Code connected" for 1.4 s.
-- **The answer is remembered** per Mac, for Yes and for No, in
-  `harness-access.json` beside the broker socket. Its contents carry an
-  HMAC-SHA256 made with a device-bound Keychain key, so a process of the same
-  user can delete the file (the harness is asked again) but cannot write an
-  `allow`. Settings -> Agents -> Coding tools lists the answers with a switch;
-  the gate reads the answer on every request, so off stops an open session.
+- **The answer is remembered** per Mac, for Yes and for No, in one Keychain
+  item of the app (`harness_access.answers`). Settings -> Agents -> Coding
+  tools lists the answers with a switch. The gate reads the answer before a
+  request and again before its response leaves, so off stops an open session
+  and a request already reading. An answer the Keychain refused to store
+  holds for this launch and is stored on the next read.
 - **What Yes covers.** Every current and future content and action tool of the
   plugin, except deleting data, which will ask each time when it exists.
   Today: `whytap_meetings_search`, `whytap_meeting_get`,
@@ -60,7 +60,9 @@ with finding and reading meetings, and wants connecting to cost one answer.
   registrations, and a Case registration (even Bypass) gives no access to
   meetings. Secret values stay behind `whytap case run`.
 - **Meeting links.** `whytap://meeting/<id without dashes>` shows one note
-  (Invariant 7: show only). Tools return it as `link`.
+  (Invariant 7: show only). Tools return it as `link`. Neither the link nor
+  `whytap_meeting_open` replaces a note the user is editing: the tool answers
+  `busy`, the link shows nothing.
 
 ## Why
 
@@ -91,9 +93,11 @@ with finding and reading meetings, and wants connecting to cost one answer.
   asked again; an unanswered prompt grants nothing; sessions starting together
   share one prompt; `request_access` returns `pending` without waiting; a
   client that left gets nothing; a script in the harness shell is refused even
-  after Yes; a forged or re-signed file is ignored; without the Keychain
-  nothing is trusted or overwritten; the Settings switch stops and restores
-  access without a prompt.
+  after Yes; unreadable stored answers allow nobody; while the Keychain is
+  locked nothing is trusted or overwritten; a No that could not be stored is
+  kept and stored later; access turned off during a read returns nothing; a
+  cancelled request stops waiting while the prompt stays; the Settings switch
+  stops and restores access without a prompt.
 - `HarnessAccessPromptTests`: Y only after the quiet keyboard, A is not an
   answer, N and Escape refuse, timeout, the confirmation and its replacement by
   the next question; offscreen renders of every face.
@@ -111,12 +115,30 @@ with finding and reading meetings, and wants connecting to cost one answer.
 - Waiting for the answer inside `initialize`: hosts time the handshake out.
 - Any known ancestor as the harness: a script run by the agent would inherit it.
 - A plain file or UserDefaults for answers: any process could grant itself.
+- A file authenticated with a Keychain key (built first): the review showed
+  that an old, genuinely signed Yes could be copied back after the user
+  turned access off.
 - Asking again for recording, settings and other actions: the user chose one
   Yes for everything except deletion.
 - A terminal, Cursor or an unknown program as a client in this step: a lasting
   answer needs an identity Apple vouches for; a terminal's would cover every
   script run in it.
 - SQLite FTS5 now: a scan is enough at this size; add an index if it gets slow.
+
+## Review
+
+Codex reviewed the branch on 2026-11-20 and found, all fixed here: a signed
+answers file could be rolled back; opening a meeting dropped an unsaved note
+edit; a response could leave after access was turned off; `maxBytes` did not
+bound one very long reply; the access probe ran more than once and was waited
+for at EOF; a four-letter Cyrillic word did not match its other cases; ISO
+timestamps with fractional seconds were refused. Gemini 4 Carbon discussed
+the specification but was unavailable for the code review.
+
+Left open, older than this change: `capture_screen` of the screen-only MCP
+server answers any local process running the helper, under Whytap's Screen
+Recording permission. A meeting link can now put a known note on screen
+first. It needs its own decision.
 
 ## Limits
 

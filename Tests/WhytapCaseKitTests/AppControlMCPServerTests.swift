@@ -161,9 +161,49 @@ final class AppControlMCPServerTests: XCTestCase {
     func test_the_built_in_agents_screen_server_never_asks_for_access() {
         let probes = Counter()
         let server = AppControlMCPServer(screenOnly: true, accessProbe: { probes.increment() }, call: { _ in .success(.null) })
-        var lines = [#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#]
+        var lines = [#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                     #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#]
         server.run(readLine: { lines.isEmpty ? nil : lines.removeFirst() }, write: { _ in })
+        Thread.sleep(forTimeInterval: 0.05)
         XCTAssertEqual(probes.value, 0)
+    }
+
+    func test_access_is_asked_once_per_connection_and_only_after_its_handshake() {
+        let probes = Counter()
+        let probed = DispatchSemaphore(value: 0)
+        let stray = AppControlMCPServer(accessProbe: { probes.increment() }, call: { _ in .success(.null) })
+        var early = [#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#]
+        stray.run(readLine: { early.isEmpty ? nil : early.removeFirst() }, write: { _ in })
+        Thread.sleep(forTimeInterval: 0.05)
+        XCTAssertEqual(probes.value, 0, "no handshake, no question")
+
+        let server = AppControlMCPServer(accessProbe: { probes.increment(); probed.signal() }, call: { _ in .success(.null) })
+        var lines = [#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                     #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                     #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#]
+        server.run(readLine: { lines.isEmpty ? nil : lines.removeFirst() }, write: { _ in })
+        XCTAssertEqual(probed.wait(timeout: .now() + 5), .success)
+        Thread.sleep(forTimeInterval: 0.05)
+        XCTAssertEqual(probes.value, 1)
+    }
+
+    /// A stuck app must not keep the server alive after the host hung up.
+    func test_the_server_ends_on_eof_while_the_access_question_is_still_open() {
+        let release = DispatchSemaphore(value: 0)
+        let started = DispatchSemaphore(value: 0)
+        let server = AppControlMCPServer(accessProbe: { started.signal(); release.wait() }, call: { _ in .success(.null) })
+        var lines = [#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                     #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#]
+        let finished = expectation(description: "run returns")
+        DispatchQueue.global().async {
+            server.run(readLine: {
+                if lines.isEmpty { _ = started.wait(timeout: .now() + 5); return nil }
+                return lines.removeFirst()
+            }, write: { _ in })
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 5)
+        release.signal()
     }
 
     func test_todo_tools_are_listed_with_batch_schema_and_meeting_guidance() throws {

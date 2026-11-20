@@ -9,7 +9,7 @@ final class AppControlMeetingsTests: XCTestCase {
     private var root: URL!
     private var store: MeetingsStore!
     private var opened: [UUID] = []
-    private var canOpen = true
+    private var openResult = AppControlMeetings.OpenResult.shown
     private var tools: AppControlMeetings!
 
     private let pricing = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
@@ -25,9 +25,9 @@ final class AppControlMeetingsTests: XCTestCase {
         tools = AppControlMeetings(
             source: { [store] in store },
             open: { [weak self] id in
-                guard let self, self.canOpen else { return false }
-                self.opened.append(id)
-                return true
+                guard let self else { return .unavailable }
+                if self.openResult == .shown { self.opened.append(id) }
+                return self.openResult
             },
             calendar: calendar)
 
@@ -120,6 +120,8 @@ final class AppControlMeetingsTests: XCTestCase {
         XCTAssertEqual(meetings(later).map { $0["id"] }, [.string(hiring.uuidString)])
         let before = await call("meetings_search", ["to": .string("2026-11-09")])
         XCTAssertEqual(meetings(before).count, 0)
+        let fractional = await call("meetings_search", ["from": .string("2026-11-11T00:00:00.000Z")])
+        XCTAssertEqual(meetings(fractional).map { $0["id"] }, [.string(hiring.uuidString)])
     }
 
     func test_malformed_requests_are_refused_whole() async {
@@ -203,6 +205,40 @@ final class AppControlMeetingsTests: XCTestCase {
         XCTAssertEqual(first.data.object?["nextIndex"], .int(1))
     }
 
+    /// Some providers return a whole meeting as one reply.
+    func test_one_very_long_reply_is_read_in_parts_that_join_back_exactly() async throws {
+        let whole = UUID()
+        let text = (0..<1000).map { "слово\($0)" }.joined(separator: " ")
+        try await store.insert(meta: meta(whole, day: 23), markdown: "# One", transcript: [
+            TranscriptSegment(speaker: nil, start: 0, end: 1800, text: text),
+            TranscriptSegment(speaker: nil, start: 1800, end: 1801, text: "конец"),
+        ])
+        var joined = ""
+        var args: [String: AppControlValue] = ["id": .string(whole.uuidString), "maxBytes": .int(1000)]
+        var calls = 0
+        while true {
+            calls += 1
+            let page = await call("meeting_transcript", args)
+            XCTAssertTrue(page.ok)
+            let segments = page.data.object?["segments"]?.array?.compactMap(\.object) ?? []
+            for segment in segments where segment["index"] == .int(0) {
+                let part = try XCTUnwrap(segment["text"]?.string)
+                XCTAssertLessThanOrEqual(part.utf8.count, 1000)
+                XCTAssertEqual(segment["offset"]?.int ?? 0, joined.count)
+                joined += part
+            }
+            guard let next = page.data.object?["nextIndex"]?.int else { break }
+            args["fromIndex"] = .int(next)
+            args["fromOffset"] = page.data.object?["nextOffset"] ?? .int(0)
+            if args["fromOffset"] == .null { args["fromOffset"] = nil }
+            XCTAssertLessThan(calls, 100)
+        }
+        XCTAssertEqual(joined, text)
+        XCTAssertGreaterThan(calls, 5)
+        let offsetOnly = await call("meeting_transcript", ["id": .string(whole.uuidString), "fromOffset": .int(5)])
+        XCTAssertEqual(offsetOnly.data.object?["code"], .string("invalid_arguments"))
+    }
+
     func test_reading_past_the_end_and_conflicting_starts() async {
         let past = await call("meeting_transcript", ["id": .string(pricing.uuidString), "fromIndex": .int(99)])
         XCTAssertEqual(past.data.object?["segments"], .array([]))
@@ -228,13 +264,18 @@ final class AppControlMeetingsTests: XCTestCase {
         let response = await call("meeting_open", ["id": .string(pricing.uuidString)])
         XCTAssertTrue(response.ok)
         XCTAssertEqual(opened, [pricing])
-        canOpen = false
+        openResult = .unavailable
         let refused = await call("meeting_open", ["id": .string(pricing.uuidString)])
         XCTAssertEqual(refused.data.object?["code"], .string("unavailable"))
+        // The user is in the middle of editing a note: it is not replaced.
+        openResult = .editing
+        let busy = await call("meeting_open", ["id": .string(pricing.uuidString)])
+        XCTAssertEqual(busy.data.object?["code"], .string("busy"))
+        XCTAssertEqual(opened, [pricing])
     }
 
     func test_without_a_meetings_store_every_tool_says_unavailable() async {
-        let broken = AppControlMeetings(source: { nil }, open: { _ in true })
+        let broken = AppControlMeetings(source: { nil }, open: { _ in .shown })
         for operation in AppControlMeetings.operations {
             let response = await broken.handle(operation, ["id": .string(pricing.uuidString)])
             XCTAssertEqual(response.data.object?["code"], .string("unavailable"), operation)
@@ -253,7 +294,8 @@ final class AppControlMeetingsTests: XCTestCase {
     // MARK: Matching rules
 
     func test_query_words_become_stems_and_duplicates_collapse() {
-        XCTAssertEqual(MeetingTextSearch.needles("Цены, ценах и ЦЕНЫ!"), ["Цены", "цен"])
+        XCTAssertEqual(MeetingTextSearch.needles("Цены, ценах и ЦЕНЫ!"), ["Цен"])
+        XCTAssertEqual(MeetingTextSearch.needles("Егор Маша цена"), ["Егор", "Маш", "цен"])
         XCTAssertEqual(MeetingTextSearch.needles("iOS 17 pricing"), ["iOS", "17", "pricin"])
         XCTAssertEqual(MeetingTextSearch.needles("a  -- "), [])
         XCTAssertEqual(MeetingTextSearch.needles((1...20).map { "w\($0)x" }.joined(separator: " ")).count, MeetingTextSearch.maxTerms)

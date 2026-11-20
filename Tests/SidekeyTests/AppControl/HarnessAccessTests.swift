@@ -1,4 +1,3 @@
-import CryptoKit
 import Darwin
 import WhytapCaseKit
 import XCTest
@@ -15,6 +14,23 @@ private final class ProcessTable: CaseProcessInspecting {
     func info(pid: pid_t) -> CaseProcessInfo? { table[pid] }
     func peer(of socket: Int32) -> (pid: pid_t, auditToken: audit_token_t)? { nil }
     func isTrustedHelper(auditToken: audit_token_t, helperURL: URL) -> Bool { false }
+}
+
+private final class MemoryAnswers: HarnessAccessPersisting {
+    var stored: Data?
+    var available = true
+    var acceptsWrites = true
+
+    func load() -> HarnessAccessStored {
+        guard available else { return .unavailable }
+        return stored.map(HarnessAccessStored.data) ?? .empty
+    }
+
+    func save(_ data: Data) -> Bool {
+        guard available, acceptsWrites else { return false }
+        stored = data
+        return true
+    }
 }
 
 @MainActor
@@ -48,8 +64,7 @@ final class HarnessAccessTests: XCTestCase {
     private var prompt: Prompt!
     private var store: HarnessAccessStore!
     private var gate: HarnessAccessGate!
-    private var file: URL!
-    private let key = SymmetricKey(size: .bits256)
+    private var answers: MemoryAnswers!
 
     override func setUp() async throws {
         processes = ProcessTable()
@@ -57,15 +72,10 @@ final class HarnessAccessTests: XCTestCase {
         processes.add(500, parent: 1, team: "Q6L2SF6YDW", id: "com.anthropic.claude-code")
         processes.add(helper, parent: 500)
         prompt = Prompt()
-        file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("harness-access-\(UUID().uuidString)/harness-access.json")
-        store = HarnessAccessStore(fileURL: file, key: { [key] in key })
+        answers = MemoryAnswers()
+        store = HarnessAccessStore(persistence: answers)
         gate = HarnessAccessGate(
             resolver: HarnessCallerResolver(inspector: processes), store: store, presenter: prompt)
-    }
-
-    override func tearDown() async throws {
-        try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
     }
 
     private func read(_ operation: String = "meetings_search", from pid: pid_t? = nil) async -> AppControlResponse? {
@@ -219,23 +229,90 @@ final class HarnessAccessTests: XCTestCase {
 
     func test_answers_survive_a_relaunch() {
         store.record(.allow, for: claude, at: Date(timeIntervalSince1970: 1_800_000_000))
-        let relaunched = HarnessAccessStore(fileURL: file, key: { [key] in key })
+        let relaunched = HarnessAccessStore(persistence: answers)
         XCTAssertEqual(relaunched.decision(for: claude.identity), .allow)
         XCTAssertEqual(relaunched.grants.first?.name, "Claude Code")
     }
 
-    func test_another_process_cannot_write_itself_a_yes() throws {
-        store.record(.deny, for: claude, at: Date())
-        // The attacker rewrites the file with its own key or flips the answer.
-        let forged = HarnessAccessStore(fileURL: file, key: { SymmetricKey(size: .bits256) })
-        forged.record(.allow, for: claude, at: Date())
-        let relaunched = HarnessAccessStore(fileURL: file, key: { [key] in key })
-        XCTAssertNil(relaunched.decision(for: claude.identity), "a file signed by another key is ignored")
+    func test_unreadable_stored_answers_allow_nobody() {
+        answers.stored = Data("not json".utf8)
+        XCTAssertNil(HarnessAccessStore(persistence: answers).decision(for: claude.identity))
+        answers.stored = Data("{\"allow\":true}".utf8)
+        XCTAssertNil(HarnessAccessStore(persistence: answers).decision(for: claude.identity))
+    }
 
-        try Data("{\"payload\":\"e30=\",\"mac\":\"AAAA\"}".utf8).write(to: file)
-        XCTAssertNil(HarnessAccessStore(fileURL: file, key: { [key] in key }).decision(for: claude.identity))
-        try Data("not json".utf8).write(to: file)
-        XCTAssertNil(HarnessAccessStore(fileURL: file, key: { [key] in key }).decision(for: claude.identity))
+    /// Access turned off while the storage refuses the write: the No holds
+    /// now and is stored as soon as a write goes through, not lost at quit.
+    func test_a_no_that_could_not_be_stored_is_kept_and_stored_later() async {
+        _ = await read()
+        answers.acceptsWrites = false
+        XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
+        let refused = await read()
+        XCTAssertEqual(refused?.data.object?["code"], .string("access_denied"))
+        XCTAssertEqual(HarnessAccessStore(persistence: answers).decision(for: claude.identity), .allow,
+                       "the storage still has the old Yes")
+        answers.acceptsWrites = true
+        _ = await read()
+        XCTAssertEqual(HarnessAccessStore(persistence: answers).decision(for: claude.identity), .deny)
+    }
+
+    func test_while_the_keychain_is_locked_nothing_is_trusted_or_overwritten() {
+        store.record(.allow, for: claude, at: Date())
+        answers.available = false
+        let locked = HarnessAccessStore(persistence: answers)
+        XCTAssertNil(locked.decision(for: claude.identity))
+        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        XCTAssertFalse(locked.record(.deny, for: codex, at: Date()))
+        // It unlocks: the stored Yes is back and this launch's No is stored with it.
+        answers.available = true
+        XCTAssertEqual(locked.decision(for: claude.identity), .allow)
+        XCTAssertEqual(locked.decision(for: codex.identity), .deny)
+        let relaunched = HarnessAccessStore(persistence: answers)
+        XCTAssertEqual(relaunched.decision(for: codex.identity), .deny)
+        XCTAssertEqual(relaunched.grants.count, 2)
+    }
+
+    // MARK: The whole request
+
+    func test_access_turned_off_while_the_meeting_was_being_read_returns_nothing() async {
+        _ = await read()
+        var performed = 0
+        let answer = await gate.handle(AppControlRequest("meeting_get"), peerPID: helper) { _ in
+            performed += 1
+            // The user flips the switch in Settings while the store is read.
+            self.store.record(.deny, for: self.claude, at: Date())
+            return .success(.string("the note"))
+        }
+        XCTAssertEqual(performed, 1)
+        XCTAssertEqual(answer.data.object?["code"], .string("access_denied"))
+    }
+
+    func test_an_allowed_request_returns_what_the_tool_read_and_a_refused_one_reads_nothing() async {
+        let allowed = await gate.handle(AppControlRequest("meeting_get"), peerPID: helper) { _ in .success(.string("the note")) }
+        XCTAssertEqual(allowed, .success(.string("the note")))
+        store.record(.deny, for: claude, at: Date())
+        let refused = await gate.handle(AppControlRequest("meeting_get"), peerPID: helper) { _ in
+            XCTFail("a refused request must not read"); return .success(.null)
+        }
+        XCTAssertEqual(refused.data.object?["code"], .string("access_denied"))
+        // Settings tools are not affected by the answer.
+        let state = await gate.handle(AppControlRequest("get_state"), peerPID: helper) { _ in .success(.string("state")) }
+        XCTAssertEqual(state, .success(.string("state")))
+    }
+
+    func test_a_cancelled_request_stops_waiting_while_the_prompt_stays_for_the_user() async {
+        prompt.holds = true
+        let request = Task { await self.read() }
+        while prompt.asked.isEmpty { await Task.yield() }
+        request.cancel()
+        let answer = await request.value
+        XCTAssertEqual(answer?.data.object?["code"], .string("cancelled"), "returned without the user's answer")
+        // The user answers later: the next request needs no second prompt.
+        prompt.release(.allow)
+        while store.decision(for: claude.identity) == nil { await Task.yield() }
+        let next = await read()
+        XCTAssertNil(next)
+        XCTAssertEqual(prompt.asked.count, 1)
     }
 
     // MARK: Settings -> Agents
@@ -259,16 +336,4 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertTrue(prompt.asked.isEmpty)
     }
 
-    func test_without_the_keychain_nothing_is_trusted_or_overwritten() {
-        store.record(.allow, for: claude, at: Date())
-        var available = false
-        let locked = HarnessAccessStore(fileURL: file, key: { [key] in available ? key : nil })
-        XCTAssertNil(locked.decision(for: claude.identity))
-        locked.record(.deny, for: HarnessClient(
-            identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex"), at: Date())
-        // The Keychain becomes readable: the saved Yes is back, this launch's No is kept.
-        available = true
-        XCTAssertEqual(locked.decision(for: claude.identity), .allow)
-        XCTAssertEqual(locked.grants.count, 2)
-    }
 }

@@ -108,7 +108,8 @@ final class CaseBroker {
     private let authenticator: CaseAuthenticating
     private let now: () -> Date
     private let appControl: ((AppControlRequest) async -> AppControlResponse)?
-    private let harnessAccess: ((AppControlRequest, pid_t) async -> AppControlResponse?)?
+    typealias HarnessAccess = (AppControlRequest, pid_t, (AppControlRequest) async -> AppControlResponse) async -> AppControlResponse
+    private let harnessAccess: HarnessAccess?
     private(set) var grants = CaseTimedGrants()
     private var accessSubscription: AnyCancellable?
 
@@ -119,7 +120,7 @@ final class CaseBroker {
         authenticator: CaseAuthenticating,
         now: @escaping () -> Date = Date.init,
         appControl: ((AppControlRequest) async -> AppControlResponse)? = nil,
-        harnessAccess: ((AppControlRequest, pid_t) async -> AppControlResponse?)? = nil
+        harnessAccess: HarnessAccess? = nil
     ) {
         self.harnessAccess = harnessAccess
         self.service = service
@@ -150,9 +151,9 @@ final class CaseBroker {
             // Content and action tools first need the user's Yes for the harness
             // that started this helper. Its answers are not Case registrations.
             // WHY: .project-docs/decisions/2026-11-20-harness-access.md
-            if let harnessAccess, let answer = await harnessAccess(command, peerPID) {
-                return .appControl(answer)
-            }
+            // It wraps the call, so an answer changed while content was being
+            // read still stops the response.
+            if let harnessAccess { return .appControl(await harnessAccess(command, peerPID, appControl)) }
             return .appControl(await appControl(command))
         }
         // The cached payload is reused; never re-read the vault per request.

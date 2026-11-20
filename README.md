@@ -114,7 +114,7 @@
 
 <sub>No card needed · Reviewed monthly · Last checked November 21, 2026</sub>
 
-<p>
+<p align="center">
 <a href="https://deepgram.com/pricing"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-deepgram-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-deepgram-light.svg"><img alt="Deepgram: $200 one-time starter credit (Speech to text)" src="docs/assets/readme/free-api-deepgram-dark.svg" width="196"></picture></a>
 <a href="https://elevenlabs.io/pricing"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-elevenlabs-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-elevenlabs-light.svg"><img alt="ElevenLabs: 10,000 free credits each month (Speech to text)" src="docs/assets/readme/free-api-elevenlabs-dark.svg" width="196"></picture></a>
 <a href="https://openrouter.ai/models?max_price=0"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-openrouter-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-openrouter-light.svg"><img alt="OpenRouter: 50 / day free model requests (Language models)" src="docs/assets/readme/free-api-openrouter-dark.svg" width="196"></picture></a>

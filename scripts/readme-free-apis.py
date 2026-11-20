@@ -117,7 +117,7 @@ def section():
         "",
         f"<sub>No card needed · Reviewed monthly · Last checked {display(newest)}</sub>",
         "",
-        "<p>",
+        "<p align=\"center\">",
         "\n".join(cards),
         "</p>",
     ]) + "\n"

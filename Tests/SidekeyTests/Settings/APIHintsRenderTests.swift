@@ -97,7 +97,6 @@ final class APIHintsRenderTests: XCTestCase {
             XCTAssertTrue(section.contains("alt=\"\(hint.provider): \(hint.allowance) \(hint.cadence) ("), hint.provider)
         }
     }
-    }
 
     /// A row without a bundled mark falls back to the generic globe, which reads as a missing logo.
     func testEveryOfferHasItsBundledMark() throws {

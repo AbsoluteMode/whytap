@@ -92,7 +92,7 @@ final class ModelStatusResolverTests: XCTestCase {
         let env = try makeEnv(snapshots: [.deepgram: fresh(models)], keyed: [.soniox, .deepgram, .elevenLabs])
         let sections = env.resolver.sections(for: .meetings)
         for (account, model, day) in [(ProviderAccount.soniox, "stt-async-v5", "2026-06-11"),
-                                      (.elevenLabs, "scribe_v2_realtime", "2025-11-11")] {
+                                      (.elevenLabs, "scribe_v3_live", "2026-11-10")] {
             let option = try XCTUnwrap(sections.first { $0.account == account }?.options.first { $0.model == model })
             XCTAssertTrue(try XCTUnwrap(option.dateLabel).hasPrefix("Released "))
             XCTAssertEqual(option.catalogDate, ModelCatalogFetcher.deepgramVersionDate(day))

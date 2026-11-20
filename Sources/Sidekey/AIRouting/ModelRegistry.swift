@@ -10,9 +10,15 @@ enum ModelRegistry {
     /// Soniox async (file) transcription, the batch counterpart of `stt-rt-*`.
     /// The same model `SonioxFileAPI` and the meeting transcriber send.
     static let sonioxRecordedModel = "stt-async-v5"
-    /// ElevenLabs Scribe v2 for recorded audio; `scribe_v2_realtime` is the
-    /// streaming model and is not accepted by the speech-to-text endpoint.
-    static let elevenLabsRecordedModel = "scribe_v2"
+    /// ElevenLabs Scribe v3 for recorded audio; the streaming model is not
+    /// accepted by the speech-to-text endpoint.
+    static let elevenLabsRecordedModel = "scribe_v3"
+    /// ElevenLabs Scribe v3 Live, the streaming model. It replaced
+    /// `scribe_v2_realtime` (`elevenLabsRetiredRealtimeModel`) on the owner's
+    /// decision; saved routes are moved by `AIRoutingStore`.
+    // WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md
+    static let elevenLabsRealtimeModel = "scribe_v3_live"
+    static let elevenLabsRetiredRealtimeModel = "scribe_v2_realtime"
     /// The speech model the On this Mac provider downloads and runs.
     static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
@@ -44,6 +50,8 @@ extension ModelRegistry {
         case (.elevenLabs, "scribe_v2_realtime"): day = "2025-11-11"
         // https://elevenlabs.io/blog/introducing-scribe-v2
         case (.elevenLabs, "scribe_v2"): day = "2026-01-09"
+        // https://elevenlabs.io/blog/scribe-v3
+        case (.elevenLabs, "scribe_v3_live"), (.elevenLabs, "scribe_v3"): day = "2026-11-10"
         default: return nil
         }
         let formatter = ISO8601DateFormatter()
@@ -55,7 +63,7 @@ extension ModelRegistry {
         RegistryModel(kind: .soniox, id: "stt-rt-v5", uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .soniox, id: sonioxRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT], diarization: false),
-        RegistryModel(kind: .elevenLabs, id: "scribe_v2_realtime", uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: false),
         RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
@@ -95,7 +103,7 @@ extension ModelRegistry {
         case .elevenLabs:
             switch feature {
             case .retiredMeetingText, .retiredMeetingAudio: return nil
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return "scribe_v2_realtime"
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return elevenLabsRealtimeModel
             case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .openRouter:

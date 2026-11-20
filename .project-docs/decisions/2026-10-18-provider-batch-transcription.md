@@ -32,7 +32,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/BYOK/ProviderBatchTranscriberTests.swift
     confirmed_at: 2026-10-18
-related: [../project.md, 2026-10-18-remove-local-models.md, 2026-10-18-no-default-realtime-host.md, 2026-09-10-byok-and-local-builds.md, 2026-10-18-silent-meetings.md, 2026-11-19-on-device-dictation.md, 2026-11-19-provider-failure-reasons.md]
+related: [../project.md, 2026-10-18-remove-local-models.md, 2026-10-18-no-default-realtime-host.md, 2026-09-10-byok-and-local-builds.md, 2026-10-18-silent-meetings.md, 2026-11-19-on-device-dictation.md, 2026-11-19-provider-failure-reasons.md, 2026-11-20-elevenlabs-scribe-v3.md]
 ---
 
 # Batch transcription with the user's own provider

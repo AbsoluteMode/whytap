@@ -122,7 +122,8 @@ Voice flow (Drop / dictation):
             keys tab has an On this Mac card above the key tiles
             (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
             button is in the card, with an animated progress bar and symbol
-            that respect Reduce Motion) that downloads or removes
+            that respect Reduce Motion; before the first whole percent it
+            says Starting… instead of 0%) that downloads or removes
             Parakeet TDT v3 (about 470 MB from Hugging Face, kept in
             Application Support/Sidekey/OnDeviceSpeechModels, outside backups
             and LegacyLocalModelCleanup). The downloaded model is the

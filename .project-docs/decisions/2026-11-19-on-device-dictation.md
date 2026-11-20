@@ -118,6 +118,13 @@ a checkmark that bounces once). Reduce Motion leaves a plain bar and symbol.
 The card was checked in offscreen renders of all four states in both
 appearances, not in a running app.
 
+On 2026-11-20 the user saw the installed card sit on "0% of about 470 MB" and
+took the download for stalled; it was running and reached 37% shortly after.
+Until the first whole percent the card now says "Starting…" and a highlight
+travels the whole track (an empty bar with Reduce Motion). Why the first
+percent arrives late was not investigated; the number is still the provider
+library's own progress.
+
 ## Rejected
 
 - Apple's system speech (`DictationTranscriber`): reports Russian and English

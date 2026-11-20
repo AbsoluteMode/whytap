@@ -21,7 +21,7 @@
 <sub>Click a tool to play its demo. Opening one closes the previous.</sub>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-drop-smart-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-drop-smart-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/demo-tab-drop-smart-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-drop-smart-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-drop-smart-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/demo-pill-drop-smart-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-drop-smart.webp" align="right" width="52%" loading="lazy" alt="Holding Space to dictate with self-corrections into a text field using Whytap Drop Smart">
 
@@ -36,7 +36,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-agent-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-agent-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/demo-tab-agent-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-agent-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-agent-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/demo-pill-agent-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-agent.webp" align="right" width="52%" loading="lazy" alt="Asking the Whytap Notch Agent to find a local file and inserting the result">
 
@@ -50,7 +50,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-case-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/demo-tab-case-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-case-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/demo-pill-case-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-case.webp" align="right" width="52%" loading="lazy" alt="Whytap Case vault approving an ANTHROPIC_API_KEY command for Claude Code from the MacBook notch">
 
@@ -65,7 +65,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-meetings-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/demo-tab-meetings-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-meetings-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/demo-pill-meetings-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-meetings.webp" align="right" width="52%" loading="lazy" alt="Bot-free meeting summary and action items in Whytap Meetings">
 
@@ -80,7 +80,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-language-vocab-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-language-vocab-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/demo-tab-language-vocab-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-language-vocab-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-language-vocab-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/demo-pill-language-vocab-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <ol>
   <li>In Smart mode, choose an Output Language to paste in that language.</li>
@@ -103,7 +103,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-shot-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-shot-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/demo-tab-shot-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-shot-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-shot-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/demo-pill-shot-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-shot.webp" align="right" width="52%" loading="lazy" alt="Capturing a screenshot and blurring sensitive text and numbers in one click with Whytap Shot">
 
@@ -117,7 +117,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-history-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-history-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/demo-tab-history-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-history-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-history-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/demo-pill-history-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-history.webp" align="right" width="52%" loading="lazy" alt="Browsing clipboard, dictation and agent history in Whytap">
 
@@ -131,7 +131,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-notify-monitor-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-notify-monitor-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/demo-tab-notify-monitor-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-notify-monitor-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-notify-monitor-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/demo-pill-notify-monitor-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-notify.webp" align="right" width="52%" loading="lazy" alt="Agent notifications and live Monitor dashboards in Whytap">
 
@@ -144,7 +144,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-calendar-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-calendar-todo-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/demo-tab-calendar-todo-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-calendar-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-calendar-todo-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/demo-pill-calendar-todo-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <a href="docs/assets/readme/demo-calendar-todo.gif">
   <picture>
@@ -156,7 +156,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-tab-display-extra-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-tab-display-extra-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/demo-tab-display-extra-dark.svg" width="340" align="absmiddle"></picture></summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-display-extra-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-display-extra-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/demo-pill-display-extra-dark.svg" width="290" align="absmiddle"></picture></summary>
 
 <img src="docs/assets/readme/demo-brightness.webp" align="right" width="52%" loading="lazy" alt="Boosting display brightness past standard maximum with Whytap Display Extra">
 

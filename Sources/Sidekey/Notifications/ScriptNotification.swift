@@ -77,8 +77,12 @@ struct LocalNotificationEvent: Codable, Identifiable, Equatable, Sendable {
     /// Internal navigation, never accepted from script output or an OS URL.
     /// Optional so older notification histories still decode.
     var meetingID: UUID? = nil
+    /// Internal action of the app's own input-language offer: a click sets
+    /// this language. Never accepted from script output or an OS URL.
+    // WHY: .project-docs/decisions/2026-11-20-input-language-suggestion.md
+    var inputLanguageCode: String? = nil
 
-    var canActivate: Bool { meetingID != nil || link != nil }
+    var canActivate: Bool { meetingID != nil || inputLanguageCode != nil || link != nil }
 
     var resolvedDuration: TimeInterval { customDuration ?? 8 }
 

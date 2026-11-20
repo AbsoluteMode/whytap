@@ -369,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.handle(request)
             }
         }
+        // The offer is accepted only while the input language is still
+        // Auto: a card clicked later from history never replaces a choice.
+        LocalNotificationHub.shared.setInputLanguage = { code in
+            guard PrivacyPreferences.shared.selectedLanguage == nil,
+                  let language = AppLanguage.all.first(where: { $0.code == code }) else { return }
+            PrivacyPreferences.shared.selectedLanguage = language
+        }
         LocalNotificationHub.shared.openMeeting = { [weak self] id in
             guard let self else { return }
             self.openSettingsWindow(tab: .notes)
@@ -1318,9 +1325,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             completeDropTurnTelemetry()
             dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+            // The provider's own text: Smart can translate the pasted one.
+            if pasted { noteDeliveredDropForLanguageOffer(rawTranscript) }
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    /// Only a take whose text reached the user counts towards the input
+    /// language offer: the normal delivery and the pasted raw partial.
+    // WHY: .project-docs/decisions/2026-11-20-input-language-suggestion.md
+    private func noteDeliveredDropForLanguageOffer(_ transcript: String) {
+        let selected = PrivacyPreferences.shared.selectedLanguage
+        Task {
+            await InputLanguageSuggestion().offer(transcript: transcript, selectedLanguage: selected) {
+                await LocalNotificationHub.shared.receive($0)
+            }
+        }
     }
 
     private func saveUndeliveredLocalDrop(raw: String, formatted: String, targetApp: String?) -> Bool {
@@ -3223,7 +3244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // caller owns the phase (it flips to `.deliveryFailed`).
                 guard let self, generation == self.streamingSetupGeneration else { return false }
                 let pasted = await self.autoPasteEngine.paste(raw)
-                if pasted { AppState.shared.phase = .idle }
+                if pasted {
+                    AppState.shared.phase = .idle
+                    self.noteDeliveredDropForLanguageOffer(raw)
+                }
                 return pasted
             },
             saveUndeliveredPartial: { [weak self] raw in

@@ -13,5 +13,5 @@
       <stop offset="1" class="pink"/>
     </linearGradient>
   </defs>
-  <text x="0" y="15" fill="url(#harness)" font-family="system-ui, sans-serif" font-size="16" font-weight="600">harness</text>
+  <text x="0" y="16" fill="url(#harness)" font-family="system-ui, sans-serif" font-size="16" font-weight="600">harness</text>
 </svg>

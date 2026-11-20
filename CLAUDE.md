@@ -155,8 +155,8 @@ Voice flow (Drop / dictation):
             Fast bypasses AI text processing. Smart makes one request to the
             selected cleanup model: a reserved whole-response pass marker keeps
             the transcript verbatim with plain delivery; otherwise use the edited
-            message. Synonyms, word order and minor polish alone should pass;
-            concrete errors and useful long-message structure still edit.
+            message. Only text with nothing to remove, repair or structure
+            should pass; fillers, repeats, errors and wrong names still edit.
             Translation cannot pass. Failed, empty, malformed or cancelled
             responses retain strict Retry behavior. The separate Jev/OpenAI
             Decision stage and settings row are removed; migration4 retires only
@@ -179,12 +179,14 @@ Voice flow (Drop / dictation):
             mode changes from every control. The cleanup provider mark appears
             only while processing; paste shows “pasting…” without a provider. WHY:
             .project-docs/decisions/2026-10-19-strict-drop-modes.md
-       Smart's editor uses minimal repairs,
-       retaining the author's wording, thought order, facts and uncertainty;
-       it does not summarize or deeply rewrite. Self-corrections replace only
-       their fragment; nested requests stay requests. Evaluated on GPT-6 Sol,
-       the prompt does not change selected routes. WHY:
-       .project-docs/decisions/2026-10-21-smart-editor-prompt.md
+       Smart's editor returns a ready text: it removes fillers, stumbles and
+       repeats, keeps the final version of a self-correction, rewrites heavy
+       spoken sentences and lays long text out in paragraphs and plain lists,
+       in the author's voice. Every fact, condition, number and degree of
+       certainty stays and nothing is added; it is not a summary. Nested
+       requests stay requests; known names are always corrected. The prompt
+       does not change selected routes. WHY:
+       .project-docs/decisions/2026-11-20-smart-ready-text.md
        SmartFormattingProfile selects destination syntax from app identity and
        focused AX role/document metadata (within the same 1.5s context deadline).
        Markdown editors/recognized web composers use a fixed syntax subset;

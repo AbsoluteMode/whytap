@@ -23,10 +23,14 @@ sources:
   - type: url
     reference: https://developers.openai.com/api/docs/guides/prompt-engineering#message-roles-and-instruction-following
     confirmed_at: 2026-10-22
-related: [2026-10-21-smart-decisions.md, 2026-10-21-smart-decision-calibration.md, 2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-destination-formatting.md]
+related: [2026-10-21-smart-decisions.md, 2026-10-21-smart-decision-calibration.md, 2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-destination-formatting.md, 2026-11-20-smart-ready-text.md]
 ---
 
 # One Smart editor request
+
+On 2026-11-20 the editing criteria below were superseded by
+[Smart returns a ready text](2026-11-20-smart-ready-text.md); the rest of this
+record stands as history.
 
 ## Decision
 

@@ -1451,11 +1451,16 @@ accounts minus calendar.*. Each item merges alone: the later change wins, ties
 go to the greater device ID, a removal is recorded so a deleted key is deleted
 everywhere. The routing document is one item. A Mac that turns sync on, or
 restores a backup, joins: shared values replace its own, its extra items
-upload; the previous values stay in local settings history. A local ledger
-(Application Support/<bundle id>/settings-sync/ledger.json, hashes only, never
-backed up) records what this Mac agreed; turning sync off deletes it. An
-unreadable Keychain item or defaults value stops the round, never reads as a
-removal. Another recovery code is reported and never overwritten; values this
+upload; the previous values stay in local settings history; joining completes
+only after the upload. A local ledger (Application Support/<bundle id>/
+settings-sync/ledger.json, hashes only, never backed up) records what this Mac
+agreed; turning sync off or restoring settings/keys deletes it. A round stamps
+local edits in the ledger before any request, reads local values again after
+the read, saves the agreement before applying (a refused Keychain write keeps
+its old agreement) and checks the repository is private before writing. The
+cache is bound to the key ID; flipping the switch or a pending restore stops a
+round before it writes. An unreadable Keychain item or defaults value stops the
+round, never reads as a removal. Another recovery code is reported and never overwritten; values this
 build rejects and items from a newer app are left alone. Stores that keep their
 own copy reload (SettingsSyncLiveReload: routes, hotkeys, Toolbox layout,
 notification sounds, Brightness keys, island helpers, Drop mode, capability

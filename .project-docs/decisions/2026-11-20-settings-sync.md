@@ -51,7 +51,12 @@ a recovery-code key and a Keychain token.
   values remain in the local settings history.
 - A local ledger, `Application Support/<bundle id>/settings-sync/ledger.json`
   (0600, hashes only, not in backups), records what this Mac agreed and its
-  random device ID. Turning sync off deletes it; a restore deletes it.
+  random device ID. Turning sync off deletes it; a restore that included
+  settings or keys deletes it.
+- A round: note local edits in the ledger with the time they were seen,
+  before any request; read the shared document; read local values again;
+  save the new agreement; apply; upload. Joining completes only after the
+  result is shared.
 - Stores that keep their own copy reload after an applied change: routes,
   hotkeys, Toolbox layout, notification sounds, Brightness keys, island
   helpers, Drop mode, capability flags and idle hide.
@@ -70,6 +75,28 @@ sharing one would sign the other Mac out. The display is a screen of one Mac.
 
 ## Safety
 
+The first review (Codex) found that a key saved while GitHub answered could be
+deleted by a removal from the other Mac, that a failed ledger write could turn
+an applied removal into a local one and spread it, that offline edits took the
+time they synced instead of the time they were made, that a 304 could reuse a
+document opened with an old recovery code, and that a failed write could finish
+a join. Each has a test now:
+
+- Local values are read again after the shared document arrives.
+- The agreement is saved before anything is applied. A Keychain write that
+  fails keeps its earlier agreement, so it is retried, never shared as a removal.
+- Edits are stamped when noticed (two seconds after a defaults change, within
+  a minute for a key) and that time is saved before the network. Edits made
+  while Whytap is not running are stamped at the next launch.
+- The cached document is bound to the key ID that opened it.
+- Joining stays unfinished until the upload succeeds or nothing needed it.
+- Turning the switch off or on, or a restore waiting for relaunch, stops a
+  round before it applies, saves or uploads.
+- A setting the other Mac removed stays removed when a store reloads and saves
+  its default.
+- Each write first checks that the repository is still private.
+- The document is limited to 900 KB, below the Contents API's 1 MB inline limit.
+
 - An unreadable Keychain item or defaults value stops the round. It never
   reads as a removal, so a locked Keychain cannot delete keys everywhere.
 - Another recovery code is reported ("Your other Mac uses a different recovery
@@ -79,13 +106,16 @@ sharing one would sign the other Mac out. The display is a screen of one Mac.
   an update.
 - Failures back off from one to fifteen minutes and respect GitHub's rate
   limit time.
+- Replacing the recovery code does not rewrite the shared document: the other
+  Mac reports a different code. Earlier versions sealed with the old code stay
+  in the repository's Git history, like backups under the old code.
 - Syncing applies the user's own choices from their other Mac, which they
   enabled; it is not a silent route change. Nothing moves to a provider the user
   did not choose on one of their Macs.
 
 ## What was tested
 
-Seventeen tests with two simulated Macs sharing a fake repository: first upload
+Twenty-three tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -93,7 +123,9 @@ stops the round; a lost write race merges and retries; another recovery code
 never overwrites; no key asks for a backup; off and on rejoins; unknown and
 invalid items are left alone; an unchanged round writes nothing; tampering and
 newer formats are detected; the Contents API transport (404, 304, base64,
-SHA conflict); routes, hotkeys and Toolbox reload. Timestamps are stored as
+SHA conflict); routes, hotkeys and Toolbox reload; and one test per review
+finding above (key saved during a read, offline edit time, new recovery code,
+join losing a write race, refused Keychain write, quick off and on). Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

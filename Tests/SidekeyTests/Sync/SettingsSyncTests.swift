@@ -12,8 +12,13 @@ actor FakeSyncRemote: SettingsSyncRemote {
     private(set) var fetches = 0
     /// Runs once at the start of the next write: another Mac writes first.
     var interject: (@Sendable (FakeSyncRemote) async -> Void)?
+    /// Runs once while the next read is in flight.
+    var duringFetch: (@Sendable () async -> Void)?
+    var offline = false
 
     func fetchSyncFile(path: String, etag: String?) async throws -> SettingsSyncFetch {
+        if offline { throw URLError(.notConnectedToInternet) }
+        if let duringFetch { self.duringFetch = nil; await duringFetch() }
         fetches += 1
         guard let data else { return .missing }
         if etag == "\"\(version)\"" { return .notModified }
@@ -29,15 +34,21 @@ actor FakeSyncRemote: SettingsSyncRemote {
 
     func overwrite(_ data: Data) { self.data = data; version += 1 }
     func setInterject(_ block: (@Sendable (FakeSyncRemote) async -> Void)?) { interject = block }
+    func setDuringFetch(_ block: (@Sendable () async -> Void)?) { duringFetch = block }
+    func setOffline(_ value: Bool) { offline = value }
 }
 
 final class FakeSecrets: @unchecked Sendable {
     var values: [String: String] = [:]
     var unreadable: Set<String> = []
+    var unwritable: Set<String> = []
     func store(_ account: String) -> TokenStore { Store(owner: self, account: account) }
     struct Store: TokenStore {
         let owner: FakeSecrets, account: String
-        func save(_ token: String) throws { owner.values[account] = token }
+        func save(_ token: String) throws {
+            if owner.unwritable.contains(account) { throw KeychainError.unhandledError(-25308) }
+            owner.values[account] = token
+        }
         func read() throws -> String? {
             if owner.unreadable.contains(account) { throw KeychainError.unhandledError(-25308) }
             return owner.values[account]
@@ -311,6 +322,110 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertEqual(after, puts)
     }
 
+    // MARK: Review findings
+
+    func testAKeySavedWhileGitHubAnswersIsKeptAndShared() async throws {
+        let first = mac(), second = mac()
+        first.secrets.values[soniox] = "old"
+        await first.turnOn(); await second.turnOn()
+        second.secrets.values[soniox] = nil
+        await second.sync()
+
+        let firstSecrets = first.secrets, account = soniox
+        await remote.setDuringFetch { firstSecrets.values[account] = "new" }
+        await first.sync(after: 30)
+        await second.sync()
+
+        XCTAssertEqual(first.secrets.values[soniox], "new", "the removal read from GitHub must not delete a key saved meanwhile")
+        XCTAssertEqual(second.secrets.values[soniox], "new")
+    }
+
+    func testAnEditMadeOfflineKeepsItsTimeAndLosesToALaterEdit() async throws {
+        let first = mac(), second = mac()
+        await first.turnOn(); await second.turnOn()
+
+        await remote.setOffline(true)
+        first.defaults.set("option+m", forKey: meetingKey)
+        await first.sync(after: 10)
+        await remote.setOffline(false)
+        second.defaults.set("control+m", forKey: meetingKey)
+        await second.sync(after: 100)
+        await first.sync(after: 1000)
+
+        XCTAssertEqual(first.defaults.string(forKey: meetingKey), "control+m")
+        XCTAssertEqual(second.defaults.string(forKey: meetingKey), "control+m")
+    }
+
+    func testANewRecoveryCodeNeverReusesTheDocumentOpenedWithTheOldOne() async throws {
+        let first = mac()
+        first.defaults.set("smart", forKey: mode)
+        await first.turnOn()
+        let before = await remote.data
+
+        first.key = ConfigBackupArchive.makeKey()
+        first.defaults.set("fast", forKey: mode)
+        await first.sync()
+
+        XCTAssertEqual(first.service.status, .differentKey)
+        let after = await remote.data
+        XCTAssertEqual(after, before, "the shared settings are not re-sealed with the new code")
+    }
+
+    func testAJoinThatLosesTheWriteRaceStillTakesTheSharedValues() async throws {
+        let first = mac()
+        first.defaults.set("smart", forKey: mode)
+        await first.turnOn()
+
+        let second = mac(at: 3600)
+        second.defaults.set("fast", forKey: mode)
+        second.defaults.set("control+m", forKey: meetingKey)
+        let firstMac = first
+        await remote.setInterject { _ in
+            await MainActor.run { firstMac.defaults.set(["Whytap"], forKey: "sidekey.preferences.vocabularyTerms") }
+            await firstMac.sync(after: 1)
+        }
+        await second.turnOn()
+
+        XCTAssertEqual(first.clock, Date(timeIntervalSince1970: 1_800_000_001), "the other Mac wrote during the join")
+        XCTAssertEqual(second.defaults.string(forKey: mode), "smart", "the retried join still yields to shared values")
+        XCTAssertEqual(second.defaults.stringArray(forKey: vocabulary), ["Whytap"])
+        XCTAssertEqual(second.service.status, .synced(second.clock))
+        let document = try await shared()
+        XCTAssertEqual(document.entries[SettingsSyncItem.preference(meetingKey)]?.value, .preference(.string("control+m")))
+        XCTAssertEqual(document.entries[SettingsSyncItem.preference(mode)]?.value, .preference(.string("smart")))
+    }
+
+    func testAKeyTheKeychainRefusesIsRetriedNotTreatedAsRemoved() async throws {
+        let first = mac(), second = mac()
+        await first.turnOn(); await second.turnOn()
+        first.secrets.values[soniox] = "secret"
+        first.defaults.set("smart", forKey: mode)
+        await first.sync()
+
+        second.secrets.unwritable = [soniox]
+        await second.sync()
+        if case .failed = second.service.status {} else { XCTFail("expected a visible failure") }
+        XCTAssertEqual(second.defaults.string(forKey: mode), "smart", "other items still apply")
+
+        second.secrets.unwritable = []
+        await second.sync(after: 1000)
+        XCTAssertEqual(second.secrets.values[soniox], "secret")
+        await first.sync()
+        XCTAssertEqual(first.secrets.values[soniox], "secret", "the refused write never becomes a removal")
+    }
+
+    func testTurningSyncOffAndOnQuicklyStillSyncs() async throws {
+        let first = mac()
+        first.defaults.set("smart", forKey: mode)
+        first.service.setEnabled(true)
+        first.service.setEnabled(false)
+        first.service.setEnabled(true)
+        await first.service.syncNow()
+        XCTAssertEqual(first.service.status, .synced(first.clock))
+        let document = try await shared()
+        XCTAssertEqual(document.entries[SettingsSyncItem.preference(mode)]?.value, .preference(.string("smart")))
+    }
+
     // MARK: Envelope
 
     func testEnvelopeDetectsTamperingAndNewerFormats() throws {
@@ -344,6 +459,9 @@ final class SettingsSyncTests: XCTestCase {
         let payload = Data("sealed-bytes".utf8)
         var stored: Data?
         StubURLProtocol.handler = { request in
+            if request.url?.path == "/repos/developer/Exodia-Backup" {
+                return (200, [:], try JSONSerialization.data(withJSONObject: ["name": "Exodia-Backup", "private": true]))
+            }
             XCTAssertEqual(request.url?.path, "/repos/developer/Exodia-Backup/contents/whytap-sync/settings.v1.json")
             if request.httpMethod == "PUT" {
                 let body = try JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies.last!) as! [String: Any]

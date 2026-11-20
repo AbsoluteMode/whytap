@@ -45,9 +45,26 @@ struct SettingsSyncLedger: Codable, Equatable {
     }
     var device: String
     var records: [String: Record] = [:]
-    /// False until the first completed round. A Mac that is joining takes the
-    /// shared values: its own items count as older than anything synced.
+    /// False until the first round whose result reached the shared document.
+    /// A Mac that is joining takes the shared values over its own.
     var joined = false
+
+    /// Stamps every item whose value changed since the last agreement with
+    /// the time it was noticed. This runs before any network request and is
+    /// saved, so an edit made while GitHub is unreachable keeps the time it
+    /// was made instead of the time it finally syncs.
+    func recordingLocalChanges(current: [String: SettingsSyncValue], now: Date) -> SettingsSyncLedger {
+        let now = SettingsSyncClock.normalized(now)
+        var next = self
+        let items = Set(current.keys).union(records.keys).filter(SettingsSyncItem.isApplicable)
+        for item in items {
+            let hash = SettingsSyncItem.hash(current[item])
+            guard records[item]?.hash != hash else { continue }
+            if records[item] == nil && current[item] == nil { continue }
+            next.records[item] = Record(hash: hash, modifiedAt: now, device: device)
+        }
+        return next
+    }
 }
 
 /// Item names inside the document: `pref:<defaults key>` and `key:<Keychain account>`.
@@ -164,7 +181,8 @@ enum SettingsSyncEnvelope {
         var sealed: Data
     }
 
-    static let maximumBytes = 2_000_000
+    /// GitHub's Contents API returns file contents inline only up to 1 MB.
+    static let maximumBytes = 900_000
 
     static func seal(_ document: SettingsSyncDocument, key: Data) throws -> Data {
         let keyID = ConfigBackupArchive.keyID(key)

@@ -7,15 +7,22 @@ import Foundation
 // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
 @MainActor
 enum SettingsSyncLiveReload {
-    static func reload(items: Set<String>) {
+    static func reload(items: Set<String>, defaults: UserDefaults = .standard) {
         let keys = Set(items.compactMap(SettingsSyncItem.preferenceKey))
         guard !keys.isEmpty else { return }
+        // A store's setter saves what it shows. A setting the other Mac
+        // removed (back to its default) must stay removed, or the next round
+        // would share the default as a new edit.
+        let absent = ConfigBackupRegistry.entries.keys.filter {
+            SettingsSyncItem.syncsPreference($0) && defaults.object(forKey: $0) == nil
+        }
+        defer { for key in absent where defaults.object(forKey: key) != nil { defaults.removeObject(forKey: key) } }
         if keys.contains(ConfigBackupRegistry.aiRoutingKey) { AIRoutingStore.shared.reloadFromDefaults() }
         if keys.contains(where: { $0.hasPrefix("hotkeys.") }) { HotkeyPreferences.shared.reloadFromDefaults() }
         if keys.contains(HoverLayoutStore.defaultsKey) { HoverLayoutStore.shared.reloadFromDefaults() }
         if keys.contains("notifications.sourceSounds") { NotificationSoundSettings.shared.reloadFromDefaults() }
         if keys.contains(BrightnessKeys.defaultsKey) {
-            BrightnessKeys.shared.setEnabled(UserDefaults.standard.bool(forKey: BrightnessKeys.defaultsKey))
+            BrightnessKeys.shared.setEnabled(defaults.bool(forKey: BrightnessKeys.defaultsKey))
         }
         if keys.contains("sidekey.preferences.hideHelpers") || keys.contains("sidekey.preferences.hideIslandHoverWidgets") {
             DisplayPreferences.shared.reloadFromDefaults()

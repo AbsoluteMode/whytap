@@ -541,6 +541,8 @@ extension GitHubBackupTransport: SettingsSyncRemote {
 
     func putSyncFile(path: String, data: Data, sha: String?) async throws -> String {
         try Task.checkCancellation()
+        // Ciphertext still never goes to a repository that became public.
+        try await requirePrivateRepository()
         var body: [String: Any] = ["message": "Whytap settings sync", "content": data.base64EncodedString()]
         if let sha { body["sha"] = sha }
         var req = request(path: repoPath + "/contents/" + path, method: "PUT")

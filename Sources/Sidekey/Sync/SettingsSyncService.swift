@@ -98,7 +98,11 @@ final class SettingsSyncService: ObservableObject {
     private var retryAt = Date.distantPast
     private var failures = 0
     /// The last document read or written, reused while GitHub answers 304.
-    private var cached: (document: SettingsSyncDocument, sha: String, etag: String?)?
+    /// Bound to the key it was opened with: a new recovery code reads again.
+    private var cached: (document: SettingsSyncDocument, sha: String, etag: String?, keyID: String)?
+    /// Changes when the switch flips. A round started before a flip stops
+    /// before it applies, saves or uploads anything.
+    private var generation = 0
 
     init(dependencies: Dependencies) {
         deps = dependencies
@@ -131,11 +135,12 @@ final class SettingsSyncService: ObservableObject {
         isEnabled = enabled
         deps.defaults.set(enabled, forKey: Self.enabledKey)
         cached = nil; failures = 0; retryAt = .distantPast
+        generation += 1
         if enabled {
             status = .syncing
             requestSync(force: true)
         } else {
-            running?.cancel()
+            running?.cancel(); rerun = false
             try? FileManager.default.removeItem(at: deps.ledgerURL)
             status = .off
         }
@@ -165,15 +170,24 @@ final class SettingsSyncService: ObservableObject {
     }
 
     private func runRounds() async {
-        repeat {
+        // A cancelled task leaves a pending request for the next task.
+        while !Task.isCancelled && isEnabled {
             rerun = false
             await round()
-        } while rerun && !Task.isCancelled && isEnabled
+            if !rerun { break }
+        }
         running = nil
+        // A request that arrived while a cancelled round was finishing.
+        if rerun && isEnabled { rerun = false; requestSync() }
+    }
+
+    private func ensureCurrent(_ round: Int) throws {
+        guard round == generation, isEnabled, !deps.isPaused(), !Task.isCancelled else { throw CancellationError() }
     }
 
     private func round() async {
         guard isEnabled, !deps.isPaused() else { return }
+        let round = generation
         do {
             guard let key = try deps.backupKey(), key.count == 32, let remote = try deps.remote() else {
                 status = .needsBackup
@@ -182,7 +196,7 @@ final class SettingsSyncService: ObservableObject {
             if case .synced = status {} else { status = .syncing }
             for attempt in 1...3 {
                 do {
-                    try await exchange(remote: remote, key: key)
+                    try await exchange(remote: remote, key: key, round: round)
                     break
                 } catch SettingsSyncFailure.conflict where attempt < 3 {
                     cached = nil
@@ -211,39 +225,63 @@ final class SettingsSyncService: ObservableObject {
         }
     }
 
-    private func exchange(remote: SettingsSyncRemote, key: Data) async throws {
+    private func exchange(remote: SettingsSyncRemote, key: Data, round: Int) async throws {
+        let keyID = ConfigBackupArchive.keyID(key)
+        // 1. Note local edits with the time they were seen, before the network.
         var ledger = try loadLedger()
-        let current = try currentValues(ledger: ledger)
+        let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now())
+        if noticed != ledger { try saveLedger(noticed); ledger = noticed }
 
-        let fetched = try await remote.fetchSyncFile(path: deps.path, etag: cached?.etag)
-        try Task.checkCancellation()
+        // 2. Read the shared document.
+        let usable = cached?.keyID == keyID ? cached : nil
+        let fetched = try await remote.fetchSyncFile(path: deps.path, etag: usable?.etag)
+        try ensureCurrent(round)
         var shared: SettingsSyncDocument?
         var sha: String?
         switch fetched {
         case .notModified:
-            guard let cached else { throw GitHubBackupTransport.Failure.invalidResponse }
-            shared = cached.document; sha = cached.sha
+            guard let usable else { throw GitHubBackupTransport.Failure.invalidResponse }
+            shared = usable.document; sha = usable.sha
         case .missing:
             cached = nil
         case .found(let data, let foundSHA, let etag):
             let document = try SettingsSyncEnvelope.open(data, key: key)
-            cached = (document, foundSHA, etag)
+            cached = (document, foundSHA, etag, keyID)
             shared = document; sha = foundSHA
         }
-        guard isEnabled else { throw CancellationError() }
 
-        // Items this build cannot apply (a newer app's) pass through the merge unchanged.
+        // 3. Values may have changed while GitHub answered: read them again.
+        let current = try currentValues(ledger: ledger)
+        ledger = ledger.recordingLocalChanges(current: current, now: deps.now())
         let plan = SettingsSyncPlan.make(current: current, ledger: ledger, remote: shared.map(Self.sanitized), now: deps.now())
-        let document = plan.document
-        try apply(plan.apply)
-        ledger = plan.ledger
-        try saveLedger(ledger)
-        if !plan.apply.isEmpty { deps.reload(Set(plan.apply.keys)) }
 
-        guard plan.needsUpload, document != shared else { return }
-        let sealed = try SettingsSyncEnvelope.seal(document, key: key)
-        let newSHA = try await remote.putSyncFile(path: deps.path, data: sealed, sha: sha)
-        cached = (document, newSHA, nil)
+        // 4. Save the agreement before writing: a failed save leaves nothing
+        //    applied, so no applied removal can later look like a local one.
+        //    Joining completes only once the result is shared.
+        var next = plan.ledger
+        next.joined = ledger.joined
+        try saveLedger(next)
+        let failed = apply(plan.apply)
+        let applied = Set(plan.apply.keys).subtracting(failed.keys)
+        if !applied.isEmpty { deps.reload(applied) }
+        if let error = failed.values.first {
+            for item in failed.keys { next.records[item] = ledger.records[item] }
+            try? saveLedger(next)
+            throw error
+        }
+
+        // 5. Share what changed here.
+        if plan.needsUpload, plan.document != shared {
+            try ensureCurrent(round)
+            let sealed = try SettingsSyncEnvelope.seal(plan.document, key: key)
+            let newSHA = try await remote.putSyncFile(path: deps.path, data: sealed, sha: sha)
+            cached = (plan.document, newSHA, nil, keyID)
+        }
+        if !next.joined {
+            try ensureCurrent(round)
+            next.joined = true
+            try saveLedger(next)
+        }
     }
 
     /// A value this build would reject is treated as not shared, so this
@@ -288,27 +326,34 @@ final class SettingsSyncService: ObservableObject {
         return result
     }
 
-    private func apply(_ changes: [String: SettingsSyncValue?]) throws {
+    /// Writes each change on its own and returns the ones that failed.
+    private func apply(_ changes: [String: SettingsSyncValue?]) -> [String: Error] {
+        var failed: [String: Error] = [:]
         for (item, value) in changes {
-            if let key = SettingsSyncItem.preferenceKey(item) {
-                switch value {
-                case .preference(let preference)?:
-                    deps.defaults.set(try preference.propertyListValue(), forKey: key)
-                case nil where key == ConfigBackupRegistry.aiRoutingKey:
-                    // Removing the routing document would rerun its migration.
-                    let empty = AIRoutingState(routes: [:], migratedRoutes: [:], servers: [], migrationVersion: 1)
-                    deps.defaults.set(try JSONEncoder().encode(empty), forKey: key)
-                case nil:
-                    deps.defaults.removeObject(forKey: key)
-                default:
-                    continue
-                }
-            } else if let account = SettingsSyncItem.secretAccount(item) {
-                switch value {
-                case .secret(let secret)?: try deps.secretStore(account).save(secret)
-                case nil: try deps.secretStore(account).delete()
-                default: continue
-                }
+            do { try apply(item: item, value: value) } catch { failed[item] = error }
+        }
+        return failed
+    }
+
+    private func apply(item: String, value: SettingsSyncValue?) throws {
+        if let key = SettingsSyncItem.preferenceKey(item) {
+            switch value {
+            case .preference(let preference)?:
+                deps.defaults.set(try preference.propertyListValue(), forKey: key)
+            case nil where key == ConfigBackupRegistry.aiRoutingKey:
+                // Removing the routing document would rerun its migration.
+                let empty = AIRoutingState(routes: [:], migratedRoutes: [:], servers: [], migrationVersion: 1)
+                deps.defaults.set(try JSONEncoder().encode(empty), forKey: key)
+            case nil:
+                deps.defaults.removeObject(forKey: key)
+            default:
+                return
+            }
+        } else if let account = SettingsSyncItem.secretAccount(item) {
+            switch value {
+            case .secret(let secret)?: try deps.secretStore(account).save(secret)
+            case nil: try deps.secretStore(account).delete()
+            default: return
             }
         }
     }

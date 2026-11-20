@@ -71,6 +71,9 @@ final class HarnessAccessStore: ObservableObject {
 
     @Published private(set) var grants: [HarnessGrant] = []
 
+    /// The running app's store, for Settings -> Agents. Nil outside a packaged app.
+    static weak var active: HarnessAccessStore?
+
     private let fileURL: URL?
     private let key: () -> SymmetricKey?
     private var loaded = false

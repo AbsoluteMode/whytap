@@ -826,8 +826,9 @@ Hover tool search and pointer routing:
 whytap:// links:
   CFBundleURLTypes registers the whytap scheme; AppDelegate handles kAEGetURL
   (registered in applicationWillFinishLaunching, queued until launch ends).
-  WhytapLink parses only whytap://tool/<HoverTool rawValue> and
-  whytap://settings/<SettingsWindowTab rawValue>; its switches over both enums
+  WhytapLink parses only whytap://tool/<HoverTool rawValue>,
+  whytap://settings/<SettingsWindowTab rawValue> and
+  whytap://meeting/<meeting id without dashes> (shows that note); its switches over both enums
   are exhaustive, so a new tile or tab needs a destination to compile. The enums
   are the public registry of linkable places: never rename raw values. A link
   only shows a place: inline tools open their HoverPanelRequest, navigate tools
@@ -1203,6 +1204,27 @@ security controls, user content (except To-do titles via whytap_todo_*),
 recording, shell execution or quit are exposed.
 Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
+
+Harness access: the plugin's content tools answer only the coding harness that
+started the MCP server itself (the helper's direct parent, by Apple-vouched
+team and signing identifier: Claude Code, Codex), after the user's one Yes.
+HarnessAccessGate asks through the Case approval card and queue ("Let Claude
+Code use Whytap?", No / Yes, Y after 0.3 s of a quiet keyboard, 60 s timeout,
+then "Claude Code connected" for 1.4 s); the prompt is shared by sessions that
+start together and outlives the request that caused it. The MCP server answers
+initialize at once and sends request_access afterwards through the client that
+never launches Whytap. Yes and No are remembered per Mac in harness-access.json
+beside the broker socket, authenticated with a device-bound Keychain key
+(HarnessAccessStore); Settings -> Agents -> Coding tools has a switch per
+tool, read on every request. Gated today: whytap_meetings_search (every query
+word in title, note or transcript, long words matched by stem, a note snippet
+and the three best replies with speaker and time), whytap_meeting_get,
+whytap_meeting_transcript (by index or around a moment, bounded by replies and
+bytes) and whytap_meeting_open. One Yes covers future content and action tools
+except deleting data. Settings and To-do tools keep the earlier boundary. The
+gate never loads the Case vault and a Case registration gives no access to
+meetings. whytap://meeting/<id without dashes> shows one note. WHY:
+.project-docs/decisions/2026-11-20-harness-access.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 only with a sole finish_answer call containing status, answer, sources and actions.

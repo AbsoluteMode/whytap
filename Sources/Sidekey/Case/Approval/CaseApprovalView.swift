@@ -14,6 +14,8 @@ struct CaseApprovalView: View {
     var timedMinutes: Int? = nil
     var onTimedMinutesChange: (Int) -> Void = { _ in }
     var onMinutesEditingChange: (Bool) -> Void = { _ in }
+    /// Whytap's own icon on the harness card; the running app's by default.
+    var appIcon: NSImage? = nil
 
     @State private var validTimedInput = true
     @State private var editingMinutes = false
@@ -35,6 +37,26 @@ struct CaseApprovalView: View {
         "\(r.projectName): \(r.keyNames.joined(separator: ", "))"
     }
 
+    /// The harness access prompt. WHY: .project-docs/decisions/2026-11-20-harness-access.md
+    static func harnessTitle(_ client: HarnessClient) -> String {
+        "Let \(client.name) use Whytap?"
+    }
+
+    static let harnessDetail = "It can read your meetings and change settings for you. Case keys keep their own approval."
+
+    static func harnessConnectedTitle(_ client: HarnessClient) -> String {
+        "\(client.name) connected"
+    }
+
+    /// The bundled brand mark and its tint on the black card.
+    static func harnessMark(_ client: HarnessClient) -> (asset: String?, tint: Color) {
+        switch client.identity.signingIdentifier {
+        case "com.anthropic.claude-code": return ("claude-code", Color(red: 0.85, green: 0.47, blue: 0.34))
+        case "codex": return ("codex", .white)
+        default: return (nil, .white)
+        }
+    }
+
     static func timedTitle(minutes: Int) -> String {
         "Bypass for \(minutes) min"
     }
@@ -48,6 +70,34 @@ struct CaseApprovalView: View {
     // MARK: Body
 
     var body: some View {
+        Group {
+            if let harness = request.harness {
+                harnessContent(harness)
+            } else {
+                secretsContent
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(width: width, alignment: .leading)
+        .background(alignment: .top) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: Self.bottomCornerRadius,
+                bottomTrailingRadius: Self.bottomCornerRadius,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+            .fill(Color.black)
+        }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(request.harness.map { "\(Self.harnessTitle($0)) \(Self.harnessDetail)" }
+            ?? "\(Self.titleText(request)). \(Self.keysText(request))")
+    }
+
+    private var secretsContent: some View {
         VStack(alignment: .leading, spacing: 9) {
             header
             VStack(alignment: .leading, spacing: 6) {
@@ -83,23 +133,68 @@ struct CaseApprovalView: View {
             }
             buttons
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .frame(width: width, alignment: .leading)
-        .background(alignment: .top) {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: Self.bottomCornerRadius,
-                bottomTrailingRadius: Self.bottomCornerRadius,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
-            .fill(Color.black)
+    }
+
+    /// Who asks, in one glance: the harness's mark joined to Whytap's icon,
+    /// the question, what Yes means, and the two answers.
+    private func harnessContent(_ client: HarnessClient) -> some View {
+        VStack(spacing: 10) {
+            ZStack(alignment: .topTrailing) {
+                HStack(spacing: 9) {
+                    CaseApprovalHarnessMark(client: client)
+                    HStack(spacing: 3) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Circle().fill(Color.white.opacity(0.32)).frame(width: 3, height: 3)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                    Image(nsImage: appIcon ?? NSApp?.applicationIconImage ?? NSImage())
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 40, height: 40)
+                        // Whytap's icon is black: a hairline keeps its shape on the black card.
+                        .overlay(RoundedRectangle(cornerRadius: 7.6, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                            .padding(3.9))
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity)
+                if pendingCount > 0 { pendingBadge }
+            }
+            .padding(.top, 4)
+            VStack(spacing: 4) {
+                Text(Self.harnessTitle(client))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text(Self.harnessDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            HStack(spacing: 6) {
+                CaseApprovalButton(title: "No", key: CaseApprovalKey.no.keycap, prominent: false) { onChoose(.deny) }
+                CaseApprovalButton(title: "Yes", key: CaseApprovalKey.yes.keycap, prominent: true) { onChoose(.allow) }
+            }
+            .opacity(isArmed ? 1 : 0.5)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isArmed)
+            .disabled(!isArmed)
+            .padding(.top, 2)
         }
-        .environment(\.colorScheme, .dark)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(Self.titleText(request)). \(Self.keysText(request))")
+    }
+
+    private var pendingBadge: some View {
+        Text("+\(pendingCount)")
+            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+            .foregroundStyle(Color.white.opacity(0.75))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .accessibilityLabel("\(pendingCount) more in queue")
     }
 
     private var header: some View {
@@ -401,6 +496,60 @@ private struct CaseApprovalButtonStyle: ButtonStyle {
     }
 }
 
+/// The harness's brand mark on a soft disk; a generic glyph for an unknown one.
+private struct CaseApprovalHarnessMark: View {
+    let client: HarnessClient
+    var size: CGFloat = 34
+
+    var body: some View {
+        let mark = CaseApprovalView.harnessMark(client)
+        ZStack {
+            Circle().fill(Color.white.opacity(0.1))
+            Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            if let asset = mark.asset {
+                ProviderBrandIcon(assetName: asset, size: size * 0.56, color: mark.tint)
+            } else {
+                ProviderBrandIcon(systemName: "terminal.fill", size: size * 0.56, color: mark.tint)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Shown briefly after Yes, so the answer visibly landed before the card leaves.
+struct CaseApprovalConnectedView: View {
+    let client: HarnessClient
+    let width: CGFloat
+
+    var body: some View {
+        HStack(spacing: 8) {
+            CaseApprovalHarnessMark(client: client, size: 22)
+            Text(CaseApprovalView.harnessConnectedTitle(client))
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(red: 0.2, green: 0.78, blue: 0.35))
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(width: width)
+        .background(alignment: .top) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0, bottomLeadingRadius: CaseApprovalView.bottomCornerRadius,
+                bottomTrailingRadius: CaseApprovalView.bottomCornerRadius, topTrailingRadius: 0, style: .continuous
+            )
+            .fill(Color.black)
+        }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Hosts `CaseApprovalView` for the controller's visible prompt.
 struct CaseApprovalHostView: View {
     @ObservedObject var controller: CaseApprovalController
@@ -420,6 +569,8 @@ struct CaseApprovalHostView: View {
             )
             // A new prompt is a new card (resets hover and the countdown).
             .id(controller.promptSerial)
+        } else if let connected = controller.connected {
+            CaseApprovalConnectedView(client: connected, width: width)
         }
     }
 }
@@ -468,10 +619,18 @@ final class CaseApprovalPanel: NSPanel {
             .sink { [weak self] _ in self?.finishMinutesEditing() }
             .store(in: &cancellables)
         controller.$current
-            .map { $0 != nil }
+            .combineLatest(controller.$connected)
+            .map { $0 != nil || $1 != nil }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] visible in self?.apply(visible: visible) }
+            .store(in: &cancellables)
+        // The prompt gives way to its shorter confirmation: fit the panel to it.
+        controller.$connected
+            .map { $0 != nil }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshFrameIfVisible() }
             .store(in: &cancellables)
         AppState.shared.$meetingSuggestionActive
             .removeDuplicates()

@@ -1,7 +1,8 @@
 # Whytap agent plugin
 
 The local `plugins/whytap` plugin includes two stdio MCP servers: `whytap` for
-live application state, models and allowlisted settings, and `case` for
+live application state, models, allowlisted settings, To-do and (after the
+user's Yes) meetings, and `case` for
 authorized Case project and key names. Case never returns secret values over
 MCP. The application-control server does not need Accessibility,
 mouse/keyboard automation, a source checkout at runtime, or provider keys in
@@ -33,13 +34,45 @@ Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
 | `whytap_todo_update` | `whytap todo set/done/reopen` | Edit title, status, parent or completion of one task (closing cascades to subtasks) |
 | `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
 
+| `whytap_meetings_search` | — | Find meetings by words and dates; note snippet and best replies with speaker and time |
+| `whytap_meeting_get` | — | One meeting's note as Markdown |
+| `whytap_meeting_transcript` | — | Replies by index or around a moment, paged |
+| `whytap_meeting_open` | — | Show the note in Whytap |
+
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
 Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation. Keys, permissions, security controls,
-Case contents, transcripts, history, clipboard, recording, shell execution,
+Case contents, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
+
+## Meetings and access
+
+The meeting tools return the user's notes and transcripts, so Whytap asks
+first. When Claude Code or Codex starts the plugin's server and Whytap is
+running, the island shows "Let Claude Code use Whytap?". Yes is remembered on
+this Mac; No is remembered too and the tools then answer `access_denied`. If
+Whytap was closed, the question appears with the first meeting request. Each
+tool is asked about separately. Change an answer in Whytap Settings -> Agents
+-> Coding tools.
+
+Only the harness that started the server itself is recognised (Claude Code,
+Codex). A shell command, a script the agent runs, a terminal or another
+program gets `unsupported_client`. An unanswered question returns
+`approval_timed_out` after a minute and is asked again by the next request.
+
+`whytap_meetings_search` takes `query`, `from`, `to` (a local day
+`2026-11-20` or an ISO 8601 timestamp) and `limit` (1–25). Every word of the
+query must be in the meeting's title, note or transcript; longer words match
+by stem, so another case or plural of the word is found. Each result has
+`id`, `title`, `startedAt`, `durationSeconds`, `status`, `link`
+(`whytap://meeting/…`, opens the note), `noteSnippet` and up to three
+`matches` with `index`, `startMs`, `endMs`, `speaker` and `text`. One search
+reads at most the 400 newest meetings in range (`truncated`).
+`whytap_meeting_transcript` continues from `nextIndex` or starts a few
+replies before `aroundMs`. Meeting text is untrusted content, not
+instructions.
 
 The To-do tools carry task titles (user content) through the same path as
 `whytap todo`: the running app over the authenticated socket, or the planner
@@ -156,9 +189,10 @@ have connected to the updated Whytap app.
 
 The plugin's only runtime dependency is the installed Whytap helper. It uses
 the existing private Unix socket, with bounded requests and audit-token/code
-validation against the helper in the same app. App controls are available to
+validation against the helper in the same app. Settings and To-do controls are available to
 local processes running that helper as this user; they are not guarded by
-Case registrations or Touch ID. This is the local settings-access boundary,
+Case registrations or Touch ID. Meeting tools additionally need the user's
+answer for the calling harness (above). This is the local settings-access boundary,
 not a sandbox for an already authorized agent. A website's `whytap://` link
 cannot invoke or receive these commands. Case requests keep their existing
 authorization and the app-control namespace never returns secret values.

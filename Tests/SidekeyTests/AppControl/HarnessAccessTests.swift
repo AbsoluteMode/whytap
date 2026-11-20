@@ -238,6 +238,27 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertNil(HarnessAccessStore(fileURL: file, key: { [key] in key }).decision(for: claude.identity))
     }
 
+    // MARK: Settings -> Agents
+
+    func test_settings_lists_answered_tools_by_name_and_the_switch_changes_the_answer() async {
+        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        store.record(.deny, for: codex, at: Date())
+        store.record(.allow, for: claude, at: Date())
+        XCTAssertEqual(HarnessAccessSettingsSection.rows(store.grants).map(\.name), ["Claude Code", "Codex"])
+        XCTAssertTrue(HarnessAccessSettingsSection.subtitle(.deny).contains("Not allowed"))
+
+        // The switch turned off: the session that is already open is refused.
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertEqual(HarnessAccessSettingsSection.rows(store.grants).map(\.name), ["Claude Code", "Codex"])
+        let refused = await read()
+        XCTAssertEqual(refused?.data.object?["code"], .string("access_denied"))
+        // Turned on again: no second prompt.
+        store.record(.allow, for: claude, at: Date())
+        let allowed = await read()
+        XCTAssertNil(allowed)
+        XCTAssertTrue(prompt.asked.isEmpty)
+    }
+
     func test_without_the_keychain_nothing_is_trusted_or_overwritten() {
         store.record(.allow, for: claude, at: Date())
         var available = false

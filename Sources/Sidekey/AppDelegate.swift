@@ -3873,6 +3873,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .deletingLastPathComponent().appendingPathComponent("harness-access.json"),
             key: { HarnessAccessKeychain.key(service: BuildConfig.keychainService) })
         harnessAccessStore = harnessStore
+        HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(
             resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
         let broker = CaseBroker(

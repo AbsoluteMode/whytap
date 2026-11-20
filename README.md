@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img alt="Live Whytap Dynamic Island cycling through Drop voice dictation and Case key approval" src="docs/assets/readme/island-hero.webp" width="560">
+  <img alt="Live Whytap Dynamic Island cycling through Drop dictation, Agent, Music, Google search, Meeting recording and HDR brightness" src="docs/assets/readme/island-hero.webp" width="640">
 </p>
 
 <h1 align="center">Whytap</h1>

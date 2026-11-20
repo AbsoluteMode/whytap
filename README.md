@@ -1,13 +1,13 @@
+<h1 align="center">Whytap</h1>
+
 <div align="center">
 
 <p align="center">
   <img alt="Live Whytap Dynamic Island cycling through Drop dictation, Agent, Music, Google search, Meeting recording and HDR brightness" src="docs/assets/readme/island-hero.webp" width="640">
 </p>
 
-<h1 align="center">Whytap</h1>
-
 <p align="center">
-  <b>The best macOS productivity app, built for your harness.</b><br>
+  <b>The MacOS productivity app, built for <a href="docs/customization/app-control.md#install-in-an-agent-host">your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16"></a>.</b><br>
   <sub>Voice prompts, Case API key vault, bot-free meeting MCP, AI agent, secret blur &amp; HDR — free in your Mac’s notch.</sub>
 </p>
 

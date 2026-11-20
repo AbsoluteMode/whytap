@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="16" viewBox="0 0 60 16">
+  <style>
+    .violet { stop-color: #5938de; }
+    .pink { stop-color: #9b328d; }
+    @media (prefers-color-scheme: dark) {
+      .violet { stop-color: #a48aff; }
+      .pink { stop-color: #f093df; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="harness">
+      <stop offset="0" class="violet"/>
+      <stop offset="1" class="pink"/>
+    </linearGradient>
+  </defs>
+  <text x="0" y="15" fill="url(#harness)" font-family="system-ui, sans-serif" font-size="16" font-weight="600">harness</text>
+</svg>

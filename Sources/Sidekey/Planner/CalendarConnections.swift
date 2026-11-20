@@ -161,10 +161,7 @@ final class CalendarConnections: ObservableObject {
         let foundFeeds = calendars.map { calendar in
             CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
                 title: calendar.title + " · " + calendar.source.title, provider: .apple,
-                color: calendar.color.usingColorSpace(.sRGB).map {
-                    String(format: "#%02X%02X%02X", Int(($0.redComponent * 255).rounded()),
-                           Int(($0.greenComponent * 255).rounded()), Int(($0.blueComponent * 255).rounded()))
-                })
+                color: CalendarFeedColor.hex(appleColor: calendar.color))
         }
         let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
         let foundEvents = store.events(matching: predicate).map { event in

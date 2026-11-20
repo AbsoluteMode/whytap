@@ -93,6 +93,10 @@ then set that idea aside for now.
   - Rows that start off the hour on a half-hour DST day (Lord Howe) label minutes.
   - "Open in ..." names the service of the link that opens, since a merged
     event can carry another copy's link.
+  - The builder's check found that EKCalendar.color can be nil (for example on
+    an unsaved calendar), which trapped. Such a calendar now gets the fallback
+    colour, and a test covers it.
+  - The VoiceOver action is attached only to events that have a link.
   - Not changed: packing reserves 18 pt per short block while drawing 16 pt
     plus a 2 pt gap. That gap is intended.
 - Not verified: real pointer hover, the click in the installed app, and whether

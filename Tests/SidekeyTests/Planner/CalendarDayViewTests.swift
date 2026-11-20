@@ -1,3 +1,5 @@
+import AppKit
+import EventKit
 import XCTest
 @testable import Sidekey
 
@@ -106,6 +108,13 @@ final class CalendarDayViewTests: XCTestCase {
         XCTAssertEqual(CalendarEventAction.appleEventURL(identifier: "a/b?c")?.absoluteString,
                        "ical://ekevent/a%2Fb%3Fc?method=show&options=more")
         XCTAssertNil(CalendarEventAction.appleEventURL(identifier: ""))
+    }
+
+    func testAppleCalendarWithoutAColourUsesTheFallbackInsteadOfCrashing() throws {
+        let unsaved = EKCalendar(for: .event, eventStore: EKEventStore())
+        XCTAssertNil(CalendarFeedColor.hex(appleColor: unsaved.color), "An unsaved EKCalendar has no colour yet")
+        XCTAssertNil(CalendarFeedColor.hex(appleColor: nil))
+        XCTAssertEqual(CalendarFeedColor.hex(appleColor: NSColor(srgbRed: 1, green: 0.5, blue: 0, alpha: 1)), "#FF8000")
     }
 
     func testCalendarColoursComeFromTheProviderOrAStableFallback() {

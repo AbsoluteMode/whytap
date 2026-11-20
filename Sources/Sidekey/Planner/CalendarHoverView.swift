@@ -488,8 +488,9 @@ struct CalendarEventButton<Label: View>: View {
             .compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint(title ?? "")
         .accessibilityAddTraits(title != nil ? .isButton : [])
-        // children: .ignore hides the Button's own action; VoiceOver activates through this one.
-        .accessibilityAction { model.perform(item) }
+        // children: .ignore hides the Button's own action; only an actionable
+        // event gets one back, so an event with nowhere to go is not activatable.
+        .modifier(CalendarEventActivation(enabled: title != nil) { model.perform(item) })
     }
 }
 
@@ -547,5 +548,14 @@ struct CalendarEventBlockLabel: View {
         .foregroundStyle(.white)
         .padding(.leading, 8).padding(.trailing, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// VoiceOver activation for event blocks that have a link to open.
+struct CalendarEventActivation: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    func body(content: Content) -> some View {
+        if enabled { content.accessibilityAction(.default, action) } else { content }
     }
 }

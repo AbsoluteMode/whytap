@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import WhytapCaseKit
 
@@ -95,6 +96,14 @@ enum CalendarFeedColor {
         guard let text = (raw as? String)?.trimmingCharacters(in: .whitespaces), text.count == 7, text.first == "#",
               text.dropFirst().allSatisfy(\.isHexDigit) else { return nil }
         return text.uppercased()
+    }
+
+    /// EKCalendar.color is an implicitly unwrapped NSColor that is nil until set,
+    /// e.g. on an unsaved calendar; nil means the fallback colour.
+    static func hex(appleColor color: NSColor?) -> String? {
+        guard let rgb = color?.usingColorSpace(.sRGB) else { return nil }
+        return String(format: "#%02X%02X%02X", Int((rgb.redComponent * 255).rounded()),
+                      Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded()))
     }
 
     static func fallback(for feedID: String) -> String {

@@ -54,6 +54,7 @@ final class LocalNotificationHub: ObservableObject {
     @Published private(set) var error: String?
     var unreadCount: Int { history.filter { !$0.read }.count }
     var openMeeting: ((UUID) -> Void)?
+    var setInputLanguage: ((String) -> Void)?
     private let archive: NotifyArchive
     private let onArrival: (LocalNotificationEvent) -> Void
     private var historyRevision = -1
@@ -114,6 +115,7 @@ final class LocalNotificationHub: ObservableObject {
     func activate(_ event: LocalNotificationEvent,
                   openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }) {
         if let id = event.meetingID { openMeeting?(id) }
+        else if let code = event.inputLanguageCode { setInputLanguage?(code) }
         else if let link = event.link { openLink(link) }
     }
     func dismiss() {

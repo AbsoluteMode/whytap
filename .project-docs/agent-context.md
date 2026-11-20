@@ -155,8 +155,8 @@ Voice flow (Drop / dictation):
             Fast bypasses AI text processing. Smart makes one request to the
             selected cleanup model: a reserved whole-response pass marker keeps
             the transcript verbatim with plain delivery; otherwise use the edited
-            message. Synonyms, word order and minor polish alone should pass;
-            concrete errors and useful long-message structure still edit.
+            message. Only text with nothing to remove, repair or structure
+            should pass; fillers, repeats, errors and wrong names still edit.
             Translation cannot pass. Failed, empty, malformed or cancelled
             responses retain strict Retry behavior. The separate Jev/OpenAI
             Decision stage and settings row are removed; migration4 retires only
@@ -179,12 +179,14 @@ Voice flow (Drop / dictation):
             mode changes from every control. The cleanup provider mark appears
             only while processing; paste shows “pasting…” without a provider. WHY:
             .project-docs/decisions/2026-10-19-strict-drop-modes.md
-       Smart's editor uses minimal repairs,
-       retaining the author's wording, thought order, facts and uncertainty;
-       it does not summarize or deeply rewrite. Self-corrections replace only
-       their fragment; nested requests stay requests. Evaluated on GPT-6 Sol,
-       the prompt does not change selected routes. WHY:
-       .project-docs/decisions/2026-10-21-smart-editor-prompt.md
+       Smart's editor returns a ready text: it removes fillers, stumbles and
+       repeats, keeps the final version of a self-correction, rewrites heavy
+       spoken sentences and lays long text out in paragraphs and plain lists,
+       in the author's voice. Every fact, condition, number and degree of
+       certainty stays and nothing is added; it is not a summary. Nested
+       requests stay requests; known names are always corrected. The prompt
+       does not change selected routes. WHY:
+       .project-docs/decisions/2026-11-20-smart-ready-text.md
        SmartFormattingProfile selects destination syntax from app identity and
        focused AX role/document metadata (within the same 1.5s context deadline).
        Markdown editors/recognized web composers use a fixed syntax subset;
@@ -842,6 +844,17 @@ whytap:// links:
   .project-docs/decisions/2026-10-20-whytap-links.md,
   .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
 
+Input language offer:
+  With the input language on Auto, InputLanguageSuggestion counts delivered
+  Drop takes whose transcript the system recognizer (on this Mac) reads as
+  one language of the menu; short or unclear takes are ignored. Three in a
+  row produce one notification card ("Dictating in Russian?"). Clicking it
+  sets the input language, only while it is still Auto; ignoring it keeps
+  Auto and that language is never offered again. The action is the app's own
+  inputLanguageCode field, which scripts and links cannot supply. Only the
+  language code, the count and the offered codes are stored. WHY:
+  .project-docs/decisions/2026-11-20-input-language-suggestion.md
+
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> Other -> "Show island on") -> screen with a real notch ->
@@ -1015,7 +1028,10 @@ dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
 MacSwitch adapts the supplied glass switch in SwiftUI with click/drag,
 keyboard and native Toggle accessibility, respecting Reduce Motion/Transparency.
-The island keeps its compact blue switch and explicitly dark Toolbox previews.
+The island keeps its compact blue switch. Island panels embedded in Toolbox
+panes (Vocab, Filler, Case, languages, Notify, History, Monitor) sit on the
+Settings background and follow its appearance through IslandInk (white in the
+always-dark island). WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
 UI decisions and verification limits: docs/DESIGN.md.
 API & Models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and

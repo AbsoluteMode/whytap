@@ -59,7 +59,7 @@ struct IslandFillerEditorPanel: View {
             if viewModel.query.isEmpty {
                 Text("Add a filler word, press Enter")
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(IslandInk.color.opacity(0.42))
                     .padding(.leading, 10)
                     .allowsHitTesting(false)
             }
@@ -76,7 +76,7 @@ struct IslandFillerEditorPanel: View {
         .frame(height: IslandFillerEditorStyle.inputHeight)
         .background(
             Capsule()
-                .fill(Color.white.opacity(0.13))
+                .fill(IslandInk.color.opacity(0.13))
         )
         .overlay(
             Capsule()
@@ -88,7 +88,7 @@ struct IslandFillerEditorPanel: View {
         if viewModel.lastRejection != nil {
             return Color.red.opacity(0.62)
         }
-        return Color.white.opacity(0.18)
+        return IslandInk.color.opacity(0.18)
     }
 }
 
@@ -102,14 +102,14 @@ private struct IslandFillerChip: View {
         HStack(spacing: 5) {
             Text(term)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.90))
+                .foregroundStyle(IslandInk.color.opacity(0.90))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Button(action: onRemove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(hovering ? 0.92 : 0.58))
+                    .foregroundStyle(IslandInk.color.opacity(hovering ? 0.92 : 0.58))
                     .frame(width: 13, height: 13)
             }
             .buttonStyle(.plain)
@@ -120,11 +120,11 @@ private struct IslandFillerChip: View {
         .frame(height: IslandFillerEditorStyle.chipHeight)
         .background(
             Capsule()
-                .fill(Color.white.opacity(hovering ? 0.18 : 0.11))
+                .fill(IslandInk.color.opacity(hovering ? 0.18 : 0.11))
         )
         .overlay(
             Capsule()
-                .stroke(.white.opacity(hovering ? 0.24 : 0.10), lineWidth: 0.7)
+                .stroke(IslandInk.color.opacity(hovering ? 0.24 : 0.10), lineWidth: 0.7)
         )
         .contentShape(Capsule())
         .onHover { hovering = $0 }
@@ -257,7 +257,7 @@ private struct IslandFillerInputField: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         textView.backgroundColor = .clear
-        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.textColor = IslandInk.ns.withAlphaComponent(0.92)
         textView.insertionPointColor = textView.fillerCursorColor
         textView.font = NSFont.systemFont(
             ofSize: IslandFillerEditorStyle.inputFontSize,
@@ -312,7 +312,7 @@ private final class IslandFillerTextView: NSTextView {
     var shouldAutoFocusOnWindowAttach = false
 
     var fillerCursorColor: NSColor {
-        NSColor(white: 1, alpha: 0.86)
+        IslandInk.ns.withAlphaComponent(0.86)
     }
 
     override var acceptsFirstResponder: Bool { true }

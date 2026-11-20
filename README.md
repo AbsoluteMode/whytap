@@ -1,10 +1,8 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/island-hero-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/island-hero-light.svg">
-  <img alt="Animated Whytap Dynamic Island cycling through voice prompts, Case key approval and MCP meeting sync" src="docs/assets/readme/island-hero-dark.svg" width="760">
-</picture>
+<p align="center">
+  <img alt="Live Whytap Dynamic Island cycling through Drop voice dictation and Case key approval" src="docs/assets/readme/island-hero.webp" width="560">
+</p>
 
 <h1 align="center">Whytap</h1>
 
@@ -43,7 +41,7 @@ Click any row below to watch it right here on GitHub — no external links or pa
 <summary><b>Case — API Key Vault for Your Harness</b><br><sub>&emsp;Replaces ~$10/mo developer secret vaults &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
-Store API keys locally in Case. **Claude Code**, **Codex**, **Cursor** and the Whytap agent discover key names via MCP and run commands with them after a quick <kbd>Y</kbd> / <kbd>N</kbd> approval in your Mac's notch — secret values never enter `.env` files or model context.
+Store API keys locally in Case. **Claude Code**, **Codex** and **Cursor** discover key names via MCP and run commands with them after a quick <kbd>Y</kbd> / <kbd>N</kbd> approval in your Mac's notch — secret values never enter `.env` files or model context.
 
 <p align="center">
   <img src="docs/assets/readme/demo-case.webp" width="840" loading="lazy" alt="Whytap Case vault approving an ANTHROPIC_API_KEY command for Claude Code from the MacBook notch">

@@ -1,99 +1,143 @@
-<p align="center">
-  <img src="docs/assets/whytap-icon.png" width="128" height="128" alt="Whytap icon">
-</p>
+<div align="center">
 
-<h1 align="center">Whytap</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/hero-light.svg">
+  <img alt="Whytap — the best productivity app, built for your harness." src="docs/assets/readme/hero-dark.svg" width="100%">
+</picture>
 
-<p align="center">
-  <b>One free app in your Mac's notch instead of half a dozen paid apps.</b><br>
-  Voice dictation, meeting notes, an AI agent, screenshots, HDR brightness and translation —<br>
-  bring your own keys or dictate on this Mac. No account, no servers, no telemetry.
-</p>
+<br><br>
 
 <p align="center">
-  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><b>Download</b></a> ·
-  <a href="https://whytap.ai">Website &amp; help</a> ·
-  <a href="docs/README.md">Docs</a>
+  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS (Universal DMG)" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask Whytap on whytap.ai" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="docs/README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-docs-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-docs-light.svg"><img alt="Whytap Documentation" src="docs/assets/readme/btn-docs-dark.svg" height="44"></picture></a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/whytap-drop.gif" width="800" alt="Holding Space in a chat field: the island at the top of the screen shows the live transcript, and the message is pasted into the field on release">
+  <sub><b>macOS 14.2+</b> (Sonoma, Sequoia &amp; Tahoe) &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <b>Developer ID Signed &amp; Notarized</b> &nbsp;·&nbsp; <b>No Account · Zero Telemetry</b> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 
-## Stop paying for six separate Mac apps
+<br>
 
-Most of the everyday tools people pay for separately on macOS live together in Whytap's notch — free and open source under MIT:
+<a href="#watch-every-tool-in-action">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/features-table-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/features-table-light.svg">
+    <img alt="Eight paid Mac tools in one free notch: comparison of Whytap tools vs average market prices" src="docs/assets/readme/features-table-dark.svg" width="100%">
+  </picture>
+</a>
 
-| What people usually pay for | Typical price | Included in Whytap |
-|---|---|---|
-| **Voice dictation** in any text field | $8–15 / mo | **Drop**: hold <kbd>Space</kbd> in any text field, speak, release. Fast pastes the transcript; Smart lightly edits it with your model. Pennies with your speech key, or $0 on this Mac (Apple Silicon). |
-| **AI meeting notes** without a call bot | $8–18 / mo | **Meeting notes**: notices calls in Zoom, Teams, Slack and Google Meet and turns them into a summary with a transcript using your keys. |
-| **Quick desktop AI & voice agent** | $8–20 / mo | **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. Reads files, searches the web and answers in the island using your key. |
-| **Screenshot editor, text blur & OCR** | about $35 once | **Shot**: arrows, text blur and Copy text — built in for free. |
-| **Extra XDR / HDR brightness** | about $20 once | **Display Extra**: brighter whites on XDR and HDR displays beyond the usual maximum — built in for free. |
-| **Clipboard history, live subtitles, translation & dev tools** | about $30 / yr | **History** (clipboard, dictations, agent answers), **Translate** & live **Subtitles**, **Case** (secrets vault for Claude Code, Cursor and Whytap Agent), **Notify**, **Vocab**, **To-do**, **Calendar** and **Monitor** dashboards — all built in. |
+</div>
 
-Bought separately, that is roughly **$320–670 a year** in subscriptions plus about **$55** in one-time purchases. Whytap itself is **$0**: you pay only raw API usage directly to the providers you choose, or nothing at all for on-device dictation and local tools.
+<br>
 
-<sub>Prices are typical individual plans of popular Mac apps in each category, checked on November 19, 2026; annual billing sits at the low end of each range. Your own mix may cost more or less.</sub>
+## Watch every tool in action
 
-## Your keys, your Mac
+Click any row below to watch it right here on GitHub — no external links or page jumps.
 
-- Dictate on this Mac with a downloaded speech model: no key, no account, audio never leaves it (Apple Silicon).
-- Or use your own keys for Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI or Anthropic, or your own OpenAI-compatible server. Keys stay in the macOS Keychain.
-- Audio and text go only to the provider you chose for that feature. There is no Whytap account, backend or telemetry.
-- Free and open source under the MIT license.
+<details open>
+<summary><b>Case — API Key Vault for Your Harness</b> &nbsp;·&nbsp; <sub>Replaces ~$10/mo developer secret vaults → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-What leaves your Mac, and when: [Privacy](docs/privacy.md).
+Store API keys locally in Case. **Claude Code**, **Codex**, **Cursor** and the Whytap agent discover key names via MCP and run commands with them after a quick <kbd>Y</kbd> / <kbd>N</kbd> approval in your Mac's notch — secret values never enter `.env` files or model context.
 
-## Install
+<p align="center">
+  <img src="docs/assets/readme/demo-case.webp" width="840" loading="lazy" alt="Whytap Case vault approving an ANTHROPIC_API_KEY command for Claude Code from the MacBook notch">
+</p>
+</details>
 
-<a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-6D4AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download Whytap for macOS"></a>
+<details>
+<summary><b>Drop &amp; Drop Smart — Voice Prompts &amp; Self-Correction</b> &nbsp;·&nbsp; <sub>Replaces ~$12/mo AI voice dictation apps → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-macOS 14.2 or newer, Apple Silicon and Intel. Signed and notarized; updates arrive in the island.
-More in [Install and update](docs/install.md).
+Hold <kbd>Space</kbd> in any editor, terminal or chat field, speak naturally, and release. **Fast** pastes instantly (for **$0 on-device** with Parakeet v3 on Apple Silicon, or pennies with your speech key); **Smart** removes fillers, keeps self-corrections, and formats lists and paragraphs.
 
-## Quick start
+<p align="center">
+  <img src="docs/assets/readme/demo-drop-smart.webp" width="840" loading="lazy" alt="Holding Space to dictate with self-corrections into a text field using Whytap Drop Smart">
+</p>
+</details>
 
-1. Open Whytap. Hover the island at the top of the screen and click **Settings**.
-2. In **Permissions**, allow Microphone and Accessibility. In **API & Models**, download the On this Mac model or add a speech key, then pick a model for Drop.
-3. Click into any text field, hold <kbd>Space</kbd>, speak and release.
+<details>
+<summary><b>Cross-Language Dictation &amp; Custom Vocab</b> &nbsp;·&nbsp; <sub>Included in Drop → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-| Action | Default |
-|---|---|
-| Dictate into the focused field | hold <kbd>Space</kbd> |
-| Ask the agent by text / by voice | tap / hold <kbd>Right ⌘</kbd> |
-| Google the selection / your voice | tap / hold <kbd>Right ⌥</kbd> |
-| Start or stop a meeting recording | <kbd>⌥</kbd> <kbd>M</kbd> |
-| Close the agent answer | <kbd>Esc</kbd> |
+Speak in your native language and paste directly in another with **Output Language**, or teach **Vocab** project names, jargon and handles once so every future take spells them right.
 
-Remap any of them, or give any tool its own shortcut, in **Settings → Hotkeys**.
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <b>Output Language</b><br><br>
+      <img src="docs/assets/readme/demo-output-lang.webp" width="100%" loading="lazy" alt="Speaking in one language and pasting in another with Output Language">
+    </td>
+    <td width="50%" align="center">
+      <b>Custom Vocab</b><br><br>
+      <img src="docs/assets/readme/demo-vocab.webp" width="100%" loading="lazy" alt="Teaching Whytap custom vocabulary terms">
+    </td>
+  </tr>
+</table>
+</details>
 
-## Help
+<details>
+<summary><b>Meeting Notes + Harness MCP — No Call Bot</b> &nbsp;·&nbsp; <sub>Replaces ~$15/mo bot-free meeting-note apps → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-Questions about setup, a feature or a problem with the app? Ask on [whytap.ai](https://whytap.ai), where you can find more information about Whytap.
+Whytap notices calls in Zoom, Meet, Teams and Slack without a bot joining the room, captures system + mic audio locally, and writes structured speaker notes and tasks. Approve once to let **Claude Code** or **Codex** read your meeting transcripts and tasks directly over MCP.
 
-## Build from source
+<p align="center">
+  <img src="docs/assets/readme/demo-meetings.webp" width="840" loading="lazy" alt="Bot-free meeting summary and action items in Whytap Meetings">
+</p>
+</details>
 
-Needs Xcode 26 or newer (Swift 6).
+<details>
+<summary><b>Notch AI Agent — Instant Answers &amp; File Lookup</b> &nbsp;·&nbsp; <sub>Replaces ~$16/mo desktop AI launchers → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-```bash
-git clone https://github.com/AbsoluteMode/whytap.git
-cd whytap
-swift test
-./scripts/dev-run.sh --run
-```
+Tap your Agent shortcut to type or hold it to speak. Your chosen model answers right inside the notch, searches the web, locates local files, and lets you open or insert results without leaving your current window.
 
-[Build details](docs/build-and-release.md) · [Customize Whytap with your coding agent](docs/customization/README.md)
+<p align="center">
+  <img src="docs/assets/readme/demo-agent.webp" width="840" loading="lazy" alt="Asking the Whytap Notch Agent to find a local file and inserting the result">
+</p>
+</details>
 
-## Contributing
+<details>
+<summary><b>Shot — Area Capture, 1-Click Secret Blur &amp; On-Device OCR</b> &nbsp;·&nbsp; <sub>Replaces ~$35 screenshot &amp; OCR utilities → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Freeze any screen, draw arrows and labels, blur sensitive text and numbers on invoices or keys in a single click, or extract text completely offline with on-device Apple Vision.
 
-## Security
+<p align="center">
+  <img src="docs/assets/readme/demo-shot.webp" width="840" loading="lazy" alt="Capturing a screenshot and blurring sensitive text and numbers in one click with Whytap Shot">
+</p>
+</details>
 
-Report vulnerabilities to contact@maxbutorin.dev; see [SECURITY.md](SECURITY.md).
+<details>
+<summary><b>Display Extra — Push XDR / HDR Brightness Past 100%</b> &nbsp;·&nbsp; <sub>Replaces ~$20 MacBook HDR brightness boosters → <b>$0 in Whytap</b></sub></summary>
+<br>
 
-## License
+Unlock the full HDR headroom of your MacBook Pro XDR or external HDR display beyond macOS's standard brightness limit, directly from the notch slider.
 
-[MIT](LICENSE). The Whytap name and icon: [TRADEMARK.md](TRADEMARK.md). Third-party code: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+<p align="center">
+  <img src="docs/assets/readme/demo-brightness.webp" width="840" loading="lazy" alt="Boosting display brightness past standard maximum with Whytap Display Extra">
+</p>
+</details>
+
+<details>
+<summary><b>Notify &amp; Monitor — Agent Alerts &amp; Live Notch Dashboards</b> &nbsp;·&nbsp; <sub>Replaces ~$15 menu-bar alert &amp; widget tools → <b>$0 in Whytap</b></sub></summary>
+<br>
+
+Have your coding harness, CI scripts or cron jobs post rich notification cards right beside the notch, and keep live custom JSON/script dashboards one hover away in Monitor.
+
+<p align="center">
+  <img src="docs/assets/readme/demo-notify.webp" width="840" loading="lazy" alt="Agent notifications and live Monitor dashboards in Whytap">
+</p>
+</details>
+
+<details>
+<summary><b>History — Clipboard, Dictations &amp; Agent Answers</b> &nbsp;·&nbsp; <sub>Replaces ~$15 clipboard managers → <b>$0 in Whytap</b></sub></summary>
+<br>
+
+Every copied snippet, image, voice dictation and agent answer stays searchable in one local drawer — ready to copy or paste again at any time.
+
+<p align="center">
+  <img src="docs/assets/readme/demo-history.webp" width="840" loading="lazy" alt="Browsing clipboard, dictation and agent history in Whytap">
+</p>
+</details>

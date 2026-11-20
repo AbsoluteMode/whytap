@@ -5,11 +5,11 @@ final class ModelRegistryTests: XCTestCase {
     func test_registry_recommendations_match_the_spec() {
         let realtime: [AIFeature] = [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
         for feature in realtime {
-            XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .soniox), "stt-rt-v5", "\(feature)")
+            XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .soniox), "stt-rt-v6", "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .deepgram), "nova-3", "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .elevenLabs), "scribe_v3_live", "\(feature)")
         }
-        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .soniox), "stt-async-v5")
+        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .soniox), "stt-async-v6")
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .deepgram), "nova-3")
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .elevenLabs), "scribe_v3_live")
         for feature: AIFeature in [.dropSmartCleanup, .meetingNotes] {
@@ -22,9 +22,9 @@ final class ModelRegistryTests: XCTestCase {
     }
 
     func test_registry_models_and_verification() {
-        XCTAssertTrue(ModelRegistry.isVerified("stt-rt-v5", kind: .soniox, use: .realtimeSTT))
-        XCTAssertFalse(ModelRegistry.isVerified("stt-rt-v5", kind: .soniox, use: .asyncSTT))
-        XCTAssertTrue(ModelRegistry.isVerified("stt-async-v5", kind: .soniox, use: .asyncSTT))
+        XCTAssertTrue(ModelRegistry.isVerified("stt-rt-v6", kind: .soniox, use: .realtimeSTT))
+        XCTAssertFalse(ModelRegistry.isVerified("stt-rt-v6", kind: .soniox, use: .asyncSTT))
+        XCTAssertTrue(ModelRegistry.isVerified("stt-async-v6", kind: .soniox, use: .asyncSTT))
         XCTAssertTrue(ModelRegistry.isVerified("nova-3", kind: .deepgram, use: .realtimeSTT))
         XCTAssertTrue(ModelRegistry.isVerified("scribe_v3", kind: .elevenLabs, use: .asyncSTT))
         XCTAssertTrue(ModelRegistry.isVerified("scribe_v3_live", kind: .elevenLabs, use: .realtimeSTT))
@@ -34,7 +34,7 @@ final class ModelRegistryTests: XCTestCase {
         XCTAssertTrue(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("google/gemini-3.8-flash", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("nova-3", kind: .soniox, use: .realtimeSTT))
-        XCTAssertEqual(ModelRegistry.models.filter(\.diarization).map(\.id), ["stt-async-v5"])
+        XCTAssertEqual(ModelRegistry.models.filter(\.diarization).map(\.id), ["stt-async-v6"])
         XCTAssertEqual(ModelRegistry.adapterVersion(.soniox, .realtimeSTT), 1)
         XCTAssertEqual(ModelRegistry.meetingNotesMinContext, 64_000)
         XCTAssertEqual(ModelRegistry.agentMinContext, 64_000)

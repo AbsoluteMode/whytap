@@ -5,7 +5,7 @@ import Foundation
 enum SonioxFileAPI {
     static let baseURL = URL(string: "https://api.soniox.com/v1/")!
     /// Files take the async model; `stt-rt-*` is realtime only.
-    static let asyncModel = "stt-async-v5"
+    static let asyncModel = ModelRegistry.sonioxRecordedModel
 
     static func request(path: String, method: String, apiKey: String) -> URLRequest {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))

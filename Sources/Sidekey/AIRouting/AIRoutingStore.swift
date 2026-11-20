@@ -223,6 +223,24 @@ final class AIRoutingStore: ObservableObject {
         commit(updated)
     }
 
+    /// Soniox v6 replaced v5 on the owner's decision, three weeks before
+    /// Soniox itself routes v5 requests to v6: a saved Soniox route moves to
+    /// the same kind of v6 model on the same account. Not version-gated, so a
+    /// route restored from an older backup moves too. Nothing else changes.
+    // WHY: .project-docs/decisions/2026-11-20-speech-model-lists.md
+    func upgradeSonioxModelsIfNeeded() {
+        guard pendingBackup == nil else { return }
+        let replacements = [
+            ModelRegistry.sonioxRetiredRealtimeModel: ModelRegistry.sonioxRealtimeModel,
+            ModelRegistry.sonioxRetiredRecordedModel: ModelRegistry.sonioxRecordedModel,
+        ]
+        var updated = stateWithSubtitleSeparation
+        for (feature, route) in updated.routes where route.account == .soniox {
+            if let newer = replacements[route.model] { updated.routes[feature]?.model = newer }
+        }
+        commit(updated)
+    }
+
     // MARK: - Persistence
 
     /// Reads entry by entry: a route or server this build does not know (an

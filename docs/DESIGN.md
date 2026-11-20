@@ -1005,7 +1005,9 @@ hover to keep the card visible while reading.
 - Each source has a speaker icon left of its enable switch (no separate sound
   row, at the user's request on 2026-11-20). Off, the default, shows a dimmed
   crossed-out speaker; a chosen sound shows a plain speaker in the text color.
-  Clicking it opens a native menu: Off, Glass, Ping, Pop; picking one previews.
+  Clicking it opens the native menu with Off, Glass, Ping and Pop. Choosing a
+  sound plays a preview. The full icon target uses the shared Settings hover,
+  pressed, keyboard focus and disabled states.
 - Existing type, spacing and colors stay in use. Keyboard and VoiceOver can
   reach the sound selector. Reduce Motion suppresses hover growth and transition
   animation. Live pointer/audio acceptance follows

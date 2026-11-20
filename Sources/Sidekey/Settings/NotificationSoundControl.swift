@@ -9,6 +9,8 @@ struct NotificationSoundControl: View {
     let sourceID: String
     let sourceName: String
     var preview: (NotificationSound) -> Void = { NotificationSoundPlayer.shared.play($0, preview: true) }
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var focused: Bool
 
     private var current: NotificationSound { settings.sound(for: sourceID) }
 
@@ -32,11 +34,13 @@ struct NotificationSoundControl: View {
                 .foregroundStyle(current == .none ? MacSettingsTheme.text3 : MacSettingsTheme.text)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.42)
         }
         .menuStyle(.button)
-        .buttonStyle(.plain)
+        .buttonStyle(MacButtonInteractionStyle(focused: focused))
         .menuIndicator(.hidden)
         .fixedSize()
+        .focused($focused)
         .accessibilityLabel("Notification sound for \(sourceName)")
         .accessibilityValue(current.title)
         .help(current == .none ? "Sound off. Click to choose a sound." : "Sound: \(current.title). Click to change.")

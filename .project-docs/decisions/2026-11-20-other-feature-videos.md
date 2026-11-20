@@ -1,3 +1,28 @@
+---
+id: other-feature-videos-2026-11-20
+type: decision
+title: Settings Other gets short descriptions, feature clips and the Agent group
+summary: Settings descriptions never name a remappable key; Other rows can open a bundled silent clip with the live shortcut; the Agents tab became an Agent group in Other (one switch that enables and connects, plus Allow file edits and commands), Coding tools moved to Integrations and the workspace path is in the plugin's get_state.
+status: confirmed
+tags: [settings, agent, video, hotkeys, plugin]
+canonical_for: [other-feature-videos, agent-settings-in-other]
+verified_at: 2026-11-20
+sources:
+  - type: user-confirmed
+    reference: On 2026-11-20 the user asked for the shortest descriptions plus a video per feature in Other, for Agent to become one entry in Other with other settings done through Claude Code or Codex, and then to keep Allow file edits and commands as a separate field in Other.
+    confirmed_at: 2026-11-20
+  - type: repository
+    reference: Sources/Sidekey/Settings/FeatureVideo.swift
+    confirmed_at: 2026-11-20
+  - type: repository
+    reference: Sources/Sidekey/Settings/AgentOtherSection.swift
+    confirmed_at: 2026-11-20
+  - type: repository
+    reference: Tests/SidekeyTests/Settings/AgentOtherSectionTests.swift
+    confirmed_at: 2026-11-20
+related: []
+---
+
 # Settings -> Other: short descriptions, feature clips, Agent in one group
 
 ## Context

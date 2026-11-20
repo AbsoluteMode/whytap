@@ -7,26 +7,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS (Universal DMG)" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
+  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
 </p>
 
 <p align="center">
   <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <b>Developer ID Signed &amp; Notarized</b> &nbsp;·&nbsp; <b>No Account · Zero Telemetry</b> &nbsp;·&nbsp; <b>MIT License</b></sub>
 </p>
 
-<br>
-
-<a href="#watch-every-tool-in-action">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/features-table-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/features-table-light.svg">
-    <img alt="Eight paid Mac tools in one free notch: comparison of Whytap tools vs average market prices" src="docs/assets/readme/features-table-dark.svg" width="100%">
-  </picture>
-</a>
-
 </div>
-
-<br>
 
 ## Watch every tool in action
 

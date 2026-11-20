@@ -31,8 +31,22 @@ struct InputLanguageSuggestion {
         self.detect = detect
     }
 
+    /// Counts one delivered take and, when it completes a streak, hands the
+    /// offer to `deliver` (the notification hub). The language counts as
+    /// offered only once the card was accepted: a failed save leaves it to be
+    /// offered again by the next take, instead of never.
+    @discardableResult
+    func offer(transcript: String, selectedLanguage: AppLanguage?,
+               deliver: (LocalNotificationEvent) async -> Bool) async -> AppLanguage? {
+        guard let language = record(transcript: transcript, selectedLanguage: selectedLanguage),
+              await deliver(Self.notification(for: language)) else { return nil }
+        markOffered(language)
+        return language
+    }
+
     /// Counts one delivered take. Returns the language to offer when this
-    /// take completes a streak for a language that was never offered before.
+    /// take completes a streak for a language that was not offered yet; the
+    /// caller marks it with `markOffered` once the offer was shown.
     /// A take with a chosen input language, or one whose language is unclear
     /// or outside the menu, changes nothing.
     func record(transcript: String, selectedLanguage: AppLanguage?) -> AppLanguage? {
@@ -42,11 +56,16 @@ struct InputLanguageSuggestion {
         let count = defaults.string(forKey: Key.streakCode) == code ? defaults.integer(forKey: Key.streakCount) + 1 : 1
         defaults.set(code, forKey: Key.streakCode)
         defaults.set(min(count, Self.streakNeeded), forKey: Key.streakCount)
-        var offered = defaults.stringArray(forKey: Key.offered) ?? []
+        let offered = defaults.stringArray(forKey: Key.offered) ?? []
         guard count >= Self.streakNeeded, !offered.contains(code) else { return nil }
-        offered.append(code)
-        defaults.set(offered, forKey: Key.offered)
         return language
+    }
+
+    func markOffered(_ language: AppLanguage) {
+        var offered = defaults.stringArray(forKey: Key.offered) ?? []
+        guard !offered.contains(language.code) else { return }
+        offered.append(language.code)
+        defaults.set(offered, forKey: Key.offered)
     }
 
     /// The dominant language of `text` as an ISO 639-1 code, or `nil` when the

@@ -37,6 +37,10 @@ New users do not know the setting matters.
 - Three consecutive takes in one language of the menu produce one notification
   card: "Dictating in Russian?" / "Click to set Russian as the input language.
   Auto stays if you don't." A different language restarts the count.
+- Only a take whose text reached the user counts: the normal delivery when
+  the paste landed, and a raw partial pasted after recovery. A language is
+  marked as offered only after Notify accepted the card, so a failed history
+  write leaves the offer to the next take (both found in the builder's review).
 - Clicking the card sets the input language, only while it is still Auto, so
   a card clicked later from Notify history never replaces a choice. Ignoring
   it changes nothing, and that language is never offered again; another
@@ -56,7 +60,7 @@ the app choosing for anyone; a wrong guess costs one ignored card.
 
 ## What was checked
 
-- 13 tests: the three-take rule, a chosen language is never counted or
+- 15 tests: the three-take rule, a chosen language is never counted or
   second-guessed, mixed languages never trigger, unclear takes are ignored,
   only the code and count are stored, the card's copy and action, scripts
   cannot supply the action, old history still decodes.

@@ -19,17 +19,60 @@ final class InputLanguageSuggestionTests: XCTestCase {
 
     // MARK: - The user's scenario
 
-    func test_three_auto_dictations_in_one_language_offer_it_once() {
+    func test_three_auto_dictations_in_one_language_offer_it_once() async {
         let defaults = defaults()
         let rule = InputLanguageSuggestion(defaults: defaults)
-        XCTAssertNil(rule.record(transcript: russian, selectedLanguage: nil))
-        XCTAssertNil(rule.record(transcript: russian, selectedLanguage: nil))
-        XCTAssertEqual(rule.record(transcript: russian, selectedLanguage: nil)?.code, "ru")
+        var cards: [LocalNotificationEvent] = []
+        let show: (LocalNotificationEvent) async -> Bool = { cards.append($0); return true }
+        var first = await rule.offer(transcript: russian, selectedLanguage: nil, deliver: show)
+        XCTAssertNil(first)
+        first = await rule.offer(transcript: russian, selectedLanguage: nil, deliver: show)
+        XCTAssertNil(first)
+        let third = await rule.offer(transcript: russian, selectedLanguage: nil, deliver: show)
+        XCTAssertEqual(third?.code, "ru")
+        XCTAssertEqual(cards.map(\.inputLanguageCode), ["ru"])
         // Ignored: Auto stays and the same language is never offered again,
         // also after a relaunch (a fresh rule over the same defaults).
         for _ in 0..<6 {
-            XCTAssertNil(InputLanguageSuggestion(defaults: defaults).record(transcript: russian, selectedLanguage: nil))
+            let again = await InputLanguageSuggestion(defaults: defaults)
+                .offer(transcript: russian, selectedLanguage: nil, deliver: show)
+            XCTAssertNil(again)
         }
+        XCTAssertEqual(cards.count, 1)
+    }
+
+    /// Found in review: a card that could not be saved (Notify history write
+    /// failed) marked the language as offered, so it was never offered at all.
+    func test_an_offer_that_could_not_be_shown_is_made_again_by_the_next_take() async {
+        let defaults = defaults()
+        let rule = InputLanguageSuggestion(defaults: defaults)
+        var attempts = 0
+        var working = false
+        let show: (LocalNotificationEvent) async -> Bool = { _ in attempts += 1; return working }
+        for _ in 0..<3 { await rule.offer(transcript: russian, selectedLanguage: nil, deliver: show) }
+        XCTAssertEqual(attempts, 1, "the third take tried to show the card")
+        XCTAssertNil(defaults.stringArray(forKey: "inputLanguageSuggestion.offeredCodes"))
+        // Notify recovers; a relaunch in between changes nothing.
+        working = true
+        let offered = await InputLanguageSuggestion(defaults: defaults)
+            .offer(transcript: russian, selectedLanguage: nil, deliver: show)
+        XCTAssertEqual(offered?.code, "ru")
+        XCTAssertEqual(defaults.stringArray(forKey: "inputLanguageSuggestion.offeredCodes"), ["ru"])
+        let after = await rule.offer(transcript: russian, selectedLanguage: nil, deliver: show)
+        XCTAssertNil(after)
+        XCTAssertEqual(attempts, 2)
+    }
+
+    /// Found in review: a take whose paste failed was counted, and a raw
+    /// partial that was pasted after recovery was not.
+    func test_only_takes_that_reached_the_user_are_counted() throws {
+        let source = try source("Sources/Sidekey/AppDelegate.swift")
+        XCTAssertTrue(source.contains("if pasted { noteDeliveredDropForLanguageOffer(rawTranscript) }"))
+        let raw = try XCTUnwrap(source.range(of: "let pasted = await self.autoPasteEngine.paste(raw)"))
+        let tail = source[raw.upperBound...].prefix(260)
+        XCTAssertTrue(tail.contains("self.noteDeliveredDropForLanguageOffer(raw)"))
+        XCTAssertEqual(source.components(separatedBy: "noteDeliveredDropForLanguageOffer(").count - 1, 3,
+                       "the definition and exactly the two delivered paths")
     }
 
     func test_a_chosen_input_language_is_never_second_guessed() {
@@ -51,7 +94,9 @@ final class InputLanguageSuggestionTests: XCTestCase {
 
     func test_a_second_language_can_be_offered_after_the_first_was_ignored() {
         let rule = InputLanguageSuggestion(defaults: defaults())
-        for _ in 0..<3 { _ = rule.record(transcript: russian, selectedLanguage: nil) }
+        for _ in 0..<3 {
+            if let language = rule.record(transcript: russian, selectedLanguage: nil) { rule.markOffered(language) }
+        }
         XCTAssertNil(rule.record(transcript: english, selectedLanguage: nil))
         XCTAssertNil(rule.record(transcript: english, selectedLanguage: nil))
         XCTAssertEqual(rule.record(transcript: english, selectedLanguage: nil)?.code, "en")
@@ -87,7 +132,9 @@ final class InputLanguageSuggestionTests: XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { defaults.removePersistentDomain(forName: name) }
         let rule = InputLanguageSuggestion(defaults: defaults)
-        for _ in 0..<3 { _ = rule.record(transcript: russian, selectedLanguage: nil) }
+        for _ in 0..<3 {
+            if let language = rule.record(transcript: russian, selectedLanguage: nil) { rule.markOffered(language) }
+        }
         let stored = defaults.persistentDomain(forName: name) ?? [:]
         XCTAssertEqual(Set(stored.keys), [
             "inputLanguageSuggestion.streakCode", "inputLanguageSuggestion.streakCount",

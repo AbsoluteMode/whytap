@@ -1326,13 +1326,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             completeDropTurnTelemetry()
             dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
             // The provider's own text: Smart can translate the pasted one.
-            if let language = InputLanguageSuggestion().record(
-                transcript: rawTranscript, selectedLanguage: PrivacyPreferences.shared.selectedLanguage) {
-                Task { await LocalNotificationHub.shared.receive(InputLanguageSuggestion.notification(for: language)) }
-            }
+            if pasted { noteDeliveredDropForLanguageOffer(rawTranscript) }
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    /// Only a take whose text reached the user counts towards the input
+    /// language offer: the normal delivery and the pasted raw partial.
+    // WHY: .project-docs/decisions/2026-11-20-input-language-suggestion.md
+    private func noteDeliveredDropForLanguageOffer(_ transcript: String) {
+        let selected = PrivacyPreferences.shared.selectedLanguage
+        Task {
+            await InputLanguageSuggestion().offer(transcript: transcript, selectedLanguage: selected) {
+                await LocalNotificationHub.shared.receive($0)
+            }
+        }
     }
 
     private func saveUndeliveredLocalDrop(raw: String, formatted: String, targetApp: String?) -> Bool {
@@ -3235,7 +3244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // caller owns the phase (it flips to `.deliveryFailed`).
                 guard let self, generation == self.streamingSetupGeneration else { return false }
                 let pasted = await self.autoPasteEngine.paste(raw)
-                if pasted { AppState.shared.phase = .idle }
+                if pasted {
+                    AppState.shared.phase = .idle
+                    self.noteDeliveredDropForLanguageOffer(raw)
+                }
                 return pasted
             },
             saveUndeliveredPartial: { [weak self] raw in

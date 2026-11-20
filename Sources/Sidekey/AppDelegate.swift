@@ -369,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.handle(request)
             }
         }
+        // The offer is accepted only while the input language is still
+        // Auto: a card clicked later from history never replaces a choice.
+        LocalNotificationHub.shared.setInputLanguage = { code in
+            guard PrivacyPreferences.shared.selectedLanguage == nil,
+                  let language = AppLanguage.all.first(where: { $0.code == code }) else { return }
+            PrivacyPreferences.shared.selectedLanguage = language
+        }
         LocalNotificationHub.shared.openMeeting = { [weak self] id in
             guard let self else { return }
             self.openSettingsWindow(tab: .notes)
@@ -1318,6 +1325,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             completeDropTurnTelemetry()
             dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+            // The provider's own text: Smart can translate the pasted one.
+            if let language = InputLanguageSuggestion().record(
+                transcript: rawTranscript, selectedLanguage: PrivacyPreferences.shared.selectedLanguage) {
+                Task { await LocalNotificationHub.shared.receive(InputLanguageSuggestion.notification(for: language)) }
+            }
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle

@@ -960,13 +960,15 @@ totals show +. OpenCode's computed step prices remain estimates.
 Tracking starts with this update; synthetic model checks are excluded. WHY:
 .project-docs/decisions/2026-10-20-feature-costs.md
 
-API hints: the fourth tab contains five offer cards with allowances and official
-links, including Tavily web search for Agent (1,000 monthly search credits,
-basic search costs one credit, no card required). It distinguishes starter
-credit, monthly allowance and paid-plan benefits. Dates are per-card: Tavily
-October 22, 2026; the four earlier offers October 19, 2026. The odd final card spans
-two columns; narrow surfaces use one column. Add API key opens the
-existing API-key form. Tavily has its own search tile there, without model routing.
+API hints: the fourth tab lists provider offers as rows grouped by Speech to
+text, Language models and Web search. A row shows the logo, provider, what it
+takes to start (No card needed, Card required or Paid plan, in that order
+within a group), the allowance with its period, and Get offer. Hovering or
+focusing Get offer opens the conditions and that offer's check date in a
+popover beside the button. The header says Reviewed monthly and shows the
+newest check date. List only offers whose key works in Whytap as it is; Groq
+and Cloudflare wait for their own provider support. The tab has no footer.
+Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
 

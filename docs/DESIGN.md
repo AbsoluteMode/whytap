@@ -272,7 +272,7 @@ The chosen direction is the user's tile-to-inline-form request.
   captures clicks or shifts fields/buttons. Existing keys are never read back.
   A failed Tavily deletion uses "Couldn’t remove key" in the same brief notice,
   so a storage failure is not described as a rejected credential.
-  Add-key entry points in Models/API hints open this same API keys surface.
+  Add-key entry points in Models open this same API keys surface.
 - OpenAI and Anthropic are ordinary LLM providers for all text modes. Adding a
   key never assigns routes silently; model selection retains its own synthetic
   check. Why: the user rejected limiting API setup by individual features.
@@ -1431,15 +1431,32 @@ supersedes the former window presentation. See
   reduced motion follows the existing shell without extra movement. Real key
   acceptance and native Screen Recording remain installed-app checks.
 
+## API hints: rows by category (2026-11-19)
+
+- Replace the grid of large offer cards with rows grouped under Speech to
+  text, Language models and Web search. Reason: the user wanted offers compared
+  within one job, and cards already scrolled at five offers.
+- A row is two lines high: logo, provider over what it takes to start, the
+  allowance over its period, and Get offer. No chips: "Paid plan" and "Card
+  required" use the warning color, "No card needed" stays secondary.
+- Details (conditions, that offer's check date) open in a popover on the
+  trailing side of Get offer on hover or keyboard focus. Reason: the row has a
+  button to click, so unlike Costs the popover must not sit over the control
+  or the row being read.
+- The header carries "Reviewed monthly · Last checked <newest date>".
+- Verified offscreen only (light/dark, 440/560/760 pt, both scroll ends). The
+  popover's placement and hover timing need a check in the installed app.
+
 ## API hints: Tavily search (2026-10-22)
 
 - Keep the existing offer cards, typography and semantic colors; add Tavily as
   web search for Agent with a neutral globe symbol. Reason: a search API should
   not appear as another LLM model.
 - Lay out all offers dynamically: two columns from 560pt, with the odd final
-  card spanning both; below 560pt use one column. Keep the offer grid scrollable
-  and footer controls outside it. Reason: five offers must not leave an empty
-  half-row or hide the last provider.
+  card spanning both; below 560pt use one column. Keep the offer grid scrollable.
+  Reason: five offers must not leave an empty half-row or hide the last provider.
+  The tab has no footer since 2026-11-19 (user request): no explanatory lines
+  and no Add API key button under the offers.
 - Show verification dates on each card: existing offers retain October 19, Tavily
   uses October 22. Reason: adding one verified offer does not reverify the rest.
 - Point all key setup, including Tavily, to API & Models → API keys.

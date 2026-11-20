@@ -4,7 +4,8 @@ import XCTest
 @testable import Sidekey
 
 /// No app launch, keys or network. Review both scroll extremes so an added
-/// offer cannot silently disappear below a fixed-size grid or footer.
+/// offer cannot silently disappear below the visible rows. The host is short
+/// on purpose: the category rows must still scroll.
 @MainActor
 final class APIHintsRenderTests: XCTestCase {
     func testOffscreenOfferLayoutsAndScrollReachability() throws {
@@ -26,8 +27,8 @@ final class APIHintsRenderTests: XCTestCase {
                 for width in [440.0, 560.0, 760.0] {
                     let host = NSHostingView(rootView: APIHintsView(onAddKey: {}, onClose: {}, embedded: embedded)
                         .environment(\.colorScheme, dark ? .dark : .light))
-                    host.frame = NSRect(x: 0, y: 0, width: width, height: 650)
-                    let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: width, height: 650),
+                    host.frame = NSRect(x: 0, y: 0, width: width, height: 300)
+                    let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: width, height: 300),
                                           styleMask: .borderless, backing: .buffered, defer: true)
                     window.isReleasedWhenClosed = false
                     window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -37,7 +38,7 @@ final class APIHintsRenderTests: XCTestCase {
                     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.12))
                     host.layoutSubtreeIfNeeded()
                     XCTAssertEqual(host.bounds.width, width)
-                    XCTAssertEqual(host.bounds.height, 650)
+                    XCTAssertEqual(host.bounds.height, 300)
                     let scroll = try XCTUnwrap(Self.scrollViews(in: host).first)
                     let document = try XCTUnwrap(scroll.documentView)
                     XCTAssertGreaterThan(document.bounds.height, scroll.contentView.bounds.height)
@@ -58,6 +59,24 @@ final class APIHintsRenderTests: XCTestCase {
                 }
             }
         }
+    }
+
+    func testHeaderShowsNewestCheckDateAndRowsStayGrouped() {
+        XCTAssertEqual(APIHintsView.displayDate("2026-10-22"), "October 22, 2026")
+        XCTAssertEqual(APIHintsView.displayDate("not a date"), "not a date")
+        let newest = APIHintsView.hints.map(\.checked).max()
+        XCTAssertEqual(APIHintsView.lastChecked, APIHintsView.displayDate(newest ?? ""))
+        // Every category has an offer, and none is hidden by an unknown category.
+        for category in APIHintsView.Category.allCases {
+            XCTAssertFalse(APIHintsView.hints.filter { $0.category == category }.isEmpty, category.title)
+        }
+        // Easiest start first: no card, then card, then paid plan.
+        let order: [APIHintsView.Access] = [.noCard, .cardRequired, .paidPlan]
+        for category in APIHintsView.Category.allCases {
+            let ranks = APIHintsView.hints.filter { $0.category == category }.compactMap { order.firstIndex(of: $0.access) }
+            XCTAssertEqual(ranks, ranks.sorted(), category.title)
+        }
+        XCTAssertEqual(Set(APIHintsView.hints.map(\.provider)).count, APIHintsView.hints.count)
     }
 
     private static func scrollViews(in view: NSView) -> [NSScrollView] {

@@ -83,8 +83,8 @@ saved by the helper or another local writer is adopted before every save and
 shown as soon as the folder changes; it is never overwritten. Unreadable or
 unsupported archives block writes and retain the original file; Retry loads a
 restored file. A failed save keeps the editor/draft and reports an error.
-The file uses the system's default data protection class, so it stays
-readable while the screen is locked; a file saved by Whytap 2.2.22 or earlier
+The file (tasks and local events) uses the system's default data protection
+class, so it stays readable while the screen is locked; a file saved by Whytap 2.2.22 or earlier
 moves to that class on its first read.
 Local tasks and events are not uploaded by calendar connections.
 Encrypted backups include the Planner archive, calendar account settings and saved

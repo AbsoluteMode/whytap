@@ -11,6 +11,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-04 the user approved making agents work with To-do while the Mac is locked, after `whytap todo list` failed on a locked screen.
     confirmed_at: 2026-11-04
+  - type: user-confirmed
+    reference: On 2026-11-20 the user also approved the same class for the local calendar events stored in this archive (answering "yes, let them too"), after the builder raised the archive scope.
+    confirmed_at: 2026-11-20
   - type: repository
     reference: Sources/WhytapCaseKit/PlannerTodoFile.swift
     confirmed_at: 2026-11-04
@@ -53,6 +56,13 @@ the protection class changed with whichever side last saved.
   PlannerStore and in the helper. A file with Complete or CompleteUnlessOpen
   (saved by builds up to 2.2.22) moves to the class above. A successful read
   means the Mac is unlocked, so the migration needs no unlock of its own.
+- Scope: the class applies to the whole archive. Besides To-do it holds the
+  local calendar events created in Whytap (title, time, notes, location,
+  meeting link); events from Google, Outlook, Zoom and Apple Calendar are not
+  stored there. The user approved this scope on 2026-11-20. Splitting events
+  into a separately protected file was rejected: it needs a migration and
+  changes to backups and rollback for a feature with no stored events on the
+  user's Mac.
 - A store whose load failed (for example, it launched on a locked screen
   before migration) already recovers on the next To-do opening, app-control
   request or folder change through `refreshFromDisk`.
@@ -80,6 +90,10 @@ unlock after startup still protect the file at rest.
   the screen cannot be automated in tests.
 
 ## Rejected
+
+- Moving local calendar events to a separate file under the stricter class.
+  This means a format migration, backup and rollback changes and a risk of
+  data loss; the user accepted the shared scope instead.
 
 - Serving `todo list` from memory and queuing adds while locked. This is more
   state and new failure modes, and the helper's file path would still be

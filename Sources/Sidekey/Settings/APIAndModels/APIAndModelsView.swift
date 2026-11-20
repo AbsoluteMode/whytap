@@ -509,14 +509,28 @@ struct APIAndModelsView: View {
 /// asset (Anthropic, a user's server) shows an SF Symbol.
 @MainActor
 struct ProviderKindIcon: View {
-    let kind: AIProviderKind
-    var size: CGFloat = 16
+    private let assetName: String?
+    private let systemName: String
+    var size: CGFloat
+
+    init(kind: AIProviderKind, size: CGFloat = 16) {
+        assetName = Self.assetName(for: kind)
+        systemName = Self.systemName(for: kind)
+        self.size = size
+    }
+
+    /// A key tile outside the model providers (Tavily web search) draws its bundled mark the same way.
+    init(assetName: String, size: CGFloat = 16) {
+        self.assetName = assetName
+        systemName = "globe"
+        self.size = size
+    }
 
     var body: some View {
-        if let assetName = Self.assetName(for: kind) {
+        if let assetName {
             ProviderBrandIcon(assetName: assetName, size: size)
         } else {
-            ProviderBrandIcon(systemName: Self.systemName(for: kind), size: size)
+            ProviderBrandIcon(systemName: systemName, size: size)
         }
     }
 

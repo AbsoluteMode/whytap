@@ -79,6 +79,7 @@ struct ProviderKeyTiles: View {
                 .overlay {
                     VStack(spacing: 9) {
                         if let provider { ProviderKindIcon(kind: provider, size: 28) }
+                        else if target == .tavily { ProviderKindIcon(assetName: "tavily", size: 28) }
                         else { Image(systemName: "globe").font(.system(size: 28)).frame(width: 28, height: 28).accessibilityHidden(true) }
                         Text(title)
                             .font(.system(size: 13, weight: .semibold))

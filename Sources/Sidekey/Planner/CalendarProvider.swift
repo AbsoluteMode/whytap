@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import WhytapCaseKit
 
@@ -68,8 +67,6 @@ struct CalendarFeed: Identifiable, Equatable {
     var remoteID: String
     var title: String
     var provider: CalendarProvider?
-    /// The calendar's own colour as `#RRGGBB` when the provider reports one.
-    var color: String? = nil
 }
 
 struct CalendarFeedEvent: Identifiable, Equatable {
@@ -83,35 +80,11 @@ struct CalendarFeedEvent: Identifiable, Equatable {
     var additionalFeedIDs: [String] = []
 }
 
-// WHY: .project-docs/decisions/2026-11-20-calendar-day-view.md
-/// Each calendar keeps one colour in the day view: the provider's own, or a
-/// stable one derived from the calendar's identifier.
-enum CalendarFeedColor {
-    /// Whytap's local events.
-    static let local = "#0A84FF"
-    static let palette = ["#0A84FF", "#30D158", "#FF9F0A", "#BF5AF2", "#FF375F", "#64D2FF", "#FFD60A", "#AC8E68"]
-
-    /// `#RRGGBB` (Google, Zoom `backgroundColor`, Microsoft `hexColor`); anything else is ignored.
-    static func hex(_ raw: Any?) -> String? {
-        guard let text = (raw as? String)?.trimmingCharacters(in: .whitespaces), text.count == 7, text.first == "#",
-              text.dropFirst().allSatisfy(\.isHexDigit) else { return nil }
-        return text.uppercased()
-    }
-
-    /// EKCalendar.color is an implicitly unwrapped NSColor that is nil until set,
-    /// e.g. on an unsaved calendar; nil means the fallback colour.
-    static func hex(appleColor color: NSColor?) -> String? {
-        guard let rgb = color?.usingColorSpace(.sRGB) else { return nil }
-        return String(format: "#%02X%02X%02X", Int((rgb.redComponent * 255).rounded()),
-                      Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded()))
-    }
-
-    static func fallback(for feedID: String) -> String {
-        // FNV-1a: stable across launches, unlike Hasher.
-        var hash: UInt32 = 2_166_136_261
-        for byte in feedID.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-        return palette[Int(hash % UInt32(palette.count))]
-    }
+// WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+/// The service an event comes from, shown as its logo in the day view.
+enum CalendarEventSource: Equatable, Hashable {
+    case whytap
+    case provider(CalendarProvider)
 }
 
 /// What a click on an event does: join its meeting, else open it in its own calendar.

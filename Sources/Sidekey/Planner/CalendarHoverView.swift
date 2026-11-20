@@ -5,7 +5,7 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-10-21-calendar-hover.md
 @MainActor
 final class CalendarHoverModel: ObservableObject {
-    enum Page: Equatable { case agenda, sources, providers }
+    enum Page: Equatable { case agenda, providers }
     static let shared = CalendarHoverModel(store: .shared, connections: .shared,
         activityChanged: { AppState.shared.calendarHoverActive = $0 },
         connectionActivityChanged: { AppState.shared.calendarHoverConnectionActive = $0 })
@@ -48,7 +48,7 @@ final class CalendarHoverModel: ObservableObject {
     func connect(_ provider: CalendarProvider, info: [String: Any]?, onSuccess: @escaping () -> Void = {}) -> Bool {
         guard !connectionFlow.working else { return false }
         page = .providers
-        if provider == .apple && connections.appleEnabled { page = .sources; return false }
+        if provider == .apple && connections.appleEnabled { page = .agenda; return false }
         return connectionFlow.startRegistered(provider: provider, info: info) { [self] in
             page = .agenda; refresh(); onSuccess()
         }
@@ -56,12 +56,13 @@ final class CalendarHoverModel: ObservableObject {
     var isToday: Bool { Calendar.current.isDate(selectedDay, inSameDayAs: now()) }
     var interval: DateInterval { Calendar.current.dateInterval(of: .day, for: selectedDay)! }
 
+    /// Every connected calendar: Hover has no calendar hiding. A choice saved by
+    /// an older build stays stored for backups and is ignored here.
     var events: [CalendarFeedEvent] {
-        let local = connections.hiddenFeeds.contains("local") ? [] : store.archive.events.map {
+        let local = store.archive.events.map {
             CalendarFeedEvent(id: $0.id.uuidString, feedID: "local", event: $0, sourceURL: nil)
         }
-        let remote = connections.events.filter { !connections.hiddenFeeds.contains($0.feedID) }
-        return CalendarEventMerger.merge(local + remote).filter { $0.event.occurs(on: selectedDay) }.sorted {
+        return CalendarEventMerger.merge(local + connections.events).filter { $0.event.occurs(on: selectedDay) }.sorted {
             if $0.event.allDay != $1.event.allDay { return $0.event.allDay }
             if $0.event.start != $1.event.start { return $0.event.start < $1.event.start }
             return $0.id < $1.id
@@ -72,10 +73,15 @@ final class CalendarHoverModel: ObservableObject {
         id == "local" ? "Whytap · On this Mac" : connections.feeds.first(where: { $0.id == id })?.title ?? "Connected calendar"
     }
 
-    /// `#RRGGBB` of the event's calendar in the day view.
-    func feedColor(_ id: String) -> String {
-        if id == "local" { return CalendarFeedColor.local }
-        return connections.feeds.first(where: { $0.id == id })?.color ?? CalendarFeedColor.fallback(for: id)
+    /// The service a calendar belongs to, for the event's logo.
+    func source(_ feedID: String) -> CalendarEventSource? {
+        if feedID == "local" { return .whytap }
+        return connections.feeds.first(where: { $0.id == feedID })?.provider.map(CalendarEventSource.provider)
+    }
+
+    /// Whether the provider already has a connection, for the Connect list.
+    func isConnected(_ provider: CalendarProvider) -> Bool {
+        provider == .apple ? connections.appleEnabled : connections.accounts.contains { $0.provider == provider }
     }
 
     /// Tooltip and VoiceOver name of the click: Join meeting or Open in <calendar app>.
@@ -167,11 +173,6 @@ struct CalendarHoverView: View {
             Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
             if model.page == .agenda {
-                CalendarHoverButton { model.page = .sources } label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle").frame(width: 26, height: 26)
-                }.accessibilityLabel("Choose visible calendars")
-            }
-            if model.page == .agenda || model.page == .sources {
                 CalendarHoverButton { model.page = .providers } label: {
                     Text("Connect").font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 9).frame(height: 26)
@@ -184,7 +185,6 @@ struct CalendarHoverView: View {
     private var title: String {
         switch model.page {
         case .agenda: return "Calendar"
-        case .sources: return "Calendars"
         case .providers: return "Connect"
         }
     }
@@ -192,39 +192,34 @@ struct CalendarHoverView: View {
     @ViewBuilder private var content: some View {
         switch model.page {
         case .agenda: agenda
-        case .sources: sources
         case .providers: providers
         }
     }
 
     private var agenda: some View {
         VStack(spacing: 8) {
+            // Compact day switcher; calendars refresh on their own (see body).
             HStack(spacing: 4) {
-                CalendarHoverButton { model.moveDay(-1) } label: { Image(systemName: "chevron.left").frame(width: 26, height: 28) }
-                    .accessibilityLabel("Previous day")
+                CalendarHoverButton { model.moveDay(-1) } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24)
+                }.accessibilityLabel("Previous day")
                 CalendarHoverButton { model.today() } label: {
-                    VStack(spacing: 1) {
-                        Text(model.isToday ? "Today" : model.selectedDay.formatted(.dateTime.weekday(.wide)))
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(model.selectedDay.formatted(.dateTime.day().month(.wide)))
-                            .font(.system(size: 10)).foregroundStyle(.white.opacity(0.76))
-                    }.frame(maxWidth: .infinity).frame(height: 34)
+                    (Text(model.isToday ? "Today" : model.selectedDay.formatted(.dateTime.weekday(.abbreviated)))
+                        .font(.system(size: 12, weight: .semibold))
+                     + Text("  " + model.selectedDay.formatted(.dateTime.day().month(.abbreviated)))
+                        .font(.system(size: 11)).foregroundColor(.white.opacity(0.76)))
+                        .lineLimit(1).padding(.horizontal, 10).frame(height: 24)
                 }.help("Show today · " + TimeZone.current.identifier)
                     .accessibilityLabel("\(model.selectedDay.formatted(date: .complete, time: .omitted)). Show today")
-                CalendarHoverButton { model.moveDay(1) } label: { Image(systemName: "chevron.right").frame(width: 26, height: 28) }
-                    .accessibilityLabel("Next day")
-                CalendarHoverButton { model.refresh() } label: {
-                    Group {
-                        if connections.refreshing { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                    }.frame(width: 26, height: 28)
-                }.disabled(connections.refreshing).accessibilityLabel("Refresh calendars")
-            }
-            if !connections.errors.isEmpty || store.errorMessage != nil || connectionFlow.error != nil {
-                CalendarHoverButton {
-                    if connectionFlow.error != nil { model.page = .providers }
-                    else { model.page = .sources }
-                } label: {
+                CalendarHoverButton { model.moveDay(1) } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24)
+                }.accessibilityLabel("Next day")
+                if connections.refreshing {
+                    ProgressView().controlSize(.mini).frame(width: 16, height: 24).accessibilityLabel("Updating calendars")
+                }
+            }.frame(maxWidth: .infinity)
+            if needsAttention {
+                CalendarHoverButton { model.page = .providers } label: {
                     Label("Some calendars need attention", systemImage: "exclamationmark.triangle")
                         .font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
@@ -239,7 +234,7 @@ struct CalendarHoverView: View {
                             Text(connections.refreshing ? "Updating calendars…" : "No events for this day")
                                 .font(.system(size: 12, weight: .medium))
                             Text(connections.accounts.isEmpty && !connections.appleEnabled
-                                 ? "Connect a calendar to see your schedule." : "Events from your selected calendars appear here.")
+                                 ? "Connect a calendar to see your schedule." : "Events from your connected calendars appear here.")
                                 .font(.system(size: 11)).multilineTextAlignment(.center)
                         }
                         .foregroundStyle(.white.opacity(0.86)).padding(.horizontal, 12).padding(.vertical, 10)
@@ -251,16 +246,17 @@ struct CalendarHoverView: View {
         }
     }
 
-    /// All-day events above the grid, one chip each, in their calendar's colour.
+    /// All-day events above the grid, one chip each, with their service's logo.
     private func allDayRow(_ items: [CalendarFeedEvent]) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 4) {
                 ForEach(items) { item in
                     CalendarEventButton(model: model, item: item) { _ in
                         HStack(spacing: 5) {
+                            CalendarSourceLogoView(source: model.source(item.feedID), size: 12)
                             Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                             Text(model.sourceTitle(item.feedID)).font(.system(size: 10)).lineLimit(1).opacity(0.8)
-                        }.padding(.leading, 9).padding(.trailing, 7).frame(height: 22)
+                        }.padding(.leading, 6).padding(.trailing, 7).frame(height: 22)
                     }.frame(maxWidth: 220)
                 }
             }
@@ -268,7 +264,7 @@ struct CalendarHoverView: View {
     }
 
     /// The classic day: hour lines with labels, events as blocks from start to
-    /// end in their calendar's colour, the current time on today.
+    /// end with their service's logo, the current time on today.
     private func dayGrid(_ events: [CalendarFeedEvent]) -> some View {
         let day = model.interval
         let hours = CalendarDayLayout.hours(of: day)
@@ -343,15 +339,18 @@ struct CalendarHoverView: View {
                             if model.visible { NSApp.activate(ignoringOtherApps: true) }
                         }
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 9) {
+                            CalendarSourceLogoView(source: .provider(provider), size: 20)
                             Text(provider.integrationTitle).font(.system(size: 12, weight: .semibold))
                             Spacer(minLength: 2)
                             if connectionFlow.working && connectionFlow.lastProvider == provider {
                                 ProgressView().controlSize(.small)
+                            } else if provider == .apple && model.isConnected(.apple) {
+                                Text("Connected").font(.system(size: 11)).foregroundStyle(.white.opacity(0.76))
                             } else {
-                                Text("Connect").font(.system(size: 11, weight: .medium))
+                                Text(model.isConnected(provider) ? "Add account" : "Connect").font(.system(size: 11, weight: .medium))
                             }
-                        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(connections.isConnecting)
                     .accessibilityLabel(connectionFlow.working && connectionFlow.lastProvider == provider
@@ -366,48 +365,27 @@ struct CalendarHoverView: View {
                         Text("Cancel").font(.system(size: 11)).padding(8)
                     }
                 }
-            }.padding(3)
-        }.scrollIndicators(.visible)
-    }
-
-    private var sources: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 7) {
-                feed("local", title: "Whytap · On this Mac")
-                ForEach(connections.feeds) { source in feed(source.id, title: source.title) }
-                if let message = connections.connectionBlockReason { Text(message).font(.system(size: 11)) }
-                if connections.feeds.isEmpty {
-                    Text("Connected calendars appear here after refresh.").font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.76)).padding(.vertical, 6)
-                }
-                ForEach(connections.errors.keys.sorted(), id: \.self) { key in
-                    Text(connections.errors[key] ?? "").font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
-                }
+                // Problems of connected calendars, moved here with the calendar list.
+                if let message = connections.connectionBlockReason { notice(message) }
+                ForEach(connections.errors.keys.sorted(), id: \.self) { key in notice(connections.errors[key] ?? "") }
                 if let error = store.errorMessage {
-                    Text(error).font(.system(size: 11))
+                    notice(error)
                     CalendarHoverButton { store.reload() } label: { Text("Retry").font(.system(size: 11)).padding(8) }
                 }
                 Text("Manage connected accounts in Settings → Integrations.")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).padding(.top, 8)
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).padding(.top, 4).padding(.horizontal, 2)
             }.padding(3)
         }.scrollIndicators(.visible)
     }
 
-    private func feed(_ id: String, title: String) -> some View {
-        let visible = !connections.hiddenFeeds.contains(id)
-        return CalendarHoverButton { connections.setVisible(!visible, feedID: id) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: visible ? "checkmark.square.fill" : "square")
-                Circle().fill(Color(hexCSS: model.feedColor(id))).frame(width: 8, height: 8).accessibilityHidden(true)
-                Text(title).font(.system(size: 12)).lineLimit(2)
-                Spacer(minLength: 0)
-            }.padding(9).frame(maxWidth: .infinity, alignment: .leading)
-        }.accessibilityValue(visible ? "Shown" : "Hidden").help(title)
-            .accessibilityRepresentation {
-                Toggle(title, isOn: Binding(get: { !connections.hiddenFeeds.contains(id) },
-                    set: { connections.setVisible($0, feedID: id) }))
-            }
-            .disabled(connections.connectionBlockReason != nil || connections.isConnecting)
+    private var needsAttention: Bool {
+        !connections.errors.isEmpty || store.errorMessage != nil || connectionFlow.error != nil
+            || connections.connectionBlockReason != nil
+    }
+
+    private func notice(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.orange)
+            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 2)
     }
 }
 
@@ -457,8 +435,9 @@ enum CalendarDayGrid {
     static let minimumBlockHeight: CGFloat = 18
 }
 
-/// An event in its calendar's colour. With a meeting link or an original it is
-/// a button (join, else open in its calendar); otherwise it only shows.
+/// An event block, one colour for every calendar; its logo names the service.
+/// With a meeting link or an original it is a button (join, else open in its
+/// calendar); otherwise it only shows.
 struct CalendarEventButton<Label: View>: View {
     @ObservedObject var model: CalendarHoverModel
     let item: CalendarFeedEvent
@@ -467,7 +446,7 @@ struct CalendarEventButton<Label: View>: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        let color = Color(hexCSS: model.feedColor(item.feedID))
+        let color = CalendarEventBlockStyle.color
         let title = model.actionTitle(item)
         let help = [item.event.title, CalendarEventBlockLabel.timeRange(item.event), model.sourceTitle(item.feedID), title]
             .compactMap { $0 }.joined(separator: " · ")
@@ -494,8 +473,12 @@ struct CalendarEventButton<Label: View>: View {
     }
 }
 
-/// Tinted block with a solid calendar-coloured edge; hover and press deepen the tint.
+/// Tinted block with a solid edge; hover and press deepen the tint.
 struct CalendarEventBlockStyle: ButtonStyle {
+    // WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+    /// Every event has this colour; the logo, not the colour, tells calendars apart.
+    static let color = Color(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255)
+
     let color: Color
     let hovering: Bool
     let focused: Bool
@@ -516,8 +499,8 @@ struct CalendarEventBlockStyle: ButtonStyle {
     }
 }
 
-/// Title, then "11:00 – 11:45 AM · Work" when the block is tall enough; a short
-/// block keeps the title and its start time on one line.
+/// The service's logo, the title, then "11:00 – 11:45 AM · Work" when the block
+/// is tall enough; a short block keeps logo, title and start time on one line.
 struct CalendarEventBlockLabel: View {
     @ObservedObject var model: CalendarHoverModel
     let item: CalendarFeedEvent
@@ -531,14 +514,18 @@ struct CalendarEventBlockLabel: View {
     var body: some View {
         Group {
             if height >= 30 {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.event.title).font(.system(size: 11, weight: .semibold))
-                        .lineLimit(height >= 46 ? 2 : 1)
-                    Text([Self.timeRange(item.event), model.sourceTitle(item.feedID)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 10)).lineLimit(1).opacity(0.85)
+                HStack(alignment: .top, spacing: 5) {
+                    CalendarSourceLogoView(source: model.source(item.feedID), size: 12).padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.event.title).font(.system(size: 11, weight: .semibold))
+                            .lineLimit(height >= 46 ? 2 : 1)
+                        Text([Self.timeRange(item.event), model.sourceTitle(item.feedID)].compactMap { $0 }.joined(separator: " · "))
+                            .font(.system(size: 10)).lineLimit(1).opacity(0.85)
+                    }
                 }.padding(.vertical, 3)
             } else {
                 HStack(spacing: 4) {
+                    CalendarSourceLogoView(source: model.source(item.feedID), size: 11)
                     Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Text(item.event.start.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: 10)).lineLimit(1).opacity(0.85).layoutPriority(-1)
@@ -546,7 +533,7 @@ struct CalendarEventBlockLabel: View {
             }
         }
         .foregroundStyle(.white)
-        .padding(.leading, 8).padding(.trailing, 4)
+        .padding(.leading, 7).padding(.trailing, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

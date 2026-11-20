@@ -715,10 +715,11 @@ in SwiftUI; the native app does not acquire a React runtime or npm dependencies.
 
 ### Embedded surfaces
 
-The island stays dark. Toolbox embeds actual island editors inside explicitly
-dark previews; the Toolbox navigation, captions and catalog follow the Settings
-theme. This keeps the preview faithful and prevents white overlay text from
-disappearing on a light settings surface. API hints and key/model sheets follow
+The island stays dark. Toolbox embeds actual island editors on the Settings
+background, like every other tool pane (user decision 2026-11-20: one
+background for all tool settings). Their foreground is `IslandInk`: white in
+the always-dark island, near-black on light Settings, so overlay text does not
+disappear on a light surface. The earlier explicitly dark preview cards are gone. API hints and key/model sheets follow
 the parent window's system appearance.
 
 ### Verification and hypotheses

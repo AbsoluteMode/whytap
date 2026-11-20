@@ -1456,8 +1456,9 @@ once it takes an existing shared document (the first Mac, once its upload
 succeeds); values it had before are stamped at the epoch and never replace a
 shared entry. A local ledger (Application Support/<bundle id>/
 settings-sync/ledger.json, hashes only, never backed up) records what this Mac
-agreed; turning sync off, or an applied restore of settings/keys (marked before
-it starts, kept if rolled back), deletes it. While a round runs it alone writes the ledger; edits seen meanwhile
+agreed; turning sync off deletes it. An applied restore (marked before it
+starts; a rollback changes nothing) makes only the sections it replaced,
+settings or keys, join again; other items keep their agreement. While a round runs it alone writes the ledger; edits seen meanwhile
 keep their time in memory for the next round. A round stamps
 local edits in the ledger before any request, reads local values again after
 the read, saves the agreement before applying (a refused Keychain write keeps

@@ -51,8 +51,9 @@ a recovery-code key and a Keychain token.
   values remain in the local settings history.
 - A local ledger, `Application Support/<bundle id>/settings-sync/ledger.json`
   (0600, hashes only, not in backups), records what this Mac agreed and its
-  random device ID. Turning sync off deletes it; a restore that included
-  settings or keys deletes it.
+  random device ID. Turning sync off deletes it. An applied restore marks
+  only what it replaced (settings, keys or both) to join again; the rest of
+  the agreement stays.
 - A round: note local edits in the ledger with the time they were seen,
   before any request; read the shared document; read local values again;
   save the new agreement; apply; upload. A Mac has joined once it takes an
@@ -102,10 +103,13 @@ a join. Each has a test now:
 - A key received while joining and removed during a conflicting write stays
   removed: joining is complete once the shared document was taken (fourth
   review).
-- A restore that will replace settings or keys leaves a marker before it
-  starts. Applied, it forgets the agreement; rolled back or cancelled, it keeps
-  it, so unsynced edits survive. A marker left by a crash after the restore
-  finished counts as applied (fifth review).
+- A restore that will replace settings or keys leaves a marker naming those
+  sections before it starts. Applied, only the replaced items join again
+  (shared values win, their removals are not recorded); every other item keeps
+  its agreement, so a key removed while offline stays removed after a
+  settings-only restore. Rolled back, cancelled or failed with nothing left to
+  retry, it changes nothing. A marker left by a crash after the restore
+  finished counts as applied (fifth and sixth reviews).
 - An edit seen during a write, then undone and made again, keeps the time of
   its last sighting (fifth review).
 - Keys the shared document names are read even when this Mac's routes do not
@@ -129,7 +133,9 @@ a join. Each has a test now:
   an update.
 - Failures back off from one to fifteen minutes and respect GitHub's rate
   limit time.
-- Known gaps: a restore prepared while a write's privacy check is in flight
+- Known gaps: if the answer to a Mac's first upload is lost and a key is
+  removed during that upload, the key can come back on the next round; a
+  restore prepared while a write's privacy check is in flight
   can still let that one write finish (it shares current values, which the
   restore replaces only at relaunch); a repository made public between the
   check and the write receives that one ciphertext.
@@ -142,7 +148,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Thirty-three tests with two simulated Macs sharing a fake repository: first upload
+Thirty-four tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -157,8 +163,9 @@ during backoff, a key dropped before joining, a removal a store re-saves, a
 key removed while the joining write is in flight, a restored key of a removed
 server, a received key removed during a conflicting join write, an edit seen
 during a write keeping its time, a pre-join value after a refused Keychain
-write, a shortcut changed back and forth during a write, restore markers). The
-fourth- and fifth-review tests were checked to fail with their fixes reverted. Timestamps are stored as
+write, a shortcut changed back and forth during a write, restore markers per
+section, a settings-only restore keeping a key removed offline). The fourth-,
+fifth- and sixth-review tests were checked to fail with their fixes reverted. Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

@@ -59,25 +59,31 @@ struct SettingsSyncLedger: Codable, Equatable {
     }
     var device: String
     var records: [String: Record] = [:]
-    /// False until the first round whose result reached the shared document.
-    /// A Mac that is joining takes the shared values over its own.
+    /// False until this Mac has taken an existing shared document (the first
+    /// Mac: until its upload succeeds). A joining Mac takes the shared values.
     var joined = false
+    /// Item prefixes (`pref:`, `key:`) a restore replaced: those items join
+    /// again, the others keep their agreement and unsynced edits.
+    var rejoin: [String]?
+
+    func rejoins(_ item: String) -> Bool { rejoin?.contains { item.hasPrefix($0) } ?? false }
 
     /// Stamps every item whose value changed since the last agreement with
     /// the time it was noticed. This runs on every sync request, also while
     /// GitHub is unreachable or backing off, and is saved, so an edit keeps
-    /// the time it was made instead of the time it finally syncs. A joining
-    /// Mac records no removals: an item it drops before its first shared
-    /// round never existed for the others.
-    /// Values a joining Mac already had are stamped at the epoch: they fill
-    /// gaps in the shared document but never beat a value another Mac shared.
-    /// `noticed` carries times seen while a round was busy.
+    /// the time it was made instead of the time it finally syncs.
+    ///
+    /// Values of a joining Mac (or of items a restore replaced) are stamped
+    /// at the epoch: they fill gaps in the shared document but never replace
+    /// a shared entry, and their removals are not recorded. `noticed` carries
+    /// times seen while a round was busy.
     func recordingLocalChanges(current: [String: SettingsSyncValue], now: Date,
                                noticed: [String: (hash: String, at: Date)] = [:]) -> SettingsSyncLedger {
-        let now = SettingsSyncClock.normalized(joined ? now : Date(timeIntervalSince1970: 0))
+        let now = SettingsSyncClock.normalized(now)
         var next = self
         let items = Set(current.keys).union(records.keys).filter(SettingsSyncItem.isApplicable)
         for item in items {
+            let fresh = joined && !rejoins(item)
             let hash = SettingsSyncItem.hash(current[item])
             if let pending = records[item]?.pending {
                 if hash == pending.hash {
@@ -87,11 +93,18 @@ struct SettingsSyncLedger: Codable, Equatable {
                 if hash == records[item]?.hash { continue } // the write never landed; it is written again
                 next.records[item]?.pending = nil
             }
-            guard records[item]?.hash != hash else { continue }
-            if !joined && current[item] == nil { next.records[item] = nil; continue }
+            let seen = noticed[item].flatMap { fresh && $0.hash == hash ? SettingsSyncClock.normalized($0.at) : nil }
+            if let record = records[item], record.hash == hash {
+                // Changed away and back while a round was busy: the latest sighting counts.
+                if let seen, seen > record.modifiedAt {
+                    next.records[item] = Record(hash: hash, modifiedAt: seen, device: device)
+                }
+                continue
+            }
+            if !fresh && current[item] == nil { next.records[item] = nil; continue }
             if records[item] == nil && current[item] == nil { continue }
-            let seen = noticed[item].flatMap { $0.hash == hash && joined ? SettingsSyncClock.normalized($0.at) : nil }
-            next.records[item] = Record(hash: hash, modifiedAt: seen ?? now, device: device)
+            let stamp = fresh ? (seen ?? now) : Date(timeIntervalSince1970: 0)
+            next.records[item] = Record(hash: hash, modifiedAt: stamp, device: device)
         }
         return next
     }

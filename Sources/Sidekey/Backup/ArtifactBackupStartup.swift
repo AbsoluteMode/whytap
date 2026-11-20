@@ -24,6 +24,10 @@ enum ArtifactBackupStartup {
                 return true
             } catch {
                 progress.close()
+                // Rolled back and nothing left to retry: the restore did not apply.
+                if !transaction.isArmed && !transaction.hasApplyJournal {
+                    SettingsSyncService.restoreFinished(applied: false)
+                }
                 let alert = NSAlert()
                 alert.messageText = "Restore needs attention"
                 alert.informativeText = "Your backup and recovery files are kept. Unlock this Mac and check free disk space, then retry. If the restore key is missing, enter your saved recovery code."
@@ -83,11 +87,9 @@ enum ArtifactBackupStartup {
             // applied restore makes this Mac rejoin sync. A restore of other
             // sections, or one rolled back, keeps this Mac's agreement.
             // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
-            let touchesSync = transaction.plannedSections
-                .map { !Set($0).isDisjoint(with: [.settings, .credentials]) } ?? true
-            if touchesSync { SettingsSyncService.restoreWillStart() }
+            SettingsSyncService.restoreWillStart(sections: transaction.plannedSections ?? [.settings, .credentials])
             let outcome = try transaction.applyIfPending()
-            if touchesSync { SettingsSyncService.restoreFinished(applied: outcome?.state == .applied) }
+            SettingsSyncService.restoreFinished(applied: outcome?.state == .applied)
         }, pump: { _ = NSApplication.shared.runModal(for: panel) },
            completed: { NSApplication.shared.stopModal() })
     }

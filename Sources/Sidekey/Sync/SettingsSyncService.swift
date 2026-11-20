@@ -157,24 +157,48 @@ final class SettingsSyncService: ObservableObject {
     }
 
     /// A restore of settings or keys marks itself before it starts. Only an
-    /// applied restore forgets the agreement; a rolled back or cancelled one
-    /// keeps it, so this Mac's unsynced edits survive. A marker left by a
-    /// crash after the restore finished counts as applied.
-    nonisolated static func restoreWillStart(ledgerURL: URL = Dependencies.productionLedgerURL) {
+    /// applied restore changes the agreement, and only for what it replaced:
+    /// those items join again (shared values win), every other item keeps its
+    /// agreement, including a key removed here but not shared yet. A rolled
+    /// back or cancelled restore changes nothing. A marker left by a crash
+    /// after the restore finished counts as applied.
+    nonisolated static func restoreWillStart(sections: [ArtifactBackupSection],
+                                             ledgerURL: URL = Dependencies.productionLedgerURL) {
+        let prefixes = rejoinPrefixes(sections)
+        guard !prefixes.isEmpty else { return }
         let marker = restoreMarker(ledgerURL)
         try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
-        try? Data().write(to: marker, options: [.atomic])
+        try? JSONEncoder.settingsSync.encode(prefixes).write(to: marker, options: [.atomic])
     }
 
     nonisolated static func restoreFinished(applied: Bool, ledgerURL: URL = Dependencies.productionLedgerURL) {
-        if applied { forgetAgreement(ledgerURL: ledgerURL) }
-        try? FileManager.default.removeItem(at: restoreMarker(ledgerURL))
+        let marker = restoreMarker(ledgerURL)
+        guard FileManager.default.fileExists(atPath: marker.path) else { return }
+        if applied {
+            let prefixes = (try? Data(contentsOf: marker)).flatMap { try? JSONDecoder.settingsSync.decode([String].self, from: $0) }
+                ?? ["pref:", "key:"]
+            if let data = try? Data(contentsOf: ledgerURL),
+               var ledger = try? JSONDecoder.settingsSync.decode(SettingsSyncLedger.self, from: data) {
+                ledger.rejoin = Array(Set(ledger.rejoin ?? []).union(prefixes)).sorted()
+                if let updated = try? JSONEncoder.settingsSync.encode(ledger) {
+                    guard (try? updated.write(to: ledgerURL, options: [.atomic])) != nil else {
+                        forgetAgreement(ledgerURL: ledgerURL) // cannot mark: joining whole is the safe side
+                        try? FileManager.default.removeItem(at: marker)
+                        return
+                    }
+                }
+            }
+        }
+        try? FileManager.default.removeItem(at: marker)
     }
 
     nonisolated static func resolveInterruptedRestore(ledgerURL: URL = Dependencies.productionLedgerURL) {
-        guard FileManager.default.fileExists(atPath: restoreMarker(ledgerURL).path) else { return }
         restoreFinished(applied: true, ledgerURL: ledgerURL)
+    }
+
+    nonisolated static func rejoinPrefixes(_ sections: [ArtifactBackupSection]) -> [String] {
+        (sections.contains(.settings) ? ["pref:"] : []) + (sections.contains(.credentials) ? ["key:"] : [])
     }
 
     nonisolated private static func restoreMarker(_ ledgerURL: URL) -> URL {
@@ -325,6 +349,7 @@ final class SettingsSyncService: ObservableObject {
         //    lands is retried, never shared as a removal.
         var next = plan.ledger
         next.joined = ledger.joined || shared != nil
+        next.rejoin = shared != nil ? nil : ledger.rejoin
         for item in plan.apply.keys {
             var old = ledger.records[item] ?? .init(hash: SettingsSyncItem.hash(current[item]), modifiedAt: .distantPast,
                                                     device: ledger.device)
@@ -361,9 +386,10 @@ final class SettingsSyncService: ObservableObject {
             cached = (plan.document, newSHA, nil, keyID)
             try ensureCurrent(round)
         }
-        if !next.joined {
+        if !next.joined || next.rejoin != nil {
             try ensureCurrent(round)
             next.joined = true
+            next.rejoin = nil
             try saveLedger(next)
         }
     }

@@ -90,7 +90,10 @@ struct SettingsBackupView: View {
                                       isEnabled: model.canChangeAutomaticBackup, label: "Automatic backup")
                         }
                     }
-                    // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+                }
+                // Also on a Mac that only restored, and always while on, so it can be turned off.
+                // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+                if model.showsSettingsSync || settingsSync.isEnabled {
                     MacCard {
                         MacRow(title: "Sync settings between Macs", subtitle: settingsSyncSubtitle) {
                             MacSwitch(isOn: Binding(get: { settingsSync.isEnabled }, set: { settingsSync.setEnabled($0) }),

@@ -33,6 +33,11 @@ a recovery-code key and a Keychain token.
 ## Decision
 
 - A switch, Settings -> Backup -> Sync settings between Macs, off by default.
+  It is shown once this Mac has the recovery-code key and a connected GitHub
+  repository, including a second Mac that only restored a backup (the
+  Automatic backup switch still waits for this Mac's own upload), and always
+  while sync is on, so it can be turned off. The builder found it hidden on a
+  clean restored Mac; a regression test follows that path.
 - One document, sealed with the backup key (AES-GCM; the key ID is readable),
   at `whytap-sync/settings.v1.json` (`settings-beta.v1.json` for beta) in the
   existing private Exodia-Backup repository, through the Contents API.

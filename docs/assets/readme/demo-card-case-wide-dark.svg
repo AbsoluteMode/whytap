@@ -5,7 +5,7 @@
   <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></g>
   <text x="92" y="32" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" fill="#f0f6fc">Case</text>
   <text x="92" y="54" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" fill="#9198a1">Approve a command in the notch</text>
-  <text x="92" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Save a key</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Your agent asks</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Allow or deny</tspan></text>
+  <text x="92" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Save a key</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Agent asks</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Allow or deny</tspan></text>
   <rect x="760" y="30.0" width="78" height="32" rx="16.0" fill="#6c5ce7"/>
   <text x="799.0" y="51.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Click</text>
 </svg>

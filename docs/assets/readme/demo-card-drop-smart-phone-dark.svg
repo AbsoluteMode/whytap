@@ -9,7 +9,7 @@
   <path d="M22 10v3" /></g>
   <text x="50" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Drop Smart</text>
   <text x="50" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" fill="#9198a1">Speak, correct yourself, release</text>
-  <text x="50" y="59" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Hold Space</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Speak</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Release to paste clean text</tspan></text>
+  <text x="50" y="59" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Hold Space</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Speak</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Release to paste</tspan></text>
   <rect x="248" y="8" width="44" height="18" rx="9.0" fill="#6c5ce7"/>
   <text x="270.0" y="21.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Click</text>
 </svg>

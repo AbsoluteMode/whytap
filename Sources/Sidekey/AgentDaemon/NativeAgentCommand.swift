@@ -3,7 +3,6 @@ import Foundation
 
 /// A separate process group bounds ordinary jobs. A detached child can leave
 /// that group: never wait indefinitely for its inherited output descriptor.
-/// Only this gated child is registered with Case, preserving existing approvals.
 final class NativeAgentCommand: @unchecked Sendable {
     private let lock = NSLock()
     private let output = Pipe()
@@ -83,7 +82,6 @@ final class NativeAgentCommand: @unchecked Sendable {
                     let child = try spawn(command: command, directory: directory, environment: environment)
                     let mayStart = lock.withLock {
                         pid = child
-                        CaseBuiltInAgentProcesses.shared.insert(child)
                         if interrupted || finished { kill(-child, SIGKILL); return false }
                         return true
                     }
@@ -97,10 +95,9 @@ final class NativeAgentCommand: @unchecked Sendable {
                         var info = siginfo_t()
                         while waitid(P_PID, id_t(child), &info, WEXITED | WNOWAIT) == -1 && errno == EINTR {}
                         let suffix = lock.withLock {
-                            // Hold the lock across reap/PID removal, so a stop
-                            // callback cannot signal a newly reused process ID.
+                            // Hold the lock across reap, so a stop callback
+                            // cannot signal a newly reused process ID.
                             kill(-child, SIGKILL)
-                            CaseBuiltInAgentProcesses.shared.remove(child)
                             var status: Int32 = 0
                             var reaped: pid_t
                             repeat { reaped = waitpid(child, &status, 0) } while reaped == -1 && errno == EINTR
@@ -190,15 +187,14 @@ final class NativeAgentCommand: @unchecked Sendable {
     }
 
     private func finish(_ suffix: String) {
-        let result: (CheckedContinuation<String, Never>, String, pid_t)? = lock.withLock {
+        let result: (CheckedContinuation<String, Never>, String)? = lock.withLock {
             guard !finished, let continuation else { return nil }
             finished = true; self.continuation = nil
-            return (continuation, String(decoding: data, as: UTF8.self) + (truncated ? "\n[Output shortened]" : "") + suffix, pid)
+            return (continuation, String(decoding: data, as: UTF8.self) + (truncated ? "\n[Output shortened]" : "") + suffix)
         }
         guard let result else { return }
         output.fileHandleForReading.readabilityHandler = nil
         try? output.fileHandleForReading.close()
-        if result.2 > 0 { CaseBuiltInAgentProcesses.shared.remove(result.2) }
         result.0.resume(returning: result.1)
     }
 }

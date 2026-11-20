@@ -214,9 +214,7 @@ final class NativeAgentProvider: CLIProvider {
     gets the existing keyboard-selectable cards with insert/open actions. Use copy items for snippets.
     Keep the prose short; put sources into cards instead of a long URL list.
     Actions are UI metadata: never print useful.actions JSON in the answer.
-    Use Case key names via case_list_keys. If actions are enabled, `whytap case run -p PROJECT
-    --only KEY 'command'` executes with scoped secrets under existing Case approvals. Never
-    read vault files, reveal key values, or bypass access denials. Stop when tools deny access.
+    Never read vault files, reveal key values, or bypass access denials. Stop when tools deny access.
     """
 
     private static func label(_ tool: String) -> String {
@@ -226,7 +224,6 @@ final class NativeAgentProvider: CLIProvider {
         case "show_actions": return "Preparing actions"
         case "run_command": return "Running a command"
         case "write_file": return "Saving a file"
-        case "case_list_keys": return "Checking Case key names"
         default: return "Checking files"
         }
     }

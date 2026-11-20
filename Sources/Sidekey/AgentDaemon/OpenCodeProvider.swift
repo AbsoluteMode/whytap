@@ -168,7 +168,6 @@ final class OpenCodeProvider: CLIProvider {
                 env = try OpenCodeEnvironment.make(workingDirectory: workingDir, model: model, provider: provider,
                                                    key: key, allowActions: options.allowActions,
                                                    modelSpec: options.openCodeModelSpec,
-                                                   caseMCPCommand: options.caseMCPCommand,
                                                    screenMCPCommand: options.screenMCPCommand,
                                                    openRouterProvider: options.openRouterProvider)
             } catch {
@@ -239,9 +238,6 @@ final class OpenCodeProvider: CLIProvider {
                 onExit(-1)
                 return
             }
-            // The Case broker recognises the built-in agent by this PID while it runs.
-            let pid = process.processIdentifier
-            CaseBuiltInAgentProcesses.shared.insert(pid)
             DispatchQueue.global(qos: .userInitiated).async {
                 try? input.fileHandleForWriting.write(contentsOf: Data(prompt.utf8))
                 try? input.fileHandleForWriting.close()
@@ -265,7 +261,6 @@ final class OpenCodeProvider: CLIProvider {
             }
             if !buffer.isEmpty { onLine(String(decoding: buffer, as: UTF8.self)) }
             process.waitUntilExit()
-            CaseBuiltInAgentProcesses.shared.remove(pid)
             onExit(process.terminationStatus)
         }
         return handle

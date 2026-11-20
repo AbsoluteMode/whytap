@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-20-case-remove-whytap-agent.md]
 ---
 
 # Decision
@@ -385,12 +385,11 @@ search service is chosen. The key joins the existing encrypted credential backup
 allowlist. Tavily credit cost is not added to model inference totals.
 
 The local tool catalog covers list/read/search, HTTPS fetch, requested screenshot,
-Case key names, answer actions, write and shell. Capture calls the app-owned
+answer actions, write and shell. Capture calls the app-owned
 ScreenCaptureKit service directly; the existing MCP scopes remain compatible.
-Case uses the signed helper and existing broker approvals. Register only the
-native shell child PID, released at exit; never register the app PID or read
-vault files directly. A gated shell startup makes that identity available before
-a Case request can be sent. Commands have an isolated process group, 30-second
+The earlier `case_list_keys` tool and child-PID Case registration were removed on
+2026-11-20 ([Remove Whytap Agent from Case](2026-11-20-case-remove-whytap-agent.md)).
+Commands have an isolated process group, 30-second
 deadline and bounded output. Cancellation signals the group, then bounds the
 output drain even if a child detached into another session. An inherited open
 pipe produces an incomplete/stopped warning, never a clean Exit 0. Detached

@@ -179,8 +179,7 @@ final class CaseRegistrationTests: XCTestCase {
         XCTAssertEqual(fx.vm.registeredAppNames, [])
 
         // Access is gone at once: the same caller now resolves as an unregistered AI.
-        let caller = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [],
-                                        builtInOpenCodePIDs: [])
+        let caller = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [])
         XCTAssertEqual(caller.resolve(peerPID: 100), .knownUnregisteredAI(name: "Claude Code"))
         await assertThrows(.missingApp) { _ = try await fx.vm.unregisterApp(appID) }
     }
@@ -217,78 +216,64 @@ final class CaseRegistrationTests: XCTestCase {
         XCTAssertNil(CaseViewModel.parseTimedMinutes("999"))
     }
 
-    // MARK: Built-in OpenCode
+    // MARK: Retired built-in agent safety
 
-    func test_opencode_config_contains_case_mcp_only_when_registered() async throws {
+    func test_legacy_builtin_opencode_vault_decodes_safely_preserves_keys_and_hides_retired_registration() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let helperURL = directory.appendingPathComponent("Whytap.app/Contents/Helpers/whytap")
-        try FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("#!/bin/sh\n".utf8).write(to: helperURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helperURL.path)
 
-        let fx = try await Fixture(payload: payload())
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: helperURL))
-        let unregistered = try OpenCodeEnvironment.make(workingDirectory: directory, model: "vendor/model", key: "k",
-            allowActions: true, caseMCPCommand: nil, inherited: [:])
-        XCTAssertNil(try config(unregistered)["mcp"])
+        let retiredID = UUID()
+        let claudeID = UUID()
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        var initial = payload()
+        initial.apps = [
+            CaseAppRegistration(id: retiredID, displayName: "Whytap Agent", identity: .builtInOpenCode,
+                                defaultMode: .bypass, projectModes: [serversID: .bypass], createdAt: date),
+            CaseAppRegistration(id: claudeID, displayName: "Claude Code", identity: claude,
+                                defaultMode: .approve, projectModes: [:], createdAt: date, allowedProjectIDs: [serversID]),
+        ]
+        let rawJSON = try JSONEncoder.caseVault.encode(initial)
+        XCTAssertTrue(String(decoding: rawJSON, as: UTF8.self).contains("builtInOpenCode"),
+                      "On-disk schema-3 vaults written before removal carry builtInOpenCode")
 
-        _ = try await fx.vm.registerApp(.builtInOpenCode, name: CaseKnownClient.builtInOpenCode.displayName)
-        let command = try XCTUnwrap(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: helperURL))
-        XCTAssertEqual(command, [helperURL.path, "case", "mcp"])
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: nil),
-                     "no helper in the bundle: no entry")
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload,
-                                                       helperURL: directory.appendingPathComponent("missing")))
+        let decoded = try CaseVaultMigration.decodePayload(rawJSON)
+        XCTAssertEqual(decoded.secrets, initial.secrets)
+        XCTAssertEqual(decoded.values, initial.values)
 
-        for allowActions in [true, false] {
-            let env = try OpenCodeEnvironment.make(workingDirectory: directory, model: "vendor/model", key: "k",
-                allowActions: allowActions, caseMCPCommand: command, inherited: [:])
-            let json = try config(env)
-            let mcp = try XCTUnwrap(json["mcp"] as? [String: Any])
-            let entry = try XCTUnwrap(mcp["case"] as? [String: Any])
-            XCTAssertEqual(entry["type"] as? String, "local")
-            XCTAssertEqual(entry["command"] as? [String], [helperURL.path, "case", "mcp"])
-            XCTAssertEqual(entry["enabled"] as? Bool, true)
-            XCTAssertNil(entry["environment"], "no values or tokens in the agent config")
-            let permission = try XCTUnwrap(json["permission"] as? [String: String])
-            XCTAssertEqual(permission["case_*"], "allow", "listing tools allowed even with actions off")
-            if !allowActions { XCTAssertEqual(permission["*"], "deny") }
+        let vaultFile = directory.appendingPathComponent("case-vault.json.enc")
+        let key = SymmetricKey(size: .bits256)
+        let realStore = CaseVaultStore(fileURL: vaultFile)
+        try realStore.save(initial, using: key)
+        let loadedFromEncrypted = try realStore.load(using: key)
+        XCTAssertEqual(loadedFromEncrypted.values.first?.value, "fixture-secret")
+
+        let fx = try await Fixture(payload: loadedFromEncrypted)
+        XCTAssertEqual(fx.vm.registrations.map(\.id), [claudeID], "Retired Whytap Agent registration stays hidden")
+        XCTAssertEqual(fx.vm.registeredAppNames, ["Claude Code"])
+        XCTAssertEqual(fx.vm.secretRows(inProject: serversID).map(\.displayName), ["NETCUP_IP"])
+
+        fx.auth.reasons.removeAll()
+        await assertThrows(.invalidAppName) { _ = try await fx.vm.registerApp(.builtInOpenCode, name: "Whytap Agent") }
+        await assertThrows(.missingApp) {
+            try await fx.vm.setAccess(for: retiredID, mode: .bypass, projects: nil, projectModes: [:])
         }
+        await assertThrows(.missingApp) { try await fx.vm.setMode(.approve, for: retiredID, project: nil) }
+        await assertThrows(.missingApp) { _ = try await fx.vm.retryClientSetup(for: retiredID) }
+        XCTAssertTrue(fx.auth.reasons.isEmpty)
 
-        // The built-in agent is told apart by the PIDs Whytap started.
-        let processes = CaseBuiltInAgentProcesses()
-        processes.insert(4242)
-        let resolver = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [],
-                                          builtInOpenCodePIDs: processes.pids)
-        guard case .registered(let reg) = resolver.resolve(peerPID: 200) else {
-            return XCTFail("built-in agent should resolve to its registration")
-        }
-        XCTAssertEqual(reg.identity, .builtInOpenCode)
-        processes.remove(4242)
-        XCTAssertTrue(processes.pids.isEmpty)
-    }
-
-    func test_opencode_process_pid_is_tracked_while_running() throws {
-        let processes = CaseBuiltInAgentProcesses.shared
-        let exited = expectation(description: "exit")
-        var seenWhileRunning = false
-        let handle = OpenCodeProvider.defaultRunStreaming(
-            binary: URL(fileURLWithPath: "/bin/sh"), args: ["-c", "read line; echo done"],
-            workingDirectory: FileManager.default.temporaryDirectory, environment: [:], prompt: "go\n",
-            onLine: { _ in }, onExit: { _ in exited.fulfill() })
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            if let pid = handle.processIdentifier, processes.pids.contains(pid) { seenWhileRunning = true; break }
-            if !seenWhileRunning, handle.processIdentifier == nil { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        }
-        wait(for: [exited], timeout: 5)
-        XCTAssertTrue(seenWhileRunning || processes.pids.isEmpty)
-        // After exit nothing of it remains, so a reused PID is never mistaken for the agent.
-        let settle = Date().addingTimeInterval(1)
-        while Date() < settle, !processes.pids.isEmpty { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        XCTAssertTrue(processes.pids.isEmpty)
+        // Legacy OpenCode environment still configures screen MCP without any Case MCP entry.
+        let env = try OpenCodeEnvironment.make(
+            workingDirectory: directory, model: "vendor/model", key: "k", allowActions: false,
+            screenMCPCommand: ["/Applications/Whytap.app/Contents/Helpers/whytap", "app", "screen-mcp"],
+            inherited: [:])
+        let json = try config(env)
+        let mcp = try XCTUnwrap(json["mcp"] as? [String: Any])
+        XCTAssertNil(mcp["case"])
+        XCTAssertNotNil(mcp["screen"])
+        let permission = try XCTUnwrap(json["permission"] as? [String: String])
+        XCTAssertNil(permission["case_*"])
+        XCTAssertEqual(permission["screen_*"], "allow")
     }
 
     // MARK: Known clients
@@ -297,7 +282,7 @@ final class CaseRegistrationTests: XCTestCase {
         XCTAssertEqual(CaseKnownClient.claudeCode.identity, .developerID(teamID: "Q6L2SF6YDW", signingIdentifier: "com.anthropic.claude-code"))
         XCTAssertEqual(CaseKnownClient.codex.identity, .developerID(teamID: "2DC432GLL2", signingIdentifier: "codex"))
         XCTAssertEqual(CaseKnownClient.cursor.identity, .executablePath("/Applications/Cursor.app"))
-        XCTAssertEqual(CaseKnownClient.builtInOpenCode.identity, .builtInOpenCode)
+        XCTAssertNil(CaseKnownClient(identity: .builtInOpenCode))
         for known in CaseCallerResolver.knownAIApps {
             XCTAssertTrue(CaseKnownClient.allCases.contains {
                 $0.identity == .developerID(teamID: known.teamID, signingIdentifier: known.identifier) && $0.displayName == known.name
@@ -321,8 +306,7 @@ final class CaseRegistrationTests: XCTestCase {
         let claudeConnector = ClaudeCodeCaseConnector(home: home, socketPath: "/tmp/x.sock", runner: runner,
                                                       locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
         let setup = CaseClientSetup(helperURL: helperURL, binDir: bin, flavorName: "prod",
-                                    connectors: [.claudeCode: claudeConnector, .cursor: CursorCaseConnector(home: home, appInstalled: { false })],
-                                    builtInAgentAvailable: { true })
+                                    connectors: [.claudeCode: claudeConnector, .cursor: CursorCaseConnector(home: home, appInstalled: { false })])
 
         let ok = await setup.connect(claude)
         XCTAssertEqual(ok.problems, [])
@@ -341,71 +325,63 @@ final class CaseRegistrationTests: XCTestCase {
 
         // No helper in the bundle: nothing points at a missing file.
         let noHelper = CaseClientSetup(helperURL: nil, binDir: bin, flavorName: "prod",
-                                       connectors: [.claudeCode: claudeConnector], builtInAgentAvailable: { true })
+                                       connectors: [.claudeCode: claudeConnector])
         runner.calls.removeAll()
         let missing = await noHelper.connect(claude)
         XCTAssertEqual(missing.problems.count, 1)
         XCTAssertTrue(runner.calls.isEmpty)
 
-        // Built-in agent and arbitrary programs have no external config.
+        // Arbitrary programs have no external config.
         runner.status = 0
         try FileManager.default.removeItem(at: bin.appendingPathComponent("whytap"))
-        let builtIn = await setup.connect(.builtInOpenCode)
-        XCTAssertEqual(builtIn.problems, [])
         let other = await setup.disconnect(.executablePath("/Applications/Other.app"))
         XCTAssertEqual(other.problems, [])
         // The located Claude Code CLI is offered again; Cursor is absent here.
         let detected = await setup.detectInstalledClients()
-        XCTAssertEqual(detected, [.builtInOpenCode, .claudeCode])
+        XCTAssertEqual(detected, [.claudeCode])
     }
 
-    func test_connect_catalog_offers_installed_opencode_claude_code_and_cursor_only() async throws {
-        XCTAssertEqual(CaseKnownClient.connectableClients, [.builtInOpenCode, .claudeCode, .cursor])
+    func test_connect_catalog_offers_installed_claude_code_and_cursor_only() async throws {
+        XCTAssertEqual(CaseKnownClient.connectableClients, [.claudeCode, .cursor])
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("case-detection-\(UUID().uuidString)")
         let runner = FakeCommandRunner()
         // Discovery must not install a CLI, write a config, run a client or request authentication.
         // An installed Codex is never offered: it stays a legacy registration only.
-        for openCodeInstalled in [false, true] {
-            for claudeInstalled in [false, true] {
-                for cursorInstalled in [false, true] {
-                    let claudeConnector = ClaudeCodeCaseConnector(
-                        home: home, socketPath: "/tmp/x.sock", runner: runner,
-                        locate: { claudeInstalled ? URL(fileURLWithPath: "/usr/local/bin/claude") : nil })
-                    let codexConnector = CodexCaseConnector(home: home, runner: runner,
-                                                            locate: { URL(fileURLWithPath: "/usr/local/bin/codex") })
-                    let setup = CaseClientSetup(helperURL: nil, binDir: home, flavorName: "prod",
-                                                connectors: [.claudeCode: claudeConnector,
-                                                             .codex: codexConnector,
-                                                             .cursor: CursorCaseConnector(home: home, appInstalled: { cursorInstalled })],
-                                                builtInAgentAvailable: { openCodeInstalled })
-                    let found = await setup.detectInstalledClients()
-                    var expected: [CaseKnownClient] = []
-                    if openCodeInstalled { expected.append(.builtInOpenCode) }
-                    if claudeInstalled { expected.append(.claudeCode) }
-                    if cursorInstalled { expected.append(.cursor) }
-                    XCTAssertEqual(found, expected,
-                                   "OpenCode \(openCodeInstalled), Claude Code \(claudeInstalled), Cursor \(cursorInstalled)")
-                }
+        for claudeInstalled in [false, true] {
+            for cursorInstalled in [false, true] {
+                let claudeConnector = ClaudeCodeCaseConnector(
+                    home: home, socketPath: "/tmp/x.sock", runner: runner,
+                    locate: { claudeInstalled ? URL(fileURLWithPath: "/usr/local/bin/claude") : nil })
+                let codexConnector = CodexCaseConnector(home: home, runner: runner,
+                                                        locate: { URL(fileURLWithPath: "/usr/local/bin/codex") })
+                let setup = CaseClientSetup(helperURL: nil, binDir: home, flavorName: "prod",
+                                            connectors: [.claudeCode: claudeConnector,
+                                                         .codex: codexConnector,
+                                                         .cursor: CursorCaseConnector(home: home, appInstalled: { cursorInstalled })])
+                let found = await setup.detectInstalledClients()
+                var expected: [CaseKnownClient] = []
+                if claudeInstalled { expected.append(.claudeCode) }
+                if cursorInstalled { expected.append(.cursor) }
+                XCTAssertEqual(found, expected, "Claude Code \(claudeInstalled), Cursor \(cursorInstalled)")
             }
         }
         XCTAssertTrue(runner.calls.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: home.path))
     }
 
-    func test_picker_offers_claude_code_until_registered_and_never_codex() async throws {
+    func test_picker_offers_claude_code_and_cursor_until_registered_and_never_codex() async throws {
         let fx = try await Fixture(payload: payload())
-        fx.clients.detected = [.claudeCode, .cursor, .codex, .builtInOpenCode]
+        fx.clients.detected = [.claudeCode, .cursor, .codex]
         let available = await fx.vm.availableClientsToRegister()
-        XCTAssertEqual(available, [.builtInOpenCode, .claudeCode, .cursor])
+        XCTAssertEqual(available, [.claudeCode, .cursor])
 
         // Not installed: not offered.
         fx.clients.detected = [.cursor, .codex]
         let withoutClaude = await fx.vm.availableClientsToRegister()
         XCTAssertEqual(withoutClaude, [.cursor])
 
-        fx.clients.detected = [.claudeCode, .cursor, .codex, .builtInOpenCode]
+        fx.clients.detected = [.claudeCode, .cursor, .codex]
         _ = try await fx.vm.registerApp(claude, name: "Claude Code")
-        _ = try await fx.vm.registerApp(.builtInOpenCode, name: "OpenCode", projects: [serversID])
         fx.auth.reasons.removeAll()
         fx.clients.connected.removeAll()
         let savedApps = fx.vm.registrations

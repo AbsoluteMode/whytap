@@ -720,6 +720,27 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertTrue(command.text.contains("unavailable"))
     }
 
+    func testCaseToolIsAbsentFromCatalogPromptAndExecution() async throws {
+        let (directory, keys, _) = try fixture()
+        for allowActions in [false, true] {
+            let defs = NativeAgentTools.definitions(allowActions: allowActions)
+            let structured = NativeAgentTools.structuredDefinitions(allowActions: allowActions)
+            XCTAssertFalse(defs.contains { $0["name"] as? String == "case_list_keys" })
+            XCTAssertFalse(structured.contains { $0["name"] as? String == "case_list_keys" })
+            let descriptions = defs.compactMap { $0["description"] as? String }.joined(separator: "\n")
+            XCTAssertFalse(descriptions.contains("whytap case"))
+        }
+        XCTAssertFalse(NativeAgentProvider.systemPrompt.contains("case_list_keys"))
+        XCTAssertFalse(NativeAgentProvider.systemPrompt.contains("whytap case"))
+        let tools = NativeAgentTools(directory: directory, allowActions: true, keys: keys)
+        let rejected = await tools.execute(.init(id: "c1", name: "case_list_keys", arguments: [:]))
+        XCTAssertTrue(rejected.text.contains("unavailable"))
+        let shape = NativeAgentDiagnostics.Shape(messages: [
+            ["role": "assistant", "tool_calls": [["id": "c1", "function": ["name": "case_list_keys", "arguments": "{}"]]]]
+        ])
+        XCTAssertEqual(shape.tools, [.unknown])
+    }
+
     func testTavilySendsOnlyQueryWithItsOwnKeyAndBoundsResults() async throws {
         let (_, _, http) = try fixture()
         StubURLProtocol.handler = { request in
@@ -849,15 +870,13 @@ final class NativeAgentTests: XCTestCase {
         let result = await NativeAgentCommand().run(command: "pwd; /usr/bin/yes x | /usr/bin/head -c 40000", directory: directory, helper: nil)
         XCTAssertTrue(result.contains(directory.path)); XCTAssertTrue(result.contains("Output shortened"))
         XCTAssertLessThan(result.utf8.count, 33_000)
-        XCTAssertTrue(CaseBuiltInAgentProcesses.shared.pids.isEmpty)
     }
 
-    func testShellTimeoutKillsStubbornProcessGroupAndReleasesCaseIdentity() async throws {
+    func testShellTimeoutKillsStubbornProcessGroup() async throws {
         let (directory, _, _) = try fixture()
         let start = ContinuousClock.now
         let result = await NativeAgentCommand().run(command: "trap '' TERM; while :; do :; done", directory: directory, helper: nil, timeout: .milliseconds(100))
         XCTAssertTrue(result.contains("stopped")); XCTAssertLessThan(ContinuousClock.now - start, .seconds(2))
-        XCTAssertTrue(CaseBuiltInAgentProcesses.shared.pids.isEmpty)
     }
 
     func testShellCancellationStopsBeforeLateWrite() async throws {
@@ -945,7 +964,6 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertTrue(result.hasPrefix("before\nleader-done\n"), "Preserve output even while a detached process holds the pipe open: \(result)")
         XCTAssertNotNil(result.range(of: "Detached child processes may still be running", options: .caseInsensitive), result)
         XCTAssertFalse(result.contains("[Exit 0]"), "An inherited open pipe is not a clean successful completion")
-        XCTAssertTrue(CaseBuiltInAgentProcesses.shared.pids.isEmpty)
     }
 
     func testCancellationFinishesDespiteDetachedOutput() async throws {

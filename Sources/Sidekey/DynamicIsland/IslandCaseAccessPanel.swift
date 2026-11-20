@@ -402,6 +402,8 @@ struct CaseAccessProjectPicker: View {
 }
 
 struct IslandCaseClientPicker: View {
+    static let emptyMessage = "Install Claude Code or Cursor, then open Connect again."
+
     let clients: [CaseKnownClient]
     let isLoading: Bool
     var hasConnectedClients = false
@@ -422,7 +424,7 @@ struct IslandCaseClientPicker: View {
                     CaseAccessSection(title: hasConnectedClients ? "Agents already connected" : "No agents found") {
                         Text(hasConnectedClients
                              ? "Click an agent’s logo in Case to change its access."
-                             : "Install OpenCode, Claude Code or Cursor, then open Connect again.")
+                             : Self.emptyMessage)
                             .font(.system(size: 11))
                             .fixedSize(horizontal: false, vertical: true)
                     }

@@ -393,8 +393,7 @@ final class CaseViewModel: ObservableObject {
 
     /// Display names of the apps registered for key access (access screen).
     var registeredAppNames: [String] {
-        guard unlockState == .unlocked else { return [] }
-        return payload?.apps.map(\.displayName) ?? []
+        registrations.map(\.displayName)
     }
 
     // MARK: App access
@@ -403,9 +402,12 @@ final class CaseViewModel: ObservableObject {
     static let maxAppNameCharacters = 64
 
     /// Registered apps in registration order (empty while locked).
+    /// Retired `.builtInOpenCode` entries remain decodable on disk for rollback
+    /// safety without appearing as connected Case apps.
+    // WHY: .project-docs/decisions/2026-11-20-case-remove-whytap-agent.md
     var registrations: [CaseAppRegistration] {
         guard unlockState == .unlocked else { return [] }
-        return payload?.apps ?? []
+        return (payload?.apps ?? []).filter { $0.identity != .builtInOpenCode }
     }
 
     var timedApprovalMinutes: Int {
@@ -435,6 +437,9 @@ final class CaseViewModel: ObservableObject {
                      mode: CaseAccessMode = .approve, projects: Set<UUID>? = nil) async throws -> CaseRegistrationResult {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= Self.maxAppNameCharacters else {
+            throw CaseViewModelError.invalidAppName
+        }
+        if identity == .builtInOpenCode {
             throw CaseViewModelError.invalidAppName
         }
         if case .executablePath(let path) = identity {
@@ -472,7 +477,7 @@ final class CaseViewModel: ObservableObject {
                    projectModes: [UUID: CaseAccessMode]) async throws {
         let current = try unlockedPayload()
         try Self.validateScope(projects, in: current)
-        guard let app = current.apps.first(where: { $0.id == appID }) else {
+        guard let app = current.apps.first(where: { $0.id == appID && $0.identity != .builtInOpenCode }) else {
             throw CaseViewModelError.missingApp
         }
         let expandsScope: Bool
@@ -513,7 +518,7 @@ final class CaseViewModel: ObservableObject {
     /// "Default". Touch ID only when the change opens Bypass.
     func setMode(_ mode: CaseAccessMode?, for appID: UUID, project projectID: UUID?) async throws {
         let current = try unlockedPayload()
-        guard let app = current.apps.first(where: { $0.id == appID }) else {
+        guard let app = current.apps.first(where: { $0.id == appID && $0.identity != .builtInOpenCode }) else {
             throw CaseViewModelError.missingApp
         }
         if let projectID {
@@ -584,7 +589,7 @@ final class CaseViewModel: ObservableObject {
     @discardableResult
     func retryClientSetup(for appID: UUID) async throws -> CaseClientSetupReport {
         let current = try unlockedPayload()
-        guard let app = current.apps.first(where: { $0.id == appID }) else {
+        guard let app = current.apps.first(where: { $0.id == appID && $0.identity != .builtInOpenCode }) else {
             throw CaseViewModelError.missingApp
         }
         let report = await clients.connect(app.identity)

@@ -16,7 +16,7 @@
 
 </div>
 
-## Watch every tool in action
+## Tools
 
 <sub>Click a tool to play its demo. Opening one closes the previous.</sub>
 

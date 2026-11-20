@@ -91,13 +91,40 @@ def card(o, theme):
 </svg>
 '''
 
+# Typical yearly cost of the paid Mac apps Whytap stands in for: dictation ~$12,
+# meeting notes ~$15, AI launcher ~$16 and secrets vault ~$10 a month (the
+# README's earlier per-tool comparison), about $636 a year. An estimate, shown
+# as approximate; Maxim chose the figure on 2026-11-21.
+PAID_YEARLY = "$600"  # shown struck through; the caption and alt say it is approximate
+BANNER = {"wide": (640, 116), "phone": (300, 96)}
+
+
+def banner(theme, layout):
+    c = THEMES[theme]
+    w, h = BANNER[layout]
+    big, cap = (44, 13) if layout == "wide" else (30, 10.5)
+    left, right, mid = w * 0.27, w * 0.73, w / 2
+    y_num, y_cap = h * 0.52, h * 0.52 + cap * 1.9
+    strike = c["sub"]
+    green = "#3fb950" if theme == "dark" else "#1a7f37"
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+  <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="16" fill="{c['bg']}" stroke="{c['border']}"/>
+  <text x="{left}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{c['sub']}">{html.escape(PAID_YEARLY)}</text>
+  <line x1="{left - big * 1.22}" y1="{y_num - big * 0.33}" x2="{left + big * 1.22}" y2="{y_num - big * 0.33}" stroke="{strike}" stroke-width="{2.5 if layout == 'wide' else 2}" stroke-linecap="round"/>
+  <text x="{left}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" fill="{c['sub']}">≈ paid apps per year</text>
+  <text x="{mid}" y="{y_num - big * 0.2}" text-anchor="middle" font-family="{FONT}" font-size="{big * 0.6}" fill="{c['sub']}">→</text>
+  <text x="{right}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{green}">$0</text>
+  <text x="{right}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" font-weight="600" fill="{c['ink']}">Whytap</text>
+</svg>
+'''
+
 
 def section():
     rows = [o for o in offers() if o["access"] == "noCard"]
     order = list(CATEGORY)
     rows.sort(key=lambda o: order.index(o["category"]))  # stable: Swift order within a category
     newest = max(o["checked"] for o in rows)
-    for old in OUT.glob("free-api-*.svg"):
+    for old in OUT.glob("free-api-*.svg"):  # cards and banner
         old.unlink()
     cards = []
     for o in rows:
@@ -112,14 +139,30 @@ def section():
             f'<source media="(prefers-color-scheme: light)" srcset="{src("light")}">'
             f'<img alt="{alt}" src="{src("dark")}" width="{W}"></picture></a>'
         )
+    for lay in BANNER:
+        for t in THEMES:
+            (OUT / f"free-api-banner-{lay}-{t}.svg").write_text(banner(t, lay))
+    b = lambda lay, t: f"docs/assets/readme/free-api-banner-{lay}-{t}.svg"
+    banner_html = (
+        "<picture>"
+        f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{b("phone", "dark")}">'
+        f'<source media="(max-width: 640px)" srcset="{b("phone", "light")}">'
+        f'<source media="(prefers-color-scheme: dark)" srcset="{b("wide", "dark")}">'
+        f'<source media="(prefers-color-scheme: light)" srcset="{b("wide", "light")}">'
+        f'<img alt="Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0" src="{b("wide", "dark")}" width="{BANNER["wide"][0]}">'
+        "</picture>"
+    )
     return "\n".join([
         HEADING,
         "",
-        f"<sub>No card needed · Reviewed monthly · Last checked {display(newest)}</sub>",
+        f"<p align=\"center\">{banner_html}</p>",
         "",
         "<p align=\"center\">",
         "\n".join(cards),
         "</p>",
+        "",
+        "<p align=\"center\">Everyday use fits in the free quotas.<br>",
+        f"<sub>No card needed · Reviewed monthly · Last checked {display(newest)}</sub></p>",
     ]) + "\n"
 
 

@@ -35,9 +35,13 @@ paying.
 - `APIHintsView.hints` stays the only source of offers. README's
   **Free API keys** section shows the offers with `access: .noCard` as small
   linked cards (logo, provider, allowance, period, purpose; dark and light
-  SVGs) under one line "No card needed · Reviewed monthly · Last checked".
+  SVGs) under the caption "Everyday use fits in the free quotas." and one line
+  "No card needed · Reviewed monthly · Last checked".
   Maxim asked for no extra words: details and per-offer dates stay in the
-  app. Paid-plan credits
+  app. Above the cards a banner compares a struck-through $600 ("≈ paid apps
+  per year") with $0 for Whytap. The figure is an estimate Maxim chose: the
+  README's earlier per-tool prices (dictation, meeting notes, AI launcher,
+  secrets vault) add up to about $636 a year. Paid-plan credits
   (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
   starting without payment.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
@@ -71,6 +75,8 @@ updates only after reading the official page keeps "Last checked" honest.
 - A separate docs page with every offer and its history: Maxim chose the
   README section.
 - A private monthly report only: the README would still need manual updates.
+- A generated raster picture for the price comparison: an SVG banner follows
+  GitHub's dark and light themes and stays sharp.
 - Listing paid-plan credits in the README: not "without payment".
 - Letting the task add newly found offers itself: each row is a product
   decision (only offers whose key works in Whytap as it is).

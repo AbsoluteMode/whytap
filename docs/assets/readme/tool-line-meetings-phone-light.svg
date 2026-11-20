@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="44" viewBox="0 0 300 44">
+  <rect x="0.5" y="0.5" width="299" height="43" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <circle cx="21" cy="22.0" r="13" fill="#ece9ff"/>
+  <g transform="translate(13.5 14.5) scale(0.6250)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" />
+  <path d="M2 6h4" />
+  <path d="M2 10h4" />
+  <path d="M2 14h4" />
+  <path d="M2 18h4" />
+  <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" /></g>
+  <text x="41" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#1f2328">Meeting Notes</text>
+  <text x="41" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#5b4bd6" xml:space="preserve"><tspan>Take notes</tspan><tspan fill="#b3aae8">  ·  </tspan><tspan>End the call</tspan><tspan fill="#b3aae8">  ·  </tspan><tspan>Get action items</tspan></text>
+
+  <rect x="252" y="5" width="42" height="17" rx="8.5" fill="#6c5ce7"/>
+  <text x="273.0" y="17.3" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#ffffff">Click</text>
+</svg>

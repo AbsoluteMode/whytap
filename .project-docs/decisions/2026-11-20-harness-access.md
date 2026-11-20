@@ -48,7 +48,7 @@ with finding and reading meetings, and wants connecting to cost one answer.
   1.9 s: the dots between the two marks turn green one by one, then "Claude
   Code connected" with a checkmark (Reduce Motion: the finished state).
 - **The answer is remembered** per Mac, for Yes and for No, in one Keychain
-  item of the app (`harness_access.answers`). Settings -> Agents -> Coding
+  item of the app (`harness_access.answers`). Settings -> Integrations -> Coding
   tools lists the answers with a switch. The gate reads the answer before a
   request and again before its response leaves, so off stops an open session
   and a request already reading. An answer the Keychain refused to store

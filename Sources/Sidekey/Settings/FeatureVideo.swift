@@ -40,6 +40,8 @@ struct FeatureVideoButton: View {
     let video: FeatureVideo
     var shortcuts: @MainActor () -> [FeatureVideoShortcut] = { [] }
     var bundle: Bundle = FeatureVideo.resourceBundle
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var focused: Bool
     @State private var presented = false
 
     var body: some View {
@@ -50,8 +52,10 @@ struct FeatureVideoButton: View {
                     .foregroundStyle(presented ? MacSettingsTheme.text : MacSettingsTheme.text2)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
+                    .opacity(isEnabled ? 1 : 0.42)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MacButtonInteractionStyle(focused: focused))
+            .focused($focused)
             .help("Watch how \(video.featureTitle) works")
             .accessibilityLabel("Watch how \(video.featureTitle) works")
             .popover(isPresented: $presented, arrowEdge: .bottom) {

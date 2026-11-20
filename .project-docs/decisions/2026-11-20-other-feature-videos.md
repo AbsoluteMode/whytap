@@ -41,7 +41,8 @@ else configured through Claude Code or Codex via the Whytap plugin.
 - A row may carry a ▶ `FeatureVideoButton` left of its title. Click opens a
   popover with the bundled clip, muted and looping, and "Your shortcut:" with
   the live keys from `HotkeyConfiguration`. Nothing plays before the click; a
-  build without the clip shows no button.
+  build without the clip shows no button. The full play target uses the shared
+  Settings hover, pressed, keyboard focus and disabled states.
 - Clips are the accepted motion videos already published on whytap.ai, copied
   byte for byte (720p, SHA-256 matching the landing `videos.lock.json`):
   `meetings.mp4` (1.4 MB) and `agent.mp4` (0.76 MB) in

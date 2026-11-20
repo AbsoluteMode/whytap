@@ -33,7 +33,7 @@ struct AgentModeView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     MacGroupTitle(title: "Agent")
                     MacCard {
-                        MacRow(title: "Use Agent shortcuts", subtitle: "Right Command: tap for text, hold for voice.") {
+                        MacRow(title: "Use Agent shortcuts", subtitle: "Ask by text or voice. Shortcuts in Hotkeys.") {
                             MacSwitch(isOn: Binding(get: { agentEnabled }, set: {
                                 agentEnabled = $0; onAgentToggle($0)
                             }), label: "Use Agent shortcuts")

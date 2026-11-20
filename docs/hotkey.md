@@ -84,7 +84,11 @@ Modifier glyphs and their VoiceOver pronunciations live on
   passive hints, Toolbox caption) source the caps from
   `configuration.dropVoiceShortcut` and the gesture word from
   `configuration.normalizedDropGesture.voiceTitle`, so a rebind propagates
-  everywhere from one source of truth.
+  everywhere from one source of truth. The Dynamic Island's Agent Voice and
+  Agent Text hints do the same with `agentVoiceShortcut` /
+  `agentVoiceGesture.voiceTitle` and `agentTextShortcut`. Settings row
+  descriptions never name a remappable key in plain text (it would go stale
+  after a rebind); they point to Hotkeys instead.
 
 ## Conflict model
 

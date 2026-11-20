@@ -12,6 +12,9 @@ enum ArtifactBackupStartup {
             do {
                 try performAttempt(showing: progress)
                 progress.close()
+                // Restored settings are older than the synced ones: rejoin sync.
+                // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+                SettingsSyncService.forgetAgreement()
                 return true
             } catch ArtifactBackupError.restoreInterrupted {
                 progress.close()

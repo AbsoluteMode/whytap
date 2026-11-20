@@ -512,6 +512,52 @@ actor GitHubBackupTransport {
     private static func date(_ string: String) -> Date { ISO8601DateFormatter().date(from: string) ?? .distantPast }
 }
 
+// MARK: Settings sync file
+// One small encrypted file in the same private repository, read and written
+// through the Contents API. The blob SHA makes every write conditional, so two
+// Macs never overwrite each other's change: the loser re-reads and merges.
+// WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+extension GitHubBackupTransport: SettingsSyncRemote {
+    private struct ContentsFile: Decodable { let sha: String; let content: String?; let encoding: String?; let size: Int }
+    private struct ContentsWrite: Decodable { struct Content: Decodable { let sha: String }; let content: Content }
+
+    func fetchSyncFile(path: String, etag: String?) async throws -> SettingsSyncFetch {
+        try Task.checkCancellation()
+        var req = request(path: repoPath + "/contents/" + path)
+        req.timeoutInterval = 30
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if status == 304 { return .notModified }
+        if status == 404 { return .missing }
+        try Self.check(response)
+        guard data.count <= 4_000_000, let file = try? JSONDecoder().decode(ContentsFile.self, from: data),
+              file.encoding == "base64", let content = file.content,
+              let bytes = Data(base64Encoded: content, options: .ignoreUnknownCharacters), bytes.count == file.size
+        else { throw Failure.invalidResponse }
+        return .found(data: bytes, sha: file.sha, etag: (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"))
+    }
+
+    func putSyncFile(path: String, data: Data, sha: String?) async throws -> String {
+        try Task.checkCancellation()
+        var body: [String: Any] = ["message": "Whytap settings sync", "content": data.base64EncodedString()]
+        if let sha { body["sha"] = sha }
+        var req = request(path: repoPath + "/contents/" + path, method: "PUT")
+        req.timeoutInterval = 30
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (responseData, response) = try await session.data(for: req)
+        // 409: the file changed since it was read. 422: it was created meanwhile.
+        if let status = (response as? HTTPURLResponse)?.statusCode, status == 409 || status == 422 {
+            throw SettingsSyncFailure.conflict
+        }
+        try Self.check(response)
+        guard let written = try? JSONDecoder().decode(ContentsWrite.self, from: responseData) else { throw Failure.invalidResponse }
+        return written.content.sha
+    }
+}
+
 /// Uses an explicit existing GitHub CLI login only when the user chooses it.
 /// The credential is returned over a pipe and later stored in the local Keychain.
 enum BackupGitHubLogin {

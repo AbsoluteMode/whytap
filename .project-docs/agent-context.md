@@ -1437,6 +1437,30 @@ data remain included. Names alone never exclude a directory and links are not
 followed. WHY:
 `.project-docs/decisions/2026-10-21-backup-tagged-caches.md`.
 
+Settings sync (Settings -> Backup -> Sync settings between Macs, off by
+default) keeps preferences and provider keys the same on Macs sharing one
+recovery code. SettingsSyncService keeps one document sealed with the backup
+key (AES-GCM, readable key ID) at whytap-sync/settings.v1.json
+(settings-beta.v1.json for beta) in the same private Exodia-Backup repository,
+through the Contents API: conditional GET with ETag, PUT with the blob SHA, so
+a write that lost a race re-reads, merges and retries (three attempts). Rounds
+run every minute and 2 s after a defaults change. Items are the backup
+allowlist minus per-Mac ones (island display, calendar accounts and their
+rotating tokens, the routing repair copy) plus the backup's provider key
+accounts minus calendar.*. Each item merges alone: the later change wins, ties
+go to the greater device ID, a removal is recorded so a deleted key is deleted
+everywhere. The routing document is one item. A Mac that turns sync on, or
+restores a backup, joins: shared values replace its own, its extra items
+upload; the previous values stay in local settings history. A local ledger
+(Application Support/<bundle id>/settings-sync/ledger.json, hashes only, never
+backed up) records what this Mac agreed; turning sync off deletes it. An
+unreadable Keychain item or defaults value stops the round, never reads as a
+removal. Another recovery code is reported and never overwritten; values this
+build rejects and items from a newer app are left alone. Stores that keep their
+own copy reload (SettingsSyncLiveReload: routes, hotkeys, Toolbox layout,
+notification sounds, Brightness keys, island helpers, Drop mode, capability
+flags, idle hide). WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+
 ArtifactBackupEngine receives the actual live MeetingsStore/AIUsageStore
 instances, whose export methods freeze database/sidecar generations. Restore
 validates into a parked transaction and applies before any stores or jobs open,
@@ -1693,7 +1717,7 @@ input layout, including live recording and previously saved non-English titles.
    audio or text) sent only to that provider when a model is picked or on
    Check now, its official OpenCode native package downloads from the npm registry, `google.com` opened in the
    browser, the Sparkle feed on GitHub Releases, and optional encrypted backups
-   to the user's own GitHub repository or selected sync folder.
+   and settings sync to the user's own GitHub repository or selected sync folder.
    `Tests/SidekeyTests/CloudRemovalTests.swift` fails the build on any
    Whytap hostname or removed cloud symbol under `Sources/`.
 2. **Keys and content never leave through logs.** Active BYOK keys live in

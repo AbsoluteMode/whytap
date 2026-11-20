@@ -31,6 +31,12 @@ final class HoverLayoutStore: ObservableObject {
         self.slots = Self.loadSlots(from: defaults)
     }
 
+    /// Settings sync wrote another Mac's layout: show it.
+    func reloadFromDefaults() {
+        let loaded = Self.loadSlots(from: defaults)
+        if loaded != slots { slots = loaded }
+    }
+
     // MARK: - Mutation
 
     /// Replace the tool at `index` with `tool`.

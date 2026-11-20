@@ -3134,11 +3134,11 @@ struct IslandLanguagePickerPanel: View {
                 .frame(width: inputFrame.width, height: inputFrame.height)
                 .background(
                     Capsule()
-                        .fill(Color.white.opacity(0.14))
+                        .fill(IslandInk.color.opacity(0.14))
                 )
                 .overlay(
                     Capsule()
-                        .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                        .stroke(IslandInk.color.opacity(0.18), lineWidth: 0.8)
                 )
                 .position(x: inputFrame.midX, y: inputFrame.midY)
                 .accessibilityLabel("Search language")
@@ -3224,7 +3224,7 @@ private struct IslandLanguageSearchField: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         textView.backgroundColor = .clear
-        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.textColor = IslandInk.ns.withAlphaComponent(0.92)
         textView.insertionPointColor = textView.languageCursorColor
         textView.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         textView.alignment = .center
@@ -3318,7 +3318,7 @@ private struct IslandLanguagePlaceholder: View {
                 )
             )
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(IslandInk.color.opacity(0.42))
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3399,7 +3399,7 @@ private struct IslandLanguageFlagChip: View {
                 Group {
                     if usesCapsuleChrome {
                         Capsule()
-                            .stroke(.white.opacity(selected ? 0.34 : 0.08), lineWidth: 0.7)
+                            .stroke(IslandInk.color.opacity(selected ? 0.34 : 0.08), lineWidth: 0.7)
                     }
                 }
             )
@@ -3420,7 +3420,7 @@ private struct IslandLanguageFlagChip: View {
                     size: IslandLanguageFlagChipStyle.variantLanguageFontSize,
                     weight: .medium
                 ))
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(IslandInk.color.opacity(0.82))
                 .lineLimit(1)
                 .minimumScaleFactor(0.64)
         } else {
@@ -3431,7 +3431,7 @@ private struct IslandLanguageFlagChip: View {
                     size: IslandLanguageFlagChipStyle.fontSize(for: option, enlarged: enlarged),
                     weight: .semibold
                 ))
-                .foregroundStyle(.white.opacity(option.language == nil ? 0.82 : 1))
+                .foregroundStyle(IslandInk.color.opacity(option.language == nil ? 0.82 : 1))
                 .lineLimit(1)
                 .minimumScaleFactor(0.64)
         }
@@ -3439,9 +3439,9 @@ private struct IslandLanguageFlagChip: View {
 
     private var backgroundOpacity: Color {
         if selected {
-            return Color.white.opacity(0.22)
+            return IslandInk.color.opacity(0.22)
         }
-        return Color.white.opacity(hovering ? 0.16 : 0.08)
+        return IslandInk.color.opacity(hovering ? 0.16 : 0.08)
     }
 }
 

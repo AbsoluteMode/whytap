@@ -20,10 +20,14 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/PostProcessorOpenRouterTests.swift
     confirmed_at: 2026-10-21
-related: [2026-10-19-strict-drop-modes.md, 2026-10-21-smart-destination-formatting.md, 2026-10-21-smart-decision-calibration.md, 2026-10-22-smart-editor-pass.md]
+related: [2026-10-19-strict-drop-modes.md, 2026-10-21-smart-destination-formatting.md, 2026-10-21-smart-decision-calibration.md, 2026-10-22-smart-editor-pass.md, 2026-11-20-smart-ready-text.md]
 ---
 
 # Smart message editing
+
+On 2026-11-20 the editing criteria below were superseded by
+[Smart returns a ready text](2026-11-20-smart-ready-text.md); the rest of this
+record stands as history.
 
 The conservative editing contract remains. On 2026-10-22 it gained the
 [single-request pass protocol](2026-10-22-smart-editor-pass.md), replacing the

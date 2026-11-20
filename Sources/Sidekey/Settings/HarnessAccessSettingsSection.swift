@@ -19,6 +19,13 @@ struct HarnessAccessSettingsSection: View {
 
     /// Shown while the Keychain has not taken the latest answer.
     static let unsavedNotice = "Whytap couldn’t save this to the Keychain yet. Turning access off still holds after a restart. It will be saved when the Keychain is available."
+    /// Shown when a No could not be written anywhere.
+    static let unverifiedNotice = "Whytap couldn’t save this change. Access is off until Whytap quits and may come back after a restart. Turn it off again later."
+
+    static func notice(unsaved: Bool, unverified: Bool) -> String? {
+        if unverified { return unverifiedNotice }
+        return unsaved ? unsavedNotice : nil
+    }
 
     /// By name, so a changed answer does not move its row.
     static func rows(_ grants: [HarnessGrant]) -> [HarnessGrant] {
@@ -45,8 +52,8 @@ struct HarnessAccessSettingsSection: View {
                             }
                         }
                     }
-                    if store.hasUnsavedAnswers {
-                        Text(Self.unsavedNotice)
+                    if let notice = Self.notice(unsaved: store.hasUnsavedAnswers, unverified: store.revocationUnverified) {
+                        Text(notice)
                             .font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 6)

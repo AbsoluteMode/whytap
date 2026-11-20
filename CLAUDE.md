@@ -1217,11 +1217,16 @@ never launches Whytap. Yes and No are remembered per Mac in one Keychain item
 of the app (HarnessAccessStore; a file could be put back after access was
 turned off). The signed app has no entitlements, so the item is in the file
 based login keychain like the Case vault key; kSecAttrAccessible does not
-apply there and is not set. An answer the Keychain refused holds for the
-launch and is retried on every read; a refused No is also journaled in
-UserDefaults (HarnessRevocationDefaults), which can only take access away and
-denies that tool after a relaunch until the Keychain has the No. Settings
-shows a notice while an answer is unsaved. Settings -> Agents -> Coding tools has a switch per
+apply there and is not set. A stored Yes counts only with its seal: the
+Keychain item and harness-access-seal.json beside the broker socket
+(HarnessAccessSealFile, written atomically and read back) carry the same
+random token, renewed on every save. A missing, unreadable or different seal
+fails closed: the tool is asked again; a stored No never needs the seal. An
+answer the Keychain refused holds for the launch and is retried on every
+read. A refused No replaces the seal's token, which cancels every stored Yes,
+and lists the No there so it denies after a relaunch. Settings shows a notice
+while an answer is unsaved, and a different one when a No reached neither
+place. Settings -> Agents -> Coding tools has a switch per
 tool; the gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet

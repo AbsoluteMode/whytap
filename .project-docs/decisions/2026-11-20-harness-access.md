@@ -50,12 +50,20 @@ with finding and reading meetings, and wants connecting to cost one answer.
   tools lists the answers with a switch. The gate reads the answer before a
   request and again before its response leaves, so off stops an open session
   and a request already reading. An answer the Keychain refused to store
-  holds for this launch and is retried on every read. A refused No is also
-  written to a journal in UserDefaults (`harnessAccess.pendingRevocations`):
-  an entry there denies that harness after a relaunch whatever the Keychain
-  holds, and is removed once the Keychain has the No. The journal can only
-  take access away; a Yes written into it by another process is ignored.
-  Settings shows a notice while an answer is unsaved.
+  holds for this launch and is retried on every read.
+- **A stored Yes needs its seal.** The Keychain item and
+  `harness-access-seal.json` beside the broker socket carry the same random
+  token, renewed on every successful save. The seal is written atomically and
+  read back from disk before it counts. At launch a stored Yes applies only
+  when the tokens match; a missing, unreadable or different seal fails
+  closed and the harness is asked again. A stored No never needs the seal.
+  When the Keychain refuses a No, the seal gets a new token, so the Yes still
+  in the Keychain matches nothing on disk any more, and the No is listed in
+  the seal so it denies after a relaunch. Only Nos are read from the seal; a
+  Yes written there by another process is ignored. If the seal cannot be
+  written either, Settings says that access may come back after a restart.
+  A No given while the Keychain is locked therefore also makes other tools
+  be asked again.
 - **Where the item is.** Checked on the signed app on 2026-11-20
   (`codesign -d --entitlements`, `security find-generic-password` metadata of
   the Case vault key): the app has no entitlements and its items are in the
@@ -108,8 +116,11 @@ with finding and reading meetings, and wants connecting to cost one answer.
   after Yes; unreadable stored answers allow nobody; while the Keychain is
   locked nothing is trusted or overwritten; a No the Keychain refused still
   denies after an immediate relaunch, also with the Keychain locked, and is
-  stored once it is writable; turning access back on removes the journaled
-  No; a damaged journal takes nothing away and a Yes in it gives nothing; access turned off during a read returns nothing; a
+  stored once it is writable; after that refused No a missing, unreadable or
+  different seal leaves the stored Yes unhonoured and the harness is asked
+  again; the refused No replaces the seal token; a No that reached neither
+  place is reported; a Yes survives a relaunch only with its seal and a No
+  always; the seal file counts only as read back from disk; access turned off during a read returns nothing; a
   cancelled request stops waiting while the prompt stays; the Settings switch
   stops and restores access without a prompt.
 - `HarnessAccessPromptTests`: Y only after the quiet keyboard, A is not an
@@ -145,8 +156,10 @@ The builder blocked the first submission on 2026-11-20: a No the Keychain
 refused came back as Yes after an immediate relaunch, the Settings switch
 showed Off without saying it was unsaved, and the code set
 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, which the file-based
-keychain ignores. Fixed with the revocation journal, the notice and the
-checked description above. The existing Case vault key sets the same ignored
+keychain ignores. A journal of refused Nos in UserDefaults came first; the
+builder blocked it too: preferences are flushed later and unverified, and a
+lost or unreadable journal let the old Yes win. The seal above replaced it:
+losing it removes access instead of restoring it. The existing Case vault key sets the same ignored
 attribute; that is left for its own change.
 
 ## Review
@@ -165,6 +178,11 @@ Recording permission. A meeting link can now put a known note on screen
 first. It needs its own decision.
 
 ## Limits
+
+A process of the same user that copied the seal earlier and puts it back
+after a No the Keychain refused restores the match. It needs that Keychain
+failure and a hostile local process at the same moment; such a process can
+read the meeting files directly anyway.
 
 The answer is consent for the plugin's tools, not protection of files: notes
 and transcripts are files any process of the user can read. A harness the user

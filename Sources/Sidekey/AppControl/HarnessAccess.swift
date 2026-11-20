@@ -112,53 +112,77 @@ struct HarnessAccessKeychain: HarnessAccessPersisting {
     }
 }
 
-/// A No the Keychain has not taken yet, kept where a write cannot be refused
-/// for the same reason. It can only take access away: an entry here denies
-/// that harness whatever the Keychain says, until the Keychain has the No.
-protocol HarnessRevocationJournaling {
-    func load() -> [HarnessGrant]
-    func save(_ pending: [HarnessGrant])
+/// The second half of every stored Yes. The Keychain item and the seal carry
+/// the same random token, renewed with each successful save. A stored Yes
+/// counts only while the two match, so when a No could not reach the
+/// Keychain, replacing the seal's token is enough to cancel every stored Yes:
+/// the old token is nowhere on disk afterwards. A missing or unreadable seal
+/// matches nothing. The harness is then asked again; a stored No never needs
+/// the seal.
+struct HarnessAccessSeal: Codable, Equatable {
+    var token: String
+    /// Nos the Keychain has not taken yet. They only take access away.
+    var revoked: [HarnessGrant]
 }
 
-struct HarnessRevocationDefaults: HarnessRevocationJournaling {
-    static let key = "harnessAccess.pendingRevocations"
-    let defaults: UserDefaults
+protocol HarnessAccessSealing {
+    /// nil when there is no seal or it cannot be read.
+    func load() -> HarnessAccessSeal?
+    /// True only when the seal is on disk as written.
+    func save(_ seal: HarnessAccessSeal) -> Bool
+}
 
-    func load() -> [HarnessGrant] {
-        guard let data = defaults.data(forKey: Self.key) else { return [] }
-        return (try? JSONDecoder().decode([HarnessGrant].self, from: data)) ?? []
+/// Written atomically and read back from disk before it is trusted:
+/// preferences are flushed later and could not be verified.
+struct HarnessAccessSealFile: HarnessAccessSealing {
+    let url: URL
+
+    func load() -> HarnessAccessSeal? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(HarnessAccessSeal.self, from: data)
     }
 
-    func save(_ pending: [HarnessGrant]) {
-        if pending.isEmpty {
-            defaults.removeObject(forKey: Self.key)
-        } else if let data = try? JSONEncoder().encode(pending) {
-            defaults.set(data, forKey: Self.key)
-        }
+    func save(_ seal: HarnessAccessSeal) -> Bool {
+        guard let data = try? JSONEncoder().encode(seal) else { return false }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return false }
+        return load() == seal
     }
 }
 
 @MainActor
 final class HarnessAccessStore: ObservableObject {
+    private struct Document: Codable {
+        var token: String
+        var grants: [HarnessGrant]
+    }
+
     @Published private(set) var grants: [HarnessGrant] = []
     /// True while an answer of this launch is not in the Keychain yet.
     @Published private(set) var hasUnsavedAnswers = false
+    /// True when a No reached neither the Keychain nor the seal: it holds
+    /// until Whytap quits and nothing guarantees it afterwards.
+    @Published private(set) var revocationUnverified = false
 
     /// The running app's store, for Settings -> Agents. Nil outside a packaged app.
     static weak var active: HarnessAccessStore?
 
     private let persistence: HarnessAccessPersisting?
-    private let revocations: HarnessRevocationJournaling?
+    private let seal: HarnessAccessSealing?
+    private let makeToken: () -> String
     private var loaded = false
 
-    /// Without `persistence` answers last for this launch only.
-    init(persistence: HarnessAccessPersisting?, revocations: HarnessRevocationJournaling? = nil) {
+    /// Without `persistence` answers last for this launch only. Without
+    /// `seal` a stored Yes needs no second half (tests of other behaviour).
+    init(persistence: HarnessAccessPersisting?, seal: HarnessAccessSealing? = nil,
+         makeToken: @escaping () -> String = { UUID().uuidString }) {
         self.persistence = persistence
-        self.revocations = revocations
+        self.seal = seal
+        self.makeToken = makeToken
         loaded = persistence == nil
-        // A No that an earlier launch could not store applies before the
-        // Keychain is read, and wins over what it holds.
-        let pending = (revocations?.load() ?? []).filter { $0.decision == .deny }
+        // A No an earlier launch could not store applies before the Keychain
+        // is read, and wins over what it holds.
+        let pending = (seal?.load()?.revoked ?? []).filter { $0.decision == .deny }
         grants = pending
         hasUnsavedAnswers = !pending.isEmpty
     }
@@ -171,18 +195,30 @@ final class HarnessAccessStore: ObservableObject {
     }
 
     /// The answer applies at once; false when the Keychain did not take it.
-    /// A No is then journaled, so it also holds after a relaunch; a Yes is
-    /// not, so the harness is asked again or keeps its earlier answer.
+    /// A refused No then cancels every stored Yes through the seal, so the
+    /// old Yes cannot return after a relaunch.
     @discardableResult
     func record(_ decision: HarnessDecision, for client: HarnessClient, at date: Date) -> Bool {
         loadIfNeeded()
         let grant = HarnessGrant(identity: client.identity, name: client.name, decision: decision, decidedAt: date)
         grants.removeAll { $0.identity == client.identity }
         grants.append(grant)
-        var pending = (revocations?.load() ?? []).filter { $0.identity != client.identity }
         if persist() { return true }
-        if decision == .deny { pending.append(grant) }
-        revocations?.save(pending)
+        guard let seal else { return false }
+        switch decision {
+        case .deny:
+            // A fresh token matches nothing the Keychain holds.
+            revocationUnverified = !seal.save(HarnessAccessSeal(
+                token: makeToken(), revoked: grants.filter { $0.decision == .deny }))
+        case .allow:
+            // The user changed their mind: only the journaled No goes. A Yes
+            // that is not in the Keychain is asked for again after a relaunch.
+            if var current = seal.load(), current.revoked.contains(where: { $0.identity == client.identity }) {
+                current.revoked.removeAll { $0.identity == client.identity }
+                _ = seal.save(current)
+            }
+            revocationUnverified = false
+        }
         return false
     }
 
@@ -197,10 +233,15 @@ final class HarnessAccessStore: ObservableObject {
             loaded = true
         case .data(let data):
             loaded = true
-            let stored = (try? JSONDecoder().decode([HarnessGrant].self, from: data)) ?? []
+            let document = try? JSONDecoder().decode(Document.self, from: data)
+            // Fail closed: a Yes without its matching seal is not an answer.
+            let sealed = seal == nil || (document != nil && seal?.load()?.token == document?.token)
+            let stored = (document?.grants ?? []).filter { $0.decision == .deny || sealed }
             // Answers of this launch and journaled Nos win over the storage.
             let fresh = Set(grants.map(\.identity))
             grants = stored.filter { !fresh.contains($0.identity) } + grants
+            // Rewrite both halves so what is stored is what applies.
+            if !sealed { hasUnsavedAnswers = true }
         }
         if hasUnsavedAnswers { persist() }
     }
@@ -208,13 +249,17 @@ final class HarnessAccessStore: ObservableObject {
     @discardableResult
     private func persist() -> Bool {
         guard let persistence else { return true }
-        guard loaded, let data = try? JSONEncoder().encode(grants), persistence.save(data) else {
+        let token = makeToken()
+        guard loaded, let data = try? JSONEncoder().encode(Document(token: token, grants: grants)),
+              persistence.save(data) else {
             hasUnsavedAnswers = true
             return false
         }
-        // The Keychain has every answer now, the journaled Nos included.
+        // The Keychain has every answer now, journaled Nos included. If the
+        // seal cannot be written, the stored Yes is asked for again later.
         hasUnsavedAnswers = false
-        revocations?.save([])
+        revocationUnverified = false
+        _ = seal?.save(HarnessAccessSeal(token: token, revoked: []))
         return true
     }
 }

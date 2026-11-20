@@ -56,7 +56,8 @@ this Mac; No is remembered too and the tools then answer `access_denied`. If
 Whytap was closed, the question appears with the first meeting request. Each
 tool is asked about separately. Change an answer in Whytap Settings -> Agents
 -> Coding tools. Turning a tool off holds after a restart even when the
-Keychain could not save it at that moment; Settings says so until it is saved.
+Keychain could not save it at that moment; Settings says so until it is
+saved. If Whytap cannot confirm a stored Yes at launch, it asks again.
 
 Only the harness that started the server itself is recognised (Claude Code,
 Codex). A shell command, a script the agent runs, a terminal or another

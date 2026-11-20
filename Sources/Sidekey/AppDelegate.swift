@@ -3872,7 +3872,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // WHY: .project-docs/decisions/2026-11-20-harness-access.md
         let harnessStore = HarnessAccessStore(
             persistence: HarnessAccessKeychain(service: BuildConfig.keychainService),
-            revocations: HarnessRevocationDefaults(defaults: .standard))
+            seal: HarnessAccessSealFile(url: CaseBrokerPaths.socketURL(bundleID: bundleID)
+                .deletingLastPathComponent().appendingPathComponent("harness-access-seal.json")))
         harnessAccessStore = harnessStore
         HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(

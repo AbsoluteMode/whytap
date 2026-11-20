@@ -11,7 +11,7 @@ Usage (icons come from Lucide, ISC, see docs/assets/readme/tool-icons.LICENSE.tx
     npm pack lucide-static@0.460.0 && tar xzf lucide-static-0.460.0.tgz
     python3 scripts/readme-tool-cards.py package/icons
 
-It rewrites docs/assets/readme/tool-tile-*.svg and the "## Tools" section of
+It rewrites docs/assets/readme/tool-row-*.svg and the "## Tools" section of
 README.md. When a card changes, rename the tile prefix: GitHub caches README
 images for several minutes under the same URL.
 """
@@ -23,7 +23,8 @@ LUCIDE = pathlib.Path(sys.argv[1])
 OUT = REPO / "docs/assets/readme"
 A = "docs/assets/readme"
 
-# slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card), media (list of files; Calendar has a reduced-motion still)
+# slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card),
+# media (a <name>-still.webp beside a file is its reduced-motion frame) (list of files; Calendar has a reduced-motion still)
 DEMOS = [
     ("drop-smart", "audio-lines", "Drop Smart", "Speak, correct yourself, release",
      ["Hold Space", "Speak", "Release to paste"],
@@ -51,10 +52,10 @@ DEMOS = [
      'Cards from Claude Code, Codex, CI or any script. Dashboards for your servers and your own data.', ["demo-notify.webp"]),
     ("calendar-todo", "calendar-check", "Calendar & To-do", "Check your agenda and manage tasks",
      ["Today's agenda", "Tasks in the notch"],
-     'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar-todo.gif"]),
+     'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar.webp", "demo-todo.webp"]),
     ("display-extra", "sun-medium", "Display Extra", "Use the display’s available HDR headroom",
      ["Open Display", "Turn on Extra", "Slide"],
-     "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level when macOS changes it.", ["demo-brightness.webp"]),
+     "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level steady.", ["demo-brightness.webp"]),
 ]
 
 THEMES = {
@@ -67,9 +68,9 @@ FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, A
 
 # Geometry per layout. Desktop is shown at 92% of the README column (~760 px), phone at ~290 px.
 LAYOUTS = {
-    "wide": dict(dx=420, dwrap=48, dfs=13, dlh=18.5, W=860, H=92, rx=16, cx=46, r=26, isz=26, tx=92, ty=41, ts=18, py=64, ps=13.5,
-                 pw=78, ph=32, pfs=14, pill_mid=True),
-    "phone": dict(W=300, H=60, rx=12, cx=25, r=16, isz=18, tx=50, ty=26, ts=14, py=45, ps=11,
+    "wide": dict(dx=410, dwrap=52, dfs=12, dlh=15.5, W=860, H=70, rx=14, cx=38, r=21, isz=22, tx=74, ty=31, ts=17, py=51, ps=13,
+                 pw=72, ph=28, pfs=13, pill_mid=True),
+    "phone": dict(W=300, H=50, rx=11, cx=23, r=14, isz=16, tx=45, ty=21, ts=14, py=38, ps=11,
                   pw=44, ph=18, pfs=11, pill_mid=False),
 }
 
@@ -87,7 +88,7 @@ def desc_block(desc, c, g):
     lines = textwrap.wrap(desc, g["dwrap"])
     top = g["H"] / 2 - (len(lines) - 1) * g["dlh"] / 2 + g["dfs"] * 0.35
     spans = "".join(f'<tspan x="{g["dx"]}" y="{top + i * g["dlh"]:.1f}">{html.escape(l)}</tspan>' for i, l in enumerate(lines))
-    return (f'  <line x1="{g["dx"]-22}" y1="18" x2="{g["dx"]-22}" y2="{g["H"]-18}" stroke="{c["border"]}"/>\n'
+    return (f'  <line x1="{g["dx"]-22}" y1="14" x2="{g["dx"]-22}" y2="{g["H"]-14}" stroke="{c["border"]}"/>\n'
             f'  <text font-family="{FONT}" font-size="{g["dfs"]}" fill="{c["sub"]}">{spans}</text>')
 
 
@@ -100,7 +101,7 @@ def card(title, sub, steps, desc, icon, theme, layout):
     if g["pill_mid"]:
         px, py = W - g["pw"] - 22, H / 2 - g["ph"] / 2
     else:
-        px, py = W - g["pw"] - 8, 8
+        px, py = W - g["pw"] - 7, 6
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
   <rect x="0.5" y="0.5" width="{W-1}" height="{H-1}" rx="{g['rx']}" fill="{c['bg']}" stroke="{c['border']}"/>
   <circle cx="{g['cx']}" cy="{H/2}" r="{g['r']}" fill="{c['disk']}"/>
@@ -116,24 +117,27 @@ def card(title, sub, steps, desc, icon, theme, layout):
 
 def media_html(slug, files, title):
     alt = html.escape(f"{title} demo")
-    if slug == "calendar-todo":
-        return ("<picture>"
-                f'<source media="(prefers-reduced-motion: reduce)" srcset="{A}/demo-calendar-todo-still.webp">'
-                f'<img src="{A}/demo-calendar-todo.gif" width="88%" loading="lazy" alt="{alt}">'
-                "</picture>")
-    if len(files) == 1:
-        return f'<img src="{A}/{files[0]}" width="88%" loading="lazy" alt="{alt}">'
-    return "\n".join(f'<img src="{A}/{f}" width="43.5%" loading="lazy" alt="{alt}">' for f in files)
+    width = "88%" if len(files) == 1 else "43.5%"
+
+    def one(f):
+        img = f'<img src="{A}/{f}" width="{width}" loading="lazy" alt="{alt}">'
+        still = f.rsplit(".", 1)[0] + "-still.webp"
+        if (OUT / still).exists():
+            return ("<picture>"
+                    f'<source media="(prefers-reduced-motion: reduce)" srcset="{A}/{still}">'
+                    f"{img}</picture>")
+        return img
+
+    return "\n".join(one(f) for f in files)
 
 
-section = ["## Tools", "",
-           "<sub>Click a tool to play its demo. Opening one closes the previous.</sub>", ""]
+section = ["## Tools", ""]
 for slug, icon, title, sub, steps, desc, media in DEMOS:
     for t in THEMES:
         for lay in LAYOUTS:
-            (OUT / f"tool-tile-{slug}-{lay}-{t}.svg").write_text(card(title, sub, steps, desc, icon, t, lay))
+            (OUT / f"tool-row-{slug}-{lay}-{t}.svg").write_text(card(title, sub, steps, desc, icon, t, lay))
     alt = html.escape(f"{title}: {sub}")
-    src = lambda lay, t: f"{A}/tool-tile-{slug}-{lay}-{t}.svg"
+    src = lambda lay, t: f"{A}/tool-row-{slug}-{lay}-{t}.svg"
     section += [
         '<details name="tool-demo">',
         "<summary><picture>"

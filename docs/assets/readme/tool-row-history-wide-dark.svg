@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="70" viewBox="0 0 860 70">
+  <rect x="0.5" y="0.5" width="859" height="69" rx="14" fill="#151b23" stroke="#2d333b"/>
+  <circle cx="38" cy="35.0" r="21" fill="#2a2350"/>
+  <g transform="translate(27.0 24.0) scale(0.9167)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+  <path d="M3 3v5h5" />
+  <path d="M12 7v5l4 2" /></g>
+  <text x="74" y="31" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f0f6fc">History</text>
+  <text x="74" y="51" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Open History</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Search</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Paste it again</tspan></text>
+  <line x1="388" y1="14" x2="388" y2="56" stroke="#2d333b"/>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#9198a1"><tspan x="410" y="31.4">Recent copies, dictations and Agent answers in one</tspan><tspan x="410" y="47.0">searchable list. Everything stays on your Mac.</tspan></text>
+  <rect x="766" y="21.0" width="72" height="28" rx="14.0" fill="#6c5ce7"/>
+  <text x="802.0" y="39.7" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Click</text>
+</svg>

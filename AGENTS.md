@@ -995,6 +995,12 @@ and Cloudflare wait for their own provider support. The tab has no footer.
 Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
+The no-card offers also form README's Free API keys table, generated from
+APIHintsView.hints by scripts/readme-free-apis.py (APIHintsRenderTests fails
+on a stale table). A monthly review rechecks every offer on its official page,
+updates terms and dates in both places through one PR and reports changes to
+the maintainer; new offers are proposed, not added. WHY:
+.project-docs/decisions/2026-11-21-free-api-report.md
 
 Model selection uses ModelPicker: a searchable native popover sharing the 30 pt
 MacPopupLabel. Name/size terms match in any order (`qwen 27`, `qwen27`), ignoring

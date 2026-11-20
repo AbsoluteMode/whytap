@@ -79,6 +79,26 @@ final class APIHintsRenderTests: XCTestCase {
         XCTAssertEqual(Set(APIHintsView.hints.map(\.provider)).count, APIHintsView.hints.count)
     }
 
+    /// README's "Free API keys" table is generated from these offers; a stale table
+    /// would advertise terms the app no longer shows.
+    func testReadmeFreeAPITableMatchesNoCardOffers() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        while !FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path) {
+            root.deleteLastPathComponent()
+        }
+        let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
+        let section = try XCTUnwrap(readme.range(of: "## Free API keys").map { String(readme[$0.lowerBound...]) })
+        let rows = section.split(separator: "\n").filter { $0.hasPrefix("| ") && !$0.hasPrefix("| For ") }
+        let free = APIHintsView.hints.filter { $0.access == .noCard }
+        XCTAssertEqual(rows.count, free.count)
+        for hint in free {
+            let row = try XCTUnwrap(rows.first { $0.contains("[\(hint.provider)](\(hint.url.absoluteString))") }, hint.provider)
+            XCTAssertTrue(row.contains("**\(hint.allowance)** \(hint.cadence)"), hint.provider)
+            XCTAssertTrue(row.contains(hint.detail), hint.provider)
+            XCTAssertTrue(row.contains(hint.checkedDate), hint.provider)
+        }
+    }
+
     /// A row without a bundled mark falls back to the generic globe, which reads as a missing logo.
     func testEveryOfferHasItsBundledMark() throws {
         var root = URL(fileURLWithPath: #filePath)

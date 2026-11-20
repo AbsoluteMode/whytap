@@ -3864,8 +3864,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)
+        // The connected confirmation is the same attached card: the island
+        // keeps its square bottom edge until it leaves too.
         caseApprovalCancellable = approvals.$current
-            .map { $0 != nil }
+            .combineLatest(approvals.$connected)
+            .map { $0 != nil || $1 != nil }
             .removeDuplicates()
             .sink { active in AppState.shared.caseApprovalActive = active }
         // Answers are per Mac, in this app's Keychain.

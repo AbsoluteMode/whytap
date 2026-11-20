@@ -83,8 +83,8 @@ final class HarnessAccessPromptTests: XCTestCase {
     }
 
     func test_the_card_names_the_harness_and_what_yes_means() {
-        XCTAssertEqual(CaseApprovalView.harnessTitle(claude), "Let Claude Code use Whytap?")
-        XCTAssertEqual(CaseApprovalView.harnessTitle(codex), "Let Codex use Whytap?")
+        XCTAssertEqual(CaseApprovalView.harnessTitle(claude), "Give Claude Code access to Whytap?")
+        XCTAssertEqual(CaseApprovalView.harnessTitle(codex), "Give Codex access to Whytap?")
         XCTAssertTrue(CaseApprovalView.harnessDetail.contains("Case keys keep their own approval"))
         XCTAssertEqual(CaseApprovalView.harnessMark(claude).asset, "claude-code")
         XCTAssertEqual(CaseApprovalView.harnessMark(codex).asset, "codex")
@@ -111,6 +111,28 @@ final class HarnessAccessPromptTests: XCTestCase {
         XCTAssertEqual(controller.connected, claude)
         clock.advance(by: CaseApprovalController.connectedDuration)
         XCTAssertNil(controller.connected)
+    }
+
+    /// The island squares its bottom edge while a card is attached. The
+    /// confirmation is still that card, so the island must not round its
+    /// corners under it; and the card overlaps the island's edge by the seam.
+    func test_the_confirmation_stays_attached_like_the_question() throws {
+        let source = try String(contentsOf: Self.repository.appendingPathComponent("Sources/Sidekey/AppDelegate.swift"), encoding: .utf8)
+        let wiring = try XCTUnwrap(source.range(of: "caseApprovalCancellable = approvals.$current"))
+        let sink = source[wiring.lowerBound...].prefix(260)
+        XCTAssertTrue(sink.contains(".combineLatest(approvals.$connected)"), "the island would round its corners under the confirmation")
+        XCTAssertTrue(sink.contains("$0 != nil || $1 != nil"))
+
+        let island = NSRect(x: 600, y: 1_000, width: 312, height: 32)
+        for card in [NSHostingView(rootView: AnyView(CaseApprovalConnectedView(client: claude, width: 312, fixedStep: 4))).fittingSize.height, 120] {
+            let frame = CaseApprovalPanel.frame(islandFrame: island, cardHeight: card, meetingNudgeVisible: false)
+            XCTAssertEqual(frame.maxY, island.minY + CaseApprovalView.islandSeam)
+            XCTAssertGreaterThan(CaseApprovalView.islandSeam, 0)
+        }
+        // The question and its confirmation keep the marks at the same place.
+        XCTAssertGreaterThan(CaseApprovalController.connectedDuration,
+                             Double(CaseApprovalConnectedView.steps) * CaseApprovalConnectedView.dotInterval + 1,
+                             "the finished state is on screen for over a second")
     }
 
     func test_n_and_escape_refuse_without_a_confirmation() async {
@@ -176,8 +198,10 @@ final class HarnessAccessPromptTests: XCTestCase {
             ("claude-code-arming-312", 312, card(claude, width: 312, armed: false)),
             ("codex-queued-310", 310, card(codex, width: 310, pending: 1)),
             ("claude-code-narrow-260", 260, card(claude, width: 260)),
-            ("claude-code-connected-312", 312, AnyView(CaseApprovalConnectedView(client: claude, width: 312))),
-            ("codex-connected-312", 312, AnyView(CaseApprovalConnectedView(client: codex, width: 312))),
+            ("claude-code-connecting-0-312", 312, AnyView(CaseApprovalConnectedView(client: claude, width: 312, appIcon: icon, fixedStep: 0))),
+            ("claude-code-connecting-2-312", 312, AnyView(CaseApprovalConnectedView(client: claude, width: 312, appIcon: icon, fixedStep: 2))),
+            ("claude-code-connected-312", 312, AnyView(CaseApprovalConnectedView(client: claude, width: 312, appIcon: icon, fixedStep: 4))),
+            ("codex-connected-312", 312, AnyView(CaseApprovalConnectedView(client: codex, width: 312, appIcon: icon, fixedStep: 4))),
         ]
         for (name, width, view) in faces {
             // A wallpaper-like backdrop shows the card's own shape and corners.

@@ -1143,8 +1143,8 @@ Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
 red now line). Events are blocks from start to end in one colour, each with the
-small logo of its service (bundled Google Calendar, Zoom and Whytap marks; the
-installed Calendar or Outlook app icon, else a drawn tile), time range and
+small logo of its service (bundled official Google Calendar and Outlook icons,
+Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range and
 calendar name. Every connected calendar is shown: Hover has no calendar hiding
 or Refresh button (open, day change, account change and a 60 s poll refresh).
 WHY: .project-docs/decisions/2026-11-21-calendar-logos.md

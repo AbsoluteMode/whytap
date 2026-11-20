@@ -127,6 +127,11 @@ final class CalendarDayViewTests: XCTestCase {
         for feed in model.connections.feeds { model.connections.setVisible(false, feedID: feed.id) }
         XCTAssertEqual(Set(model.events.map(\.event.title)), ["Company offsite", "Team standup", "Design review", "School pickup"])
         XCTAssertTrue(model.isConnected(.google)); XCTAssertFalse(model.isConnected(.microsoft))
+        // The Connect rows say the same thing on screen and to VoiceOver.
+        XCTAssertEqual(model.connectState(.google), .addAccount)
+        XCTAssertEqual(model.connectAccessibilityLabel(.google), "Add Google Calendar account")
+        XCTAssertEqual(model.connectState(.microsoft), .connect)
+        XCTAssertEqual(model.connectAccessibilityLabel(.microsoft), "Connect Outlook Calendar")
     }
 
     func testLogosComeFromTheBundleOrTheInstalledApp() throws {
@@ -136,16 +141,27 @@ final class CalendarDayViewTests: XCTestCase {
         defer { CalendarSourceLogo.resourceDirectoryForTesting = nil; CalendarSourceLogo.applicationURL = lookup }
         CalendarSourceLogo.resourceDirectoryForTesting = icons
         CalendarSourceLogo.applicationURL = { _ in nil }
-        for source: CalendarEventSource in [.whytap, .provider(.google), .provider(.zoom)] {
+        for source: CalendarEventSource in [.whytap, .provider(.google), .provider(.microsoft), .provider(.zoom)] {
             let image = try XCTUnwrap(CalendarSourceLogo.image(for: source), "\(source) is bundled")
             XCTAssertFalse(image.isTemplate, "Logos keep their own colours")
         }
         XCTAssertNil(CalendarSourceLogo.image(for: .provider(.apple)), "No Calendar app, no logo: the view falls back to a symbol")
-        XCTAssertNotNil(CalendarSourceLogo.image(for: .provider(.microsoft)), "Without Outlook installed, a drawn tile")
         CalendarSourceLogo.applicationURL = { $0 == CalendarSourceLogo.appleCalendarBundleID
             ? URL(fileURLWithPath: "/System/Applications/Calendar.app") : nil }
         XCTAssertNotNil(CalendarSourceLogo.image(for: .provider(.apple)))
         CalendarSourceLogo.resourceDirectoryForTesting = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         XCTAssertNil(CalendarSourceLogo.image(for: .whytap), "A missing asset is no image, not a crash")
+    }
+
+    /// An app icon's transparent margin is cut away so it is as big as a flat logo.
+    func testLogoMarginsAreTrimmedSoLogosMatchInSize() throws {
+        let padded = NSImage(size: NSSize(width: 100, height: 100), flipped: false) { _ in
+            NSColor.red.setFill(); NSRect(x: 20, y: 30, width: 60, height: 60).fill(); return true
+        }
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(CalendarSourceLogo.trimmed(padded).tiffRepresentation)))
+        let corner = try XCTUnwrap(bitmap.colorAt(x: 2, y: 2))
+        XCTAssertGreaterThan(corner.alphaComponent, 0.9, "The visible square reaches the corners after trimming")
+        let blank = NSImage(size: NSSize(width: 10, height: 10))
+        XCTAssertTrue(CalendarSourceLogo.trimmed(blank) === blank, "A fully transparent image is left as it is")
     }
 }

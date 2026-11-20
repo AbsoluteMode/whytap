@@ -67,6 +67,15 @@ final class CalendarHoverTests: XCTestCase {
         model.moveDay(1); XCTAssertTrue(model.events.isEmpty)
     }
 
+    func testEnabledAppleCalendarReadsConnectedOnScreenAndToVoiceOver() {
+        defaults.set(true, forKey: "planner.calendar.appleEnabled")
+        let model = makeModel()
+        XCTAssertEqual(model.connectState(.apple), .connected)
+        XCTAssertEqual(model.connectAccessibilityLabel(.apple), "Apple Calendar, connected")
+        XCTAssertEqual(model.connectState(.zoom), .connect)
+        XCTAssertEqual(model.connectAccessibilityLabel(.zoom), "Connect Zoom Calendar")
+    }
+
     func testMergedConnectedFeedsDeduplicateAndOlderHidingIsIgnored() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PlannerURLProtocol.self]
@@ -159,6 +168,9 @@ final class CalendarHoverTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(30))
         XCTAssertTrue(flow.working); XCTAssertTrue(connections.isConnecting)
         XCTAssertEqual(model.page, .providers)
+        XCTAssertEqual(model.connectState(.microsoft), .connecting)
+        XCTAssertEqual(model.connectAccessibilityLabel(.microsoft), "Connecting Outlook Calendar")
+        XCTAssertEqual(model.connectState(.google), .connect, "Only the provider being connected shows progress")
         XCTAssertFalse(window.isVisible || window.isKeyWindow)
         if let output = ProcessInfo.processInfo.environment["WHYTAP_CALENDAR_HOVER_RENDER_DIR"] {
             try FileManager.default.createDirectory(at: URL(fileURLWithPath: output), withIntermediateDirectories: true)

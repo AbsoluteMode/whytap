@@ -39,9 +39,10 @@ He also asked whether Whytap can learn about changes by itself.
 - Every event block has the same blue. A small logo of its service leads the
   title: Google Calendar, Outlook, Calendar on this Mac, Zoom or Whytap. The
   calendar's name stays in the block's second line.
-- Logos come from the bundle (Google Calendar mark on a white tile, Zoom,
-  Whytap) or from the installed app (Calendar, Outlook). Without Outlook a
-  calendar symbol on an Outlook-blue tile is drawn. Nothing is downloaded.
+- Logos are the services' own full-colour icons, bundled: Google Calendar and
+  Outlook (official 96 px PNGs, see Follow-up), Zoom and Whytap. Calendar on
+  this Mac uses the installed Calendar app's icon. Transparent margins are
+  trimmed so all logos are the same size. The app downloads nothing.
 - Hover shows every connected calendar. The filter button and the calendar list
   page are removed. The saved hidden-calendar list is kept and ignored: it is
   part of settings backups and older builds still read it.
@@ -71,18 +72,38 @@ He also asked whether Whytap can learn about changes by itself.
 - Unit tests: each event's service (Google, Whytap, a vanished calendar), every
   calendar shown even with a hiding choice saved by an older build, deduplicated
   copies from two calendars, connected-state labels, logos from the bundle
-  (not template images), Calendar from the installed app, the Outlook tile when
-  Outlook is missing, and a missing asset returning no image.
+  (not template images), Calendar from the installed app, a missing asset
+  returning no image, and margin trimming.
 - Offscreen renders at 310, 360 and 500 pt: the day with logos, the Connect list
   with logos and a connected Google account.
-- Not verified: the installed app's look, the Outlook app icon (Outlook is not
-  installed on the test Mac) and real pointer behavior.
+- The builder's review found that Connect rows reading "Connected" or "Add
+  account" were still announced to VoiceOver as "Connect". The row text and its
+  VoiceOver name now come from one state (Connecting, Connected, Add account,
+  Connect), with tests for each.
+- Not verified: real pointer behavior and VoiceOver in the installed app.
 
 ## Rejected
 
 - Keeping colours and adding logos: two signals for one fact.
-- Downloading an official Outlook icon: needs the owner's approval; the
-  installed app's icon or a drawn tile covers it for now.
+- Drawn tiles (a monochrome Google mark on white, a calendar symbol on Outlook
+  blue): the user found them small and poor next to real app icons.
 - Push notifications from Google or Microsoft: they need a public server.
+
+## Follow-up: real logos, bigger (2026-11-21)
+
+In the installed 2.2.25 (1667) the user found the icons poor and
+asked for the real Outlook, Zoom and Google logos, bigger. With the user's
+explicit approval two official icons were added to Resources/UsefulLinkIcons:
+
+- `google-calendar.png` (96 x 96, 907 bytes) from Google's product branding
+  assets, `www.gstatic.com/images/branding/product/2x/calendar_2020q4_48dp.png`,
+  SHA-256 c2a7600e39f41146589f8ff9111d6f756f94d0af6f83ec98ab6768c985bf7d3b.
+- `outlook.png` (96 x 96, 6,335 bytes) from Microsoft's Fabric brand icons,
+  `res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/outlook_96x1.png`,
+  SHA-256 14fbe9ba300e217672e2ce38b34f08a5ea4779b1924f4aeb9833b65893a979ac.
+
+Sizes grew: 28 pt on Connect rows (was 20), 15 pt on tall blocks and all-day
+chips (was 12), 13 pt on one-line blocks (was 11). The logos name the service
+they belong to and are used only for that.
 
 2026-11-21 · PR: Calendar logos instead of colours

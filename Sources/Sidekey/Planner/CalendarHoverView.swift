@@ -84,6 +84,26 @@ final class CalendarHoverModel: ObservableObject {
         provider == .apple ? connections.appleEnabled : connections.accounts.contains { $0.provider == provider }
     }
 
+    /// What a Connect row offers, shown on the row and spoken by VoiceOver.
+    enum ConnectState: Equatable { case connecting, connected, addAccount, connect }
+
+    func connectState(_ provider: CalendarProvider) -> ConnectState {
+        if connectionFlow.working && connectionFlow.lastProvider == provider { return .connecting }
+        if !isConnected(provider) { return .connect }
+        return provider == .apple ? .connected : .addAccount
+    }
+
+    /// VoiceOver name of a Connect row; it matches the row's visible words.
+    func connectAccessibilityLabel(_ provider: CalendarProvider) -> String {
+        let name = provider.integrationTitle
+        switch connectState(provider) {
+        case .connecting: return "Connecting \(name)"
+        case .connected: return "\(name), connected"
+        case .addAccount: return "Add \(name) account"
+        case .connect: return "Connect \(name)"
+        }
+    }
+
     /// Tooltip and VoiceOver name of the click: Join meeting or Open in <calendar app>.
     func actionTitle(_ item: CalendarFeedEvent) -> String? {
         switch CalendarEventAction.resolve(item) {
@@ -253,7 +273,7 @@ struct CalendarHoverView: View {
                 ForEach(items) { item in
                     CalendarEventButton(model: model, item: item) { _ in
                         HStack(spacing: 5) {
-                            CalendarSourceLogoView(source: model.source(item.feedID), size: 12)
+                            CalendarSourceLogoView(source: model.source(item.feedID), size: 15)
                             Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                             Text(model.sourceTitle(item.feedID)).font(.system(size: 10)).lineLimit(1).opacity(0.8)
                         }.padding(.leading, 6).padding(.trailing, 7).frame(height: 22)
@@ -339,22 +359,21 @@ struct CalendarHoverView: View {
                             if model.visible { NSApp.activate(ignoringOtherApps: true) }
                         }
                     } label: {
-                        HStack(spacing: 9) {
-                            CalendarSourceLogoView(source: .provider(provider), size: 20)
+                        HStack(spacing: 10) {
+                            CalendarSourceLogoView(source: .provider(provider), size: 28)
                             Text(provider.integrationTitle).font(.system(size: 12, weight: .semibold))
                             Spacer(minLength: 2)
-                            if connectionFlow.working && connectionFlow.lastProvider == provider {
-                                ProgressView().controlSize(.small)
-                            } else if provider == .apple && model.isConnected(.apple) {
+                            switch model.connectState(provider) {
+                            case .connecting: ProgressView().controlSize(.small)
+                            case .connected:
                                 Text("Connected").font(.system(size: 11)).foregroundStyle(.white.opacity(0.76))
-                            } else {
-                                Text(model.isConnected(provider) ? "Add account" : "Connect").font(.system(size: 11, weight: .medium))
+                            case .addAccount: Text("Add account").font(.system(size: 11, weight: .medium))
+                            case .connect: Text("Connect").font(.system(size: 11, weight: .medium))
                             }
                         }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(connections.isConnecting)
-                    .accessibilityLabel(connectionFlow.working && connectionFlow.lastProvider == provider
-                        ? "Connecting \(provider.integrationTitle)" : "Connect \(provider.integrationTitle)")
+                    .accessibilityLabel(model.connectAccessibilityLabel(provider))
                     if connectionFlow.lastProvider == provider, let error = connectionFlow.error {
                         Text(error).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.orange)
                             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
@@ -515,7 +534,7 @@ struct CalendarEventBlockLabel: View {
         Group {
             if height >= 30 {
                 HStack(alignment: .top, spacing: 5) {
-                    CalendarSourceLogoView(source: model.source(item.feedID), size: 12).padding(.top, 1)
+                    CalendarSourceLogoView(source: model.source(item.feedID), size: 15).padding(.top, 1)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.event.title).font(.system(size: 11, weight: .semibold))
                             .lineLimit(height >= 46 ? 2 : 1)
@@ -525,7 +544,7 @@ struct CalendarEventBlockLabel: View {
                 }.padding(.vertical, 3)
             } else {
                 HStack(spacing: 4) {
-                    CalendarSourceLogoView(source: model.source(item.feedID), size: 11)
+                    CalendarSourceLogoView(source: model.source(item.feedID), size: 13)
                     Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Text(item.event.start.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: 10)).lineLimit(1).opacity(0.85).layoutPriority(-1)

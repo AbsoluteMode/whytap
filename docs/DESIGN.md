@@ -1363,23 +1363,24 @@ main buttons narrower, and to tell calendars apart by a small logo instead of
 colour.
 
 - Every event block is the same blue (#0A84FF at 30%, 45% hover, 55% pressed)
-  with the 3 pt edge. A 12 pt logo leads the title (11 pt on one-line blocks,
-  12 pt on all-day chips). Why: the service is what tells events apart; the
+  with the 3 pt edge. A 15 pt logo leads the title (13 pt on one-line blocks,
+  15 pt on all-day chips). Why: the service is what tells events apart; the
   calendar name stays in the second line.
-- Logos: Google Calendar's mark in Google blue on a white tile, Zoom and Whytap
-  bundled icons, the installed Calendar app icon, the Outlook app icon or, if
-  Outlook is not installed, a calendar symbol on an Outlook-blue tile. An
-  unknown calendar gets a calendar symbol. Nothing is downloaded.
+- Logos are the services' own full-colour icons: bundled Google Calendar,
+  Outlook, Zoom and Whytap, and the installed Calendar app icon. Transparent
+  margins are trimmed so they match in size. An unknown calendar gets a
+  calendar symbol. Why: the user found drawn tiles small and poor next to real
+  icons (2026-11-21).
 - The day switcher is one compact row: 24 pt chevrons and "Today  21 Oct" on one
   line, centered. A mini spinner appears beside it while calendars update.
 - No filter button, no calendar list page and no Refresh button. The attention
   banner opens Connect, which now lists connection errors, the store's Retry and
-  20 pt logos on provider rows. Apple shows Connected once enabled; a connected
+  28 pt logos on provider rows. Apple shows Connected once enabled; a connected
   web provider offers Add account.
 
 Verification: offscreen fixtures at 310/360/500 pt (day with logos, Connect with
-logos and a connected Google). The installed app's Outlook and Calendar icons
-and real pointer behavior remain acceptance.
+logos and a connected Google). Real pointer behavior and VoiceOver remain
+acceptance in the installed app.
 WHY: `.project-docs/decisions/2026-11-21-calendar-logos.md`.
 
 ## Calendar day view — 2026-11-20

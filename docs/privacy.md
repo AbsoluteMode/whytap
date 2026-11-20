@@ -44,8 +44,8 @@ is a verifiable claim rather than a slogan.
 - A coding tool with the Whytap plugin (Claude Code, Codex) reads your meeting
   notes and transcripts only after you answer Yes to Whytap's question for
   that tool, once per Mac. What it reads goes to that tool's model provider
-  under its own policy. Change the answer in Settings -> Agents -> Coding
-  tools. The files themselves are ordinary files in your user account.
+  under its own policy. Change the answer in Settings -> Integrations ->
+  Coding tools. The files themselves are ordinary files in your user account.
 - API keys you enter in Settings → API & Models ("Your key") are stored in the
   macOS Keychain under the app's own service name (`com.rootwise.sidekey`).
   Key values are never shown again after saving and are never written to

@@ -23,7 +23,7 @@ Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
 
 | MCP tool | CLI subcommand | Behavior |
 | --- | --- | --- |
-| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route |
+| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route, the Agent workspace folder (`agentWorkspace`) |
 | `whytap_get_settings` | `settings` | Current supported settings and accepted values |
 | `whytap_list_models` | `models` | Search the app's cached compatible models; optional account and limit (1–100) |
 | `whytap_set_model` | `set-model` | Validate and select one account/model through Settings; preserve other routes |
@@ -54,8 +54,8 @@ first. When Claude Code or Codex starts the plugin's server and Whytap is
 running, the island shows "Give Claude Code access to Whytap?". Yes is remembered on
 this Mac; No is remembered too and the tools then answer `access_denied`. If
 Whytap was closed, the question appears with the first meeting request. Each
-tool is asked about separately. Change an answer in Whytap Settings -> Agents
--> Coding tools. Turning a tool off holds after a restart even when the
+tool is asked about separately. Change an answer in Whytap Settings ->
+Integrations -> Coding tools. Turning a tool off holds after a restart even when the
 Keychain could not save it at that moment; Settings says so until it is
 saved. If Whytap cannot confirm a stored Yes at launch, it asks again.
 

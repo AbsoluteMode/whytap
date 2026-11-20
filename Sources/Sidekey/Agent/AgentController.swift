@@ -61,7 +61,7 @@ final class AgentController: ObservableObject {
     /// Injected so tests can control the flag without touching the singleton.
     private let agentEnabled: @MainActor () -> Bool
     /// A gesture arrived while Agent is disabled or no CLI provider is
-    /// connected. Production opens Settings > Agents immediately; the no-op
+    /// connected. Production opens Settings > Other (Agent) immediately; the no-op
     /// default keeps standalone tests and previews independent from AppDelegate.
     private let onAgentSetupRequired: @MainActor () -> Void
     /// When `true`, R-Cmd hold may drive realtime streaming transcription via
@@ -1042,7 +1042,7 @@ final class AgentController: ObservableObject {
         responseStore.markErrorBlock(StateErrorBlock(
             title: "No agent connected",
             subtitle: "Connect in Settings",
-            message: "Connect Whytap Agent in Settings → Agents. Its model is set in API & Models.",
+            message: "Turn on Agent in Settings → Other. Its model is set in API & Models.",
             code: "not_connected",
             retryable: false
         ))

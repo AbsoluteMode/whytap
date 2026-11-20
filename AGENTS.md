@@ -1029,6 +1029,14 @@ centers the menu and enable switch, moving Notification type into the adjacent
 question-mark tooltip/popover. Bindings and saved selections are unchanged.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
+Settings -> Other rows explain themselves with a short subtitle that names no
+remappable key, plus, where an accepted clip exists, a ▶ FeatureVideoButton:
+a popover with the bundled silent clip (Resources/FeatureVideos, copied by
+dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
+"Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
+show the default keys. Today: Meeting Notes and Agent. WHY:
+.project-docs/decisions/2026-11-20-other-feature-videos.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
@@ -1052,7 +1060,11 @@ screen requests no permission automatically. WHY:
 .project-docs/decisions/2026-10-26-first-launch-permissions.md.
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
-Agents configures native connection and action settings), and permissions in
+Other -> Agent turns the native Agent on, which connects it, and holds Allow
+file edits and commands; the workspace path is in the Whytap plugin's
+get_state; the former Agents tab is gone, its whytap://settings/agentMode link
+opens Other. WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md),
+and permissions in
 Settings -> Permissions. A feature can request the permission it needs when
 invoked. Drop without a chosen provider, key or endpoint opens
 Settings -> API & Models on that feature's row. Settings opens on API &
@@ -1245,7 +1257,7 @@ denies after a relaunch; if the seal cannot be written it is removed. Settings s
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
-with no suspension before the action. Settings -> Agents -> Coding tools has a switch per
+with no suspension before the action. Settings -> Integrations -> Coding tools has a switch per
 tool; the gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet

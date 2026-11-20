@@ -8,7 +8,7 @@ enum AgentSetupStepStatus: Equatable {
     case unsatisfied
 }
 
-/// The four checks the Settings → Agents setup guide tracks per provider.
+/// The four checks the former Settings → Agents setup guide tracks per provider.
 struct AgentSetupSnapshot: Equatable {
     var homebrew: AgentSetupStepStatus = .checking
     var node: AgentSetupStepStatus = .checking

@@ -418,7 +418,7 @@ final class AgentControllerTests: XCTestCase {
             if case .stateError(let b) = block, b.code == "not_connected" { return b.message }
             return nil
         }.first
-        XCTAssertEqual(notConnectedMessage, "Connect Whytap Agent in Settings → Agents. Its model is set in API & Models.")
+        XCTAssertEqual(notConnectedMessage, "Turn on Agent in Settings → Other. Its model is set in API & Models.")
         XCTAssertEqual(controller.state, .idle)
         // The "connect first" prompt surfaces as a transient wing notice — the
         // turn never dispatched, so no answer panel opens.

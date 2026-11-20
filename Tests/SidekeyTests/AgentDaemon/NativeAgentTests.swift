@@ -1063,12 +1063,21 @@ final class NativeAgentTests: XCTestCase {
         let model = AgentModeViewModel(store: store, probe: { _ in .connected(sessionID: nil) }, notify: { _ in })
         let destination = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        // Show the ▶ buttons: look the clips up in the source Resources folder.
+        var root = URL(fileURLWithPath: #filePath)
+        while !FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path) { root.deleteLastPathComponent() }
+        FeatureVideo.resourceBundle = try XCTUnwrap(Bundle(url: root.appendingPathComponent("Resources")))
+        defer { FeatureVideo.resourceBundle = .main }
         for connected in [false, true] {
             if connected { store.markConnected(.native) } else { store.disconnect() }
             for dark in [false, true] {
                 for width in [560.0, 760.0] {
-                    let view = AgentModeView(viewModel: model, settings: settings, store: store, agentEnabled: { true },
-                                             onAgentToggle: { _ in }, openAPIAndModels: { _ in })
+                    // The Agents tab became the Agent group in Settings -> Other.
+                    let section = AgentOtherSection(viewModel: model, settings: settings, store: store, agentEnabled: { true },
+                                                    onAgentToggle: { _ in }, openAPIAndModels: { _ in },
+                                                    shortcuts: { .defaults })
+                    let view = SettingsOtherView(displayPicker: DisplayPickerViewModel(), agentSection: section,
+                                                 hotkeys: { .defaults })
                         .background(MacSettingsTheme.bgContent)
                         .environment(\.colorScheme, dark ? .dark : .light)
                     let host = NSHostingView(rootView: view)

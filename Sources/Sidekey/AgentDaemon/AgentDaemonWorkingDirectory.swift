@@ -20,6 +20,18 @@ enum AgentDaemonWorkingDirectory {
     /// Having a dedicated directory means the user's global CLAUDE.md and MCP
     /// server config load from the conventional location, and any files the
     /// agent writes land in a known, inspectable place.
+    /// The workspace location without creating it (for the Whytap plugin's
+    /// `whytap_get_state`, which replaced the Agents tab's Open folder button).
+    static func url(appSupportDirectory: URL? = nil) -> URL {
+        let appSupport = appSupportDirectory ?? FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+        return appSupport
+            .appendingPathComponent("whytap", isDirectory: true)
+            .appendingPathComponent("agent", isDirectory: true)
+    }
+
     @discardableResult
     static func ensure() throws -> URL {
         let appSupport = FileManager.default.urls(

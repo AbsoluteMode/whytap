@@ -186,6 +186,24 @@ struct SettingsWindowView: View {
         .accessibilityLabel(AppBuildIdentity.current.quitActionTitle)
     }
 
+    /// The Agent group in Other; a `whytap://settings/agentMode` link or the
+    /// Agent setup prompt highlights it for a second.
+    private var agentSection: AgentOtherSection {
+        let highlighted: Bool = {
+            if case .tab(.agentMode) = selection.highlightedTarget { return true }
+            return false
+        }()
+        return AgentOtherSection(
+            viewModel: agentModeViewModel,
+            settings: AgentSettingsStore.shared,
+            store: AgentProviderStore.shared,
+            agentEnabled: agentEnabled,
+            onAgentToggle: onAgentToggle,
+            openAPIAndModels: { selection.focus($0) },
+            highlighted: highlighted
+        )
+    }
+
     @ViewBuilder
     private var detailPane: some View {
         switch selection.selectedTab {
@@ -212,17 +230,12 @@ struct SettingsWindowView: View {
                 onMeetingsToggle: otherOnMeetingsToggle,
                 onGoogleToggle: otherOnGoogleToggle,
                 privacyPreferences: privacyPreferences,
-                screenshotProtectionChanged: screenshotProtectionChanged
+                screenshotProtectionChanged: screenshotProtectionChanged,
+                agentSection: agentSection
             )
         case .agentMode:
-            AgentModeView(
-                viewModel: agentModeViewModel,
-                settings: AgentSettingsStore.shared,
-                store: AgentProviderStore.shared,
-                agentEnabled: agentEnabled,
-                onAgentToggle: onAgentToggle,
-                openAPIAndModels: { selection.focus($0) }
-            )
+            // Never selected: `select` resolves it to Other.
+            EmptyView()
         case .toolbox:
             ToolboxSettingsView(
                 hoverStore: HoverLayoutStore.shared,
@@ -331,13 +344,15 @@ final class SettingsWindowSelection: ObservableObject {
     private var highlightTask: Task<Void, Never>?
 
     init(selectedTab: SettingsWindowTab = .apiAndModels) {
-        let availableTab = selectedTab.isAvailable ? selectedTab : SettingsWindowTab.defaultAvailable
+        let resolvedTab = selectedTab.resolved
+        let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         self.selectedTab = availableTab
         previousNonNotesTab = availableTab == .notes ? SettingsWindowTab.defaultAvailable : availableTab
     }
 
     func select(_ tab: SettingsWindowTab) {
-        let availableTab = tab.isAvailable ? tab : SettingsWindowTab.defaultAvailable
+        let resolvedTab = tab.resolved
+        let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         if availableTab == .notes {
             // Sidebar Notes button = "Notes home": always land on the meeting
             // list, even if the controller was left mid-editor.

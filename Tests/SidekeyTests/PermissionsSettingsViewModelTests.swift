@@ -100,4 +100,68 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         await first.value
         XCTAssertFalse(model.isRequestingScreenRecording)
     }
+
+    // A clean Mac: the first Allow must leave macOS alone with its own dialog.
+    func testFirstKeyboardAllowOnlyAsksMacOSAndTheNextPressOpensSettings() {
+        var events: [String] = []
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: false, microphoneStatus: .authorized) },
+            accessibilityRequester: { events.append("request") },
+            openAccessibilitySettings: { events.append("settings") },
+            runtimeRefresh: { _, _ in })
+        XCTAssertFalse(model.accessibilityRequested)
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request"])
+        XCTAssertTrue(model.accessibilityRequested)
+        model.requestAccessibility()
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request", "settings", "settings"])
+    }
+
+    func testKeyboardAllowAfterGrantNeitherAsksNorOpensSettings() {
+        var events: [String] = []
+        var granted = false
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
+            accessibilityRequester: { events.append("request") },
+            openAccessibilitySettings: { events.append("settings") },
+            runtimeRefresh: { _, _ in })
+        model.requestAccessibility()
+        granted = true
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request"])
+        XCTAssertTrue(model.snapshot.accessibilityGranted)
+    }
+
+    func testFirstScreenAllowOnlyAsksMacOSAndTheNextPressOpensSettings() async {
+        var events: [String] = []
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
+            screenRecordingAccessProvider: { false },
+            screenRecordingRequester: { events.append("request") },
+            openScreenRecordingSettings: { events.append("settings") },
+            runtimeRefresh: { _, _ in })
+        await model.requestScreenRecording()
+        XCTAssertEqual(events, ["request"])
+        XCTAssertTrue(model.screenRecordingRequested)
+        await model.requestScreenRecording()
+        XCTAssertEqual(events, ["request", "settings"])
+        XCTAssertFalse(model.isRequestingScreenRecording)
+    }
+
+    func testScreenAllowAfterGrantNeitherAsksNorOpensSettings() async {
+        var events: [String] = []
+        var granted = false
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
+            screenRecordingAccessProvider: { granted },
+            screenRecordingRequester: { events.append("request") },
+            openScreenRecordingSettings: { events.append("settings") },
+            runtimeRefresh: { _, _ in })
+        await model.requestScreenRecording()
+        granted = true
+        await model.requestScreenRecording()
+        XCTAssertEqual(events, ["request"])
+        XCTAssertTrue(model.screenRecordingGranted)
+    }
 }

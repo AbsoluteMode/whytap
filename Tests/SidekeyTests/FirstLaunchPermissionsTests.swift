@@ -41,36 +41,18 @@ final class FirstLaunchPermissionsTests: XCTestCase {
 
 @MainActor
 final class ScreenRecordingPermissionRequestTests: XCTestCase {
-    func testNativeRequestPrecedesSystemSettingsWhenDenied() async {
-        var events: [String] = []
+    func testFailedNativeRequestIsNotAnError() async {
+        var requests = 0
         await ScreenRecordingPermissionRequest.request(isGranted: { false }, requestContent: {
-            events.append("request")
+            requests += 1
             throw NSError(domain: "PermissionTest", code: 1)
-        }, openSettings: { events.append("settings") })
-        XCTAssertEqual(events, ["request", "settings"])
+        })
+        XCTAssertEqual(requests, 1)
     }
 
-    func testSuccessfulNativeRequestDoesNotOpenSystemSettings() async {
-        var events: [String] = []
-        await ScreenRecordingPermissionRequest.request(isGranted: { false },
-            requestContent: { events.append("request") }, openSettings: { events.append("settings") })
-        XCTAssertEqual(events, ["request"])
-    }
-
-    func testAlreadyGrantedDoesNotRequestOrOpenAnything() async {
-        var events: [String] = []
-        await ScreenRecordingPermissionRequest.request(isGranted: { true },
-            requestContent: { events.append("request") }, openSettings: { events.append("settings") })
-        XCTAssertTrue(events.isEmpty)
-    }
-
-    func testErrorAfterGrantDoesNotOpenSystemSettings() async {
-        var granted = false
-        var openedSettings = false
-        await ScreenRecordingPermissionRequest.request(isGranted: { granted }, requestContent: {
-            granted = true
-            throw NSError(domain: "PermissionTest", code: 2)
-        }, openSettings: { openedSettings = true })
-        XCTAssertFalse(openedSettings)
+    func testAlreadyGrantedDoesNotRequest() async {
+        var requests = 0
+        await ScreenRecordingPermissionRequest.request(isGranted: { true }, requestContent: { requests += 1 })
+        XCTAssertEqual(requests, 0)
     }
 }

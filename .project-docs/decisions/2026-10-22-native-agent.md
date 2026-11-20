@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md]
 ---
 
 # Decision

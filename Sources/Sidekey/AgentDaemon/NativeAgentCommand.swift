@@ -17,14 +17,41 @@ final class NativeAgentCommand: @unchecked Sendable {
     private var outputEnded = false
     private var exitSuffix: String?
 
-    func run(command: String, directory: URL, helper: URL?, timeout: Duration = .seconds(30)) async -> String {
+    /// What a command sees. An app opened from Finder has no `LANG`, and
+    /// without a UTF-8 locale `pbcopy`, `wc` and the like read text as
+    /// MacRoman: a copied file arrived with every non-ASCII letter broken.
+    /// The app's own locale is kept only when this Mac really has it as a
+    /// UTF-8 locale; a name macOS does not know (`ja_JP.utf8`, a locale that
+    /// is not installed) silently behaves as C, so it becomes en_US.UTF-8.
+    // WHY: .project-docs/decisions/2026-11-20-agent-command-utf8-locale.md
+    static func childEnvironment(
+        from base: [String: String], helper: URL?,
+        localeIsInstalled: (String) -> Bool = NativeAgentCommand.localeIsInstalled
+    ) -> [String: String] {
+        var environment = base.filter { ["HOME", "USER", "LOGNAME", "TMPDIR"].contains($0.key) }
+        let inherited = base["LANG"] ?? ""
+        environment["LANG"] = inherited.hasSuffix(".UTF-8") && localeIsInstalled(inherited) ? inherited : fallbackLocale
+        environment["PATH"] = ([helper?.deletingLastPathComponent().path].compactMap { $0 }
+            + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]).joined(separator: ":")
+        return environment
+    }
+
+    static let fallbackLocale = "en_US.UTF-8"
+
+    /// macOS resolves a locale name to this directory; a missing one is C.
+    static func localeIsInstalled(_ name: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.-@"))
+        guard !name.isEmpty, name.unicodeScalars.allSatisfy(allowed.contains), !name.hasPrefix(".") else { return false }
+        return FileManager.default.fileExists(atPath: "/usr/share/locale/\(name)/LC_CTYPE")
+    }
+
+    func run(command: String, directory: URL, helper: URL?, timeout: Duration = .seconds(30),
+             baseEnvironment: [String: String] = ProcessInfo.processInfo.environment) async -> String {
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 lock.withLock { self.continuation = continuation }
                 if Task.isCancelled { finish("Command cancelled."); return }
-                var environment = ProcessInfo.processInfo.environment.filter { ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"].contains($0.key) }
-                environment["PATH"] = ([helper?.deletingLastPathComponent().path].compactMap { $0 }
-                    + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]).joined(separator: ":")
+                let environment = Self.childEnvironment(from: baseEnvironment, helper: helper)
                 let readFD = output.fileHandleForReading.fileDescriptor
                 _ = fcntl(readFD, F_SETFL, fcntl(readFD, F_GETFL) | O_NONBLOCK)
                 output.fileHandleForReading.readabilityHandler = { [weak self] handle in

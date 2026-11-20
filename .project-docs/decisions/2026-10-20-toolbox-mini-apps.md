@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/ToolboxMiniApps.swift
     confirmed_at: 2026-10-20
-related: [2026-10-18-toolbox-drag-feedback.md, 2026-10-20-translation-tools.md, 2026-10-20-whytap-links.md]
+related: [2026-10-18-toolbox-drag-feedback.md, 2026-10-20-translation-tools.md, 2026-10-20-whytap-links.md, 2026-11-20-toolbox-system-background.md]
 ---
 
 # Toolbox mini apps and a fixed Add target

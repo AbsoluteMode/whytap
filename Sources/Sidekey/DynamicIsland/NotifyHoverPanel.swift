@@ -77,8 +77,9 @@ struct NotifyHoverPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(10)
-        .foregroundStyle(Color.white)
-        .environment(\.colorScheme, .dark)
+        // The island's window is dark; in Settings the panel follows the
+        // window's appearance.
+        .foregroundStyle(IslandInk.color)
         .task(id: hub.history.first?.id) { if !showsSources { await hub.markRead() } }
         .onChange(of: showsSources) { _, value in if !value { Task { await hub.markRead() } } }
         .confirmationDialog("Remove this notification source?", isPresented: Binding(
@@ -91,9 +92,9 @@ struct NotifyHoverPanel: View {
     private func sectionButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
-                .foregroundStyle(Color.white.opacity(selected ? 1 : 0.6))
+                .foregroundStyle(IslandInk.color.opacity(selected ? 1 : 0.6))
                 .frame(maxWidth: .infinity).frame(height: 23)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(selected ? 0.14 : 0)))
+                .background(RoundedRectangle(cornerRadius: 5).fill(IslandInk.color.opacity(selected ? 0.14 : 0)))
                 .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)

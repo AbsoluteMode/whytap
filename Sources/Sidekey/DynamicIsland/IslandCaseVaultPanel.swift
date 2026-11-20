@@ -105,7 +105,7 @@ struct IslandCaseVaultPanel: View {
                     ? "Create a new Case? The old encrypted file is kept. Click again to confirm."
                     : message)
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(IslandInk.color.opacity(0.52))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
@@ -115,7 +115,7 @@ struct IslandCaseVaultPanel: View {
 
                 Text(message)
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(IslandInk.color.opacity(0.52))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
@@ -133,7 +133,7 @@ struct IslandCaseVaultPanel: View {
 
                 Text("Touch ID or your Mac password")
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.46))
+                    .foregroundStyle(IslandInk.color.opacity(0.46))
 
                 if case let .failed(message) = viewModel.unlockState {
                     Text(message)
@@ -157,11 +157,11 @@ struct IslandCaseVaultPanel: View {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
         }
-        .foregroundStyle(.white.opacity(0.94))
+        .foregroundStyle(IslandInk.color.opacity(0.94))
         .padding(.horizontal, 13)
         .frame(height: 30)
-        .background(Capsule().fill(Color.white.opacity(0.14)))
-        .overlay(Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.8))
+        .background(Capsule().fill(IslandInk.color.opacity(0.14)))
+        .overlay(Capsule().stroke(IslandInk.color.opacity(0.20), lineWidth: 0.8))
     }
 
     private var unlockedPanel: some View {
@@ -208,7 +208,7 @@ struct IslandCaseVaultPanel: View {
                 if viewModel.query.isEmpty {
                     Text("Search keys and projects")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.70))
+                        .foregroundStyle(IslandInk.color.opacity(0.70))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .padding(.horizontal, 10)
@@ -220,12 +220,12 @@ struct IslandCaseVaultPanel: View {
                     .accessibilityIdentifier("case.search")
                     .font(.system(size: IslandCaseVaultStyle.inputFontSize, weight: .medium))
                     .textFieldStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(IslandInk.color.opacity(0.92))
                     .padding(.horizontal, 10)
                     .focused($inputFocused, equals: .search)
             }
             .frame(height: IslandCaseVaultStyle.inputHeight)
-            .background(Capsule().fill(Color.white.opacity(0.13)))
+            .background(Capsule().fill(IslandInk.color.opacity(0.13)))
             .modifier(CaseVaultFieldFeedback(focused: inputFocused == .search, border: inputBorderColor))
             .contentShape(Capsule())
             .onTapGesture { if isEnabled { inputFocused = .search } }
@@ -233,13 +233,13 @@ struct IslandCaseVaultPanel: View {
             Button(action: startCreatingProject) {
                 Text("+ Project")
                     .font(.system(size: IslandCaseVaultStyle.nameFontSize, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
+                    .foregroundStyle(IslandInk.color.opacity(0.88))
                     .lineLimit(1)
                     .fixedSize()
                     .padding(.horizontal, 9)
                     .frame(height: IslandCaseVaultStyle.inputHeight)
-                    .background(Capsule().fill(Color.white.opacity(0.10)))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 0.7))
+                    .background(Capsule().fill(IslandInk.color.opacity(0.10)))
+                    .overlay(Capsule().stroke(IslandInk.color.opacity(0.14), lineWidth: 0.7))
             }
             .buttonStyle(CaseAccessButtonStyle(cornerRadius: IslandCaseVaultStyle.inputHeight / 2))
             .accessibilityIdentifier("case.project.create")
@@ -260,10 +260,10 @@ struct IslandCaseVaultPanel: View {
             }
             .textFieldStyle(.plain)
             .font(.system(size: IslandCaseVaultStyle.inputFontSize, weight: .medium))
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(IslandInk.color.opacity(0.92))
             .padding(.horizontal, 10)
             .frame(height: IslandCaseVaultStyle.inputHeight)
-            .background(Capsule().fill(.white.opacity(0.10)))
+            .background(Capsule().fill(IslandInk.color.opacity(0.10)))
             .modifier(CaseVaultFieldFeedback(focused: inputFocused == .newKey, border: inputBorderColor))
             .focused($inputFocused, equals: .newKey)
             .contentShape(Capsule())
@@ -274,7 +274,7 @@ struct IslandCaseVaultPanel: View {
                     .frame(width: 24, height: 28)
             }
             .buttonStyle(CaseAccessButtonStyle(cornerRadius: 7))
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(IslandInk.color.opacity(0.92))
             .accessibilityLabel(viewModel.inputMode == .name ? "Next: key value" : "Add key")
             IslandCaseIconButton(action: Self.cancelInputAction) {
                 valueDraft = ""
@@ -294,7 +294,7 @@ struct IslandCaseVaultPanel: View {
     )
 
     private var inputBorderColor: Color {
-        lastError == nil ? Color.white.opacity(0.18) : Color.red.opacity(0.60)
+        lastError == nil ? IslandInk.color.opacity(0.18) : Color.red.opacity(0.60)
     }
 
     private var caseList: some View {
@@ -308,7 +308,7 @@ struct IslandCaseVaultPanel: View {
                         if sections.isEmpty, searching {
                             Text("No results")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.78))
+                                .foregroundStyle(IslandInk.color.opacity(0.78))
                                 .padding(.vertical, 12)
                         }
 
@@ -493,7 +493,7 @@ struct IslandCaseVaultPanel: View {
         })
         .padding(.top, 6)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
+            Rectangle().fill(IslandInk.color.opacity(0.10)).frame(height: 0.5)
         }
     }
 
@@ -760,14 +760,14 @@ private enum ProjectEditor: Equatable {
 // WHY: docs/DESIGN.md — Case English copy and interaction feedback.
 private struct CaseVaultFieldFeedback: ViewModifier {
     let focused: Bool
-    var border: Color = .white.opacity(0.18)
+    var border: Color = IslandInk.color.opacity(0.18)
     @Environment(\.isEnabled) private var enabled
     @State private var hovered = false
 
     func body(content: Content) -> some View {
         content
-            .overlay(Capsule().strokeBorder(enabled && focused ? .white.opacity(0.8)
-                : enabled && hovered ? .white.opacity(0.5) : border, lineWidth: 1)
+            .overlay(Capsule().strokeBorder(enabled && focused ? IslandInk.color.opacity(0.8)
+                : enabled && hovered ? IslandInk.color.opacity(0.5) : border, lineWidth: 1)
                 .allowsHitTesting(false))
             .opacity(enabled ? 1 : 0.4)
             .onHover { hovered = enabled && $0 }
@@ -784,10 +784,10 @@ private struct CaseVaultEditField<Content: View>: View {
         content
             .textFieldStyle(.plain)
             .focused($focused)
-            .foregroundStyle(.white.opacity(0.90))
+            .foregroundStyle(IslandInk.color.opacity(0.90))
             .padding(.horizontal, 7)
             .frame(height: 22)
-            .background(Capsule().fill(Color.white.opacity(0.10)))
+            .background(Capsule().fill(IslandInk.color.opacity(0.10)))
             .modifier(CaseVaultFieldFeedback(focused: focused))
             .contentShape(Capsule())
             .onTapGesture { if isEnabled { focused = true } }

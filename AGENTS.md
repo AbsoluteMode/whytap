@@ -1015,7 +1015,10 @@ dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
 MacSwitch adapts the supplied glass switch in SwiftUI with click/drag,
 keyboard and native Toggle accessibility, respecting Reduce Motion/Transparency.
-The island keeps its compact blue switch and explicitly dark Toolbox previews.
+The island keeps its compact blue switch. Island panels embedded in Toolbox
+panes (Vocab, Filler, Case, languages, Notify, History, Monitor) sit on the
+Settings background and follow its appearance through IslandInk (white in the
+always-dark island). WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
 UI decisions and verification limits: docs/DESIGN.md.
 API & Models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and

@@ -31,7 +31,7 @@ struct IslandVocabularyEditorPanel: View {
                 if viewModel.state == .loading && viewModel.visibleTerms.isEmpty {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.white.opacity(0.74))
+                        .tint(IslandInk.color.opacity(0.74))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
@@ -65,7 +65,7 @@ struct IslandVocabularyEditorPanel: View {
             if viewModel.query.isEmpty {
                 Text("Search or add, press Enter")
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(IslandInk.color.opacity(0.42))
                     .padding(.leading, 10)
                     .allowsHitTesting(false)
             }
@@ -86,7 +86,7 @@ struct IslandVocabularyEditorPanel: View {
         .frame(height: IslandVocabularyEditorStyle.inputHeight)
         .background(
             Capsule()
-                .fill(Color.white.opacity(0.13))
+                .fill(IslandInk.color.opacity(0.13))
         )
         .overlay(
             Capsule()
@@ -99,9 +99,9 @@ struct IslandVocabularyEditorPanel: View {
             return Color.red.opacity(0.62)
         }
         if viewModel.state == .saving {
-            return Color.white.opacity(0.28)
+            return IslandInk.color.opacity(0.28)
         }
-        return Color.white.opacity(0.18)
+        return IslandInk.color.opacity(0.18)
     }
 }
 
@@ -115,14 +115,14 @@ private struct IslandVocabularyChip: View {
         HStack(spacing: 5) {
             Text(term)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.90))
+                .foregroundStyle(IslandInk.color.opacity(0.90))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Button(action: onRemove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(hovering ? 0.92 : 0.58))
+                    .foregroundStyle(IslandInk.color.opacity(hovering ? 0.92 : 0.58))
                     .frame(width: 13, height: 13)
             }
             .buttonStyle(.plain)
@@ -133,11 +133,11 @@ private struct IslandVocabularyChip: View {
         .frame(height: IslandVocabularyEditorStyle.chipHeight)
         .background(
             Capsule()
-                .fill(Color.white.opacity(hovering ? 0.18 : 0.11))
+                .fill(IslandInk.color.opacity(hovering ? 0.18 : 0.11))
         )
         .overlay(
             Capsule()
-                .stroke(.white.opacity(hovering ? 0.24 : 0.10), lineWidth: 0.7)
+                .stroke(IslandInk.color.opacity(hovering ? 0.24 : 0.10), lineWidth: 0.7)
         )
         .contentShape(Capsule())
         .onHover { hovering = $0 }
@@ -279,7 +279,7 @@ private struct IslandVocabularyInputField: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         textView.backgroundColor = .clear
-        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.textColor = IslandInk.ns.withAlphaComponent(0.92)
         textView.insertionPointColor = textView.vocabularyCursorColor
         textView.font = NSFont.systemFont(
             ofSize: IslandVocabularyEditorStyle.inputFontSize,
@@ -361,7 +361,7 @@ final class IslandVocabularyTextView: NSTextView {
     }
 
     var vocabularyCursorColor: NSColor {
-        NSColor(white: 1, alpha: 0.86)
+        IslandInk.ns.withAlphaComponent(0.86)
     }
 
     override var acceptsFirstResponder: Bool { true }

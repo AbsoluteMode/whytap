@@ -158,11 +158,11 @@ struct HistoryHoverView: View {
                 } label: {
                     Text(title(for: candidate))
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(candidate == mode ? Color.white : .white.opacity(0.58))
+                        .foregroundStyle(candidate == mode ? IslandInk.color : IslandInk.color.opacity(0.58))
                         .frame(maxWidth: .infinity, minHeight: 24)
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(candidate == mode ? Color.white.opacity(0.18) : Color.clear)
+                                .fill(candidate == mode ? IslandInk.color.opacity(0.18) : Color.clear)
                         )
                         // Whole tab tappable, not just the text glyphs. With
                         // .buttonStyle(.plain) the hit area is the label's
@@ -255,7 +255,7 @@ struct HistoryHoverView: View {
     private var emptyStateRow: some View {
         Text(emptyStateText)
             .font(.system(size: 10.5, weight: .medium))
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(IslandInk.color.opacity(0.45))
             .frame(maxWidth: .infinity)
             .frame(height: Self.rowHeight)
             .background(rowBackground(isHovered: false))
@@ -272,7 +272,7 @@ struct HistoryHoverView: View {
     private var hintRow: some View {
         Text(Self.hintText(targetAppName: targetAppName))
             .font(.system(size: 9.5, weight: .medium))
-            .foregroundStyle(.white.opacity(0.55))
+            .foregroundStyle(IslandInk.color.opacity(0.55))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity)
@@ -285,7 +285,7 @@ struct HistoryHoverView: View {
                         .fill(Color.black.opacity(HistoryHoverVisualStyle.hintOpacity))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                                .strokeBorder(IslandInk.color.opacity(0.08), lineWidth: 0.5)
                         )
                 }
             }
@@ -317,7 +317,7 @@ private struct HistoryHoverRow: View {
         HStack(spacing: 8) {
             Text(HistoryHoverContent.displayText(for: card))
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.84))
+                .foregroundStyle(IslandInk.color.opacity(0.84))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -361,7 +361,7 @@ private func rowBackground(isHovered: Bool) -> some View {
             ))
             .overlay(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(Color.white.opacity(isHovered ? 0.22 : 0.12), lineWidth: 0.5)
+                    .strokeBorder(IslandInk.color.opacity(isHovered ? 0.22 : 0.12), lineWidth: 0.5)
             )
     }
 }
@@ -371,7 +371,7 @@ private func rowBackground(isHovered: Bool) -> some View {
 private func historyForegroundLens(cornerRadius: CGFloat, isHovered: Bool) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     return shape
-        .fill(Color.white.opacity(isHovered ? 0.16 : 0.06))
+        .fill(IslandInk.color.opacity(isHovered ? 0.16 : 0.06))
         .overlay {
             IslandHoverGlassRim(shape: shape, highlighted: isHovered)
         }

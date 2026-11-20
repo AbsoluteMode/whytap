@@ -1,4 +1,4 @@
-<h1 align="center"><img alt="" src="docs/assets/readme/whytap-logo.svg" width="56" height="56" align="absmiddle">&nbsp;Whytap<br><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640" align="absbottom"></h1>
+<h1 align="center"><img alt="" src="docs/assets/readme/whytap-logo.svg" width="38" height="38" align="absmiddle">&nbsp;Whytap<br><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640" align="absbottom"></h1>
 
 <div align="center">
 
@@ -21,150 +21,92 @@
 <sub>Click a tool to play its demo. Opening one closes the previous.</sub>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-drop-smart-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-drop-smart-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/demo-pill-drop-smart-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-drop-smart-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-drop-smart-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-drop-smart-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-drop-smart-wide-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/demo-card-drop-smart-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-drop-smart.webp" align="right" width="52%" loading="lazy" alt="Holding Space to dictate with self-corrections into a text field using Whytap Drop Smart">
-
-<ol>
-  <li>Focus a text field and hold <kbd>Space</kbd>.</li>
-  <li>Dictate your prompt, including any corrections.</li>
-  <li>Release to paste the cleaned-up text.</li>
-</ol>
-<p>Fast mode pastes the transcript as you said it. On Apple Silicon you can transcribe on your Mac with Parakeet v3, or use your own speech key.</p>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-drop-smart.webp" width="100%" loading="lazy" alt="Drop Smart demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-agent-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-agent-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/demo-pill-agent-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-agent-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-agent-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-agent-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-agent-wide-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/demo-card-agent-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-agent.webp" align="right" width="52%" loading="lazy" alt="Asking the Whytap Notch Agent to find a local file and inserting the result">
-
-<ol>
-  <li>Tap your Agent shortcut to type or hold it to speak.</li>
-  <li>Ask a question, search the web, or ask for a local file.</li>
-  <li>Open or insert the result from the notch.</li>
-</ol>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-agent.webp" width="100%" loading="lazy" alt="Agent demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-case-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/demo-pill-case-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-case-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-case-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-case-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-case-wide-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/demo-card-case-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-case.webp" align="right" width="52%" loading="lazy" alt="Whytap Case vault approving an ANTHROPIC_API_KEY command for Claude Code from the MacBook notch">
-
-<ol>
-  <li>Save an API key in Case.</li>
-  <li>Request a command from Claude Code, Codex, or Cursor.</li>
-  <li>Check the request and choose Allow or Deny.</li>
-</ol>
-<p>Your coding tool can find key names over MCP. Case passes the secret value to the approved command.</p>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-case.webp" width="100%" loading="lazy" alt="Case demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-meetings-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/demo-pill-meetings-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-meetings-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-meetings-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-meetings-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-meetings-wide-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/demo-card-meetings-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-meetings.webp" align="right" width="52%" loading="lazy" alt="Bot-free meeting summary and action items in Whytap Meetings">
-
-<ol>
-  <li>Choose Take notes when Whytap detects your call.</li>
-  <li>Stop recording when the call ends.</li>
-  <li>Open the summary and review the action items.</li>
-</ol>
-<p>Works with Zoom, Google Meet, Teams, and Slack without a bot joining the call. After approval, Claude Code or Codex can read the note and transcript over MCP.</p>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-meetings.webp" width="100%" loading="lazy" alt="Meeting Notes demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-language-vocab-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-language-vocab-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/demo-pill-language-vocab-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-language-vocab-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-language-vocab-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-language-vocab-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-language-vocab-wide-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/demo-card-language-vocab-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<ol>
-  <li>In Smart mode, choose an Output Language to paste in that language.</li>
-  <li>Add project names, jargon, or handles in Vocab so Drop can recognize them.</li>
-</ol>
-
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <b>Output Language</b><br><br>
-      <img src="docs/assets/readme/demo-output-lang.webp" width="100%" loading="lazy" alt="Speaking in one language and pasting in another with Output Language">
-    </td>
-    <td width="50%" align="center">
-      <b>Custom Vocab</b><br><br>
-      <img src="docs/assets/readme/demo-vocab.webp" width="100%" loading="lazy" alt="Teaching Whytap custom vocabulary terms">
-    </td>
-  </tr>
-</table>
+<p align="center">
+<img src="docs/assets/readme/demo-output-lang.webp" width="49%" loading="lazy" alt="Output Language &amp; Vocab demo">
+<img src="docs/assets/readme/demo-vocab.webp" width="49%" loading="lazy" alt="Output Language &amp; Vocab demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-shot-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-shot-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/demo-pill-shot-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-shot-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-shot-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-shot-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-shot-wide-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/demo-card-shot-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-shot.webp" align="right" width="52%" loading="lazy" alt="Capturing a screenshot and blurring sensitive text and numbers in one click with Whytap Shot">
-
-<ol>
-  <li>Open Shot and select an area of the screen.</li>
-  <li>Add arrows and labels, or blur sensitive text and numbers.</li>
-  <li>Choose Copy text to extract text on your Mac.</li>
-</ol>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-shot.webp" width="100%" loading="lazy" alt="Shot demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-history-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-history-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/demo-pill-history-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-history-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-history-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-history-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-history-wide-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/demo-card-history-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-history.webp" align="right" width="52%" loading="lazy" alt="Browsing clipboard, dictation and agent history in Whytap">
-
-<ol>
-  <li>Open History in the notch.</li>
-  <li>Search for a copy, dictation, or Agent answer.</li>
-  <li>Copy it again or paste it where you’re working.</li>
-</ol>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-history.webp" width="100%" loading="lazy" alt="History demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-notify-monitor-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-notify-monitor-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/demo-pill-notify-monitor-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-notify-monitor-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-notify-monitor-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-notify-monitor-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-notify-monitor-wide-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/demo-card-notify-monitor-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-notify.webp" align="right" width="52%" loading="lazy" alt="Agent notifications and live Monitor dashboards in Whytap">
-
-<ol>
-  <li>Use Notify to get cards from your coding tool, CI, or scripts.</li>
-  <li>Open Monitor to see live dashboards fed by your own data.</li>
-</ol>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-notify.webp" width="100%" loading="lazy" alt="Notify &amp; Monitor demo">
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-calendar-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-calendar-todo-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/demo-pill-calendar-todo-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-calendar-todo-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-calendar-todo-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-calendar-todo-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-calendar-todo-wide-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/demo-card-calendar-todo-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<a href="docs/assets/readme/demo-calendar-todo.gif">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-calendar-todo-still.webp">
-    <img src="docs/assets/readme/demo-calendar-todo.gif" width="640" alt="Calendar agenda and event details, followed by the To-do list and completed-task history in Whytap">
-  </picture>
-</a>
+<p align="center">
+<picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-calendar-todo-still.webp"><img src="docs/assets/readme/demo-calendar-todo.gif" width="100%" loading="lazy" alt="Calendar &amp; To-do demo"></picture>
+</p>
 
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-pill-display-extra-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-pill-display-extra-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/demo-pill-display-extra-dark.svg" width="290" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-display-extra-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/demo-card-display-extra-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-card-display-extra-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/demo-card-display-extra-wide-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/demo-card-display-extra-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
-<img src="docs/assets/readme/demo-brightness.webp" align="right" width="52%" loading="lazy" alt="Boosting display brightness past standard maximum with Whytap Display Extra">
-
-<ol>
-  <li>Open the Display slider in the notch.</li>
-  <li>Turn on Extra on a compatible XDR or HDR display.</li>
-  <li>Use the slider to adjust brightness.</li>
-</ol>
-<br clear="all">
+<p align="center">
+<img src="docs/assets/readme/demo-brightness.webp" width="100%" loading="lazy" alt="Display Extra demo">
+</p>
 
 </details>

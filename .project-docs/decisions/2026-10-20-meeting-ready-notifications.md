@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Notifications/MeetingReadyNotifications.swift
     confirmed_at: 2026-10-20
-related: [2026-10-19-script-notifications.md, 2026-10-20-notification-cards-and-sounds.md]
+related: [2026-10-19-script-notifications.md, 2026-10-20-notification-cards-and-sounds.md, 2026-11-20-input-language-suggestion.md]
 ---
 
 # Meeting-ready notifications

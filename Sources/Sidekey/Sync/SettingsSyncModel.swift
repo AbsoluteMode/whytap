@@ -65,8 +65,12 @@ struct SettingsSyncLedger: Codable, Equatable {
     /// the time it was made instead of the time it finally syncs. A joining
     /// Mac records no removals: an item it drops before its first shared
     /// round never existed for the others.
-    func recordingLocalChanges(current: [String: SettingsSyncValue], now: Date) -> SettingsSyncLedger {
-        let now = SettingsSyncClock.normalized(now)
+    /// Values a joining Mac already had are stamped at the epoch: they fill
+    /// gaps in the shared document but never beat a value another Mac shared.
+    /// `noticed` carries times seen while a round was busy.
+    func recordingLocalChanges(current: [String: SettingsSyncValue], now: Date,
+                               noticed: [String: (hash: String, at: Date)] = [:]) -> SettingsSyncLedger {
+        let now = SettingsSyncClock.normalized(joined ? now : Date(timeIntervalSince1970: 0))
         var next = self
         let items = Set(current.keys).union(records.keys).filter(SettingsSyncItem.isApplicable)
         for item in items {
@@ -82,7 +86,8 @@ struct SettingsSyncLedger: Codable, Equatable {
             guard records[item]?.hash != hash else { continue }
             if !joined && current[item] == nil { next.records[item] = nil; continue }
             if records[item] == nil && current[item] == nil { continue }
-            next.records[item] = Record(hash: hash, modifiedAt: now, device: device)
+            let seen = noticed[item].flatMap { $0.hash == hash && joined ? SettingsSyncClock.normalized($0.at) : nil }
+            next.records[item] = Record(hash: hash, modifiedAt: seen ?? now, device: device)
         }
         return next
     }

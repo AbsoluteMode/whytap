@@ -1451,10 +1451,13 @@ accounts minus calendar.*. Each item merges alone: the later change wins, ties
 go to the greater device ID, a removal is recorded so a deleted key is deleted
 everywhere. The routing document is one item. A Mac that turns sync on, or
 restores a backup, joins: shared values replace its own, its extra items
-upload; the previous values stay in local settings history; joining completes
-only after the upload. A local ledger (Application Support/<bundle id>/
+upload; the previous values stay in local settings history. A Mac has joined
+once it takes an existing shared document (the first Mac, once its upload
+succeeds); values it had before are stamped at the epoch. A local ledger (Application Support/<bundle id>/
 settings-sync/ledger.json, hashes only, never backed up) records what this Mac
-agreed; turning sync off or restoring settings/keys deletes it. A round stamps
+agreed; turning sync off, or a restore of settings/keys before it starts,
+deletes it. While a round runs it alone writes the ledger; edits seen meanwhile
+keep their time in memory for the next round. A round stamps
 local edits in the ledger before any request, reads local values again after
 the read, saves the agreement before applying (a refused Keychain write keeps
 its old agreement) and checks the repository is private before writing. The

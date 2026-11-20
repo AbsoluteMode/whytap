@@ -74,14 +74,16 @@ enum ArtifactBackupStartup {
 
     private static func performAttempt(showing panel: NSPanel) throws {
         try runAttempt(operation: {
-            let outcome = try ArtifactBackupEnvironment().transaction().applyIfPending()
+            let transaction = ArtifactBackupEnvironment().transaction()
             // Restored settings or keys are older than the synced ones: this
-            // Mac rejoins sync. A restore of other sections keeps its edits.
+            // Mac rejoins sync. Forgetting comes first, so a crash during the
+            // restore cannot leave old values that look like new edits. A
+            // restore of other sections keeps this Mac's agreement.
             // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
-            if let outcome, outcome.state == .applied,
-               !Set(outcome.sections).isDisjoint(with: [.settings, .credentials]) {
+            if transaction.plannedSections.map({ !Set($0).isDisjoint(with: [.settings, .credentials]) }) ?? true {
                 SettingsSyncService.forgetAgreement()
             }
+            _ = try transaction.applyIfPending()
         }, pump: { _ = NSApplication.shared.runModal(for: panel) },
            completed: { NSApplication.shared.stopModal() })
     }

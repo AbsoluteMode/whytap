@@ -103,6 +103,8 @@ final class SettingsSyncService: ObservableObject {
     /// Changes when the switch flips. A round started before a flip stops
     /// before it applies, saves or uploads anything.
     private var generation = 0
+    /// When edits were first seen while a round was busy writing the ledger.
+    private var noticedWhileRunning: [String: (hash: String, at: Date)] = [:]
 
     init(dependencies: Dependencies) {
         deps = dependencies
@@ -136,6 +138,7 @@ final class SettingsSyncService: ObservableObject {
         deps.defaults.set(enabled, forKey: Self.enabledKey)
         cached = nil; failures = 0; retryAt = .distantPast
         generation += 1
+        noticedWhileRunning = [:]
         if enabled {
             status = .syncing
             requestSync(force: true)
@@ -186,10 +189,18 @@ final class SettingsSyncService: ObservableObject {
     /// While a round runs it alone writes the ledger; the request makes it
     /// run again at once, and that round stamps the edit.
     private func noticeLocalChanges() {
-        guard running == nil else { return }
         do {
             let ledger = try loadLedger()
-            let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now())
+            let current = try currentValues(ledger: ledger)
+            let noticed = ledger.recordingLocalChanges(current: current, now: deps.now(), noticed: noticedWhileRunning)
+            guard running == nil else {
+                // Remember only when; the running round stamps it with this time.
+                for (item, record) in noticed.records where record != ledger.records[item] {
+                    let hash = SettingsSyncItem.hash(current[item])
+                    if noticedWhileRunning[item]?.hash != hash { noticedWhileRunning[item] = (hash, deps.now()) }
+                }
+                return
+            }
             if noticed != ledger { try saveLedger(noticed) }
         } catch {
             // The round reports read failures; noticing retries on the next request.
@@ -246,7 +257,8 @@ final class SettingsSyncService: ObservableObject {
         let keyID = ConfigBackupArchive.keyID(key)
         // 1. Note local edits with the time they were seen, before the network.
         var ledger = try loadLedger()
-        let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now())
+        let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now(),
+                                                   noticed: noticedWhileRunning)
         if noticed != ledger { try saveLedger(noticed); ledger = noticed }
 
         // 2. Read the shared document.
@@ -273,16 +285,17 @@ final class SettingsSyncService: ObservableObject {
         ledger = try loadLedger()
         let sharedAccounts = Set((shared?.entries.keys).map(Array.init) ?? []).compactMap(SettingsSyncItem.secretAccount)
         let current = try currentValues(ledger: ledger, extraAccounts: Set(sharedAccounts))
-        ledger = ledger.recordingLocalChanges(current: current, now: deps.now())
+        ledger = ledger.recordingLocalChanges(current: current, now: deps.now(), noticed: noticedWhileRunning)
         let plan = SettingsSyncPlan.make(current: current, ledger: ledger, remote: shared.map(Self.sanitized), now: deps.now())
 
         // 4. Save the agreement before writing: a failed save leaves nothing
         //    applied, so no applied removal can later look like a local one.
-        //    Joining completes only once the result is shared.
-        //    Each item being written keeps its old agreement plus the target,
-        //    so a write that never lands is retried, never shared as a removal.
+        //    A Mac has joined once it takes an existing shared document; the
+        //    first Mac, once its upload succeeds. Each item being written
+        //    keeps its old agreement plus the target, so a write that never
+        //    lands is retried, never shared as a removal.
         var next = plan.ledger
-        next.joined = ledger.joined
+        next.joined = ledger.joined || shared != nil
         for item in plan.apply.keys {
             var old = ledger.records[item] ?? .init(hash: SettingsSyncItem.hash(current[item]), modifiedAt: .distantPast,
                                                     device: ledger.device)
@@ -309,6 +322,7 @@ final class SettingsSyncService: ObservableObject {
             throw error
         }
         try saveLedger(next)
+        noticedWhileRunning = noticedWhileRunning.filter { next.records[$0.key]?.hash != $0.value.hash }
 
         // 5. Share what changed here.
         if plan.needsUpload, plan.document != shared {

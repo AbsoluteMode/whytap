@@ -55,8 +55,10 @@ a recovery-code key and a Keychain token.
   settings or keys deletes it.
 - A round: note local edits in the ledger with the time they were seen,
   before any request; read the shared document; read local values again;
-  save the new agreement; apply; upload. Joining completes only after the
-  result is shared.
+  save the new agreement; apply; upload. A Mac has joined once it takes an
+  existing shared document; the first Mac, once its upload succeeds. Values a
+  joining Mac already had are stamped at the epoch: they fill gaps but never
+  beat a shared value.
 - Stores that keep their own copy reload after an applied change: routes,
   hotkeys, Toolbox layout, notification sounds, Brightness keys, island
   helpers, Drop mode, capability flags and idle hide.
@@ -95,8 +97,13 @@ a join. Each has a test now:
   round never reaches the other Macs (second review).
 - A round that started before the switch flipped reports nothing.
 - While a round runs it is the only writer of the ledger; an edit noticed
-  meanwhile makes the next round run at once and is stamped there (third
-  review: a stale save after the write lost such an edit).
+  meanwhile keeps the time it was seen in memory and the next round, which
+  runs at once, stamps it with that time (third and fourth reviews).
+- A key received while joining and removed during a conflicting write stays
+  removed: joining is complete once the shared document was taken (fourth
+  review).
+- A restore that will replace settings or keys forgets the agreement before
+  it starts, so a crash midway cannot leave old values that look like edits.
 - Keys the shared document names are read even when this Mac's routes do not
   list them, so a key restored without its server meets the shared removal
   instead of being uploaded again later (third review).
@@ -131,7 +138,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Twenty-eight tests with two simulated Macs sharing a fake repository: first upload
+Thirty tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -144,7 +151,9 @@ finding above (key saved during a read, offline edit time, new recovery code,
 join losing a write race, refused Keychain write, quick off and on, an edit
 during backoff, a key dropped before joining, a removal a store re-saves, a
 key removed while the joining write is in flight, a restored key of a removed
-server). Timestamps are stored as
+server, a received key removed during a conflicting join write, an edit seen
+during a write keeping its time). The last two were checked to fail with
+their fixes reverted. Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

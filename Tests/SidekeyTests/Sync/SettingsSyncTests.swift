@@ -521,6 +521,54 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertNil(second.secrets.values[soniox])
     }
 
+    func testAReceivedKeyRemovedDuringAConflictingJoinWriteStaysRemoved() async throws {
+        let first = mac()
+        first.secrets.values[soniox] = "shared"
+        await first.turnOn()
+
+        let second = mac(at: 100)
+        second.defaults.set("control+m", forKey: meetingKey)
+        let firstMac = first, secondMac = second, account = soniox
+        await remote.setInterject { _ in
+            await MainActor.run {
+                secondMac.clock.addTimeInterval(1)
+                secondMac.secrets.values[account] = nil
+                secondMac.service.requestSync()
+                firstMac.defaults.set(["Whytap"], forKey: "sidekey.preferences.vocabularyTerms")
+            }
+            await firstMac.sync(after: 50)               // makes the joining write conflict
+        }
+        await second.turnOn()
+
+        XCTAssertNil(second.secrets.values[soniox], "the user's removal survives the retried write")
+        await first.sync(after: 1000)
+        XCTAssertNil(first.secrets.values[soniox])
+        XCTAssertEqual(second.defaults.stringArray(forKey: vocabulary), ["Whytap"])
+    }
+
+    func testAnEditSeenDuringAWriteKeepsTheTimeItWasSeen() async throws {
+        let first = mac(), second = mac()
+        await first.turnOn(); await second.turnOn()
+
+        first.defaults.set("smart", forKey: mode)        // gives the next round something to write
+        let firstMac = first, secondMac = second, key = meetingKey
+        await remote.setInterject { _ in
+            await MainActor.run {
+                firstMac.clock.addTimeInterval(1)
+                firstMac.defaults.set("option+m", forKey: key)
+                firstMac.service.requestSync()
+                secondMac.defaults.set("control+m", forKey: key)
+            }
+            await secondMac.sync(after: 50)
+            await MainActor.run { firstMac.clock.addTimeInterval(500) }
+        }
+        await first.sync(after: 10)
+        await second.sync(after: 1000)
+
+        XCTAssertEqual(first.defaults.string(forKey: meetingKey), "control+m", "the later edit on the other Mac wins")
+        XCTAssertEqual(second.defaults.string(forKey: meetingKey), "control+m")
+    }
+
     func testTurningSyncOffAndOnQuicklyStillSyncs() async throws {
         let first = mac()
         first.defaults.set("smart", forKey: mode)

@@ -48,6 +48,14 @@ else configured through Claude Code or Codex via the Whytap plugin.
   `meetings.mp4` (1.4 MB) and `agent.mp4` (0.76 MB) in
   `Resources/FeatureVideos`, copied into the bundle by `dev-run.sh` and
   `build-dmg.sh`.
+- Follow-up the same day: Maxim accepted four more clips made for these rows
+  ("accept, into the app"): `google-search.mp4`, `drop-auto-stop.mp4`,
+  `screen-protect.mp4` and `auto-hide.mp4` (85–460 KB each). They are not on
+  whytap.ai yet, so they are 720p re-encodes of the kit's render with the
+  landing import settings (H.264, BT.709 limited range, CRF 28). The Drop
+  clip shows an example Toggle combo (there is no default one), so its popover
+  names the user's own Drop shortcut; Google's names its Text and Voice keys.
+  Screenshot protection and Auto-hide have no shortcut line.
 - The Agents tab leaves the sidebar. Other gets an Agent group: an Agent switch
   that enables the shortcuts and connects the native Agent in one step (off
   disables and disconnects; no model means a message with Choose model), and
@@ -83,6 +91,9 @@ else configured through Claude Code or Codex via the Whytap plugin.
 - Unit tests: tab resolution and highlight, switch state, live shortcut labels,
   bundled clip sizes and packaging, no `http` in the clip code, workspace path
   equals the folder the Agent creates, no source copy points to Settings → Agents.
+- Follow-up: an offscreen render shows ▶ on all six feature rows; a test
+  requires a ▶ for every bundled clip. The minimum clip size dropped to 40 KB
+  because the mostly still Auto-hide clip encodes to 85 KB.
 - Not verified: video playback in the popover and the click flow in the
   installed app (offscreen rendering does not draw AVPlayer frames).
 

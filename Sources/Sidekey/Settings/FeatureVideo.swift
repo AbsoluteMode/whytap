@@ -8,6 +8,10 @@ import SwiftUI
 enum FeatureVideo: String, CaseIterable {
     case agent
     case meetings
+    case googleSearch = "google-search"
+    case dropAutoStop = "drop-auto-stop"
+    case screenshotProtection = "screen-protect"
+    case autoHide = "auto-hide"
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -18,6 +22,10 @@ enum FeatureVideo: String, CaseIterable {
         switch self {
         case .agent: return "Agent"
         case .meetings: return "Meeting Notes"
+        case .googleSearch: return "Google search"
+        case .dropAutoStop: return "Stop Drop automatically"
+        case .screenshotProtection: return "Screenshot protection"
+        case .autoHide: return "Auto-hide island"
         }
     }
 

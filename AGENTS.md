@@ -1218,9 +1218,16 @@ Guide: docs/customization/app-control.md. WHY:
 Harness access: the plugin's content tools answer only the coding harness that
 started the MCP server itself (the helper's direct parent, by Apple-vouched
 team and signing identifier: Claude Code, Codex), after the user's one Yes.
-HarnessAccessGate asks through the Case approval card and queue ("Let Claude
-Code use Whytap?", No / Yes, Y after 0.3 s of a quiet keyboard, 60 s timeout,
-then "Claude Code connected" for 1.4 s); the prompt is shared by sessions that
+HarnessAccessGate asks through the Case approval card and queue (one line,
+"Give Claude Code access to Whytap?", No / Yes, Y after 0.3 s of a quiet
+keyboard, 60 s timeout, then for 1.9 s the same marks with the dots between
+them turning green one by one and "Claude Code connected" with a checkmark;
+Reduce Motion shows the finished state). The card and its confirmation
+overlap the island's bottom edge by CaseApprovalView.islandSeam (1 pt) and
+AppState.caseCardAttached stays true through the confirmation, so the island
+keeps its square bottom edge and no line or corner shows between them.
+caseCardAttached is geometry only: caseApprovalActive still ends with the
+answer, so a visible Agent answer owns Escape again at once. The prompt is shared by sessions that
 start together and outlives the request that caused it. The MCP server answers
 initialize at once and sends request_access afterwards through the client that
 never launches Whytap. Yes and No are remembered per Mac in one Keychain item

@@ -71,6 +71,14 @@ protocol HarnessAccessPersisting {
 
 /// Answers live in one Keychain item of this app. A file, even a signed one,
 /// could be put back by another process after the user turned access off.
+///
+/// Checked on the signed app (2026-11-20): it has no entitlements, so the
+/// item is in the user's file-based login keychain, like the Case vault key.
+/// It stays on this Mac (that keychain is not synchronized) and is readable
+/// without a prompt only by code the item's access list trusts, which is the
+/// app that created it. `kSecAttrAccessible` applies only to the
+/// data-protection keychain and is not set: it would claim a policy this
+/// build does not have.
 struct HarnessAccessKeychain: HarnessAccessPersisting {
     static let account = "harness_access.answers"
     let service: String
@@ -100,55 +108,86 @@ struct HarnessAccessKeychain: HarnessAccessPersisting {
         guard status == errSecItemNotFound else { return false }
         var add = query
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
+}
+
+/// A No the Keychain has not taken yet, kept where a write cannot be refused
+/// for the same reason. It can only take access away: an entry here denies
+/// that harness whatever the Keychain says, until the Keychain has the No.
+protocol HarnessRevocationJournaling {
+    func load() -> [HarnessGrant]
+    func save(_ pending: [HarnessGrant])
+}
+
+struct HarnessRevocationDefaults: HarnessRevocationJournaling {
+    static let key = "harnessAccess.pendingRevocations"
+    let defaults: UserDefaults
+
+    func load() -> [HarnessGrant] {
+        guard let data = defaults.data(forKey: Self.key) else { return [] }
+        return (try? JSONDecoder().decode([HarnessGrant].self, from: data)) ?? []
+    }
+
+    func save(_ pending: [HarnessGrant]) {
+        if pending.isEmpty {
+            defaults.removeObject(forKey: Self.key)
+        } else if let data = try? JSONEncoder().encode(pending) {
+            defaults.set(data, forKey: Self.key)
+        }
     }
 }
 
 @MainActor
 final class HarnessAccessStore: ObservableObject {
     @Published private(set) var grants: [HarnessGrant] = []
+    /// True while an answer of this launch is not in the Keychain yet.
+    @Published private(set) var hasUnsavedAnswers = false
 
     /// The running app's store, for Settings -> Agents. Nil outside a packaged app.
     static weak var active: HarnessAccessStore?
 
     private let persistence: HarnessAccessPersisting?
+    private let revocations: HarnessRevocationJournaling?
     private var loaded = false
-    /// An answer of this launch that the storage has not taken yet.
-    private var unsaved = false
 
     /// Without `persistence` answers last for this launch only.
-    init(persistence: HarnessAccessPersisting?) {
+    init(persistence: HarnessAccessPersisting?, revocations: HarnessRevocationJournaling? = nil) {
         self.persistence = persistence
+        self.revocations = revocations
         loaded = persistence == nil
+        // A No that an earlier launch could not store applies before the
+        // Keychain is read, and wins over what it holds.
+        let pending = (revocations?.load() ?? []).filter { $0.decision == .deny }
+        grants = pending
+        hasUnsavedAnswers = !pending.isEmpty
     }
 
     func decision(for identity: HarnessIdentity) -> HarnessDecision? {
         loadIfNeeded()
-        // A refused write is retried, so a No given here is not lost at quit.
-        if unsaved { persist() }
+        // A refused write is retried on every read.
+        if hasUnsavedAnswers { persist() }
         return grants.first { $0.identity == identity }?.decision
     }
 
-    /// The answer applies at once; false when it could not be stored yet.
+    /// The answer applies at once; false when the Keychain did not take it.
+    /// A No is then journaled, so it also holds after a relaunch; a Yes is
+    /// not, so the harness is asked again or keeps its earlier answer.
     @discardableResult
     func record(_ decision: HarnessDecision, for client: HarnessClient, at date: Date) -> Bool {
         loadIfNeeded()
+        let grant = HarnessGrant(identity: client.identity, name: client.name, decision: decision, decidedAt: date)
         grants.removeAll { $0.identity == client.identity }
-        grants.append(HarnessGrant(identity: client.identity, name: client.name, decision: decision, decidedAt: date))
-        return persist()
-    }
-
-    /// Forgets the answer: the harness is asked again on its next request.
-    @discardableResult
-    func forget(_ identity: HarnessIdentity) -> Bool {
-        loadIfNeeded()
-        grants.removeAll { $0.identity == identity }
-        return persist()
+        grants.append(grant)
+        var pending = (revocations?.load() ?? []).filter { $0.identity != client.identity }
+        if persist() { return true }
+        if decision == .deny { pending.append(grant) }
+        revocations?.save(pending)
+        return false
     }
 
     /// Reads the stored answers once the storage is readable. Until then
-    /// nothing is trusted and nothing stored is overwritten.
+    /// nothing stored is trusted and nothing stored is overwritten.
     func loadIfNeeded() {
         guard !loaded, let persistence else { return }
         switch persistence.load() {
@@ -159,21 +198,23 @@ final class HarnessAccessStore: ObservableObject {
         case .data(let data):
             loaded = true
             let stored = (try? JSONDecoder().decode([HarnessGrant].self, from: data)) ?? []
-            // Answers given before the storage became readable win over it.
+            // Answers of this launch and journaled Nos win over the storage.
             let fresh = Set(grants.map(\.identity))
             grants = stored.filter { !fresh.contains($0.identity) } + grants
         }
-        if unsaved { persist() }
+        if hasUnsavedAnswers { persist() }
     }
 
     @discardableResult
     private func persist() -> Bool {
         guard let persistence else { return true }
         guard loaded, let data = try? JSONEncoder().encode(grants), persistence.save(data) else {
-            unsaved = true
+            hasUnsavedAnswers = true
             return false
         }
-        unsaved = false
+        // The Keychain has every answer now, the journaled Nos included.
+        hasUnsavedAnswers = false
+        revocations?.save([])
         return true
     }
 }

@@ -1215,8 +1215,13 @@ start together and outlives the request that caused it. The MCP server answers
 initialize at once and sends request_access afterwards through the client that
 never launches Whytap. Yes and No are remembered per Mac in one Keychain item
 of the app (HarnessAccessStore; a file could be put back after access was
-turned off); an answer that could not be stored holds for the launch and is
-stored on the next read. Settings -> Agents -> Coding tools has a switch per
+turned off). The signed app has no entitlements, so the item is in the file
+based login keychain like the Case vault key; kSecAttrAccessible does not
+apply there and is not set. An answer the Keychain refused holds for the
+launch and is retried on every read; a refused No is also journaled in
+UserDefaults (HarnessRevocationDefaults), which can only take access away and
+denies that tool after a relaunch until the Keychain has the No. Settings
+shows a notice while an answer is unsaved. Settings -> Agents -> Coding tools has a switch per
 tool; the gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet

@@ -33,6 +33,12 @@ private final class MemoryAnswers: HarnessAccessPersisting {
     }
 }
 
+private final class MemoryJournal: HarnessRevocationJournaling {
+    var pending: [HarnessGrant] = []
+    func load() -> [HarnessGrant] { pending }
+    func save(_ pending: [HarnessGrant]) { self.pending = pending }
+}
+
 @MainActor
 private final class Prompt: HarnessAccessPresenting {
     var answer: HarnessAccessOutcome = .allow
@@ -65,6 +71,7 @@ final class HarnessAccessTests: XCTestCase {
     private var store: HarnessAccessStore!
     private var gate: HarnessAccessGate!
     private var answers: MemoryAnswers!
+    private var journal: MemoryJournal!
 
     override func setUp() async throws {
         processes = ProcessTable()
@@ -73,7 +80,8 @@ final class HarnessAccessTests: XCTestCase {
         processes.add(helper, parent: 500)
         prompt = Prompt()
         answers = MemoryAnswers()
-        store = HarnessAccessStore(persistence: answers)
+        journal = MemoryJournal()
+        store = HarnessAccessStore(persistence: answers, revocations: journal)
         gate = HarnessAccessGate(
             resolver: HarnessCallerResolver(inspector: processes), store: store, presenter: prompt)
     }
@@ -216,15 +224,6 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertEqual(answer?.data.object?["code"], .string("cancelled"))
     }
 
-    func test_access_revoked_in_settings_stops_the_next_request_and_asks_again() async {
-        _ = await read()
-        store.forget(claude.identity)
-        prompt.answer = .deny
-        let answer = await read()
-        XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"))
-        XCTAssertEqual(prompt.asked.count, 2)
-    }
-
     // MARK: Remembered answers
 
     func test_answers_survive_a_relaunch() {
@@ -241,19 +240,72 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertNil(HarnessAccessStore(persistence: answers).decision(for: claude.identity))
     }
 
-    /// Access turned off while the storage refuses the write: the No holds
-    /// now and is stored as soon as a write goes through, not lost at quit.
-    func test_a_no_that_could_not_be_stored_is_kept_and_stored_later() async {
+    /// The switch is turned off while the Keychain refuses the write, and
+    /// Whytap is quit at once. The stored Yes must not come back.
+    func test_a_no_the_keychain_refused_still_holds_after_an_immediate_relaunch() async {
         _ = await read()
         answers.acceptsWrites = false
         XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
+        XCTAssertTrue(store.hasUnsavedAnswers, "Settings shows that it is not saved yet")
         let refused = await read()
         XCTAssertEqual(refused?.data.object?["code"], .string("access_denied"))
-        XCTAssertEqual(HarnessAccessStore(persistence: answers).decision(for: claude.identity), .allow,
-                       "the storage still has the old Yes")
+
+        // Relaunch with the Keychain still refusing writes: its item says Yes.
+        let relaunched = HarnessAccessStore(persistence: answers, revocations: journal)
+        XCTAssertEqual(relaunched.decision(for: claude.identity), .deny)
+        XCTAssertEqual(HarnessAccessSettingsSection.rows(relaunched.grants).map(\.decision), [.deny])
+        XCTAssertTrue(relaunched.hasUnsavedAnswers)
+        let gate = HarnessAccessGate(
+            resolver: HarnessCallerResolver(inspector: processes), store: relaunched, presenter: prompt)
+        let answer = await gate.intercept(AppControlRequest("meetings_search"), peerPID: helper)
+        XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"))
+        XCTAssertEqual(prompt.asked.count, 1, "no new question either")
+
+        // Relaunch with the Keychain locked: the No applies before it can be read.
+        answers.available = false
+        XCTAssertEqual(HarnessAccessStore(persistence: answers, revocations: journal).decision(for: claude.identity), .deny)
+
+        // The Keychain takes writes again: the No is stored and the journal emptied.
+        answers.available = true
         answers.acceptsWrites = true
-        _ = await read()
-        XCTAssertEqual(HarnessAccessStore(persistence: answers).decision(for: claude.identity), .deny)
+        let later = HarnessAccessStore(persistence: answers, revocations: journal)
+        XCTAssertEqual(later.decision(for: claude.identity), .deny)
+        XCTAssertFalse(later.hasUnsavedAnswers)
+        XCTAssertTrue(journal.pending.isEmpty)
+        XCTAssertEqual(HarnessAccessStore(persistence: answers).decision(for: claude.identity), .deny,
+                       "the Keychain alone now says No")
+    }
+
+    func test_turning_access_back_on_removes_the_journaled_no() {
+        answers.acceptsWrites = false
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertEqual(journal.pending.map(\.identity), [claude.identity])
+        // The user changes their mind before the Keychain is writable.
+        XCTAssertFalse(store.record(.allow, for: claude, at: Date()))
+        XCTAssertTrue(journal.pending.isEmpty)
+        XCTAssertEqual(store.decision(for: claude.identity), .allow)
+        // That Yes was never stored: after a relaunch the harness is asked again.
+        XCTAssertNil(HarnessAccessStore(persistence: answers, revocations: journal).decision(for: claude.identity))
+    }
+
+    func test_a_damaged_journal_takes_no_access_away_and_a_yes_in_it_gives_none() {
+        store.record(.allow, for: claude, at: Date())
+        let defaults = UserDefaults(suiteName: "harness-access-tests-\(UUID().uuidString)")!
+        defaults.set(Data("garbage".utf8), forKey: HarnessRevocationDefaults.key)
+        let damaged = HarnessAccessStore(persistence: answers, revocations: HarnessRevocationDefaults(defaults: defaults))
+        XCTAssertEqual(damaged.decision(for: claude.identity), .allow)
+
+        // Another process writes a Yes for Codex into the journal: it is not an answer.
+        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        let forged = HarnessRevocationDefaults(defaults: defaults)
+        forged.save([HarnessGrant(identity: codex.identity, name: "Codex", decision: .allow, decidedAt: Date())])
+        XCTAssertNil(HarnessAccessStore(persistence: answers, revocations: forged).decision(for: codex.identity))
+
+        // The real journal round-trips a No through UserDefaults.
+        forged.save([HarnessGrant(identity: codex.identity, name: "Codex", decision: .deny, decidedAt: Date())])
+        XCTAssertEqual(HarnessRevocationDefaults(defaults: defaults).load().map(\.decision), [.deny])
+        forged.save([])
+        XCTAssertNil(defaults.data(forKey: HarnessRevocationDefaults.key))
     }
 
     func test_while_the_keychain_is_locked_nothing_is_trusted_or_overwritten() {

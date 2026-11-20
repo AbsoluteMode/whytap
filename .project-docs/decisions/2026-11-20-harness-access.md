@@ -50,7 +50,19 @@ with finding and reading meetings, and wants connecting to cost one answer.
   tools lists the answers with a switch. The gate reads the answer before a
   request and again before its response leaves, so off stops an open session
   and a request already reading. An answer the Keychain refused to store
-  holds for this launch and is stored on the next read.
+  holds for this launch and is retried on every read. A refused No is also
+  written to a journal in UserDefaults (`harnessAccess.pendingRevocations`):
+  an entry there denies that harness after a relaunch whatever the Keychain
+  holds, and is removed once the Keychain has the No. The journal can only
+  take access away; a Yes written into it by another process is ignored.
+  Settings shows a notice while an answer is unsaved.
+- **Where the item is.** Checked on the signed app on 2026-11-20
+  (`codesign -d --entitlements`, `security find-generic-password` metadata of
+  the Case vault key): the app has no entitlements and its items are in the
+  user's file-based login keychain. The data-protection keychain and
+  `kSecAttrAccessible` classes are not available to this build, so the
+  attribute is not set. The item is not synchronized and is read without a
+  prompt only by code its access list trusts, the app that created it.
 - **What Yes covers.** Every current and future content and action tool of the
   plugin, except deleting data, which will ask each time when it exists.
   Today: `whytap_meetings_search`, `whytap_meeting_get`,
@@ -94,8 +106,10 @@ with finding and reading meetings, and wants connecting to cost one answer.
   share one prompt; `request_access` returns `pending` without waiting; a
   client that left gets nothing; a script in the harness shell is refused even
   after Yes; unreadable stored answers allow nobody; while the Keychain is
-  locked nothing is trusted or overwritten; a No that could not be stored is
-  kept and stored later; access turned off during a read returns nothing; a
+  locked nothing is trusted or overwritten; a No the Keychain refused still
+  denies after an immediate relaunch, also with the Keychain locked, and is
+  stored once it is writable; turning access back on removes the journaled
+  No; a damaged journal takes nothing away and a Yes in it gives nothing; access turned off during a read returns nothing; a
   cancelled request stops waiting while the prompt stays; the Settings switch
   stops and restores access without a prompt.
 - `HarnessAccessPromptTests`: Y only after the quiet keyboard, A is not an
@@ -124,6 +138,16 @@ with finding and reading meetings, and wants connecting to cost one answer.
   answer needs an identity Apple vouches for; a terminal's would cover every
   script run in it.
 - SQLite FTS5 now: a scan is enough at this size; add an index if it gets slow.
+
+## Builder review
+
+The builder blocked the first submission on 2026-11-20: a No the Keychain
+refused came back as Yes after an immediate relaunch, the Settings switch
+showed Off without saying it was unsaved, and the code set
+`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, which the file-based
+keychain ignores. Fixed with the revocation journal, the notice and the
+checked description above. The existing Case vault key sets the same ignored
+attribute; that is left for its own change.
 
 ## Review
 

@@ -55,7 +55,8 @@ running, the island shows "Let Claude Code use Whytap?". Yes is remembered on
 this Mac; No is remembered too and the tools then answer `access_denied`. If
 Whytap was closed, the question appears with the first meeting request. Each
 tool is asked about separately. Change an answer in Whytap Settings -> Agents
--> Coding tools.
+-> Coding tools. Turning a tool off holds after a restart even when the
+Keychain could not save it at that moment; Settings says so until it is saved.
 
 Only the harness that started the server itself is recognised (Claude Code,
 Codex). A shell command, a script the agent runs, a terminal or another

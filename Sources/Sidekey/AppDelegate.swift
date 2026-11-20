@@ -3871,7 +3871,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Answers are per Mac, in this app's Keychain.
         // WHY: .project-docs/decisions/2026-11-20-harness-access.md
         let harnessStore = HarnessAccessStore(
-            persistence: HarnessAccessKeychain(service: BuildConfig.keychainService))
+            persistence: HarnessAccessKeychain(service: BuildConfig.keychainService),
+            revocations: HarnessRevocationDefaults(defaults: .standard))
         harnessAccessStore = harnessStore
         HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(

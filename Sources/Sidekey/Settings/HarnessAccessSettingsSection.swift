@@ -17,6 +17,9 @@ struct HarnessAccessSettingsSection: View {
         }
     }
 
+    /// Shown while the Keychain has not taken the latest answer.
+    static let unsavedNotice = "Whytap couldn’t save this to the Keychain yet. Turning access off still holds after a restart. It will be saved when the Keychain is available."
+
     /// By name, so a changed answer does not move its row.
     static func rows(_ grants: [HarnessGrant]) -> [HarnessGrant] {
         grants.sorted { ($0.name, $0.identity.signingIdentifier) < ($1.name, $1.identity.signingIdentifier) }
@@ -41,6 +44,12 @@ struct HarnessAccessSettingsSection: View {
                                     }), label: "Let \(grant.name) use Whytap")
                             }
                         }
+                    }
+                    if store.hasUnsavedAnswers {
+                        Text(Self.unsavedNotice)
+                            .font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
                     }
                 }
             }

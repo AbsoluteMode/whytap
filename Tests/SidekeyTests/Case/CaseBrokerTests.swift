@@ -160,6 +160,30 @@ final class CaseBrokerTests: XCTestCase {
         XCTAssertTrue(approvals.requests.isEmpty)
     }
 
+    /// Content tools first pass the harness access gate, with the helper's
+    /// pid; a refusal never reaches the controls and never touches the vault.
+    func test_harness_access_decides_before_the_app_controls_and_without_the_vault() async {
+        makeBroker(caller: .registered(registration(.bypass)))
+        var reached: [String] = []
+        var asked: [(String, pid_t)] = []
+        let controls = CaseBroker(
+            service: service, resolver: resolver, approvals: approvals, authenticator: auth,
+            appControl: { request in reached.append(request.operation); return .success(.null) },
+            harnessAccess: { request, pid in
+                asked.append((request.operation, pid))
+                return request.operation == "meetings_search" ? .failure("access_denied", "no") : nil
+            })
+        let refused = await controls.handle(.appControl(AppControlRequest("meetings_search")), peerPID: 900)
+        XCTAssertEqual(refused, .appControl(.failure("access_denied", "no")))
+        let passed = await controls.handle(.appControl(AppControlRequest("get_state")), peerPID: 900)
+        XCTAssertEqual(passed, .appControl(.success(.null)))
+        XCTAssertEqual(reached, ["get_state"])
+        XCTAssertEqual(asked.map(\.0), ["meetings_search", "get_state"])
+        XCTAssertEqual(asked.map(\.1), [900, 900])
+        XCTAssertEqual(store.loadCount, 0, "a Case Bypass registration gives no access to meetings")
+        XCTAssertEqual(resolver.calls, 0)
+    }
+
     func test_app_control_client_exchanges_through_the_authenticated_socket() async throws {
         makeBroker(caller: .registered(registration(.approve)))
         broker = CaseBroker(service: service, resolver: resolver, approvals: approvals, authenticator: auth,

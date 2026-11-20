@@ -4,7 +4,11 @@ import Foundation
 public final class AppControlCommand {
     private let client: CaseBrokerCalling?
     private let todo: TodoCommand?
-    public init(client: CaseBrokerCalling?, todo: TodoCommand? = nil) { self.client = client; self.todo = todo }
+    /// Never launches Whytap: used for the access prompt a connecting harness triggers.
+    private let direct: CaseBrokerCalling?
+    public init(client: CaseBrokerCalling?, todo: TodoCommand? = nil, direct: CaseBrokerCalling? = nil) {
+        self.client = client; self.todo = todo; self.direct = direct
+    }
 
     public func call(_ request: AppControlRequest) -> AppControlResponse {
         call(request, cancellation: nil)
@@ -31,6 +35,9 @@ public final class AppControlCommand {
     }) -> Int32 {
         if args == ["mcp"] || args == ["screen-mcp"] {
             let server = AppControlMCPServer(screenOnly: args == ["screen-mcp"], todo: todo.map { todo in { todo.respond($0, $1) } },
+                                             accessProbe: direct.map { direct in
+                                                 { _ = try? direct.send(.appControl(AppControlRequest("request_access", arguments: [:]))) }
+                                             },
                                              cancellableCall: { self.call($0, cancellation: $1) })
             server.run(readLine: readLine, write: write)
             return 0

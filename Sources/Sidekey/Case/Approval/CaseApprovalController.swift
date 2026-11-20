@@ -241,3 +241,19 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
         cancelTimeout = nil
     }
 }
+
+/// The same island prompt and queue ask whether a coding harness may use
+/// Whytap: one prompt at a time, the same quiet-keyboard arming and timeout.
+// WHY: .project-docs/decisions/2026-11-20-harness-access.md
+extension CaseApprovalController: HarnessAccessPresenting {
+    func requestAccess(for client: HarnessClient) async -> HarnessAccessOutcome {
+        var request = CaseApprovalRequest(
+            appName: client.name, projectName: "", keyNames: [], command: "", timedMinutes: 0)
+        request.harness = client
+        switch await requestApproval(request) {
+        case .allow, .allowTimed: return .allow
+        case .deny: return .deny
+        case .timedOut: return .timedOut
+        }
+    }
+}

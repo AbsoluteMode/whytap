@@ -16,6 +16,8 @@ enum WhytapLinkDestination: Equatable {
     /// Open Settings -> Toolbox with this tool's pane selected.
     case toolboxTool(HoverTool)
     case translation(TranslationWindowController.Mode)
+    /// Open Settings -> Meetings on this note. An unknown id shows the list.
+    case meeting(UUID)
     /// A well-formed link to something this version does not have (a newer
     /// tile, tab or link kind): only show the island.
     case island
@@ -47,7 +49,8 @@ enum WhytapLinkChangePlan: Equatable {
 }
 
 /// Parses `whytap://tool/<HoverTool rawValue>`,
-/// `whytap://settings/<SettingsWindowTab rawValue>` and
+/// `whytap://settings/<SettingsWindowTab rawValue>`,
+/// `whytap://meeting/<meeting id without dashes>` and
 /// `whytap://hotkey/<HoverTool rawValue>?keys=option+shift+s`. The enums
 /// themselves are the registry of linkable places: the switches below are
 /// exhaustive, so a new tile or tab does not compile until it has a
@@ -76,6 +79,9 @@ enum WhytapLink {
             return .show(HoverTool(rawValue: id).map(destination(for:)) ?? .island)
         case "settings":
             return .show(SettingsWindowTab(rawValue: id).map(destination(for:)) ?? .island)
+        case "meeting":
+            // A meeting id without dashes; anything else only shows the island.
+            return .show(AppControlMeetings.meetingID(id).map(WhytapLinkDestination.meeting) ?? .island)
         case "hotkey":
             // Anything it cannot propose safely still shows where hotkeys live.
             guard let tool = HoverTool(rawValue: id), acceptsLinkHotkey(tool),

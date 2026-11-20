@@ -216,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Case broker socket for the bundled `whytap` helper; running app only.
     private var caseBrokerServer: CaseBrokerServer?
     private var appControlController: AppControlController?
+    private(set) var harnessAccessStore: HarnessAccessStore?
     /// Case Approve prompts in the island (Y / N / A keys) and their panel.
     private var caseApprovalController: CaseApprovalController?
     private var caseApprovalPanel: CaseApprovalPanel?
@@ -1752,10 +1753,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.selection.setHighlight(.tab(.toolbox))
         case .translation(let mode):
             openTranslation(mode)
+        case .meeting(let id):
+            _ = showMeetingNote(id: id)
         case .island:
             // Already woken above: a link this version does not know.
             break
         }
+    }
+
+    /// Opens Settings -> Meetings on one note. Only shows it.
+    @discardableResult
+    private func showMeetingNote(id: UUID) -> Bool {
+        openSettingsWindow(tab: .notes)
+        ensureSettingsWindowController().selectNoteMeeting(id: id)
+        return true
     }
 
     private func openTranslation(_ mode: TranslationWindowController.Mode, toggles: Bool = false) {
@@ -3843,7 +3854,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let bundleID = Bundle.main.bundleIdentifier
         else { return }
         let inspector = CaseSystemProcessInspector()
-        let controls = AppControlController()
+        let controls = AppControlController(meetings: AppControlMeetings(
+            source: { [weak self] in self?.meetingsStore },
+            open: { [weak self] id in self?.showMeetingNote(id: id) ?? false }))
         appControlController = controls
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
@@ -3852,6 +3865,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { $0 != nil }
             .removeDuplicates()
             .sink { active in AppState.shared.caseApprovalActive = active }
+        // Answers are per Mac: the file sits beside the broker socket and is
+        // signed with a device-bound Keychain key.
+        // WHY: .project-docs/decisions/2026-11-20-harness-access.md
+        let harnessStore = HarnessAccessStore(
+            fileURL: CaseBrokerPaths.socketURL(bundleID: bundleID)
+                .deletingLastPathComponent().appendingPathComponent("harness-access.json"),
+            key: { HarnessAccessKeychain.key(service: BuildConfig.keychainService) })
+        harnessAccessStore = harnessStore
+        let harnessGate = HarnessAccessGate(
+            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
         let broker = CaseBroker(
             service: CaseVaultService.shared,
             resolver: CaseSystemCallerResolver(
@@ -3859,7 +3882,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 builtInOpenCodePIDs: { CaseBuiltInAgentProcesses.shared.pids }),
             approvals: approvals,
             authenticator: LocalCaseAuthenticator(),
-            appControl: { [controls] request in await controls.handle(request) })
+            appControl: { [controls] request in await controls.handle(request) },
+            harnessAccess: { [harnessGate] request, peerPID in await harnessGate.intercept(request, peerPID: peerPID) })
         let server = CaseBrokerServer(
             socketURL: CaseBrokerPaths.socketURL(bundleID: bundleID),
             broker: broker,

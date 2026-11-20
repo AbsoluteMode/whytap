@@ -35,7 +35,9 @@ final class AgentOtherSectionTests: XCTestCase {
         for video in FeatureVideo.allCases {
             let file = root.appendingPathComponent("Resources/FeatureVideos/\(video.rawValue).mp4")
             let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int)
-            XCTAssertGreaterThan(size, 100_000, "\(video) clip missing")
+            // A mostly still clip (Auto-hide) encodes under 100 KB; this only
+            // rules out an empty or placeholder file.
+            XCTAssertGreaterThan(size, 40_000, "\(video) clip missing")
             XCTAssertLessThan(size, 3_000_000, "\(video) clip too large for the app bundle")
         }
         for script in ["scripts/dev-run.sh", "scripts/build-dmg.sh"] {
@@ -45,6 +47,31 @@ final class AgentOtherSectionTests: XCTestCase {
         let source = try String(contentsOf: root.appendingPathComponent("Sources/Sidekey/Settings/FeatureVideo.swift"),
                                 encoding: .utf8)
         XCTAssertFalse(source.contains("http"), "feature videos must never be fetched")
+    }
+
+    /// Every bundled clip has its ▶ on a Settings row.
+    func test_every_feature_video_has_a_button() throws {
+        let root = try projectRoot().appendingPathComponent("Sources/Sidekey/Settings")
+        let sources = try ["SettingsOtherView.swift", "AgentOtherSection.swift"]
+            .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
+            .joined()
+        for video in FeatureVideo.allCases {
+            XCTAssertTrue(sources.contains("FeatureVideoButton(video: .\(video)"), "\(video) has no ▶ button")
+        }
+    }
+
+    func test_other_row_clips_name_the_users_own_shortcuts() {
+        var configuration = HotkeyConfiguration.defaults
+        configuration.dropVoiceShortcut = .combo(.optionPeriod)
+        configuration.googleSearchTextShortcut = .modifier(.rightOption)
+        configuration.googleSearchVoiceShortcut = .combo(.optionPeriod)
+        let drop = SettingsOtherView.dropAutoStopVideoShortcuts(configuration)
+        XCTAssertEqual(drop.map(\.label), ["Drop"])
+        XCTAssertEqual(drop[0].contents, [.text(HotkeyGlyph.option), .text(".")])
+        let google = SettingsOtherView.googleSearchVideoShortcuts(configuration)
+        XCTAssertEqual(google.map(\.label), ["Text", "Voice"])
+        XCTAssertEqual(google[0].contents, [HotkeyModifierKey.rightOption.keycapContent])
+        XCTAssertEqual(google[1].contents, [.text(HotkeyGlyph.option), .text(".")])
     }
 
     func test_workspace_url_matches_the_folder_the_agent_uses() throws {

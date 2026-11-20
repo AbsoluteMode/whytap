@@ -118,6 +118,16 @@ struct SettingsOtherView: View {
         _googleEnabled = State(initialValue: googleEnabled())
     }
 
+    /// The clip shows an example combo; the popover names the user's own.
+    static func dropAutoStopVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
+        [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents)]
+    }
+
+    static func googleSearchVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
+        [FeatureVideoShortcut(label: "Text", contents: configuration.googleSearchTextShortcut.contents),
+         FeatureVideoShortcut(label: "Voice", contents: configuration.googleSearchVoiceShortcut.contents)]
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -136,6 +146,8 @@ struct SettingsOtherView: View {
                             title: "Stop Drop automatically",
                             subtitle: "With a Toggle shortcut: press once, speak, and dictation ends when you stop. Press again to stop sooner. Hold shortcuts are unchanged."
                         ) {
+                            FeatureVideoButton(video: .dropAutoStop, shortcuts: { Self.dropAutoStopVideoShortcuts(hotkeys()) })
+                        } trailing: {
                             MacSwitch(isOn: dropAutoStopToggleBinding, label: "Stop Drop automatically")
                         }
                     }
@@ -162,6 +174,8 @@ struct SettingsOtherView: View {
                             // Settings -> Hotkeys, so a fixed name would mislead.
                             subtitle: "Type or say a query; it opens in Google. Shortcut in Hotkeys."
                         ) {
+                            FeatureVideoButton(video: .googleSearch, shortcuts: { Self.googleSearchVideoShortcuts(hotkeys()) })
+                        } trailing: {
                             MacSwitch(isOn: googleToggleBinding, label: "Google search")
                         }
 
@@ -179,6 +193,8 @@ struct SettingsOtherView: View {
                             title: "Screenshot protection",
                             subtitle: "Hide the island from screenshots and screen shares."
                         ) {
+                            FeatureVideoButton(video: .screenshotProtection)
+                        } trailing: {
                             MacSwitch(isOn: screenshotProtectionToggleBinding, label: "Screenshot protection")
                         }
                     }
@@ -191,6 +207,8 @@ struct SettingsOtherView: View {
                             title: "Auto-hide island",
                             subtitle: "Fades into the notch after a while of no use. Hover it or press a hotkey to bring it back."
                         ) {
+                            FeatureVideoButton(video: .autoHide)
+                        } trailing: {
                             MacSwitch(isOn: islandAutoHideToggleBinding, label: "Auto-hide island")
                         }
 

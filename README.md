@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
+  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img alt="Download" src="docs/assets/readme/btn-download.svg" height="44"></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
 </p>
 
 <p align="center">

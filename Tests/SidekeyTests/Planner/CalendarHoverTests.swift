@@ -42,7 +42,7 @@ final class CalendarHoverTests: XCTestCase {
         XCTAssertEqual(model.page, .providers); XCTAssertEqual(model.selectedDay, tomorrow)
         model.end(); model.begin()
         XCTAssertEqual(model.page, .agenda); XCTAssertEqual(model.selectedDay, day)
-        model.page = .sources; model.openToday()
+        model.page = .providers; model.openToday()
         XCTAssertEqual(model.page, .agenda)
         clock = calendar.date(byAdding: .day, value: 1, to: clock)!
         model.dayChanged()
@@ -52,7 +52,7 @@ final class CalendarHoverTests: XCTestCase {
         model.end(); XCTAssertEqual(activity, [true, false, true, false])
     }
 
-    func testDayAgendaIncludesSpanningEventsAndExclusiveEndAndHonorsVisibility() {
+    func testDayAgendaIncludesSpanningEventsAndExclusiveEndAndShowsEveryCalendar() {
         let model = makeModel(); model.begin()
         let previous = day.addingTimeInterval(-3600)
         let spanning = PlannerEvent(title: "Spanning midnight", start: previous, end: day.addingTimeInterval(1800))
@@ -62,12 +62,12 @@ final class CalendarHoverTests: XCTestCase {
             end: calendar.date(byAdding: .day, value: 1, to: day)!, allDay: true)
         for event in [timed, ended, spanning, allDay] { XCTAssertTrue(model.store.saveEvent(event)) }
         XCTAssertEqual(model.events.map(\.event.title), ["All day", "Spanning midnight", "Timed"])
-        model.connections.setVisible(false, feedID: "local"); XCTAssertTrue(model.events.isEmpty)
-        model.connections.setVisible(true, feedID: "local"); XCTAssertEqual(model.events.count, 3)
+        model.connections.setVisible(false, feedID: "local")
+        XCTAssertEqual(model.events.count, 3, "Hover has no calendar hiding; an older saved choice is ignored")
         model.moveDay(1); XCTAssertTrue(model.events.isEmpty)
     }
 
-    func testMergedConnectedFeedsRespectHiddenCalendarsBeforeDeduplication() async throws {
+    func testMergedConnectedFeedsDeduplicateAndOlderHidingIsIgnored() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PlannerURLProtocol.self]
         let http = CalendarHTTP(session: URLSession(configuration: configuration))
@@ -94,9 +94,10 @@ final class CalendarHoverTests: XCTestCase {
         XCTAssertEqual(model.events.count, 1)
         let one = try XCTUnwrap(connections.feeds.first(where: { $0.remoteID == "one" }))
         let two = try XCTUnwrap(connections.feeds.first(where: { $0.remoteID == "two" }))
-        connections.setVisible(false, feedID: one.id)
-        XCTAssertEqual(model.events.first?.feedID, two.id)
-        connections.setVisible(false, feedID: two.id); XCTAssertTrue(model.events.isEmpty)
+        XCTAssertEqual(Set([try XCTUnwrap(model.events.first?.feedID)] + (model.events.first?.additionalFeedIDs ?? [])),
+                       [one.id, two.id], "One block for the copy in both calendars")
+        connections.setVisible(false, feedID: one.id); connections.setVisible(false, feedID: two.id)
+        XCTAssertEqual(model.events.count, 1)
         try await connections.remove(account); XCTAssertTrue(model.events.isEmpty)
         XCTAssertNil(try credentials.read(account.id))
     }
@@ -299,6 +300,10 @@ final class CalendarHoverTests: XCTestCase {
         }
         _ = NSApplication.shared
         let destination = URL(fileURLWithPath: output)
+        CalendarSourceLogo.resourceDirectoryForTesting = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/UsefulLinkIcons")
+        defer { CalendarSourceLogo.resourceDirectoryForTesting = nil }
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         var model = makeModel(); model.begin()
         let info: [String: Any] = ["WhytapCalendarOAuthClients": [
@@ -323,7 +328,7 @@ final class CalendarHoverTests: XCTestCase {
             end: day.addingTimeInterval(16 * 3600 + 300))))
         for width: CGFloat in [310, 360, 500] {
             try await render(model, page: .agenda, name: "day", width: width, info: info, destination: destination)
-            try await render(model, page: .sources, name: "sources", width: width, info: info, destination: destination)
+            try await render(model, page: .providers, name: "providers-connected", width: width, info: info, destination: destination)
         }
         model.moveDay(1)
         try await render(model, page: .agenda, name: "day-empty-tomorrow", width: 310, info: info, destination: destination)
@@ -334,7 +339,7 @@ final class CalendarHoverTests: XCTestCase {
         try await render(model, page: .agenda, name: "reduced-motion", width: 310, info: info, destination: destination, reduceMotion: true)
     }
 
-    /// Two synthetic Google calendars with their own colours; the second one has a
+    /// Two synthetic Google calendars (each reports its own colour, now unused); the second one has a
     /// meeting overlapping the first one's event.
     func fakeGoogleModel() throws -> CalendarHoverModel {
         let configuration = URLSessionConfiguration.ephemeral

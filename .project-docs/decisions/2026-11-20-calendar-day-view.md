@@ -20,10 +20,13 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarDayViewTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md]
+related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-21-calendar-logos.md]
 ---
 
 # Calendar day view in Hover
+
+> Calendar colours and the calendar list were replaced on 2026-11-21 by service
+> logos with every calendar shown: `2026-11-21-calendar-logos.md`.
 
 ## Context
 

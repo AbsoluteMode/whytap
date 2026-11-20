@@ -1142,17 +1142,22 @@ full truncated titles. Drafts survive closing; saved Toolbox slots remain unchan
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
-red now line). Events are blocks from start to end, tinted with their calendar's
-colour (provider colour or a stable fallback), with time range and calendar name.
+red now line). Events are blocks from start to end in one colour, each with the
+small logo of its service (bundled Google Calendar, Zoom and Whytap marks; the
+installed Calendar or Outlook app icon, else a drawn tile), time range and
+calendar name. Every connected calendar is shown: Hover has no calendar hiding
+or Refresh button (open, day change, account change and a 60 s poll refresh).
+WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
 Overlaps share the width and all-day events are chips above the grid. A click
 joins the meeting link, else opens the event in its own calendar (Google/Outlook
 web, ical://ekevent on this Mac). There is no details page. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
-Day navigation, feed selection (with colour dots) and Connect stay in Hover.
+A compact day switcher and Connect stay in Hover; Connect rows carry the
+provider logos, and connection errors and Retry are listed there.
 Connect starts the provider browser or macOS permission prompt directly, using
 the same CalendarConnectionFlow as Settings → Integrations. No intermediate
 form, account-name field, Advanced app setup or Whytap account is shown.
-Unavailability/errors stay inline; progress and Cancel remain on the source list. Toolbox uses the same inline entry; there are no runtime
+Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime
 PlannerWindowController calls. CalendarConnectionFlow keeps permission work alive
 through temporary Hover hiding. Only Hover-owned connections pin its menu;
 Settings connections do not. Repeat opens preserve an active connection.

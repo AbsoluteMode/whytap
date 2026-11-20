@@ -1356,6 +1356,32 @@ interaction and live provider inference remain acceptance on the installed app.
 The 0.05 cutoff is conservative policy; its quality on real dictation is an
 unvalidated assumption, not a measured classifier accuracy guarantee.
 
+## Calendar logos — 2026-11-21
+
+The user asked to drop calendar hiding and the Refresh button, to make the
+main buttons narrower, and to tell calendars apart by a small logo instead of
+colour.
+
+- Every event block is the same blue (#0A84FF at 30%, 45% hover, 55% pressed)
+  with the 3 pt edge. A 12 pt logo leads the title (11 pt on one-line blocks,
+  12 pt on all-day chips). Why: the service is what tells events apart; the
+  calendar name stays in the second line.
+- Logos: Google Calendar's mark in Google blue on a white tile, Zoom and Whytap
+  bundled icons, the installed Calendar app icon, the Outlook app icon or, if
+  Outlook is not installed, a calendar symbol on an Outlook-blue tile. An
+  unknown calendar gets a calendar symbol. Nothing is downloaded.
+- The day switcher is one compact row: 24 pt chevrons and "Today  21 Oct" on one
+  line, centered. A mini spinner appears beside it while calendars update.
+- No filter button, no calendar list page and no Refresh button. The attention
+  banner opens Connect, which now lists connection errors, the store's Retry and
+  20 pt logos on provider rows. Apple shows Connected once enabled; a connected
+  web provider offers Add account.
+
+Verification: offscreen fixtures at 310/360/500 pt (day with logos, Connect with
+logos and a connected Google). The installed app's Outlook and Calendar icons
+and real pointer behavior remain acceptance.
+WHY: `.project-docs/decisions/2026-11-21-calendar-logos.md`.
+
 ## Calendar day view — 2026-11-20
 
 The user comes here to see the shape of the day: what is booked, for how long,
@@ -1379,7 +1405,7 @@ own calendar with one click.
   is not a button. The tooltip names the action. There is a 1.5 pt focus outline.
 - The empty day keeps the grid with a centered dark note. The copy is the
   former empty state.
-- The calendar list shows each calendar's colour dot.
+- Superseded on 2026-11-21 (below): calendar colours and the calendar list.
 
 Verification: offscreen fixtures at 310/360/500 pt (day from two fake Google
 calendars, all-day chip, now line, long Russian title, sources, empty next

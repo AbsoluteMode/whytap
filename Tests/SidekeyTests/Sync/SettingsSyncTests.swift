@@ -66,6 +66,8 @@ final class SettingsSyncTests: XCTestCase {
         let secrets = FakeSecrets()
         let ledgerURL: URL
         var reloaded: [Set<String>] = []
+        /// What a store's setter does on reload: write the value it shows.
+        var onReload: ((UserDefaults) -> Void)?
         var key: Data
         var clock: Date
         var service: SettingsSyncService!
@@ -85,7 +87,7 @@ final class SettingsSyncTests: XCTestCase {
                 path: "whytap-sync/settings.v1.json",
                 now: { [unowned self] in self.clock },
                 isPaused: { false },
-                reload: { [unowned self] in self.reloaded.append($0) }))
+                reload: { [unowned self] in self.reloaded.append($0); self.onReload?(self.defaults) }))
         }
 
         func turnOn() async { service.setEnabled(true); await service.syncNow() }
@@ -412,6 +414,58 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertEqual(second.secrets.values[soniox], "secret")
         await first.sync()
         XCTAssertEqual(first.secrets.values[soniox], "secret", "the refused write never becomes a removal")
+    }
+
+    func testAnEditDuringBackoffKeepsItsTime() async throws {
+        let first = mac(), second = mac()
+        await first.turnOn(); await second.turnOn()
+
+        await remote.setOffline(true)
+        await first.sync(after: 1)                       // fails, backs off for a minute
+        first.clock.addTimeInterval(10)
+        first.defaults.set("option+m", forKey: meetingKey)
+        first.service.requestSync()                      // skipped by backoff, edit still noticed
+        await remote.setOffline(false)
+        second.defaults.set("control+m", forKey: meetingKey)
+        await second.sync(after: 100)
+        await first.sync(after: 1000)
+
+        XCTAssertEqual(first.defaults.string(forKey: meetingKey), "control+m")
+    }
+
+    func testAKeyDroppedBeforeTheFirstSharedRoundIsNotSharedAsARemoval() async throws {
+        let first = mac()
+        first.secrets.values[soniox] = "first"
+        await remote.setOffline(true)
+        await first.turnOn()                             // join fails offline
+        first.secrets.values[soniox] = nil
+        await remote.setOffline(false)
+        await first.sync(after: 1000)
+
+        let second = mac(at: 2000)
+        second.secrets.values[soniox] = "second"
+        await second.turnOn()
+
+        XCTAssertEqual(second.secrets.values[soniox], "second")
+        let document = try await shared()
+        XCTAssertEqual(document.entries[SettingsSyncItem.secret(soniox)]?.value, .secret("second"))
+    }
+
+    func testASettingRemovedOnTheOtherMacStaysRemovedWhenAStoreSavesItsDefault() async throws {
+        let first = mac(), second = mac()
+        first.defaults.set("option+m", forKey: meetingKey)
+        await first.turnOn(); await second.turnOn()
+        let key = meetingKey
+        second.onReload = { defaults in if defaults.object(forKey: key) == nil { defaults.set("default", forKey: key) } }
+
+        first.defaults.removeObject(forKey: meetingKey)
+        await first.sync()
+        await second.sync()
+        await second.sync()
+        await first.sync()
+
+        XCTAssertNil(second.defaults.object(forKey: meetingKey))
+        XCTAssertNil(first.defaults.object(forKey: meetingKey), "the store's default never comes back as an edit")
     }
 
     func testTurningSyncOffAndOnQuicklyStillSyncs() async throws {

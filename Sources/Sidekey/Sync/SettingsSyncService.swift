@@ -155,6 +155,7 @@ final class SettingsSyncService: ObservableObject {
 
     func requestSync(force: Bool = false) {
         guard isEnabled else { return }
+        noticeLocalChanges()
         if force { retryAt = .distantPast }
         guard deps.now() >= retryAt else { return }
         if running != nil { rerun = true; return }
@@ -181,6 +182,17 @@ final class SettingsSyncService: ObservableObject {
         if rerun && isEnabled { rerun = false; requestSync() }
     }
 
+    /// Stamps local edits even while rounds back off or GitHub is away.
+    private func noticeLocalChanges() {
+        do {
+            let ledger = try loadLedger()
+            let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now())
+            if noticed != ledger { try saveLedger(noticed) }
+        } catch {
+            // The round reports read failures; noticing retries on the next request.
+        }
+    }
+
     private func ensureCurrent(_ round: Int) throws {
         guard round == generation, isEnabled, !deps.isPaused(), !Task.isCancelled else { throw CancellationError() }
     }
@@ -204,6 +216,8 @@ final class SettingsSyncService: ObservableObject {
             }
             failures = 0
             status = .synced(deps.now())
+        } catch where round != generation {
+            // A round from before the switch flipped: its outcome is stale.
         } catch SettingsSyncEnvelope.Failure.differentKey {
             status = .differentKey
             retryAt = deps.now().addingTimeInterval(900)
@@ -251,6 +265,7 @@ final class SettingsSyncService: ObservableObject {
         }
 
         // 3. Values may have changed while GitHub answered: read them again.
+        ledger = try loadLedger()
         let current = try currentValues(ledger: ledger)
         ledger = ledger.recordingLocalChanges(current: current, now: deps.now())
         let plan = SettingsSyncPlan.make(current: current, ledger: ledger, remote: shared.map(Self.sanitized), now: deps.now())
@@ -258,17 +273,36 @@ final class SettingsSyncService: ObservableObject {
         // 4. Save the agreement before writing: a failed save leaves nothing
         //    applied, so no applied removal can later look like a local one.
         //    Joining completes only once the result is shared.
+        //    Each item being written keeps its old agreement plus the target,
+        //    so a write that never lands is retried, never shared as a removal.
         var next = plan.ledger
         next.joined = ledger.joined
+        for item in plan.apply.keys {
+            var old = ledger.records[item] ?? .init(hash: SettingsSyncItem.hash(current[item]), modifiedAt: .distantPast,
+                                                    device: ledger.device)
+            old.pending = plan.ledger.records[item].map { .init(hash: $0.hash, modifiedAt: $0.modifiedAt, device: $0.device) }
+            next.records[item] = old
+        }
         try saveLedger(next)
         let failed = apply(plan.apply)
         let applied = Set(plan.apply.keys).subtracting(failed.keys)
-        if !applied.isEmpty { deps.reload(applied) }
+        for item in applied { next.records[item] = plan.ledger.records[item] }
+        if !applied.isEmpty {
+            deps.reload(applied)
+            // A store's setter saves what it shows; a setting the other Mac
+            // removed stays removed instead of returning as its default.
+            for item in applied where plan.apply[item] == .some(nil) {
+                if let key = SettingsSyncItem.preferenceKey(item), deps.defaults.object(forKey: key) != nil,
+                   key != ConfigBackupRegistry.aiRoutingKey {
+                    deps.defaults.removeObject(forKey: key)
+                }
+            }
+        }
         if let error = failed.values.first {
-            for item in failed.keys { next.records[item] = ledger.records[item] }
             try? saveLedger(next)
             throw error
         }
+        try saveLedger(next)
 
         // 5. Share what changed here.
         if plan.needsUpload, plan.document != shared {

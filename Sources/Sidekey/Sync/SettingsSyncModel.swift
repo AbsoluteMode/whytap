@@ -42,6 +42,16 @@ struct SettingsSyncLedger: Codable, Equatable {
         var hash: String
         var modifiedAt: Date
         var device: String
+        /// The shared value this Mac is about to write. Until the write is
+        /// confirmed, finding the old value means the write never landed (for
+        /// example the app quit or the Keychain refused it): it is written
+        /// again, never shared as this Mac's own change.
+        var pending: Target?
+    }
+    struct Target: Codable, Equatable {
+        var hash: String
+        var modifiedAt: Date
+        var device: String
     }
     var device: String
     var records: [String: Record] = [:]
@@ -50,16 +60,27 @@ struct SettingsSyncLedger: Codable, Equatable {
     var joined = false
 
     /// Stamps every item whose value changed since the last agreement with
-    /// the time it was noticed. This runs before any network request and is
-    /// saved, so an edit made while GitHub is unreachable keeps the time it
-    /// was made instead of the time it finally syncs.
+    /// the time it was noticed. This runs on every sync request, also while
+    /// GitHub is unreachable or backing off, and is saved, so an edit keeps
+    /// the time it was made instead of the time it finally syncs. A joining
+    /// Mac records no removals: an item it drops before its first shared
+    /// round never existed for the others.
     func recordingLocalChanges(current: [String: SettingsSyncValue], now: Date) -> SettingsSyncLedger {
         let now = SettingsSyncClock.normalized(now)
         var next = self
         let items = Set(current.keys).union(records.keys).filter(SettingsSyncItem.isApplicable)
         for item in items {
             let hash = SettingsSyncItem.hash(current[item])
+            if let pending = records[item]?.pending {
+                if hash == pending.hash {
+                    next.records[item] = Record(hash: pending.hash, modifiedAt: pending.modifiedAt, device: pending.device)
+                    continue
+                }
+                if hash == records[item]?.hash { continue } // the write never landed; it is written again
+                next.records[item]?.pending = nil
+            }
             guard records[item]?.hash != hash else { continue }
+            if !joined && current[item] == nil { next.records[item] = nil; continue }
             if records[item] == nil && current[item] == nil { continue }
             next.records[item] = Record(hash: hash, modifiedAt: now, device: device)
         }

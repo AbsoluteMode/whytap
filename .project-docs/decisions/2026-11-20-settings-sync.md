@@ -83,17 +83,23 @@ document opened with an old recovery code, and that a failed write could finish
 a join. Each has a test now:
 
 - Local values are read again after the shared document arrives.
-- The agreement is saved before anything is applied. A Keychain write that
-  fails keeps its earlier agreement, so it is retried, never shared as a removal.
+- The agreement is saved before anything is applied, with each item to be
+  written marked pending (old value plus target). Finding the old value later,
+  after a crash or a refused Keychain write, means the write never landed: it
+  is written again, never shared as a removal (second review).
 - Edits are stamped when noticed (two seconds after a defaults change, within
-  a minute for a key) and that time is saved before the network. Edits made
-  while Whytap is not running are stamped at the next launch.
+  a minute for a key), on every sync request including during backoff, and
+  saved before the network. Edits made while Whytap is not running are stamped
+  at the next launch.
+- A joining Mac records no removals: an item it drops before its first shared
+  round never reaches the other Macs (second review).
+- A round that started before the switch flipped reports nothing.
 - The cached document is bound to the key ID that opened it.
 - Joining stays unfinished until the upload succeeds or nothing needed it.
 - Turning the switch off or on, or a restore waiting for relaunch, stops a
   round before it applies, saves or uploads.
 - A setting the other Mac removed stays removed when a store reloads and saves
-  its default.
+  its default; only removals applied in that round are cleared again.
 - Each write first checks that the repository is still private.
 - The document is limited to 900 KB, below the Contents API's 1 MB inline limit.
 
@@ -106,6 +112,10 @@ a join. Each has a test now:
   an update.
 - Failures back off from one to fifteen minutes and respect GitHub's rate
   limit time.
+- Known gaps: a restore prepared while a write's privacy check is in flight
+  can still let that one write finish (it shares current values, which the
+  restore replaces only at relaunch); a repository made public between the
+  check and the write receives that one ciphertext.
 - Replacing the recovery code does not rewrite the shared document: the other
   Mac reports a different code. Earlier versions sealed with the old code stay
   in the repository's Git history, like backups under the old code.
@@ -115,7 +125,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Twenty-three tests with two simulated Macs sharing a fake repository: first upload
+Twenty-six tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -125,7 +135,8 @@ invalid items are left alone; an unchanged round writes nothing; tampering and
 newer formats are detected; the Contents API transport (404, 304, base64,
 SHA conflict); routes, hotkeys and Toolbox reload; and one test per review
 finding above (key saved during a read, offline edit time, new recovery code,
-join losing a write race, refused Keychain write, quick off and on). Timestamps are stored as
+join losing a write race, refused Keychain write, quick off and on, an edit
+during backoff, a key dropped before joining, a removal a store re-saves). Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

@@ -36,6 +36,15 @@ enum CalendarProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .apple: return ""
         }
     }
+    /// Web pages where an event's original opens (htmlLink, webLink).
+    var webHosts: [String] {
+        switch self {
+        case .google: return ["calendar.google.com", "www.google.com"]
+        case .microsoft: return ["outlook.office.com", "outlook.office365.com", "outlook.live.com"]
+        case .zoom: return ["zoom.us"]
+        case .apple: return []
+        }
+    }
     var apiHost: String {
         switch self {
         case .google: return "www.googleapis.com"
@@ -58,15 +67,65 @@ struct CalendarFeed: Identifiable, Equatable {
     var remoteID: String
     var title: String
     var provider: CalendarProvider?
+    /// The calendar's own colour as `#RRGGBB` when the provider reports one.
+    var color: String? = nil
 }
 
 struct CalendarFeedEvent: Identifiable, Equatable {
     var id: String
     var feedID: String
     var event: PlannerEvent
+    /// Where the event opens in its own calendar: the provider's web page, or
+    /// Calendar on this Mac for Apple Calendar events.
     var sourceURL: URL?
     var externalUID: String?
     var additionalFeedIDs: [String] = []
+}
+
+// WHY: .project-docs/decisions/2026-11-20-calendar-day-view.md
+/// Each calendar keeps one colour in the day view: the provider's own, or a
+/// stable one derived from the calendar's identifier.
+enum CalendarFeedColor {
+    /// Whytap's local events.
+    static let local = "#0A84FF"
+    static let palette = ["#0A84FF", "#30D158", "#FF9F0A", "#BF5AF2", "#FF375F", "#64D2FF", "#FFD60A", "#AC8E68"]
+
+    /// `#RRGGBB` (Google, Zoom `backgroundColor`, Microsoft `hexColor`); anything else is ignored.
+    static func hex(_ raw: Any?) -> String? {
+        guard let text = (raw as? String)?.trimmingCharacters(in: .whitespaces), text.count == 7, text.first == "#",
+              text.dropFirst().allSatisfy(\.isHexDigit) else { return nil }
+        return text.uppercased()
+    }
+
+    static func fallback(for feedID: String) -> String {
+        // FNV-1a: stable across launches, unlike Hasher.
+        var hash: UInt32 = 2_166_136_261
+        for byte in feedID.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        return palette[Int(hash % UInt32(palette.count))]
+    }
+}
+
+/// What a click on an event does: join its meeting, else open it in its own calendar.
+enum CalendarEventAction: Equatable {
+    case join(URL)
+    case open(URL)
+
+    var url: URL {
+        switch self { case .join(let url), .open(let url): url }
+    }
+
+    static func resolve(_ item: CalendarFeedEvent) -> CalendarEventAction? {
+        if let meeting = item.event.meetingURL { return .join(meeting) }
+        if let source = item.sourceURL { return .open(source) }
+        return nil
+    }
+
+    /// Calendar on this Mac shows an EventKit event by its identifier.
+    static func appleEventURL(identifier: String) -> URL? {
+        guard !identifier.isEmpty,
+              let encoded = identifier.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) else { return nil }
+        return URL(string: "ical://ekevent/\(encoded)?method=show&options=more")
+    }
 }
 
 enum CalendarEventMerger {

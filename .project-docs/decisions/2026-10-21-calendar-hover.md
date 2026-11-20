@@ -20,10 +20,14 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Planner/CalendarHoverView.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-calendar-integrations.md, 2026-10-20-todo-hover.md, 2026-10-19-planner.md]
+related: [2026-10-21-calendar-integrations.md, 2026-10-20-todo-hover.md, 2026-10-19-planner.md, 2026-11-20-calendar-day-view.md]
 ---
 
 # Calendar in Hover
+
+The agenda list and inline event details below were replaced on 2026-11-20 by an
+hour grid whose events join their meeting or open in their own calendar; see
+[the day view decision](2026-11-20-calendar-day-view.md).
 
 This supersedes the standalone Planner window as Calendar's normal entry.
 The Calendar tile, tool search, assigned hotkey, Toolbox and `whytap://tool/calendar`

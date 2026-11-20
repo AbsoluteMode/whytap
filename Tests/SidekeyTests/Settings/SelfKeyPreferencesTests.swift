@@ -79,7 +79,7 @@ final class SelfKeyPreferencesTests: XCTestCase {
     func testAvailableTranscriptionModelsPerProvider() {
         XCTAssertEqual(BYOKProvider.openAI.availableTranscriptionModels, ["gpt-4o-transcribe", "gpt-4o-mini-transcribe"])
         XCTAssertEqual(BYOKProvider.deepgram.availableTranscriptionModels, ["nova-3"])
-        XCTAssertEqual(BYOKProvider.soniox.availableTranscriptionModels, ["stt-rt-v5"])
+        XCTAssertEqual(BYOKProvider.soniox.availableTranscriptionModels, ["stt-rt-v6"])
         XCTAssertEqual(BYOKProvider.elevenLabs.availableTranscriptionModels, ["scribe_v3_live"])
         XCTAssertTrue(BYOKProvider.selfHosted.availableTranscriptionModels.isEmpty)  // free-text
     }
@@ -88,7 +88,7 @@ final class SelfKeyPreferencesTests: XCTestCase {
         let prefs = SelfKeyPreferences(defaults: makeDefaults())
         XCTAssertEqual(prefs.transcriptionModel(for: .openAI), "gpt-4o-transcribe")
         XCTAssertEqual(prefs.transcriptionModel(for: .deepgram), "nova-3")
-        XCTAssertEqual(prefs.transcriptionModel(for: .soniox), "stt-rt-v5")
+        XCTAssertEqual(prefs.transcriptionModel(for: .soniox), "stt-rt-v6")
         XCTAssertEqual(prefs.transcriptionModel(for: .elevenLabs), "scribe_v3_live")
     }
 
@@ -99,7 +99,7 @@ final class SelfKeyPreferencesTests: XCTestCase {
         let reloaded = SelfKeyPreferences(defaults: d)
         XCTAssertEqual(reloaded.transcriptionModel(for: .openAI), "gpt-4o-mini-transcribe")
         XCTAssertEqual(reloaded.transcriptionModel(for: .deepgram), "nova-3")  // untouched → default
-        XCTAssertEqual(reloaded.transcriptionModel(for: .soniox), "stt-rt-v5")  // untouched → default
+        XCTAssertEqual(reloaded.transcriptionModel(for: .soniox), "stt-rt-v6")  // untouched → default
     }
 
     func testTranscriptionModelForSelfHostedMapsToSelfHostedModel() {

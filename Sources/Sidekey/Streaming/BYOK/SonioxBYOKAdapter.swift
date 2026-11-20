@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Soniox stt-rt-v5 BYOK adapter: client-direct with the user's key. Config
+/// Soniox real-time BYOK adapter: client-direct with the user's key. Config
 /// (incl. the user `api_key`) rides in the first JSON frame. Mirrors the
 /// hold-to-talk config (endpoint-detection off for the
 /// tap-tap drop; `en` appended to language_hints) plus the user key + terms

@@ -159,7 +159,8 @@ struct ModelStatusResolver {
                 add(model.id)
             }
             for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
-            where (model.aliasOf == nil && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
+            where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind)
+                && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
                 add(model.id)
             }
             if let selected, selected.account == account { add(selected.model) }

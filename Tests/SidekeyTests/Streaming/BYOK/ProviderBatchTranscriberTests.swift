@@ -19,16 +19,16 @@ final class ProviderBatchRouteTests: XCTestCase {
 
     func test_registry_models() {
         XCTAssertEqual(ModelRegistry.sonioxRecordedModel, SonioxFileAPI.asyncModel)
-        XCTAssertEqual(ModelRegistry.sonioxRecordedModel, "stt-async-v5")
+        XCTAssertEqual(ModelRegistry.sonioxRecordedModel, "stt-async-v6")
         XCTAssertEqual(ModelRegistry.elevenLabsRecordedModel, "scribe_v3")
     }
 
     // Breaks if the recorded model of Soniox/ElevenLabs is taken from the
-    // real-time route (`stt-rt-v5` is not a file-API model).
+    // real-time route (`stt-rt-v6` is not a file-API model).
     func test_soniox_and_elevenLabs_use_the_registry_model_not_the_route_model() {
         XCTAssertEqual(
-            ProviderBatchRoute.make(for: resolved(.soniox, model: "stt-rt-v5", apiKey: "sx-key")),
-            .soniox(apiKey: "sx-key", model: "stt-async-v5")
+            ProviderBatchRoute.make(for: resolved(.soniox, model: "stt-rt-v6", apiKey: "sx-key")),
+            .soniox(apiKey: "sx-key", model: "stt-async-v6")
         )
         XCTAssertEqual(
             ProviderBatchRoute.make(for: resolved(.elevenLabs, model: "scribe_v3_live", apiKey: "el-key")),
@@ -137,7 +137,7 @@ final class ProviderBatchFeatureRoutingTests: XCTestCase {
         try saveKey("sx-key", for: .soniox)
         try saveKey("el-key", for: .elevenLabs)
         let take = DropTake()
-        take.begin(mode: .fast, route: FeatureRoute(account: .soniox, model: "stt-rt-v5"))
+        take.begin(mode: .fast, route: FeatureRoute(account: .soniox, model: "stt-rt-v6"))
         routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v2_realtime"), for: .dropFast)
         routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v2_realtime"), for: .dropSmart)
         let deleted = expectation(description: "remote audio deleted")
@@ -164,7 +164,7 @@ final class ProviderBatchFeatureRoutingTests: XCTestCase {
         XCTAssertEqual(Set(StubURLProtocol.capturedRequests.compactMap { $0.url?.host }), ["api.soniox.com"])
         XCTAssertEqual(Set(StubURLProtocol.capturedRequests.map { $0.value(forHTTPHeaderField: "Authorization") }), ["Bearer sx-key"])
         let job = try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[1]) as? NSDictionary)
-        XCTAssertEqual(job["model"] as? String, "stt-async-v5")
+        XCTAssertEqual(job["model"] as? String, "stt-async-v6")
     }
 
     // The latched route is resolved when the call is made: a key saved after
@@ -186,7 +186,7 @@ final class ProviderBatchFeatureRoutingTests: XCTestCase {
 
     func test_drop_batch_without_a_latched_route_is_unavailable() async throws {
         try saveKey("sx-key", for: .soniox)
-        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         let take = DropTake()
         take.begin(mode: .fast, route: nil)
 
@@ -206,7 +206,7 @@ final class ProviderBatchFeatureRoutingTests: XCTestCase {
     func test_agent_batch_voice_uses_the_agent_voice_provider() async throws {
         try saveKey("sx-key", for: .soniox)
         try saveKey("dg-key", for: .deepgram)
-        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .agentVoice)
         StubURLProtocol.handler = { _ in
             (200, [:], Self.json(["results": ["channels": [["alternatives": [["transcript": "Hi."]]]]]]))
@@ -579,7 +579,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         let deleted = deletions(2)
         serveSoniox(jobStatuses: ["queued", "processing", "completed"], deleted: deleted)
 
-        let text = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5")).transcribe(audio: pcm, language: "ru")
+        let text = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6")).transcribe(audio: pcm, language: "ru")
         await fulfillment(of: [deleted], timeout: 2)
 
         XCTAssertEqual(text, "Привет, мир.")
@@ -601,7 +601,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         var job = try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[1]) as? [String: Any])
         let reference = try XCTUnwrap(job.removeValue(forKey: "client_reference_id") as? String)
         XCTAssertNotNil(UUID(uuidString: reference))
-        XCTAssertEqual(job as NSDictionary, ["model": "stt-async-v5", "file_id": fileID, "language_hints": ["ru", "en"]] as NSDictionary)
+        XCTAssertEqual(job as NSDictionary, ["model": "stt-async-v6", "file_id": fileID, "language_hints": ["ru", "en"]] as NSDictionary)
     }
 
     // Breaks if Auto input drops the "en" hint the realtime Soniox request
@@ -610,7 +610,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         let deleted = deletions(2)
         serveSoniox(jobStatuses: ["completed"], deleted: deleted)
 
-        _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5")).transcribe(audio: pcm, language: nil)
+        _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6")).transcribe(audio: pcm, language: nil)
         await fulfillment(of: [deleted], timeout: 2)
 
         let job = try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[1]) as? NSDictionary)
@@ -623,7 +623,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         let deleted = deletions(2)
         serveSoniox(jobStatuses: ["completed"], transcript: ["text": "", "tokens": []], deleted: deleted)
 
-        let text = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5")).transcribe(audio: pcm, language: nil)
+        let text = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6")).transcribe(audio: pcm, language: nil)
         await fulfillment(of: [deleted], timeout: 2)
 
         XCTAssertEqual(text, "")
@@ -636,7 +636,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         serveSoniox(jobStatuses: ["error"], deleted: deleted)
 
         do {
-            _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5")).transcribe(audio: pcm, language: nil)
+            _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6")).transcribe(audio: pcm, language: nil)
             XCTFail("a failed job must not produce a transcript")
         } catch {
             XCTAssertEqual(error as? ProviderBatchTranscriptionError, .jobFailed)
@@ -654,7 +654,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         serveSoniox(jobStatuses: ["completed"], createJobStatus: 400, deleted: deleted)
 
         do {
-            _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5")).transcribe(audio: pcm, language: nil)
+            _ = try await transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6")).transcribe(audio: pcm, language: nil)
             XCTFail("a rejected job must not produce a transcript")
         } catch {
             XCTAssertEqual(error as? ProviderBatchTranscriptionError, .httpStatus(400))
@@ -674,7 +674,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
     func test_soniox_jobThatNeverFinishes_timesOut_andDeletesTheAudio() async {
         let deleted = deletions(2)
         let jobDeletes = serveSoniox(jobStatuses: ["processing"], busyDeletes: 2, deleted: deleted)
-        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
+        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
         let pcm = pcm
 
         let outcome = await watchdog { try await soniox.transcribe(audio: pcm, language: nil) }
@@ -689,7 +689,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
     func test_soniox_deletionOfAJobThatNeverStops_isGivenUp() async throws {
         let deleted = deletions(1)
         let jobDeletes = serveSoniox(jobStatuses: ["processing"], busyDeletes: .max, deleted: deleted)
-        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
+        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
         let pcm = pcm
 
         let outcome = await watchdog { try await soniox.transcribe(audio: pcm, language: nil) }
@@ -708,7 +708,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
     func test_soniox_recoveryDeadline_endsPolling_andStillDeletesTheAudio() async {
         let deleted = deletions(2)
         serveSoniox(jobStatuses: ["processing"], deleted: deleted)
-        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v5"), pollInterval: .milliseconds(5))
+        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5))
         let pcm = pcm
 
         let outcome = await watchdog {

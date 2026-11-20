@@ -5,7 +5,10 @@ import SwiftUI
 /// Holds miscellaneous per-user toggles that do not belong to a dedicated
 /// Settings section:
 ///   - Volume ducking while recording voice (bound to `VolumeDuckConfig`)
-///   - Meeting Notes on/off (capability flag, persisted by the host)
+///   - Meeting Notes on/off (capability flag, persisted by the host), with a
+///     ▶ clip of the feature (`FeatureVideoButton`)
+///   - Agent on/off + file edits and commands (`AgentOtherSection`, formerly
+///     the Agents tab)
 ///   - Google search on/off (capability flag, persisted by the host)
 ///   - Island display picker (bound to the injected `DisplayPickerViewModel`)
 ///   - Screenshot protection for the island overlay (`PrivacyPreferences`)
@@ -39,6 +42,10 @@ struct SettingsOtherView: View {
     private let privacyPreferences: PrivacyPreferences
     /// Applies the toggle to the live island panel (host-wired).
     private let screenshotProtectionChanged: (Bool) -> Void
+    /// The Agent group (formerly the Agents tab); nil in hosts without an agent.
+    private let agentSection: AgentOtherSection?
+    /// Live hotkeys for the shortcut line under a feature video.
+    private let hotkeys: @MainActor () -> HotkeyConfiguration
 
     /// Local mirror of the volume-duck flag. Seeded from `volumeDuckConfig`
     /// on init and re-read on appear; written back on every toggle.
@@ -86,8 +93,12 @@ struct SettingsOtherView: View {
         onMeetingsToggle: @escaping (Bool) -> Void = { _ in },
         onGoogleToggle: @escaping (Bool) -> Void = { _ in },
         privacyPreferences: PrivacyPreferences? = nil,
-        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in }
+        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
+        agentSection: AgentOtherSection? = nil,
+        hotkeys: @escaping @MainActor () -> HotkeyConfiguration = { HotkeyPreferences.shared.configuration }
     ) {
+        self.agentSection = agentSection
+        self.hotkeys = hotkeys
         self.displayPicker = displayPicker
         let resolvedDucking = volumeDuckConfig ?? VolumeDuckConfig()
         self.volumeDuckConfig = resolvedDucking
@@ -105,6 +116,16 @@ struct SettingsOtherView: View {
         _islandAutoHideEnabled = State(initialValue: resolvedIdlePrefs.isEnabled)
         _meetingsEnabled = State(initialValue: meetingsEnabled())
         _googleEnabled = State(initialValue: googleEnabled())
+    }
+
+    /// The clip shows an example combo; the popover names the user's own.
+    static func dropAutoStopVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
+        [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents)]
+    }
+
+    static func googleSearchVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
+        [FeatureVideoShortcut(label: "Text", contents: configuration.googleSearchTextShortcut.contents),
+         FeatureVideoShortcut(label: "Voice", contents: configuration.googleSearchVoiceShortcut.contents)]
     }
 
     var body: some View {
@@ -125,6 +146,8 @@ struct SettingsOtherView: View {
                             title: "Stop Drop automatically",
                             subtitle: "With a Toggle shortcut: press once, speak, and dictation ends when you stop. Press again to stop sooner. Hold shortcuts are unchanged."
                         ) {
+                            FeatureVideoButton(video: .dropAutoStop, shortcuts: { Self.dropAutoStopVideoShortcuts(hotkeys()) })
+                        } trailing: {
                             MacSwitch(isOn: dropAutoStopToggleBinding, label: "Stop Drop automatically")
                         }
                     }
@@ -137,6 +160,10 @@ struct SettingsOtherView: View {
                             title: "Meeting Notes",
                             subtitle: "Detect calls, record, and summarize. Off until you turn it on."
                         ) {
+                            FeatureVideoButton(video: .meetings, shortcuts: {
+                                [FeatureVideoShortcut(label: "Record", contents: hotkeys().meetingRecordShortcut.contents)]
+                            })
+                        } trailing: {
                             MacSwitch(isOn: meetingsToggleBinding, label: "Meeting Notes")
                         }
 
@@ -145,12 +172,18 @@ struct SettingsOtherView: View {
                             title: "Google search",
                             // No key name here: the shortcut is remappable in
                             // Settings -> Hotkeys, so a fixed name would mislead.
-                            subtitle: "Search your selection on Google. Shortcut in Hotkeys."
+                            subtitle: "Type or say a query; it opens in Google. Shortcut in Hotkeys."
                         ) {
+                            FeatureVideoButton(video: .googleSearch, shortcuts: { Self.googleSearchVideoShortcuts(hotkeys()) })
+                        } trailing: {
                             MacSwitch(isOn: googleToggleBinding, label: "Google search")
                         }
 
                     }
+                }
+
+                if let agentSection {
+                    agentSection
                 }
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -160,6 +193,8 @@ struct SettingsOtherView: View {
                             title: "Screenshot protection",
                             subtitle: "Hide the island from screenshots and screen shares."
                         ) {
+                            FeatureVideoButton(video: .screenshotProtection)
+                        } trailing: {
                             MacSwitch(isOn: screenshotProtectionToggleBinding, label: "Screenshot protection")
                         }
                     }
@@ -172,6 +207,8 @@ struct SettingsOtherView: View {
                             title: "Auto-hide island",
                             subtitle: "Fades into the notch after a while of no use. Hover it or press a hotkey to bring it back."
                         ) {
+                            FeatureVideoButton(video: .autoHide)
+                        } trailing: {
                             MacSwitch(isOn: islandAutoHideToggleBinding, label: "Auto-hide island")
                         }
 

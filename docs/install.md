@@ -77,7 +77,7 @@ used **Local** before, choose a speech model in **API & Models** to dictate
 again.
 
 For the optional agent, add an OpenRouter, OpenAI or Anthropic key, choose the
-Agent model in **API & Models**, then click **Connect** in **Settings → Agents**
+Agent model in **API & Models**, then turn on **Agent** in **Settings → Other**
 ([Whytap Agent](agent.md)). Meeting recording may also request **System Audio
 Recording** permission.
 

@@ -10,9 +10,9 @@ on your Mac, and inference runs at the provider you choose, with your key.
    Anthropic key.
 2. Under **Models**, choose the **Agent** model (and **Agent voice** for spoken
    requests).
-3. In **Settings → Agents**, click **Connect**.
+3. In **Settings → Other → Agent**, turn on **Agent**.
 
-Connect prepares the local workspace and checks that a key and a model are
+Turning it on connects: it prepares the local workspace and checks that a key and a model are
 present; it does not prove that the provider accepts the key. Requests are
 billed by your provider. Whytap never switches to another provider or model on
 its own.
@@ -35,14 +35,15 @@ another service.
 ## Files and commands
 
 The agent can edit files and run commands by default. Turn off **Allow file
-edits and commands** in **Settings → Agents** to block both. This is an action
+edits and commands** in **Settings → Other → Agent** to block both. This is an action
 policy, not a sandbox. Commands stop after 30 seconds. Approval modes are a
 later phase.
 
 ## Memory
 
-The agent's folder is `~/Library/Application Support/whytap/agent` (**Open
-folder** in Settings → Agents):
+The agent's folder is `~/Library/Application Support/whytap/agent` (the
+Whytap plugin's `whytap_get_state` names it as `agentWorkspace`, so Claude Code
+or Codex can open it for you):
 
 - `AGENTS.md` is long-term memory that you or the agent can edit.
 - Recent text context resumes for 15 minutes, limited to six question/answer

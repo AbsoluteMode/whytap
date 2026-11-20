@@ -34,7 +34,7 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
     /// The harness the user just allowed, shown for `connectedDuration` when
     /// no other prompt is waiting.
     @Published private(set) var connected: HarnessClient?
-    static let connectedDuration: TimeInterval = 1.4
+    static let connectedDuration: TimeInterval = 1.9
 
     private struct Entry {
         let id: UUID

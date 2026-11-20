@@ -41,12 +41,14 @@ with finding and reading meetings, and wants connecting to cost one answer.
   (`Q6L2SF6YDW` / `com.anthropic.claude-code`) and Codex (`2DC432GLL2` /
   `codex`). Anything else gets `unsupported_client` without a prompt.
 - **One question.** The first time a harness needs a gated tool, or right after
-  its MCP server connects to a running Whytap, the island shows "Let Claude
-  Code use Whytap?" with No and Yes. It is the Case approval card and queue:
+  its MCP server connects to a running Whytap, the island shows one line,
+  "Give Claude Code access to Whytap?", with No and Yes. It is the Case approval card and queue:
   one prompt at a time, armed after 0.3 s of a quiet keyboard, Y / N / Escape,
-  denied as unanswered after 60 s. Yes shows "Claude Code connected" for 1.4 s.
+  denied as unanswered after 60 s. Yes shows the connection being made for
+  1.9 s: the dots between the two marks turn green one by one, then "Claude
+  Code connected" with a checkmark (Reduce Motion: the finished state).
 - **The answer is remembered** per Mac, for Yes and for No, in one Keychain
-  item of the app (`harness_access.answers`). Settings -> Agents -> Coding
+  item of the app (`harness_access.answers`). Settings -> Integrations -> Coding
   tools lists the answers with a switch. The gate reads the answer before a
   request and again before its response leaves, so off stops an open session
   and a request already reading. An answer the Keychain refused to store
@@ -163,6 +165,21 @@ with finding and reading meetings, and wants connecting to cost one answer.
   answer needs an identity Apple vouches for; a terminal's would cover every
   script run in it.
 - SQLite FTS5 now: a scan is enough at this size; add an index if it gets slow.
+
+## After the first live use
+
+On 2026-11-20 the user accepted the installed card and asked for three
+changes: no gap between the island and the card, in the question and in the
+confirmation; one line of text; an animation on connecting. The gap had two
+causes. A line of the island's edge showed above the card, so the card now
+overlaps that edge by 1 pt. And the island rounded its bottom corners as soon
+as the question was answered, while the confirmation was still attached under
+it; the island now keeps its square edge until the confirmation leaves,
+through a separate geometry-only state (`caseCardAttached`). The builder
+caught the first attempt, which stretched `caseApprovalActive` over the
+confirmation: the prompt's key tap had already stopped, so for 1.9 s a
+visible Agent answer did not own Escape and it reached the foreground app. What
+Yes covers is no longer written on the card; VoiceOver still reads it.
 
 ## Builder review
 

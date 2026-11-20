@@ -20,7 +20,8 @@ struct CalendarRemoteClient {
             guard let id = value["id"] as? String, !id.isEmpty else { throw CalendarConnectionError.invalidResponse }
             return CalendarFeed(id: account.id.uuidString + ":" + id, accountID: account.id, remoteID: id,
                 title: (value["summaryOverride"] as? String) ?? (value["summary"] as? String) ??
-                    (value["name"] as? String) ?? "Calendar", provider: provider)
+                    (value["name"] as? String) ?? "Calendar", provider: provider,
+                color: CalendarFeedColor.hex(value["backgroundColor"] ?? value["hexColor"]))
         }
         var events: [CalendarFeedEvent] = []
         for feed in feeds {

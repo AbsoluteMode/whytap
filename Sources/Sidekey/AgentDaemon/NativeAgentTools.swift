@@ -62,7 +62,7 @@ struct NativeAgentTools {
         do {
             try Task.checkCancellation()
             guard Self.definitions(allowActions: allowActions).contains(where: { $0["name"] as? String == call.name }) else {
-                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be disabled in Settings → Agents.")
+                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be disabled in Settings → Other.")
             }
             let args = call.arguments
             func required(_ name: String) throws -> String {

@@ -9,7 +9,7 @@ final class CalendarHoverTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
     private let calendar = Calendar.current
-    private var day: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 21))! }
+    var day: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 21))! }
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -42,7 +42,7 @@ final class CalendarHoverTests: XCTestCase {
         XCTAssertEqual(model.page, .providers); XCTAssertEqual(model.selectedDay, tomorrow)
         model.end(); model.begin()
         XCTAssertEqual(model.page, .agenda); XCTAssertEqual(model.selectedDay, day)
-        model.page = .event("missing"); model.openToday()
+        model.page = .sources; model.openToday()
         XCTAssertEqual(model.page, .agenda)
         clock = calendar.date(byAdding: .day, value: 1, to: clock)!
         model.dayChanged()
@@ -300,7 +300,7 @@ final class CalendarHoverTests: XCTestCase {
         _ = NSApplication.shared
         let destination = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let model = makeModel(); model.begin()
+        var model = makeModel(); model.begin()
         let info: [String: Any] = ["WhytapCalendarOAuthClients": [
             "google": ["clientID": "fixture"], "microsoft": ["clientID": "fixture"]]]
         for width: CGFloat in [310, 360, 500] {
@@ -311,23 +311,64 @@ final class CalendarHoverTests: XCTestCase {
             try await render(model, page: .providers, name: "google-pending", width: width, info: info, destination: destination)
             model.connectionFlow.clearError()
         }
-        for index in 0..<10 {
-            let event = PlannerEvent(title: index == 0 ? "Очень длинное название встречи — обсуждение запуска календаря и следующих шагов с командой" : "Meeting \(index)",
-                start: day.addingTimeInterval(Double(32400 + index * 1800)), end: day.addingTimeInterval(Double(34200 + index * 1800)),
-                location: "Studio · переговорная на втором этаже", notes: String(repeating: "Useful details about the meeting. ", count: 12),
-                meetingURL: URL(string: "https://example.invalid/meeting"))
-            XCTAssertTrue(model.store.saveEvent(event))
-        }
-        let first = try XCTUnwrap(model.events.first)
+        // A real-looking day from two connected calendars (fake Google), plus local events.
+        model.end()
+        model = try fakeGoogleModel()
+        model.begin(); await model.connections.refresh(interval: model.interval)
+        XCTAssertTrue(model.connections.errors.isEmpty)
+        let local = PlannerEvent(title: "Очень длинное название встречи — обсуждение запуска календаря",
+            start: day.addingTimeInterval(13 * 3600), end: day.addingTimeInterval(14 * 3600))
+        XCTAssertTrue(model.store.saveEvent(local))
+        XCTAssertTrue(model.store.saveEvent(PlannerEvent(title: "Quick sync", start: day.addingTimeInterval(16 * 3600),
+            end: day.addingTimeInterval(16 * 3600 + 300))))
         for width: CGFloat in [310, 360, 500] {
-            try await render(model, page: .agenda, name: "agenda-long-list", width: width, info: info, destination: destination)
-            try await render(model, page: .event(first.id), name: "details", width: width, info: info, destination: destination)
+            try await render(model, page: .agenda, name: "day", width: width, info: info, destination: destination)
             try await render(model, page: .sources, name: "sources", width: width, info: info, destination: destination)
         }
+        model.moveDay(1)
+        try await render(model, page: .agenda, name: "day-empty-tomorrow", width: 310, info: info, destination: destination)
+        model.today()
         XCTAssertTrue(model.connections.beginConnecting(provider: .microsoft))
         try await render(model, page: .providers, name: "busy", width: 310, info: info, destination: destination)
         model.connections.endConnecting()
         try await render(model, page: .agenda, name: "reduced-motion", width: 310, info: info, destination: destination, reduceMotion: true)
+    }
+
+    /// Two synthetic Google calendars with their own colours; the second one has a
+    /// meeting overlapping the first one's event.
+    func fakeGoogleModel() throws -> CalendarHoverModel {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PlannerURLProtocol.self]
+        let http = CalendarHTTP(session: URLSession(configuration: configuration))
+        let credentials = PlannerMemoryCredentials()
+        let oauth = CalendarOAuthClient(http: http, storage: credentials)
+        let connections = CalendarConnections(defaults: defaults, oauth: oauth, http: http)
+        let account = ConnectedCalendarAccount(id: UUID(), provider: .google, label: "Synthetic Google")
+        try credentials.save(CalendarCredential(provider: .google, clientID: "fixture", accessToken: "fixture",
+            refreshToken: "fixture", expiresAt: .distantFuture), id: account.id, backupRelevant: false)
+        try connections.add(account)
+        let start = day; let at = { (hours: Double) in CalendarDateCodec.string(start.addingTimeInterval(hours * 3600)) }
+        PlannerURLProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("calendarList") {
+                return (200, ["items": [["id": "work", "summary": "Work", "backgroundColor": "#4986e7"],
+                                        ["id": "family", "summary": "Family", "backgroundColor": "#f691b2"]]])
+            }
+            if path.contains("/work/") {
+                return (200, ["items": [
+                    ["id": "standup", "summary": "Team standup", "start": ["dateTime": at(9.5)], "end": ["dateTime": at(9.75)],
+                     "htmlLink": "https://calendar.google.com/event?eid=standup"],
+                    ["id": "review", "summary": "Design review", "start": ["dateTime": at(11)], "end": ["dateTime": at(12)],
+                     "hangoutLink": "https://meet.google.com/abc-defg-hij", "htmlLink": "https://calendar.google.com/event?eid=review"],
+                    ["id": "offsite", "summary": "Company offsite", "start": ["date": "2026-10-21"],
+                     "end": ["date": "2026-10-22"]]]])
+            }
+            return (200, ["items": [["id": "school", "summary": "School pickup", "start": ["dateTime": at(11.5)], "end": ["dateTime": at(12.25)],
+                                     "htmlLink": "https://calendar.google.com/event?eid=school"]]])
+        }
+        // 10:24 on the fixture day, like the menu bar in the videos.
+        return CalendarHoverModel(store: PlannerStore(url: directory.appendingPathComponent("planner-google.json")),
+            connections: connections, now: { self.day.addingTimeInterval(10 * 3600 + 24 * 60) })
     }
 
     private func render(_ model: CalendarHoverModel, page: CalendarHoverModel.Page, name: String,

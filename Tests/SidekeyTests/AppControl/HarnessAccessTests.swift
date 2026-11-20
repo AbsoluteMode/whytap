@@ -688,7 +688,7 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertEqual(prompt.asked.count, 1)
     }
 
-    // MARK: Settings -> Agents
+    // MARK: Settings -> Integrations
 
     func test_settings_lists_answered_tools_by_name_and_the_switch_changes_the_answer() async {
         store.record(.deny, for: codex, at: Date())

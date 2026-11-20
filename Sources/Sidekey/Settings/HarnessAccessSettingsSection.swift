@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings -> Agents: the coding tools the user answered Whytap's access
+/// Settings -> Integrations: the coding tools the user answered Whytap's access
 /// question for. The switch is the same answer, changed here: off refuses the
 /// tool's next request at once, on allows it without another prompt.
 // WHY: .project-docs/decisions/2026-11-20-harness-access.md

@@ -1356,6 +1356,37 @@ interaction and live provider inference remain acceptance on the installed app.
 The 0.05 cutoff is conservative policy; its quality on real dictation is an
 unvalidated assumption, not a measured classifier accuracy guarantee.
 
+## Calendar day view — 2026-11-20
+
+The user comes here to see the shape of the day: what is booked, for how long,
+from which calendar, and where the free time is. They notice the current time
+and the next event first. Then they can join a meeting or open an event in its
+own calendar with one click.
+
+- The agenda list is replaced by an hour grid. Hours are 44 pt, labels are 9.5 pt
+  medium at 76% white in a 38 pt gutter, and lines are 14% white. Why: the classic
+  calendar day the user asked for, and the labels stay readable.
+- Events are blocks from start to end. Fill is the calendar colour at 30%
+  (45% on hover, 55% pressed) with a solid 3 pt leading edge and 5 pt corners.
+  Tall blocks have an 11 pt semibold title, then a 10 pt "time range · calendar"
+  line. Short blocks have the title and start time on one line. The minimum
+  height is 18 pt. Why: colour and name answer "which calendar" at a glance.
+- Overlapping events share the width in columns. All-day events are chips
+  above the grid. A red 1.5 pt line with a dot marks now on today.
+- The grid opens an hour before now (or before the first event, or at 8 AM).
+  The hour label above the line stays visible.
+- A click joins the meeting, else opens the original. A block without either
+  is not a button. The tooltip names the action. There is a 1.5 pt focus outline.
+- The empty day keeps the grid with a centered dark note. The copy is the
+  former empty state.
+- The calendar list shows each calendar's colour dot.
+
+Verification: offscreen fixtures at 310/360/500 pt (day from two fake Google
+calendars, all-day chip, now line, long Russian title, sources, empty next
+day). Pointer hover, the click and `ical://ekevent` in Calendar remain
+acceptance in the installed app.
+WHY: `.project-docs/decisions/2026-11-20-calendar-day-view.md`.
+
 ## Calendar inside Hover — 2026-10-21
 
 The user comes here to see today’s schedule without opening a separate app window.
@@ -1367,9 +1398,8 @@ The user can inspect an event or connect another provider without losing Hover.
   user explicitly asked to stay within Hover, including setup entry points.
 - Calendar opens on today through the tile, search, hotkey and deep link. Day
   arrows and Today navigate in place; each reopening starts on today again.
-- Event rows use a 45pt time column, a 12pt medium title (up to two lines), 10pt
-  source and a disclosure chevron. Full title/notes/location are in inline
-  scrollable details. Why: longer content must be readable without a window.
+- Superseded on 2026-11-20 by the day view above: event rows with a 45pt time
+  column and inline scrollable details were removed.
 - Connect stays in the header. Google, Outlook, Apple and Zoom lead to the same
   CalendarConnectionFlow authorization used by Integrations. Connect immediately
   opens the provider browser or macOS permission prompt. The user clarified on

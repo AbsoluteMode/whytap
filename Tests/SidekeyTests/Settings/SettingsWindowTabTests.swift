@@ -29,11 +29,24 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(5).first, .toolbox)
     }
 
-    func test_every_tab_is_available() {
-        XCTAssertEqual(SettingsWindowTab.availableCases, SettingsWindowTab.allCases)
-        for tab in SettingsWindowTab.allCases {
-            XCTAssertTrue(tab.isAvailable, "\(tab) must be available")
-        }
+    func test_every_tab_but_agents_is_in_the_sidebar() {
+        XCTAssertEqual(SettingsWindowTab.availableCases, SettingsWindowTab.allCases.filter { $0 != .agentMode })
+        XCTAssertFalse(SettingsWindowTab.agentMode.isAvailable)
+    }
+
+    /// The Agents tab moved into Other; its link and setup prompt still work.
+    @MainActor
+    func test_agents_tab_opens_other() {
+        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .other)
+        for tab in SettingsWindowTab.availableCases { XCTAssertEqual(tab.resolved, tab) }
+        let selection = SettingsWindowSelection(selectedTab: .agentMode)
+        XCTAssertEqual(selection.selectedTab, .other)
+        selection.select(.hotkeys)
+        selection.select(.agentMode)
+        XCTAssertEqual(selection.selectedTab, .other)
+        selection.setHighlight(.tab(.agentMode))
+        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.highlightedTarget, .tab(.agentMode))
     }
 
     func test_no_removed_settings_tabs() {

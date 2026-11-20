@@ -58,6 +58,8 @@ feature sessions with regular checked integration and one working application.
 - Review overlaps, validate the final combined candidate and merge through a
   PR with exact head/base checks. Routine checked integration/local refresh
   needs no repeated approval. Public publishing remains a separate action.
+- After a PR merges, verify that GitHub removed its remote feature branch.
+  Follow the shared workflow for branches GitHub leaves and for retired work.
 - Build a production candidate without interrupting the installed app. Verify
   its signature/identity against the installed app and require a newer build
   number without downgrading the display version. Keep the last working
@@ -378,7 +380,11 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Commands use a dedicated process group, 30-second deadline and bounded output;
   cancellation signals that group. Stop waiting within a bounded drain if a
   detached child holds output open, and report that it may still be running.
-  Child environments exclude model keys and unrelated app descriptors. This is
+  Child environments exclude model keys and unrelated app descriptors and
+  always carry a UTF-8 `LANG` (the app's own when it is an installed
+  `.UTF-8` locale, else en_US.UTF-8): an app opened from Finder has none, and pbcopy then broke
+  non-ASCII text. WHY:
+  .project-docs/decisions/2026-11-20-agent-command-utf8-locale.md. This is
   an action policy, not a filesystem
   sandbox. Approve and bypass modes are a later phase, not implemented here.
   The loop has bounded steps/tool calls/context, explicit failures and no automatic
@@ -1029,6 +1035,16 @@ centers the menu and enable switch, moving Notification type into the adjacent
 question-mark tooltip/popover. Bindings and saved selections are unchanged.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
+Settings -> Other rows explain themselves with a short subtitle that names no
+remappable key, plus, where an accepted clip exists, a ▶ FeatureVideoButton:
+a popover with the bundled silent clip (Resources/FeatureVideos, copied by
+dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
+"Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
+show default or example keys. Today: every Other feature row (Stop Drop
+automatically, Meeting Notes, Google search, Agent, Screenshot protection,
+Auto-hide island); rows that are plain options have none. WHY:
+.project-docs/decisions/2026-11-20-other-feature-videos.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
@@ -1052,7 +1068,11 @@ screen requests no permission automatically. WHY:
 .project-docs/decisions/2026-10-26-first-launch-permissions.md.
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
-Agents configures native connection and action settings), and permissions in
+Other -> Agent turns the native Agent on, which connects it, and holds Allow
+file edits and commands; the workspace path is in the Whytap plugin's
+get_state; the former Agents tab is gone, its whytap://settings/agentMode link
+opens Other. WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md),
+and permissions in
 Settings -> Permissions. A feature can request the permission it needs when
 invoked. Drop without a chosen provider, key or endpoint opens
 Settings -> API & Models on that feature's row. Settings opens on API &
@@ -1119,9 +1139,16 @@ To-do opens a compact inline hover list with Return-to-add, click-to-complete/re
 and a History mode with completion date/time. Completed tasks move below active
 ones for the current opening, then appear only in History. Native tooltips expose
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
-Calendar opens a 350pt inline Hover agenda on today. Tile, search, assigned hotkey
+Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
-Day navigation, full event details, feed selection and Connect stay in Hover.
+The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
+red now line). Events are blocks from start to end, tinted with their calendar's
+colour (provider colour or a stable fallback), with time range and calendar name.
+Overlaps share the width and all-day events are chips above the grid. A click
+joins the meeting link, else opens the event in its own calendar (Google/Outlook
+web, ical://ekevent on this Mac). There is no details page. WHY:
+.project-docs/decisions/2026-11-20-calendar-day-view.md
+Day navigation, feed selection (with colour dots) and Connect stay in Hover.
 Connect starts the provider browser or macOS permission prompt directly, using
 the same CalendarConnectionFlow as Settings → Integrations. No intermediate
 form, account-name field, Advanced app setup or Whytap account is shown.
@@ -1216,9 +1243,16 @@ Guide: docs/customization/app-control.md. WHY:
 Harness access: the plugin's content tools answer only the coding harness that
 started the MCP server itself (the helper's direct parent, by Apple-vouched
 team and signing identifier: Claude Code, Codex), after the user's one Yes.
-HarnessAccessGate asks through the Case approval card and queue ("Let Claude
-Code use Whytap?", No / Yes, Y after 0.3 s of a quiet keyboard, 60 s timeout,
-then "Claude Code connected" for 1.4 s); the prompt is shared by sessions that
+HarnessAccessGate asks through the Case approval card and queue (one line,
+"Give Claude Code access to Whytap?", No / Yes, Y after 0.3 s of a quiet
+keyboard, 60 s timeout, then for 1.9 s the same marks with the dots between
+them turning green one by one and "Claude Code connected" with a checkmark;
+Reduce Motion shows the finished state). The card and its confirmation
+overlap the island's bottom edge by CaseApprovalView.islandSeam (1 pt) and
+AppState.caseCardAttached stays true through the confirmation, so the island
+keeps its square bottom edge and no line or corner shows between them.
+caseCardAttached is geometry only: caseApprovalActive still ends with the
+answer, so a visible Agent answer owns Escape again at once. The prompt is shared by sessions that
 start together and outlives the request that caused it. The MCP server answers
 initialize at once and sends request_access afterwards through the client that
 never launches Whytap. Yes and No are remembered per Mac in one Keychain item
@@ -1238,7 +1272,7 @@ denies after a relaunch; if the seal cannot be written it is removed. Settings s
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
-with no suspension before the action. Settings -> Agents -> Coding tools has a switch per
+with no suspension before the action. Settings -> Integrations -> Coding tools has a switch per
 tool; the gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet

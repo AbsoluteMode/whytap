@@ -147,9 +147,38 @@ struct HarnessAccessSealFile: HarnessAccessSealing {
     let url: URL
 
     func load() -> HarnessAccessSealState {
-        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
-        guard let data = try? Data(contentsOf: url) else { return .unreadable }
-        return (try? JSONDecoder().decode(HarnessAccessSeal.self, from: data)).map(HarnessAccessSealState.seal) ?? .missing
+        do {
+            let data = try Data(contentsOf: url)
+            return (try? JSONDecoder().decode(HarnessAccessSeal.self, from: data)).map(HarnessAccessSealState.seal) ?? .missing
+        } catch {
+            // Missing only when its absence is confirmed. A folder that cannot
+            // be looked into right now may still hold a seal that matches.
+            return Self.isAbsent(error) && confirmsAbsence(of: url) ? .missing : .unreadable
+        }
+    }
+
+    private static func isAbsent(_ error: Error) -> Bool {
+        let cocoa = error as NSError
+        if cocoa.domain == NSCocoaErrorDomain {
+            return cocoa.code == NSFileReadNoSuchFileError || cocoa.code == NSFileNoSuchFileError
+        }
+        return cocoa.domain == NSPOSIXErrorDomain && cocoa.code == Int(ENOENT)
+    }
+
+    /// The folder lists without the file, or the folder itself is confirmed
+    /// absent by the first ancestor that can be listed.
+    private func confirmsAbsence(of url: URL) -> Bool {
+        var folder = url.deletingLastPathComponent()
+        var missing = url.lastPathComponent
+        while true {
+            do {
+                return !(try FileManager.default.contentsOfDirectory(atPath: folder.path)).contains(missing)
+            } catch {
+                guard Self.isAbsent(error), folder.path != "/" else { return false }
+                missing = folder.lastPathComponent
+                folder = folder.deletingLastPathComponent()
+            }
+        }
     }
 
     func save(_ seal: HarnessAccessSeal) -> Bool {
@@ -161,7 +190,7 @@ struct HarnessAccessSealFile: HarnessAccessSealing {
 
     func remove() -> Bool {
         try? FileManager.default.removeItem(at: url)
-        return !FileManager.default.fileExists(atPath: url.path)
+        return load() == .missing
     }
 }
 
@@ -205,8 +234,9 @@ final class HarnessAccessStore: ObservableObject {
     }
 
     func decision(for identity: HarnessIdentity) -> HarnessDecision? {
-        // A refused write is retried on every read.
-        if dirty { commit() }
+        // A refused write is retried on every read, and so is the seal while a
+        // No is stored nowhere: either place may have become writable.
+        if dirty, !commit(), revocationUnverified { journal(after: .deny) }
         return publish()[identity]?.decision
     }
 

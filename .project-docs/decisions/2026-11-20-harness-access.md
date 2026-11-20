@@ -183,7 +183,14 @@ refused and the old pair still matching; a seal unreadable at launch losing
 its No; a loaded Yes surviving the seal's rotation and being written back;
 a warning that did not match what was on disk; the card's Yes overwriting a
 later No. The store was rewritten to the model above instead of patched, and
-each sequence is a test.
+each sequence is a test. A second pass confirmed four closed and added two,
+fixed: a seal folder that cannot be looked into was taken for a missing seal
+(absence must now be confirmed by a listing), and a No stored nowhere was
+not sealed when the seal became writable again (the seal is retried on every
+read while a No is unverified). The first one stands as a limit: when the
+Keychain write, the seal write and the seal removal all fail, nothing on
+disk can change, the old Yes applies after a relaunch, and Settings says so
+until then.
 
 ## Review
 

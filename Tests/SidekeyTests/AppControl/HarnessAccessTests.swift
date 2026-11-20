@@ -383,6 +383,63 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
     }
 
+    /// After a No that reached nowhere, the seal becomes writable while the
+    /// Keychain still refuses. The next request must use it.
+    func test_a_no_saved_nowhere_is_sealed_as_soon_as_the_seal_takes_writes() async {
+        store.record(.allow, for: claude, at: Date())
+        answers.acceptsWrites = false
+        seal.acceptsWrites = false
+        seal.removable = false
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertTrue(store.revocationUnverified)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .allow)
+
+        seal.acceptsWrites = true
+        let refused = await read()
+        XCTAssertEqual(refused?.data.object?["code"], .string("access_denied"))
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertTrue(store.hasUnsavedAnswers, "the Keychain still has not taken it")
+        XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
+    }
+
+    /// The folder of the seal cannot be looked into when the No is given.
+    /// Not finding the seal there is not proof that it is gone.
+    func test_a_seal_folder_that_cannot_be_read_is_not_taken_for_a_missing_seal() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-seal-\(UUID().uuidString)")
+        let folder = directory.appendingPathComponent("app")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let file = HarnessAccessSealFile(url: folder.appendingPathComponent("harness-access-seal.json"))
+        let store = HarnessAccessStore(persistence: answers, seal: file)
+        XCTAssertTrue(store.record(.allow, for: claude, at: Date()))
+        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: file).decision(for: claude.identity), .allow)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder.path)
+        XCTAssertEqual(file.load(), .unreadable)
+        XCTAssertFalse(file.remove())
+        answers.acceptsWrites = false
+        XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
+        XCTAssertTrue(store.revocationUnverified, "the old seal may still be there and still match")
+
+        // The folder is back: the stored pair does match, as the notice warned,
+        // and the running app seals the No on its next read.
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: file).decision(for: claude.identity), .allow)
+        XCTAssertEqual(store.decision(for: claude.identity), .deny)
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: file).decision(for: claude.identity), .deny)
+    }
+
+    func test_a_seal_in_a_folder_that_does_not_exist_yet_is_missing() {
+        let nowhere = FileManager.default.temporaryDirectory
+            .appendingPathComponent("harness-seal-\(UUID().uuidString)/a/b/harness-access-seal.json")
+        XCTAssertEqual(HarnessAccessSealFile(url: nowhere).load(), .missing)
+        XCTAssertTrue(HarnessAccessSealFile(url: nowhere).remove())
+    }
+
     /// Claude Code is turned off and neither place saved it. Answering about
     /// Codex must not make the warning about Claude Code disappear.
     func test_the_warning_stays_until_that_no_is_saved_or_reversed() {

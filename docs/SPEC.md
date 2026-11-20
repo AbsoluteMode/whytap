@@ -498,7 +498,7 @@ Refresh повторяет чтение цен; при ошибке API изве
 
 **STT-провайдеры (Your key, выбор пользователя в Settings → API & Models для
 каждой фичи):** Soniox (`stt-rt-v5`, по умолчанию), Deepgram (`nova-3`),
-ElevenLabs (`scribe_v2_realtime`) или self-hosted endpoint с протоколом OpenAI
+ElevenLabs (`scribe_v3_live`) или self-hosted endpoint с протоколом OpenAI
 Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`). Сам
 OpenAI не предлагается: сохранённый выбор OpenAI читается как Soniox. Drop —
 realtime streaming, не batch; заметки встреч с Soniox идут через file API
@@ -529,7 +529,7 @@ Qwen и локальной диаризацией. Сохранённый выб
 уходит провайдеру той фичи, что вела Drop (Fast или Smart; для голоса агента —
 Agent voice), с его ключом из Keychain и recorded-моделью из вшитого реестра:
 Soniox file API (`stt-async-v5`), Deepgram pre-recorded, ElevenLabs
-speech-to-text (`scribe_v2`), self-hosted `/v1/audio/transcriptions` на хосте
+speech-to-text (`scribe_v3`), self-hosted `/v1/audio/transcriptions` на хосте
 своего сервера. Без маршрута фичи, ключа или recorded-модели batch недоступен;
 другой провайдер не подставляется.
 

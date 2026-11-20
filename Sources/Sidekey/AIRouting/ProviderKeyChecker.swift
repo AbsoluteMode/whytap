@@ -199,7 +199,7 @@ struct ProviderKeyChecker: ProviderKeyChecking {
     /// leaves it a working scoped key.
     private func paidProbe(apiKey: String, scoped: Bool = false) async -> KeyStatus {
         let transcriber = ProviderBatchTranscriber(
-            route: { .elevenLabs(apiKey: apiKey, model: "scribe_v2") },
+            route: { .elevenLabs(apiKey: apiKey, model: ModelRegistry.elevenLabsRecordedModel) },
             session: session
         )
         let silence = Data(count: 16_000 * 2)

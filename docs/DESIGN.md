@@ -327,14 +327,15 @@ The closed control retains the shared 30 pt popup label and existing widths.
   including the plain `nova-3` alias. Soniox and ElevenLabs omit release dates
   in their model API schemas, so shipped stable IDs use an exact-ID release
   registry with checked official launch sources: Soniox `stt-rt-v5` 2026-06-16,
-  `stt-async-v5` 2026-06-11; ElevenLabs `scribe_v2_realtime` 2025-11-11,
-  `scribe_v2` 2026-01-09. They show `Released`, including offline and catalog-less
+  `stt-async-v5` 2026-06-11; ElevenLabs `scribe_v3_live` and `scribe_v3` 2026-11-10
+  (they replaced `scribe_v2_realtime` 2025-11-11 and `scribe_v2` 2026-01-09). They show `Released`, including offline and catalog-less
   states. Unknown models/aliases inherit no date. Why: speech models need the
   same recency context without fabricating API fields or release dates.
   Sources: [Deepgram model metadata](https://developers.deepgram.com/guides/fundamentals/model-metadata),
   [Soniox model changelog](https://soniox.com/docs/stt/models),
   [Scribe v2 Realtime launch](https://elevenlabs.io/blog/introducing-scribe-v2-realtime),
-  [Scribe v2 launch](https://elevenlabs.io/blog/introducing-scribe-v2).
+  [Scribe v2 launch](https://elevenlabs.io/blog/introducing-scribe-v2),
+  [Scribe v3 launch](https://elevenlabs.io/blog/scribe-v3).
 - The native search field owns normal editing and IME composition. Up/Down
   moves through enabled results and scrolls them into view; Return selects.
   Escape clears the query, then closes; outside click dismisses. Focus returns

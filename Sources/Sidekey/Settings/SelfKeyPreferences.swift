@@ -35,7 +35,7 @@ enum BYOKProvider: String, CaseIterable, Codable {
         case .openAI, .selfHosted: return "gpt-4o-transcribe"
         case .deepgram: return "nova-3"
         case .soniox: return "stt-rt-v5"
-        case .elevenLabs: return "scribe_v2_realtime"
+        case .elevenLabs: return ModelRegistry.elevenLabsRealtimeModel
         }
     }
 
@@ -48,7 +48,7 @@ enum BYOKProvider: String, CaseIterable, Codable {
         case .selfHosted: return []
         case .deepgram: return ["nova-3"]
         case .soniox: return ["stt-rt-v5"]
-        case .elevenLabs: return ["scribe_v2_realtime"]
+        case .elevenLabs: return [ModelRegistry.elevenLabsRealtimeModel]
         }
     }
 

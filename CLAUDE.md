@@ -924,7 +924,10 @@ OpenAI-compatible servers) and one model per AI feature (Drop Fast, Drop
 Smart, Drop Smart cleanup, Meetings, Meeting notes, Agent, Agent voice, Voice
 search); Local was removed. Models come from provider catalogs plus the
 built-in registry; a model outside the registry is checked with a synthetic
-probe when picked or on Check now. The first launch migrates the old choices
+probe when picked or on Check now. ElevenLabs speech is Scribe v3 Live
+(`scribe_v3_live`) and, for recorded audio, Scribe v3; saved ElevenLabs routes
+naming Scribe v2 Realtime move to v3 Live at launch, the one owner-approved
+model change. WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md The first launch migrates the old choices
 into per-feature routes (AIRoutingMigration) and leaves the old UserDefaults
 keys untouched so a rollback sees them; nothing is switched to another
 provider or model automatically. WHY:

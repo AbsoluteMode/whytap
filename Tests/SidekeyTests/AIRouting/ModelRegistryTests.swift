@@ -7,11 +7,11 @@ final class ModelRegistryTests: XCTestCase {
         for feature in realtime {
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .soniox), "stt-rt-v5", "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .deepgram), "nova-3", "\(feature)")
-            XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .elevenLabs), "scribe_v2_realtime", "\(feature)")
+            XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .elevenLabs), "scribe_v3_live", "\(feature)")
         }
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .soniox), "stt-async-v5")
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .deepgram), "nova-3")
-        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .elevenLabs), "scribe_v2_realtime")
+        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .elevenLabs), "scribe_v3_live")
         for feature: AIFeature in [.dropSmartCleanup, .meetingNotes] {
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .openRouter), "google/gemini-3.8-flash")
         }
@@ -26,7 +26,11 @@ final class ModelRegistryTests: XCTestCase {
         XCTAssertFalse(ModelRegistry.isVerified("stt-rt-v5", kind: .soniox, use: .asyncSTT))
         XCTAssertTrue(ModelRegistry.isVerified("stt-async-v5", kind: .soniox, use: .asyncSTT))
         XCTAssertTrue(ModelRegistry.isVerified("nova-3", kind: .deepgram, use: .realtimeSTT))
-        XCTAssertTrue(ModelRegistry.isVerified("scribe_v2", kind: .elevenLabs, use: .asyncSTT))
+        XCTAssertTrue(ModelRegistry.isVerified("scribe_v3", kind: .elevenLabs, use: .asyncSTT))
+        XCTAssertTrue(ModelRegistry.isVerified("scribe_v3_live", kind: .elevenLabs, use: .realtimeSTT))
+        // Scribe v2 was replaced, not kept beside v3.
+        XCTAssertFalse(ModelRegistry.isVerified("scribe_v2", kind: .elevenLabs, use: .asyncSTT))
+        XCTAssertFalse(ModelRegistry.isVerified("scribe_v2_realtime", kind: .elevenLabs, use: .realtimeSTT))
         XCTAssertTrue(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("google/gemini-3.8-flash", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("nova-3", kind: .soniox, use: .realtimeSTT))

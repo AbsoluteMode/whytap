@@ -245,8 +245,8 @@ struct ProviderBatchTranscriber: BatchTranscribing {
         return best.transcript
     }
 
-    /// ElevenLabs speech-to-text with the recorded model (Scribe v2;
-    /// `scribe_v2_realtime` is the realtime model), without audio-event tags or
+    /// ElevenLabs speech-to-text with the recorded model (Scribe v3;
+    /// Scribe v3 Live is the realtime model), without audio-event tags or
     /// filler words.
     private func elevenLabs(_ wav: Data, apiKey: String, model: String, language: String?,
                             onReference: @escaping (String) -> Void) async throws -> String {

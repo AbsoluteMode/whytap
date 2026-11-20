@@ -20,7 +20,7 @@ final class ProviderBatchRouteTests: XCTestCase {
     func test_registry_models() {
         XCTAssertEqual(ModelRegistry.sonioxRecordedModel, SonioxFileAPI.asyncModel)
         XCTAssertEqual(ModelRegistry.sonioxRecordedModel, "stt-async-v5")
-        XCTAssertEqual(ModelRegistry.elevenLabsRecordedModel, "scribe_v2")
+        XCTAssertEqual(ModelRegistry.elevenLabsRecordedModel, "scribe_v3")
     }
 
     // Breaks if the recorded model of Soniox/ElevenLabs is taken from the
@@ -31,8 +31,8 @@ final class ProviderBatchRouteTests: XCTestCase {
             .soniox(apiKey: "sx-key", model: "stt-async-v5")
         )
         XCTAssertEqual(
-            ProviderBatchRoute.make(for: resolved(.elevenLabs, model: "scribe_v2_realtime", apiKey: "el-key")),
-            .elevenLabs(apiKey: "el-key", model: "scribe_v2")
+            ProviderBatchRoute.make(for: resolved(.elevenLabs, model: "scribe_v3_live", apiKey: "el-key")),
+            .elevenLabs(apiKey: "el-key", model: "scribe_v3")
         )
     }
 
@@ -266,7 +266,7 @@ final class ProviderBatchFeatureRoutingTests: XCTestCase {
         let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
         XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "el-key")
         let form = try MultipartForm(request, body: StubURLProtocol.capturedBodies[0])
-        XCTAssertEqual(form.fields["model_id"], "scribe_v2")
+        XCTAssertEqual(form.fields["model_id"], "scribe_v3")
     }
 
     // Review Focus 5: a server without a key gets no Authorization header.

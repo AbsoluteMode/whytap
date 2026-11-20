@@ -52,6 +52,7 @@ struct AIRoutingMigration {
         routing.separateSubtitleTranslationIfNeeded()
         routing.retireSmartDecisionIfNeeded()
         routing.retireMeetingRoutesIfNeeded()
+        routing.upgradeElevenLabsScribeIfNeeded()
     }
 
     // MARK: - Routes

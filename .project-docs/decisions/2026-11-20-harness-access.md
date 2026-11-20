@@ -61,9 +61,18 @@ with finding and reading meetings, and wants connecting to cost one answer.
   in the Keychain matches nothing on disk any more, and the No is listed in
   the seal so it denies after a relaunch. Only Nos are read from the seal; a
   Yes written there by another process is ignored. If the seal cannot be
-  written either, Settings says that access may come back after a restart.
-  A No given while the Keychain is locked therefore also makes other tools
-  be asked again.
+  written either, it is removed, which cancels the stored Yes as well; only
+  when that fails too does Settings say that access may come back after a
+  restart. A No given while the Keychain is locked therefore also makes
+  other tools be asked again.
+- **Nothing stored is cached.** Every decision is worked out from what the
+  Keychain and the seal hold at that moment, plus the answers of this launch
+  (which always apply here). So a Yes that lost its seal during the launch
+  is not honoured or written back, a seal that was unreadable at launch
+  still counts once it can be read, and the Settings warning is computed
+  from what a relaunch would actually do. A save merges the seal's Nos; it
+  does not run while the Keychain is locked or the seal is unreadable. The
+  card's answer is dropped when the user answered in Settings meanwhile.
 - **Where the item is.** Checked on the signed app on 2026-11-20
   (`codesign -d --entitlements`, `security find-generic-password` metadata of
   the Case vault key): the app has no entitlements and its items are in the
@@ -167,6 +176,14 @@ tool cleared the warning about an Off that was saved nowhere (the warning now
 stays until that Off is saved or reversed), and `whytap_meeting_open` moved
 the window before the gate's second check (the tool now rechecks consent
 through `HarnessConsent.stillAllowed` with no suspension before the window).
+
+Before the fourth submission Codex walked the store through sequences of
+failed writes and relaunches and found five that broke it: both writes
+refused and the old pair still matching; a seal unreadable at launch losing
+its No; a loaded Yes surviving the seal's rotation and being written back;
+a warning that did not match what was on disk; the card's Yes overwriting a
+later No. The store was rewritten to the model above instead of patched, and
+each sequence is a test.
 
 ## Review
 

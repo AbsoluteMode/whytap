@@ -18,7 +18,7 @@ struct HarnessAccessSettingsSection: View {
     }
 
     /// Shown while the Keychain has not taken the latest answer.
-    static let unsavedNotice = "Whytap couldn’t save this to the Keychain yet. Turning access off still holds after a restart. It will be saved when the Keychain is available."
+    static let unsavedNotice = "Whytap couldn’t save this to the Keychain yet. A tool you turned off will not get access back without asking you. It will be saved when the Keychain is available."
     /// Shown when a No could not be written anywhere.
     static let unverifiedNotice = "Whytap couldn’t save this change. Access is off until Whytap quits and may come back after a restart. Turn it off again later."
 

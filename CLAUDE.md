@@ -1221,10 +1221,12 @@ apply there and is not set. A stored Yes counts only with its seal: the
 Keychain item and harness-access-seal.json beside the broker socket
 (HarnessAccessSealFile, written atomically and read back) carry the same
 random token, renewed on every save. A missing, unreadable or different seal
-fails closed: the tool is asked again; a stored No never needs the seal. An
-answer the Keychain refused holds for the launch and is retried on every
-read. A refused No replaces the seal's token, which cancels every stored Yes,
-and lists the No there so it denies after a relaunch. Settings shows a notice
+fails closed: the tool is asked again; a stored No never needs the seal. Nothing
+stored is cached: each decision is worked out from the Keychain and the seal
+as they are then, plus this launch's answers. An answer the Keychain refused
+holds for the launch and is retried on every read. A refused No replaces the
+seal's token, which cancels every stored Yes, and lists the No there so it
+denies after a relaunch; if the seal cannot be written it is removed. Settings shows a notice
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed

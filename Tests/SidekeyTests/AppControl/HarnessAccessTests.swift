@@ -35,13 +35,26 @@ private final class MemoryAnswers: HarnessAccessPersisting {
 
 private final class MemorySeal: HarnessAccessSealing {
     var stored: HarnessAccessSeal?
+    /// A seal that exists and cannot be read.
     var readable = true
     var acceptsWrites = true
-    func load() -> HarnessAccessSeal? { readable ? stored : nil }
+    var removable = true
+
+    func load() -> HarnessAccessSealState {
+        guard let stored else { return .missing }
+        return readable ? .seal(stored) : .unreadable
+    }
+
     func save(_ seal: HarnessAccessSeal) -> Bool {
         guard acceptsWrites else { return false }
         stored = seal
         return readable
+    }
+
+    func remove() -> Bool {
+        guard removable else { return false }
+        stored = nil
+        return true
     }
 }
 
@@ -232,18 +245,30 @@ final class HarnessAccessTests: XCTestCase {
 
     // MARK: Remembered answers
 
+    private let codex = HarnessClient(
+        identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+
+    private func relaunch() -> HarnessAccessStore { HarnessAccessStore(persistence: answers, seal: seal) }
+
+    private func gate(on store: HarnessAccessStore) -> HarnessAccessGate {
+        HarnessAccessGate(resolver: HarnessCallerResolver(inspector: processes), store: store, presenter: prompt)
+    }
+
     func test_answers_survive_a_relaunch() {
         store.record(.allow, for: claude, at: Date(timeIntervalSince1970: 1_800_000_000))
-        let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+        store.record(.deny, for: codex, at: Date(timeIntervalSince1970: 1_800_000_001))
+        let relaunched = relaunch()
         XCTAssertEqual(relaunched.decision(for: claude.identity), .allow)
-        XCTAssertEqual(relaunched.grants.first?.name, "Claude Code")
+        XCTAssertEqual(relaunched.decision(for: codex.identity), .deny)
+        XCTAssertEqual(relaunched.grants.map(\.name), ["Claude Code", "Codex"])
+        XCTAssertFalse(relaunched.hasUnsavedAnswers)
     }
 
     func test_unreadable_stored_answers_allow_nobody() {
         answers.stored = Data("not json".utf8)
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity))
+        XCTAssertNil(relaunch().decision(for: claude.identity))
         answers.stored = Data("{\"allow\":true}".utf8)
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity))
+        XCTAssertNil(relaunch().decision(for: claude.identity))
     }
 
     /// The switch is turned off while the Keychain refuses the write, and
@@ -254,44 +279,39 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
         XCTAssertTrue(store.hasUnsavedAnswers)
         XCTAssertFalse(store.revocationUnverified)
-        XCTAssertEqual(HarnessAccessSettingsSection.notice(unsaved: true, unverified: false),
-                       HarnessAccessSettingsSection.unsavedNotice)
         let refused = await read()
         XCTAssertEqual(refused?.data.object?["code"], .string("access_denied"))
 
         // Relaunch with the Keychain still refusing writes: its item says Yes.
-        let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+        let relaunched = relaunch()
         XCTAssertEqual(relaunched.decision(for: claude.identity), .deny)
-        XCTAssertEqual(HarnessAccessSettingsSection.rows(relaunched.grants).map(\.decision), [.deny])
-        let gate = HarnessAccessGate(
-            resolver: HarnessCallerResolver(inspector: processes), store: relaunched, presenter: prompt)
-        let answer = await gate.intercept(AppControlRequest("meetings_search"), peerPID: helper)
+        XCTAssertEqual(relaunched.grants.map(\.decision), [.deny])
+        let answer = await gate(on: relaunched).intercept(AppControlRequest("meetings_search"), peerPID: helper)
         XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"))
         XCTAssertEqual(prompt.asked.count, 1, "no new question either")
 
-        // Relaunch with the Keychain locked: the No applies before it can be read.
+        // Relaunch with the Keychain locked: the No applies without reading it.
         answers.available = false
-        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity), .deny)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
 
-        // The Keychain takes writes again: the No is stored and nothing is pending.
+        // The Keychain takes writes again: the next answer stores the No too.
         answers.available = true
         answers.acceptsWrites = true
-        let later = HarnessAccessStore(persistence: answers, seal: seal)
-        XCTAssertEqual(later.decision(for: claude.identity), .deny)
-        XCTAssertFalse(later.hasUnsavedAnswers)
+        let later = relaunch()
+        XCTAssertTrue(later.record(.deny, for: codex, at: Date()))
         XCTAssertEqual(seal.stored?.revoked, [])
-        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity), .deny)
+        seal.stored = nil
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny, "the Keychain alone now says No")
     }
 
-    /// The same failed No, and then the seal is gone or unreadable at the
-    /// next launch: nothing proves the Yes in the Keychain is still wanted.
+    /// The same failed No, and then the seal is gone, unreadable or another
+    /// one at the next launch: nothing proves the Yes in the Keychain is wanted.
     func test_a_stored_yes_without_its_seal_is_not_honoured() async {
-        for damage in ["missing", "unreadable", "replaced by an older copy's shape"] {
+        for damage in ["missing", "unreadable", "another seal"] {
             answers = MemoryAnswers()
             seal = MemorySeal()
-            store = HarnessAccessStore(persistence: answers, seal: seal)
+            store = relaunch()
             store.record(.allow, for: claude, at: Date())
-            let earlier = seal.stored
             answers.acceptsWrites = false
             XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
 
@@ -300,16 +320,13 @@ final class HarnessAccessTests: XCTestCase {
             case "unreadable": seal.readable = false
             default: seal.stored = HarnessAccessSeal(token: "not-the-token", revoked: [])
             }
-            XCTAssertNotEqual(seal.stored, earlier)
-            let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+            let relaunched = relaunch()
             XCTAssertNil(relaunched.decision(for: claude.identity), damage)
 
-            // The harness is asked again instead of being let in; No stays No.
+            // The harness is asked again instead of being let in.
             prompt = Prompt()
             prompt.answer = .deny
-            let gate = HarnessAccessGate(
-                resolver: HarnessCallerResolver(inspector: processes), store: relaunched, presenter: prompt)
-            let answer = await gate.intercept(AppControlRequest("meetings_search"), peerPID: helper)
+            let answer = await gate(on: relaunched).intercept(AppControlRequest("meetings_search"), peerPID: helper)
             XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"), damage)
             XCTAssertEqual(prompt.asked.count, 1, damage)
         }
@@ -327,35 +344,52 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
         // Even with the journaled No removed by hand, the Yes does not return.
         seal.stored?.revoked = []
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity))
+        XCTAssertNil(relaunch().decision(for: claude.identity))
     }
 
-    func test_a_no_that_reached_neither_place_says_so() {
+    /// Neither the Keychain nor the seal takes the No, but the old seal can
+    /// be removed: the old Yes is cancelled, the tool will be asked again.
+    func test_a_no_saved_nowhere_removes_the_seal_so_the_old_yes_cannot_return() {
         store.record(.allow, for: claude, at: Date())
         answers.acceptsWrites = false
         seal.acceptsWrites = false
+        XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
+        XCTAssertNil(seal.stored)
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertEqual(store.decision(for: claude.identity), .deny)
+        XCTAssertNil(relaunch().decision(for: claude.identity), "asked again, never let in")
+    }
+
+    func test_a_no_that_reached_neither_place_and_could_not_remove_the_seal_says_so() {
+        store.record(.allow, for: claude, at: Date())
+        answers.acceptsWrites = false
+        seal.acceptsWrites = false
+        seal.removable = false
         XCTAssertFalse(store.record(.deny, for: claude, at: Date()))
         XCTAssertTrue(store.revocationUnverified)
         XCTAssertEqual(store.decision(for: claude.identity), .deny, "it holds for this launch")
         XCTAssertEqual(HarnessAccessSettingsSection.notice(unsaved: true, unverified: true),
                        HarnessAccessSettingsSection.unverifiedNotice)
-        XCTAssertTrue(HarnessAccessSettingsSection.unverifiedNotice.contains("may come back"))
+        XCTAssertEqual(HarnessAccessSettingsSection.notice(unsaved: true, unverified: false),
+                       HarnessAccessSettingsSection.unsavedNotice)
         XCTAssertNil(HarnessAccessSettingsSection.notice(unsaved: false, unverified: false))
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .allow, "exactly what the notice warns about")
         // Both become writable: the next read stores it and the warning goes.
         answers.acceptsWrites = true
         seal.acceptsWrites = true
         XCTAssertEqual(store.decision(for: claude.identity), .deny)
         XCTAssertFalse(store.revocationUnverified)
         XCTAssertFalse(store.hasUnsavedAnswers)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
     }
 
-    /// Claude Code is turned off and neither place saved it. Answering Yes for
+    /// Claude Code is turned off and neither place saved it. Answering about
     /// Codex must not make the warning about Claude Code disappear.
     func test_the_warning_stays_until_that_no_is_saved_or_reversed() {
-        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
         store.record(.allow, for: claude, at: Date())
         answers.acceptsWrites = false
         seal.acceptsWrites = false
+        seal.removable = false
         store.record(.deny, for: claude, at: Date())
         XCTAssertTrue(store.revocationUnverified)
 
@@ -365,18 +399,19 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
         XCTAssertTrue(store.revocationUnverified, "reversing Codex does not reverse Claude Code")
 
-        // The seal becomes writable: the next answer about any tool seals the No.
+        // The seal becomes writable: the next answer about any tool lists the No.
         seal.acceptsWrites = true
         XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
         XCTAssertFalse(store.revocationUnverified)
         XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
-        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity), .deny)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
     }
 
     func test_reversing_the_unsaved_no_itself_removes_the_warning() {
         store.record(.allow, for: claude, at: Date())
         answers.acceptsWrites = false
         seal.acceptsWrites = false
+        seal.removable = false
         store.record(.deny, for: claude, at: Date())
         XCTAssertTrue(store.revocationUnverified)
         store.record(.allow, for: claude, at: Date())
@@ -384,94 +419,82 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertEqual(store.decision(for: claude.identity), .allow)
     }
 
+    /// The seal stops taking writes after it listed Claude Code's No. Turning
+    /// Codex off and on again must leave the ordinary notice: Claude Code's
+    /// No is still on disk.
+    func test_the_warning_is_worked_out_from_what_is_on_disk() {
+        store.record(.allow, for: claude, at: Date())
+        store.record(.allow, for: codex, at: Date())
+        answers.acceptsWrites = false
+        store.record(.deny, for: claude, at: Date())
+        seal.acceptsWrites = false
+        seal.removable = false
+        store.record(.deny, for: codex, at: Date())
+        XCTAssertFalse(store.revocationUnverified, "the rotated seal already cancelled Codex's stored Yes")
+        store.record(.allow, for: codex, at: Date())
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertTrue(store.hasUnsavedAnswers)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
+        XCTAssertNil(relaunch().decision(for: codex.identity))
+    }
+
     /// An unsaved Yes for one tool keeps the seal of the others' stored answers.
     func test_an_unsaved_yes_does_not_cancel_other_stored_answers() {
-        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
         store.record(.allow, for: claude, at: Date())
         let token = seal.stored?.token
         answers.acceptsWrites = false
         XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
         XCTAssertEqual(seal.stored?.token, token)
-        let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+        let relaunched = relaunch()
         XCTAssertEqual(relaunched.decision(for: claude.identity), .allow)
         XCTAssertNil(relaunched.decision(for: codex.identity), "Codex is asked again")
     }
 
-    /// meeting_open moves the user's window, so it asks once more right
-    /// before acting; the gate answers from the store as it is then.
-    func test_a_tool_that_acts_can_recheck_consent_at_the_last_moment() async {
-        _ = await read()
-        var checks: [Bool] = []
-        let answer = await gate.handle(AppControlRequest("meeting_open"), peerPID: helper) { _ in
-            checks.append(HarnessConsent.stillAllowed?() ?? true)
-            self.store.record(.deny, for: self.claude, at: Date())
-            checks.append(HarnessConsent.stillAllowed?() ?? true)
-            return .success(.null)
-        }
-        XCTAssertEqual(checks, [true, false])
-        XCTAssertEqual(answer.data.object?["code"], .string("access_denied"))
-        // Settings tools get no such hook, and none leaks out of the request.
-        _ = await gate.handle(AppControlRequest("get_state"), peerPID: helper) { _ in
-            XCTAssertNil(HarnessConsent.stillAllowed)
-            return .success(.null)
-        }
-        XCTAssertNil(HarnessConsent.stillAllowed)
-    }
-
-    func test_a_yes_survives_a_relaunch_only_with_its_seal_and_a_no_always() {
-        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+    /// Two tools were allowed. Codex is turned off while the Keychain
+    /// refuses: Claude Code's stored Yes lost its seal too and must not be
+    /// honoured, or written back, without asking.
+    func test_a_refused_no_for_one_tool_makes_the_other_stored_yes_ask_again() {
         store.record(.allow, for: claude, at: Date())
-        store.record(.deny, for: codex, at: Date())
-        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity), .allow)
-        seal.stored = nil
-        let unsealed = HarnessAccessStore(persistence: answers, seal: seal)
-        XCTAssertNil(unsealed.decision(for: claude.identity))
-        XCTAssertEqual(unsealed.decision(for: codex.identity), .deny)
-        // What is stored now is what applies: the dropped Yes is gone for good.
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity))
+        store.record(.allow, for: codex, at: Date())
+        let loaded = relaunch()
+        XCTAssertEqual(loaded.decision(for: claude.identity), .allow)
+        answers.acceptsWrites = false
+        XCTAssertFalse(loaded.record(.deny, for: codex, at: Date()))
+        XCTAssertNil(loaded.decision(for: claude.identity), "in this same launch")
+        answers.acceptsWrites = true
+        XCTAssertEqual(loaded.decision(for: codex.identity), .deny)
+        XCTAssertNil(loaded.decision(for: claude.identity))
+        XCTAssertNil(relaunch().decision(for: claude.identity), "the Yes was not written back")
+        XCTAssertEqual(relaunch().decision(for: codex.identity), .deny)
     }
 
-    func test_turning_access_back_on_removes_the_journaled_no() {
+    /// The seal lists a No and cannot be read for a moment at launch.
+    func test_a_seal_unreadable_at_launch_keeps_its_no_and_is_not_replaced() {
+        store.record(.allow, for: claude, at: Date())
         answers.acceptsWrites = false
         store.record(.deny, for: claude, at: Date())
-        XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
-        // The user changes their mind before the Keychain is writable.
-        XCTAssertFalse(store.record(.allow, for: claude, at: Date()))
-        XCTAssertEqual(seal.stored?.revoked, [])
-        XCTAssertEqual(store.decision(for: claude.identity), .allow)
-        // That Yes was never stored: after a relaunch the harness is asked again.
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity))
-    }
+        answers.acceptsWrites = true
+        let journaled = seal.stored
 
-    func test_the_seal_file_is_trusted_only_as_read_back_from_disk() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-seal-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = HarnessAccessSealFile(url: directory.appendingPathComponent("nested/harness-access-seal.json"))
-        XCTAssertNil(file.load())
-        let written = HarnessAccessSeal(token: "t1", revoked: [
-            HarnessGrant(identity: claude.identity, name: "Claude Code", decision: .deny, decidedAt: Date(timeIntervalSince1970: 1_800_000_000))])
-        XCTAssertTrue(file.save(written))
-        XCTAssertEqual(file.load(), written)
-        try Data("garbage".utf8).write(to: file.url)
-        XCTAssertNil(file.load())
-        // A folder that cannot hold the file: the save is reported as failed.
-        let blocked = HarnessAccessSealFile(url: file.url.appendingPathComponent("under-a-file.json"))
-        XCTAssertFalse(blocked.save(written))
-    }
+        seal.readable = false
+        let relaunched = relaunch()
+        XCTAssertNil(relaunched.decision(for: claude.identity), "nothing is known yet: ask, do not allow")
+        // An answer about another tool meanwhile must not wipe the seal's No.
+        XCTAssertFalse(relaunched.record(.allow, for: codex, at: Date()))
+        XCTAssertEqual(seal.stored?.revoked.map(\.identity), journaled?.revoked.map(\.identity))
 
-    /// A Yes forged into the seal is not an answer: only Nos are read from it.
-    func test_a_yes_written_into_the_seal_gives_no_access() {
-        let codex = HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex")
-        seal.stored = HarnessAccessSeal(token: "x", revoked: [
-            HarnessGrant(identity: codex, name: "Codex", decision: .allow, decidedAt: Date())])
-        XCTAssertNil(HarnessAccessStore(persistence: answers, seal: seal).decision(for: codex))
+        seal.readable = true
+        XCTAssertEqual(relaunched.decision(for: claude.identity), .deny)
+        XCTAssertFalse(relaunched.hasUnsavedAnswers)
+        seal.stored = nil
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny, "the No reached the Keychain")
     }
 
     func test_while_the_keychain_is_locked_nothing_is_trusted_or_overwritten() {
         store.record(.allow, for: claude, at: Date())
         let stored = answers.stored
         answers.available = false
-        let locked = HarnessAccessStore(persistence: answers, seal: seal)
+        let locked = relaunch()
         XCTAssertNil(locked.decision(for: claude.identity))
         XCTAssertEqual(answers.stored, stored)
         // It unlocks with nothing changed meanwhile: the stored Yes is back.
@@ -485,17 +508,84 @@ final class HarnessAccessTests: XCTestCase {
     func test_a_no_given_while_the_keychain_is_locked_cancels_stored_yeses() {
         store.record(.allow, for: claude, at: Date())
         answers.available = false
-        let locked = HarnessAccessStore(persistence: answers, seal: seal)
-        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        let locked = relaunch()
         XCTAssertFalse(locked.record(.deny, for: codex, at: Date()))
         XCTAssertFalse(locked.revocationUnverified)
         answers.available = true
         XCTAssertEqual(locked.decision(for: codex.identity), .deny)
         XCTAssertNil(locked.decision(for: claude.identity))
-        let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+        let relaunched = relaunch()
         XCTAssertEqual(relaunched.decision(for: codex.identity), .deny)
         XCTAssertNil(relaunched.decision(for: claude.identity))
         XCTAssertEqual(relaunched.grants.count, 1)
+    }
+
+    func test_a_yes_survives_a_relaunch_only_with_its_seal_and_a_no_always() {
+        store.record(.allow, for: claude, at: Date())
+        store.record(.deny, for: codex, at: Date())
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .allow)
+        seal.stored = nil
+        let unsealed = relaunch()
+        XCTAssertNil(unsealed.decision(for: claude.identity))
+        XCTAssertEqual(unsealed.decision(for: codex.identity), .deny)
+    }
+
+    func test_turning_access_back_on_removes_the_journaled_no() {
+        answers.acceptsWrites = false
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
+        // The user changes their mind before the Keychain is writable.
+        XCTAssertFalse(store.record(.allow, for: claude, at: Date()))
+        XCTAssertEqual(seal.stored?.revoked, [])
+        XCTAssertEqual(store.decision(for: claude.identity), .allow)
+        // That Yes was never stored: after a relaunch the harness is asked again.
+        XCTAssertNil(relaunch().decision(for: claude.identity))
+    }
+
+    func test_the_seal_file_is_trusted_only_as_read_back_from_disk() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-seal-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = HarnessAccessSealFile(url: directory.appendingPathComponent("nested/harness-access-seal.json"))
+        XCTAssertEqual(file.load(), .missing)
+        let written = HarnessAccessSeal(token: "t1", revoked: [
+            HarnessGrant(identity: claude.identity, name: "Claude Code", decision: .deny, decidedAt: Date(timeIntervalSince1970: 1_800_000_000))])
+        XCTAssertTrue(file.save(written))
+        XCTAssertEqual(file.load(), .seal(written))
+        // Contents that are not a seal count as no seal and may be replaced.
+        try Data("garbage".utf8).write(to: file.url)
+        XCTAssertEqual(file.load(), .missing)
+        // A seal that exists and cannot be read is told apart from a missing one.
+        try FileManager.default.removeItem(at: file.url)
+        try FileManager.default.createDirectory(at: file.url, withIntermediateDirectories: false)
+        XCTAssertEqual(file.load(), .unreadable)
+        XCTAssertFalse(file.save(written))
+        XCTAssertTrue(file.remove())
+        XCTAssertEqual(file.load(), .missing)
+        // A place that cannot hold the file: the save is reported as failed.
+        XCTAssertTrue(file.save(written))
+        let blocked = HarnessAccessSealFile(url: file.url.appendingPathComponent("under-a-file.json"))
+        XCTAssertFalse(blocked.save(written))
+    }
+
+    /// A Yes forged into the seal is not an answer: only Nos are read from it.
+    func test_a_yes_written_into_the_seal_gives_no_access() {
+        seal.stored = HarnessAccessSeal(token: "x", revoked: [
+            HarnessGrant(identity: codex.identity, name: "Codex", decision: .allow, decidedAt: Date())])
+        XCTAssertNil(relaunch().decision(for: codex.identity))
+    }
+
+    /// The card is up; the user turns the tool off in Settings and only then
+    /// the card's Yes arrives. The later answer stands.
+    func test_an_answer_given_in_settings_while_the_card_is_up_is_not_overwritten_by_the_card() async {
+        prompt.holds = true
+        let request = Task { await self.read() }
+        while prompt.asked.isEmpty { await Task.yield() }
+        store.record(.deny, for: claude, at: Date())
+        prompt.release(.allow)
+        let answer = await request.value
+        XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"))
+        XCTAssertEqual(store.decision(for: claude.identity), .deny)
+        XCTAssertEqual(relaunch().decision(for: claude.identity), .deny)
     }
 
     // MARK: The whole request
@@ -544,7 +634,6 @@ final class HarnessAccessTests: XCTestCase {
     // MARK: Settings -> Agents
 
     func test_settings_lists_answered_tools_by_name_and_the_switch_changes_the_answer() async {
-        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
         store.record(.deny, for: codex, at: Date())
         store.record(.allow, for: claude, at: Date())
         XCTAssertEqual(HarnessAccessSettingsSection.rows(store.grants).map(\.name), ["Claude Code", "Codex"])

@@ -182,4 +182,24 @@ final class PlannerExternalChangesTests: XCTestCase {
         XCTAssertEqual(tooLong.data.object?["code"], .string("title_too_long"))
         XCTAssertEqual(store.archive.tasks.count, 2)
     }
+
+    /// Agents reach To-do while the screen is locked only if the app's own file
+    /// opens then. A file saved by builds up to 2.2.22 is migrated on its first read.
+    // WHY: .project-docs/decisions/2026-11-04-todo-locked-screen.md
+    func testStoreKeepsArchiveReadableWhileTheScreenIsLocked() throws {
+        let store = PlannerStore(url: url)
+        XCTAssertTrue(store.saveTask(PlannerTask(title: "Mine")))
+        guard let saved = protection(url) else { throw XCTSkip("This volume has no data protection classes") }
+        XCTAssertEqual(saved, .completeUntilFirstUserAuthentication)
+
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path)
+        XCTAssertEqual(protection(url), .completeUnlessOpen, "As an earlier build left it")
+        let relaunched = PlannerStore(url: url)
+        XCTAssertEqual(relaunched.archive.tasks.map(\.title), ["Mine"])
+        XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication)
+    }
+
+    private func protection(_ url: URL) -> FileProtectionType? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.protectionKey] as? FileProtectionType
+    }
 }

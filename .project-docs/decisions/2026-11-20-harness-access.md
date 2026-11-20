@@ -138,6 +138,11 @@ with finding and reading meetings, and wants connecting to cost one answer.
 - `AppControlMeetingsTests`: search by inflected words, dates, limits, paging
   by segments and bytes, cut notes, unknown ids, a missing store.
 - `CaseBrokerTests`: the gate decides before the controls and without the vault.
+- Full suite on 794a3120 with the console unlocked, 2026-11-20: 4741 tests,
+  38 skipped, 0 failures. With the Mac locked the same run fails 74 tests in
+  the Planner, To-do, Calendar and backup suites: files written with
+  `completeFileProtectionUnlessOpen` cannot be read then (Cocoa 257). They are
+  unrelated to this change; run the full suite with the screen unlocked.
 - Not tested: the installed app with a live harness, the real key tap and the
   compositor. Source tests do not show that a host's plugin connection updated.
 

@@ -87,8 +87,24 @@ examples that keep the author's first-person framing.
 - Defects seen in that run: one invented closing sentence, one question moved
   from the start to the end, one clean short phrase reordered for taste, and
   one relayed instruction ("tell it to split…") turned into direct commands.
-  The prompt gained a rule for each. Those four rules have not been run
-  against a model again; only the unit tests were repeated (33, 0 failures).
+  The prompt gained a rule for each.
+- Builder review of the first submitted head found two contradictions in the
+  prompt itself: an example turned "I would like" into "must not", against the
+  modality rule, and the closing line banned code blocks that destination
+  formatting allows. The example keeps the preference; the closing line now
+  forbids only wrapping the whole answer.
+- Final prompt, six synthetic samples on the same two models (12 requests, no
+  errors, $0.07), run by the user with the app's key. No invented closing
+  sentence; the leading question stayed first; the relayed instruction stayed
+  an instruction to pass on, its examples stayed examples; "I would like"
+  stayed a preference. With the GitHub destination appended, both models
+  returned a numbered list with inline code for the commands, the parameter
+  and the file name, and no fence around the answer.
+- Remaining after that run: Sonnet still reordered one clean short sentence
+  without changing its meaning (Terra passed it), and in the numbered list
+  each model reworded the step lead-ins ("build the project", imperative
+  verbs) around the literal commands. One generation per sample; the unit
+  tests (33, 0 failures) cover the envelope, not editing quality.
 
 ## Rejected
 

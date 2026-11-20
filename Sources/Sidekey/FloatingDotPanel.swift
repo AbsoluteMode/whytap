@@ -20,8 +20,7 @@ final class FloatingDotPanel: NSPanel {
     /// OS does NOT always subtract a magnified Dock's full visual size
     /// from `NSScreen.visibleFrame`, so we add an explicit cushion in
     /// addition to a `.statusBar` window level. Same value reused by
-    /// `AgentTextInputPanel`, `AgentResponsePanel`, and
-    /// `HistoryStripPanel` so the whole UI lifts together.
+    /// `AgentTextInputPanel` and `AgentResponsePanel`.
     static let dockSafeBottomMargin: CGFloat = 40
     /// Base anchor distance from `visible.minY` BEFORE the dock-safe
     /// buffer. Was 19pt before the glow-padding bump (`canvasSize` 41 →

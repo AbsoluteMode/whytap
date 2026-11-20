@@ -57,7 +57,6 @@ struct FeatureGroup: Equatable, Identifiable {
         ("Voice search", [.voiceSearch]),
         ("Translation", [.translation]),
         ("Subtitles", [.subtitlesAudio, .subtitlesTranslation]),
-        ("Meeting Assistant (Beta)", [.meetingAssistantAudio, .meetingAssistant]),
     ]
 }
 
@@ -115,7 +114,7 @@ final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var providerLists: [String: ProviderList] = [:]
 
     /// Built-in providers in the order the tab lists them and Set up picks them.
-    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic]
+    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac]
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
@@ -130,6 +129,7 @@ final class APIAndModelsViewModel: ObservableObject {
     private let now: () -> Date
     private let inputLanguage: @MainActor () -> String?
     private let resolver: ModelStatusResolver
+    private let onDevice: OnDeviceSpeechReadiness
 
     private var checking: Set<AIFeature> = []
     private var messages: [AIFeature: String] = [:]
@@ -148,8 +148,10 @@ final class APIAndModelsViewModel: ObservableObject {
         probe: any ModelProbing = ModelProbe(),
         endpoints: any OpenRouterEndpointsFetching = OpenRouterEndpointsClient(),
         now: @escaping () -> Date = Date.init,
-        inputLanguage: (@MainActor () -> String?)? = nil
+        inputLanguage: (@MainActor () -> String?)? = nil,
+        onDevice: OnDeviceSpeechReadiness = .live
     ) {
+        self.onDevice = onDevice
         let routing = routing ?? .shared
         let catalogs = catalogs ?? .shared
         let checks = checks ?? .shared
@@ -165,7 +167,8 @@ final class APIAndModelsViewModel: ObservableObject {
         self.now = now
         self.inputLanguage = inputLanguage ?? { PrivacyPreferences.shared.selectedLanguage?.code }
         self.resolver = ModelStatusResolver(
-            routing: routing, keys: keys, catalogs: catalogs, checks: checks, keyStatuses: keyStatuses
+            routing: routing, keys: keys, catalogs: catalogs, checks: checks, keyStatuses: keyStatuses,
+            onDevice: onDevice
         )
         recompute()
 
@@ -183,6 +186,8 @@ final class APIAndModelsViewModel: ObservableObject {
     /// unreadable one already has a chip), and always a server.
     var addableKinds: [AIProviderKind] {
         AIProviderKind.allCases.filter { kind in
+            // Not a key: its tile downloads a model instead.
+            guard kind != .onDevice else { return false }
             guard let account = Self.builtInAccount(for: kind) else { return true }
             return lookup(account) == .absent
         }
@@ -200,6 +205,11 @@ final class APIAndModelsViewModel: ObservableObject {
             await catalogs.refreshIfStale(account, apiKey: access.apiKey, server: access.server)
             if keyStatuses.needsCheck(account, now: now()) {
                 let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: false)
+                // The free check cannot see what a dictation or a paid check
+                // found (a key without the speech permission answers
+                // "limited" here), so it does not clear a refusal on its own.
+                // A dictation that works clears it (`forgetDropKeyRefusal`).
+                if status == .limited, case .rejected = keyStatuses.record(for: account)?.status { continue }
                 keyStatuses.set(status, for: account, at: now())
             }
         }
@@ -274,7 +284,7 @@ final class APIAndModelsViewModel: ObservableObject {
         }
         switch account {
         case .server(let id): routing.removeServer(id)
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic: routing.clearRoutes(using: account)
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac: routing.clearRoutes(using: account)
         }
         catalogs.forget(account)
         keyStatuses.forget(account)
@@ -287,6 +297,24 @@ final class APIAndModelsViewModel: ObservableObject {
         guard let access = access(account) else { return }
         let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: true)
         keyStatuses.set(status, for: account, at: now())
+        recompute()
+    }
+
+    // MARK: - On this Mac
+
+    /// The model was downloaded or removed. A fresh download offers it for
+    /// every feature that has no model yet; removing it un-sets the features
+    /// that ran on it, and nothing moves to a provider.
+    func onDeviceModelChanged() {
+        if onDevice.isReady() {
+            keyStatuses.set(.valid, for: .thisMac, at: now())
+            // A download can finish while another provider's offer is open;
+            // that offer is the user's current question and is left alone.
+            if proposal == nil { proposeSetup(for: .thisMac) }
+        } else {
+            remove(.thisMac)
+        }
+        objectWillChange.send()
         recompute()
     }
 
@@ -438,6 +466,8 @@ final class APIAndModelsViewModel: ObservableObject {
         case .server(let id):
             guard let endpoint = routing.server(id) else { return "This server was removed" }
             server = endpoint
+        case .thisMac:
+            return "On this Mac needs no key"
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
             guard !key.isEmpty else { return "Enter a key" }
             server = nil
@@ -484,7 +514,7 @@ final class APIAndModelsViewModel: ObservableObject {
         }
         let resolved: ResolvedRoute
         do {
-            resolved = try FeatureRouteResolver(routing: routing, keys: keys).resolve(route, for: feature)
+            resolved = try FeatureRouteResolver(routing: routing, keys: keys, onDevice: onDevice).resolve(route, for: feature)
         } catch {
             setMessage("Couldn't check: \(Self.reason(for: error))", on: shown)
             return false
@@ -596,12 +626,15 @@ final class APIAndModelsViewModel: ObservableObject {
         case .deepgram:
             return DeepgramLanguagePolicy.configurationError(model: route.model, language: inputLanguage())?
                 .localizedDescription
-        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .server:
+        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .server, .thisMac:
             return nil
         }
     }
 
     private func chip(for account: ProviderAccount) -> KeyChip {
+        if account == .thisMac {
+            return KeyChip(account: account, title: title(of: account), statusText: "Model downloaded", checkedAt: nil)
+        }
         if lookup(account) == .unreadable {
             return KeyChip(account: account, title: title(of: account),
                            statusText: "Couldn't read the key from the Keychain", checkedAt: nil)
@@ -620,10 +653,11 @@ final class APIAndModelsViewModel: ObservableObject {
         case .limited: return "Limited key"
         case .unreachable: return "Couldn't check"
         case .rejected(.outOfCredit): return "Out of credit or key limit reached"
+        case .rejected(.missingSpeechPermission): return "No Speech to Text access on this key"
         case .rejected(.invalidKey):
             switch account {
             case .soniox, .elevenLabs: return "Key not accepted. Regional keys aren't supported yet."
-            case .deepgram, .openRouter, .openAI, .anthropic, .server: return "Key not accepted"
+            case .deepgram, .openRouter, .openAI, .anthropic, .server, .thisMac: return "Key not accepted"
             }
         }
     }
@@ -640,6 +674,8 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func lookup(_ account: ProviderAccount) -> ProviderKeyStore.KeyLookup {
+        // Its downloaded model stands in for a key; there is no secret.
+        if account == .thisMac { return onDevice.isReady() ? .key("") : .absent }
         guard let keychainAccount = account.keychainAccount(in: routing) else { return .absent }
         return keys.lookup(account: keychainAccount)
     }
@@ -660,6 +696,8 @@ final class APIAndModelsViewModel: ObservableObject {
             case .absent: return Access(apiKey: nil, server: server)
             case .unreadable: return nil
             }
+        case .thisMac:
+            return onDevice.isReady() ? Access(apiKey: nil, server: nil) : nil
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
             guard case .key(let key) = lookup(account) else { return nil }
             return Access(apiKey: key, server: nil)
@@ -679,6 +717,7 @@ final class APIAndModelsViewModel: ObservableObject {
         case .openRouter: return .openRouter
         case .openAI: return .openAI
         case .anthropic: return .anthropic
+        case .onDevice: return .thisMac
         case .openAICompatible: return nil
         }
     }

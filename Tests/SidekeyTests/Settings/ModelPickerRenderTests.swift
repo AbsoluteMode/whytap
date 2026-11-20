@@ -1,10 +1,74 @@
 import AppKit
 import SwiftUI
+import Vision
 import XCTest
 @testable import Sidekey
 
 @MainActor
 final class ModelPickerRenderTests: XCTestCase {
+    func testShortSearchRendersAfterScrollingAndAnEmptyQueryResult() throws {
+        guard ProcessInfo.processInfo.environment["EXODIA_MODEL_PICKER_RENDER_DIR"] != nil else {
+            throw XCTSkip("Set EXODIA_MODEL_PICKER_RENDER_DIR for offscreen visual proof")
+        }
+        let hydrogen = "google/gemini-4-hydrogen"
+        let current = "google/gemini-3.8-flash"
+        let ids = (0..<70).map { "aa/model-\($0)" }
+            + (0..<25).map { "google/gemini-3.0-\($0)" }
+            + [current, hydrogen, "qwen/qwen3.8-27b"]
+            + (0..<50).map { "zz/model-\($0)" }
+        let section = PickerSection(account: .openRouter, title: "OpenRouter", options: ids.map {
+            PickerOption(model: $0, state: .new, isSelected: $0 == current, hint: nil)
+        }, refreshFailed: false)
+        let picker = ModelPicker(sections: [section], missingProviderHint: nil,
+                                 onSelect: { _, _ in }, onRefresh: {}, onAddKey: {}, onClose: {})
+        let size = NSSize(width: 440, height: 400)
+        let host = NSHostingView(rootView: picker)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+
+        func layout() {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.18))
+            host.layoutSubtreeIfNeeded()
+        }
+        func searchField(in view: NSView) -> NSSearchField? {
+            (view as? NSSearchField) ?? view.subviews.lazy.compactMap { searchField(in: $0) }.first
+        }
+        layout()
+        let field = try XCTUnwrap(searchField(in: host))
+        XCTAssertTrue(window.makeFirstResponder(field))
+        let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+
+        func renderedText(afterTyping query: String) throws -> String {
+            editor.selectAll(nil)
+            for character in query {
+                editor.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+            XCTAssertEqual(editor.string, query)
+            layout()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let request = VNRecognizeTextRequest()
+            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+            return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        }
+
+        XCTAssertTrue(try renderedText(afterTyping: "hydro").contains(hydrogen))
+        XCTAssertTrue(try renderedText(afterTyping: "googl").contains(current))
+        let empty = try renderedText(afterTyping: "zzzzz")
+        let short = try renderedText(afterTyping: "hydro")
+        XCTAssertTrue(empty.contains("No matching models"), empty)
+        XCTAssertTrue(short.contains(hydrogen), short)
+        XCTAssertFalse(window.isVisible)
+    }
+
     func testSearchResultsAndEmptyStatesInBothAppearances() throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_MODEL_PICKER_RENDER_DIR"] else {
             throw XCTSkip("Set EXODIA_MODEL_PICKER_RENDER_DIR for offscreen visual proof")

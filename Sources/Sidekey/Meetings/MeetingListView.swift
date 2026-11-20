@@ -182,8 +182,6 @@ final class MeetingListModel: ObservableObject {
 // MARK: - Overview and history
 
 /// One shared source and selection for the overview and the full archive.
-/// Future Meeting Assistant content belongs below the recent-meetings section;
-/// no placeholder or inactive preset controls are shown before it exists.
 @MainActor
 struct MeetingListView: View {
     @ObservedObject var model: MeetingListModel

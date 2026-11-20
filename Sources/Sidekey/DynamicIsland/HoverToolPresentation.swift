@@ -35,7 +35,7 @@ struct HoverToolPresentation: Equatable {
             case .level(let level): status = "\(Int((ScreenBrightnessScale.clampedLevel(level) * 100).rounded()))%"
             case nil: status = nil
             }
-        case .clipboard, .notifs, .vocab, .caseVault, .filler, .hotkeys, .notes, .monitor, .tasks, .calendar, .meetingAssistant, .translate, .subtitles, .screenshot, .quit, .settings:
+        case .clipboard, .notifs, .vocab, .caseVault, .filler, .hotkeys, .notes, .monitor, .tasks, .calendar, .translate, .subtitles, .screenshot, .quit, .settings:
             status = nil
         }
         return Self(title: HoverToolRegistry.info(for: tool).title, status: status)

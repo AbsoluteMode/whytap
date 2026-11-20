@@ -288,6 +288,14 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        ProviderBrandIconAsset.clearCacheForTesting()
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(root.appendingPathComponent("Resources/UsefulLinkIcons"))
+        defer {
+            ProviderBrandIconAsset.clearCacheForTesting()
+            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
+        }
         let suite = UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

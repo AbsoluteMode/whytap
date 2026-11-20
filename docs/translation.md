@@ -3,6 +3,7 @@
 Open **Translate** or **Subtitles** from the island's tool search. Add either
 button in **Settings → Toolbox** if you want it pinned. Each tool can have its
 own shortcut in **Settings → Hotkeys**; no existing shortcut or layout changes.
+Pressing the same shortcut again closes its window.
 In Toolbox, select either tile to use it directly in the right pane. The floating
 window and Toolbox share translation content and language preferences. Leaving
 the mini app or closing Settings cancels its work unless the floating translator
@@ -42,6 +43,11 @@ Return**). There is no separate Translate button. The second row shows the
 result, translating status or an actionable error; configuration errors open
 **API & Models** when clicked. Escape closes the palette and cancels its work.
 Long input scrolls horizontally; long output wraps and scrolls in the second row.
+
+You can also dictate into the input with Drop. The text is inserted at the
+cursor (replacing a selection) without passing through the clipboard. If the
+palette closes before the text arrives, Drop saves it in **History → Drop**
+and shows a notice.
 
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
 Russian. Right-click the palette for **Translate to**, **Copy translation**,

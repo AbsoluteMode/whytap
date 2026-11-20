@@ -8,12 +8,14 @@ struct NotifyHoverPanel: View {
     @ObservedObject var meetingNotifications: MeetingReadyNotifications
     let onBack: () -> Void
     let showsBackButton: Bool
-    @State private var showsSources = false
+    @State private var showsSources: Bool
     @State private var pendingRemoval: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     init(hub: LocalNotificationHub? = nil, supervisor: NotifyScriptSupervisor? = nil,
          meetingNotifications: MeetingReadyNotifications? = nil,
-         showsBackButton: Bool = true, onBack: @escaping () -> Void) {
+         showsBackButton: Bool = true, showsSources: Bool = false, onBack: @escaping () -> Void) {
+        _showsSources = State(initialValue: showsSources)
         self.hub = hub ?? .shared; self.supervisor = supervisor ?? .shared; self.onBack = onBack; self.showsBackButton = showsBackButton
         self.meetingNotifications = meetingNotifications ?? .shared
     }
@@ -44,7 +46,7 @@ struct NotifyHoverPanel: View {
                 sectionButton("Sources", selected: showsSources) { showsSources = true }
             }
             .padding(2)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(0.24)))
+            .background(RoundedRectangle(cornerRadius: 7).fill(IslandInk.plate(0.24)))
 
 
             if let error = hub.error ?? supervisor.error {
@@ -58,12 +60,12 @@ struct NotifyHoverPanel: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Meeting notes").font(.system(size: 11, weight: .semibold))
-                                Text("When your notes are ready").font(.system(size: 9)).foregroundStyle(.secondary)
+                                Text("When your notes are ready").font(.system(size: 9)).foregroundStyle(secondaryInk)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             Toggle("Enable meeting notes notifications", isOn: $meetingNotifications.enabled)
                                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                         }
-                        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
+                        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
                         if supervisor.sources.isEmpty {
                             empty("No other sources yet", detail: "Ask your agent to connect more notifications.")
                         }
@@ -77,8 +79,9 @@ struct NotifyHoverPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(10)
-        .foregroundStyle(Color.white)
-        .environment(\.colorScheme, .dark)
+        // The island's window is dark; in Settings the panel follows the
+        // window's appearance.
+        .foregroundStyle(IslandInk.color)
         .task(id: hub.history.first?.id) { if !showsSources { await hub.markRead() } }
         .onChange(of: showsSources) { _, value in if !value { Task { await hub.markRead() } } }
         .confirmationDialog("Remove this notification source?", isPresented: Binding(
@@ -88,12 +91,19 @@ struct NotifyHoverPanel: View {
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: { Text("Its script will stop. Notification history and script files will be kept.") }
     }
+    private var secondaryInk: AnyShapeStyle {
+        colorScheme == .light
+            ? AnyShapeStyle(MacSettingsTheme.text2)
+            : AnyShapeStyle(HierarchicalShapeStyle.secondary)
+    }
+
     private func sectionButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let unselectedInk = colorScheme == .light ? MacSettingsTheme.text2 : IslandInk.color.opacity(0.6)
+        return Button(action: action) {
             Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
-                .foregroundStyle(Color.white.opacity(selected ? 1 : 0.6))
+                .foregroundStyle(selected ? IslandInk.color : unselectedInk)
                 .frame(maxWidth: .infinity).frame(height: 23)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(selected ? 0.14 : 0)))
+                .background(RoundedRectangle(cornerRadius: 5).fill(IslandInk.color.opacity(selected ? 0.14 : 0)))
                 .contentShape(RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
@@ -103,46 +113,55 @@ struct NotifyHoverPanel: View {
         VStack(spacing: 6) {
             Image(systemName: "bell").font(.system(size: 24)).foregroundStyle(.secondary)
             Text(title).font(.system(size: 12, weight: .semibold))
-            Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(detail).font(.system(size: 11)).foregroundStyle(secondaryInk).multilineTextAlignment(.center)
         }.padding(.vertical, 14).frame(maxWidth: .infinity)
     }
-    private func historyRow(_ event: LocalNotificationEvent) -> some View {
-        Button {
-            hub.activate(event)
-        } label: {
-            HStack(spacing: 8) {
-                NotificationSourceIcon(glyph: IslandNotificationPill.resolvedGlyph(for: event),
-                                       tint: IslandNotificationPill.resolvedTint(for: event), size: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Text(event.body.isEmpty ? event.sourceName : event.body)
-                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(.secondary)
-                    .lineLimit(1).frame(maxWidth: 48)
+    /// A notification without a link or internal action is still text the
+    /// user reads. On light Settings a disabled button dimmed it to 1.7:1, so
+    /// there the row is static; the dark island keeps its dimmed inactive row.
+    // WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
+    @ViewBuilder private func historyRow(_ event: LocalNotificationEvent) -> some View {
+        Group {
+            if event.canActivate || colorScheme == .dark {
+                Button { hub.activate(event) } label: { historyRowLabel(event) }
+                    .buttonStyle(.plain)
+                    .disabled(!event.canActivate)
+            } else {
+                historyRowLabel(event)
             }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
-        .disabled(!event.canActivate)
-        .opacity(1)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("\(event.sourceName), \(event.title), \(event.body)")
         .contextMenu { Button("Copy text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(event.title + "\n" + event.body, forType: .string) } }
+    }
+    private func historyRowLabel(_ event: LocalNotificationEvent) -> some View {
+        HStack(spacing: 8) {
+            NotificationSourceIcon(glyph: IslandNotificationPill.resolvedGlyph(for: event),
+                                   tint: IslandNotificationPill.resolvedTint(for: event), size: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Text(event.body.isEmpty ? event.sourceName : event.body)
+                    .font(.system(size: 10)).foregroundStyle(secondaryInk).lineLimit(2)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(secondaryInk)
+                .lineLimit(1).frame(maxWidth: 48)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
     }
     private func sourceRow(_ source: NotifySourceStatus) -> some View {
         HStack(spacing: 7) {
             Image(systemName: "bell.badge").foregroundStyle(Color(hexCSS: source.script.tint ?? "#299FD6"))
             VStack(alignment: .leading, spacing: 2) {
                 Text(source.script.name).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                Text(source.message).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2)
+                Text(source.message).font(.system(size: 9)).foregroundStyle(secondaryInk).lineLimit(2)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Toggle("Enabled", isOn: Binding(get: { source.script.enabled }, set: { supervisor.setEnabled($0, id: source.id) }))
                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 .accessibilityLabel("Enable \(source.script.name)")
         }
-        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
+        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
         .contextMenu { Button("Remove source…", role: .destructive) { pendingRemoval = source.id } }
     }
 }

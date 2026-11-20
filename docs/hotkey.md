@@ -80,7 +80,7 @@ Modifier glyphs and their VoiceOver pronunciations live on
   `.hold` gesture; other shortcuts keep the user's current gesture choice
   (`.hold` = release-to-stop, `.tap`/Toggle = second-tap-to-stop). The gesture
   switch is live for non-Space bindings and locked on Hold for Space. All Drop
-  hint surfaces (Help, onboarding, idle chip, History strip, Dynamic Island
+  hint surfaces (Help, onboarding, idle chip, Dynamic Island
   passive hints, Toolbox caption) source the caps from
   `configuration.dropVoiceShortcut` and the gesture word from
   `configuration.normalizedDropGesture.voiceTitle`, so a rebind propagates
@@ -124,6 +124,11 @@ stored separately and can be changed in Settings independently of the key.
 |---------|-----------|-----------|
 | `.hold` | Hold | Press starts recording; release sends (grace-tail then commit). |
 | `.tap`  | Toggle | First press starts recording; second press sends. |
+
+With **Stop Drop automatically** on (Settings -> Other -> Recording), a Toggle
+Drop shortcut needs one press: recording ends when the speaker has finished,
+and a second press still stops it at once. Hold shortcuts are unchanged. See
+`.project-docs/decisions/2026-11-11-drop-auto-stop.md`.
 
 All UI surfaces that display the gesture word for voice bindings must use
 `HotkeyGesture.voiceTitle` — `.tap` maps to **"Toggle"** (not "Tap"), because
@@ -226,12 +231,14 @@ produces registrations with independent Carbon IDs, and `AppDelegate` captures
 the tool directly. Tile clicks, search and hotkeys share `HoverSlotRouter`.
 Inline panels request the existing policy-gated hover expansion; actions and
 navigation run directly. Output Language retains its Smart Mode requirement.
+Translate and Subtitles hotkeys toggle: a second press closes the window if that
+mode is visible; the other mode's hotkey switches it instead.
 The existing Meeting record row remains the primary record toggle; Record in
 the Tools section provides an optional additional shortcut for the same action.
 
 Assigned hints above tiles and named Help rows read the same configuration.
 Unassigned tools have no hint or Help hotkey row. Conflicts use the existing
-physical-key model, including the fixed Help and History-strip shortcuts.
+physical-key model, including the fixed Help shortcut.
 If macOS cannot register a binding, its saved row shows an unavailable message
 with permission/shortcut recovery guidance.
 
@@ -392,9 +399,10 @@ the source stays available. Click anywhere in a pair to choose any tool/command 
 native menu or reset that direction. Changes save immediately and preserve the
 screenshot. The physical arrow keys execute the assigned functions. Shift-arrows move the crop 10 points; Option-arrows resize it. Assign
 Move crop in an arrow menu for 1-point movement. Copy text remains available in the same assignment catalog without a new default shortcut; custom assignments are preserved. Screenshot temporarily releases
-Agent Useful Links hotkeys so it owns arrows first, including while an annotation
-text field is focused (native cursor movement). Agent registrations return after
-the editor closes, using the latest visible actions. Delete removes a selected
+Agent Useful Links hotkeys so it owns arrows first. A bare arrow assigned to
+another tool switches from a new empty label. While editing text, arrows move
+the caret. Agent registrations return after the editor closes, using the
+latest visible actions. Delete removes a selected
 annotation. Tab and Shift-Tab move between enabled toolbar/settings controls and
 the visible text move handle. With that handle focused, arrows move its label
 one point (Shift: ten), and Return reopens text editing instead of exporting.

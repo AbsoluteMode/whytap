@@ -134,7 +134,7 @@ final class DropConfigurableTests: XCTestCase {
         XCTAssertFalse(monitor.routedMonitorIsCarbon)
     }
 
-    /// Every non-Drop combo (agent close ⌥Q, hover ⌥1..5, history ⌥V, help ⌥H,
+    /// Every non-Drop combo (agent close ⌥Q, hover ⌥1..5, help ⌥H,
     /// agent text/voice combos) is registered WITHOUT `dropHoldSwallow`, so it
     /// keeps the Carbon `RegisterEventHotKey` route — no Input Monitoring, no
     /// keystroke swallow. The default `dropHoldSwallow == false` guarantees this.

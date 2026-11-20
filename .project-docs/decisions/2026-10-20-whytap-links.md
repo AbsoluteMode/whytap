@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Resources/Info.plist.template
     confirmed_at: 2026-10-20
-related: [2026-10-17-hover-tool-search.md, 2026-10-20-toolbox-mini-apps.md, 2026-10-21-whytap-link-hotkeys.md]
+related: [2026-10-17-hover-tool-search.md, 2026-10-20-toolbox-mini-apps.md, 2026-10-21-whytap-link-hotkeys.md, 2026-11-20-harness-access.md]
 ---
 
 ## Context

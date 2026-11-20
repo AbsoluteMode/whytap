@@ -12,9 +12,9 @@ final class AIFeatureTests: XCTestCase {
     // MARK: - Registry
 
     func test_features_follow_the_spec_table() {
-        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agent, .agentVoice, .meetingAssistant, .meetingAssistantAudio, .voiceSearch, .translation, .subtitlesAudio, .subtitlesTranslation])
-        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent", "Agent voice", "Meeting Assistant", "Meeting Assistant audio", "Voice search", "Translation", "Subtitles audio", "Subtitles translation"])
-        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "LLM with tools", "real-time", "LLM with tools", "real-time", "real-time", "LLM", "real-time", "LLM"])
+        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agent, .agentVoice, .voiceSearch, .translation, .subtitlesAudio, .subtitlesTranslation])
+        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles audio", "Subtitles translation"])
+        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "LLM with tools", "real-time", "real-time", "LLM", "real-time", "LLM"])
         XCTAssertEqual(AIFeature.drop(.fast), .dropFast)
         XCTAssertEqual(AIFeature.drop(.smart), .dropSmart)
     }
@@ -27,10 +27,10 @@ final class AIFeatureTests: XCTestCase {
     }
 
     func test_provider_kinds_carry_their_ui_names() {
-        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible])
+        XCTAssertEqual(AIProviderKind.allCases, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice])
         XCTAssertEqual(
             AIProviderKind.allCases.map(\.displayName),
-            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "OpenAI-compatible server"]
+            ["Soniox", "Deepgram", "ElevenLabs", "OpenRouter", "OpenAI", "Anthropic", "OpenAI-compatible server", "On this Mac"]
         )
     }
 
@@ -51,6 +51,10 @@ final class AIFeatureTests: XCTestCase {
             case .openAI: return openRouter
             case .anthropic: return anthropic
             case .openAICompatible: return openAICompatible
+            // The microphone features only: not subtitles, meetings or text.
+            case .onDevice:
+                let microphone: Set<AIFeature> = [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
+                return features.allSatisfy(microphone.contains) ? .realtimeSTT : nil
             }
         }
     }
@@ -58,7 +62,12 @@ final class AIFeatureTests: XCTestCase {
     func test_model_use_matches_the_provider_table() {
         let rows = [
             TableRow(
-                features: [.dropFast, .dropSmart, .agentVoice, .meetingAssistantAudio, .voiceSearch, .subtitlesAudio],
+                features: [.dropFast, .dropSmart, .agentVoice, .voiceSearch],
+                soniox: .realtimeSTT, deepgram: .realtimeSTT, elevenLabs: .realtimeSTT,
+                openRouter: nil, anthropic: nil, openAICompatible: .realtimeSTT
+            ),
+            TableRow(
+                features: [.subtitlesAudio],
                 soniox: .realtimeSTT, deepgram: .realtimeSTT, elevenLabs: .realtimeSTT,
                 openRouter: nil, anthropic: nil, openAICompatible: .realtimeSTT
             ),
@@ -73,13 +82,13 @@ final class AIFeatureTests: XCTestCase {
                 openRouter: .chat, anthropic: .chat, openAICompatible: .chat
             ),
             TableRow(
-                features: [.agent, .meetingAssistant],
+                features: [.agent],
                 soniox: nil, deepgram: nil, elevenLabs: nil,
                 openRouter: .chatWithTools, anthropic: .chatWithTools, openAICompatible: nil
             ),
         ]
         // Every feature sits in exactly one row, so the loop below visits all
-        // 13 active features x 7 providers = 91 cells.
+        // 11 active features x 7 providers = 77 cells.
         XCTAssertEqual(
             rows.flatMap(\.features).map(\.rawValue).sorted(),
             AIFeature.activeCases.map(\.rawValue).sorted()
@@ -97,7 +106,7 @@ final class AIFeatureTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(visited, 91)
+        XCTAssertEqual(visited, 88)
     }
 
     func test_direct_llm_providers_are_available_for_all_text_modes_only() {

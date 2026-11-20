@@ -13,17 +13,15 @@ import SwiftUI
 /// positioned over this slot by `IslandPanel`.
 struct IslandAgentWingView: View {
     let wing: IslandAgentFlowStore.Wing
-    /// Width the active face is laid out at. Owned by `IslandView`
-    /// (`activeWingFaceWidth`) so the rendered face, the black capsule's
-    /// rightward stretch, and the face offset all key off one value.
+    /// Width the active face is laid out at. The flow store supplies the
+    /// same value to this face, the capsule, and AppKit's hit zones.
     let faceWidth: CGFloat
     let activityLabel: String
     var recordingProviderBrand: TranscriptionProviderBrand? = nil
     let height: CGFloat
     let onComposingFocusChange: (Bool) -> Void
 
-    /// Horizontal padding inside recording/composing faces. Shared so
-    /// `IslandView`'s width measurement adds the exact same inset it renders.
+    /// Horizontal padding inside recording/composing faces.
     static let contentHorizontalPadding: CGFloat = 12
 
     /// Composer placeholder. Shared with `IslandView`'s width measurement so
@@ -45,10 +43,9 @@ struct IslandAgentWingView: View {
     var deliveryHitBridge: IslandHoverHitBridge? = nil
     var onRetryDelivery: () -> Void = {}
     var onDismissDeliveryFailure: () -> Void = {}
+    var onRecordingTextWidthChange: (CGFloat, String) -> Void = { _, _ in }
 
-    /// Recording placeholder. Used both for rendering and width measurement so
-    /// the face never shrinks below the initial listening state when the first
-    /// live partial is visually shorter than this word.
+    /// Shown until the first non-empty live partial.
     static let recordingPlaceholder = "listening…"
 
     /// Extra width reserved past the measured text so the caret (and one more
@@ -79,39 +76,35 @@ struct IslandAgentWingView: View {
         )
     }
 
-    /// Layout of the breathing provider mark inside the recording face.
-    /// `IslandView`'s width measurement derives its extra allowance from
-    /// these exact values (`recordingProviderMarkSlack`), so the rendered
-    /// face and the measured face can never drift apart.
+    /// Layout of the breathing provider mark inside the right wing.
     static let recordingMarkSide: CGFloat = 16
     static let recordingMarkSpacing: CGFloat = 7
     /// Slightly tighter leading inset when the mark is present, so the mark
     /// optically aligns where the bare text used to start.
     static let recordingMarkLeadingPadding: CGFloat = 10
 
-    /// Extra width the recording face needs beyond the measured text content
-    /// when the provider mark is shown: the mark + its gap, minus the leading
-    /// inset the mark variant gives back versus the text-only variant.
-    static var recordingProviderMarkSlack: CGFloat {
-        recordingMarkSide + recordingMarkSpacing
-            + recordingMarkLeadingPadding - contentHorizontalPadding
+    private static let recordingTrailingPadding: CGFloat = 1
+    private static let recordingFont = NSFont.systemFont(ofSize: IslandLiveTextTickerModel.fontSize, weight: .medium)
+    private static let recordingPlaceholderWidth = measuredRecordingTextWidth(recordingPlaceholder)
+
+    private static func measuredRecordingTextWidth(_ text: String) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: recordingFont]).width)
     }
 
-    static func recordingMeasuredContentWidth(text: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let measurementText = text.isEmpty ? recordingPlaceholder : text
-        let textWidth = ceil((measurementText as NSString).size(withAttributes: [.font: font]).width)
-        return textWidth + contentHorizontalPadding * 2
+    private static func recordingLeadingWidth(providerMarkVisible: Bool) -> CGFloat {
+        providerMarkVisible
+            ? recordingMarkLeadingPadding + recordingMarkSide + recordingMarkSpacing
+            : contentHorizontalPadding
     }
 
-    static func recordingFaceWidth(
-        text: String,
-        providerMarkVisible: Bool
-    ) -> CGFloat {
-        let markSlack = providerMarkVisible ? recordingProviderMarkSlack : 0
-        return IslandFrameLayout.adaptiveWingWidth(
-            measuredContentWidth: recordingMeasuredContentWidth(text: text) + markSlack,
-            cap: IslandFrameLayout.agentWingRecordingWidth
+    static func recordingFaceWidth(textWidth: CGFloat, providerMarkVisible: Bool) -> CGFloat {
+        let measured = recordingLeadingWidth(providerMarkVisible: providerMarkVisible) + max(
+            recordingPlaceholderWidth + contentHorizontalPadding,
+            textWidth + recordingTrailingPadding
+        )
+        return min(
+            IslandFrameLayout.agentWingRecordingWidth,
+            max(IslandFrameLayout.agentWingInCapsuleWidth, measured)
         )
     }
 
@@ -150,6 +143,8 @@ struct IslandAgentWingView: View {
         return false
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         // Each face carries `.transition(.identity)` so a face↔face swap is an
         // INSTANT replace, never a cross-dissolve. The recording→thinking swap
@@ -180,13 +175,42 @@ struct IslandAgentWingView: View {
                                 height: Self.recordingMarkSide
                             )
                     }
-                    Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
-                        .lineLimit(1)
-                        .truncationMode(.head)   // виден ХВОСТ транскрипта
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
+                    let animated = !reduceMotion && LiveTextTicker.canDrawPerCharacter(transcript)
+                    ZStack(alignment: .leading) {
+                        if !animated || transcript.isEmpty {
+                            Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
+                                .font(.system(size: IslandLiveTextTickerModel.fontSize, weight: .medium))
+                                .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
+                                .lineLimit(1)
+                                .truncationMode(.head)   // виден ХВОСТ транскрипта
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .onChange(of: transcript, initial: true) { _, text in
+                                    // The plain-text fallback draws the whole shaped line at once.
+                                    if !animated, !text.isEmpty {
+                                        onRecordingTextWidthChange(Self.measuredRecordingTextWidth(text), text)
+                                    }
+                                }
+                        }
+                        if animated {
+                            // Always in the tree while recording, so the first
+                            // words gather too; a face rebuilt mid-take shows
+                            // its text at once (`prime`). Text that needs the
+                            // whole line shaped (Arabic, Hebrew, Indic) stays
+                            // plain: drawn per character it would lose its
+                            // joining and its right-to-left order.
+                            IslandLiveTextTicker(
+                                text: transcript,
+                                visibleWidth: faceWidth - Self.recordingLeadingWidth(
+                                    providerMarkVisible: recordingProviderBrand != nil
+                                ) - Self.recordingTrailingPadding
+                            ) { width in
+                                onRecordingTextWidthChange(width, transcript)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                 }
                 .padding(
                     .leading,
@@ -194,8 +218,10 @@ struct IslandAgentWingView: View {
                         ? Self.contentHorizontalPadding
                         : Self.recordingMarkLeadingPadding
                 )
-                .padding(.trailing, Self.contentHorizontalPadding)
-                .frame(width: faceWidth, height: height)
+                .padding(.trailing, Self.recordingTrailingPadding)
+                // The outer clip moves with the revealed text. The fixed
+                // viewport starts scrolling only at the maximum width.
+                .frame(width: IslandFrameLayout.agentWingRecordingWidth, height: height)
                 .transition(.identity)
             case .acting:
                 HStack(spacing: recordingProviderBrand == nil ? 6 : Self.recordingMarkSpacing) {

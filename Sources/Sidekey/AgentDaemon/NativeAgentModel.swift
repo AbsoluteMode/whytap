@@ -22,7 +22,6 @@ struct NativeAgentModel {
     var messages: [[String: Any]]
     var http = NativeAgentHTTP()
     var usageSink: (AIUsageEvent) -> Void = AIUsageRecorder.record
-    var usageFeature: AIFeature = .agent
     var diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
     private let diagnosticTurn = UUID()
     private var diagnosticRequest = 0
@@ -102,7 +101,7 @@ struct NativeAgentModel {
         }
         diagnosticRequest += 1
         let trace = NativeAgentDiagnostics.Trace(turn: diagnosticTurn, request: diagnosticRequest,
-            provider: options.openCodeProvider, feature: usageFeature,
+            provider: options.openCodeProvider,
             pinned: options.openCodeProvider == .openRouter && options.openRouterProvider != nil,
             toolsCount: tools.count, outputLimit: outputLimit, sink: diagnosticsSink)
         let wireMessages = options.openCodeProvider == .openRouter ? [["role": "system", "content": system]] + messages : messages
@@ -114,7 +113,7 @@ struct NativeAgentModel {
                 let result = try await http.response(request)
                 response = result.object; responseStatus = result.status; responseBytes = result.bytes
             } catch {
-                usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
+                usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
                                             currency: .usd, amount: nil, basis: .unavailable))
                 throw error
             }
@@ -126,7 +125,7 @@ struct NativeAgentModel {
             case .anthropic: cost = AnthropicUsagePrices.cost(model: model, usage: usage); basis = .estimated
             case .openAI: cost = nil; basis = .unavailable
             }
-            usageSink(.init(context: .init(feature: usageFeature, account: options.openCodeProvider.account, model: model),
+            usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
                                         currency: .usd, amount: cost, basis: cost == nil ? .unavailable : basis))
             if options.openCodeProvider == .openRouter,
                let error = NativeAgentHTTP.openRouterError(in: response) { throw error }

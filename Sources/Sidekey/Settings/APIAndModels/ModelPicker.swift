@@ -75,6 +75,9 @@ struct ModelPicker: View {
                     .padding(6)
                 }
                 .frame(height: 300)
+                // A filtered list needs a fresh viewport. Reusing the lazy
+                // layout can leave even a nonempty result set visually blank.
+                .id(query)
                 .onChange(of: activeID) { _, id in
                     if let id { scroll.scrollTo(id) }
                 }
@@ -169,6 +172,12 @@ struct ModelPicker: View {
                             .foregroundStyle(MacSettingsTheme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let price = result.option.priceLabel {
+                        Text(price)
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacSettingsTheme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let hint = result.option.hint {
                         Text(hint).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
                     }
@@ -206,7 +215,8 @@ struct ModelPicker: View {
         guard let index = matches.firstIndex(where: { $0.id == activeID }) else { return nil }
         let result = matches[index]
         let date = result.option.dateLabel.map { ", \($0)" } ?? ""
-        return "\(result.providerTitle), \(result.option.model)\(date), \(index + 1) of \(matches.count)"
+        let price = result.option.priceLabel.map { ", \($0)" } ?? ""
+        return "\(result.providerTitle), \(result.option.model)\(date)\(price), \(index + 1) of \(matches.count)"
     }
 
     private func move(_ offset: Int) {

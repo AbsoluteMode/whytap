@@ -8,15 +8,12 @@ struct ToolboxDeps {
     var toggleDropMode: () -> TranscriptionMode = { .fast }
     /// Current Drop transcription mode.
     var currentDropMode: () -> TranscriptionMode = { .fast }
-    /// Open the floating clipboard history strip.
-    var openClipboard: () -> Void = {}
     var historyCards: (HistoryStripMode) async -> [HistoryStripCard] = { _ in [] }
     var copyHistoryCard: (HistoryStripCard) -> Void = { _ in }
     /// Confirms and deletes a clipboard row; `true` when the list must reload.
     var deleteHistoryCard: (HistoryStripCard) async -> Bool = { _ in false }
     var toggleMeetingRecord: () -> Void = {}
     var openScreenshot: () -> Void = {}
-    var openMeetingAssistant: () -> Void = {}
     /// Show an inline tool in this process, without LaunchServices scheme lookup.
     var openHoverPanel: (HoverInlinePanel) -> Void = { _ in }
     var quitApplication: () -> Void = {}

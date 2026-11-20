@@ -21,6 +21,9 @@ final class MeetingsContentController: NSViewController {
     private let source: MeetingsSidebarSource
     private let markdownProvider: @MainActor (UUID) async throws -> String?
     private let transcriptProvider: @MainActor (UUID) async throws -> [TranscriptSegment]?
+    /// Set by the coordinator: the transcript kept for a meeting whose note is
+    /// missing, and the way to write that note again.
+    var notesRecovery: MeetingNotesRecovery?
     private let refreshHandler: (@MainActor (UUID) async -> Void)?
     /// Deletes one meeting for good; `false` means it could not be deleted.
     /// `nil` hides the feature in surfaces that cannot delete.
@@ -228,6 +231,9 @@ final class MeetingsContentController: NSViewController {
         refreshAllOnShow()
     }
 
+    /// A note open for editing: opening another meeting would drop the edit.
+    var isEditingNote: Bool { detailView.isEditing }
+
     /// Open a specific meeting straight in the editor (Dynamic Island Notes tile,
     /// menu entries). Refreshes the list underneath so back lands on fresh data.
     func selectMeeting(id: UUID) {
@@ -339,7 +345,7 @@ final class MeetingsContentController: NSViewController {
                     await applyDetail(id: id, markdown: snapshot.markdown, transcript: snapshot.transcript,
                         version: snapshot.version, title: snapshot.title, preservingTab: preservingTab)
                 } else {
-                    detailView.loadUnavailableMeeting(id: id, message: unavailableMessage(for: id))
+                    await showUnavailable(id: id, generation: generation, preservingTab: preservingTab)
                 }
                 return
             }
@@ -349,11 +355,7 @@ final class MeetingsContentController: NSViewController {
                     log: Self.log, type: .error,
                     id.uuidString
                 )
-                guard mayApplyDetailLoad(id: id, generation: generation) else { return }
-                detailView.loadUnavailableMeeting(
-                    id: id,
-                    message: unavailableMessage(for: id)
-                )
+                await showUnavailable(id: id, generation: generation, preservingTab: preservingTab)
                 return
             }
             guard mayApplyDetailLoad(id: id, generation: generation) else { return }
@@ -421,6 +423,31 @@ final class MeetingsContentController: NSViewController {
         return detailLoadGeneration
     }
 
+    /// A meeting without a note: its status message, plus the kept transcript
+    /// and Retry notes when a failed attempt left one.
+    private func showUnavailable(id: UUID, generation: UInt64, preservingTab: Bool = false) async {
+        let kept = (try? await notesRecovery?.keptTranscript(id)) ?? nil
+        guard mayApplyDetailLoad(id: id, generation: generation) else { return }
+        let meta = sidebarController.meetings.first { $0.id == id }
+        let hasKept = kept?.isEmpty == false
+        let canRetry = hasKept && meta?.progressStatus == .failed
+        detailView.loadUnavailableMeeting(
+            id: id,
+            message: hasKept && meta?.progressStatus == .failed
+                ? (meta?.failureReason?.nilIfBlank ?? MeetingNotesFailure.transcriptKept)
+                : unavailableMessage(for: id),
+            transcript: kept,
+            onRetryNotes: canRetry ? { [weak self] in
+                guard let self, let recovery = self.notesRecovery else { return }
+                self.detailView.loadUnavailableMeeting(
+                    id: id, message: "Writing the notes from the saved transcript…", isLoading: true, transcript: kept
+                )
+                Task { @MainActor in await recovery.retryNotes(id) }
+            } : nil,
+            preservingTab: preservingTab
+        )
+    }
+
     private func unavailableMessage(for id: UUID) -> String {
         guard let meta = sidebarController.meetings.first(where: { $0.id == id }) else {
             return "This meeting's note is not available yet."
@@ -483,5 +510,17 @@ extension MeetingsContentController: MeetingsSidebarDelegate {
     private func deletionTitle(for id: UUID) -> String {
         let title = sidebarController.meetings.first { $0.id == id }?.title
         return (title?.isEmpty == false) ? title! : "Untitled"
+    }
+}
+
+/// How a notes window reaches a transcript kept without a note.
+struct MeetingNotesRecovery {
+    let keptTranscript: @MainActor (UUID) async throws -> [TranscriptSegment]?
+    let retryNotes: @MainActor (UUID) async -> Void
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self
     }
 }

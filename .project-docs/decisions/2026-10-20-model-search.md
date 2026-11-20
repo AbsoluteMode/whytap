@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/APIAndModels/ModelPicker.swift
     confirmed_at: 2026-10-20
-related: [2026-10-21-provider-key-tiles.md]
+related: [2026-10-21-provider-key-tiles.md, 2026-11-17-openrouter-model-prices.md, 2026-11-20-elevenlabs-scribe-v3.md]
 ---
 
 ## Context

@@ -31,6 +31,10 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
     @Published private(set) var promptSerial = 0
     @Published private(set) var isEditingMinutes = false
     @Published private(set) var selectedTimedMinutes = CaseVaultPayload.defaultTimedApprovalMinutes
+    /// The harness the user just allowed, shown for `connectedDuration` when
+    /// no other prompt is waiting.
+    @Published private(set) var connected: HarnessClient?
+    static let connectedDuration: TimeInterval = 1.4
 
     private struct Entry {
         let id: UUID
@@ -45,6 +49,7 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
     private var queue: [Entry] = []
     private var cancelArming: (() -> Void)?
     private var cancelTimeout: (() -> Void)?
+    private var cancelConnected: (() -> Void)?
     private var tapRunning = false
 
     init(keyTap: CaseApprovalKeyIntercepting? = nil,
@@ -119,6 +124,7 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
             allowWaiting(coveredBy: entry.request)
         }
         if queue.isEmpty {
+            if outcome == .allow, let harness = entry.request.harness { showConnected(harness) }
             current = nil
             isArmed = false
             deadline = nil
@@ -126,6 +132,15 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
             stopTap()
         } else {
             showNext()
+        }
+    }
+
+    private func showConnected(_ harness: HarnessClient) {
+        cancelConnected?()
+        connected = harness
+        cancelConnected = schedule(Self.connectedDuration) { [weak self] in
+            self?.connected = nil
+            self?.cancelConnected = nil
         }
     }
 
@@ -183,6 +198,10 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
     private func showNext() {
         guard !queue.isEmpty else { return }
         let entry = queue.removeFirst()
+        // A new question replaces the confirmation of the previous answer.
+        cancelConnected?()
+        cancelConnected = nil
+        connected = nil
         active = entry
         let shown = now()
         isArmed = false
@@ -239,5 +258,21 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
         cancelTimeout?()
         cancelArming = nil
         cancelTimeout = nil
+    }
+}
+
+/// The same island prompt and queue ask whether a coding harness may use
+/// Whytap: one prompt at a time, the same quiet-keyboard arming and timeout.
+// WHY: .project-docs/decisions/2026-11-20-harness-access.md
+extension CaseApprovalController: HarnessAccessPresenting {
+    func requestAccess(for client: HarnessClient) async -> HarnessAccessOutcome {
+        var request = CaseApprovalRequest(
+            appName: client.name, projectName: "", keyNames: [], command: "", timedMinutes: 0)
+        request.harness = client
+        switch await requestApproval(request) {
+        case .allow, .allowTimed: return .allow
+        case .deny: return .deny
+        case .timedOut: return .timedOut
+        }
     }
 }

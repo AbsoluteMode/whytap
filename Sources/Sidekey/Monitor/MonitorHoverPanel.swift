@@ -56,7 +56,7 @@ struct MonitorHoverPanel: View {
             }
             .frame(height: 26)
 
-            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(IslandInk.color.opacity(0.12)).frame(height: 1)
 
             if let error = store.dashboardError {
                 Text(error)
@@ -122,8 +122,8 @@ struct MonitorHoverPanel: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
+            .background(IslandInk.color.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)

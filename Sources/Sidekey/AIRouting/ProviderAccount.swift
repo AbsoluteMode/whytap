@@ -12,6 +12,9 @@ enum ProviderAccount: Hashable, Codable, Sendable {
     case openRouter
     case openAI
     case anthropic
+    /// The speech model downloaded to this Mac. It has no key: the model's
+    /// files are its credential (`OnDeviceSpeechReadiness`).
+    case thisMac
     case server(UUID)
 
     private static let serverPrefix = "server:"
@@ -24,11 +27,12 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case .openRouter: return .openRouter
         case .openAI: return .openAI
         case .anthropic: return .anthropic
+        case .thisMac: return .onDevice
         case .server: return .openAICompatible
         }
     }
 
-    /// `"soniox"`, `"deepgram"`, `"elevenLabs"`, `"openRouter"`, `"anthropic"` or
+    /// `"soniox"`, `"deepgram"`, `"elevenLabs"`, `"openRouter"`, `"anthropic"`, `"thisMac"` or
     /// `"server:<uuid, lower case>"`.
     var storageID: String {
         switch self {
@@ -38,6 +42,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case .openRouter: return "openRouter"
         case .openAI: return "openAI"
         case .anthropic: return "anthropic"
+        case .thisMac: return "thisMac"
         case .server(let id): return Self.serverPrefix + id.uuidString.lowercased()
         }
     }
@@ -52,6 +57,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
         case "openRouter": parsed = .openRouter
         case "openAI": parsed = .openAI
         case "anthropic": parsed = .anthropic
+        case "thisMac": parsed = .thisMac
         default:
             guard storageID.hasPrefix(Self.serverPrefix),
                   let id = UUID(uuidString: String(storageID.dropFirst(Self.serverPrefix.count)))

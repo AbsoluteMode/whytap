@@ -9,7 +9,6 @@
     "generated": ["AGENTS.md", "CLAUDE.md"]
   },
   "commands": {
-    "meeting_spaces": ["python3", "scripts/meeting-space.py", "list"],
     "discover": ["python3", "scripts/customize.py", "discover", "--json"],
     "doctor": ["python3", "scripts/customize.py", "doctor", "--json"],
     "build": ["python3", "scripts/customize.py", "build"],
@@ -32,12 +31,6 @@
     "Scaffold commands create drafts; they do not change the running app."
   ],
   "change_kinds": {
-    "meeting_assistant": {
-      "guide": "docs/meeting-assistant.md",
-      "entry_points": ["Sources/Sidekey/MeetingAssistant/MeetingSpace.swift", "Sources/Sidekey/MeetingAssistant/MeetingAssistantModel.swift", "Sources/Sidekey/MeetingAssistant/MeetingAssistantRunner.swift", "Sources/Sidekey/MeetingAssistant/MeetingAssistantAudio.swift", "scripts/meeting-space.py"],
-      "focused_test_filter": "MeetingAssistant|MeetingSpace",
-      "contract": "Explicit system audio and selected model routes; read-only repository scopes enforced at each file open; in-memory turns and images; coding agents create Spaces, people select them."
-    },
     "hover": {
       "guide": "docs/customization/hover-tools.md",
       "entry_points": ["Sources/Sidekey/Settings/HoverTool.swift", "Sources/Sidekey/Settings/HoverLayoutStore.swift", "Sources/Sidekey/DynamicIsland/HoverSlotRouter.swift", "Sources/Sidekey/DynamicIsland/IslandActions.swift", "Sources/Sidekey/DynamicIsland/IslandHoverPanelControl.swift", "Sources/Sidekey/DynamicIsland/HoverToolPresentation.swift", "Sources/Sidekey/DynamicIsland/IslandView.swift", "Sources/Sidekey/Settings/ToolboxSettingsView.swift", "Sources/Sidekey/AppDelegate.swift"],

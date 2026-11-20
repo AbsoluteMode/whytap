@@ -34,14 +34,20 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     case meetingNotes
     case agent
     case agentVoice
-    case meetingAssistant
-    case meetingAssistantAudio
+    // Historical usage IDs only; no runtime, settings row or assignable route.
+    case retiredMeetingText = "meetingAssistant"
+    case retiredMeetingAudio = "meetingAssistantAudio"
     case voiceSearch
     case translation
     case subtitlesAudio
     case subtitlesTranslation
 
-    var isActive: Bool { self != .dropSmartDecision }
+    var isActive: Bool {
+        switch self {
+        case .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio: return false
+        default: return true
+        }
+    }
     static var activeCases: [AIFeature] { allCases.filter(\.isActive) }
 
     var title: String {
@@ -54,8 +60,8 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .meetingNotes: return "Meeting notes"
         case .agent: return "Agent"
         case .agentVoice: return "Agent voice"
-        case .meetingAssistant: return "Meeting Assistant"
-        case .meetingAssistantAudio: return "Meeting Assistant audio"
+        case .retiredMeetingText: return "Retired meeting text"
+        case .retiredMeetingAudio: return "Retired meeting audio"
         case .voiceSearch: return "Voice search"
         case .translation: return "Translation"
         case .subtitlesAudio: return "Subtitles audio"
@@ -65,10 +71,10 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
 
     var mode: AIFeatureMode {
         switch self {
-        case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return .realtime
+        case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .retiredMeetingAudio: return .realtime
         case .meetings: return .recorded
         case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return .llm
-        case .agent, .meetingAssistant: return .llmWithTools
+        case .agent, .retiredMeetingText: return .llmWithTools
         case .dropSmartDecision: return .decision
         }
     }
@@ -97,28 +103,32 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         case .realtime:
             switch kind {
             case .soniox, .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
+            // The microphone features only: subtitles read system audio
+            // through a provider adapter, which the on-device model has none of.
+            case .onDevice: return self == .subtitlesAudio ? nil : .realtimeSTT
             case .openRouter, .openAI, .anthropic: return nil
             }
         case .recorded:
             switch kind {
             case .soniox: return .asyncSTT
             case .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
-            case .openRouter, .openAI, .anthropic: return nil
+            // Meetings need speaker labels, which come from the provider.
+            case .openRouter, .openAI, .anthropic, .onDevice: return nil
             }
         case .llm:
             switch kind {
             case .openRouter, .openAI, .anthropic, .openAICompatible: return .chat
-            case .soniox, .deepgram, .elevenLabs: return nil
+            case .soniox, .deepgram, .elevenLabs, .onDevice: return nil
             }
         case .decision:
             switch kind {
             case .openRouter, .openAI: return .decision
-            case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible: return nil
+            case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible, .onDevice: return nil
             }
         case .llmWithTools:
             switch kind {
             case .openRouter, .openAI, .anthropic: return .chatWithTools
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible: return nil
+            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return nil
             }
         }
     }
@@ -149,6 +159,8 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
     /// Anthropic's own Messages API and OpenCode's `anthropic` provider.
     case anthropic
     case openAICompatible
+    /// Speech recognition by a model downloaded to this Mac: no key, no network.
+    case onDevice
 
     var displayName: String {
         switch self {
@@ -159,6 +171,7 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
         case .openAI: return "OpenAI"
         case .anthropic: return "Anthropic"
         case .openAICompatible: return "OpenAI-compatible server"
+        case .onDevice: return "On this Mac"
         }
     }
 }

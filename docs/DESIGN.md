@@ -1,5 +1,17 @@
 # Interface decisions
 
+## Recording wing width — 2026-11-16
+
+Drop and agent voice open a compact wing fitted to `listening…` and the
+provider mark. The right edge follows the width of the letters as they appear
+and holds its furthest position through pauses and shorter revisions. At the
+width limit the line scrolls to keep its newest letters visible. The letters
+and their particles use the space up to the capsule edge, with a 1 pt inset.
+During a correction, the reader's attention stays on the word being dictated.
+Only first reveals at the advancing edge use particles. Earlier corrections
+appear legibly in place. In a full wing, any scroll adjustment tapers to zero
+at the current word. Reduce Motion fits each visible transcript update immediately.
+
 ## Agent voice model mark — 2026-10-22
 
 The user speaks to the agent and wants to recognize the selected model's author.
@@ -260,7 +272,7 @@ The chosen direction is the user's tile-to-inline-form request.
   captures clicks or shifts fields/buttons. Existing keys are never read back.
   A failed Tavily deletion uses "Couldn’t remove key" in the same brief notice,
   so a storage failure is not described as a rejected credential.
-  Add-key entry points in Models/API hints open this same API keys surface.
+  Add-key entry points in Models open this same API keys surface.
 - OpenAI and Anthropic are ordinary LLM providers for all text modes. Adding a
   key never assigns routes silently; model selection retains its own synthetic
   check. Why: the user rejected limiting API setup by individual features.
@@ -299,6 +311,14 @@ The closed control retains the shared 30 pt popup label and existing widths.
   UTC day in the user's date locale; dates participate in search announcements.
   Refresh older metadata caches once on opening, retaining offline results.
   No new controls or motion; the existing full-row feedback covers the date.
+- Show OpenRouter's list price as one more secondary line under the date:
+  `$1.25 in / $10 out per 1M tokens`, or `Free` when the catalog states zero for
+  both sides. Why: the cost of a model was invisible at the moment of choosing
+  it. Per-million units match provider price pages; two decimals from $1, three
+  significant digits below, so a small price never reads as zero. An unknown,
+  malformed or router (-1) price has no line and no placeholder. Other providers
+  show none: their catalogs carry no prices. The line joins the search
+  announcement but is not searchable text.
   Sources: [Anthropic](https://platform.claude.com/docs/en/api/models/list),
   [OpenAI](https://developers.openai.com/api/reference/resources/models),
   [OpenRouter](https://openrouter.ai/docs/guides/overview/models#model-object-schema).
@@ -307,14 +327,15 @@ The closed control retains the shared 30 pt popup label and existing widths.
   including the plain `nova-3` alias. Soniox and ElevenLabs omit release dates
   in their model API schemas, so shipped stable IDs use an exact-ID release
   registry with checked official launch sources: Soniox `stt-rt-v5` 2026-06-16,
-  `stt-async-v5` 2026-06-11; ElevenLabs `scribe_v2_realtime` 2025-11-11,
-  `scribe_v2` 2026-01-09. They show `Released`, including offline and catalog-less
+  `stt-async-v5` 2026-06-11; ElevenLabs `scribe_v3_live` and `scribe_v3` 2026-11-10
+  (they replaced `scribe_v2_realtime` 2025-11-11 and `scribe_v2` 2026-01-09). They show `Released`, including offline and catalog-less
   states. Unknown models/aliases inherit no date. Why: speech models need the
   same recency context without fabricating API fields or release dates.
   Sources: [Deepgram model metadata](https://developers.deepgram.com/guides/fundamentals/model-metadata),
   [Soniox model changelog](https://soniox.com/docs/stt/models),
   [Scribe v2 Realtime launch](https://elevenlabs.io/blog/introducing-scribe-v2-realtime),
-  [Scribe v2 launch](https://elevenlabs.io/blog/introducing-scribe-v2).
+  [Scribe v2 launch](https://elevenlabs.io/blog/introducing-scribe-v2),
+  [Scribe v3 launch](https://elevenlabs.io/blog/scribe-v3).
 - The native search field owns normal editing and IME composition. Up/Down
   moves through enabled results and scrolls them into view; Return selects.
   Escape clears the query, then closes; outside click dismisses. Focus returns
@@ -369,9 +390,13 @@ installed-app acceptance; no real update is started by the tests.
 ## API & Models costs — 2026-10-20
 
 The user chose four tabs in one surface: API keys, Models, Costs, API hints.
-Costs first shows the nearby period, then used features with one Price column;
-USD and ElevenLabs credit values retain explicit units, including both lines
-when a feature used both. Model details appear on the feature. Why: compare
+Costs first shows the nearby period, then the total, then used features with
+one Price column; USD and ElevenLabs credit values retain explicit units,
+including both lines when a feature used both. Model details appear on the
+feature: hovering anywhere on its row opens them, a click pins them, and the
+detail's header repeats the feature's total (2026-11-19, on the user's
+request: the detail used to open only from the name at the row's left edge,
+and the total sat under the list). Why: compare
 feature expenses without a permanent model-level grid or scattered period control.
 
 - One existing bgCard surface, 14 pt corners, shared underlined tabs and quiet
@@ -558,7 +583,7 @@ checkmark is recognizable without a visible Allowed label.
 ## Meetings overview — 2026-10-20
 
 The user approved the Overview composition: recent meetings first, History
-beside the screen title, and room below for future Meeting Assistant presets.
+beside the screen title.
 The person comes to reopen a recent note; first they see the newest five
 meetings, then they can open a note or browse the complete history.
 
@@ -571,9 +596,6 @@ meetings, then they can open a note or browse the complete history.
   scrolling. Back from a note returns to the page that opened it; the Settings
   Meetings entry and direct note links use the overview as their parent.
   Why: browsing older notes must not repeatedly reset the user's context.
-- Reserve extension through the overview's vertical section layout, without
-  empty Meeting Assistant panels, preset settings or new persistence yet.
-  Why: unfinished controls would imply that the assistant is already available.
 - Use the current adaptive Settings tokens and the system font. Screen title is
   23 pt semibold, section headings 13 pt semibold, titles 13 pt medium, dates
   and statuses 12 pt. Titles wrap to two lines; full text is available through
@@ -693,10 +715,11 @@ in SwiftUI; the native app does not acquire a React runtime or npm dependencies.
 
 ### Embedded surfaces
 
-The island stays dark. Toolbox embeds actual island editors inside explicitly
-dark previews; the Toolbox navigation, captions and catalog follow the Settings
-theme. This keeps the preview faithful and prevents white overlay text from
-disappearing on a light settings surface. API hints and key/model sheets follow
+The island stays dark. Toolbox embeds actual island editors on the Settings
+background, like every other tool pane (user decision 2026-11-20: one
+background for all tool settings). Their foreground is `IslandInk`: white in
+the always-dark island, near-black on light Settings, so overlay text does not
+disappear on a light surface. The earlier explicitly dark preview cards are gone. API hints and key/model sheets follow
 the parent window's system appearance.
 
 ### Verification and hypotheses
@@ -1064,6 +1087,8 @@ Later query parts that start a key-name word add to a partial match; parts of th
   280pt full-text bubble left of the drawer, placed like the History preview:
   parent title, full title, full status and open subtask count. It is
   non-interactive and clears on leave, inline editing and panel changes.
+  Use an opaque charcoal surface for the bubble so its white text stays
+  legible over light and dark windows behind the island.
   User feedback 2026-11-03: hover must show the whole text, as in History.
 
 ## Compact To-do in hover — 2026-10-20
@@ -1131,8 +1156,7 @@ The full target has a 6% white resting fill, 15% hover fill, 23% pressed fill
 and a separate 1.5pt focus outline. Disabled buttons use 42% opacity and no
 active feedback or native pointer registration. Navigation waits for mouse-up;
 dragging out, Escape, hiding the panel, a changed page/destination or a disabled
-button cancels the old press. Root tool/search targets and Meeting Assistant
-cannot dispatch through the submenu surface. Reduce Motion removes the brief
+button cancels the old press. Root tool/search targets cannot dispatch through the submenu surface. Reduce Motion removes the brief
 hover color transition; target geometry never animates.
 
 Synthetic invisible-panel checks exercise the actual To-do and Monitor labels
@@ -1409,15 +1433,32 @@ supersedes the former window presentation. See
   reduced motion follows the existing shell without extra movement. Real key
   acceptance and native Screen Recording remain installed-app checks.
 
+## API hints: rows by category (2026-11-19)
+
+- Replace the grid of large offer cards with rows grouped under Speech to
+  text, Language models and Web search. Reason: the user wanted offers compared
+  within one job, and cards already scrolled at five offers.
+- A row is two lines high: logo, provider over what it takes to start, the
+  allowance over its period, and Get offer. No chips: "Paid plan" and "Card
+  required" use the warning color, "No card needed" stays secondary.
+- Details (conditions, that offer's check date) open in a popover on the
+  trailing side of Get offer on hover or keyboard focus. Reason: the row has a
+  button to click, so unlike Costs the popover must not sit over the control
+  or the row being read.
+- The header carries "Reviewed monthly · Last checked <newest date>".
+- Verified offscreen only (light/dark, 440/560/760 pt, both scroll ends). The
+  popover's placement and hover timing need a check in the installed app.
+
 ## API hints: Tavily search (2026-10-22)
 
 - Keep the existing offer cards, typography and semantic colors; add Tavily as
   web search for Agent with a neutral globe symbol. Reason: a search API should
   not appear as another LLM model.
 - Lay out all offers dynamically: two columns from 560pt, with the odd final
-  card spanning both; below 560pt use one column. Keep the offer grid scrollable
-  and footer controls outside it. Reason: five offers must not leave an empty
-  half-row or hide the last provider.
+  card spanning both; below 560pt use one column. Keep the offer grid scrollable.
+  Reason: five offers must not leave an empty half-row or hide the last provider.
+  The tab has no footer since 2026-11-19 (user request): no explanatory lines
+  and no Add API key button under the offers.
 - Show verification dates on each card: existing offers retain October 19, Tavily
   uses October 22. Reason: adding one verified offer does not reverify the rest.
 - Point all key setup, including Tavily, to API & Models → API keys.
@@ -1431,116 +1472,6 @@ supersedes the former window presentation. See
   6.62:1 light and 6.84:1 dark using the shared semantic tokens.
 
 
-## Meeting Assistant — approved native pilot, 2026-10-23
-
-The user approved the isolated native design and requested a live pilot inside
-Whytap. Preserve its 354pt right column, slightly dimmed material and single thin
-outline. The project name/arrow selector hugs its content; there is one common
-close control and a plain input with a left caret. Questions appear newest first,
-with older items lower/fainter; Answers is a separate bounded list. Long replies
-scroll inside their body and emphasize the conclusion and important spans.
-
-Two contextual continuations and a free clarification input continue the same
-conversation. Collapse preserves the branch and exposes Return answer. Escape
-in a field releases focus and preserves screenshots. Only editors acquire key
-status, so reading/clicking the module keeps the meeting app's keyboard focus.
-
-Attach screen sits beside the main input. Up to six independently removable
-thumbnails sit directly below it and scroll horizontally. Images stay in memory;
-success removes submitted images, failure/cancellation preserves them for retry.
-A compact explicit Listen/Stop action makes capture state visible. Empty catalog,
-setup errors and listening failures have visible explanations and repair access.
-
-Creation/editing of Spaces belongs to coding agents. The module only chooses
-ready Spaces. A malformed active manifest invalidates context instead of silently
-reusing its former scope. The pilot uses the existing screenshot-protection
-setting. Real sharing exclusion and native call interactions are installed
-acceptance; offscreen renders and test checks do not establish those guarantees.
-
-
-## Meeting Assistant — per-meeting hover magic, 2026-10-24
-
-The user chose a magic icon right of the upper recording timer, replacing the
-proposed separate switch row before it shipped. Reason: this is a secondary
-meeting action and should sit beside recording rather than consume drawer space.
-Keep the approved right-hand answer module and tool/search show-only behavior.
-A configured Space and both routes expose the icon during Notes recording;
-an explicitly active Assistant session also exposes it when Notes is off.
-Only the controls hover shows it; agent, nudge, approval and other inline panels
-preempt it. Hover reveals a control, never capture permission.
-
-The wand is 15pt in a fixed 28pt target, within a 36pt trailing extension of the
-same black island. This is a temporary secondary-action wing: the base compact
-island and drawer retain matched compactWidth, while the visible upper right
-edge extends by 36pt. This geometry is an implementation assumption for the
-latest requested placement, not a separate user approval of a wider drawer.
-The timer, Stop and drawer keep their original positions and height. Native hit routing claims exactly this visible extension while shown.
-The measured first-mouse target is only the icon, with separate hover, pressed,
-keyboard-focus and disabled feedback. Its overlay owns a hover signal that holds an already
-open drawer without reopening it after collapse. Off is white at 52% opacity; listening
-is white/ice blue with a soft blue halo. Connecting uses a static partial outline
-and stays cancellable; stopping dims and disables the control. The active halo
-breathes gently over 3.2s without moving or scaling the glyph/target. Reduce Motion
-keeps the glow static and stops timeline frame updates. White icon on black at
-52% alpha has 5.66:1 contrast; the bright active core exceeds 3:1 throughout.
-
-One in-memory model backs icon and module Listen/Stop. Stop preserves answers;
-close/sleep/restart stop listening and no later meeting auto-enables it. Startup
-and hover refresh metadata without opening a panel, accessing keys or audio.
-A separate metadata-only probe stops an observed recognized call after 15s of
-inactivity; brief reconnects cancel the stop. Manual unrecognized calls require
-explicit Stop. Long mute/seamless call switches remain heuristic limitations.
-
-Verification uses component-composition darkAqua fixtures at 310/312/354pt:
-the live recording slot, real IslandCameraSurface with its trailing extension,
-four magic phases, hover/press/focus/disabled drawing surfaces and unchanged
-drawer components. These are offscreen compositions, not whole-window or
-physical pointer/extension-animation evidence. Reduced-motion fixture uses the live static
-branch. Pure geometry and fake-provider tests cover first mouse, scoped press
-cancellation, context end, preparation and repeated/cancelled starts. Physical
-pointer/keyboard/VoiceOver, native glass, actual calls and screen sharing remain
-installed acceptance; offscreen evidence does not establish those guarantees.
-
-
-## Meeting Assistant — automatic listening, 2026-10-26
-
-Superseded later on the same day by the user's Beta/default-off request below.
-
-The user clarified that configuring models enables Assistant on every meeting.
-This supersedes the explicit Listen/Stop and no-auto-join choices above. Both
-routes and a ready Space enable a passive meeting observer. It starts system
-audio on a recognized call without opening the answers window. No extra hotkey
-or persistent switch is added. The existing wand overrides only the current
-meeting; its off state remains reachable during a detected call without Notes.
-
-The module keeps the approved layout, input, attachments and answer controls.
-A secondary noninteractive label shows connecting, listening or stopping;
-the redundant Listen/Stop button is removed. Idle text says «Можно задать вопрос».
-Closing answers keeps capture active; sleep/quit and missing required routes
-stop it. Errors pause automatic attempts for that meeting, with explicit retry
-through the wand. Reuse existing hover/pressed/focus/disabled feedback without
-adding controls or animation. Native offscreen fixtures cover ready, connecting,
-listening, stopping, populated and short-screen layouts in light/dark themes.
-Physical call/hover/keyboard acceptance remains in the installed app.
-
-## Meeting Assistant — Beta and explicit meeting enable, 2026-10-26
-
-Every meeting starts with listening off, even when routes and a Space are ready.
-Only the existing wand enables audio and automatic question extraction for the
-current meeting. Starting a later meeting, opening answers, a catalog refresh,
-wake and a failed connection never re-enable it. Reason: the user observed
-unexpected usage and explicitly requested default-off behavior.
-
-Keep the existing fixed wand target and hover/pressed/focus/disabled states.
-The API & Models group says “Meeting Assistant (Beta)”; a quiet noninteractive
-“Beta” sits beside the Space selector without adding a control or moving the
-picker. The tool description and wand help also identify Beta. This keeps the
-approved native module and the user's two-action key form intact.
-
-Native offscreen light/dark fixtures cover empty/ready/connecting/listening/
-stopping/populated/short-screen states. No new pointer or keyboard interaction
-is introduced. Real-call behavior remains installed acceptance; fake audio and
-providers verify that inactive meetings make no capture or extraction requests.
 
 ## Quick Translate: two text rows — 2026-10-26
 

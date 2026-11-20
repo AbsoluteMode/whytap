@@ -14,22 +14,29 @@ struct ProviderKeyTiles: View {
     @StateObject private var tavily: TavilySettings
     let onRemoveFailure: () -> Void
     let onSaveResult: (Bool) -> Void
+    /// Why a key was not saved, after `onSaveResult(false)`.
+    let onSaveFailure: (String) -> Void
     @State private var expanded: Target?
     @State private var busy = false
     @FocusState private var focused: Target?
 
     init(viewModel: APIAndModelsViewModel, initiallyExpanded: Target? = nil,
          tavily: TavilySettings? = nil, onRemoveFailure: @escaping () -> Void = {},
-         onSaveResult: @escaping (Bool) -> Void = { _ in }) {
+         onSaveResult: @escaping (Bool) -> Void = { _ in },
+         onSaveFailure: @escaping (String) -> Void = { _ in }) {
         self.viewModel = viewModel
         self.onSaveResult = onSaveResult
+        self.onSaveFailure = onSaveFailure
         self.onRemoveFailure = onRemoveFailure
         _tavily = StateObject(wrappedValue: tavily ?? viewModel.makeTavilySettings())
         _expanded = State(initialValue: initiallyExpanded)
     }
 
     private var targets: [Target] {
-        AIProviderKind.allCases.map(Target.provider) + [.tavily]
+        // On this Mac is not a key: it has its own card above the tiles.
+        AIProviderKind.allCases
+            .filter { $0 != .onDevice }
+            .map(Target.provider) + [.tavily]
             + viewModel.chips.compactMap { chip in
                 if case .server = chip.account { return .server(chip.account) }
                 return nil
@@ -45,7 +52,8 @@ struct ProviderKeyTiles: View {
                     TavilyKeyForm(settings: tavily, onSaveResult: onSaveResult, onRemoveFailure: onRemoveFailure, onClose: close)
                 } else if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
-                                onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult, onClose: close)
+                                onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
+                                onSaveFailure: onSaveFailure, onClose: close)
                     .id(expanded)
                 }
             }
@@ -71,6 +79,7 @@ struct ProviderKeyTiles: View {
                 .overlay {
                     VStack(spacing: 9) {
                         if let provider { ProviderKindIcon(kind: provider, size: 28) }
+                        else if target == .tavily { ProviderKindIcon(assetName: "tavily", size: 28) }
                         else { Image(systemName: "globe").font(.system(size: 28)).frame(width: 28, height: 28).accessibilityHidden(true) }
                         Text(title)
                             .font(.system(size: 13, weight: .semibold))
@@ -172,7 +181,7 @@ private struct ProviderGrid: Layout {
 extension AIProviderKind {
     var keyTileDetail: String {
         switch self {
-        case .soniox, .deepgram, .elevenLabs: return "Speech recognition"
+        case .soniox, .deepgram, .elevenLabs, .onDevice: return "Speech recognition"
         case .openRouter, .openAI, .anthropic: return "Language models"
         case .openAICompatible: return "Your own endpoint"
         }
@@ -188,6 +197,7 @@ struct ProviderKeyForm: View {
     let account: ProviderAccount?
     var onBusyChanged: (Bool) -> Void = { _ in }
     var onSaveResult: (Bool) -> Void = { _ in }
+    var onSaveFailure: (String) -> Void = { _ in }
     let onClose: () -> Void
 
     @State private var key = ""
@@ -254,6 +264,7 @@ struct ProviderKeyForm: View {
             saving = false
             onBusyChanged(false)
             onSaveResult(failure == nil)
+            if let failure { onSaveFailure(failure) }
             if failure == nil {
                 key = ""
                 if newServer { onClose() }

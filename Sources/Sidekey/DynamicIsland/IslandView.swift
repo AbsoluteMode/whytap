@@ -159,7 +159,6 @@ struct IslandView: View {
     /// `IslandPanel` can grow its hit-test band when a tall inline panel
     /// (History) is on screen — and shrink it back on `.controls`.
     let onHoverPanelBandHeightChange: (CGFloat) -> Void
-    let onMeetingAssistantMagicVisibilityChange: (Bool) -> Void
 
     /// Reports the rendered answer card height so `IslandPanel` can size the
     /// answer hit-zone to the visible card (not a fixed reservation that would
@@ -199,7 +198,6 @@ struct IslandView: View {
         onKeyboardFocusRequest: @escaping (Bool) -> Void = { _ in },
         hoverHitBridge: IslandHoverHitBridge? = nil,
         onHoverPanelBandHeightChange: @escaping (CGFloat) -> Void = { _ in },
-        onMeetingAssistantMagicVisibilityChange: @escaping (Bool) -> Void = { _ in },
         onAgentAnswerHeightChange: @escaping (CGFloat) -> Void = { _ in },
         actions: IslandActions? = nil,
         agentFlow: IslandAgentFlowStore? = nil,
@@ -219,7 +217,6 @@ struct IslandView: View {
         self.onKeyboardFocusRequest = onKeyboardFocusRequest
         self._hoverHitBridge = ObservedObject(wrappedValue: hoverHitBridge ?? IslandHoverHitBridge())
         self.onHoverPanelBandHeightChange = onHoverPanelBandHeightChange
-        self.onMeetingAssistantMagicVisibilityChange = onMeetingAssistantMagicVisibilityChange
         self.onAgentAnswerHeightChange = onAgentAnswerHeightChange
         self.cancelAgentFlow = cancelAgentFlow
         self.onAgentKeyboardFocusChange = onAgentKeyboardFocusChange
@@ -257,7 +254,6 @@ struct IslandView: View {
     @StateObject private var wingReveal = IslandWingRevealCoordinator()
 
     @State private var pillHovering = false
-    @State private var meetingAssistantHovering = false
     /// Hover over the rendered hover panel (Row-1 + Row-2 tile grid). Only
     /// meaningful once expansion has already happened; lets the cursor
     /// travel from the pill down into the panel without dismissing.
@@ -331,13 +327,6 @@ struct IslandView: View {
     /// strip insertion at the top of the hover drawer.
     private var showsHoverMusicStrip: Bool {
         isHoverExpanded && hoverNowPlaying != nil
-    }
-
-    private var showsMeetingAssistantMagic: Bool {
-        IslandMeetingAssistantPlacement.isVisible(recording: appState.meetingRecordingActive,
-            assistant: appState.meetingAssistantHover, hoverExpanded: isHoverExpanded,
-            controls: hoverPanelMode == .controls,
-            obscured: agentFlow.isActive || appState.meetingSuggestionActive || appState.caseApprovalActive)
     }
 
     /// Height of the rendered drawer for the current mode.
@@ -426,7 +415,6 @@ struct IslandView: View {
         let next = Self.mouseHoldsDrawer(
             pillHovering: pillHovering,
             panelHovering: panelHovering,
-            meetingAssistantHovering: meetingAssistantHovering,
             wasExpanded: mouseExpanded,
             glance: hoverPanelGlance,
             interactionHeld: holdsHoverMenu,
@@ -475,11 +463,11 @@ struct IslandView: View {
 
     /// A glance opened without the pointer crossing the pill, so reaching its strip from below
     /// counts as entering the drawer rather than as the drawer's fading band.
-    static func mouseHoldsDrawer(pillHovering: Bool, panelHovering: Bool, meetingAssistantHovering: Bool = false, wasExpanded: Bool,
+    static func mouseHoldsDrawer(pillHovering: Bool, panelHovering: Bool, wasExpanded: Bool,
                                  glance: Bool, interactionHeld: Bool = false, screenshotPreparing: Bool = false) -> Bool {
         if screenshotPreparing { return wasExpanded }
         return interactionHeld || IslandHoverGate.mouseExpanded(
-            pillHovering: pillHovering, panelHovering: panelHovering || meetingAssistantHovering, wasExpanded: wasExpanded || glance
+            pillHovering: pillHovering, panelHovering: panelHovering, wasExpanded: wasExpanded || glance
         )
     }
 
@@ -595,6 +583,7 @@ struct IslandView: View {
         guard !appState.screenshotPreparing else { return }
         guard hoverPanelMode != .caseVault || !caseViewModel.isSystemInteractionActive else { return }
         guard hoverPanelMode != .calendar || !appState.calendarHoverConnectionActive else { return }
+        appState.dropTargetsHoverEditor = false
         hoverPanelMode = .controls
         hoverSearchFocused = false
         hoverVocabularyFocused = false
@@ -615,7 +604,7 @@ struct IslandView: View {
             && IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
-                agentFlowActive: agentFlow.isActive,
+                agentFlowActive: agentFlow.blocksHoverDrawer(dropTargetsDrawer: appState.dropTargetsHoverEditor),
                 caseApprovalActive: appState.caseApprovalActive
             )
     }
@@ -683,48 +672,9 @@ struct IslandView: View {
         }
     }
 
-    /// Intrinsic width of the current wing face's CONTENT — `0` when no wing
-    /// is shown. The face is laid out at this width by `IslandAgentWingView`;
-    /// the first `agentWingInCapsuleWidth` of it is hosted inside the compact
-    /// capsule's right band and the rest overflows into the form extension
-    /// (`activeWingExtension`). Recording transcript partials only change this
-    /// when they set a new rendered-width peak; shorter/narrower live updates
-    /// keep the prior width, so the ticker stays live without repeated shrink
-    /// springs (the body's `wingFaceID` spring keys off the coarse face, not the
-    /// string).
-    private var activeWingFaceWidth: CGFloat {
-        switch agentFlow.wing {
-        case .hidden: return 0
-        case .recording:
-            // Size to the turn's WIDEST rendered transcript (monotonic), NOT the
-            // live one: the width grows then holds, so a transient provider
-            // re-segment (a shorter/narrower partial) never shrinks/jumps the
-            // wing — while the displayed text stays live. The store resets the
-            // hint per turn.
-            return IslandAgentWingView.recordingFaceWidth(
-                text: agentFlow.recordingFaceWidthHint,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .composing:
-            // Grows with the typed text from the placeholder floor up to the
-            // composing cap, then the composer field scrolls. Single source of
-            // truth shared with the hit zone + field rect in `IslandPanel`.
-            return IslandAgentWingView.composingFaceWidth(text: agentFlow.composingText)
-        case .acting:
-            // Content-size the acting slot like recording/composing: hug the
-            // status mark + label so short labels ("Editing") leave no dead
-            // space to the right, while long tool labels cap at
-            // agentWingActingWidth and truncate with an ellipsis (the face's own
-            // .truncationMode(.tail)).
-            return IslandAgentWingView.actingFaceWidth(
-                label: agentFlow.activityLabel,
-                providerMarkVisible: agentFlow.recordingProviderBrand != nil
-            )
-        case .answerControls: return IslandFrameLayout.agentWingAnswerControlsWidth
-        case .failed: return IslandFrameLayout.agentWingFailedWidth
-        case .deliveryFailed(let message): return IslandDeliveryFailureView.faceWidth(message: message)
-        }
-    }
+    /// The part that fits in the compact band's width is drawn there; the
+    /// remainder extends the right edge of the capsule.
+    private var activeWingFaceWidth: CGFloat { agentFlow.wingFaceWidth }
 
     /// How far the single island surface stretches RIGHTWARD for the current
     /// face — only the face's overflow past the right band
@@ -747,7 +697,7 @@ struct IslandView: View {
     }
 
     /// Snap (don't spring) the wing width when content drives rapid width
-    /// changes the spring would lag behind: the acting label (live narration),
+    /// changes: live narration, the recording ticker's frame-by-frame reveal,
     /// and the composer once text is being typed. The composer's content lives
     /// in a separate, instantly-resized panel (`IslandAgentComposerPanel`), so a
     /// springing black capsule would trail the typed text and briefly leak it
@@ -755,8 +705,17 @@ struct IslandView: View {
     /// OPEN to the placeholder floor — only the per-keystroke grow snaps.
     private var wingSnapsWidth: Bool {
         if wingIsActing { return true }
+        if case .recording(let transcript) = agentFlow.wing { return !transcript.isEmpty }
         if case .composing = agentFlow.wing { return !agentFlow.composingText.isEmpty }
         return false
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceRecordingWidthMotion
+
+    private var wingWidthAnimation: Animation? {
+        if wingSnapsWidth { return nil }
+        if case .recording = agentFlow.wing, reduceRecordingWidthMotion { return nil }
+        return Self.widthGrowth
     }
 
     var body: some View {
@@ -777,12 +736,9 @@ struct IslandView: View {
         // `.recording(transcript:)` to a single token so the live ticker
         // doesn't re-trigger the layout spring on each delta.
         .animation(Self.hoverMotion, value: wingFaceID)
-        // Acting label and per-keystroke composer growth change width too fast
-        // for a spring (it shakes / trails the typed text, leaking it past the
-        // capsule). Snap those; keep the spring for the recording grow and the
-        // composer's OPEN, where the width moves monotonically as one smooth
-        // stretch. See `wingSnapsWidth`.
-        .animation(wingSnapsWidth ? nil : Self.widthGrowth, value: activeWingFaceWidth)
+        // The ticker already paces the recording width. A second animation
+        // would continuously restart and lag behind the emerging letters.
+        .animation(wingWidthAnimation, value: activeWingFaceWidth)
         .animation(Self.hoverMotion, value: agentFlow.answerPanelVisible)
         // Strip slides in / out with the same reveal spring as the rest of
         // the island when a track starts / stops (height + transition).
@@ -822,7 +778,7 @@ struct IslandView: View {
     /// stack, and — while the agent flow is active — the right-side wing
     /// zone. The wing zone is a FIXED `rightAgentZoneWidth` reservation so
     /// the island capsule's right edge stays put as the wing changes width
-    /// (recording adaptive up to 260 / composing 300 / acting 120). The wing is
+    /// (recording 260 / composing up to 300 / acting up to 120). The wing is
     /// left-aligned inside the zone (gap, then wing) so its left edge sits
     /// at `windowRight - rightAgentZoneWidth + agentWingGap` — matching
     /// `IslandAgentHitZones.wingRect`.
@@ -1026,10 +982,9 @@ struct IslandView: View {
                         // prompt) squares the bottom so both read as one surface.
                         meetingSuggestionActive: appState.meetingSuggestionActive
                             || appState.caseApprovalActive,
-                        trailingExtension: max(activeWingExtension, showsMeetingAssistantMagic ? IslandMeetingAssistantPlacement.extensionWidth : 0),
-                        // Snap the surface for acting and per-keystroke composer
-                        // growth (see `wingSnapsWidth`) so the black wing never
-                        // lags behind the text and leaks it past the capsule.
+                        trailingExtension: activeWingExtension,
+                        // Use the same width as the content clip for each
+                        // ticker frame or rapidly changing label or input.
                         animatesWidthChange: !wingSnapsWidth
                     )
                     .frame(
@@ -1043,9 +998,7 @@ struct IslandView: View {
                         alignment: .leading
                     )
                 }
-                // One continuous hover region includes the visible magic
-                // extension, so crossing timer -> icon never closes the drawer.
-                .frame(width: compactWidth + (showsMeetingAssistantMagic ? IslandMeetingAssistantPlacement.extensionWidth : 0), alignment: .leading)
+                .frame(width: compactWidth, alignment: .leading)
                 .contentShape(Rectangle())
                 .onHover { hovering in
                     let next = hovering && IslandHoverPolicy.allowsExpansion(
@@ -1102,7 +1055,8 @@ struct IslandView: View {
                                 isGoogle: agentFlow.activeSourceIsGoogle,
                                 deliveryHitBridge: hoverHitBridge,
                                 onRetryDelivery: actions.retryDelivery,
-                                onDismissDeliveryFailure: actions.dismissDeliveryFailure
+                                onDismissDeliveryFailure: actions.dismissDeliveryFailure,
+                                onRecordingTextWidthChange: agentFlow.recordingTextWidthChanged
                             )
                             .frame(height: compactHeight, alignment: .top)
                             .offset(x: compactWidth + activeWingExtension - activeWingFaceWidth)
@@ -1266,7 +1220,6 @@ struct IslandView: View {
                             onOpenCalendar: actions.openCalendar,
                             onOpenTranslate: actions.openTranslate,
                             onOpenSubtitles: actions.openSubtitles,
-                            onOpenMeetingAssistant: actions.openMeetingAssistant,
                             onOpenScreenshot: actions.openScreenshot,
                             onOpenHelp: actions.openHelp,
                             onQuit: actions.quitApplication,
@@ -1339,17 +1292,6 @@ struct IslandView: View {
             height: compactHeight + activeHoverPanelHeight,
             alignment: .top
         )
-        .overlay(alignment: .topLeading) {
-            if showsMeetingAssistantMagic {
-                IslandMeetingAssistantControl(state: appState.meetingAssistantHover,
-                    setEnabled: actions.setMeetingAssistantEnabled,
-                    hitBridge: hoverHitBridge, hitContext: hoverHitBridge.context)
-                    .frame(width: IslandMeetingAssistantPlacement.extensionWidth, height: compactHeight)
-                    .contentShape(Rectangle())
-                    .onHover { meetingAssistantHovering = $0 }
-                    .offset(x: compactWidth)
-            }
-        }
         .coordinateSpace(name: Self.hoverZoneSpace)
         // Preview bubble for the hovered History row. Lives OUTSIDE the
         // clipped drawer (which would cut anything beyond its bounds) and
@@ -1409,14 +1351,6 @@ struct IslandView: View {
         // region to STAY open, so the drawer's fading hover band can't re-open a
         // closed drawer before the cursor reaches the pill.
         .onChange(of: pillHovering) { _, _ in recomputeMouseExpanded() }
-        .onChange(of: meetingAssistantHovering) { _, _ in recomputeMouseExpanded() }
-        .onChange(of: showsMeetingAssistantMagic) { _, visible in
-            if !visible { meetingAssistantHovering = false }
-            onMeetingAssistantMagicVisibilityChange(visible)
-        }
-        .onChange(of: appState.meetingAssistantHover) { _, _ in
-            hoverHitBridge.cancelPress(for: .meetingAssistant)
-        }
         .onChange(of: panelHovering) { _, _ in recomputeMouseExpanded() }
         .onChange(of: appState.screenshotPreparing) { _, preparing in
             guard !preparing else { return }
@@ -1519,11 +1453,11 @@ struct IslandView: View {
             onHoverPanelBandHeightChange(activeHoverPanelHeight)
         }
         .onChange(of: isHoverExpanded) { _, expanded in
-            if expanded { actions.prepareMeetingAssistant() }
             hoverHitBridge.setEnabled(expanded)
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
             if !expanded {
+                appState.dropTargetsHoverEditor = false
                 hoverSearchFocused = false
                 hoverPanelGlance = false
                 hoverVocabularyFocused = false
@@ -2620,7 +2554,6 @@ private struct IslandDropModeHoverPanel: View {
     var onOpenCalendar: () -> Void = {}
     var onOpenTranslate: () -> Void = {}
     var onOpenSubtitles: () -> Void = {}
-    var onOpenMeetingAssistant: () -> Void = {}
     var onOpenScreenshot: () -> Void = {}
     let onOpenHelp: () -> Void
     let onQuit: () -> Void
@@ -2981,7 +2914,6 @@ private struct IslandDropModeHoverPanel: View {
         case .openCalendar: onOpenCalendar()
         case .openTranslate: onOpenTranslate()
         case .openSubtitles: onOpenSubtitles()
-        case .openMeetingAssistant: onOpenMeetingAssistant()
         case .openScreenshot: onOpenScreenshot()
         case .quit: onQuit()
         case .openPanel(let panel):
@@ -3202,11 +3134,11 @@ struct IslandLanguagePickerPanel: View {
                 .frame(width: inputFrame.width, height: inputFrame.height)
                 .background(
                     Capsule()
-                        .fill(Color.white.opacity(0.14))
+                        .fill(IslandInk.color.opacity(0.14))
                 )
                 .overlay(
                     Capsule()
-                        .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                        .stroke(IslandInk.color.opacity(0.18), lineWidth: 0.8)
                 )
                 .position(x: inputFrame.midX, y: inputFrame.midY)
                 .accessibilityLabel("Search language")
@@ -3292,7 +3224,7 @@ private struct IslandLanguageSearchField: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         textView.backgroundColor = .clear
-        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.textColor = IslandInk.ns.withAlphaComponent(0.92)
         textView.insertionPointColor = textView.languageCursorColor
         textView.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         textView.alignment = .center
@@ -3386,7 +3318,7 @@ private struct IslandLanguagePlaceholder: View {
                 )
             )
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(IslandInk.color.opacity(0.42))
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3467,7 +3399,7 @@ private struct IslandLanguageFlagChip: View {
                 Group {
                     if usesCapsuleChrome {
                         Capsule()
-                            .stroke(.white.opacity(selected ? 0.34 : 0.08), lineWidth: 0.7)
+                            .stroke(IslandInk.color.opacity(selected ? 0.34 : 0.08), lineWidth: 0.7)
                     }
                 }
             )
@@ -3488,7 +3420,7 @@ private struct IslandLanguageFlagChip: View {
                     size: IslandLanguageFlagChipStyle.variantLanguageFontSize,
                     weight: .medium
                 ))
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(IslandInk.color.opacity(0.82))
                 .lineLimit(1)
                 .minimumScaleFactor(0.64)
         } else {
@@ -3499,7 +3431,7 @@ private struct IslandLanguageFlagChip: View {
                     size: IslandLanguageFlagChipStyle.fontSize(for: option, enlarged: enlarged),
                     weight: .semibold
                 ))
-                .foregroundStyle(.white.opacity(option.language == nil ? 0.82 : 1))
+                .foregroundStyle(IslandInk.color.opacity(option.language == nil ? 0.82 : 1))
                 .lineLimit(1)
                 .minimumScaleFactor(0.64)
         }
@@ -3507,9 +3439,9 @@ private struct IslandLanguageFlagChip: View {
 
     private var backgroundOpacity: Color {
         if selected {
-            return Color.white.opacity(0.22)
+            return IslandInk.color.opacity(0.22)
         }
-        return Color.white.opacity(hovering ? 0.16 : 0.08)
+        return IslandInk.color.opacity(hovering ? 0.16 : 0.08)
     }
 }
 

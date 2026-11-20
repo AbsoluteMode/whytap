@@ -32,14 +32,13 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     @Published var phase: AppPhase = .idle
+    /// True if this take began in an editor inside the island's hover drawer.
+    @Published var dropTargetsHoverEditor = false
     /// Fixed, privacy-safe copy for a retained Smart-processing failure.
     @Published var dropDeliveryFailureMessage: String?
     @Published var agentPhase: AgentPhase = .idle
     /// Visible translation work (including unsent input) or an active session.
     @Published var translationActive = false
-    @Published var meetingAssistantActive = false
-    @Published var meetingAssistantEditing = false
-    @Published var meetingAssistantHover = MeetingAssistantHoverState()
     /// A screenshot selection/editor, including in-flight local OCR and unsaved edits.
     @Published var screenshotActive = false
     /// Hold the existing hover state only until explicit capture has frozen its pixels.

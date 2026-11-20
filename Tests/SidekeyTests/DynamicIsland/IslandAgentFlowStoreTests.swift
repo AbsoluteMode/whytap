@@ -78,6 +78,20 @@ final class IslandAgentFlowStoreTests: XCTestCase {
         XCTAssertFalse(store.answerPanelVisible)
     }
 
+    func testOnlyADropIntoTheOpenDrawerKeepsItsEditorMounted() {
+        let (store, _) = makeStore()
+        for phase: AppPhase in [.transcribing, .recording, .finishing, .verifying, .inserting] {
+            store.dropPhaseChanged(phase)
+            XCTAssertFalse(store.blocksHoverDrawer(dropTargetsDrawer: true))
+            XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: false))
+        }
+        store.dropPhaseChanged(.deliveryFailed)
+        XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: true))
+        store.dropPhaseChanged(.recording)
+        store.agentPhaseChanged(.voiceRecording)
+        XCTAssertTrue(store.blocksHoverDrawer(dropTargetsDrawer: true))
+    }
+
     func testSmartFailureShowsItsOwnMessageAndClearsOnNewTake() async {
         let (store, _) = makeStore()
         AppState.shared.dropDeliveryFailureMessage = "Smart failed (503)"
@@ -291,62 +305,70 @@ final class IslandAgentFlowStoreTests: XCTestCase {
         XCTAssertEqual(store.wing, .recording(transcript: "шесть"))
     }
 
-    /// The recording wing's WIDTH is driven by `recordingFaceWidthHint` — the
-    /// widest rendered transcript this turn — so it GROWS then HOLDS (never
-    /// shrinks on a transient re-segment) while the displayed transcript stays
-    /// live. Resets per turn. This is what removes the pause width-jump without
-    /// freezing.
-    func testRecordingFaceWidthHintHoldsPeakAndResetsPerTurn() {
-        let (store, _) = makeStore()
-        store.dropPhaseChanged(.recording)
-        store.dropTranscriptUpdated("один два три четыре")   // grows
-        XCTAssertEqual(store.recordingFaceWidthHint, "один два три четыре")
+    func testDropGrowsWithTheRevealThenKeepsItsWidthAcrossRevisionsAndPauses() {
+        for brand in ["Soniox", "ElevenLabs"] {
+            let (store, _) = makeStore(dropProviderBrand: {
+                TranscriptionProviderBrand(assetName: brand.lowercased(), label: brand)
+            })
+            store.dropPhaseChanged(.transcribing)
+            let listeningWidth = store.wingFaceWidth
+            XCTAssertLessThan(listeningWidth, IslandFrameLayout.agentWingRecordingWidth)
+            store.dropPhaseChanged(.recording)
+            store.dropTranscriptUpdated("  \n")
+            XCTAssertEqual(store.wing, .recording(transcript: ""))
+            XCTAssertEqual(store.wingFaceWidth, listeningWidth)
 
-        store.dropTranscriptUpdated("шесть")                 // shorter re-segment
-        XCTAssertEqual(store.wing, .recording(transcript: "шесть"), "display stays live")
-        XCTAssertEqual(
-            store.recordingFaceWidthHint,
-            "один два три четыре",
-            "width hint HOLDS the peak — wing does not shrink on a shorter partial"
-        )
+            let delivered = String(repeating: "текст ", count: 80)
+            store.dropTranscriptUpdated(delivered)
+            XCTAssertEqual(store.wingFaceWidth, listeningWidth)
 
-        store.dropTranscriptUpdated("")                      // empty pause: hint unchanged
-        XCTAssertEqual(store.recordingFaceWidthHint, "один два три четыре")
+            store.recordingTextWidthChanged(72, transcript: delivered)
+            let firstWidth = store.wingFaceWidth
+            XCTAssertGreaterThan(firstWidth, listeningWidth)
+            store.recordingTextWidthChanged(110, transcript: delivered)
+            let secondWidth = store.wingFaceWidth
+            XCTAssertGreaterThan(secondWidth, firstWidth)
+            XCTAssertLessThan(secondWidth, IslandFrameLayout.agentWingRecordingWidth)
 
-        store.dropPhaseChanged(.idle)                        // turn ends
-        XCTAssertEqual(store.recordingFaceWidthHint, "", "hint resets per turn")
+            store.dropTranscriptUpdated("короче")
+            store.recordingTextWidthChanged(45, transcript: "короче")
+            store.recordingTextWidthChanged(300, transcript: delivered)
+            XCTAssertEqual(store.wingFaceWidth, secondWidth)
+
+            let beforePause = store.wing
+            store.dropTranscriptUpdated("")
+            store.dropTranscriptUpdated(" ")
+            XCTAssertEqual(store.wing, beforePause)
+            XCTAssertEqual(store.wingFaceWidth, secondWidth)
+
+            store.dropTranscriptUpdated(delivered)
+            store.recordingTextWidthChanged(300, transcript: delivered)
+            XCTAssertEqual(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
+
+            store.dropPhaseChanged(.idle)
+            XCTAssertEqual(store.wingFaceWidth, 0)
+            store.dropPhaseChanged(.recording)
+            XCTAssertEqual(store.wingFaceWidth, listeningWidth)
+        }
     }
 
-    func testRecordingFaceWidthHintUsesRenderedWidthNotCharacterCount() {
-        let (store, _) = makeStore()
-        store.dropPhaseChanged(.recording)
-        store.dropTranscriptUpdated("WWWWWWWW")
-        XCTAssertEqual(store.recordingFaceWidthHint, "WWWWWWWW")
-
-        store.dropTranscriptUpdated("iiiiiiiiiiiiiiiiiiiiiiii")
-
-        XCTAssertEqual(
-            store.wing,
-            .recording(transcript: "iiiiiiiiiiiiiiiiiiiiiiii"),
-            "displayed text stays live even when the width hint holds a wider earlier string"
-        )
-        XCTAssertEqual(
-            store.recordingFaceWidthHint,
-            "WWWWWWWW",
-            "a longer but visually narrower partial must not replace the peak width hint"
-        )
-    }
-
-    /// Hint also resets on agent turn boundaries (shared between drop + agent
-    /// flows, which never record at the same time).
-    func testRecordingFaceWidthHintResetsOnAgentTurnBoundary() {
-        let (store, _) = makeStore()
+    func testAgentVoiceAlsoGrowsWithItsRevealedText() {
+        let (store, _) = makeStore(agentProviderBrand: { nil })
         store.agentPhaseChanged(.voiceRecording)
-        store.transcriptUpdated("привет мир как")
-        XCTAssertEqual(store.recordingFaceWidthHint, "привет мир как")
+        let listeningWidth = store.wingFaceWidth
+        XCTAssertLessThan(listeningWidth, IslandFrameLayout.agentWingRecordingWidth)
+
+        let text = "one two three four five"
+        store.transcriptUpdated(text)
+        XCTAssertEqual(store.wingFaceWidth, listeningWidth)
+        store.recordingTextWidthChanged(90, transcript: text)
+        XCTAssertGreaterThan(store.wingFaceWidth, listeningWidth)
+        XCTAssertLessThan(store.wingFaceWidth, IslandFrameLayout.agentWingRecordingWidth)
 
         store.agentPhaseChanged(.idle)
-        XCTAssertEqual(store.recordingFaceWidthHint, "", "hint resets when the agent turn ends")
+        XCTAssertEqual(store.wingFaceWidth, 0)
+        store.agentPhaseChanged(.voiceRecording)
+        XCTAssertEqual(store.wingFaceWidth, listeningWidth)
     }
 
     func testDropRecordingExposesCurrentProviderBrand() {

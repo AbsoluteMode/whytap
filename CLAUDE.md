@@ -1,8 +1,8 @@
 # Whytap
 
-Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK only: the
-user's provider keys or their own OpenAI-compatible endpoints, no on-device
-models; free, MIT. Two hotkeys: hold Space in an editable
+Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
+user's provider keys or their own OpenAI-compatible endpoints, plus optional
+dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
 native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers,
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
@@ -41,11 +41,16 @@ feature sessions with regular checked integration and one working application.
 - Finished feature agents automatically submit their reviewed PR/exact head,
   checks, dependencies and acceptance steps to the persistent build queue
   (`scripts/build-queue.py`; installed helper in the Git common directory).
-  The configured builder chat processes FIFO, sends queue/start/result messages
-  to the originating sessions and alone integrates/packages/promotes. These
-  queue messages are user-authorized. Workers follow the result and report
-  issues without starting competing builds. Follow the runbook for CLI inboxes,
-  pending installs, recovery and the five-minute builder automation.
+  `enqueue` rejects a head whose guidance sync or documentation validation
+  fails. The configured builder processes FIFO, sends queue/start/result
+  messages to the originating sessions and alone integrates/packages/promotes;
+  it resolves routine merge conflicts itself. It is an on-demand headless
+  session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
+  starts only while the queue has open work; only the maintainer activates or
+  deactivates it. These queue messages are user-authorized. Workers follow the
+  result and report issues without starting competing builds. Follow the
+  runbook for CLI inboxes, pending installs, their automatic retry and
+  recovery. WHY: .project-docs/decisions/2026-11-19-on-demand-build-queue-builder.md
 - The builder holds the shared `exodia-integration.lock` in
   `git rev-parse --git-common-dir` for protected operations. Queue claims never
   replace that lock or any validation gate. Preserve all other sessions' WIP;
@@ -111,6 +116,35 @@ Voice flow (Drop / dictation):
             is checked before the key (invalidLanguageConfiguration). WHY:
             .project-docs/decisions/2026-10-18-remove-local-models.md,
             .project-docs/decisions/2026-10-19-api-and-models.md
+       On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
+            the same route mechanism, for Drop Fast, Drop Smart, Agent voice
+            and Voice search only (not Meetings, Subtitles or text). The API
+            keys tab has an On this Mac card above the key tiles
+            (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
+            button is in the card, with an animated progress bar and symbol
+            that respect Reduce Motion; before the first whole percent it
+            says Starting… instead of 0%) that downloads or removes
+            Parakeet TDT v3 (about 470 MB from Hugging Face, kept in
+            Application Support/Sidekey/OnDeviceSpeechModels, outside backups
+            and LegacyLocalModelCleanup). The downloaded model is the
+            account's credential (OnDeviceSpeechReadiness): without it the
+            route throws .missingKey, the row is Not set and nothing goes to a
+            provider. A finished download only offers the model for features
+            without a route; removing it un-sets its features. The factory
+            builds OnDeviceTranscriptionSession (no adapter, no socket): live
+            text re-decodes the last 14 s about every 0.8 s, the pasted text
+            is one pass over the whole take (the session's own copy of the
+            stream, not the engine's capped turn buffer); a take under 0.3 s
+            is silence. Live text counts only a changed ending as new, so a
+            scrolled window does not hold Drop auto-stop. Decodes hold the
+            model (acquire/release), so idle eviction and Remove never unload
+            it mid-decode.
+            Batch recovery, Retry and agent batch voice use
+            OnDeviceBatchTranscriber and stay on this Mac. FluidAudio's
+            language is a script filter: kept for Latin-script languages,
+            none for Cyrillic ones. The loaded model is released after five
+            idle minutes. No Costs rows. WHY:
+            .project-docs/decisions/2026-11-19-on-device-dictation.md
        Soniox Stop: drain all captured audio -> 200ms PCM silence -> explicit
        finalize + text EOF. A final <fin> acknowledgement completes the take;
        finished=true also completes it. The 10s watchdog remains the backstop.
@@ -121,8 +155,8 @@ Voice flow (Drop / dictation):
             Fast bypasses AI text processing. Smart makes one request to the
             selected cleanup model: a reserved whole-response pass marker keeps
             the transcript verbatim with plain delivery; otherwise use the edited
-            message. Synonyms, word order and minor polish alone should pass;
-            concrete errors and useful long-message structure still edit.
+            message. Only text with nothing to remove, repair or structure
+            should pass; fillers, repeats, errors and wrong names still edit.
             Translation cannot pass. Failed, empty, malformed or cancelled
             responses retain strict Retry behavior. The separate Jev/OpenAI
             Decision stage and settings row are removed; migration4 retires only
@@ -134,16 +168,25 @@ Voice flow (Drop / dictation):
             the original mode and target; configuration errors open API & Models on
             the Drop Smart cleanup row.
             Full, batch-recovered and partial transcripts use the same rule.
+            In both modes DropPunctuationSpacing then removes an ordinary
+            space a provider left before closing punctuation ("word ?"),
+            also right after inline code, never inside Markdown code and
+            never attaching a mark to a link the system detector finds (it
+            would change the address) and never editing an explicit Markdown
+            destination; a result that changes any detected destination is
+            discarded.
             A new take discards the old retry. The island observes persisted
             mode changes from every control. The cleanup provider mark appears
             only while processing; paste shows “pasting…” without a provider. WHY:
             .project-docs/decisions/2026-10-19-strict-drop-modes.md
-       Smart's editor uses minimal repairs,
-       retaining the author's wording, thought order, facts and uncertainty;
-       it does not summarize or deeply rewrite. Self-corrections replace only
-       their fragment; nested requests stay requests. Evaluated on GPT-6 Sol,
-       the prompt does not change selected routes. WHY:
-       .project-docs/decisions/2026-10-21-smart-editor-prompt.md
+       Smart's editor returns a ready text: it removes fillers, stumbles and
+       repeats, keeps the final version of a self-correction, rewrites heavy
+       spoken sentences and lays long text out in paragraphs and plain lists,
+       in the author's voice. Every fact, condition, number and degree of
+       certainty stays and nothing is added; it is not a summary. Nested
+       requests stay requests; known names are always corrected. The prompt
+       does not change selected routes. WHY:
+       .project-docs/decisions/2026-11-20-smart-ready-text.md
        SmartFormattingProfile selects destination syntax from app identity and
        focused AX role/document metadata (within the same 1.5s context deadline).
        Markdown editors/recognized web composers use a fixed syntax subset;
@@ -161,6 +204,16 @@ Voice flow (Drop / dictation):
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->
             CGEvent Cmd+V (4-event sequence)
+       A take that starts with the keyboard in one of Whytap's own native text
+            editors (the floating Translate input, Settings fields) remembers
+            that editor (AutoPasteEngine.rememberDropTarget, DropLocalEditor)
+            and inserts the final text into its selection: no clipboard, no
+            Cmd+V, and Smart stays plain without Accessibility context from the
+            frontmost app. Delivery, batch recovery, the raw partial and Retry
+            share it. An active take keeps its original hover editor mounted.
+            If the editor loses focus, Drop saves the result or recovered
+            partial in History and shows the delivery status. WHY:
+            .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
        Resilient delivery: local audio is the truth. A degraded stream goes
             to batch recovery over the retained PCM through the
             `BatchTranscribing` seam (bounded by BatchRecoveryDeadline, 30s),
@@ -187,9 +240,76 @@ Voice flow (Drop / dictation):
             docs/decisions/2026-07-26-empty-batch-is-silence-not-offline.md,
             docs/decisions/2026-06-24-deliveryfailed-escapable-and-retry-robust.md,
             .project-docs/decisions/2026-10-18-provider-batch-transcription.md
+       A provider's refusal of the batch rung or of Retry is named instead
+            of "offline": ProviderFailure reads only the status code, the
+            error kind or one of three ElevenLabs refusal codes (401 key
+            refused, missing permission, 402 or quota out of credit, 403
+            refused, 429 busy, 5xx or an unfinished job or a timeout not
+            responding, no route to the network no connection). It is applied
+            only when the take ends undelivered: the failure face shows
+            "<Provider> refused the key" and the like, and a take whose
+            partial was pasted after all changes nothing. A refused key,
+            missing permission or empty balance also marks the key's tile and
+            the feature row (KeyStatusStore) and opens API & Models on the
+            take's row once per take; a 403 is shown but not recorded against
+            the key. The audio stays for Retry. A later dictation that works
+            forgets the mark; the free key check on opening Settings does not
+            clear it with a mere "limited". Saving an ElevenLabs key whose
+            account endpoint answers missing_permissions asks the
+            speech-to-text endpoint with a second of silence: only a named
+            missing_permissions there is "No Speech to Text access on this
+            key" (not saved), a named quota is out of credit, an unexplained
+            401 leaves the key "limited". The key form's notice shows the
+            reason a key was not saved. WHY:
+            .project-docs/decisions/2026-11-19-provider-failure-reasons.md
        Transcript join (BYOKTranscriptJoin): Soniox tokens carry their own
             spaces = verbatim join; word-level providers = word-boundary join.
             WHY: docs/decisions/2026-07-22-hub-token-join-and-batch-recovery-deadline.md
+
+Live text in the recording wing (Drop and agent voice):
+  IslandLiveTextTicker draws the provider's live transcript instead of a plain
+  Text. LiveTextPacer reveals it at the speaker's rate, holding a reserve
+  sized from the observed gap between batches so the line does not stop, and
+  no character waits more than 1.4 s after delivery (current before smooth).
+  Only the advancing edge gathers from 14 grains over 0.35 s. Visible
+  corrections are solid. Unchanged runs keep their reveal times, including
+  when a correction and new speech arrive together. A returning truncated
+  prefix restores its visible text. A rewrite of visible text glides the line
+  as two rigid pieces (before and after the change), never stretching it.
+  A snapshot that changes revealed text waits 0.5 s and the newest one is
+  shown in one step; new words at the end are not delayed. Any provider. WHY:
+  .project-docs/decisions/2026-11-19-live-text-rewrite-hold.md
+  Soniox publishes the complete live snapshot once per token frame.
+  WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
+  A face rebuilt mid-take shows its text at once; text revealed past its
+  deadline is solid at once. Reduce Motion, right-to-left scripts and scripts
+  that join across characters (canDrawPerCharacter) keep the plain Text.
+  The recording face starts compact for listening. The capsule and hit zone
+  follow the revealed glyph width frame by frame and hold their widest extent
+  through pauses and shorter revisions. The ticker scrolls within a fixed
+  viewport after reaching the cap. Glyphs and particles use a 1 pt right inset.
+  Display only: paste and auto-stop still use the provider's text. WHY:
+  .project-docs/decisions/2026-11-13-live-text-sand.md
+
+Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
+  With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
+  ends by itself; a second press still stops it at once, and hold shortcuts
+  are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
+  after the live transcript stops changing and the microphone last heard a
+  voice (9 dB above the take's quietest level; sound holds a quiet transcript
+  for at most 6 s), or when no words arrive within 5 s of recording: always an ordinary stop, never a cancel, so silence pastes
+  nothing and a connection lost before the first word still goes to batch
+  recovery. The streaming session publishes committed finals as live text
+  (Deepgram sends no partials). Only this rule ends such a take: every provider
+  keeps its manual commit, because a provider commit cannot be told from
+  Scribe's ~36 s segment cap (turn prediction cut takes there and was
+  removed). A self-hosted server route sends no words before a commit, so the
+  press starts a normal Toggle take there. The quiet period can be overridden
+  through the DropAutoStopTuning default while it is calibrated (no UI yet).
+  The wake word built the same day was removed. WHY:
+  .project-docs/decisions/2026-11-11-drop-auto-stop.md,
+  .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md,
+  .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 
 Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   The Agent voice ticker shows the selected model author's bundled mark instead
@@ -218,8 +338,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
   raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
-  reported usage is recorded. The shared model loop applies the same handling
-  to Meeting Assistant's OpenRouter route. Native model requests also emit local
+  reported usage is recorded. Native model requests also emit local
   unified-log events (native-agent): generated turn/request IDs, timings, counts,
   tool/reasoning shape, status and fixed error hints only. No content, route
   strings, external IDs, keys or raw errors; search HTTP is not model traffic.
@@ -268,42 +387,6 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
   WHY: .project-docs/decisions/2026-10-22-native-agent.md
 
-Meeting Assistant Beta:
-  A passive right-hand module uses the approved native design: ready Space picker,
-  plain input, bounded questions/answers, structured replies, two continuations
-  and up to six explicit screenshot attachments. A Toolbox/search tool and
-  whytap://tool/meetingAssistant only show it. With both model routes and a ready
-  Space configured, a metadata-only observer exposes the wand during recognized
-  meetings. Listening starts off on every meeting and requires an explicit wand
-  click; configuration, opening the module and hover never enable it.
-  Meeting Assistant and Meeting Assistant audio have independent initially unset
-  routes. A native provider loop uses only scoped read/list/search tools, without
-  the ordinary Agent's workspace/history, shell, writes, network or Case tools.
-  Coding agents create/edit local manifests with scripts/meeting-space.py; users
-  select ready Spaces. Each file is validated independently; descriptor-relative
-  reads reject traversal, symlinks, hidden/credential paths and out-of-scope access.
-  Database declarations remain unavailable metadata in this Beta. Explicitly
-  enabled listening sends system audio (not microphone) to the selected realtime route,
-  retains only bounded in-memory finals and extracts questions through the chosen
-  answer model. No audio, transcript, images or conversations are written by this
-  feature. Space changes/edits cancel work and revalidate context; closing answers
-  keeps listening. Sleep/quit stop audio and monitoring; wake rechecks the current
-  meeting without resuming capture. Removing a required model stops capture. Protection recreates
-  the panel using the existing Other setting. Guide: docs/meeting-assistant.md.
-  Once both routes and a Space are configured, hover reveals a magic icon right
-  of the recording timer during recognized meetings/Notes (also during a manually
-  active Assistant session). It is translucent off and softly glowing while listening.
-  This secondary action uses a temporary 36pt right wing; base compactWidth and
-  drawer stay matched, so their right edges temporarily differ while it is shown.
-  The wand enables/disables only the current meeting; each later meeting starts
-  off. Errors stop listening until another explicit enable. The module and its
-  API & Models group visibly mark the feature Beta.
-  An observed context ending for 15s stops capture; initial/unrecognized manual
-  sessions need the wand to stop. This mic-activity heuristic cannot identify every call.
-  WHY: docs/decisions/2026-10-26-meeting-assistant-beta-opt-in.md
-  WHY: docs/decisions/2026-10-24-meeting-assistant-session-switch.md
-  WHY: docs/decisions/2026-10-23-meeting-assistant-pilot.md
-
 Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
   floating window (TranslationWindowController). Text mode is a compact two-row
@@ -312,9 +395,15 @@ Translation tools:
   gap or inset field container. Each floating Text show requests input focus,
   guarded against late focus after dismissal/mode changes. The input has no
   hint/border and text mode has no window title bar.
+  Drop dictated into the focused input is inserted at its selection without
+  the clipboard (see Voice flow); a palette closed before the text arrives
+  receives nothing. WHY:
+  .project-docs/decisions/2026-11-18-drop-into-whytap-editors.md
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
+  Pressing the same Translate or Subtitles tool hotkey again closes its visible
+  mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the
   context menu; long output scrolls. TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
@@ -342,9 +431,8 @@ Meeting Notes:
   History keeps the full date-grouped list. Back from a note preserves its list
   origin; the Settings Meetings entry and direct note links return to overview.
   Both use MeetingListModel and retain refresh, status and confirmed deletion.
-  Load failures preserve existing rows and offer Retry. The vertical overview
-  layout leaves room for future Meeting Assistant presets without showing
-  unfinished controls. UI rationale and behavior: docs/DESIGN.md.
+  Load failures preserve existing rows and offer Retry.
+  UI rationale and behavior: docs/DESIGN.md.
   Always-on detector (mic activity + CoreAudio system audio + FluidAudio
   Silero VAD, the only remaining Core ML model, downloaded from Hugging Face
   on the first speech check; fires only when a recognised meeting app writes
@@ -369,6 +457,23 @@ Meeting Notes:
           WHY: .project-docs/decisions/2026-10-18-silent-meetings.md,
           .project-docs/decisions/2026-10-18-remove-local-models.md
        -> MeetingsStore (local SQLite) -> notes window (BlockNote in WKWebView)
+  A transcript is kept as soon as it exists (meeting_pending_transcripts in
+  the meetings database), before the notes model is asked. When the note
+  fails, the meeting is failed with fixed copy that names the cause
+  (MeetingNotesFailure: missing key, refused key, out of credit, busy, not
+  responding, refused model; never the provider's own text) and ends with
+  "The transcript is saved". The note pane then enables the Transcript tab
+  and shows Retry notes. A retry, by button or by launch recovery, reuses the
+  kept transcript and never calls the speech provider again; the button
+  (MeetingsCoordinator.retryNotes) runs the ordinary queued processing while
+  the recording is staged and needs no recording afterwards. Delete is
+  refused while notes are being written; a retry cut short by quitting goes
+  back to failed on launch. After 24 hours only
+  the audio is deleted: the kept transcript and Retry notes remain. Storing
+  the note or deleting the meeting removes the kept copy. A Reconnect part's
+  kept transcript is reused but not shown, because its meeting still shows
+  the earlier note. WHY:
+  .project-docs/decisions/2026-11-19-meeting-transcript-kept.md
   Delete: a finished meeting (ready or failed) has "Delete…" in its row
   context menu behind a confirmation whose default button is Cancel.
   MeetingsCoordinator.deleteMeeting removes the staged recording first (while
@@ -416,22 +521,9 @@ Meeting Notes:
   the next launch). WHY:
   .project-docs/decisions/2026-10-18-meeting-recovery-dark-wake.md
 
-  Internal opt-in research (no Settings controls): the local
-  sidekey.meetings.liveTestCapture flag adds a separate Soniox stt-rt-v5 stream
-  only when Meetings uses Soniox, and only in source dev builds (9999 / -dev);
-  packaged builds ignore it and remove Sidekey/meeting-assistant-tests at
-  launch. Preserve its explicitly chosen value. It saves
-  private aligned source PCM, signal activity, final diarized tokens and receipt
-  times under Sidekey/meeting-assistant-tests. Normal notes remain unchanged;
-  no automatic suggestions are enabled. The independent 100ms test mixer uses
-  a 150ms jitter allowance and approximate callback timing; source-role labels
-  are experimental. Per-source background calibration warms up for two seconds;
-  unique-time speaker anchors check surrounding audio and never override current
-  overlap or an opposing source. Meeting mic capture keeps its quiet-input boost
-  with a peak limiter and gradual gain release. Guide: docs/meeting-assistant-testing.md. WHY:
-  .project-docs/decisions/2026-10-20-meeting-source-noise-floor.md,
-  .project-docs/decisions/2026-10-19-live-meeting-test-capture.md,
-  .project-docs/decisions/2026-10-22-no-retained-meeting-audio.md
+  Meeting microphone capture keeps its quiet-input boost with a peak limiter
+  and gradual gain release. Retired research capture cannot be enabled.
+  WHY: .project-docs/decisions/2026-10-20-meeting-source-noise-floor.md
 
 Case secrets manager:
   The Case drawer has a 320 pt content viewport (the outer hit band includes
@@ -734,8 +826,9 @@ Hover tool search and pointer routing:
 whytap:// links:
   CFBundleURLTypes registers the whytap scheme; AppDelegate handles kAEGetURL
   (registered in applicationWillFinishLaunching, queued until launch ends).
-  WhytapLink parses only whytap://tool/<HoverTool rawValue> and
-  whytap://settings/<SettingsWindowTab rawValue>; its switches over both enums
+  WhytapLink parses only whytap://tool/<HoverTool rawValue>,
+  whytap://settings/<SettingsWindowTab rawValue> and
+  whytap://meeting/<meeting id without dashes> (shows that note); its switches over both enums
   are exhaustive, so a new tile or tab needs a destination to compile. The enums
   are the public registry of linkable places: never rename raw values. A link
   only shows a place: inline tools open their HoverPanelRequest, navigate tools
@@ -751,6 +844,17 @@ whytap:// links:
   dialog asks first; taken keys show a conflict and change nothing. WHY:
   .project-docs/decisions/2026-10-20-whytap-links.md,
   .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
+
+Input language offer:
+  With the input language on Auto, InputLanguageSuggestion counts delivered
+  Drop takes whose transcript the system recognizer (on this Mac) reads as
+  one language of the menu; short or unclear takes are ignored. Three in a
+  row produce one notification card ("Dictating in Russian?"). Clicking it
+  sets the input language, only while it is still Auto; ignoring it keeps
+  Auto and that language is never offered again. The action is the app's own
+  inputLanguageCode field, which scripts and links cannot supply. Only the
+  language code, the count and the offered codes are stored. WHY:
+  .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
@@ -834,7 +938,10 @@ OpenAI-compatible servers) and one model per AI feature (Drop Fast, Drop
 Smart, Drop Smart cleanup, Meetings, Meeting notes, Agent, Agent voice, Voice
 search); Local was removed. Models come from provider catalogs plus the
 built-in registry; a model outside the registry is checked with a synthetic
-probe when picked or on Check now. The first launch migrates the old choices
+probe when picked or on Check now. ElevenLabs speech is Scribe v3 Live
+(`scribe_v3_live`) and, for recorded audio, Scribe v3; saved ElevenLabs routes
+naming Scribe v2 Realtime move to v3 Live at launch, the one owner-approved
+model change. WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md The first launch migrates the old choices
 into per-feature routes (AIRoutingMigration) and leaves the old UserDefaults
 keys untouched so a rollback sees them; nothing is switched to another
 provider or model automatically. WHY:
@@ -847,8 +954,9 @@ provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 Costs: the local ai-usage.sqlite journal records only feature/provider/model,
 request ID, time, duration, currency and expense metadata from actual runtime
 calls. Historical routes are captured before sending; switching models does not
-rewrite past usage. Only used feature groups appear for the selected local-date
-period; hover/click/keyboard focus reveals their models. One Price column
+rewrite past usage. The total leads the table. Only used feature groups appear for the
+selected local-date period; hover anywhere on a row, a click or keyboard focus
+reveals its models. One Price column
 retains explicit USD and ElevenLabs credit units, both when mixed. Each visit
 starts at This month; matching neutral From/To controls open a dismissing native
 calendar. No permanent bottom explanation or sticky text-segment highlight.
@@ -870,13 +978,15 @@ totals show +. OpenCode's computed step prices remain estimates.
 Tracking starts with this update; synthetic model checks are excluded. WHY:
 .project-docs/decisions/2026-10-20-feature-costs.md
 
-API hints: the fourth tab contains five offer cards with allowances and official
-links, including Tavily web search for Agent (1,000 monthly search credits,
-basic search costs one credit, no card required). It distinguishes starter
-credit, monthly allowance and paid-plan benefits. Dates are per-card: Tavily
-October 22, 2026; the four earlier offers October 19, 2026. The odd final card spans
-two columns; narrow surfaces use one column. Add API key opens the
-existing API-key form. Tavily has its own search tile there, without model routing.
+API hints: the fourth tab lists provider offers as rows grouped by Speech to
+text, Language models and Web search. A row shows the logo, provider, what it
+takes to start (No card needed, Card required or Paid plan, in that order
+within a group), the allowance with its period, and Get offer. Hovering or
+focusing Get offer opens the conditions and that offer's check date in a
+popover beside the button. The header says Reviewed monthly and shows the
+newest check date. List only offers whose key works in Whytap as it is; Groq
+and Cloudflare wait for their own provider support. The tab has no footer.
+Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
 
@@ -885,6 +995,13 @@ MacPopupLabel. Name/size terms match in any order (`qwen 27`, `qwen27`), ignorin
 case/separators. Search never changes routes; explicit picks retain verification.
 Known catalog dates appear under model IDs: Anthropic Released, OpenAI Created,
 OpenRouter Added to OpenRouter. Unknown/epoch dates stay hidden.
+OpenRouter rows also show the catalog's list price on their own line
+(`$1.25 in / $10 out per 1M tokens`), read from the `pricing` field of the same
+free /models response; `Free` only when the catalog states zero for both sides.
+A missing, malformed or negative (router) amount shows nothing, never a zero.
+Display only: not searchable, no effect on routes, checks or Costs. Other
+providers show no price. Caches written before prices refresh once on opening.
+WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
 Speech models: Deepgram Updated uses cached newest version dates;
 Soniox/ElevenLabs Released uses exact stable IDs with verified official launch
 dates in ModelRegistry. Unknown models/aliases inherit no release date. Nonempty search
@@ -912,7 +1029,10 @@ dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
 MacSwitch adapts the supplied glass switch in SwiftUI with click/drag,
 keyboard and native Toggle accessibility, respecting Reduce Motion/Transparency.
-The island keeps its compact blue switch and explicitly dark Toolbox previews.
+The island keeps its compact blue switch. Island panels embedded in Toolbox
+panes (Vocab, Filler, Case, languages, Notify, History, Monitor) sit on the
+Settings background and follow its appearance through IslandInk (white in the
+always-dark island). WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
 UI decisions and verification limits: docs/DESIGN.md.
 API & Models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and
@@ -1088,6 +1208,44 @@ recording, shell execution or quit are exposed.
 Guide: docs/customization/app-control.md. WHY:
 .project-docs/decisions/2026-10-21-app-control-plugin.md
 
+Harness access: the plugin's content tools answer only the coding harness that
+started the MCP server itself (the helper's direct parent, by Apple-vouched
+team and signing identifier: Claude Code, Codex), after the user's one Yes.
+HarnessAccessGate asks through the Case approval card and queue ("Let Claude
+Code use Whytap?", No / Yes, Y after 0.3 s of a quiet keyboard, 60 s timeout,
+then "Claude Code connected" for 1.4 s); the prompt is shared by sessions that
+start together and outlives the request that caused it. The MCP server answers
+initialize at once and sends request_access afterwards through the client that
+never launches Whytap. Yes and No are remembered per Mac in one Keychain item
+of the app (HarnessAccessStore; a file could be put back after access was
+turned off). The signed app has no entitlements, so the item is in the file
+based login keychain like the Case vault key; kSecAttrAccessible does not
+apply there and is not set. A stored Yes counts only with its seal: the
+Keychain item and harness-access-seal.json beside the broker socket
+(HarnessAccessSealFile, written atomically and read back) carry the same
+random token, renewed on every save. A missing, unreadable or different seal
+fails closed: the tool is asked again; a stored No never needs the seal. Nothing
+stored is cached: each decision is worked out from the Keychain and the seal
+as they are then, plus this launch's answers. An answer the Keychain refused
+holds for the launch and is retried on every read. A refused No replaces the
+seal's token, which cancels every stored Yes, and lists the No there so it
+denies after a relaunch; if the seal cannot be written it is removed. Settings shows a notice
+while an answer is unsaved, and a different one when a No reached neither
+place, until that No is saved or reversed. A tool that acts on the screen
+(whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
+with no suspension before the action. Settings -> Agents -> Coding tools has a switch per
+tool; the gate reads the answer before a request and again before its
+response leaves. Gated today: whytap_meetings_search (every query
+word in title, note or transcript, long words matched by stem, a note snippet
+and the three best replies with speaker and time), whytap_meeting_get,
+whytap_meeting_transcript (by index or around a moment, bounded by replies and
+bytes, a longer reply continued by fromOffset) and whytap_meeting_open (busy
+while a note is being edited; a meeting link then shows nothing). One Yes covers future content and action tools
+except deleting data. Settings and To-do tools keep the earlier boundary. The
+gate never loads the Case vault and a Case registration gives no access to
+meetings. whytap://meeting/<id without dashes> shows one note. WHY:
+.project-docs/decisions/2026-11-20-harness-access.md
+
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 only with a sole finish_answer call containing status, answer, sources and actions.
 Strict tool schemas and application-required completion preserve the selected route.
@@ -1124,7 +1282,7 @@ sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
 without deleting other retained rows. A clipboard row's context menu offers
-Delete… in hover History, Toolbox History and the ⌥V strip; ClipboardEntryDeletion
+Delete… in hover History and Toolbox History; ClipboardEntryDeletion
 asks Cancel-first like meeting delete and never quotes the copy. deleteClipboardEntry
 removes the image sidecar, then the row with secure_delete and a truncating WAL
 checkpoint, in one store-queue hop; a sidecar that cannot be removed keeps the
@@ -1296,7 +1454,8 @@ and the passive instruction strip is removed. Return copies the selected area
 and closes, waiting for pending Blur. Download writes collision-safe timestamped
 PNG files into Downloads and shows the actual filename without closing. Arrow,
 Shape, Pen, Text, Blur, Numbered steps, Copy text and system sharing remain on the main
-toolbar. There is no Select/crop button or V shortcut; initial area selection
+toolbar. Pen with Shift held draws one straight line from the press, snapped to
+45 degrees and shortened (never bent) at the crop edge. There is no Select/crop button or V shortcut; initial area selection
 remains a drag. Clicking the active tool again stops drawing and permits
 selection/annotation adjustment without an extra selector. Highlighter,
 Spotlight, Pin above windows and
@@ -1315,7 +1474,9 @@ only that destination, or click anywhere in the pair for a native assignment men
 reset. Changes save immediately through HotkeyPreferences.screenshotArrowBindings;
 Help and settings backups share it. Custom mappings survive this placement change; the previous unmodified stock map
 migrates once to the new four drawing defaults.
-The earlier Settings-only assignment surface is removed. Bare arrows use those actions,
+The earlier Settings-only assignment surface is removed. Bare arrows use those actions.
+An arrow assigned to another tool also switches from a new empty label.
+Entered text and marked input keep native cursor navigation.
 Shift-arrows move the crop and Option-arrows resize it. Agent Useful Links
 releases its Carbon registrations while Screenshot is active, restores the
 latest visible actions afterwards, and invalidates stale callbacks. Blur defaults to Text and numbers, including
@@ -1340,11 +1501,15 @@ is separate from the removed app-managed speech/LLM models. Guide:
   the same Allow button used by the other permissions when missing, without
   status chips or an action on a granted row. Only explicit capture or Allow
   actions request access, never launch or refresh. Settings Allow uses an async
-  ScreenCaptureKit content request without capturing pixels or audio, then
-  opens System Settings if access remains denied. A pending request shows
-  progress and ignores repeated clicks. WHY:
+  ScreenCaptureKit content request without capturing pixels or audio. A pending
+  request shows progress and ignores repeated clicks. WHY:
   .project-docs/decisions/2026-10-26-first-launch-permissions.md. Returning
   from System Settings refreshes the status; it never gates launch/Drop readiness.
+  The first Allow of a launch for Keyboard control or Screen Recording only
+  asks macOS and never opens System Settings itself: a pane opened beside the
+  request listed no Whytap on a clean Mac. The button then reads Open Settings
+  and opens the pane on later presses; the asked state is not saved. WHY:
+  .project-docs/decisions/2026-11-19-permission-request-before-settings.md
 
 - **Accessibility** gates `NSEvent.addGlobalMonitorForEvents`
   (`RightCmdGestureMonitor`; `EscapeCloseEventMonitor` consumes only the first
@@ -1484,7 +1649,8 @@ input layout, including live recording and previously saved non-English titles.
 
 1. **No Whytap-owned services.** The app never contacts a Whytap backend,
    has no account and sends no telemetry. Network traffic is limited to
-   the meeting detector's Silero VAD download from Hugging Face, providers
+   the meeting detector's Silero VAD download from Hugging Face, the On this
+   Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),
    notification sources accessed by user-configured local scripts, calendar providers
    explicitly connected by the user (Google, Microsoft and Zoom), direct agent provider
@@ -1505,16 +1671,19 @@ input layout, including live recording and previously saved non-English titles.
    transcripts, prompts, replies or keys (`LocalPathLoggingInvariantTests`).
    Key contents read by the hotkey tap or the Brightness keys tap are never
    logged or persisted.
-3. **No on-device models and no silent route change.** Speech, cleanup and
-   meeting processing run only on providers or endpoints the user chose. A
+3. **No on-device LLM and no silent route change.** Cleanup and meeting
+   processing run only on providers or endpoints the user chose; speech runs
+   there or, for the microphone features, on the On this Mac model the user
+   downloaded and picked (never chosen for them; WHY:
+   .project-docs/decisions/2026-11-19-on-device-dictation.md). A
    stored retired `local` level, or no stored level on Apple Silicon (where
    Local was the default), reads as not configured even when a key is stored;
    Intel keeps its Your key default (`SelfKeyPreferences`,
    `RetiredLocalRouteTests`). Each feature's data, including its fallback and
    probe, goes only to the provider of its own route in Settings -> API &
    Models; a removed key leaves the feature Not set and moves nothing. WHY:
-   .project-docs/decisions/2026-10-19-api-and-models.md FluidAudio stays only for the meeting detector's
-   Silero VAD; launch removes the retired models' weights under
+   .project-docs/decisions/2026-10-19-api-and-models.md FluidAudio serves the meeting detector's
+   Silero VAD and On this Mac speech; launch removes the retired models' weights under
    Application Support/Sidekey once per flavor and never touches FluidAudio's
    cache (`LegacyLocalModelCleanup`, WHY:
    .project-docs/decisions/2026-10-18-legacy-model-cleanup.md). There is no

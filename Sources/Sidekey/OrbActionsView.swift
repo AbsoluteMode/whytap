@@ -2,11 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Three-row action cluster rendered inside the darkened rounded-rect
-/// frame of `OrbActionsOverlayPanel`. Each row's click opens the
-/// unified history strip with the matching filter pre-selected
-/// (`.agent` → Agent / `.drop` → Drop / `.clipboard` → Clipboard) via
-/// `HistoryStripController.toggle(_:)` — same path the in-strip
-/// sidebar would take.
+/// frame of `OrbActionsOverlayPanel`.
 ///
 /// Layout: vertical 3-row `VStack`, each row is one hit-test target
 /// (`Button` wrapping the inner `HStack` with
@@ -117,10 +113,7 @@ struct OrbActionsView: View {
     /// per-row hint reintroduction lands without re-plumbing.
     @ObservedObject private var displayPreferences: DisplayPreferences
 
-    /// Click handler injected by `OrbActionsOverlayPanel` so the view
-    /// stays decoupled from concrete `HistoryStripController` while still
-    /// driving the strip on a click. Defaults to a no-op for previews +
-    /// tests that don't care about wire-up.
+    /// The action for the clicked row.
     let onAction: (IconID) -> Void
 
     @MainActor
@@ -222,10 +215,7 @@ struct OrbActionsView: View {
         }
     }
 
-    /// Step 2: forwards the row click to the injected `onAction`
-    /// handler, which `OrbActionsOverlayPanel` binds to a call into
-    /// `HistoryStripController.toggle(_:)` for the matching mode.
-    /// Without a wired handler this is a no-op (preview / test paths).
+    /// Forward the row click to its action.
     private func perform(_ id: IconID) {
         onAction(id)
     }

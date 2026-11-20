@@ -62,7 +62,6 @@ enum IslandHoverToolSearch {
         case .calendar: return "calendar schedule events agenda google outlook apple teams zoom календарь расписание события встречи"
         case .brightness: return "screen brightness sun hdr xdr vivid extra boost яркость экран солнце"
         case .translate: return "translator translation text llm перевод переводчик текст"
-        case .meetingAssistant: return "meeting assistant space questions answers meeting ассистент встреча спейс вопросы ответы"
         case .subtitles: return "translator live captions system audio video перевод субтитры системный звук"
         case .screenshot: return "screenshot capture area crop blur text numbers redact annotation screen скриншот снимок область размытие текст числа блюр"
         case .quit: return "exit выход"

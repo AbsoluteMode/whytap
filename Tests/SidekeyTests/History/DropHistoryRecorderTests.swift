@@ -9,11 +9,11 @@ final class DropHistoryRecorderTests: XCTestCase {
             clock: { Date(timeIntervalSince1970: 100) }
         )
 
-        recorder.record(
+        XCTAssertTrue(recorder.record(
             rawTranscript: "um hello world",
             formattedText: "Hello, world.",
             targetApp: "Mail"
-        )
+        ))
 
         let entries = try store.latestDropEntries(limit: 10)
         XCTAssertEqual(entries.count, 1)
@@ -26,11 +26,11 @@ final class DropHistoryRecorderTests: XCTestCase {
     func testRecordSwallowsStoreErrors() {
         let recorder = DropHistoryRecorder(store: ThrowingHistoryStore(), clock: Date.init)
         // Must not throw — best-effort.
-        recorder.record(
+        XCTAssertFalse(recorder.record(
             rawTranscript: "raw",
             formattedText: "Formatted.",
             targetApp: nil
-        )
+        ))
     }
 }
 

@@ -5,26 +5,8 @@ import XCTest
 
 @MainActor
 final class IslandAgentWingViewTests: XCTestCase {
-    /// The recording face is measured and rendered in `IslandAgentWingView`, so
-    /// `IslandView` and `IslandPanel` share the same width contract. When the
-    /// breathing provider mark is shown, the rendered row adds the mark + its
-    /// gap and trades the leading inset down; the measurement widens by
-    /// `recordingProviderMarkSlack`. Locking the formula (and its current
-    /// value) keeps the two from drifting — a drift reads as a clipped
-    /// transcript tail or dead trailing space in the live ticker.
-    func test_providerMarkSlackMatchesRenderedMarkLayout() {
-        XCTAssertEqual(
-            IslandAgentWingView.recordingProviderMarkSlack,
-            IslandAgentWingView.recordingMarkSide
-                + IslandAgentWingView.recordingMarkSpacing
-                + IslandAgentWingView.recordingMarkLeadingPadding
-                - IslandAgentWingView.contentHorizontalPadding
-        )
-        XCTAssertEqual(IslandAgentWingView.recordingProviderMarkSlack, 21)
-    }
-
     func test_recordingTranscriptUpdateDoesNotNotifyComposingFocusChange() {
-        let model = WingHarnessModel(wing: .recording(transcript: "first words"))
+        let model = WingHarnessModel(wing: .recording(transcript: ""))
         let recorder = FocusRecorder()
         let hosting = NSHostingController(
             rootView: WingHarness(model: model, recorder: recorder)
@@ -35,9 +17,11 @@ final class IslandAgentWingViewTests: XCTestCase {
 
         XCTAssertEqual(recorder.values, [])
 
-        model.wing = .recording(transcript: "second words")
-        drainRunLoop()
-        hosting.view.layoutSubtreeIfNeeded()
+        for text in ["first words", "first words while listening", "corrected words"] {
+            model.wing = .recording(transcript: text)
+            drainRunLoop()
+            hosting.view.layoutSubtreeIfNeeded()
+        }
 
         XCTAssertEqual(
             recorder.values,
@@ -76,7 +60,9 @@ private struct WingHarness: View {
     var body: some View {
         IslandAgentWingView(
             wing: model.wing,
-            faceWidth: 260,
+            faceWidth: model.wing == .recording(transcript: "")
+                ? IslandAgentWingView.recordingFaceWidth(textWidth: 0, providerMarkVisible: false)
+                : IslandFrameLayout.agentWingRecordingWidth,
             activityLabel: "thinking...",
             height: 32,
             onComposingFocusChange: recorder.record

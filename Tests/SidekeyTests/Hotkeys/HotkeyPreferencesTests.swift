@@ -36,6 +36,22 @@ final class HotkeyPreferencesTests: XCTestCase {
         XCTAssertEqual(HotkeyDisplay.usefulLinksPreviousHint(for: preferences.configuration), "tap up")
     }
 
+    func testOptionVIsAvailableForACustomBinding() throws {
+        let optionV = HotkeyTapCombo(
+            keyCode: UInt32(kVK_ANSI_V),
+            modifiers: UInt32(optionKey),
+            keyTitle: "V"
+        )
+        let preferences = HotkeyPreferences(defaults: makeDefaults())
+        let binding = HotkeyBinding(gesture: .tap, key: .combo(optionV))
+        var configuration = preferences.configuration
+        XCTAssertFalse(configuration.assignments.contains { $0.binding.conflictKey == binding.conflictKey })
+
+        configuration.agentTextShortcut = .combo(optionV)
+        try preferences.apply(configuration)
+        XCTAssertEqual(preferences.agentTextShortcut, .combo(optionV))
+    }
+
     func testPersistsChangedBindingsImmediately() {
         let defaults = makeDefaults()
         var preferences: HotkeyPreferences? = HotkeyPreferences(defaults: defaults)

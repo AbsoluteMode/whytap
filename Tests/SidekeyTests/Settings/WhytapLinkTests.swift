@@ -91,7 +91,10 @@ final class WhytapLinkTests: XCTestCase {
             // Toolbox panes whose action is an explicit button. Case's pane
             // requests Touch ID on appear and is excluded.
             return [.dropMode, .meetingRecord, .screenshot].contains(tool)
-        case .settings, .translation, .meetingAssistant, .island:
+        case .settings, .translation, .island:
+            return true
+        case .meeting:
+            // Opens Settings -> Meetings on one note the user already has.
             return true
         }
     }
@@ -107,6 +110,18 @@ final class WhytapLinkTests: XCTestCase {
             // Requests Touch ID when it appears.
             return false
         }
+    }
+
+    func test_a_meeting_link_shows_that_note_and_nothing_else() {
+        let id = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        XCTAssertEqual(destination("whytap://meeting/11111111222233334444555555555555"), .meeting(id))
+        XCTAssertEqual(destination(AppControlMeetings.link(id)), .meeting(id))
+        XCTAssertTrue(isShowOnly(.meeting(id)))
+        // Not an id: the island only wakes.
+        XCTAssertEqual(destination("whytap://meeting/latest"), .island)
+        XCTAssertEqual(destination("whytap://meeting/1111111122223333444455555555555"), .island)
+        XCTAssertNil(destination("whytap://meeting/11111111-2222-3333-4444-555555555555"))
+        XCTAssertNil(destination("whytap://meeting/11111111222233334444555555555555/transcript"))
     }
 
     func test_no_link_runs_an_action_or_asks_for_authentication() {

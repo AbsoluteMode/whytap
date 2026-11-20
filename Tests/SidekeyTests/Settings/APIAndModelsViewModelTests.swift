@@ -339,7 +339,6 @@ final class APIAndModelsViewModelTests: XCTestCase {
             AssignItem(feature: .dropSmart, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .meetings, account: .soniox, model: "stt-async-v5"),
             AssignItem(feature: .agentVoice, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .meetingAssistantAudio, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .voiceSearch, account: .soniox, model: "stt-rt-v5"),
             AssignItem(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v5"),
         ])
@@ -592,6 +591,37 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.keyStatuses.record(for: .openRouter)?.checkedAt, env.now)
     }
 
+    /// A dictation was refused and marked the key. The free check on the next
+    /// visit answers "limited" for the same scoped key: that proves nothing
+    /// about speech, so the mark stays until a real check or a new key.
+    func test_reopening_settings_does_not_clear_a_refusal_with_a_mere_limited_answer() async throws {
+        let env = try makeEnv(keyed: [.elevenLabs])
+        env.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v2_realtime"), for: .dropFast)
+        env.keyStatuses.set(.rejected(.invalidKey), for: .elevenLabs, at: env.now.addingTimeInterval(-600))
+        env.checker.set(.limited, for: .elevenLabs)
+        let vm = env.makeViewModel()
+
+        await vm.onAppear()
+
+        XCTAssertEqual(env.keyStatuses.record(for: .elevenLabs)?.status, .rejected(.invalidKey))
+        XCTAssertEqual(vm.rows.first { $0.feature == .dropFast }?.status, .keyProblem)
+
+        // Check now may spend a paid probe, and its verdict does count.
+        await vm.checkKey(.elevenLabs)
+        XCTAssertEqual(env.keyStatuses.record(for: .elevenLabs)?.status, .limited)
+    }
+
+    func test_saving_a_key_without_speech_access_says_so_and_keeps_the_previous_key() async throws {
+        let env = try makeEnv(keyed: [.elevenLabs])
+        env.checker.set(.rejected(.missingSpeechPermission), for: .elevenLabs)
+        let vm = env.makeViewModel()
+
+        let failure = await vm.replaceKey("new-key-without-speech", for: .elevenLabs)
+
+        XCTAssertEqual(failure, "No Speech to Text access on this key")
+        XCTAssertEqual(env.lookup(.elevenLabs), .key("key"), "the working key is not replaced")
+    }
+
     func test_reopening_settings_recovers_a_cached_credit_refusal_without_replacing_the_key() async throws {
         let env = try makeEnv(keyed: [.openRouter])
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openai/gpt-6-sol"), for: .dropSmartCleanup)
@@ -615,7 +645,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertNil(env.makeViewModel().unsetBanner)
 
         env.addKey(.soniox)
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "13 features have no model")
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "11 features have no model")
 
         for feature in AIFeature.allCases where feature != .dropFast {
             env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: feature)
@@ -698,16 +728,13 @@ final class APIAndModelsProviderTests: XCTestCase {
         let (vm, _, _, _) = try make()
         let features = vm.groups.flatMap { $0.rows.map(\.feature) }
         XCTAssertEqual(features.sorted { $0.rawValue < $1.rawValue }, AIFeature.activeCases.sorted { $0.rawValue < $1.rawValue })
-        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles", "Meeting Assistant (Beta)"])
+        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles"])
         XCTAssertEqual(vm.groups.first { $0.title == "Drop Smart" }?.rows.map(\.feature), [.dropSmart, .dropSmartCleanup])
         XCTAssertEqual(vm.groups.first { $0.title == "Meetings" }?.rows.map(\.feature), [.meetings, .meetingNotes])
         XCTAssertEqual(vm.groups.first { $0.title == "Translation" }?.rows.map(\.feature), [.translation])
         let subtitles = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })
         XCTAssertEqual(subtitles.rows.map(\.feature), [.subtitlesAudio, .subtitlesTranslation])
         XCTAssertEqual(subtitles.rows.map(\.fieldLabel), ["Speech", "LLM"])
-        let assistant = try XCTUnwrap(vm.groups.first { $0.title == "Meeting Assistant (Beta)" })
-        XCTAssertEqual(assistant.rows.map(\.feature), [.meetingAssistantAudio, .meetingAssistant])
-        XCTAssertEqual(assistant.rows.map(\.fieldLabel), ["Speech", "Text"])
     }
 
     func test_only_openrouter_rows_offer_a_provider_and_auto_is_the_default() throws {

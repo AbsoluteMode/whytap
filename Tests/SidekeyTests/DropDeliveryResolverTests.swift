@@ -164,6 +164,22 @@ final class DropDeliveryResolverTests: XCTestCase {
         XCTAssertEqual(rec.phases.last, .deliveryFailed, "failed salvage paste must not silently idle")
     }
 
+    func testClosedLocalEditorParksRawPartialInHistoryOnce() async {
+        let rec = Recorder()
+        rec.pasteRawSucceeds = false
+        var saved: [String] = []
+        var sink = rec.sink()
+        sink.saveUndeliveredPartial = { saved.append($0); return true }
+        await AppDelegate.resolveDelivery(
+            result: .degraded, capturedPCM: pcm, lastPartial: "the last words",
+            hasBatchTranscriber: false, transcribe: { _ in XCTFail(); return "" }, sink: sink)
+        XCTAssertEqual(saved, ["the last words"])
+        XCTAssertTrue(rec.clearedPending)
+        XCTAssertNil(rec.retainedAudio)
+        XCTAssertEqual(rec.phases.last, .idle)
+        XCTAssertEqual(rec.failureReasons, ["local_editor_unavailable"])
+    }
+
     func test_degraded_batch_throws_no_partial_goes_deliveryFailed() async {
         let rec = Recorder()
         struct Offline: Error {}

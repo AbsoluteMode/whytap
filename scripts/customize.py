@@ -25,7 +25,6 @@ TOPICS = {
     "hover": "docs/customization/hover-tools.md",
     "dashboard": "docs/customization/dashboards.md",
     "data": "docs/customization/local-data.md",
-    "meeting_assistant": "docs/meeting-assistant.md",
 }
 RESERVED_SWIFT = {
     "actor", "as", "associatedtype", "break", "case", "catch", "class", "continue",

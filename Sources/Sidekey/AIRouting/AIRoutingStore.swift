@@ -195,6 +195,34 @@ final class AIRoutingStore: ObservableObject {
         commit(updated)
     }
 
+    /// Also retire routes restored from older backups. Keep provider keys,
+    /// unrelated routes and historical usage identifiers intact.
+    // WHY: docs/decisions/2026-11-05-retire-live-assistant.md
+    func retireMeetingRoutesIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for feature in [AIFeature.retiredMeetingText, .retiredMeetingAudio] {
+            updated.routes[feature.rawValue] = nil
+            updated.migratedRoutes[feature.rawValue] = nil
+        }
+        commit(updated)
+    }
+
+    /// Move every ElevenLabs route still naming Scribe v2 Realtime to Scribe
+    /// v3 Live: the same account and key, the provider's newer model. Runs at
+    /// each launch, so a route restored from an older backup moves too. The
+    /// migration snapshot keeps what was chosen before.
+    // WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md
+    func upgradeElevenLabsScribeIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for (feature, route) in updated.routes
+        where route.account == .elevenLabs && route.model == ModelRegistry.elevenLabsRetiredRealtimeModel {
+            updated.routes[feature]?.model = ModelRegistry.elevenLabsRealtimeModel
+        }
+        commit(updated)
+    }
+
     // MARK: - Persistence
 
     /// Reads entry by entry: a route or server this build does not know (an

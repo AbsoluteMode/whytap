@@ -9,6 +9,9 @@ import os
 /// `no_verbatim=true` asks Scribe to remove fillers, false starts and
 /// disfluencies. Remaining end-to-end behavior is verified once a live key exists.
 enum ElevenLabsRealtimeURL {
+    /// Always a manual commit, auto-stop takes included: a provider commit
+    /// cannot be told from Scribe's ~36 s segment cap, so it never ends a take.
+    /// WHY: .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
     static func make(model: String, language: String?, terms: [String]) -> URL {
         var comps = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         var items: [URLQueryItem] = [
@@ -52,7 +55,10 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
     }
 
     /// Test: inject a transport.
-    init(model: String, prerollSilenceMs: Int = 150, previousText: String? = ".", transport: @escaping TransportFactory) {
+    init(
+        model: String, prerollSilenceMs: Int = 150, previousText: String? = ".",
+        transport: @escaping TransportFactory
+    ) {
         self.prerollSilenceMs = prerollSilenceMs
         self.previousText = previousText
         self.makeTransport = transport

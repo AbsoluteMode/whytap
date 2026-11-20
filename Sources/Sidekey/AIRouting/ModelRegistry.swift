@@ -10,9 +10,17 @@ enum ModelRegistry {
     /// Soniox async (file) transcription, the batch counterpart of `stt-rt-*`.
     /// The same model `SonioxFileAPI` and the meeting transcriber send.
     static let sonioxRecordedModel = "stt-async-v5"
-    /// ElevenLabs Scribe v2 for recorded audio; `scribe_v2_realtime` is the
-    /// streaming model and is not accepted by the speech-to-text endpoint.
-    static let elevenLabsRecordedModel = "scribe_v2"
+    /// ElevenLabs Scribe v3 for recorded audio; the streaming model is not
+    /// accepted by the speech-to-text endpoint.
+    static let elevenLabsRecordedModel = "scribe_v3"
+    /// ElevenLabs Scribe v3 Live, the streaming model. It replaced
+    /// `scribe_v2_realtime` (`elevenLabsRetiredRealtimeModel`) on the owner's
+    /// decision; saved routes are moved by `AIRoutingStore`.
+    // WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md
+    static let elevenLabsRealtimeModel = "scribe_v3_live"
+    static let elevenLabsRetiredRealtimeModel = "scribe_v2_realtime"
+    /// The speech model the On this Mac provider downloads and runs.
+    static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
     static let anthropicAgentModel = "claude-sonnet-5-5"
 }
@@ -42,6 +50,8 @@ extension ModelRegistry {
         case (.elevenLabs, "scribe_v2_realtime"): day = "2025-11-11"
         // https://elevenlabs.io/blog/introducing-scribe-v2
         case (.elevenLabs, "scribe_v2"): day = "2026-01-09"
+        // https://elevenlabs.io/blog/scribe-v3
+        case (.elevenLabs, "scribe_v3_live"), (.elevenLabs, "scribe_v3"): day = "2026-11-10"
         default: return nil
         }
         let formatter = ISO8601DateFormatter()
@@ -53,8 +63,9 @@ extension ModelRegistry {
         RegistryModel(kind: .soniox, id: "stt-rt-v5", uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .soniox, id: sonioxRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT], diarization: false),
-        RegistryModel(kind: .elevenLabs, id: "scribe_v2_realtime", uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: false),
+        RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
         RegistryModel(kind: .anthropic, id: anthropicAgentModel, uses: [.chatWithTools], diarization: false),
@@ -78,39 +89,46 @@ extension ModelRegistry {
         switch kind {
         case .soniox:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return "stt-rt-v5"
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio: return "stt-rt-v5"
             case .meetings: return sonioxRecordedModel
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .deepgram:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio, .meetings: return "nova-3"
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return "nova-3"
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .elevenLabs:
             switch feature {
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio, .meetings: return "scribe_v2_realtime"
-            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent, .meetingAssistant: return nil
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return elevenLabsRealtimeModel
+            case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .openRouter:
             switch feature {
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
             case .dropSmartDecision: return nil
             case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return "google/gemini-3.8-flash"
-            case .agent, .meetingAssistant: return "anthropic/claude-sonnet-5.5"
-            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return nil
+            case .agent: return "anthropic/claude-sonnet-5.5"
+            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .anthropic:
             switch feature {
+            case .retiredMeetingText, .retiredMeetingAudio: return nil
             case .dropSmartDecision: return nil
-            case .agent, .meetingAssistant: return anthropicAgentModel
+            case .agent: return anthropicAgentModel
             case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return anthropicAgentModel
-            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio, .meetingAssistantAudio: return nil
+            case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .openAI:
             // The authenticated live catalog is the source of available IDs.
             return nil
         case .openAICompatible:
             return nil
+        case .onDevice:
+            return feature.modelUse(on: .onDevice) == nil ? nil : onDeviceSpeechModel
         }
     }
 
@@ -131,7 +149,7 @@ extension ModelRegistry {
         switch kind {
         case .deepgram:
             return id.hasPrefix("flux-") ? "needs Deepgram's v2 streaming API" : nil
-        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible:
+        case .soniox, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice:
             return nil
         }
     }

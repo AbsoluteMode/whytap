@@ -111,21 +111,9 @@ enum HelpWindowContent {
                 prefix: nil,
                 contents: [.text(CaseApprovalKey.timed.keycap)]
             ),
-            // ROO-208: the three per-mode rows (`⌥1` Agent / `⌥2` Drop /
-            // `⌥3` Clipboard) collapse into a single unified-strip row.
-            // Filter selection lives inside the strip's left sidebar.
-            HelpHotkeyRowSpec(
-                title: "History",
-                detail: "Open the bottom strip with clipboard, voice drops, and agent history.",
-                iconName: "clock",
-                prefix: nil,
-                contents: [.text(HotkeyGlyph.option), .text("V")]
-            ),
-            // ROO-208 iter 15: Raycast-style hover+Enter paste from the
-            // bottom strip into the previously focused app.
             HelpHotkeyRowSpec(
                 title: "History — paste",
-                detail: "Hover a card in the bottom strip and press Return to paste it into the previously focused app.",
+                detail: "Hover a card in the island’s History and press Return to paste it into the previously focused app.",
                 iconName: "return",
                 prefix: nil,
                 contents: [.text("\u{21A9}")]
@@ -182,7 +170,7 @@ enum HelpWindowContent {
     private static func screenshotEditorRows(for configuration: HotkeyConfiguration) -> [HelpHotkeyRowSpec] {
         ScreenshotArrow.allCases.map { arrow in
             let action = configuration.screenshotArrowBindings[arrow]
-            return HelpHotkeyRowSpec(title: "Screenshot — \(arrow.glyph)", detail: "\(action.title). Screenshot takes priority over Agent; text fields keep cursor navigation.",
+            return HelpHotkeyRowSpec(title: "Screenshot — \(arrow.glyph)", detail: "\(action.title). Screenshot takes priority over Agent. Arrows can switch tools from a new empty label.",
                                      iconName: action.symbol, prefix: nil, contents: [.text(arrow.glyph)])
         } + ScreenshotEditorKeys.tools.map { entry in
             HelpHotkeyRowSpec(title: "Screenshot — \(entry.title)", detail: entry.tool == .text ? "Click inside the selection to type. Click a label to edit; drag its hover handle to move." : "While the screenshot editor is open.",

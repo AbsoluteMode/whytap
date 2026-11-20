@@ -56,7 +56,6 @@ enum HoverSlotEffect: Equatable {
     case openCalendar
     case openTranslate
     case openSubtitles
-    case openMeetingAssistant
     case openScreenshot
     case quit
     case openPanel(HoverInlinePanel)
@@ -69,8 +68,18 @@ enum HoverSlotEffect: Equatable {
         case .openPanel:
             return true
         case .toggleDropMode, .openSettings, .openHotkeys, .openNotes,
-             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openMeetingAssistant, .openScreenshot, .quit:
+             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
             return false
+        }
+    }
+
+    /// The translation window a tool hotkey toggles. Tile clicks, tool search
+    /// and `whytap://` links keep the open-only `invoke` path.
+    var hotkeyTranslationToggle: TranslationWindowController.Mode? {
+        switch self {
+        case .openTranslate: return .text
+        case .openSubtitles: return .subtitles
+        default: return nil
         }
     }
 
@@ -101,8 +110,6 @@ enum HoverSlotEffect: Equatable {
             actions.openCalendar()
         case .openTranslate:
             actions.openTranslate()
-        case .openMeetingAssistant:
-            actions.openMeetingAssistant()
         case .openSubtitles:
             actions.openSubtitles()
         case .openScreenshot:
@@ -127,9 +134,6 @@ enum HoverSlotRouter {
         case .notifs:
             return .openPanel(.notifications)
         case .clipboard:
-            // #313: the Clipboard tile is now the History inline hover panel.
-            // Open it in-place (D1: same as the tile click → `panelMode =
-            // .history`) instead of the retired bottom-strip openClipboard.
             return .openPanel(.history)
         case .settings:
             return .openSettings
@@ -137,8 +141,6 @@ enum HoverSlotRouter {
             return .openHotkeys
         case .notes:
             return .openNotes
-        case .meetingAssistant:
-            return .openMeetingAssistant
         case .meetingRecord:
             return .toggleMeetingRecord
         case .monitor:

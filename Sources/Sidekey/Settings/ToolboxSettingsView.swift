@@ -1,12 +1,14 @@
 // Sources/Sidekey/Settings/ToolboxSettingsView.swift
 import SwiftUI
 
-private extension View {
-    /// Embedded island tools preview their actual dark overlay appearance.
+extension View {
+    /// An island panel embedded in a Toolbox tool pane. It sits on the same
+    /// Settings background as every other pane and follows the window's
+    /// light or dark appearance (`IslandInk`); the former dark preview card
+    /// made the panes look different from one another.
+    // WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
     func settingsIslandPreview() -> some View {
-        self.padding(12)
-            .background(Color(hexCSS: "#1C1C1E"), in: RoundedRectangle(cornerRadius: 10))
-            .environment(\.colorScheme, .dark)
+        self
     }
 }
 
@@ -386,8 +388,6 @@ struct ToolboxSettingsView: View {
                 ToolboxTranslationPane(mode: tool == .translate ? .text : .subtitles, deps: deps,
                                        openFeature: { selection.focus($0) })
                     .id(tool)
-            case .meetingAssistant:
-                actionPane(tool, title: "Open Meeting Assistant", action: deps.openMeetingAssistant)
             case .meetingRecord:
                 ToolboxRecordingPane(toggle: deps.toggleMeetingRecord)
             case .screenshot:

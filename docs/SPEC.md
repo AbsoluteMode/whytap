@@ -41,7 +41,7 @@ Knowledge workers — разработчики, продакт-менеджер�
 - To-do — компактный локальный список в hover: ввод + Enter, нажатие завершает/возвращает задачу, завершённые уходят вниз до закрытия, затем доступны в History с датой и временем завершения. Длинный текст раскрывается нативной подсказкой при наведении; черновик сохраняется при закрытии. Calendar открывается внутри Hover на текущем дне. Повестка, полные подробности события, выбор видимых календарей и кнопка Connect остаются внутри Hover; повторное открытие возвращает сегодня. Connect и Settings → Integrations сразу запускают общий сценарий подключения Apple, Google, Outlook/Teams и Zoom Calendar Service: без промежуточной формы, имени аккаунта и Advanced setup. Браузер или системный запрос открываются только для разрешения доступа провайдеру; аккаунта Whytap нет. Внешние события доступны для чтения. Публичные Google/Zoom подключения остаются недоступны до проверки; живая авторизация проверяется отдельно. См. [Planner](planner.md).
 
 - macOS 14.2+, Swift + AppKit + SwiftUI; surface — Dynamic Island (status-bar item нет)
-- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) → cleanup (OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / без LLM) → Cmd+V
+- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) → cleanup (OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / без LLM) → Cmd+V (в собственные текстовые поля Whytap, например в ввод Translate, текст вставляется напрямую в выделение, без буфера обмена и Cmd+V)
 - Agent flow: Right Cmd tap/hold → Whytap Agent → выбранная пользователем модель OpenRouter, OpenAI или Anthropic, рендер в окне
 - Meeting Notes: always-on детектор → запись (mic + system audio) → BYOK-процессор (Soniox размечает спикеров, саммари — LLM пользователя) → notes window
 - App-aware форматирование (Notion/Linear/Slack/Telegram → markdown, остальное → plain)
@@ -361,12 +361,10 @@ correction & learning loop
 
 **Режим Drop фиксируется в начале записи.** Fast вставляет транскрипт с
 фильтром слов-паразитов и не обращается к AI-обработке текста. Smart делает один
-запрос выбранной модели текста: она возвращает исправленное сообщение либо
-служебный ответ «без изменений», если существенной пользы от правок нет.
+запрос выбранной модели текста. Модель возвращает готовое сообщение либо
+служебный ответ «без изменений», если текст уже готов к вставке.
 В последнем случае вставляется сохранённый транскрипт без интерпретации Markdown;
-служебный ответ во вставку не попадает. Замена синонимов, порядок слов и мелкая
-стилистика сами по себе не требуют редактуры. Настоящие ошибки и структура
-длинного сообщения по-прежнему исправляются. Отдельная модель Jev/Decision и её
+служебный ответ во вставку не попадает. Отдельная модель Jev/Decision и её
 строка в настройках удалены. Выбранная модель текста, её провайдер и ключи
 сохраняются; режим записи и STT-провайдер остаются Smart. Выбранный язык перевода
 всегда требует полного текста на нужном языке. Если обработка недоступна, завершилась ошибкой или
@@ -376,16 +374,17 @@ correction & learning loop
 смена режима относится к следующей записи. Правило действует и для batch
 recovery, и для восстановления по частичному транскрипту.
 
-Редактор Smart делает минимальные полезные исправления, убирает явные запинки
-и случайные дубли, сохраняя исходные формулировки, порядок мыслей,
-самостоятельные факты, причины, условия, запреты, адресатов и степень
-уверенности. Предложение не становится решением, вложенная просьба написать
-кому-то остаётся просьбой. При самопоправке заменяется только исправляемая
-часть. Длинные сообщения разделяются пустыми строками на смысловые абзацы;
-три и более параллельных требования можно оформить простым списком.
-Краткость не имеет заданного процента: если сокращение теряет смысловую
-деталь, она сохраняется. Настроенный выходной язык действует и для такой
-редактуры. Промпт проверен под GPT-6 Sol, выбор модели остаётся в API & Models.
+Редактор Smart убирает запинки, слова-паразиты и повторы, исправляет ошибки
+распознавания и написание известных названий, упрощает тяжёлые устные
+конструкции. При самопоправке остаётся итоговый вариант и всё, что в исходном
+варианте ещё в силе. Редактор сохраняет голос автора, факты, причины, условия,
+запреты, адресатов и степень уверенности. Предложения сохраняют статус
+предложений, а вложенная просьба написать кому-то остаётся просьбой.
+Длинные сообщения делятся на смысловые абзацы, три и более параллельных
+пункта оформляются списком, зависимые шаги нумеруются. Настроенный выходной
+язык действует и для такой редактуры. Выбор модели остаётся в API & Models.
+Подробности и результаты проверки описаны в
+[решении о редакторе Smart](../.project-docs/decisions/2026-11-20-smart-ready-text.md).
 
 Smart выбирает правила оформления по распознанному приложению и полю ввода:
 CommonMark для Markdown-редакторов и AI-композеров, варианты GitHub/GitLab
@@ -394,8 +393,8 @@ CommonMark для Markdown-редакторов и AI-композеров, ва
 поля остаются обычным текстом. Для Slack и Telegram разметка преобразуется
 локально в форматированный текст буфера обмена с обычным текстовым fallback.
 Точные пути, URL и код защищены от локального удаления слов-паразитов.
-Распознавание приложения само по себе не запускает дополнительную редактуру;
-Fast и успешный пропуск редактора через Decision сохраняются. Подробности и
+Правила назначения применяются при правке, структурировании или переводе.
+Fast и служебный ответ Smart используют обычный текст. Подробности и
 границы поддержки: [правила назначения](../.project-docs/decisions/2026-10-21-smart-destination-formatting.md).
 
 Окно Settings автоматически следует светлой и тёмной теме macOS, включая смену
@@ -498,7 +497,7 @@ Refresh повторяет чтение цен; при ошибке API изве
 
 **STT-провайдеры (Your key, выбор пользователя в Settings → API & Models для
 каждой фичи):** Soniox (`stt-rt-v5`, по умолчанию), Deepgram (`nova-3`),
-ElevenLabs (`scribe_v2_realtime`) или self-hosted endpoint с протоколом OpenAI
+ElevenLabs (`scribe_v3_live`) или self-hosted endpoint с протоколом OpenAI
 Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`). Сам
 OpenAI не предлагается: сохранённый выбор OpenAI читается как Soniox. Drop —
 realtime streaming, не batch; заметки встреч с Soniox идут через file API
@@ -529,7 +528,7 @@ Qwen и локальной диаризацией. Сохранённый выб
 уходит провайдеру той фичи, что вела Drop (Fast или Smart; для голоса агента —
 Agent voice), с его ключом из Keychain и recorded-моделью из вшитого реестра:
 Soniox file API (`stt-async-v5`), Deepgram pre-recorded, ElevenLabs
-speech-to-text (`scribe_v2`), self-hosted `/v1/audio/transcriptions` на хосте
+speech-to-text (`scribe_v3`), self-hosted `/v1/audio/transcriptions` на хосте
 своего сервера. Без маршрута фичи, ключа или recorded-модели batch недоступен;
 другой провайдер не подставляется.
 
@@ -573,8 +572,7 @@ The Meetings entry opens an overview with the five newest meetings and History.
 History retains the complete date-grouped list. Opening a note preserves its
 origin for Back; choosing Meetings again or following a direct note link uses
 the overview. Both lists retain processing states and confirmed deletion.
-Load failures offer Retry without discarding the last loaded list. The overview
-can grow with future Meeting Assistant sections; no preset controls ship yet.
+Load failures offer Retry without discarding the last loaded list.
 
 **Current continuation behavior (2026-10-20):** Each completed call starts BYOK
 processing immediately. After auto-end, Reconnect is available for three minutes;
@@ -590,16 +588,6 @@ merely submitting a debounced save does not reload older stored text.
 See [the continuation decision](../.project-docs/decisions/2026-10-20-meeting-continuations.md).
 The backend design below is historical; current processing uses the user's BYOK
 routes and the native notes viewer.
-
-**Live-assistant test preparation (2026-10-19):** Internal opt-in capture uses
-the local `sidekey.meetings.liveTestCapture` flag when Meeting Notes uses Soniox.
-The user requested no test-mode controls or test-files row in Settings.
-It adds a separate live diarization stream, stores private source tracks and
-timing locally, and preserves ordinary notes processing. Since 2026-10-22 only
-source dev builds (9999 / `-dev`) capture; packaged builds ignore the flag and
-remove earlier captures at launch. No automatic
-suggestions are enabled. Real-call source attribution and latency remain
-acceptance tests. See [testing instructions](meeting-assistant-testing.md).
 
 Auto-detect когда пользователь на голосовой встрече (Zoom, Meet, Teams, FaceTime, Discord, Slack huddle и т.п.) и предложить записать структурированную заметку. Whytap уже всегда запущен и имеет JWT — нативное место для этой фичи (vs. Granola/tl;dv как отдельные продукты с собственной авторизацией).
 
@@ -802,27 +790,3 @@ Settings → API & Models → API keys содержит ключ Tavily в Keych
 без платного поиска. Поиск отправляет только запрос и возвращает до пяти результатов.
 Существующее разрешение редактирования/команд сохраняется; approve и bypass —
 следующий этап. См. [решение](../.project-docs/decisions/2026-10-22-native-agent.md).
-
-
-### Meeting Assistant Beta
-
-A configured assistant exposes a hover magic icon to the right of the recording
-timer, translucent when off and softly glowing while listening. Listening starts
-off for every meeting, including after relaunch or wake. Configuring both model
-routes and a ready Space only makes the feature available. A wand click explicitly
-enables listening for this meeting; stopping, ending a meeting or changing Space
-never enables it again. The panel and API & Models group mark the feature Beta.
-A recognized meeting-context end sustained for 15 seconds stops listening;
-manual sessions without recognized context need the wand to stop. Context detection
-is a mic-activity heuristic, not a unique call identity.
-
-The approved native right-hand module offers a ready Space picker, plain input,
-up to five current questions, twenty answered roots and six removable screenshot
-attachments. Replies contain a conclusion, structured points and two follow-ups;
-conversation survives collapse. Closing answers does not stop listening. The
-module shows connection status instead of a Listen button. Explicitly enabled listening extracts questions
-from bounded system-audio transcription without retaining audio or starting Notes.
-Speech and answer models have separate initially unset routes in API & Models.
-Coding agents prepare Spaces; the user selects them. Runtime repository access
-is read-only and constrained to declared scopes. Database adapters are not yet
-connected. See [pilot usage and Space contract](meeting-assistant.md).

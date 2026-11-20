@@ -57,7 +57,6 @@ enum DropCancelRoute: Equatable {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translationWindowController: TranslationWindowController?
-    private var meetingAssistantPanel: MeetingAssistantPanel?
     private var screenshotCoordinator: ScreenshotCoordinator?
     private let recorder = AudioRecorder()
     /// Batch transcriber for the Drop recorder fallback, the resilient-delivery
@@ -67,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// provider.
     /// WHY: .project-docs/decisions/2026-10-18-provider-batch-transcription.md
     private let dropBatchTranscriber: any BatchTranscribing = ProviderBatchTranscriber.forDrop()
+    /// The last batch attempt of the current take failed, and why when a
+    /// provider said so. Applied when the take ends undelivered.
+    private var dropBatchFailed = false
+    private var pendingDropProviderFailure: ProviderFailure?
+    /// API & Models was opened for this take's failure; a Retry that is
+    /// refused again does not take the user out of their app a second time.
+    private var dropFailureSettingsShown = false
     /// Batch transcriber for the agent's voice path: the Agent voice route.
     private let agentBatchTranscriber: any BatchTranscribing = ProviderBatchTranscriber.forFeature(.agentVoice)
     /// In-flight streaming session for the Drop flow. Both `.fast` and
@@ -111,13 +117,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the new turn would be indistinguishable from "my own window is still
     /// open".
     private var streamingSetupGeneration: UInt64 = 0
+    /// Drop "stop automatically": true from the press that starts such a take
+    /// until the next take begins. The take has no second press to wait for:
+    /// `dropAutoStopRule` ends it.
+    /// WHY: .project-docs/decisions/2026-11-11-drop-auto-stop.md
+    private var dropAutoStopTakeActive = false
+    /// Set only across the dispatcher call that starts an auto-stop take, so
+    /// `startDropTurnTelemetry` decides the mode for every take synchronously.
+    private var dropAutoStopStartPending = false
+    private let dropAutoStopWatch = DropAutoStopWatch()
+    private var dropAutoStopTask: Task<Void, Never>?
     private let autoPasteEngine = AutoPasteEngine()
     private var hotkey: HotkeyShortcutMonitor?
     private var helpHotkey: CarbonHotkeyMonitor?
-    /// ROO-208: unified `⌥V` hotkey for the history strip. Replaces the
-    /// trio of per-mode `⌥1` / `⌥2` / `⌥3` monitors that used to live
-    /// in `historyHotkeys: [CarbonHotkeyMonitor]`.
-    private var historyHotkey: CarbonHotkeyMonitor?
     /// Independent monitors for the user's tool bindings, regardless of layout.
     private var toolHotkeys: [HotkeyShortcutMonitor] = []
     /// Manual Meeting-record toggle (default ⌥M) — tap starts a recording
@@ -140,7 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// rounded-rect frame + 3-row actions cluster. Lifecycle tied to
     /// `panel` — created lazily once the orb panel exists so the
     /// overlay can read its frame.
-    private var actionsOverlayPanel: OrbActionsOverlayPanel?
     private var postProcessor: PostProcessor?
     /// Resilient-Drop manual-retry state (Task 7). When degraded batch recovery
     /// also fails (total offline), the captured PCM + its paste target are
@@ -205,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Case broker socket for the bundled `whytap` helper; running app only.
     private var caseBrokerServer: CaseBrokerServer?
     private var appControlController: AppControlController?
+    private(set) var harnessAccessStore: HarnessAccessStore?
     /// Case Approve prompts in the island (Y / N / A keys) and their panel.
     private var caseApprovalController: CaseApprovalController?
     private var caseApprovalPanel: CaseApprovalPanel?
@@ -232,14 +244,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// flips the "Hide Helpers" preference.
     private var cancellables: Set<AnyCancellable> = []
 
-    // MARK: - History Strip
-    /// Bottom-strip orchestrator. Mode state + Esc / outside-click
-    /// handling. SwiftUI views inside `HistoryStripPanel` and
-    /// `HistoryExpandedPanel` observe its `@Published` properties.
-    private var historyStripController: HistoryStripController?
+    // MARK: - History
+    private var historyInteraction: HistoryInteractionState?
     private var historyStripFeed: HistoryStripFeed?
-    private var historyStripPanel: HistoryStripPanel?
-    private var historyExpandedPanel: HistoryExpandedPanel?
     private var copiedToastController: CopiedToastController?
     private var copiedToastPanel: CopiedToastPanel?
     private var clipboardWatcher: ClipboardWatcher?
@@ -363,6 +370,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.handle(request)
             }
         }
+        // The offer is accepted only while the input language is still
+        // Auto: a card clicked later from history never replaces a choice.
+        LocalNotificationHub.shared.setInputLanguage = { code in
+            guard PrivacyPreferences.shared.selectedLanguage == nil,
+                  let language = AppLanguage.all.first(where: { $0.code == code }) else { return }
+            PrivacyPreferences.shared.selectedLanguage = language
+        }
         LocalNotificationHub.shared.openMeeting = { [weak self] id in
             guard let self else { return }
             self.openSettingsWindow(tab: .notes)
@@ -404,9 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // WHY: .project-docs/decisions/2026-10-18-legacy-model-cleanup.md
         DispatchQueue.global(qos: .utility).async {
             LegacyLocalModelCleanup().run()
-            // Packaged builds keep no meeting research audio.
-            // WHY: .project-docs/decisions/2026-10-22-no-retained-meeting-audio.md
-            MeetingLiveTestSettings.removeCapturesIfUnavailable()
+            RetiredMeetingCaptureCleanup.run()
         }
 
         // Restore standard text-editing shortcuts (⌘V/⌘C/⌘X/⌘A) for the app's
@@ -430,11 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the History window) keeps surfacing new turns post-migration.
                 self.chatStackStore = ChatStackStore(store: store)
 
-            // History strip: assets dir for clipboard image sidecars,
-            // clipboard watcher, strip controller + feed. Feed is a
-            // read-only adapter over the same store; controller owns
-            // open/close state and orchestrates the strip + expanded
-            // panels via @Published events.
+            // History uses the same store for its feed and clipboard image sidecars.
                 let assets = try HistoryStoreLocation.prepareAssetsDirectory()
                 self.assetsDirectory = assets
             // Clipboard history belongs to the local workspace and survives
@@ -477,16 +485,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
-                let controller = HistoryStripController()
-                self.historyStripController = controller
+                self.historyInteraction = HistoryInteractionState()
                 let feed = HistoryStripFeed(store: store)
                 self.historyStripFeed = feed
 
-            // Round 2 UX 5: "Copied" toast — centered pill that flashes
-            // when the user clicks a strip card's body. Tied to a
-            // singleton controller so any code path that copies via
-            // the strip can opt-in via `controller.show()` without
-            // owning its own NSPanel.
+            // Shared "Copied" toast for History rows in the island and Toolbox.
                 let toast = CopiedToastController()
                 self.copiedToastController = toast
         } catch {
@@ -542,14 +545,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshRuntimePermissions()
         IslandPanel.shared.show()
         IslandNotificationPanel.shared.show()
-        ensureMeetingAssistant().prepare()
         registerIslandHotkeyActivity()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
-        meetingAssistantPanel?.suspend()
         BackupViewModel.shared.stop()
         // Give the display its own transfer table back; Extra never changes the backlight.
         ScreenBrightnessController.shared.shutdown()
@@ -568,7 +569,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // open (idle, or a recorder-fallback run).
         cancelStreamingSessionIfNeeded()
         hotkey?.stop()
-        stopHistoryHotkey()
         agentController?.stop()
         clipboardWatcher?.stop()
         // Terminate the MediaRemote `run.pl stream` child synchronously;
@@ -722,14 +722,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startReady() {
         didCompleteReadyStartup = true
         runtimeAccessibilityGranted = PermissionsHelper.accessibilityGranted(prompt: false)
-        showFloatingPanelIfNeeded()
+        prepareCopiedToastIfNeeded()
         // The island and Settings are available immediately. Permissions and
         // provider configuration gate the corresponding action, never launch.
         IslandPanel.shared.actions = makeIslandActions()
         configureSettingsDeps(from: IslandPanel.shared.actions)
         IslandPanel.shared.show()
         IslandNotificationPanel.shared.show()
-        ensureMeetingAssistant().prepare()
         installIslandIdleControllerIfNeeded()
         // Post-relaunch "Updated" indicator (variant A): if the previous
         // session installed an update and this is the new binary, surface a
@@ -783,13 +782,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ensureSettingsWindowController().configure(toolboxDeps: ToolboxDeps(
             toggleDropMode: actions.toggleDropMode,
             currentDropMode: actions.currentDropMode,
-            openClipboard: actions.openClipboard,
             historyCards: actions.historyCards,
             copyHistoryCard: actions.copyHistoryCard,
             deleteHistoryCard: actions.deleteHistoryCard,
             toggleMeetingRecord: actions.toggleMeetingRecord,
             openScreenshot: actions.openScreenshot,
-            openMeetingAssistant: actions.openMeetingAssistant,
             openHoverPanel: { [weak self] panel in self?.show(.hoverPanel(panel)) },
             quitApplication: actions.quitApplication,
             translationController: { [weak self] in self?.ensureTranslationController() },
@@ -922,7 +919,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         os_log("power_will_sleep pausing runtime", log: Self.log, type: .info)
         stopPermissionRecoveryPolling()
         translationWindowController?.cancel()
-        meetingAssistantPanel?.suspend()
 
         recorder.cancel()
         // Same reasoning as `applicationWillTerminate` — sleep should not
@@ -934,7 +930,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Full-wake path reboots via `startReady() → registerHotkey()`, whose
         // registrars early-return on a live ref. Clear the WHOLE monitor set
         // (incl. ⌥M / ⌥1..⌥5) here so they actually rebuild on wake, not just
-        // Drop / Help / History.
+        // Drop / Help.
         teardownHotkeyMonitorsForRebuild()
 
         agentController?.stop()
@@ -945,8 +941,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Order the orb panel OUT so its SwiftUI TimelineView stops
         // ticking before the system suspends the process. On wake,
         // `rearmRuntimeAfterWake(reason: .full)` calls `startReady()`
-        // which re-runs `showFloatingPanelIfNeeded` → `panel?.showOnTop()`
-        // to put it back. The panel instance is retained (orderOut does
+        // to show the island again. The panel instance is retained (orderOut does
         // not destroy it) so the panel-level subscriptions and
         // luminance window-ID bookkeeping survive the sleep.
         panel?.orderOut(nil)
@@ -1002,7 +997,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Tears down and re-registers all event monitors that the kernel
     /// power-management layer can silently invalidate during sleep:
-    /// Carbon `RegisterEventHotKey` (drop / help / history hotkeys) and
+    /// Carbon `RegisterEventHotKey` (drop / help hotkeys) and
     /// the Right-Cmd `NSEvent.addGlobalMonitorForEvents` inside
     /// `AgentController`.
     ///
@@ -1035,12 +1030,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// idempotent and `start()` self-stops, so a redundant call is cheap.
     private func teardownHotkeyMonitorsForRebuild() {
         Self.teardownHotkeyMonitorsForRebuild(
-            [hotkey, helpHotkey, historyHotkey, meetingRecordHotkey] + toolHotkeys
+            [hotkey, helpHotkey, meetingRecordHotkey] + toolHotkeys
         )
         hotkey = nil
         dropMonitorGeneration = UUID()
         helpHotkey = nil
-        historyHotkey = nil
         meetingRecordHotkey = nil
         toolHotkeys = []
         // The setting stays; registerHotkey installs the tap again.
@@ -1057,84 +1051,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showFloatingPanelIfNeeded() {
-        // Bottom-right orb panels (FloatingDotPanel, KeybindingsHintPanel,
-        // OrbActionsOverlayPanel) moved to IslandPanel (PoC). Classes kept
-        // for easy revert. The history strip still anchors to the orb's
-        // frame; with the orb absent it falls back to `.zero` and the
-        // strip uses the full visible width.
-        showHistoryStripPanelsIfNeeded()
-    }
-
-    private func showActionsOverlayPanelIfNeeded() {
-        if actionsOverlayPanel == nil {
-            let overlay = OrbActionsOverlayPanel(
-                orbFrame: { [weak self] in self?.panel?.frame ?? .zero },
-                hintFrame: { [weak self] in self?.keybindingsHintPanel?.frame },
-                onAction: { [weak self] id in
-                    self?.handleOrbAction(id)
-                }
-            )
-            // Start ordered out — the orderFront happens on the first
-            // `orbHovered = true` tick from the SwiftUI subscription
-            // inside the overlay itself.
-            self.actionsOverlayPanel = overlay
-        }
-        // Tell the orb panel where the overlay sits so its hover
-        // controller can include the overlay's frame in the hover
-        // region (the overlay extends past orb+hint, so the cursor
-        // must stay latched while it travels over the cluster).
-        panel?.overlayFrameProvider = { [weak self] in
-            guard let overlay = self?.actionsOverlayPanel, overlay.isVisible else {
-                return nil
-            }
-            return overlay.frame
-        }
-
-        showHistoryStripPanelsIfNeeded()
-    }
-
-    /// Lazy-creates the bottom strip + centered expanded panel. Both
-    /// panels stay alive across mode switches; they order themselves
-    /// in / out based on `HistoryStripController` published events.
-    private func showHistoryStripPanelsIfNeeded() {
-        guard let controller = historyStripController,
-              let feed = historyStripFeed,
-              let assets = assetsDirectory
-        else {
-            return
-        }
-
-        if historyStripPanel == nil {
-            // ROO-208 iter 4: the strip spans the full screen width
-            // (`visible.minX + sideMargin` … `visible.maxX - sideMargin`),
-            // so no orb-hover-frame closure is needed here. The orb +
-            // strip no longer share a horizontal band visually — the
-            // 5-up rubbery cards row needs the full width to fan out.
-            let strip = HistoryStripPanel(
-                controller: controller,
-                feed: feed,
-                assetsDirectory: assets,
-                toast: copiedToastController,
-                autoPasteEngine: autoPasteEngine,
-                deleteCard: { [weak self] card in
-                    await self?.deleteHistoryCard(card) ?? false
-                }
-            )
-            self.historyStripPanel = strip
-        }
-
-        if historyExpandedPanel == nil {
-            let expanded = HistoryExpandedPanel(
-                controller: controller,
-                assetsDirectory: assets
-            )
-            self.historyExpandedPanel = expanded
-        }
-
-        if copiedToastPanel == nil, let toast = copiedToastController {
-            self.copiedToastPanel = CopiedToastPanel(controller: toast)
-        }
+    private func prepareCopiedToastIfNeeded() {
+        guard copiedToastPanel == nil, let copiedToastController else { return }
+        copiedToastPanel = CopiedToastPanel(controller: copiedToastController)
     }
 
     /// Builds the `IslandActions` struct fed into `IslandPanel.shared`
@@ -1161,9 +1080,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openTextAgent: { [weak self] in
                 self?.agentController?.triggerTextAgent()
             },
-            openClipboard: { [weak self] in
-                self?.toggleHistoryStrip(.clipboard)
-            },
             openHistory: { [weak self] in
                 self?.openHistoryFromIsland() ?? .clipboard
             },
@@ -1176,7 +1092,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await IslandHistoryCards.load(mode: mode) { feed.cards(for: $0) }
             },
             selectHistoryMode: { [weak self] mode in
-                self?.historyStripController?.rememberFilter(mode)
+                self?.historyInteraction?.rememberFilter(mode)
             },
             copyHistoryCard: { [weak self] card in
                 self?.copyHistoryCardFromIsland(card)
@@ -1191,7 +1107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self?.deleteHistoryCard(card) ?? false
             },
             historyPasteTargetName: { [weak self] in
-                self?.historyStripController?.targetAppName
+                self?.historyInteraction?.targetAppName
             },
             openUsefulLinks: {
                 // No global Useful Links entry point — the hotkey only
@@ -1226,9 +1142,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             openTranslate: { [weak self] in self?.openTranslation(.text) },
             openSubtitles: { [weak self] in self?.openTranslation(.subtitles) },
-            openMeetingAssistant: { [weak self] in self?.openMeetingAssistant() },
-            setMeetingAssistantEnabled: { [weak self] enabled in self?.ensureMeetingAssistant().setMeetingEnabled(enabled) },
-            prepareMeetingAssistant: { [weak self] in self?.ensureMeetingAssistant().prepare() },
             openScreenshot: { [weak self] in self?.openScreenshot() },
             openSettings: { [weak self] in
                 self?.openSettingsWindow(tab: .apiAndModels)
@@ -1365,10 +1278,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsWindowController() -> SettingsWindowController {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                screenshotProtectionChanged: { [weak self] enabled in
+                screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
-                    self?.meetingAssistantPanel?.setProtection(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -1376,17 +1288,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         return settingsWindowController!
-    }
-
-    /// Orb-action click handler. Mode-icon clicks toggle / switch /
-    /// close the strip via `HistoryStripController`.
-    private func handleOrbAction(_ id: OrbActionsView.IconID) {
-        guard historyStripController != nil else { return }
-        switch id {
-        case .agent: toggleHistoryStrip(.agent)
-        case .drop: toggleHistoryStrip(.drop)
-        case .clipboard: toggleHistoryStrip(.clipboard)
-        }
     }
 
     private func showKeybindingsHintIfNeeded() {
@@ -1415,28 +1316,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cleaned = text
         AppState.shared.phase = .inserting
         let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
-        if !pasted {
-            // Fallback: text is already in the clipboard (AutoPasteEngine
-            // writes up-front). No UI toast surface exists in this PR;
-            // user can press ⌘V manually.
-            // TODO: surface a transient "Copied, press ⌘V" notification.
-            os_log(
-                "autopaste_fallback_clipboard_only",
-                log: Self.log,
-                type: .info
-            )
-        }
-        // The user-visible deliverable landed (either direct paste or
-        // clipboard fallback). Either way the turn closes as completed.
         discardPendingRetry()
-        completeDropTurnTelemetry()
-        dropHistoryRecorder?.record(
-            rawTranscript: rawTranscript,
-            formattedText: cleaned,
-            targetApp: targetApp
-        )
+        if !pasted && autoPasteEngine.hasLocalDropTarget {
+            _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
+            failDropTurnTelemetry(reason: "local_editor_unavailable")
+        } else {
+            if !pasted {
+                os_log("autopaste_external_delivery_failed", log: Self.log, type: .info)
+            }
+            completeDropTurnTelemetry()
+            dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+            // The provider's own text: Smart can translate the pasted one.
+            if pasted { noteDeliveredDropForLanguageOffer(rawTranscript) }
+        }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    /// Only a take whose text reached the user counts towards the input
+    /// language offer: the normal delivery and the pasted raw partial.
+    // WHY: .project-docs/decisions/2026-11-20-input-language-suggestion.md
+    private func noteDeliveredDropForLanguageOffer(_ transcript: String) {
+        let selected = PrivacyPreferences.shared.selectedLanguage
+        Task {
+            await InputLanguageSuggestion().offer(transcript: transcript, selectedLanguage: selected) {
+                await LocalNotificationHub.shared.receive($0)
+            }
+        }
+    }
+
+    private func saveUndeliveredLocalDrop(raw: String, formatted: String, targetApp: String?) -> Bool {
+        let saved = dropHistoryRecorder?.record(rawTranscript: raw, formattedText: formatted, targetApp: targetApp) == true
+        // Only the status appears outside the original field. The transcript
+        // stays in Drop history under the same rules as an ordinary take.
+        let notice = LocalNotificationEvent(
+            id: UUID().uuidString, source: "builtin.drop", sourceName: "Drop",
+            title: "Couldn’t insert dictation",
+            body: saved ? "Find your text in History → Drop." : "The text field is unavailable.",
+            link: nil, timestamp: Date()
+        )
+        Task { await LocalNotificationHub.shared.receive(notice) }
+        return saved
     }
 
     private static func pipelineErrorDescription(_ error: Error) -> String {
@@ -1453,7 +1373,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropShortcut: HotkeyShortcut? = nil,
         dropGesture: HotkeyGesture? = nil
     ) {
-        registerHistoryHotkey()
         registerHelpHotkey()
         registerToolHotkeys()
         registerMeetingRecordHotkey()
@@ -1539,38 +1458,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             publishDropHotkeyStatus()
         }
-    }
-
-    /// ROO-208: registers the unified `⌥V` strip hotkey. Calls
-    /// `HistoryStripController.toggleUnified()` so the controller picks
-    /// the last-remembered filter (defaulting to Clipboard) and
-    /// open/close-toggles in place.
-    private func registerHistoryHotkey() {
-        guard historyHotkey == nil else { return }
-        guard historyStripController != nil else { return }
-
-        let monitor = CarbonHotkeyMonitor(
-            keyCode: CarbonHotkeyMonitor.vKeyCode,
-            modifiers: CarbonHotkeyMonitor.optionModifier,
-            hotKeyIDValue: CarbonHotkeyMonitor.historyUnifiedHotKeyID
-        ) { [weak self] in
-            self?.toggleUnifiedHistoryStrip()
-        }
-        do {
-            try monitor.start()
-            self.historyHotkey = monitor
-        } catch {
-            os_log(
-                "registerHistoryHotkey failed: %{public}@",
-                log: Self.hotkeyLog, type: .error,
-                String(describing: error)
-            )
-        }
-    }
-
-    private func stopHistoryHotkey() {
-        historyHotkey?.stop()
-        historyHotkey = nil
     }
 
     private func registerHelpHotkey() {
@@ -1750,6 +1637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func onToolHotkeyActivated(_ tool: HoverTool) {
         if tool != .screenshot { registerIslandHotkeyActivity() }
         let effect = HoverSlotRouter.effect(for: tool)
+        if let mode = effect.hotkeyTranslationToggle {
+            // A second press of the same tool hotkey closes the window.
+            openTranslation(mode, toggles: true)
+            return
+        }
 
         switch effect {
         case .openPanel(let panel):
@@ -1769,7 +1661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // invisible and reads as "the hotkey does nothing".
             let newMode = IslandPanel.shared.actions.toggleDropMode()
             AppState.shared.publishDropModeHotkeyToggle(newMode)
-        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openMeetingAssistant, .openScreenshot, .quit:
+        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty
             // Hover for ~4s (Stage 3 review fix). Run the effect directly
@@ -1859,40 +1751,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.show(tab: .toolbox)
             controller.selection.focus(tool)
             controller.selection.setHighlight(.tab(.toolbox))
-        case .meetingAssistant:
-            openMeetingAssistant()
         case .translation(let mode):
             openTranslation(mode)
+        case .meeting(let id):
+            _ = showMeetingNote(id: id)
         case .island:
             // Already woken above: a link this version does not know.
             break
         }
     }
 
-    private func openMeetingAssistant() {
-        registerIslandHotkeyActivity()
-        ensureMeetingAssistant().show()
+    /// Opens Settings -> Meetings on one note. Only shows it, and never over a
+    /// note the user is editing: leaving that note would drop the edit.
+    @discardableResult
+    private func showMeetingNote(id: UUID) -> AppControlMeetings.OpenResult {
+        let controller = ensureSettingsWindowController()
+        guard !controller.isEditingNote else { return .editing }
+        openSettingsWindow(tab: .notes)
+        controller.selectNoteMeeting(id: id)
+        return .shown
     }
 
-    private func ensureMeetingAssistant() -> MeetingAssistantPanel {
-        if meetingAssistantPanel == nil {
-            meetingAssistantPanel = MeetingAssistantPanel(
-                openSettings: { [weak self] feature in self?.openSettingsWindow(tab: .apiAndModels, feature: feature) },
-                activityChanged: { active, editing in
-                    if AppState.shared.meetingAssistantActive != active { AppState.shared.meetingAssistantActive = active }
-                    if AppState.shared.meetingAssistantEditing != editing { AppState.shared.meetingAssistantEditing = editing }
-                },
-                hoverChanged: { state in
-                    if AppState.shared.meetingAssistantHover != state { AppState.shared.meetingAssistantHover = state }
-                }
-            )
-        }
-        return meetingAssistantPanel!
-    }
-
-    private func openTranslation(_ mode: TranslationWindowController.Mode) {
+    private func openTranslation(_ mode: TranslationWindowController.Mode, toggles: Bool = false) {
         registerIslandHotkeyActivity()
-        ensureTranslationController().show(mode)
+        let controller = ensureTranslationController()
+        if toggles { controller.toggle(mode) } else { controller.show(mode) }
     }
 
     private func ensureTranslationController() -> TranslationWindowController {
@@ -1926,27 +1809,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         helpWindowController?.show()
     }
 
-    /// ROO-208 iter 22: Dynamic Island toolbar (clipboard icon) and
-    /// orb-action mode switches enter the strip through this single
-    /// `toggle(_:)` path. Without `captureAndValidatePasteTargetIfOpening()`
-    /// here, the strip would open without ever asking `AutoPasteEngine`
-    /// what the frontmost app was — so the bottom hint bar would render
-    /// only "Click to copy" with no right-hand "Paste to <App> ↵"
-    /// affordance, and the local Enter handler would silently no-op
-    /// (because `controller.targetAppName` stays `nil`). Mirroring the
-    /// `⌥V` hotkey's pre-open capture aligns all three entry points.
-    private func toggleHistoryStrip(_ mode: HistoryStripMode) {
-        captureAndValidatePasteTargetIfOpening()
-        historyStripController?.toggle(mode)
-    }
-
     private func openHistoryFromIsland() -> HistoryStripMode {
         captureAndValidatePasteTargetForHistory()
-        return historyStripController?.rememberedFilter() ?? .clipboard
+        return historyInteraction?.rememberedFilter() ?? .clipboard
     }
 
     private func copyHistoryCardFromIsland(_ card: HistoryStripCard) {
-        guard let controller = historyStripController,
+        guard let historyInteraction,
               let assets = assetsDirectory
         else {
             return
@@ -1958,69 +1827,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipboardSuppression.shared.setSuppressed(false)
         }
 
-        controller.writeCardToPasteboard(card, assetsDirectory: assets)
+        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         copiedToastController?.show()
     }
 
-    /// Delete… on a clipboard row in any History surface. The ⌥V strip
-    /// reads the feed on every render, so a revision bump refreshes it even
-    /// when the request came from the island or Toolbox.
+    /// Delete a clipboard row so the requesting History view can reload its feed.
     /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
     private func deleteHistoryCard(_ card: HistoryStripCard) async -> Bool {
         guard let store = historyStore, let assets = assetsDirectory else { return false }
         let outcome = await ClipboardEntryDeletion(store: store, assetsDirectory: assets).delete(card)
-        guard outcome.removesEntry else { return false }
-        historyStripController?.clipboardEntryRemoved(card)
-        return true
+        return outcome.removesEntry
     }
 
     private func pasteHistoryCardFromIsland(_ card: HistoryStripCard) {
-        guard let controller = historyStripController,
-              controller.targetAppName != nil,
+        guard let historyInteraction,
+              historyInteraction.targetAppName != nil,
               let assets = assetsDirectory
         else {
             return
         }
 
-        controller.writeCardToPasteboard(card, assetsDirectory: assets)
+        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         Task { @MainActor in
             _ = await autoPasteEngine.pasteAlreadyOnPasteboard()
         }
     }
 
-    /// Captures the user's last-focused app via `AutoPasteEngine` and
-    /// runs `PasteTargetValidator.appHasFocusedTextInput` on it. Pushes
-    /// the result (or `nil` when the target failed AX validation /
-    /// is in the blacklist) into `historyStripController.setTargetAppName`.
-    ///
-    /// Called BEFORE the strip's toggle so the capture happens while
-    /// the user's real app is still frontmost — once
-    /// `HistoryStripPanel.applyVisibility` calls `makeKey()`, AppKit
-    /// briefly hands key status to the panel and `frontmostApplication`
-    /// would return Sidekey itself. Cheap on the close path (we just
-    /// overwrite the remembered target with whatever's frontmost; the
-    /// next `toggleUnified` close branch clears `targetAppName`
-    /// anyway).
-    ///
-    /// Shared by all three open entry points:
-    ///   * `toggleUnifiedHistoryStrip()` — `⌥V` Carbon hotkey.
-    ///   * `toggleHistoryStrip(_:)` — Dynamic Island clipboard icon
-    ///     (via `IslandActions.openClipboard`) and orb-action icons
-    ///     (`OrbActionsView.IconID.{agent, drop, clipboard}` →
-    ///     `handleOrbAction`).
-    private func captureAndValidatePasteTargetIfOpening() {
-        autoPasteEngine.rememberTargetBeforeRecording()
-        // Only validate when we're OPENING the strip — the close path
-        // doesn't need a target. `openMode == nil` here means the
-        // upcoming `toggle*()` call will transition to open.
-        let willOpen = historyStripController?.openMode == nil
-        guard willOpen else { return }
-        historyStripController?.setTargetAppName(validatedPasteTargetName())
-    }
-
+    /// Capture the focused app before opening the island's History.
     private func captureAndValidatePasteTargetForHistory() {
         autoPasteEngine.rememberTargetBeforeRecording()
-        historyStripController?.setTargetAppName(validatedPasteTargetName())
+        historyInteraction?.setTargetAppName(validatedPasteTargetName())
     }
 
     private func validatedPasteTargetName() -> String? {
@@ -2034,40 +1870,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return target?.name
         }
         return nil
-    }
-
-    /// ROO-208: `⌥V` entry point. Routes through
-    /// `HistoryStripController.toggleUnified()` so the strip opens on
-    /// the user's last-picked filter (defaults to Clipboard) and closes
-    /// regardless of the active filter on a re-press.
-    ///
-    /// ROO-208 iter 15: capture the frontmost app BEFORE the strip
-    /// panel orders front. Once the panel becomes key on hover, AppKit
-    /// briefly reports Sidekey active and `frontmostApplication` would
-    /// return Sidekey itself — too late to know which app the user was
-    /// just typing in. Capturing here mirrors the drop-pipeline's
-    /// `rememberTargetBeforeRecording()` callsite (also pre-UI).
-    /// Cheap when the strip is being closed (we just overwrite the
-    /// remembered target with whatever's frontmost; nothing reads it
-    /// until the next paste).
-    ///
-    /// ROO-208 iter 17: gate the "Paste to <App> ↵" hint on whether
-    /// the captured app actually has a focused text-editing element.
-    /// `rememberTargetBeforeRecording()` captures ANY frontmost app
-    /// (Finder/Safari/Desktop included); without the validation step
-    /// the hint reads "Paste to Finder ↵" but pressing Enter posts
-    /// Cmd+V to a non-editable surface and nothing lands — the user
-    /// sees a silent failure. `PasteTargetValidator` queries the AX
-    /// API for the captured pid's focused element; only roles like
-    /// `AXTextField` / `AXTextArea` / `AXComboBox` / `AXWebArea`
-    /// (or subroles `AXSearchField` / `AXContentEditableElement`)
-    /// produce a non-nil `targetAppName` on the controller, and only
-    /// a non-nil value renders the hint and arms the Enter-paste
-    /// handler.
-    private func toggleUnifiedHistoryStrip() {
-        registerIslandHotkeyActivity()
-        captureAndValidatePasteTargetIfOpening()
-        historyStripController?.toggleUnified()
     }
 
     // MARK: - Capability reconciliation
@@ -2488,16 +2290,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return hasStreamingSession ? .cancelStreamingSession : .cancelRecording
     }
 
+    // MARK: - Drop auto-stop
+
+    /// Whether the press that produced `route` starts a take that ends by
+    /// itself. Only a Toggle shortcut (a hold ends on release), only a start,
+    /// and only on a route whose provider sends words while the user speaks:
+    /// a self-hosted OpenAI-realtime server transcribes after a commit, so
+    /// nothing could tell that the speaker has finished.
+    static func dropPressStartsAutoStopTake(
+        enabled: Bool, gesture: HotkeyGesture, route: DropFlowRoute, speechRoute: FeatureRoute?
+    ) -> Bool {
+        guard enabled, gesture == .tap, DropHotkeyRecovery.requiresStartPermission(route) else { return false }
+        if let speechRoute, case .server = speechRoute.account { return false }
+        return true
+    }
+
+    private func endDropAutoStop() {
+        dropAutoStopTakeActive = false
+        dropAutoStopWatch.reset()
+        dropAutoStopTask?.cancel()
+        dropAutoStopTask = nil
+    }
+
+    /// Meter levels covering one 200 ms poll of the watcher, with one to spare.
+    private static let dropAutoStopLevelsPerPoll = 7
+
+    /// Watches an auto-stop take and stops it when the speaker has finished.
+    /// A second press of the shortcut stops it sooner through the normal
+    /// toggle route; this loop then sees the stop and leaves.
+    private func watchDropAutoStopTake() {
+        dropAutoStopTask?.cancel()
+        dropAutoStopTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled, let self, self.dropAutoStopTakeActive else { return }
+                let phase = AppState.shared.phase
+                // The take resolved, failed or was cancelled.
+                if phase == .idle || phase == .deliveryFailed { return }
+                // Session setup, or a stop already under way.
+                guard phase == .recording, !self.streamingStopRequested else { continue }
+                // The clock starts when recording does, not during setup; a
+                // transcript that arrived before this poll already started it.
+                let now = ProcessInfo.processInfo.systemUptime
+                // The levels published since the previous poll (30 per second).
+                if let loudest = AppState.shared.audioLevels.suffix(Self.dropAutoStopLevelsPerPoll).max() {
+                    self.dropAutoStopWatch.microphoneLevel(loudest, now: now)
+                }
+                guard self.dropAutoStopWatch.decision(now: now) == .finish else { continue }
+                // Always an ordinary stop, never a cancel. With no words the
+                // delivery ladder pastes nothing; if the connection dropped
+                // before the first word the stop still recovers the retained
+                // audio; after a failed connection it stops the batch recorder.
+                self.handleDropHotkeyRoute(AppDelegate.dropMaxHoldRoute(
+                    phase: AppState.shared.phase,
+                    hasStreamingSession: self.streamingSession != nil
+                ))
+                return
+            }
+        }
+    }
+
     private func onDropHotkeyPressed() {
         registerIslandHotkeyActivity()
+        let gesture = HotkeyPreferences.shared.configuration.normalizedDropGesture
+        let mode = UserPreferencesCache.shared.currentMode
         let route = AppDelegate.dropHotkeyPressedRoute(
-            gesture: HotkeyPreferences.shared.configuration.normalizedDropGesture,
+            gesture: gesture,
             phase: AppState.shared.phase,
-            mode: UserPreferencesCache.shared.currentMode,
+            mode: mode,
             hasStreamingSession: streamingSession != nil,
             isStreamingSetupInProgress: streamingSetupInProgress
         )
+        dropAutoStopStartPending = AppDelegate.dropPressStartsAutoStopTake(
+            enabled: DropAutoStopPreferences.shared.isEnabled,
+            gesture: gesture,
+            route: route,
+            speechRoute: AIRoutingStore.shared.route(for: .drop(mode))
+        )
         handleDropHotkeyRoute(route)
+        dropAutoStopStartPending = false
+        if dropAutoStopTakeActive, AppState.shared.phase != .idle { watchDropAutoStopTake() }
     }
 
     private func onDropHotkeyReleased() {
@@ -2555,6 +2427,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.phase = .idle
     }
 
+    private func rememberDropTarget() {
+        autoPasteEngine.rememberDropTarget()
+        AppState.shared.dropTargetsHoverEditor = autoPasteEngine.hasLocalDropTarget && DropLocalEditor.keyWindow is IslandPanel
+    }
+
     private func handleDropHotkeyRoute(_ route: DropFlowRoute) {
         if DropHotkeyRecovery.requiresStartPermission(route) {
             let snapshot = PermissionsHelper.snapshot()
@@ -2584,11 +2461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // wrong target. (FloatingDotPanel is non-activating today, so this
             // is belt-and-suspenders, but it is the contract the engine
             // documents.)
-            autoPasteEngine.rememberTargetBeforeRecording()
+            rememberDropTarget()
             startDropTurnTelemetry()
             startDropVoiceCapture()
         case .startRecording:
-            autoPasteEngine.rememberTargetBeforeRecording()
+            rememberDropTarget()
             startDropTurnTelemetry()
             startRecording()
         case .stopStreamingSession:
@@ -2651,7 +2528,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here and every later read of the take's mode uses `DropTake`.
         let mode = UserPreferencesCache.shared.currentMode
         DropTake.shared.begin(mode: mode, route: AIRoutingStore.shared.route(for: .drop(mode)))
+        // Decided here for every take: one that follows an auto-stop take
+        // never inherits its mode.
+        endDropAutoStop()
+        dropAutoStopTakeActive = dropAutoStopStartPending
         AppState.shared.dropDeliveryFailureMessage = nil
+        pendingDropProviderFailure = nil
+        dropBatchFailed = false
+        dropFailureSettingsShown = false
         lastDropPartial = ""
         let trace = DropTurnTrace()
         dropTurnTrace = trace
@@ -2743,6 +2627,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try recorder.start()
             dropTurnTrace?.mark(.recording)
+            if dropAutoStopTakeActive {
+                dropAutoStopWatch.recordingBegan(now: ProcessInfo.processInfo.systemUptime)
+            }
             AppState.shared.phase = .recording
         } catch {
             FileHandle.standardError.write(Data("✗ start recording failed: \(error)\n".utf8))
@@ -2752,14 +2639,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopRecordingAndTranscribe() {
         dropTurnTrace?.mark(.stopRequested)
-        // `AutoPasteEngine.rememberTargetBeforeRecording()` ran at hotkey-down
+        // `AutoPasteEngine.rememberDropTarget()` ran at hotkey-down
         // time (see `onHotkey`), so the engine's captured target is the
         // authoritative source. Fall back to the live frontmost only if the
         // engine has nothing (e.g. the very first hotkey before remember runs).
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         let wav: Data
         do {
@@ -2875,7 +2762,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // which would silently drop the dictation).
                 session = try await makeStreamingSession(
                     feature: DropTake.shared.feature,
-                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled
+                    resilient: AgentFeatureGate.resilientDropDeliveryEnabled,
+                    endsOnlyByStop: dropAutoStopTakeActive
                 )
             } catch {
                 // Stale-turn gate: a newer turn claimed the window while we
@@ -2960,12 +2848,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // but nothing arrived". First token also stamps `.firstToken`.
                 self?.dropTurnTrace?.recordToken()
                 self?.lastDropPartial = text
+                if self?.dropAutoStopTakeActive == true {
+                    // Creates the rule if the watcher has not polled yet, so
+                    // words that arrive first are never counted as silence.
+                    self?.dropAutoStopWatch.transcriptChanged(
+                        text, now: ProcessInfo.processInfo.systemUptime
+                    )
+                }
                 IslandPanel.shared.agentFlow.dropTranscriptUpdated(text)
             }
             // Close the setup window now that the session exists. From here a
             // stop routes through `.stopStreamingSession` normally.
             streamingSetupInProgress = false
             dropTurnTrace?.mark(.recording)
+            if dropAutoStopTakeActive {
+                dropAutoStopWatch.recordingBegan(now: ProcessInfo.processInfo.systemUptime)
+            }
             AppState.shared.phase = .recording
 
             // Apply any stop the user requested DURING setup. Must happen
@@ -3004,14 +2902,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// were accidentally inherited.
     private func makeStreamingSession(
         feature: AIFeature,
-        resilient: Bool = false
+        resilient: Bool = false,
+        endsOnlyByStop: Bool = false
     ) async throws -> any StreamingSessionRunning {
         let factory = TranscriptionSessionFactory()
         do {
             return try factory.make(
                 feature: feature,
                 language: PrivacyPreferences.shared.selectedLanguage?.code,
-                resilient: resilient
+                resilient: resilient,
+                endsOnlyByStop: endsOnlyByStop
             )
         } catch let error as FeatureRouteError {
             os_log(
@@ -3089,10 +2989,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hotkey can't apply a pending stop to a finished session.
         clearStreamingSetupWindow()
 
-        let target = autoPasteEngine.currentTarget()
-        let targetApp = target?.name
+        let target = autoPasteEngine.currentDropTarget()
+        let targetApp = target.name
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let targetPID = target?.pid
+        let targetPID = target.pid
 
         switch result {
         case .cancelled:
@@ -3310,9 +3210,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = DropTake.shared.mode
         let generation = streamingSetupGeneration
         return DropBatchRecoverySink(
-            setPhase: { AppState.shared.phase = $0 },
+            setPhase: { [weak self] phase in
+                // The reason is applied only when the take really ends
+                // undelivered: a take whose partial was pasted after all must
+                // not open Settings or mark the key.
+                if phase == .deliveryFailed, let self, generation == self.streamingSetupGeneration {
+                    self.applyDropProviderFailure()
+                }
+                AppState.shared.phase = phase
+            },
             deliver: { [weak self] raw in
                 guard let self, generation == self.streamingSetupGeneration else { return false }
+                // A transcript exists, so the speech provider accepted the
+                // key: an earlier refusal recorded for it no longer holds.
+                self.forgetDropKeyRefusal()
                 return await self.runPostProcessAndPaste(
                     rawText: raw, targetApp: targetApp, targetPID: targetPID, mode: mode
                 )
@@ -3333,6 +3244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failTelemetry: { [weak self] reason in
                 self?.failDropTurnTelemetry(reason: reason)
             },
+            noteBatchFailure: { [weak self] error in
+                guard let self, generation == self.streamingSetupGeneration else { return }
+                self.pendingDropProviderFailure = ProviderFailure(error)
+                self.dropBatchFailed = true
+            },
             pasteRaw: { [weak self] raw in
                 // Direct paste of the raw realtime partial — no cleanup
                 // (salvage rung). Returns whether the paste landed so
@@ -3340,10 +3256,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // for retry) instead of silently losing the dictation. Only a
                 // SUCCESSFUL paste parks the phase at `.idle`; on failure the
                 // caller owns the phase (it flips to `.deliveryFailed`).
-                guard let self else { return false }
+                guard let self, generation == self.streamingSetupGeneration else { return false }
                 let pasted = await self.autoPasteEngine.paste(raw)
-                if pasted { AppState.shared.phase = .idle }
+                if pasted {
+                    AppState.shared.phase = .idle
+                    self.noteDeliveredDropForLanguageOffer(raw)
+                }
                 return pasted
+            },
+            saveUndeliveredPartial: { [weak self] raw in
+                guard let self, generation == self.streamingSetupGeneration,
+                      self.autoPasteEngine.hasLocalDropTarget else { return false }
+                return self.saveUndeliveredLocalDrop(raw: raw, formatted: raw, targetApp: targetApp)
             },
             requiresProcessingForPartial: mode == .smart
         )
@@ -3404,6 +3328,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     language: prefs.selectedLanguage?.code)
             },
             sink: dropDeliverySink(targetApp: targetApp, targetPID: targetPID))
+    }
+
+    /// The take ends undelivered after a batch attempt. A provider's refusal
+    /// is named next to Retry instead of "offline", its key is marked in
+    /// API & Models, and that row opens once per take when only the user can
+    /// fix it. Any other batch failure clears an earlier reason, so a Retry
+    /// that fails differently does not keep blaming the key. The audio stays
+    /// for Retry.
+    // WHY: .project-docs/decisions/2026-11-19-provider-failure-reasons.md
+    private func applyDropProviderFailure() {
+        guard dropBatchFailed else { return }
+        dropBatchFailed = false
+        let failure = pendingDropProviderFailure
+        pendingDropProviderFailure = nil
+        guard let failure, let route = DropTake.shared.route else {
+            AppState.shared.dropDeliveryFailureMessage = nil
+            return
+        }
+        let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
+        AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
+        if let status = failure.keyStatus {
+            KeyStatusStore.shared.set(status, for: route.account, at: Date())
+        }
+        if failure.needsSettings, !dropFailureSettingsShown {
+            dropFailureSettingsShown = true
+            openSettingsWindow(tab: .apiAndModels, feature: DropTake.shared.feature)
+        }
+    }
+
+    /// A take produced a transcript on its provider: a refusal recorded for
+    /// that key by an earlier take is out of date. The next visit to
+    /// API & Models checks the key afresh.
+    private func forgetDropKeyRefusal() {
+        guard let account = DropTake.shared.route?.account, account != .thisMac,
+              case .rejected = KeyStatusStore.shared.record(for: account)?.status else { return }
+        KeyStatusStore.shared.forget(account)
     }
 
     /// Drop the retained total-offline take (Task 7): clears the PCM kept for a
@@ -3499,6 +3459,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var clearPendingRetry: () -> Void
         /// Close the turn's diagnostics with a failure reason.
         var failTelemetry: (String) -> Void
+        /// The error the batch transcription ended with, before the take is
+        /// parked as undelivered: the production sink turns a provider's
+        /// refusal into the reason shown next to Retry.
+        var noteBatchFailure: (Error) -> Void = { _ in }
         /// Paste a RAW transcript (the realtime partial) directly, bypassing
         /// cleanup — used only on the salvage rung. Async because the paste
         /// tail awaits AutoPaste.
@@ -3506,6 +3470,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// through to `.deliveryFailed` (retain for retry) instead of silently
         /// losing the dictation.
         var pasteRaw: (String) async -> Bool = { _ in true }
+        /// A closed native field can park a raw partial in History without
+        /// retaining audio for a retry into an editor that no longer exists.
+        var saveUndeliveredPartial: (String) -> Bool = { _ in false }
         /// A Smart take must process recovered partials before delivering them.
         var requiresProcessingForPartial: Bool = false
     }
@@ -3559,6 +3526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // (re)delivery clears any armed retry from a prior failed attempt.
             sink.clearPendingRetry()
         } catch {
+            sink.noteBatchFailure(error)
             // Keep the audio so the user can retry, surface the non-alarming
             // .deliveryFailed state, and NEVER paste an empty/partial result.
             // A deadline-cut hang reports its own reason so a stuck decode can
@@ -3705,6 +3673,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let pasted = await sink.pasteRaw(lastPartial)          // rung 3
                 if pasted {
                     sink.failTelemetry("salvaged_partial")
+                } else if sink.saveUndeliveredPartial(lastPartial) {
+                    sink.clearPendingRetry()
+                    sink.failTelemetry("local_editor_unavailable")
+                    sink.setPhase(.idle)
                 } else if !pcm.isEmpty && armRetry {
                     // The raw-partial paste itself failed (pasteboard write /
                     // modifier timeout). Don't silently lose the dictation —
@@ -3751,11 +3723,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard await sink.deliver(raw) else { return }
             sink.clearPendingRetry()
-        } catch is BatchRecoveryTimeout {
+        } catch let timeout as BatchRecoveryTimeout {
+            sink.noteBatchFailure(timeout)
             // Stuck decode cut by the deadline: same salvage ladder, but the
             // reason distinguishes the hang from an ordinary batch error.
             await salvageOrFail(batchFailureReason: "degraded_batch_timeout")
         } catch {
+            sink.noteBatchFailure(error)
             await salvageOrFail()
         }
     }
@@ -3818,8 +3792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 micSource: MicCaptureSource(),
                 systemSource: vadProbe,
                 micInUseProbe: micProbe,
-                stagingRoot: stagingRoot,
-                testCapture: MeetingLiveTestSettings.makeIfEnabled()
+                stagingRoot: stagingRoot
             )
         }
         // Local store + coordinator wire. Store init can throw on
@@ -3884,7 +3857,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let bundleID = Bundle.main.bundleIdentifier
         else { return }
         let inspector = CaseSystemProcessInspector()
-        let controls = AppControlController()
+        let controls = AppControlController(meetings: AppControlMeetings(
+            source: { [weak self] in self?.meetingsStore },
+            open: { [weak self] id in self?.showMeetingNote(id: id) ?? .unavailable }))
         appControlController = controls
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
@@ -3893,6 +3868,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { $0 != nil }
             .removeDuplicates()
             .sink { active in AppState.shared.caseApprovalActive = active }
+        // Answers are per Mac, in this app's Keychain.
+        // WHY: .project-docs/decisions/2026-11-20-harness-access.md
+        let harnessStore = HarnessAccessStore(
+            persistence: HarnessAccessKeychain(service: BuildConfig.keychainService),
+            seal: HarnessAccessSealFile(url: CaseBrokerPaths.socketURL(bundleID: bundleID)
+                .deletingLastPathComponent().appendingPathComponent("harness-access-seal.json")))
+        harnessAccessStore = harnessStore
+        HarnessAccessStore.active = harnessStore
+        let harnessGate = HarnessAccessGate(
+            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
         let broker = CaseBroker(
             service: CaseVaultService.shared,
             resolver: CaseSystemCallerResolver(
@@ -3900,7 +3885,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 builtInOpenCodePIDs: { CaseBuiltInAgentProcesses.shared.pids }),
             approvals: approvals,
             authenticator: LocalCaseAuthenticator(),
-            appControl: { [controls] request in await controls.handle(request) })
+            appControl: { [controls] request in await controls.handle(request) },
+            harnessAccess: { [harnessGate] request, peerPID, perform in
+                await harnessGate.handle(request, peerPID: peerPID, perform: perform)
+            })
         let server = CaseBrokerServer(
             socketURL: CaseBrokerPaths.socketURL(bundleID: bundleID),
             broker: broker,
@@ -4028,10 +4016,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `UsefulLinksBlockView`'s rolling chip) observe the preference
     /// directly through `@ObservedObject` and don't need a sink here.
     ///
-    /// `dropFirst()` skips the initial value emission so toggling the
-    /// menu item is the only event that flows through this sink — the
-    /// startup state is already handled by `showFloatingPanelIfNeeded`
-    /// reading `DisplayPreferences.shared.hideHelpers` synchronously.
+    /// `dropFirst()` limits this sink to changes after startup.
     private func installDisplayPreferenceObserver() {
         DisplayPreferences.shared.$hideHelpers
             .dropFirst()

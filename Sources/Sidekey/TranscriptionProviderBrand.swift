@@ -97,6 +97,8 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
             return TranscriptionProviderBrand(assetName: "openai", label: "OpenAI")
         case .anthropic:
             return .anthropic
+        case .thisMac:
+            return TranscriptionProviderBrand(systemName: "laptopcomputer", label: "On this Mac")
         case .server(let id):
             return TranscriptionProviderBrand(systemName: "server.rack", label: routing.server(id)?.name ?? "Server")
         }

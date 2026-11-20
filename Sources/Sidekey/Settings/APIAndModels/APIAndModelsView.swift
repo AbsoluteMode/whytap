@@ -70,7 +70,13 @@ struct APIAndModelsView: View {
                     case .keys, .models:
                         ScrollView {
                             VStack(alignment: .leading, spacing: 22) {
-                                if section == .keys { keysBlock } else { modelsBlock }
+                                if section == .keys {
+                                    // Where its model can run (Apple Silicon).
+                                    if OnDeviceSpeechModelStore.isSupportedHost { onDeviceBlock }
+                                    keysBlock
+                                } else {
+                                    modelsBlock
+                                }
                             }
                             .padding(18)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -184,15 +190,25 @@ struct APIAndModelsView: View {
         )
     }
 
+    // MARK: - On this Mac
+
+    private var onDeviceBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "On this Mac")
+            OnDeviceSpeechCard(viewModel: viewModel, model: .shared)
+        }
+    }
+
     // MARK: - API keys
 
     private var keysBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "API keys")
             ProviderKeyTiles(viewModel: viewModel,
-                onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") }) {
-                    keyNotice = KeyNotice(accepted: $0)
-                }
+                onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") },
+                onSaveResult: { keyNotice = KeyNotice(accepted: $0) },
+                // The reason replaces the bare "Key not accepted".
+                onSaveFailure: { keyNotice = KeyNotice(accepted: false, failureText: $0) })
         }
     }
 
@@ -493,20 +509,35 @@ struct APIAndModelsView: View {
 /// asset (Anthropic, a user's server) shows an SF Symbol.
 @MainActor
 struct ProviderKindIcon: View {
-    let kind: AIProviderKind
-    var size: CGFloat = 16
+    private let assetName: String?
+    private let systemName: String
+    var size: CGFloat
+
+    init(kind: AIProviderKind, size: CGFloat = 16) {
+        assetName = Self.assetName(for: kind)
+        systemName = Self.systemName(for: kind)
+        self.size = size
+    }
+
+    /// A key tile outside the model providers (Tavily web search) draws its bundled mark the same way.
+    init(assetName: String, size: CGFloat = 16) {
+        self.assetName = assetName
+        systemName = "globe"
+        self.size = size
+    }
 
     var body: some View {
-        if let assetName = Self.assetName(for: kind) {
+        if let assetName {
             ProviderBrandIcon(assetName: assetName, size: size)
         } else {
-            ProviderBrandIcon(systemName: Self.systemName(for: kind), size: size)
+            ProviderBrandIcon(systemName: systemName, size: size)
         }
     }
 
     static func systemName(for kind: AIProviderKind) -> String {
         switch kind {
         case .anthropic: return TranscriptionProviderBrand.anthropicSystemName
+        case .onDevice: return "laptopcomputer"
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .openAICompatible: return "server.rack"
         }
     }
@@ -518,7 +549,7 @@ struct ProviderKindIcon: View {
         case .elevenLabs: return "elevenlabs"
         case .openRouter: return "openrouter"
         case .openAI: return "openai"
-        case .anthropic, .openAICompatible: return nil
+        case .anthropic, .openAICompatible, .onDevice: return nil
         }
     }
 }

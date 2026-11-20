@@ -22,14 +22,17 @@ final class AppControlController {
     private let googleCalendarReview: () -> Bool
     private let screenCapture: AgentScreenCapture
     private let planner: @MainActor () -> PlannerStore
+    /// Set only where the broker gates these operations by `HarnessAccessGate`.
+    private let meetings: AppControlMeetings?
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
          preferences: UserPreferencesCache? = nil, languages: PrivacyPreferences? = nil,
          idle: IslandIdlePreferences? = nil, identity: AppBuildIdentity = .current,
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
-         planner: (@MainActor () -> PlannerStore)? = nil,
+         planner: (@MainActor () -> PlannerStore)? = nil, meetings: AppControlMeetings? = nil,
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive }) {
+        self.meetings = meetings
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
         self.routing = routing ?? .shared
@@ -46,8 +49,7 @@ final class AppControlController {
             return .object(["drop": .string(String(describing: state.phase)),
                             "agent": .string(String(describing: state.agentPhase)),
                             "meetingRecording": .bool(state.meetingRecordingActive),
-                            "translationActive": .bool(state.translationActive),
-                            "meetingAssistantActive": .bool(state.meetingAssistantActive)])
+                            "translationActive": .bool(state.translationActive)])
         }
     }
 
@@ -63,6 +65,13 @@ final class AppControlController {
         switch request.operation {
         case "capture_screen":
             return await screenCapture.handle(args)
+        // The user's notes and transcripts: reachable only behind the broker's
+        // harness access gate. WHY: .project-docs/decisions/2026-11-20-harness-access.md
+        case _ where AppControlMeetings.operations.contains(request.operation):
+            guard let meetings else {
+                return .failure("unavailable", "Meeting tools are unavailable in this build.")
+            }
+            return await meetings.handle(request.operation, args)
         // To-do is the one user-content surface here: titles the user's own
         // processes can already read in the planner file. WHY:
         // .project-docs/decisions/2026-11-03-todo-helper.md

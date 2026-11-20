@@ -92,7 +92,7 @@ final class ModelStatusResolverTests: XCTestCase {
         let env = try makeEnv(snapshots: [.deepgram: fresh(models)], keyed: [.soniox, .deepgram, .elevenLabs])
         let sections = env.resolver.sections(for: .meetings)
         for (account, model, day) in [(ProviderAccount.soniox, "stt-async-v5", "2026-06-11"),
-                                      (.elevenLabs, "scribe_v2_realtime", "2025-11-11")] {
+                                      (.elevenLabs, "scribe_v3_live", "2026-11-10")] {
             let option = try XCTUnwrap(sections.first { $0.account == account }?.options.first { $0.model == model })
             XCTAssertTrue(try XCTUnwrap(option.dateLabel).hasPrefix("Released "))
             XCTAssertEqual(option.catalogDate, ModelCatalogFetcher.deepgramVersionDate(day))
@@ -291,6 +291,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
             "Add a key for Soniox, Deepgram, ElevenLabs or an OpenAI-compatible server"
+                + (HostArchitecture.isAppleSilicon ? ", or download the On this Mac model" : "")
         )
         env.addKey(.soniox)
         XCTAssertNil(env.resolver.missingProviderHint(for: .dropFast))
@@ -346,5 +347,67 @@ final class ModelStatusResolverTests: XCTestCase {
         let options = try XCTUnwrap(env.resolver.sections(for: .dropSmartCleanup).first).options
         XCTAssertEqual(options.first { $0.model == "x/thinker" }?.hint, "always reasons, slower")
         XCTAssertNil(options.first { $0.model == "google/gemini-3.8-flash" }?.hint)
+    }
+
+    private func price(_ input: Decimal, _ output: Decimal) -> CatalogTokenPrice? {
+        CatalogTokenPrice(promptPerToken: input / 1_000_000, completionPerToken: output / 1_000_000)
+    }
+
+    func test_price_label_formats_per_million_and_never_rounds_a_price_to_zero() throws {
+        let label = { (input: Decimal, output: Decimal) in
+            ModelStatusResolver.catalogPriceLabel(self.price(input, output), account: .openRouter)
+        }
+        XCTAssertEqual(label(1.25, 10), "$1.25 in / $10 out per 1M tokens")
+        XCTAssertEqual(label(0.075, 0.3), "$0.075 in / $0.3 out per 1M tokens")
+        XCTAssertEqual(label(0.0375, 0.15), "$0.0375 in / $0.15 out per 1M tokens")
+        XCTAssertEqual(label(15, 75), "$15 in / $75 out per 1M tokens")
+        XCTAssertEqual(label(1250, 2.505), "$1250 in / $2.5 out per 1M tokens")
+        XCTAssertEqual(label(0.000004, 0.00123456), "$0.000004 in / $0.00123 out per 1M tokens")
+        // One free side is still a paid model.
+        XCTAssertEqual(label(0, 0.4), "$0 in / $0.4 out per 1M tokens")
+        XCTAssertEqual(label(0, 0), "Free")
+    }
+
+    func test_price_label_is_absent_for_unknown_prices_and_other_providers() throws {
+        XCTAssertNil(ModelStatusResolver.catalogPriceLabel(nil, account: .openRouter))
+        XCTAssertNil(CatalogTokenPrice(promptPerToken: nil, completionPerToken: 0))
+        XCTAssertNil(CatalogTokenPrice(promptPerToken: 0, completionPerToken: nil))
+        XCTAssertNil(CatalogTokenPrice(promptPerToken: -1, completionPerToken: -1))
+        for account in [ProviderAccount.openAI, .anthropic, .soniox, .deepgram, .elevenLabs, .server(UUID())] {
+            XCTAssertNil(ModelStatusResolver.catalogPriceLabel(price(1, 2), account: account))
+        }
+    }
+
+    func test_picker_shows_prices_only_on_openrouter_rows_without_changing_the_choice() throws {
+        let priced = CatalogModel(id: "vendor/priced", uses: [.chat, .chatWithTools], tokenPrice: price(0.3, 2.5))
+        let free = CatalogModel(id: "vendor/free", uses: [.chat, .chatWithTools], tokenPrice: price(0, 0))
+        let unknown = CatalogModel(id: "vendor/unknown", uses: [.chat, .chatWithTools])
+        let accounts: [ProviderAccount] = [.openRouter, .openAI]
+        let models = [priced, free, unknown]
+        let env = try makeEnv(snapshots: Dictionary(uniqueKeysWithValues: accounts.map { ($0, fresh(models)) }),
+                              keyed: accounts)
+        let sections = env.resolver.sections(for: .dropSmartCleanup)
+        let openRouter = try XCTUnwrap(sections.first { $0.account == .openRouter }).options
+        XCTAssertEqual(openRouter.first { $0.model == priced.id }?.priceLabel, "$0.3 in / $2.5 out per 1M tokens")
+        XCTAssertEqual(openRouter.first { $0.model == free.id }?.priceLabel, "Free")
+        let unpriced = try XCTUnwrap(openRouter.first { $0.model == unknown.id })
+        XCTAssertNil(unpriced.priceLabel)
+        // The same catalog rows under another provider never get a price.
+        let openAI = try XCTUnwrap(sections.first { $0.account == .openAI }).options
+        XCTAssertTrue(models.allSatisfy { model in openAI.contains { $0.model == model.id } })
+        XCTAssertTrue(openAI.allSatisfy { $0.priceLabel == nil })
+        // Built-in registry models absent from the catalog have no price either.
+        XCTAssertTrue(openRouter.filter { option in !models.contains { $0.id == option.model } }
+            .allSatisfy { $0.priceLabel == nil })
+
+        // Display only: a price changes neither the state nor the search results.
+        let plain = try makeEnv(
+            snapshots: [.openRouter: fresh(models.map { var model = $0; model.tokenPrice = nil; return model })],
+            keyed: [.openRouter])
+        let plainOptions = try XCTUnwrap(plain.resolver.sections(for: .dropSmartCleanup).first).options
+        XCTAssertEqual(plainOptions.map(\.model), openRouter.map(\.model))
+        XCTAssertEqual(plainOptions.map(\.state), openRouter.map(\.state))
+        let found = ModelPickerSearch.results(in: sections, query: "0.3").map(\.option.model)
+        XCTAssertFalse(found.contains(priced.id), "a price is not searchable text")
     }
 }

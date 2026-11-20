@@ -1,24 +1,18 @@
 ---
 id: meeting-source-noise-floor-2026-10-20
 type: decision
-title: Separate microphone background from speaker evidence and limit capture gain
-summary: Calibrate source activity independently and preserve quiet microphone boost without clipping loud buffers.
+title: Preserve quiet microphone boost and limit capture gain
+summary: Preserve quiet microphone boost without clipping loud buffers; the earlier research source-attribution implementation is retired.
 status: confirmed
 tags: [meetings, audio, microphone, diarization, testing]
-canonical_for: [meeting-source-activity-calibration, meeting-microphone-gain]
-verified_at: 2026-10-20
+canonical_for: [meeting-microphone-gain]
+verified_at: 2026-11-05
 sources:
   - type: user-confirmed
     reference: On 2026-10-20 the user confirmed that the principal voice in the active test was the remote participant despite its local label, authorized tuning during the call, and requested checking the older quiet-microphone issue against official guidance.
     confirmed_at: 2026-10-20
   - type: repository
-    reference: Sources/Sidekey/Meetings/MeetingSpeakerSourceMapper.swift
-    confirmed_at: 2026-10-20
-  - type: repository
     reference: Sources/Sidekey/Meetings/MicSampleGain.swift
-    confirmed_at: 2026-10-20
-  - type: repository
-    reference: Tests/SidekeyTests/Meetings/MeetingSpeakerSourceMapperTests.swift
     confirmed_at: 2026-10-20
   - type: url
     reference: https://developer.apple.com/documentation/avfaudio/avaudioinputnode/isvoiceprocessingagcenabled
@@ -26,7 +20,7 @@ sources:
   - type: url
     reference: https://soniox.com/docs/stt/concepts/speaker-diarization
     confirmed_at: 2026-10-20
-related: [2026-10-19-live-meeting-test-capture.md]
+related: []
 ---
 
 # Background-aware source evidence
@@ -41,18 +35,8 @@ hit its hard clamp.
 
 ## Decision
 
-The internal test writer calibrates each source separately on captured 100ms
-frames, before processing ASR tokens. Twenty frames establish initial readiness.
-The activity threshold is the greater of 0.003 and three times the lower quintile
-of up to 100 background observations. Once calibrated, foreground frames do not
-raise that source's background estimate. Pause/resume restarts calibration.
-Thresholds and readiness are saved alongside raw RMS values for diagnosis.
-
-Speaker anchors require 500ms of unique token time supported by an exclusive
-source across a window extending 100ms to either side. Repeated subword times
-cannot accumulate duplicate evidence. A known speaker cannot override current
-overlap or evidence for the opposite source. Existing audio and tokens can be
-replayed locally; they need no new provider request and are never rewritten.
+The retired research source-attribution implementation was removed on 2026-11-05.
+Its previous implementation remains in Git history.
 
 Meeting microphone capture retains the existing maximum fourfold boost. A
 stateful per-buffer peak limiter reduces gain before output exceeds 0.95, then
@@ -74,8 +58,7 @@ and changes neither hardware input volume nor other applications' audio.
 
 ## Verification and limitations
 
-Synthetic regressions cover microphone background, quiet and sustained speech,
-source gaps, overlap, repeated timestamps, invalid input and gain attack/release.
+Synthetic regressions cover microphone gain attack/release.
 Private causal replay uses only the already captured frames and received tokens;
 it is diagnostic evidence, not an independent accuracy benchmark. No private
 audio, text, file identifiers or replay artifacts belong in the repository.

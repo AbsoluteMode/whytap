@@ -60,7 +60,7 @@ enum IslandFrameLayout {
     /// flush against the capsule, reading as the island stretching rather
     /// than a separate component.
     static let agentWingGap: CGFloat = 8
-    /// Wing width while voice-recording (live transcript ticker).
+    /// Maximum live dictation width. Once reached, the ticker scrolls inside it.
     static let agentWingRecordingWidth: CGFloat = 260
     /// Wing width while composing text (R-Cmd tap input field).
     static let agentWingComposingWidth: CGFloat = 300
@@ -113,17 +113,12 @@ enum IslandFrameLayout {
 
     /// Floor for a content-sized wing face — keeps the capsule from
     /// collapsing below a legible minimum (and guards a zero measurement).
-    /// Deliberately below the "listening…" placeholder width so the
-    /// placeholder itself sets the natural compact start; the floor only
-    /// catches shorter transcripts.
     static let adaptiveWingFloor: CGFloat = 72
 
     /// Adaptive width of a content-sized wing face: the measured content
     /// width (rendered text + horizontal padding) clamped into
     /// `[adaptiveWingFloor, cap]`. `cap` is the face's established maximum
-    /// (`agentWingRecordingWidth` 260 / `agentWingComposingWidth` 300). Pure
-    /// so the clamp is unit-testable without rendering — the measurement that
-    /// feeds it (`NSFont` metrics in `IslandView`) is not.
+    /// (e.g. `agentWingComposingWidth` 300).
     static func adaptiveWingWidth(measuredContentWidth: CGFloat, cap: CGFloat) -> CGFloat {
         min(max(measuredContentWidth, adaptiveWingFloor), cap)
     }

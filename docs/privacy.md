@@ -10,7 +10,9 @@ is a verifiable claim rather than a slogan.
   and, for meetings, staged as WAV chunks under `~/Library/Application
   Support/` only while the meeting is recorded and its note is created. If
   processing fails, the recording is kept for retries for at most 24 hours
-  after it ended and then deleted; the meeting stays listed as failed.
+  after it ended and then deleted; the meeting stays listed as failed. A
+  transcript that was already made stays on this Mac with the meeting, so the
+  notes can be written again later without the recording.
   Packaged builds keep no research recordings.
 - Transcripts, agent history, clipboard history and meeting notes live in
   SQLite databases under `~/Library/Application Support/`. Delete them from
@@ -39,6 +41,11 @@ is a verifiable claim rather than a slogan.
   room for its temporary copy (about twice the size of the kept entries), it
   waits for a later launch. This cleans the files themselves; it is not a
   forensic wipe of the SSD, snapshots or backups.
+- A coding tool with the Whytap plugin (Claude Code, Codex) reads your meeting
+  notes and transcripts only after you answer Yes to Whytap's question for
+  that tool, once per Mac. What it reads goes to that tool's model provider
+  under its own policy. Change the answer in Settings -> Agents -> Coding
+  tools. The files themselves are ordinary files in your user account.
 - API keys you enter in Settings → API & Models ("Your key") are stored in the
   macOS Keychain under the app's own service name (`com.rootwise.sidekey`).
   Key values are never shown again after saving and are never written to
@@ -107,6 +114,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Route | Where data goes | When |
 |---|---|---|
 | Meeting detector (FluidAudio Silero VAD) | nowhere; a one-time download from Hugging Face fetches the model | the first time the detector checks for speech |
+| On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in API & Models; recognition while a feature set to On this Mac is in use |
 | Your key: speech (Soniox, Deepgram, ElevenLabs, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
 | Agent (native) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key; tool actions may access destinations needed by your request | when you submit an agent request |
 | Agent model mark | public image files on OpenRouter for the displayed model author; no API key, cookies, audio, prompt or reply. Bundled marks appear immediately; a small local cache is disposable | asynchronously when the voice mark is shown, at most weekly per cached author; failures retain usable artwork |

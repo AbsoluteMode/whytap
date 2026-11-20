@@ -9,6 +9,7 @@ struct TranscriptionSessionFactory {
     private let resolver: FeatureRouteResolver
     private let vocab: VocabularyCache
     private let makeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
+    private let makeOnDeviceSession: @MainActor (String?) -> StreamingSessionRunning
 
     /// `vocab` defaults to the shared cache, looked up when the session is
     /// built: a literal `.shared` default does not compile for a main-actor
@@ -16,21 +17,27 @@ struct TranscriptionSessionFactory {
     init(
         resolver: FeatureRouteResolver = FeatureRouteResolver(),
         vocab: VocabularyCache? = nil,
-        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered
+        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered,
+        makeOnDeviceSession: @escaping @MainActor (String?) -> StreamingSessionRunning = {
+            OnDeviceTranscriptionSession(language: $0)
+        }
     ) {
         self.resolver = resolver
         self.vocab = vocab ?? .shared
         self.makeAdapter = makeAdapter
+        self.makeOnDeviceSession = makeOnDeviceSession
     }
 
     /// Build the session for `feature`. `resilient` enables degraded-turn batch
     /// recovery and must be `true` ONLY for the Drop flow; agent-voice and
     /// Google-search pass `false` so they can never resolve `.degraded` (their
     /// handlers treat it as a no-op, which would silently drop dictation).
+    /// `endsOnlyByStop` marks a Drop auto-stop take: see the session's field.
     func make(
         feature: AIFeature,
         language: String?,
-        resilient: Bool = false
+        resilient: Bool = false,
+        endsOnlyByStop: Bool = false
     ) throws -> StreamingSessionRunning {
         guard let route = resolver.route(for: feature) else {
             throw FeatureRouteError.notSet(feature)
@@ -41,13 +48,21 @@ struct TranscriptionSessionFactory {
            let error = DeepgramLanguagePolicy.configurationError(model: route.model, language: language) {
             throw FeatureRouteError.invalidLanguageConfiguration(feature, error)
         }
-        let adapter = try makeAdapter(try resolver.resolve(route, for: feature))
+        let resolved = try resolver.resolve(route, for: feature)
+        // On this Mac: no adapter and no socket. The session keeps the take's
+        // audio itself, so it never resolves `.degraded`.
+        // WHY: .project-docs/decisions/2026-11-19-on-device-dictation.md
+        if resolved.account == .thisMac {
+            return makeOnDeviceSession(language)
+        }
+        let adapter = try makeAdapter(resolved)
         return DirectProviderStreamingSession(
             audioEngine: StreamingAudioEngine(),
             adapter: adapter,
             language: language,
             terms: vocab.terms,
-            resilient: resilient
+            resilient: resilient,
+            endsOnlyByStop: endsOnlyByStop
         )
     }
 }

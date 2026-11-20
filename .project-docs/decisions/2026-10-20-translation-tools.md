@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Translation/TranslationService.swift
     confirmed_at: 2026-10-20
-related: [../project.md, 2026-10-20-toolbox-mini-apps.md]
+related: [../project.md, 2026-10-20-toolbox-mini-apps.md, 2026-11-18-drop-into-whytap-editors.md]
 ---
 
 # Translation tools
@@ -56,6 +56,15 @@ explicit targets. Keep original speech optional beside subtitles. The 2026-10-26
 text layout uses only an input row (Return to submit) and a result/status row.
 Saved explicit targets and secondary actions remain in the context menu; no
 provider choice changes. See [design](../../docs/DESIGN.md) and the guide.
+
+A second press of a tool's hotkey closes the window while that tool's mode is
+visible; the other tool's hotkey switches modes. The close is the ordinary
+dismissal (the same one as Escape, an outside click and the close button), so
+requests and capture are cancelled in one place. Tile clicks, tool search and
+`whytap://` links stay open-only; a link may only show a place.
+`TranslationHotkeyTogglePolicy` holds the rule as a pure function, and the
+controller takes the visible state as a parameter, so tests cover the rule and
+the cancelling close without showing the panel or installing mouse monitors.
 
 The implementation uses three routes: Translation (typed-text LLM),
 Subtitles audio (real-time speech) and Subtitles translation (its independent

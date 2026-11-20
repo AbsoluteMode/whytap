@@ -141,6 +141,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         refreshRootView()
     }
 
+    /// True while a note is open for editing in the Meetings tab.
+    var isEditingNote: Bool { selection.notesController?.isEditingNote == true }
+
     func selectNoteMeeting(id: UUID) {
         selection.select(.notes)
         selection.ensureNotesController()?.selectMeeting(id: id)

@@ -193,7 +193,7 @@ struct APIHintsView: View {
         Hint(
             category: .search,
             provider: "Tavily",
-            assetName: nil,
+            assetName: "tavily",
             allowance: "1,000",
             cadence: "free search credits each month",
             access: .noCard,

@@ -156,6 +156,31 @@ final class SettingsSyncService: ObservableObject {
         try? FileManager.default.removeItem(at: ledgerURL)
     }
 
+    /// A restore of settings or keys marks itself before it starts. Only an
+    /// applied restore forgets the agreement; a rolled back or cancelled one
+    /// keeps it, so this Mac's unsynced edits survive. A marker left by a
+    /// crash after the restore finished counts as applied.
+    nonisolated static func restoreWillStart(ledgerURL: URL = Dependencies.productionLedgerURL) {
+        let marker = restoreMarker(ledgerURL)
+        try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        try? Data().write(to: marker, options: [.atomic])
+    }
+
+    nonisolated static func restoreFinished(applied: Bool, ledgerURL: URL = Dependencies.productionLedgerURL) {
+        if applied { forgetAgreement(ledgerURL: ledgerURL) }
+        try? FileManager.default.removeItem(at: restoreMarker(ledgerURL))
+    }
+
+    nonisolated static func resolveInterruptedRestore(ledgerURL: URL = Dependencies.productionLedgerURL) {
+        guard FileManager.default.fileExists(atPath: restoreMarker(ledgerURL).path) else { return }
+        restoreFinished(applied: true, ledgerURL: ledgerURL)
+    }
+
+    nonisolated private static func restoreMarker(_ ledgerURL: URL) -> URL {
+        ledgerURL.deletingLastPathComponent().appendingPathComponent("restore-in-progress")
+    }
+
     func requestSync(force: Bool = false) {
         guard isEnabled else { return }
         noticeLocalChanges()
@@ -195,6 +220,10 @@ final class SettingsSyncService: ObservableObject {
             let noticed = ledger.recordingLocalChanges(current: current, now: deps.now(), noticed: noticedWhileRunning)
             guard running == nil else {
                 // Remember only when; the running round stamps it with this time.
+                // A value back at its agreed state forgets its earlier sighting.
+                for (item, entry) in noticedWhileRunning where entry.hash != SettingsSyncItem.hash(current[item]) {
+                    noticedWhileRunning[item] = nil
+                }
                 for (item, record) in noticed.records where record != ledger.records[item] {
                     let hash = SettingsSyncItem.hash(current[item])
                     if noticedWhileRunning[item]?.hash != hash { noticedWhileRunning[item] = (hash, deps.now()) }

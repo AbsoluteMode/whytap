@@ -21,6 +21,10 @@ struct SettingsSyncEntry: Codable, Equatable {
     var modifiedAt: Date
     var device: String
 
+    /// A value a Mac had before it joined, stamped at the epoch. It fills a
+    /// gap in the shared document but never replaces a shared entry.
+    var isPreJoin: Bool { modifiedAt <= Date(timeIntervalSince1970: 0) }
+
     /// Later change wins; the device ID breaks an exact tie the same way on
     /// every Mac, so both converge on one value.
     func wins(over other: SettingsSyncEntry) -> Bool {
@@ -172,7 +176,7 @@ struct SettingsSyncPlan: Equatable {
         var apply: [String: SettingsSyncValue?] = [:]
         for (item, entry) in local {
             // Joining: what this Mac had before yields to anything already shared.
-            if let shared = remoteEntries[item], !ledger.joined || !entry.wins(over: shared) {
+            if let shared = remoteEntries[item], !ledger.joined || entry.isPreJoin || !entry.wins(over: shared) {
                 if SettingsSyncItem.hash(shared.value) != SettingsSyncItem.hash(current[item]) {
                     apply[item] = .some(shared.value)
                 }

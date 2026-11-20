@@ -58,7 +58,7 @@ a recovery-code key and a Keychain token.
   save the new agreement; apply; upload. A Mac has joined once it takes an
   existing shared document; the first Mac, once its upload succeeds. Values a
   joining Mac already had are stamped at the epoch: they fill gaps but never
-  beat a shared value.
+  replace a shared entry, whatever the device IDs (fifth review).
 - Stores that keep their own copy reload after an applied change: routes,
   hotkeys, Toolbox layout, notification sounds, Brightness keys, island
   helpers, Drop mode, capability flags and idle hide.
@@ -102,8 +102,12 @@ a join. Each has a test now:
 - A key received while joining and removed during a conflicting write stays
   removed: joining is complete once the shared document was taken (fourth
   review).
-- A restore that will replace settings or keys forgets the agreement before
-  it starts, so a crash midway cannot leave old values that look like edits.
+- A restore that will replace settings or keys leaves a marker before it
+  starts. Applied, it forgets the agreement; rolled back or cancelled, it keeps
+  it, so unsynced edits survive. A marker left by a crash after the restore
+  finished counts as applied (fifth review).
+- An edit seen during a write, then undone and made again, keeps the time of
+  its last sighting (fifth review).
 - Keys the shared document names are read even when this Mac's routes do not
   list them, so a key restored without its server meets the shared removal
   instead of being uploaded again later (third review).
@@ -138,7 +142,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Thirty tests with two simulated Macs sharing a fake repository: first upload
+Thirty-three tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -152,8 +156,9 @@ join losing a write race, refused Keychain write, quick off and on, an edit
 during backoff, a key dropped before joining, a removal a store re-saves, a
 key removed while the joining write is in flight, a restored key of a removed
 server, a received key removed during a conflicting join write, an edit seen
-during a write keeping its time). The last two were checked to fail with
-their fixes reverted. Timestamps are stored as
+during a write keeping its time, a pre-join value after a refused Keychain
+write, a shortcut changed back and forth during a write, restore markers). The
+fourth- and fifth-review tests were checked to fail with their fixes reverted. Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

@@ -569,6 +569,79 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertEqual(second.defaults.string(forKey: meetingKey), "control+m")
     }
 
+    func testAValueFromBeforeJoiningNeverReplacesASharedOneEvenAfterARefusedWrite() async throws {
+        let first = mac()
+        first.secrets.values[soniox] = "a-key"
+        await first.turnOn()
+
+        let second = mac(at: 100)
+        // The greatest possible device ID: an epoch tie would go to this Mac.
+        try FileManager.default.createDirectory(at: second.ledgerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder.settingsSync.encode(SettingsSyncLedger(device: "ZZZZ")).write(to: second.ledgerURL)
+        second.secrets.values[soniox] = "b-key"
+        second.secrets.unwritable = [soniox]
+        await second.turnOn()                            // joins, but the Keychain refuses the shared key
+        second.secrets.unwritable = []
+        await second.sync(after: 1000)
+
+        XCTAssertEqual(second.secrets.values[soniox], "a-key")
+        let document = try await shared()
+        XCTAssertEqual(document.entries[SettingsSyncItem.secret(soniox)]?.value, .secret("a-key"))
+    }
+
+    func testChangingAShortcutBackAndForthDuringAWriteKeepsTheLastTime() async throws {
+        let first = mac(), second = mac()
+        first.defaults.set("x", forKey: meetingKey)
+        await first.turnOn(); await second.turnOn()
+
+        first.defaults.set("smart", forKey: mode)
+        let firstMac = first, secondMac = second, key = meetingKey
+        await remote.setInterject { _ in
+            await MainActor.run {
+                firstMac.clock.addTimeInterval(1)
+                firstMac.defaults.set("y", forKey: key); firstMac.service.requestSync()
+                firstMac.clock.addTimeInterval(1)
+                firstMac.defaults.set("x", forKey: key); firstMac.service.requestSync()
+                secondMac.clock.addTimeInterval(20)
+                secondMac.defaults.set("z", forKey: key)
+            }
+            await secondMac.sync(after: 0)
+            await MainActor.run {
+                firstMac.clock.addTimeInterval(40)
+                firstMac.defaults.set("y", forKey: key); firstMac.service.requestSync()
+                firstMac.clock.addTimeInterval(500)
+            }
+        }
+        await first.sync(after: 10)
+        await second.sync(after: 1000)
+
+        XCTAssertEqual(first.defaults.string(forKey: meetingKey), "y", "the last edit on this Mac is later than the other Mac's")
+        XCTAssertEqual(second.defaults.string(forKey: meetingKey), "y")
+    }
+
+    func testOnlyAnAppliedRestoreForgetsTheAgreement() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sync-restore-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ledger = directory.appendingPathComponent("ledger.json")
+        func reset() throws { try Data("{}".utf8).write(to: ledger) }
+
+        try reset()
+        SettingsSyncService.restoreWillStart(ledgerURL: ledger)
+        SettingsSyncService.restoreFinished(applied: false, ledgerURL: ledger)
+        SettingsSyncService.resolveInterruptedRestore(ledgerURL: ledger)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ledger.path), "a rolled back restore keeps unsynced edits")
+
+        SettingsSyncService.restoreWillStart(ledgerURL: ledger)
+        SettingsSyncService.restoreFinished(applied: true, ledgerURL: ledger)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ledger.path))
+
+        try reset()
+        SettingsSyncService.restoreWillStart(ledgerURL: ledger)  // the app stopped mid-restore
+        SettingsSyncService.resolveInterruptedRestore(ledgerURL: ledger)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ledger.path), "a finished restore whose marker survived counts as applied")
+    }
+
     func testTurningSyncOffAndOnQuicklyStillSyncs() async throws {
         let first = mac()
         first.defaults.set("smart", forKey: mode)

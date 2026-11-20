@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="64" viewBox="0 0 640 64">
-  <rect x="0.5" y="0.5" width="639" height="63" rx="14" fill="#151b23" stroke="#2d333b"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="64" viewBox="0 0 480 64">
+  <rect x="0.5" y="0.5" width="479" height="63" rx="14" fill="#151b23" stroke="#2d333b"/>
   <circle cx="34" cy="32.0" r="20" fill="#2a2350"/>
   <g transform="translate(22 20.0)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
   <path d="M3 3v5h5" />
   <path d="M12 7v5l4 2" /></g>
   <text x="68" y="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f0f6fc">History</text>
   <text x="68" y="47" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="#9198a1">Find something you used earlier</text>
-  <rect x="556" y="18.0" width="66" height="28" rx="14" fill="#6c5ce7"/>
-  <text x="589" y="36.5" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Click</text>
+  <rect x="396" y="18.0" width="66" height="28" rx="14" fill="#6c5ce7"/>
+  <text x="429" y="36.5" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Click</text>
 </svg>

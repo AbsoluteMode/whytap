@@ -1002,9 +1002,10 @@ hover to keep the card visible while reading.
   and down from the top-trailing corner, preserving top alignment and the 8 pt
   island gap. Transparent panel overflow fits the whole card; the click region
   follows its transformed size. The inset border stays within the rounded shape.
-- Each source has a separate labeled Notification sound row using the existing
-  native menu. Off is the default; Glass, Ping and Pop preview when selected.
-  A separate row keeps long source names and the enable switch readable.
+- Each source has a speaker icon left of its enable switch (no separate sound
+  row, at the user's request on 2026-11-20). Off, the default, shows a dimmed
+  crossed-out speaker; a chosen sound shows a plain speaker in the text color.
+  Clicking it opens a native menu: Off, Glass, Ping, Pop; picking one previews.
 - Existing type, spacing and colors stay in use. Keyboard and VoiceOver can
   reach the sound selector. Reduce Motion suppresses hover growth and transition
   animation. Live pointer/audio acceptance follows

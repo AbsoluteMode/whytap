@@ -1,24 +1,48 @@
 import SwiftUI
 
-/// A separate labeled row leaves room for long source names and the enable switch.
+/// A speaker icon beside a source's switch: crossed out and dimmed while the
+/// source is silent (the default), plain and bright once a sound is chosen.
+/// Clicking it opens a native menu of sounds; picking one plays a preview.
+/// Maxim asked on 2026-11-20 to drop the separate "Notification sound" row.
 struct NotificationSoundControl: View {
     @ObservedObject var settings: NotificationSoundSettings
     let sourceID: String
     let sourceName: String
     var preview: (NotificationSound) -> Void = { NotificationSoundPlayer.shared.play($0, preview: true) }
 
+    private var current: NotificationSound { settings.sound(for: sourceID) }
+
     var body: some View {
-        MacRow(title: "Notification sound") {
-            MacPopup(items: NotificationSound.allCases.map { .init(value: $0, label: $0.title) },
-                     selection: Binding(
-                        get: { settings.sound(for: sourceID) },
-                        set: { sound in
-                            settings.setSound(sound, for: sourceID)
-                            preview(sound)
-                        }
-                     ), minWidth: 110)
-                .accessibilityLabel("Notification sound for \(sourceName)")
-                .help("Choose a sound to hear a preview. Off keeps this source silent.")
+        Menu {
+            ForEach(NotificationSound.allCases, id: \.self) { sound in
+                Button {
+                    settings.setSound(sound, for: sourceID)
+                    preview(sound)
+                } label: {
+                    if sound == current {
+                        Label(sound.title, systemImage: "checkmark")
+                    } else {
+                        Text(sound.title)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: Self.symbolName(for: current))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(current == .none ? MacSettingsTheme.text3 : MacSettingsTheme.text)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Notification sound for \(sourceName)")
+        .accessibilityValue(current.title)
+        .help(current == .none ? "Sound off. Click to choose a sound." : "Sound: \(current.title). Click to change.")
+    }
+
+    static func symbolName(for sound: NotificationSound) -> String {
+        sound == .none ? "speaker.slash" : "speaker.wave.2"
     }
 }

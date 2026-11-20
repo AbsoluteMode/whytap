@@ -39,12 +39,13 @@ struct SettingsNotificationsView: View {
                                                    tint: Color(hexCSS: "#785EFF"), size: 28, imageLoader: imageLoader)
                                 .accessibilityHidden(true)
                         } trailing: {
-                            MacSwitch(isOn: $meetingNotifications.enabled, label: "Meeting-ready notifications")
-                                .accessibilityLabel("Enable meeting notes notifications")
+                            HStack(spacing: 10) {
+                                NotificationSoundControl(settings: soundSettings, sourceID: MeetingReadyNotifications.sourceID,
+                                                         sourceName: "meeting notes")
+                                MacSwitch(isOn: $meetingNotifications.enabled, label: "Meeting-ready notifications")
+                                    .accessibilityLabel("Enable meeting notes notifications")
+                            }
                         }
-                        MacRowSeparator()
-                        NotificationSoundControl(settings: soundSettings, sourceID: MeetingReadyNotifications.sourceID,
-                                                 sourceName: "meeting notes")
                     }
                 }
 
@@ -76,21 +77,22 @@ struct SettingsNotificationsView: View {
                                     )
                                     .accessibilityHidden(true)
                                 } trailing: {
-                                    MacSwitch(isOn: Binding(
-                                        get: { supervisor.sources.first(where: { $0.id == source.id })?.script.enabled ?? false },
-                                        set: { supervisor.setEnabled($0, id: source.id) }
-                                    ))
-                                    .accessibilityLabel("Enable \(source.script.name)")
+                                    HStack(spacing: 10) {
+                                        NotificationSoundControl(settings: soundSettings, sourceID: source.id,
+                                                                 sourceName: source.script.name)
+                                        MacSwitch(isOn: Binding(
+                                            get: { supervisor.sources.first(where: { $0.id == source.id })?.script.enabled ?? false },
+                                            set: { supervisor.setEnabled($0, id: source.id) }
+                                        ))
+                                        .accessibilityLabel("Enable \(source.script.name)")
+                                    }
                                 }
-                                MacRowSeparator()
-                                NotificationSoundControl(settings: soundSettings, sourceID: source.id,
-                                                         sourceName: source.script.name)
                             }
                         }
                     }
                 }
 
-                Text("Notifications appear as cards to the left of the island. Click a meeting notification to open its notes. Choose a sound to hear a preview; Off keeps that source silent. Notifications appear while Whytap is open; turning a source off keeps its setup and history.")
+                Text("Notifications appear as cards to the left of the island. Click a meeting notification to open its notes. Click the speaker to choose a sound and hear a preview; crossed out means silent. Notifications appear while Whytap is open; turning a source off keeps its setup and history.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(MacSettingsTheme.text2)
             }

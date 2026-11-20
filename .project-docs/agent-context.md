@@ -381,8 +381,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   cancellation signals that group. Stop waiting within a bounded drain if a
   detached child holds output open, and report that it may still be running.
   Child environments exclude model keys and unrelated app descriptors and
-  always carry a UTF-8 `LANG` (the app's own when it is UTF-8, else
-  en_US.UTF-8): an app opened from Finder has none, and pbcopy then broke
+  always carry a UTF-8 `LANG` (the app's own when it is an installed
+  `.UTF-8` locale, else en_US.UTF-8): an app opened from Finder has none, and pbcopy then broke
   non-ASCII text. WHY:
   .project-docs/decisions/2026-11-20-agent-command-utf8-locale.md. This is
   an action policy, not a filesystem

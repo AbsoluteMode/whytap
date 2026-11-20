@@ -20,16 +20,29 @@ final class NativeAgentCommand: @unchecked Sendable {
     /// What a command sees. An app opened from Finder has no `LANG`, and
     /// without a UTF-8 locale `pbcopy`, `wc` and the like read text as
     /// MacRoman: a copied file arrived with every non-ASCII letter broken.
-    /// The app's own UTF-8 locale is kept; anything else becomes UTF-8.
+    /// The app's own locale is kept only when this Mac really has it as a
+    /// UTF-8 locale; a name macOS does not know (`ja_JP.utf8`, a locale that
+    /// is not installed) silently behaves as C, so it becomes en_US.UTF-8.
     // WHY: .project-docs/decisions/2026-11-20-agent-command-utf8-locale.md
-    static func childEnvironment(from base: [String: String], helper: URL?) -> [String: String] {
+    static func childEnvironment(
+        from base: [String: String], helper: URL?,
+        localeIsInstalled: (String) -> Bool = NativeAgentCommand.localeIsInstalled
+    ) -> [String: String] {
         var environment = base.filter { ["HOME", "USER", "LOGNAME", "TMPDIR"].contains($0.key) }
         let inherited = base["LANG"] ?? ""
-        let normalized = inherited.lowercased().replacingOccurrences(of: "-", with: "")
-        environment["LANG"] = normalized.hasSuffix(".utf8") ? inherited : "en_US.UTF-8"
+        environment["LANG"] = inherited.hasSuffix(".UTF-8") && localeIsInstalled(inherited) ? inherited : fallbackLocale
         environment["PATH"] = ([helper?.deletingLastPathComponent().path].compactMap { $0 }
             + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]).joined(separator: ":")
         return environment
+    }
+
+    static let fallbackLocale = "en_US.UTF-8"
+
+    /// macOS resolves a locale name to this directory; a missing one is C.
+    static func localeIsInstalled(_ name: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.-@"))
+        guard !name.isEmpty, name.unicodeScalars.allSatisfy(allowed.contains), !name.hasPrefix(".") else { return false }
+        return FileManager.default.fileExists(atPath: "/usr/share/locale/\(name)/LC_CTYPE")
     }
 
     func run(command: String, directory: URL, helper: URL?, timeout: Duration = .seconds(30),

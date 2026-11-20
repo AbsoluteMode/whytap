@@ -35,9 +35,11 @@ builder, which is why the same request worked there.
 ## Decision
 
 `NativeAgentCommand.childEnvironment` always sets `LANG`: the app's own value
-when it names UTF-8 (so `ru_RU.UTF-8` or `C.UTF-8` is kept), otherwise
-`en_US.UTF-8`. `LC_ALL` and `LC_CTYPE` are still not inherited, so they cannot
-switch the command back. Nothing else about the child environment changes.
+when it ends in `.UTF-8` and macOS has that locale installed
+(`/usr/share/locale/<name>/LC_CTYPE`), so `ru_RU.UTF-8` or `C.UTF-8` is kept;
+otherwise `en_US.UTF-8`. `LC_ALL` and `LC_CTYPE` are still not inherited, so
+they cannot switch the command back. Nothing else about the child environment
+changes.
 
 ## Why
 
@@ -55,7 +57,12 @@ tools the agent runs, which the model reads either way.
 - Tests run real commands with an empty and a `C` base environment over
   Cyrillic, Chinese, Japanese, Korean, Arabic, Hebrew, Hindi, accented Latin
   and emoji: `locale charmap` is UTF-8, `wc -m` counts characters instead of
-  bytes and `cat` returns the text. They fail (25 assertions) on the old code.
+  bytes and `cat` returns the text. They fail on the code before the fix.
+- The builder's review found that an inherited `ja_JP.utf8` was kept and ran
+  as US-ASCII: Darwin resolves only exact installed names, and an unknown name
+  silently behaves as C. The inherited value is now checked against the
+  installed locales, and the real-command test covers `ja_JP.utf8`, an unknown
+  `xx_YY.UTF-8`, a legacy charset and an inherited `LC_ALL=C`.
 - Not checked: the clipboard on the second computer after the fix.
 
 ## Rejected

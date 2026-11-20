@@ -41,11 +41,18 @@ final class NativeAgentCommandLocaleTests: XCTestCase {
         XCTAssertNotNil(finder["PATH"])
 
         for (inherited, expected) in [
-            ("ru_RU.UTF-8", "ru_RU.UTF-8"), ("ja_JP.utf8", "ja_JP.utf8"), ("C.UTF-8", "C.UTF-8"),
+            ("ru_RU.UTF-8", "ru_RU.UTF-8"), ("ja_JP.UTF-8", "ja_JP.UTF-8"), ("C.UTF-8", "C.UTF-8"),
+            // Names macOS does not resolve run as C: they are replaced.
+            ("ja_JP.utf8", "en_US.UTF-8"), ("en_US.utf-8", "en_US.UTF-8"), ("xx_YY.UTF-8", "en_US.UTF-8"),
+            ("../../etc.UTF-8", "en_US.UTF-8"), (".UTF-8", "en_US.UTF-8"),
             ("C", "en_US.UTF-8"), ("POSIX", "en_US.UTF-8"), ("ru_RU.KOI8-R", "en_US.UTF-8"), ("", "en_US.UTF-8"),
         ] {
             XCTAssertEqual(NativeAgentCommand.childEnvironment(from: ["LANG": inherited], helper: nil)["LANG"], expected, inherited)
         }
+        XCTAssertEqual(
+            NativeAgentCommand.childEnvironment(from: ["LANG": "ru_RU.UTF-8"], helper: nil, localeIsInstalled: { _ in false })["LANG"],
+            "en_US.UTF-8", "a UTF-8 name this Mac lacks is not trusted")
+        XCTAssertTrue(NativeAgentCommand.localeIsInstalled(NativeAgentCommand.fallbackLocale), "the fallback itself must work")
         let withOverrides = NativeAgentCommand.childEnvironment(
             from: ["LANG": "en_US.UTF-8", "LC_ALL": "C", "LC_CTYPE": "C"], helper: nil)
         XCTAssertNil(withOverrides["LC_ALL"], "an inherited override cannot switch the child back to bytes")
@@ -59,7 +66,12 @@ final class NativeAgentCommandLocaleTests: XCTestCase {
         for (name, text) in samples {
             try Data(text.utf8).write(to: directory.appendingPathComponent("\(name).txt"))
         }
-        for base in [[String: String](), ["LANG": "C"]] {
+        // Every inherited value, valid or not, must end in a real UTF-8 shell.
+        let bases: [[String: String]] = [
+            [:], ["LANG": "C"], ["LANG": "ja_JP.utf8"], ["LANG": "ja_JP.UTF-8"], ["LANG": "xx_YY.UTF-8"],
+            ["LANG": "ru_RU.UTF-8"], ["LANG": "C.UTF-8"], ["LANG": "ru_RU.KOI8-R"], ["LANG": "en_US.UTF-8", "LC_ALL": "C"],
+        ]
+        for base in bases {
             let charmap = await NativeAgentCommand().run(
                 command: "locale charmap", directory: directory, helper: nil, baseEnvironment: base)
             XCTAssertEqual(firstLine(charmap), "UTF-8", "\(base)")

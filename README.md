@@ -5,8 +5,9 @@
 <h1 align="center">Whytap</h1>
 
 <p align="center">
-  <b>Voice input and an AI agent in your Mac's notch.</b><br>
-  Bring your own keys. No account, no servers, no telemetry.
+  <b>One free app in your Mac's notch instead of half a dozen paid apps.</b><br>
+  Voice dictation, meeting notes, an AI agent, screenshots, HDR brightness and translation —<br>
+  bring your own keys or dictate on this Mac. No account, no servers, no telemetry.
 </p>
 
 <p align="center">
@@ -19,18 +20,22 @@
   <img src="docs/assets/whytap-drop.gif" width="800" alt="Holding Space in a chat field: the island at the top of the screen shows the live transcript, and the message is pasted into the field on release">
 </p>
 
-## Features
+## Stop paying for six separate Mac apps
 
-- **Drop**: hold <kbd>Space</kbd> in any text field, speak, release, and the text is pasted at the cursor. Fast pastes the transcript; Smart lightly edits it with your model.
-- **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. It reads files, searches the web and answers in the island.
-- **Meeting notes**: notices calls in Zoom, Teams, Slack and Google Meet and turns them into a summary with a transcript.
-- **History**: your clipboard, dictations and agent answers in one list, ready to paste again.
-- **Case**: a secrets vault for Claude Code, Cursor and Whytap Agent. Agents see key names; Case puts the value into the command they run.
-- **Shot**: a screenshot editor with arrows, text blur and Copy text.
-- **Display Extra**: brighter whites on XDR and HDR displays, beyond the usual maximum.
-- **Notify**: notifications from any script your coding agent writes, next to the island.
+Most of the everyday tools people pay for separately on macOS live together in Whytap's notch — free and open source under MIT:
 
-Also in the island: Translate and live Subtitles, Vocab, To-do, Calendar and Monitor dashboards.
+| What people usually pay for | Typical price | Included in Whytap |
+|---|---|---|
+| **Voice dictation** in any text field | $8–15 / mo | **Drop**: hold <kbd>Space</kbd> in any text field, speak, release. Fast pastes the transcript; Smart lightly edits it with your model. Pennies with your speech key, or $0 on this Mac (Apple Silicon). |
+| **AI meeting notes** without a call bot | $8–18 / mo | **Meeting notes**: notices calls in Zoom, Teams, Slack and Google Meet and turns them into a summary with a transcript using your keys. |
+| **Quick desktop AI & voice agent** | $8–20 / mo | **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. Reads files, searches the web and answers in the island using your key. |
+| **Screenshot editor, text blur & OCR** | about $35 once | **Shot**: arrows, text blur and Copy text — built in for free. |
+| **Extra XDR / HDR brightness** | about $20 once | **Display Extra**: brighter whites on XDR and HDR displays beyond the usual maximum — built in for free. |
+| **Clipboard history, live subtitles, translation & dev tools** | about $30 / yr | **History** (clipboard, dictations, agent answers), **Translate** & live **Subtitles**, **Case** (secrets vault for Claude Code, Cursor and Whytap Agent), **Notify**, **Vocab**, **To-do**, **Calendar** and **Monitor** dashboards — all built in. |
+
+Bought separately, that is roughly **$320–670 a year** in subscriptions plus about **$55** in one-time purchases. Whytap itself is **$0**: you pay only raw API usage directly to the providers you choose, or nothing at all for on-device dictation and local tools.
+
+<sub>Prices are typical individual plans of popular Mac apps in each category, checked on November 19, 2026; annual billing sits at the low end of each range. Your own mix may cost more or less.</sub>
 
 ## Your keys, your Mac
 

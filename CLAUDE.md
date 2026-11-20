@@ -119,7 +119,10 @@ Voice flow (Drop / dictation):
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
             the same route mechanism, for Drop Fast, Drop Smart, Agent voice
             and Voice search only (not Meetings, Subtitles or text). The API
-            keys tab has an On this Mac tile that downloads or removes
+            keys tab has an On this Mac card above the key tiles
+            (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
+            button is in the card, with an animated progress bar and symbol
+            that respect Reduce Motion) that downloads or removes
             Parakeet TDT v3 (about 470 MB from Hugging Face, kept in
             Application Support/Sidekey/OnDeviceSpeechModels, outside backups
             and LegacyLocalModelCleanup). The downloaded model is the
@@ -1434,11 +1437,15 @@ is separate from the removed app-managed speech/LLM models. Guide:
   the same Allow button used by the other permissions when missing, without
   status chips or an action on a granted row. Only explicit capture or Allow
   actions request access, never launch or refresh. Settings Allow uses an async
-  ScreenCaptureKit content request without capturing pixels or audio, then
-  opens System Settings if access remains denied. A pending request shows
-  progress and ignores repeated clicks. WHY:
+  ScreenCaptureKit content request without capturing pixels or audio. A pending
+  request shows progress and ignores repeated clicks. WHY:
   .project-docs/decisions/2026-10-26-first-launch-permissions.md. Returning
   from System Settings refreshes the status; it never gates launch/Drop readiness.
+  The first Allow of a launch for Keyboard control or Screen Recording only
+  asks macOS and never opens System Settings itself: a pane opened beside the
+  request listed no Whytap on a clean Mac. The button then reads Open Settings
+  and opens the pane on later presses; the asked state is not saved. WHY:
+  .project-docs/decisions/2026-11-19-permission-request-before-settings.md
 
 - **Accessibility** gates `NSEvent.addGlobalMonitorForEvents`
   (`RightCmdGestureMonitor`; `EscapeCloseEventMonitor` consumes only the first

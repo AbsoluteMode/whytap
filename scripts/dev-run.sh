@@ -224,6 +224,13 @@ if [ -d "${LANGUAGE_FLAGS_DIR}" ]; then
     cp -R "${LANGUAGE_FLAGS_DIR}" "${APP_BUNDLE}/Contents/Resources/LanguageFlags"
 fi
 
+# Feature clips for the ▶ buttons in Settings -> Other (FeatureVideoButton,
+# Bundle.main/FeatureVideos). Bundled, never fetched.
+FEATURE_VIDEOS_DIR="${PROJECT_DIR}/Resources/FeatureVideos"
+if [ -d "${FEATURE_VIDEOS_DIR}" ]; then
+    cp -R "${FEATURE_VIDEOS_DIR}" "${APP_BUNDLE}/Contents/Resources/FeatureVideos"
+fi
+
 # Custom fonts (Instrument Serif Regular + Italic). Registered at launch
 # via Info.plist's ATSApplicationFontsPath = "Fonts", consumed by the
 # editorial display typography.

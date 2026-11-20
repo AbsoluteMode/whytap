@@ -70,7 +70,8 @@ final class AppControlControllerTests: XCTestCase {
         let controller = AppControlController(routing: routing, models: models, preferences: preferences,
             languages: PrivacyPreferences(defaults: defaults), idle: IslandIdlePreferences(defaults: defaults),
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-42", "ExodiaSourceRevision": "fixture-sha"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
-            activity: { .object(["drop": .string("idle")]) }, googleCalendarReview: googleReview)
+            activity: { .object(["drop": .string("idle")]) }, googleCalendarReview: googleReview,
+            agentWorkspace: { "/tmp/fixture-app-support/whytap/agent" })
         return Env(routing: routing, preferences: preferences, probe: probe, controller: controller)
     }
 
@@ -88,6 +89,8 @@ final class AppControlControllerTests: XCTestCase {
         XCTAssertEqual(state.data.object?["build"], .string("test-42"))
         XCTAssertEqual(state.data.object?["sourceRevision"], .string("fixture-sha"))
         XCTAssertEqual(state.data.object?["googleCalendarReviewActive"], .bool(false))
+        // The Agents tab's Open folder moved here: the plugin names the folder.
+        XCTAssertEqual(state.data.object?["agentWorkspace"], .string("/tmp/fixture-app-support/whytap/agent"))
         let settings = await e.controller.handle(AppControlRequest("get_settings"))
         let text = String(data: try JSONEncoder().encode([state, settings]), encoding: .utf8)!
         XCTAssertFalse(text.contains("fake-provider-key"))

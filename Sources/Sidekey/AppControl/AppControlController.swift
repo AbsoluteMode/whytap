@@ -24,6 +24,7 @@ final class AppControlController {
     private let planner: @MainActor () -> PlannerStore
     /// Set only where the broker gates these operations by `HarnessAccessGate`.
     private let meetings: AppControlMeetings?
+    private let agentWorkspace: () -> String
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
@@ -31,8 +32,10 @@ final class AppControlController {
          idle: IslandIdlePreferences? = nil, identity: AppBuildIdentity = .current,
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
          planner: (@MainActor () -> PlannerStore)? = nil, meetings: AppControlMeetings? = nil,
-         googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive }) {
+         googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive },
+         agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path }) {
         self.meetings = meetings
+        self.agentWorkspace = agentWorkspace
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
         self.routing = routing ?? .shared
@@ -109,7 +112,9 @@ final class AppControlController {
                 "version": .string(identity.version), "build": .string(identity.build),
                 "sourceRevision": identity.sourceRevision.map(AppControlValue.string) ?? .null,
                 "googleCalendarReviewActive": .bool(googleCalendarReview()),
-                "activity": activity(), "features": .array(features)
+                "activity": activity(), "features": .array(features),
+                // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
+                "agentWorkspace": .string(agentWorkspace())
             ]))
         case "get_settings":
             guard args.isEmpty else { return invalid() }

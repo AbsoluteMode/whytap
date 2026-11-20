@@ -1891,7 +1891,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitorArmed: Bool
     ) -> CapabilityReconcileDecision {
         // Keep the lightweight gesture monitor alive after both capabilities
-        // are switched off. R-Cmd can then open Settings > Agents and explain
+        // are switched off. R-Cmd can then open Settings > Other (Agent) and explain
         // how to re-enable Agent instead of becoming a silent no-op.
         let needMonitor = true
         return CapabilityReconcileDecision(

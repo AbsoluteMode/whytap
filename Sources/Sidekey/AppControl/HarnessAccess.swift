@@ -212,7 +212,7 @@ final class HarnessAccessStore: ObservableObject {
     /// earlier Yes would apply again after a relaunch.
     @Published private(set) var revocationUnverified = false
 
-    /// The running app's store, for Settings -> Agents. Nil outside a packaged app.
+    /// The running app's store, for Settings -> Integrations. Nil outside a packaged app.
     static weak var active: HarnessAccessStore?
 
     private let persistence: HarnessAccessPersisting?
@@ -527,7 +527,7 @@ final class HarnessAccessGate {
 
     private static func denied(_ client: HarnessClient) -> AppControlResponse {
         .failure("access_denied",
-            "The user has not allowed \(client.name) to use Whytap. They can change it in Whytap Settings → Agents. Do not retry.")
+            "The user has not allowed \(client.name) to use Whytap. They can change it in Whytap Settings → Integrations. Do not retry.")
     }
 
     private static let cancelled = AppControlResponse.failure("cancelled", "Request cancelled.")

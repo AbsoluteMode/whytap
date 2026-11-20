@@ -14,8 +14,16 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Sidebar tabs. `agentMode` stays a case so `whytap://settings/agentMode`
+    /// keeps working, but its settings now live in Other (`resolved`).
+    // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
     static var availableCases: [SettingsWindowTab] {
-        allCases
+        allCases.filter { $0 != .agentMode }
+    }
+
+    /// The tab that actually shows this tab's settings.
+    var resolved: SettingsWindowTab {
+        self == .agentMode ? .other : self
     }
 
     static var defaultAvailable: SettingsWindowTab {

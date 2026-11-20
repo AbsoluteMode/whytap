@@ -59,6 +59,12 @@ struct SettingsIntegrationsView: View {
                     }.padding(14)
                 }
                 SettingsCalendarIntegrationsView(connections: calendarConnections)
+                // Coding tools (Claude Code, Codex) moved here from the
+                // removed Agents tab: the plugin cannot grant itself access.
+                // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
+                if let harnessAccess = HarnessAccessStore.active {
+                    HarnessAccessSettingsSection(store: harnessAccess)
+                }
             }
             .foregroundStyle(MacSettingsTheme.text)
             .padding(.horizontal, 24).padding(.vertical, 22)

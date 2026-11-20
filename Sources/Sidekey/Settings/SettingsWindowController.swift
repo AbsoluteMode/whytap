@@ -196,7 +196,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .native:
             return "Whytap Agent is included in the app. Choose a model in API & Models."
         case .opencode:
-            return "Install OpenCode in Settings → Agents, then press Connect."
+            return "Install OpenCode, then turn on Agent in Settings → Other."
         }
     }
 

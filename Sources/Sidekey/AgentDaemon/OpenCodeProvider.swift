@@ -92,7 +92,7 @@ final class OpenCodeProvider: CLIProvider {
         let result = await Task.detached { probe(binary) }.value
         guard let result, result.exitCode == 0,
               Self.supportsVersion(result.stdout) else {
-            return .failed(code: "unsupported_version", message: "Update the app’s OpenCode copy in Settings → Agents.")
+            return .failed(code: "unsupported_version", message: "Update the app’s OpenCode copy.")
         }
         return await validateKey(provider, key)
     }
@@ -149,7 +149,7 @@ final class OpenCodeProvider: CLIProvider {
             }
             let runID = UUID()
             sessionLock.withLock { currentRunID = runID; storedSessionID = nil }
-            guard let binary = locate() else { return fail("not_installed", "Install OpenCode in Settings → Agents.") }
+            guard let binary = locate() else { return fail("not_installed", "Install OpenCode.") }
             let provider = options.openCodeProvider
             guard let key = try? readKey(provider), !key.isEmpty else {
                 return fail("missing_key", "Add your \(provider.displayName) key in Settings → API & Models.")

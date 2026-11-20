@@ -1,7 +1,10 @@
 # Whytap Planner
 
 Open **Search all tools → To-do** for a compact list inside hover.
-**Calendar** opens today’s agenda inside Hover, with a visible **Connect** button.
+**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
+Events are blocks from start to end in their calendar's colour, with the time
+range and calendar name. Clicking one joins its meeting link, or opens it in its
+own calendar (Google or Outlook on the web, Calendar on this Mac).
 The tools can also be added from Settings → Toolbox; adding this
 feature does not change existing saved tool layouts or positional shortcuts.
 
@@ -348,8 +351,8 @@ For Google's verification form, justify each requested scope from the actual UI:
 
 | Scope | Required behavior |
 | --- | --- |
-| `calendar.calendarlist.readonly` | List subscribed calendars by name so the user can choose the feeds to display. |
-| `calendar.events.readonly` | Read events for the selected day, show the agenda and inline details, and open its meeting/original link. |
+| `calendar.calendarlist.readonly` | List subscribed calendars by name and colour so the user can choose the feeds to display and tell them apart in the day. |
+| `calendar.events.readonly` | Read events for the selected day, show them on the day grid, and open an event's meeting/original link on click. |
 
 The review video must show the real app and browser flow in English: open the
 calendar, choose Google, show the consent screen and requested permissions,

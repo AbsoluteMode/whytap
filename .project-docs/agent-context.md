@@ -936,8 +936,9 @@ provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 Costs: the local ai-usage.sqlite journal records only feature/provider/model,
 request ID, time, duration, currency and expense metadata from actual runtime
 calls. Historical routes are captured before sending; switching models does not
-rewrite past usage. Only used feature groups appear for the selected local-date
-period; hover/click/keyboard focus reveals their models. One Price column
+rewrite past usage. The total leads the table. Only used feature groups appear for the
+selected local-date period; hover anywhere on a row, a click or keyboard focus
+reveals its models. One Price column
 retains explicit USD and ElevenLabs credit units, both when mixed. Each visit
 starts at This month; matching neutral From/To controls open a dismissing native
 calendar. No permanent bottom explanation or sticky text-segment highlight.

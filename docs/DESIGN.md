@@ -389,9 +389,13 @@ installed-app acceptance; no real update is started by the tests.
 ## API & Models costs — 2026-10-20
 
 The user chose four tabs in one surface: API keys, Models, Costs, API hints.
-Costs first shows the nearby period, then used features with one Price column;
-USD and ElevenLabs credit values retain explicit units, including both lines
-when a feature used both. Model details appear on the feature. Why: compare
+Costs first shows the nearby period, then the total, then used features with
+one Price column; USD and ElevenLabs credit values retain explicit units,
+including both lines when a feature used both. Model details appear on the
+feature: hovering anywhere on its row opens them, a click pins them, and the
+detail's header repeats the feature's total (2026-11-19, on the user's
+request: the detail used to open only from the name at the row's left edge,
+and the total sat under the list). Why: compare
 feature expenses without a permanent model-level grid or scattered period control.
 
 - One existing bgCard surface, 14 pt corners, shared underlined tabs and quiet

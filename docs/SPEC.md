@@ -443,9 +443,11 @@ Show»: Show раскрывает первую нужную функцию, пр
 подсвечивает нужные строки. Переходы из ошибок функций тоже раскрывают нужную
 группу. В меню модели — только ID модели (короткая
 пометка вроде «with speakers» в той же строке); неподходящие модели не
-показываются. У Deepgram в меню только модели, обновлённые за последние 12
-месяцев (дата — по самой новой `version` в каталоге), плюс вшитые и выбранная;
-каталог при этом полный, маршрут на старой модели работает. У строки на OpenRouter есть второе меню — провайдер: Auto
+показываются. У Deepgram в меню только `nova-3` (живая речь и запись), у Soniox
+только `stt-rt-v6` и `stt-async-v6`, плюс уже выбранная модель этой функции;
+остальные строки их каталогов не предлагаются, маршрут на другой модели
+продолжает работать. Сохранённые маршруты Soniox на v5 при запуске переезжают
+на v6 того же вида. У строки на OpenRouter есть второе меню — провайдер: Auto
 (выбирает OpenRouter, для диктовки — по скорости) или один провайдер модели,
 закреплённый без подмены (`provider.order` + `allow_fallbacks: false`, так же
 для агента в конфиге OpenCode). У каждого провайдера — медианная задержка до
@@ -496,12 +498,12 @@ Refresh повторяет чтение цен; при ошибке API изве
 [2026-10-20-feature-costs](../.project-docs/decisions/2026-10-20-feature-costs.md).
 
 **STT-провайдеры (Your key, выбор пользователя в Settings → API & Models для
-каждой фичи):** Soniox (`stt-rt-v5`, по умолчанию), Deepgram (`nova-3`),
+каждой фичи):** Soniox (`stt-rt-v6`, по умолчанию), Deepgram (`nova-3`),
 ElevenLabs (`scribe_v3_live`) или self-hosted endpoint с протоколом OpenAI
 Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`). Сам
 OpenAI не предлагается: сохранённый выбор OpenAI читается как Soniox. Drop —
 realtime streaming, не batch; заметки встреч с Soniox идут через file API
-(`stt-async-v5`).
+(`stt-async-v6`).
 
 **Input language** — отдельный от Smart Output language выбор. Явный язык
 передаётся STT-провайдеру: Soniox получает мягкие hints с добавлением английского,
@@ -527,7 +529,7 @@ Qwen и локальной диаризацией. Сохранённый выб
 после «Couldn't deliver», fallback рекордера и batch-голос агента. Весь take
 уходит провайдеру той фичи, что вела Drop (Fast или Smart; для голоса агента —
 Agent voice), с его ключом из Keychain и recorded-моделью из вшитого реестра:
-Soniox file API (`stt-async-v5`), Deepgram pre-recorded, ElevenLabs
+Soniox file API (`stt-async-v6`), Deepgram pre-recorded, ElevenLabs
 speech-to-text (`scribe_v3`), self-hosted `/v1/audio/transcriptions` на хосте
 своего сервера. Без маршрута фичи, ключа или recorded-модели batch недоступен;
 другой провайдер не подставляется.

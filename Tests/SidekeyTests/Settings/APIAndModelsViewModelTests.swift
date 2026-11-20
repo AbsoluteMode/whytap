@@ -335,12 +335,12 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.keyStatuses.record(for: .soniox)?.status, .valid)
         XCTAssertEqual(vm.proposal?.title, "Use Soniox for")
         XCTAssertEqual(vm.proposal?.items, [
-            AssignItem(feature: .dropFast, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .dropSmart, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .meetings, account: .soniox, model: "stt-async-v5"),
-            AssignItem(feature: .agentVoice, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .voiceSearch, account: .soniox, model: "stt-rt-v5"),
-            AssignItem(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v5"),
+            AssignItem(feature: .dropFast, account: .soniox, model: "stt-rt-v6"),
+            AssignItem(feature: .dropSmart, account: .soniox, model: "stt-rt-v6"),
+            AssignItem(feature: .meetings, account: .soniox, model: "stt-async-v6"),
+            AssignItem(feature: .agentVoice, account: .soniox, model: "stt-rt-v6"),
+            AssignItem(feature: .voiceSearch, account: .soniox, model: "stt-rt-v6"),
+            AssignItem(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v6"),
         ])
     }
 
@@ -388,8 +388,8 @@ final class APIAndModelsViewModelTests: XCTestCase {
 
         vm.applyProposal(selected: [.dropFast, .meetings])
 
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v5"))
-        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v5"))
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
+        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v6"))
         XCTAssertNil(env.routing.route(for: .dropSmart))
         XCTAssertNil(env.routing.route(for: .agentVoice))
         XCTAssertNil(env.probe.probedModels.first, "registry models are assigned without a probe")
@@ -399,10 +399,10 @@ final class APIAndModelsViewModelTests: XCTestCase {
     // MARK: - Removing keys (Review Focus 3)
 
     func test_remove_key_unsets_features_and_reassigns_nothing() throws {
-        let env = try makeEnv(snapshots: [.soniox: fresh([CatalogModel(id: "stt-rt-v5", uses: [.realtimeSTT])])],
+        let env = try makeEnv(snapshots: [.soniox: fresh([CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT])])],
                               keyed: [.soniox, .deepgram])
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropSmart)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropSmart)
         env.routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .meetings)
         env.keyStatuses.set(.valid, for: .soniox, at: env.now)
         let vm = env.makeViewModel()
@@ -429,26 +429,26 @@ final class APIAndModelsViewModelTests: XCTestCase {
     private func sonioxWithNewModel() throws -> Env {
         let env = try makeEnv(
             snapshots: [.soniox: fresh([
-                CatalogModel(id: "stt-rt-v5", uses: [.realtimeSTT]),
                 CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
+                CatalogModel(id: "stt-rt-v7", uses: [.realtimeSTT]),
             ])],
             keyed: [.soniox]
         )
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         return env
     }
 
     func test_new_model_is_assigned_after_a_passed_probe() async throws {
         let env = try sonioxWithNewModel()
         let vm = env.makeViewModel()
-        XCTAssertEqual(row(.dropFast, in: vm)?.selectionLabel, "Soniox · stt-rt-v5")
-        XCTAssertEqual(row(.dropFast, in: vm)?.modelSummary, "stt-rt-v5")
-
-        await vm.select(model: "stt-rt-v6", account: .soniox, for: .dropFast)
-
-        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v6"])
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
+        XCTAssertEqual(row(.dropFast, in: vm)?.selectionLabel, "Soniox · stt-rt-v6")
         XCTAssertEqual(row(.dropFast, in: vm)?.modelSummary, "stt-rt-v6")
+
+        await vm.select(model: "stt-rt-v7", account: .soniox, for: .dropFast)
+
+        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v7"])
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v7"))
+        XCTAssertEqual(row(.dropFast, in: vm)?.modelSummary, "stt-rt-v7")
         XCTAssertEqual(row(.dropFast, in: vm)?.status, .ok)
         XCTAssertEqual(row(.dropFast, in: vm)?.isChecking, false)
         XCTAssertNil(row(.dropFast, in: vm)?.message)
@@ -464,14 +464,14 @@ final class APIAndModelsViewModelTests: XCTestCase {
             await Task.yield()
         }
         XCTAssertEqual(row(.dropFast, in: vm)?.isChecking, true)
-        XCTAssertEqual(row(.dropFast, in: vm)?.modelSummary, "stt-rt-v5")
+        XCTAssertEqual(row(.dropFast, in: vm)?.modelSummary, "stt-rt-v6")
         await vm.checkNow(.dropFast)
         let count = await probe.calls
         XCTAssertEqual(count, 1)
         await probe.finish()
         await first.value
         XCTAssertEqual(row(.dropFast, in: vm)?.isChecking, false)
-        XCTAssertEqual(env.routing.route(for: .dropFast)?.model, "stt-rt-v5")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.model, "stt-rt-v6")
     }
 
     func test_failed_probe_keeps_the_previous_model_and_says_why() async throws {
@@ -479,9 +479,9 @@ final class APIAndModelsViewModelTests: XCTestCase {
         env.probe.answer(.failed(reason: "no partial results"))
         let vm = env.makeViewModel()
 
-        await vm.select(model: "stt-rt-v6", account: .soniox, for: .dropFast)
+        await vm.select(model: "stt-rt-v7", account: .soniox, for: .dropFast)
 
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v5"))
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
         XCTAssertEqual(row(.dropFast, in: vm)?.message, "no partial results")
         XCTAssertEqual(row(.dropFast, in: vm)?.isChecking, false)
     }
@@ -491,25 +491,25 @@ final class APIAndModelsViewModelTests: XCTestCase {
         env.probe.answer(.inconclusive(reason: "offline"))
         let vm = env.makeViewModel()
 
-        await vm.select(model: "stt-rt-v6", account: .soniox, for: .dropFast)
+        await vm.select(model: "stt-rt-v7", account: .soniox, for: .dropFast)
 
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v5"))
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
         XCTAssertEqual(row(.dropFast, in: vm)?.message, "Couldn't check: offline")
-        XCTAssertNil(env.checks.record(for: ModelCheckKey(account: "soniox", model: "stt-rt-v6", use: .realtimeSTT)))
+        XCTAssertNil(env.checks.record(for: ModelCheckKey(account: "soniox", model: "stt-rt-v7", use: .realtimeSTT)))
     }
 
     /// A stored probe failure is not a ban: picking the model again probes it
     /// again, and a pass assigns it (final review I1).
     func test_picking_a_model_with_a_stored_failure_probes_it_again() async throws {
         let env = try sonioxWithNewModel()
-        let key = ModelCheckKey(account: "soniox", model: "stt-rt-v6", use: .realtimeSTT)
+        let key = ModelCheckKey(account: "soniox", model: "stt-rt-v7", use: .realtimeSTT)
         env.checks.store(.failed(reason: "Provider refused: provider"), for: key, adapterVersion: 1, at: env.now)
         let vm = env.makeViewModel()
 
-        await vm.select(model: "stt-rt-v6", account: .soniox, for: .dropFast)
+        await vm.select(model: "stt-rt-v7", account: .soniox, for: .dropFast)
 
-        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v6"])
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
+        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v7"])
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v7"))
         XCTAssertEqual(env.checks.record(for: key)?.outcome, .passed)
         XCTAssertEqual(row(.dropFast, in: vm)?.status, .ok)
     }
@@ -518,15 +518,15 @@ final class APIAndModelsViewModelTests: XCTestCase {
     /// stored failure does not keep showing after it is assigned.
     func test_picking_a_registry_model_with_a_stored_failure_probes_it_again() async throws {
         let env = try sonioxWithNewModel()
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
-        let key = ModelCheckKey(account: "soniox", model: "stt-rt-v5", use: .realtimeSTT)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v7"), for: .dropFast)
+        let key = ModelCheckKey(account: "soniox", model: "stt-rt-v6", use: .realtimeSTT)
         env.checks.store(.failed(reason: "Provider refused: provider"), for: key, adapterVersion: 1, at: env.now)
         let vm = env.makeViewModel()
 
-        await vm.select(model: "stt-rt-v5", account: .soniox, for: .dropFast)
+        await vm.select(model: "stt-rt-v6", account: .soniox, for: .dropFast)
 
-        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v5"])
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v5"))
+        XCTAssertEqual(env.probe.probedModels, ["stt-rt-v6"])
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
         XCTAssertEqual(row(.dropFast, in: vm)?.status, .ok)
     }
 
@@ -550,11 +550,11 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(row(.dropSmartCleanup, in: vm)?.status, .ok)
     }
 
-    func test_switch_group_moves_all_four_features_to_stt_rt_v5() async throws {
+    func test_switch_group_moves_all_four_features_to_stt_rt_v6() async throws {
         let env = try makeEnv(
             snapshots: [.soniox: fresh([
-                CatalogModel(id: "stt-rt-v5", uses: [.realtimeSTT]),
-                CatalogModel(id: "stt-rt-v4", uses: [.realtimeSTT], aliasOf: "stt-rt-v5"),
+                CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
+                CatalogModel(id: "stt-rt-v4", uses: [.realtimeSTT], aliasOf: "stt-rt-v6"),
             ])],
             keyed: [.soniox]
         )
@@ -569,7 +569,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         await vm.apply(group)
 
         for feature in realtime {
-            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v5"))
+            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v6"))
         }
         XCTAssertTrue(env.probe.probedModels.isEmpty)
         XCTAssertTrue(vm.aliasGroups.isEmpty)
@@ -648,11 +648,11 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.makeViewModel().unsetBanner, "11 features have no model")
 
         for feature in AIFeature.allCases where feature != .dropFast {
-            env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: feature)
+            env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: feature)
         }
         XCTAssertEqual(env.makeViewModel().unsetBanner, "1 feature has no model")
 
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         XCTAssertNil(env.makeViewModel().unsetBanner)
     }
 
@@ -740,7 +740,7 @@ final class APIAndModelsProviderTests: XCTestCase {
     func test_only_openrouter_rows_offer_a_provider_and_auto_is_the_default() throws {
         let (vm, routing, _, _) = try make()
         routing.setRoute(FeatureRoute(account: .openRouter, model: "x/m"), for: .meetingNotes)
-        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         vm.selectProvider(nil, for: .meetingNotes)
 
         let notes = try XCTUnwrap(vm.rows.first { $0.feature == .meetingNotes })

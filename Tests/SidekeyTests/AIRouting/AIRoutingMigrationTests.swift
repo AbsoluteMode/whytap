@@ -107,7 +107,7 @@ final class AIRoutingMigrationTests: XCTestCase {
                 env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v4"), "\(feature)"
             )
         }
-        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v5"))
+        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v6"))
         let llm = FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash")
         XCTAssertEqual(env.routing.route(for: .dropSmartCleanup), llm)
         XCTAssertEqual(env.routing.route(for: .meetingNotes), llm)
@@ -156,10 +156,10 @@ final class AIRoutingMigrationTests: XCTestCase {
 
         for feature in realtimeFeatures {
             XCTAssertEqual(
-                env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v5"), "\(feature)"
+                env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v6"), "\(feature)"
             )
         }
-        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v5"))
+        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v6"))
         XCTAssertNil(env.routing.route(for: .dropSmartCleanup), "no OpenRouter key")
         XCTAssertNil(env.routing.route(for: .agent), "no agent model")
     }
@@ -214,7 +214,7 @@ final class AIRoutingMigrationTests: XCTestCase {
                 env.routing.route(for: feature), FeatureRoute(account: .soniox, model: "stt-rt-v4"), "\(feature)"
             )
         }
-        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v5"))
+        XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v6"))
         XCTAssertEqual(
             env.routing.route(for: .dropSmartCleanup), FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash")
         )

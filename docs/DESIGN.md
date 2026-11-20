@@ -326,8 +326,8 @@ The closed control retains the shared 30 pt popup label and existing widths.
   `Updated` from the newest dated API version already cached by the app,
   including the plain `nova-3` alias. Soniox and ElevenLabs omit release dates
   in their model API schemas, so shipped stable IDs use an exact-ID release
-  registry with checked official launch sources: Soniox `stt-rt-v5` 2026-06-16,
-  `stt-async-v5` 2026-06-11; ElevenLabs `scribe_v3_live` and `scribe_v3` 2026-11-10
+  registry with checked official launch sources: Soniox `stt-rt-v6` and
+  `stt-async-v6` 2026-11-03; ElevenLabs `scribe_v3_live` and `scribe_v3` 2026-11-10
   (they replaced `scribe_v2_realtime` 2025-11-11 and `scribe_v2` 2026-01-09). They show `Released`, including offline and catalog-less
   states. Unknown models/aliases inherit no date. Why: speech models need the
   same recency context without fabricating API fields or release dates.

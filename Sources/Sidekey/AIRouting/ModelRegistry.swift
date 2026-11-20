@@ -9,7 +9,12 @@ enum ModelRegistry {
 
     /// Soniox async (file) transcription, the batch counterpart of `stt-rt-*`.
     /// The same model `SonioxFileAPI` and the meeting transcriber send.
-    static let sonioxRecordedModel = "stt-async-v5"
+    static let sonioxRecordedModel = "stt-async-v6"
+    /// Soniox v6 replaced v5 (deprecated, removed by Soniox on 2026-12-15).
+    // WHY: .project-docs/decisions/2026-11-20-speech-model-lists.md
+    static let sonioxRealtimeModel = "stt-rt-v6"
+    static let sonioxRetiredRealtimeModel = "stt-rt-v5"
+    static let sonioxRetiredRecordedModel = "stt-async-v5"
     /// ElevenLabs Scribe v3 for recorded audio; the streaming model is not
     /// accepted by the speech-to-text endpoint.
     static let elevenLabsRecordedModel = "scribe_v3"
@@ -42,6 +47,8 @@ extension ModelRegistry {
     static func documentedReleaseDate(for id: String, kind: AIProviderKind) -> Date? {
         let day: String
         switch (kind, id) {
+        // https://docs.soniox.com/stt/models#november-3-2026
+        case (.soniox, "stt-rt-v6"), (.soniox, "stt-async-v6"): day = "2026-11-03"
         // https://soniox.com/docs/stt/models#june-16-2026
         case (.soniox, "stt-rt-v5"): day = "2026-06-16"
         // https://soniox.com/docs/stt/models#june-11-2026
@@ -60,7 +67,7 @@ extension ModelRegistry {
     }
 
     static let models: [RegistryModel] = [
-        RegistryModel(kind: .soniox, id: "stt-rt-v5", uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .soniox, id: sonioxRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .soniox, id: sonioxRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
@@ -76,6 +83,19 @@ extension ModelRegistry {
     static let meetingNotesMinContext = 64_000
     static let agentMinContext = 64_000
 
+    /// Deepgram's catalog lists dozens of domain, language and legacy rows
+    /// (medical, pharma, Nova-2, enhanced, base) next to the one model people
+    /// want, and Soniox keeps deprecated versions listed. Their pickers offer
+    /// only the built-in models (Nova-3; Soniox v6 live and recorded); a route
+    /// already saved on another model keeps it.
+    // WHY: .project-docs/decisions/2026-11-20-speech-model-lists.md
+    static func offersOnlyBuiltInModels(_ kind: AIProviderKind) -> Bool {
+        switch kind {
+        case .deepgram, .soniox: return true
+        case .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice: return false
+        }
+    }
+
     /// True when the app ships this model for this use.
     static func isVerified(_ id: String, kind: AIProviderKind, use: ModelUse) -> Bool {
         models.contains { $0.kind == kind && $0.id == id && $0.uses.contains(use) }
@@ -90,7 +110,7 @@ extension ModelRegistry {
         case .soniox:
             switch feature {
             case .retiredMeetingText, .retiredMeetingAudio: return nil
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio: return "stt-rt-v5"
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio: return sonioxRealtimeModel
             case .meetings: return sonioxRecordedModel
             case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }

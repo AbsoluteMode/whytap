@@ -349,6 +349,75 @@ final class HarnessAccessTests: XCTestCase {
         XCTAssertFalse(store.hasUnsavedAnswers)
     }
 
+    /// Claude Code is turned off and neither place saved it. Answering Yes for
+    /// Codex must not make the warning about Claude Code disappear.
+    func test_the_warning_stays_until_that_no_is_saved_or_reversed() {
+        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        store.record(.allow, for: claude, at: Date())
+        answers.acceptsWrites = false
+        seal.acceptsWrites = false
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertTrue(store.revocationUnverified)
+
+        XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
+        XCTAssertTrue(store.revocationUnverified, "Claude Code's Off is still saved nowhere")
+        XCTAssertFalse(store.record(.deny, for: codex, at: Date()))
+        XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
+        XCTAssertTrue(store.revocationUnverified, "reversing Codex does not reverse Claude Code")
+
+        // The seal becomes writable: the next answer about any tool seals the No.
+        seal.acceptsWrites = true
+        XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertEqual(seal.stored?.revoked.map(\.identity), [claude.identity])
+        XCTAssertEqual(HarnessAccessStore(persistence: answers, seal: seal).decision(for: claude.identity), .deny)
+    }
+
+    func test_reversing_the_unsaved_no_itself_removes_the_warning() {
+        store.record(.allow, for: claude, at: Date())
+        answers.acceptsWrites = false
+        seal.acceptsWrites = false
+        store.record(.deny, for: claude, at: Date())
+        XCTAssertTrue(store.revocationUnverified)
+        store.record(.allow, for: claude, at: Date())
+        XCTAssertFalse(store.revocationUnverified)
+        XCTAssertEqual(store.decision(for: claude.identity), .allow)
+    }
+
+    /// An unsaved Yes for one tool keeps the seal of the others' stored answers.
+    func test_an_unsaved_yes_does_not_cancel_other_stored_answers() {
+        let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
+        store.record(.allow, for: claude, at: Date())
+        let token = seal.stored?.token
+        answers.acceptsWrites = false
+        XCTAssertFalse(store.record(.allow, for: codex, at: Date()))
+        XCTAssertEqual(seal.stored?.token, token)
+        let relaunched = HarnessAccessStore(persistence: answers, seal: seal)
+        XCTAssertEqual(relaunched.decision(for: claude.identity), .allow)
+        XCTAssertNil(relaunched.decision(for: codex.identity), "Codex is asked again")
+    }
+
+    /// meeting_open moves the user's window, so it asks once more right
+    /// before acting; the gate answers from the store as it is then.
+    func test_a_tool_that_acts_can_recheck_consent_at_the_last_moment() async {
+        _ = await read()
+        var checks: [Bool] = []
+        let answer = await gate.handle(AppControlRequest("meeting_open"), peerPID: helper) { _ in
+            checks.append(HarnessConsent.stillAllowed?() ?? true)
+            self.store.record(.deny, for: self.claude, at: Date())
+            checks.append(HarnessConsent.stillAllowed?() ?? true)
+            return .success(.null)
+        }
+        XCTAssertEqual(checks, [true, false])
+        XCTAssertEqual(answer.data.object?["code"], .string("access_denied"))
+        // Settings tools get no such hook, and none leaks out of the request.
+        _ = await gate.handle(AppControlRequest("get_state"), peerPID: helper) { _ in
+            XCTAssertNil(HarnessConsent.stillAllowed)
+            return .success(.null)
+        }
+        XCTAssertNil(HarnessConsent.stillAllowed)
+    }
+
     func test_a_yes_survives_a_relaunch_only_with_its_seal_and_a_no_always() {
         let codex = HarnessClient(identity: HarnessIdentity(teamID: "2DC432GLL2", signingIdentifier: "codex"), name: "Codex")
         store.record(.allow, for: claude, at: Date())

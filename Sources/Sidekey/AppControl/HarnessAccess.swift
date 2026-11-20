@@ -171,6 +171,12 @@ final class HarnessAccessStore: ObservableObject {
     private let seal: HarnessAccessSealing?
     private let makeToken: () -> String
     private var loaded = false
+    /// Nos the Keychain has not taken yet.
+    private var unsavedDenies: Set<HarnessIdentity> = []
+    /// Of those, the ones the seal has not taken either.
+    private var unverifiedDenies: Set<HarnessIdentity> = [] {
+        didSet { revocationUnverified = !unverifiedDenies.isEmpty }
+    }
 
     /// Without `persistence` answers last for this launch only. Without
     /// `seal` a stored Yes needs no second half (tests of other behaviour).
@@ -184,6 +190,7 @@ final class HarnessAccessStore: ObservableObject {
         // is read, and wins over what it holds.
         let pending = (seal?.load()?.revoked ?? []).filter { $0.decision == .deny }
         grants = pending
+        unsavedDenies = Set(pending.map(\.identity))
         hasUnsavedAnswers = !pending.isEmpty
     }
 
@@ -204,20 +211,20 @@ final class HarnessAccessStore: ObservableObject {
         grants.removeAll { $0.identity == client.identity }
         grants.append(grant)
         if persist() { return true }
+        // A Yes for this tool reverses its own unsaved No, nobody else's.
+        if decision == .deny { unsavedDenies.insert(client.identity) } else { unsavedDenies.remove(client.identity) }
         guard let seal else { return false }
-        switch decision {
-        case .deny:
-            // A fresh token matches nothing the Keychain holds.
-            revocationUnverified = !seal.save(HarnessAccessSeal(
-                token: makeToken(), revoked: grants.filter { $0.decision == .deny }))
-        case .allow:
-            // The user changed their mind: only the journaled No goes. A Yes
-            // that is not in the Keychain is asked for again after a relaunch.
-            if var current = seal.load(), current.revoked.contains(where: { $0.identity == client.identity }) {
-                current.revoked.removeAll { $0.identity == client.identity }
-                _ = seal.save(current)
-            }
-            revocationUnverified = false
+        let revoked = grants.filter { $0.decision == .deny && unsavedDenies.contains($0.identity) }
+        if decision == .deny || !unverifiedDenies.isEmpty {
+            // A fresh token matches nothing the Keychain holds. A No that
+            // reached neither place stays reported until it is saved or reversed.
+            let sealed = seal.save(HarnessAccessSeal(token: makeToken(), revoked: revoked))
+            unverifiedDenies = sealed ? [] : unsavedDenies
+        } else if let current = seal.load(), current.revoked != revoked {
+            // Only this tool's journaled No goes; the token stays, so other
+            // stored answers keep their seal. This Yes itself is not stored:
+            // after a relaunch the tool is asked again.
+            _ = seal.save(HarnessAccessSeal(token: current.token, revoked: revoked))
         }
         return false
     }
@@ -258,13 +265,21 @@ final class HarnessAccessStore: ObservableObject {
         // The Keychain has every answer now, journaled Nos included. If the
         // seal cannot be written, the stored Yes is asked for again later.
         hasUnsavedAnswers = false
-        revocationUnverified = false
+        unsavedDenies = []
+        unverifiedDenies = []
         _ = seal?.save(HarnessAccessSeal(token: token, revoked: []))
         return true
     }
 }
 
 // MARK: Asking the user
+
+/// Bound by the gate around a gated request, so a tool that acts on the
+/// user's screen can ask once more at the last moment, with no suspension
+/// between the check and the action.
+enum HarnessConsent {
+    @TaskLocal static var stillAllowed: (@MainActor @Sendable () -> Bool)?
+}
 
 enum HarnessAccessOutcome: Equatable, Sendable {
     case allow, deny, timedOut
@@ -309,8 +324,11 @@ final class HarnessAccessGate {
     func handle(_ request: AppControlRequest, peerPID: pid_t,
                 perform: (AppControlRequest) async -> AppControlResponse) async -> AppControlResponse {
         if let refusal = await intercept(request, peerPID: peerPID) { return refusal }
-        let response = await perform(request)
-        guard Self.gatedOperations.contains(request.operation) else { return response }
+        guard Self.gatedOperations.contains(request.operation) else { return await perform(request) }
+        let response = await HarnessConsent.$stillAllowed.withValue({ [weak self] in
+            guard let self, let client = self.resolver.client(peerPID: peerPID) else { return false }
+            return self.store.decision(for: client.identity) == .allow
+        }) { await perform(request) }
         // Access turned off, or the client gone, while the content was read.
         guard !Task.isCancelled else { return Self.cancelled }
         guard let client = resolver.client(peerPID: peerPID) else { return Self.unsupported }

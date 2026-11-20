@@ -1226,7 +1226,9 @@ answer the Keychain refused holds for the launch and is retried on every
 read. A refused No replaces the seal's token, which cancels every stored Yes,
 and lists the No there so it denies after a relaunch. Settings shows a notice
 while an answer is unsaved, and a different one when a No reached neither
-place. Settings -> Agents -> Coding tools has a switch per
+place, until that No is saved or reversed. A tool that acts on the screen
+(whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
+with no suspension before the action. Settings -> Agents -> Coding tools has a switch per
 tool; the gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet

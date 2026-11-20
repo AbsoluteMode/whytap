@@ -162,6 +162,12 @@ lost or unreadable journal let the old Yes win. The seal above replaced it:
 losing it removes access instead of restoring it. The existing Case vault key sets the same ignored
 attribute; that is left for its own change.
 
+A third builder pass found two more, fixed with tests: a Yes for another
+tool cleared the warning about an Off that was saved nowhere (the warning now
+stays until that Off is saved or reversed), and `whytap_meeting_open` moved
+the window before the gate's second check (the tool now rechecks consent
+through `HarnessConsent.stillAllowed` with no suspension before the window).
+
 ## Review
 
 Codex reviewed the branch on 2026-11-20 and found, all fixed here: a signed

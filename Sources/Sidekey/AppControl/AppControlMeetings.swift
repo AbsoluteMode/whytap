@@ -150,6 +150,11 @@ struct AppControlMeetings {
         guard let document = try await source.document(id: id) else { return Self.unknownMeeting }
         // A client that left must not move the user's window.
         guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled.") }
+        // Access may have been turned off while the meeting was looked up.
+        // Nothing suspends between this check and the window.
+        if let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
+            return .failure("access_denied", "The user has turned this tool's access to Whytap off. Do not retry.")
+        }
         switch open(id) {
         case .shown: return .success(.object(Self.summary(document.meta, title: document.title)))
         case .editing:

@@ -274,6 +274,28 @@ final class AppControlMeetingsTests: XCTestCase {
         XCTAssertEqual(opened, [pricing])
     }
 
+    /// The user turns access off while the meeting is being looked up: the
+    /// window must not move, not only the answer be withheld.
+    func test_open_does_not_move_the_window_when_access_was_turned_off_during_the_lookup() async {
+        let allowed = Flag(true)
+        let source = RevokingSource(store: store) { allowed.value = false }
+        let revoking = AppControlMeetings(
+            source: { source },
+            open: { [weak self] id in self?.opened.append(id); return .shown })
+        let refused = await HarnessConsent.$stillAllowed.withValue({ allowed.value }) {
+            await revoking.handle("meeting_open", ["id": .string(pricing.uuidString)])
+        }
+        XCTAssertEqual(refused.data.object?["code"], .string("access_denied"))
+        XCTAssertTrue(opened.isEmpty)
+
+        // Still allowed at that moment: it opens.
+        let shown = await HarnessConsent.$stillAllowed.withValue({ true }) {
+            await tools.handle("meeting_open", ["id": .string(pricing.uuidString)])
+        }
+        XCTAssertTrue(shown.ok)
+        XCTAssertEqual(opened, [pricing])
+    }
+
     func test_without_a_meetings_store_every_tool_says_unavailable() async {
         let broken = AppControlMeetings(source: { nil }, open: { _ in .shown })
         for operation in AppControlMeetings.operations {
@@ -303,5 +325,31 @@ final class AppControlMeetingsTests: XCTestCase {
         XCTAssertNil(MeetingTextSearch.snippet(["нет"], in: "ничего похожего"))
         XCTAssertEqual(MeetingTextSearch.heading(of: "<!-- protocol:v1 -->\n\n#  Title \nbody"), "Title")
         XCTAssertNil(MeetingTextSearch.heading(of: "## Only a subheading"))
+    }
+}
+
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool
+    init(_ value: Bool) { stored = value }
+    var value: Bool {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
+/// Reads the real store and reports when a document has been loaded.
+private struct RevokingSource: AppControlMeetingsReading {
+    let store: MeetingsStore
+    let afterLoad: @Sendable () -> Void
+
+    func search(_ request: MeetingSearchRequest) async throws -> MeetingSearchResult {
+        try await store.search(request)
+    }
+
+    func document(id: UUID) async throws -> MeetingDocument? {
+        let document = try await store.document(id: id)
+        afterLoad()
+        return document
     }
 }

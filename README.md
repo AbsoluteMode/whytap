@@ -1,22 +1,17 @@
-<h1 align="center">Whytap</h1>
+<h1 align="center">Whytap<br><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640" align="absbottom"></h1>
 
 <div align="center">
 
 <p align="center">
-  <img alt="Live Whytap Dynamic Island cycling through Drop dictation, Agent, Music, Google search, Meeting recording and HDR brightness" src="docs/assets/readme/island-hero.webp" width="640">
+  <b>The MacOS productivity app, built for your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16">.</b>
 </p>
 
 <p align="center">
-  <b>The MacOS productivity app, built for <a href="docs/customization/app-control.md#install-in-an-agent-host">your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16"></a>.</b><br>
-  <sub>Voice prompts, Case API key vault, bot-free meeting MCP, AI agent, secret blur &amp; HDR — free in your Mac’s notch.</sub>
+  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS (Universal DMG)" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-download-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-download-light.svg"><img alt="Download Whytap for macOS (Universal DMG)" src="docs/assets/readme/btn-download-dark.svg" height="44"></picture></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask Whytap on whytap.ai" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>
-</p>
-
-<p align="center">
-  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <b>Developer ID Signed &amp; Notarized</b> &nbsp;·&nbsp; <b>No Account · Zero Telemetry</b> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
+  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <b>Developer ID Signed &amp; Notarized</b> &nbsp;·&nbsp; <b>No Account · Zero Telemetry</b> &nbsp;·&nbsp; <b>MIT License</b></sub>
 </p>
 
 <br>

@@ -102,6 +102,37 @@ final class IslandPassiveHintTests: XCTestCase {
         XCTAssertEqual(dropHint.keyContents, [.text(HotkeyGlyph.option), .text(".")])
     }
 
+    func test_defaultAgentHintsShowRightCommand() throws {
+        let hints = IslandPassiveHints.hints
+        let voice = try XCTUnwrap(hints.first { $0.title == "Agent Voice" })
+        let text = try XCTUnwrap(hints.first { $0.title == "Agent Text" })
+
+        XCTAssertEqual(voice.keyContents, [HotkeyModifierKey.rightCommand.keycapContent])
+        XCTAssertEqual(text.keyContents, [HotkeyModifierKey.rightCommand.keycapContent])
+    }
+
+    /// A user who moves the Agent off Right Command must not keep seeing
+    /// "right ⌘" in the island: both Agent hints follow the live config,
+    /// including the voice gesture verb.
+    func test_agentHintsReflectReboundShortcuts() throws {
+        var rebound = HotkeyConfiguration.defaults
+        rebound.agentTextShortcut = .modifier(.rightOption)
+        rebound.agentVoiceShortcut = .combo(.optionPeriod)
+        rebound.agentVoiceGesture = .tap
+
+        let hints = IslandPassiveHints.hints(for: rebound)
+        let voice = try XCTUnwrap(hints.first { $0.title == "Agent Voice" })
+        let text = try XCTUnwrap(hints.first { $0.title == "Agent Text" })
+
+        XCTAssertEqual(voice.keyContents, [.text(HotkeyGlyph.option), .text(".")])
+        XCTAssertEqual(voice.actionLabel, "toggle")
+        XCTAssertEqual(text.keyContents, [HotkeyModifierKey.rightOption.keycapContent])
+        XCTAssertEqual(text.actionLabel, "tap")
+        for hint in [voice, text] {
+            XCTAssertFalse(hint.keyContents.contains(HotkeyModifierKey.rightCommand.keycapContent))
+        }
+    }
+
     func test_keycapLayoutWidthWidensMultiCharLabelInsteadOfClipping() throws {
         // Width-clipping fix: the `.keycaps` layout path pins single-glyph
         // text caps to the canonical square, but a multi-character label like

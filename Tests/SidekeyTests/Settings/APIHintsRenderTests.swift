@@ -79,6 +79,26 @@ final class APIHintsRenderTests: XCTestCase {
         XCTAssertEqual(Set(APIHintsView.hints.map(\.provider)).count, APIHintsView.hints.count)
     }
 
+    /// A row without a bundled mark falls back to the generic globe, which reads as a missing logo.
+    func testEveryOfferHasItsBundledMark() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        while !FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path) {
+            root.deleteLastPathComponent()
+        }
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(root.appendingPathComponent("Resources/UsefulLinkIcons"))
+        ProviderBrandIconAsset.clearCacheForTesting()
+        defer {
+            ProviderBrandIconAsset.clearCacheForTesting()
+            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
+        }
+        for hint in APIHintsView.hints {
+            let name = try XCTUnwrap(hint.assetName, hint.provider)
+            XCTAssertNotNil(ProviderBrandIconAsset.image(named: name, pointSize: 17), hint.provider)
+        }
+        // The API keys tile draws the same Tavily mark.
+        XCTAssertNotNil(ProviderBrandIconAsset.image(named: "tavily", pointSize: 28))
+    }
+
     private static func scrollViews(in view: NSView) -> [NSScrollView] {
         (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap { scrollViews(in: $0) }
     }

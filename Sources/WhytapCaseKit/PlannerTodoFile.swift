@@ -121,6 +121,25 @@ public enum PlannerTodoFile {
         return try body()
     }
 
+    // MARK: - Data protection
+
+    /// Readable after the first unlock since startup, also while the screen is
+    /// locked, so agents can use To-do on a locked Mac. This is the system
+    /// default for new files; app builds up to 2.2.22 saved with CompleteUnlessOpen,
+    /// which nobody can open while the screen is locked.
+    // WHY: .project-docs/decisions/2026-11-04-todo-locked-screen.md
+    public static let writeOptions: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+
+    /// Moves an archive saved under a stricter class to the class above. Call it
+    /// after a successful read: the file was readable, so the Mac is unlocked.
+    public static func relaxProtection(at url: URL) {
+        let manager = FileManager.default
+        guard let current = (try? manager.attributesOfItem(atPath: url.path))?[.protectionKey] as? FileProtectionType,
+              current == .complete || current == .completeUnlessOpen else { return }
+        try? manager.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: url.path)
+    }
+
     // MARK: - Direct file access while Whytap is not running
 
     /// Applies a request straight to the archive while Whytap is closed. Fields
@@ -147,7 +166,7 @@ public enum PlannerTodoFile {
             }
             // The edited bytes must still load in the app before they replace the file.
             guard isValidArchive(data) else { throw unreadable }
-            try data.write(to: url, options: [.atomic])
+            try data.write(to: url, options: writeOptions)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             guard nodes(try readRaw(url)["tasks"] as! [[String: Any]]) == after else {
                 throw Failure("unconfirmed", "The to-do file did not contain the change after saving.")
@@ -201,6 +220,7 @@ public enum PlannerTodoFile {
         catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return ["version": 1, "tasks": [[String: Any]](), "events": [[String: Any]]()]
         } catch { throw unreadable }
+        relaxProtection(at: url)
         guard isValidArchive(data),
               let archive = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               archive["tasks"] is [[String: Any]] else { throw unreadable }

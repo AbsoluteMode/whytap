@@ -9,6 +9,15 @@ final class NotificationSoundTests: XCTestCase {
                                body: "", link: nil, timestamp: Date())
     }
 
+    /// The sound control is an icon, not a row: silent sources (the default)
+    /// show a crossed-out speaker, any chosen sound a plain one.
+    func testSpeakerIconIsCrossedOutOnlyWhileSilent() {
+        XCTAssertEqual(NotificationSoundControl.symbolName(for: .none), "speaker.slash")
+        for sound in NotificationSound.allCases where sound != .none {
+            XCTAssertEqual(NotificationSoundControl.symbolName(for: sound), "speaker.wave.2")
+        }
+    }
+
     func testSoundsAreOptInAndSavedIndependentlyForEachSource() {
         let suite = "NotificationSoundTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!

@@ -27,8 +27,8 @@ and notifications immediately, while keeping its configuration and event history
 the switch remains off after restarting Whytap. Agent-added sources appear
 automatically without reopening Settings.
 
-Each source also has a **Notification sound** selector: Off (the default),
-Glass, Ping or Pop. Selecting a sound plays a preview and saves that choice for
+Each source also has a notification sound: the speaker icon beside its switch,
+crossed out while Off (the default). Click it to choose Glass, Ping or Pop. Selecting a sound plays a preview and saves that choice for
 the source, including Meeting notes. Audibility follows macOS output and volume.
 Only new accepted arrivals within the presentation limit sound; duplicates,
 restored history and suspended delivery stay silent. Bursts play at most one

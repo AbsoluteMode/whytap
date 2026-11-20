@@ -19,8 +19,8 @@ enum NotifySetupGuide {
         Monitor is not highlighted. Clear All clears history and current events
         immediately, without confirmation, and keeps connected sources enabled.
         Settings > Notifications lists all sources with individual on/off switches
-        and Notification sound: Off (default), Glass, Ping or Pop. Choosing a sound
-        plays a preview. Only new accepted arrivals sound; duplicates, restored
+        and a speaker icon for the notification sound: Off (default, crossed out),
+        Glass, Ping or Pop. Choosing a sound plays a preview. Only new accepted arrivals sound; duplicates, restored
         history and suspended delivery stay silent. Bursts sound at most once per
         0.75 seconds. Sound follows macOS output/volume and is not a JSON field.
         No Whytap server or model request is needed to deliver a notification.

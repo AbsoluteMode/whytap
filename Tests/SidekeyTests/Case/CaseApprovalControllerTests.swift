@@ -818,17 +818,20 @@ final class CaseApprovalViewRenderTests: XCTestCase {
             let prompt = CaseApprovalPanel.frame(islandFrame: island, cardHeight: promptHeight,
                                                  meetingNudgeVisible: false, agentAnswerHeight: answerHeight)
             XCTAssertEqual(prompt.width, island.width)
-            XCTAssertLessThanOrEqual(prompt.maxY, island.minY)
+            XCTAssertLessThanOrEqual(prompt.maxY, island.minY + CaseApprovalView.islandSeam)
             if answerHeight > 0 {
                 XCTAssertFalse(prompt.intersects(card), "answer \(answerHeight): prompt covers the agent card")
                 XCTAssertLessThanOrEqual(prompt.maxY, card.minY - CaseApprovalPanel.agentCardGap + 0.5)
             } else {
-                XCTAssertEqual(prompt.maxY, island.minY, "without a card the prompt stays flush under the island")
+                XCTAssertEqual(prompt.maxY, island.minY + CaseApprovalView.islandSeam,
+                               "without a card the prompt overlaps the island's edge by the seam: no line between them")
             }
             // A meeting nudge and a card: the prompt goes under the lower of the two.
             let both = CaseApprovalPanel.frame(islandFrame: island, cardHeight: promptHeight,
                                                meetingNudgeVisible: true, agentAnswerHeight: answerHeight)
-            XCTAssertLessThanOrEqual(both.maxY, min(prompt.maxY, island.minY - MeetingPillPanel.suggestionNudgeHeight))
+            // Under the nudge it overlaps the nudge's edge by the same seam.
+            XCTAssertLessThanOrEqual(both.maxY, min(prompt.maxY, island.minY - MeetingPillPanel.suggestionNudgeHeight
+                + (answerHeight > 0 ? 0 : CaseApprovalView.islandSeam)))
         }
 
         // Offscreen picture of the 240 pt case (screen y-up mapped to view y-down).

@@ -39,10 +39,15 @@ struct CaseApprovalView: View {
 
     /// The harness access prompt. WHY: .project-docs/decisions/2026-11-20-harness-access.md
     static func harnessTitle(_ client: HarnessClient) -> String {
-        "Let \(client.name) use Whytap?"
+        "Give \(client.name) access to Whytap?"
     }
 
+    /// Not shown on the card (the user asked for one line); read by VoiceOver.
     static let harnessDetail = "It can read your meetings and change settings for you. Case keys keep their own approval."
+
+    /// The card overlaps the island's bottom edge by this much, so no line of
+    /// the island's rim or of the desktop shows between the two surfaces.
+    static let islandSeam: CGFloat = 1
 
     static func harnessConnectedTitle(_ client: HarnessClient) -> String {
         "\(client.name) connected"
@@ -78,7 +83,7 @@ struct CaseApprovalView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.top, 8 + Self.islandSeam)
         .padding(.bottom, 12)
         .frame(width: width, alignment: .leading)
         .background(alignment: .top) {
@@ -136,46 +141,21 @@ struct CaseApprovalView: View {
     }
 
     /// Who asks, in one glance: the harness's mark joined to Whytap's icon,
-    /// the question, what Yes means, and the two answers.
+    /// the question and the two answers.
     private func harnessContent(_ client: HarnessClient) -> some View {
         VStack(spacing: 10) {
             ZStack(alignment: .topTrailing) {
-                HStack(spacing: 9) {
-                    CaseApprovalHarnessMark(client: client)
-                    HStack(spacing: 3) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            Circle().fill(Color.white.opacity(0.32)).frame(width: 3, height: 3)
-                        }
-                    }
-                    .accessibilityHidden(true)
-                    Image(nsImage: appIcon ?? NSApp?.applicationIconImage ?? NSImage())
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 40, height: 40)
-                        // Whytap's icon is black: a hairline keeps its shape on the black card.
-                        .overlay(RoundedRectangle(cornerRadius: 7.6, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
-                            .padding(3.9))
-                        .accessibilityHidden(true)
-                }
-                .frame(maxWidth: .infinity)
+                CaseApprovalHarnessLink(client: client, appIcon: appIcon, lit: 0)
+                    .frame(maxWidth: .infinity)
                 if pendingCount > 0 { pendingBadge }
             }
             .padding(.top, 4)
-            VStack(spacing: 4) {
-                Text(Self.harnessTitle(client))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Text(Self.harnessDetail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(1.5)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity)
+            Text(Self.harnessTitle(client))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
             HStack(spacing: 6) {
                 CaseApprovalButton(title: "No", key: CaseApprovalKey.no.keycap, prominent: false) { onChoose(.deny) }
                 CaseApprovalButton(title: "Yes", key: CaseApprovalKey.yes.keycap, prominent: true) { onChoose(.allow) }
@@ -517,26 +497,80 @@ private struct CaseApprovalHarnessMark: View {
     }
 }
 
-/// Shown briefly after Yes, so the answer visibly landed before the card leaves.
-struct CaseApprovalConnectedView: View {
+/// The harness's mark, three dots and Whytap's icon. `lit` dots are green:
+/// the connection being made, one dot at a time.
+struct CaseApprovalHarnessLink: View {
+    static let connectedColor = Color(red: 0.2, green: 0.78, blue: 0.35)
+
     let client: HarnessClient
-    let width: CGFloat
+    var appIcon: NSImage?
+    let lit: Int
 
     var body: some View {
-        HStack(spacing: 8) {
-            CaseApprovalHarnessMark(client: client, size: 22)
-            Text(CaseApprovalView.harnessConnectedTitle(client))
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .lineLimit(1)
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(red: 0.2, green: 0.78, blue: 0.35))
-                .accessibilityHidden(true)
+        HStack(spacing: 9) {
+            CaseApprovalHarnessMark(client: client)
+            HStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(index < lit ? Self.connectedColor : Color.white.opacity(0.32))
+                        .frame(width: 3, height: 3)
+                        .scaleEffect(index < lit ? 1.35 : 1)
+                }
+            }
+            Image(nsImage: appIcon ?? NSApp?.applicationIconImage ?? NSImage())
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 40, height: 40)
+                // Whytap's icon is black: a hairline keeps its shape on the black card.
+                .overlay(RoundedRectangle(cornerRadius: 7.6, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                    .padding(3.9))
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Shown after Yes in place of the question: the same two marks, the dots
+/// between them lighting up one by one, then the name with a checkmark.
+struct CaseApprovalConnectedView: View {
+    /// Dots, then the checkmark.
+    static let steps = 4
+    static let dotInterval: TimeInterval = 0.11
+
+    let client: HarnessClient
+    let width: CGFloat
+    var appIcon: NSImage? = nil
+    /// A fixed moment of the animation, for pictures; nil plays it.
+    var fixedStep: Int? = nil
+
+    @State private var played = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var step: Int { fixedStep ?? played }
+    private var done: Bool { step >= Self.steps }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            CaseApprovalHarnessLink(client: client, appIcon: appIcon, lit: min(step, 3))
+                .scaleEffect(done ? 1 : 0.97)
+                .padding(.top, 4)
+            HStack(spacing: 6) {
+                Text(CaseApprovalView.harnessConnectedTitle(client))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(CaseApprovalHarnessLink.connectedColor)
+                    .scaleEffect(done ? 1 : 0.2)
+                    .opacity(done ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+            .opacity(step == 0 ? 0.55 : 1)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.top, 8 + CaseApprovalView.islandSeam)
+        .padding(.bottom, 14)
         .frame(width: width)
         .background(alignment: .top) {
             UnevenRoundedRectangle(
@@ -547,6 +581,16 @@ struct CaseApprovalConnectedView: View {
         }
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .combine)
+        .task {
+            guard fixedStep == nil else { return }
+            guard !reduceMotion else { return played = Self.steps }
+            for next in 1...3 {
+                try? await Task.sleep(nanoseconds: UInt64(Self.dotInterval * 1_000_000_000))
+                withAnimation(.easeOut(duration: 0.14)) { played = next }
+            }
+            try? await Task.sleep(nanoseconds: UInt64(Self.dotInterval * 1_000_000_000))
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) { played = Self.steps }
+        }
     }
 }
 
@@ -667,7 +711,9 @@ final class CaseApprovalPanel: NSPanel {
         let nudge = meetingNudgeVisible ? MeetingPillPanel.suggestionNudgeHeight : 0
         let agent = agentAnswerHeight > 0
             ? IslandFrameLayout.agentWingGap + agentAnswerHeight + agentCardGap : 0
-        let top = islandFrame.minY - max(nudge, agent)
+        // Attached surfaces overlap by the seam; under the agent card the
+        // prompt keeps its own gap.
+        let top = islandFrame.minY - max(nudge, agent) + (agent > 0 ? 0 : CaseApprovalView.islandSeam)
         return NSRect(x: islandFrame.midX - islandFrame.width / 2, y: top - cardHeight,
                       width: islandFrame.width, height: cardHeight)
     }

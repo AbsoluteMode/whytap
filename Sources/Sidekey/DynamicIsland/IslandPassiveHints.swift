@@ -80,24 +80,18 @@ enum IslandPassiveHints {
         hints(for: .defaults)
     }
 
-    /// The passive-hint sequence for a given hotkey configuration. The Drop
+    /// The passive-hint sequence for a given hotkey configuration. Every
     /// hint's keycaps and action verb are derived from the live config
-    /// (`dropVoiceShortcut` / `dropVoiceGesture`) so the Dynamic Island stays
-    /// the single source of truth alongside Help / onboarding / the floating
-    /// chip — post-cutover this renders "Drop hold Space" instead of the old
-    /// hardcoded `⌥ /`.
+    /// (Agent voice/text and Drop shortcuts and gestures) so the Dynamic
+    /// Island stays the single source of truth alongside Help / onboarding /
+    /// the floating chip: a rebound Agent key shows the new key, never the
+    /// default Right Command.
     static func hints(for configuration: HotkeyConfiguration) -> [IslandPassiveHint] {
         return [
             IslandPassiveHint(
                 title: "Agent Voice",
-                actionLabel: "hold",
-                keyContents: [
-                    .prefixedGlyph(
-                        prefix: "right",
-                        glyph: HotkeyGlyph.command,
-                        accessibilityLabel: "Right Command key"
-                    )
-                ],
+                actionLabel: configuration.agentVoiceGesture.voiceTitle.lowercased(),
+                keyContents: configuration.agentVoiceShortcut.contents,
                 shortcutStyle: .inlineText
             ),
             IslandPassiveHint(
@@ -109,13 +103,7 @@ enum IslandPassiveHints {
             IslandPassiveHint(
                 title: "Agent Text",
                 actionLabel: "tap",
-                keyContents: [
-                    .prefixedGlyph(
-                        prefix: "right",
-                        glyph: HotkeyGlyph.command,
-                        accessibilityLabel: "Right Command key"
-                    )
-                ],
+                keyContents: configuration.agentTextShortcut.contents,
                 shortcutStyle: .inlineText
             ),
         ]

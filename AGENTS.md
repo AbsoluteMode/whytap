@@ -58,6 +58,8 @@ feature sessions with regular checked integration and one working application.
 - Review overlaps, validate the final combined candidate and merge through a
   PR with exact head/base checks. Routine checked integration/local refresh
   needs no repeated approval. Public publishing remains a separate action.
+- After a PR merges, verify that GitHub removed its remote feature branch.
+  Follow the shared workflow for branches GitHub leaves and for retired work.
 - Build a production candidate without interrupting the installed app. Verify
   its signature/identity against the installed app and require a newer build
   number without downgrading the display version. Keep the last working

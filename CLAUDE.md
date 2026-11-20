@@ -842,6 +842,17 @@ whytap:// links:
   .project-docs/decisions/2026-10-20-whytap-links.md,
   .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
 
+Input language offer:
+  With the input language on Auto, InputLanguageSuggestion counts delivered
+  Drop takes whose transcript the system recognizer (on this Mac) reads as
+  one language of the menu; short or unclear takes are ignored. Three in a
+  row produce one notification card ("Dictating in Russian?"). Clicking it
+  sets the input language, only while it is still Auto; ignoring it keeps
+  Auto and that language is never offered again. The action is the app's own
+  inputLanguageCode field, which scripts and links cannot supply. Only the
+  language code, the count and the offered codes are stored. WHY:
+  .project-docs/decisions/2026-11-20-input-language-suggestion.md
+
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> Other -> "Show island on") -> screen with a real notch ->

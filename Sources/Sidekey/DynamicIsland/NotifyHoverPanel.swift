@@ -60,7 +60,7 @@ struct NotifyHoverPanel: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Meeting notes").font(.system(size: 11, weight: .semibold))
-                                Text("When your notes are ready").font(.system(size: 9)).foregroundStyle(.secondary)
+                                Text("When your notes are ready").font(.system(size: 9)).foregroundStyle(secondaryInk)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             Toggle("Enable meeting notes notifications", isOn: $meetingNotifications.enabled)
                                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
@@ -91,10 +91,17 @@ struct NotifyHoverPanel: View {
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: { Text("Its script will stop. Notification history and script files will be kept.") }
     }
+    private var secondaryInk: AnyShapeStyle {
+        colorScheme == .light
+            ? AnyShapeStyle(MacSettingsTheme.text2)
+            : AnyShapeStyle(HierarchicalShapeStyle.secondary)
+    }
+
     private func sectionButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let unselectedInk = colorScheme == .light ? MacSettingsTheme.text2 : IslandInk.color.opacity(0.6)
+        return Button(action: action) {
             Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
-                .foregroundStyle(IslandInk.color.opacity(selected ? 1 : 0.6))
+                .foregroundStyle(selected ? IslandInk.color : unselectedInk)
                 .frame(maxWidth: .infinity).frame(height: 23)
                 .background(RoundedRectangle(cornerRadius: 5).fill(IslandInk.color.opacity(selected ? 0.14 : 0)))
                 .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -106,7 +113,7 @@ struct NotifyHoverPanel: View {
         VStack(spacing: 6) {
             Image(systemName: "bell").font(.system(size: 24)).foregroundStyle(.secondary)
             Text(title).font(.system(size: 12, weight: .semibold))
-            Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(detail).font(.system(size: 11)).foregroundStyle(secondaryInk).multilineTextAlignment(.center)
         }.padding(.vertical, 14).frame(maxWidth: .infinity)
     }
     /// A notification without a link or internal action is still text the
@@ -134,9 +141,9 @@ struct NotifyHoverPanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                 Text(event.body.isEmpty ? event.sourceName : event.body)
-                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.system(size: 10)).foregroundStyle(secondaryInk).lineLimit(2)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(secondaryInk)
                 .lineLimit(1).frame(maxWidth: 48)
         }
         .padding(8)
@@ -148,7 +155,7 @@ struct NotifyHoverPanel: View {
             Image(systemName: "bell.badge").foregroundStyle(Color(hexCSS: source.script.tint ?? "#299FD6"))
             VStack(alignment: .leading, spacing: 2) {
                 Text(source.script.name).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                Text(source.message).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2)
+                Text(source.message).font(.system(size: 9)).foregroundStyle(secondaryInk).lineLimit(2)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Toggle("Enabled", isOn: Binding(get: { source.script.enabled }, set: { supervisor.setEnabled($0, id: source.id) }))
                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)

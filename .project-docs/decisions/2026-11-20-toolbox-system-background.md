@@ -38,6 +38,10 @@ two different products.
   window is always dark, so the island draws exactly as before.
 - The opacities tuned for white on dark are kept for both appearances.
 - Row and plate surfaces are dynamic too (`IslandInk.row`, `IslandInk.plate`).
+- Light Notify uses the Settings secondary text color for message bodies,
+  timestamps, descriptions and the inactive tab label. A history item without
+  an action uses static text and retains its Copy menu. The dark island keeps
+  its existing text and inactive row treatment.
 
 ## Why
 

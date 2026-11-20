@@ -80,6 +80,11 @@ final class AppState: ObservableObject {
     /// A Case Approve prompt is attached under the island (`CaseApprovalController`).
     /// Holds idle-hide off and keeps the hover drawer closed while it is up.
     @Published var caseApprovalActive: Bool = false
+    /// A card of the Case panel is attached under the island: the prompt or
+    /// the short confirmation after it. Geometry only (the island's square
+    /// bottom edge). The confirmation takes no keys, so nothing that yields
+    /// keys to the prompt may depend on this.
+    @Published var caseCardAttached: Bool = false
     /// Height of the agent answer card below the island (0 when none); the Case
     /// prompt goes under it so both stay readable.
     @Published var agentAnswerCardHeight: CGFloat = 0

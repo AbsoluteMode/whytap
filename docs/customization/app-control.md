@@ -51,7 +51,7 @@ installation and quit are outside the application-control server.
 
 The meeting tools return the user's notes and transcripts, so Whytap asks
 first. When Claude Code or Codex starts the plugin's server and Whytap is
-running, the island shows "Let Claude Code use Whytap?". Yes is remembered on
+running, the island shows "Give Claude Code access to Whytap?". Yes is remembered on
 this Mac; No is remembered too and the tools then answer `access_denied`. If
 Whytap was closed, the question appears with the first meeting request. Each
 tool is asked about separately. Change an answer in Whytap Settings -> Agents

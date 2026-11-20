@@ -162,14 +162,18 @@ final class SettingsSyncService: ObservableObject {
     /// agreement, including a key removed here but not shared yet. A rolled
     /// back or cancelled restore changes nothing. A marker left by a crash
     /// after the restore finished counts as applied.
+    ///
+    /// A marker already there belongs to this restore, written before an
+    /// interruption, when its plan was still readable: it is kept. Without a
+    /// ledger there is no agreement to protect. A marker that cannot be
+    /// written stops the restore before it applies, so it can be retried.
     nonisolated static func restoreWillStart(sections: [ArtifactBackupSection],
-                                             ledgerURL: URL = Dependencies.productionLedgerURL) {
+                                             ledgerURL: URL = Dependencies.productionLedgerURL) throws {
         let prefixes = rejoinPrefixes(sections)
-        guard !prefixes.isEmpty else { return }
         let marker = restoreMarker(ledgerURL)
-        try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                 attributes: [.posixPermissions: 0o700])
-        try? JSONEncoder.settingsSync.encode(prefixes).write(to: marker, options: [.atomic])
+        guard !prefixes.isEmpty, !FileManager.default.fileExists(atPath: marker.path),
+              FileManager.default.fileExists(atPath: ledgerURL.path) else { return }
+        try JSONEncoder.settingsSync.encode(prefixes).write(to: marker, options: [.atomic])
     }
 
     nonisolated static func restoreFinished(applied: Bool, ledgerURL: URL = Dependencies.productionLedgerURL) {

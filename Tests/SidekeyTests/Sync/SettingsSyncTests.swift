@@ -633,23 +633,78 @@ final class SettingsSyncTests: XCTestCase {
         }
 
         try reset()
-        SettingsSyncService.restoreWillStart(sections: [.settings, .credentials], ledgerURL: ledgerURL)
+        try SettingsSyncService.restoreWillStart(sections: [.settings, .credentials], ledgerURL: ledgerURL)
         SettingsSyncService.restoreFinished(applied: false, ledgerURL: ledgerURL)
         SettingsSyncService.resolveInterruptedRestore(ledgerURL: ledgerURL)
         XCTAssertNil(try rejoin(), "a rolled back restore changes nothing")
 
-        SettingsSyncService.restoreWillStart(sections: [.settings, .meetings], ledgerURL: ledgerURL)
+        try SettingsSyncService.restoreWillStart(sections: [.settings, .meetings], ledgerURL: ledgerURL)
         SettingsSyncService.restoreFinished(applied: true, ledgerURL: ledgerURL)
         XCTAssertEqual(try rejoin(), ["pref:"], "only the replaced section joins again")
 
         try reset()
-        SettingsSyncService.restoreWillStart(sections: [.meetings], ledgerURL: ledgerURL)
+        try SettingsSyncService.restoreWillStart(sections: [.meetings], ledgerURL: ledgerURL)
         SettingsSyncService.restoreFinished(applied: true, ledgerURL: ledgerURL)
         XCTAssertNil(try rejoin(), "a restore without settings or keys leaves sync alone")
 
-        SettingsSyncService.restoreWillStart(sections: [.credentials], ledgerURL: ledgerURL)  // the app stopped mid-restore
+        try SettingsSyncService.restoreWillStart(sections: [.credentials], ledgerURL: ledgerURL)  // the app stopped mid-restore
         SettingsSyncService.resolveInterruptedRestore(ledgerURL: ledgerURL)
         XCTAssertEqual(try rejoin(), ["key:"], "a finished restore whose marker survived counts as applied")
+    }
+
+    func testARestoreResumedWithoutItsPlanKeepsItsOwnSections() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sync-restore-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ledgerURL = directory.appendingPathComponent("ledger.json")
+        let marker = directory.appendingPathComponent("restore-in-progress")
+
+        try SettingsSyncService.restoreWillStart(sections: [.settings], ledgerURL: ledgerURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "no ledger, nothing to protect")
+
+        var ledger = SettingsSyncLedger(device: "A"); ledger.joined = true
+        try JSONEncoder.settingsSync.encode(ledger).write(to: ledgerURL)
+        try SettingsSyncService.restoreWillStart(sections: [.settings], ledgerURL: ledgerURL)
+        // Relaunched after a crash past the plan's removal: startup no longer knows the sections.
+        try SettingsSyncService.restoreWillStart(sections: [.settings, .credentials], ledgerURL: ledgerURL)
+        SettingsSyncService.restoreFinished(applied: true, ledgerURL: ledgerURL)
+        let rejoin = try JSONDecoder.settingsSync.decode(SettingsSyncLedger.self, from: Data(contentsOf: ledgerURL)).rejoin
+        XCTAssertEqual(rejoin, ["pref:"])
+    }
+
+    func testAMarkerThatCannotBeWrittenStopsTheRestore() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sync-restore-" + UUID().uuidString)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ledgerURL = directory.appendingPathComponent("ledger.json")
+        try JSONEncoder.settingsSync.encode(SettingsSyncLedger(device: "A")).write(to: ledgerURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        XCTAssertThrowsError(try SettingsSyncService.restoreWillStart(sections: [.credentials], ledgerURL: ledgerURL))
+    }
+
+    func testARestoredValueEqualToAnUnsyncedEditTakesTheSharedValue() async throws {
+        let first = mac(), second = mac()
+        second.defaults.set("x", forKey: meetingKey)
+        await second.turnOn(); await first.turnOn()      // shared: x
+        first.defaults.set("y", forKey: meetingKey)
+        await first.sync(after: 10)                       // shared: y
+        await second.sync(after: 10)                      // second agrees on y
+
+        await remote.setOffline(true)
+        second.defaults.set("x", forKey: meetingKey)      // back to x while offline: a late edit time
+        await second.sync(after: 100)
+        try SettingsSyncService.restoreWillStart(sections: [.settings], ledgerURL: second.ledgerURL)
+        second.defaults.set("x", forKey: meetingKey)      // the backup holds x too
+        SettingsSyncService.restoreFinished(applied: true, ledgerURL: second.ledgerURL)
+        await remote.setOffline(false)
+        await second.sync(after: 10)
+
+        XCTAssertEqual(second.defaults.string(forKey: meetingKey), "y", "a restored value never replaces a newer shared one")
+        let document = try await shared()
+        XCTAssertEqual(document.entries[SettingsSyncItem.preference(meetingKey)]?.value, .preference(.string("y")))
     }
 
     func testRestoringOnlySettingsKeepsAKeyRemovedWhileOffline() async throws {
@@ -666,7 +721,7 @@ final class SettingsSyncTests: XCTestCase {
         await first.sync(after: 10)
 
         // A settings-only restore on the second Mac puts back an old mode.
-        SettingsSyncService.restoreWillStart(sections: [.settings], ledgerURL: second.ledgerURL)
+        try SettingsSyncService.restoreWillStart(sections: [.settings], ledgerURL: second.ledgerURL)
         second.defaults.set("fast", forKey: mode)
         SettingsSyncService.restoreFinished(applied: true, ledgerURL: second.ledgerURL)
         await second.sync(after: 1000)

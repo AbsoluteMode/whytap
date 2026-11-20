@@ -110,6 +110,12 @@ a join. Each has a test now:
   settings-only restore. Rolled back, cancelled or failed with nothing left to
   retry, it changes nothing. A marker left by a crash after the restore
   finished counts as applied (fifth and sixth reviews).
+- A restored value equal to an unsynced edit is still a restored value: it is
+  stamped at the epoch and the shared one wins. A resumed restore whose plan
+  is gone keeps the marker written while the plan was readable. A disk error
+  after the applied outcome was written counts as applied. Without a ledger
+  no marker is needed; a marker that cannot be written stops the restore
+  before it applies, and Retry tries again (seventh review).
 - An edit seen during a write, then undone and made again, keeps the time of
   its last sighting (fifth review).
 - Keys the shared document names are read even when this Mac's routes do not
@@ -148,7 +154,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Thirty-four tests with two simulated Macs sharing a fake repository: first upload
+Thirty-seven tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -164,8 +170,9 @@ key removed while the joining write is in flight, a restored key of a removed
 server, a received key removed during a conflicting join write, an edit seen
 during a write keeping its time, a pre-join value after a refused Keychain
 write, a shortcut changed back and forth during a write, restore markers per
-section, a settings-only restore keeping a key removed offline). The fourth-,
-fifth- and sixth-review tests were checked to fail with their fixes reverted. Timestamps are stored as
+section, a settings-only restore keeping a key removed offline, a resumed restore
+keeping its sections, an unwritable marker, a restored value equal to an
+unsynced edit). The fourth- to seventh-review tests were checked to fail with their fixes reverted. Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

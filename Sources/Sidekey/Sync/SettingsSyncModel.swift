@@ -98,6 +98,9 @@ struct SettingsSyncLedger: Codable, Equatable {
                 // Changed away and back while a round was busy: the latest sighting counts.
                 if let seen, seen > record.modifiedAt {
                     next.records[item] = Record(hash: hash, modifiedAt: seen, device: device)
+                } else if !fresh && record.modifiedAt > Date(timeIntervalSince1970: 0) {
+                    // A restored value equal to an earlier unsynced edit is still a restored value.
+                    next.records[item] = Record(hash: hash, modifiedAt: Date(timeIntervalSince1970: 0), device: device)
                 }
                 continue
             }

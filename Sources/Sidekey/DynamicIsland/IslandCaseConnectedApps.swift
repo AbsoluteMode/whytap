@@ -7,11 +7,15 @@ struct IslandCaseConnectedApps: View {
     let onOpenAccess: (UUID) -> Void
     let onConnect: () -> Void
 
+    static func visibleRegistrations(_ registrations: [CaseAppRegistration]) -> [CaseAppRegistration] {
+        registrations.filter { $0.identity != .builtInOpenCode }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
-                    ForEach(registrations) { app in
+                    ForEach(Self.visibleRegistrations(registrations)) { app in
                         CaseConnectedAppButton(app: app) { onOpenAccess(app.id) }
                     }
                 }
@@ -38,7 +42,6 @@ struct IslandCaseConnectedApps: View {
         case .claudeCode: return "claude-code"
         case .codex: return "codex"
         case .cursor: return "cursor"
-        case .builtInOpenCode: return "opencode"
         default: return nil
         }
     }

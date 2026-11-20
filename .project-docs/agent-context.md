@@ -372,11 +372,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
   No key means an actionable tool error, never an alternative search provider.
-  Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
-  structured finish_answer completion and Case key names. The existing action preference
+  Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot
+  and structured finish_answer completion (Case key tools and built-in agent Case
+  registrations were removed; Whytap-spawned child processes are refused by the
+  Case broker. WHY: .project-docs/decisions/2026-11-20-case-remove-whytap-agent.md).
+  The existing action preference
   agent.opencode.allowActions is preserved: Allow file edits and commands is
-  on by default; off removes and rejects write_file/run_command. Case keeps its
-  own approvals through the signed helper and scoped child PID registrations.
+  on by default; off removes and rejects write_file/run_command.
   Commands use a dedicated process group, 30-second deadline and bounded output;
   cancellation signals that group. Stop waiting within a bounded drain if a
   detached child holds output open, and report that it may still be running.
@@ -535,11 +537,14 @@ Case secrets manager:
   The Case drawer has a 320 pt content viewport (the outer hit band includes
   its gap/music strip) and retains the notch-derived width. Connected clients
   appear as app icons; clicking one opens that client's policy. An always-visible
-  Connect button offers Whytap Agent plus installed Claude Code and Cursor with
-  bundled logos, then grouped project scope and Accept/Bypass before registration.
-  Codex is not offered. There is no arbitrary program picker; existing legacy
-  registrations stay editable. WHY:
-  .project-docs/decisions/2026-10-21-case-connect-claude-code.md. Mode
+  Connect button offers installed Claude Code and Cursor with bundled logos
+  ("Install Claude Code or Cursor, then open Connect again." when neither is
+  available), then grouped project scope and Accept/Bypass before registration.
+  Whytap Agent and Codex are not offered; legacy .builtInOpenCode vault entries
+  remain decodable on disk for rollback safety without appearing in Case UI or
+  matching in the broker. There is no arbitrary program picker; other existing
+  legacy registrations stay editable. WHY:
+  .project-docs/decisions/2026-11-20-case-remove-whytap-agent.md. Mode
   and project headings have thin horizontal dividers above their controls.
   Selected projects has a metadata search that preserves the full draft selection;
   All projects includes future projects, with its explanation in native help.

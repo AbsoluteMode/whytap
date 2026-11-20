@@ -7,7 +7,7 @@ import Foundation
 /// AI app is a person at a terminal.
 struct CaseCallerResolver {
     static let maxHops = 32
-    static let builtInOpenCodeName = "Whytap agent"
+    static let hostAppName = "Whytap Agent"
 
     /// AI apps recognised by Developer ID even when not registered, so they
     /// are refused with a hint instead of being treated as a person.
@@ -20,12 +20,12 @@ struct CaseCallerResolver {
 
     private let inspector: CaseProcessInspecting
     private let registrations: [CaseAppRegistration]
-    private let builtInOpenCodePIDs: Set<pid_t>
+    private let hostPID: pid_t
 
-    init(inspector: CaseProcessInspecting, registrations: [CaseAppRegistration], builtInOpenCodePIDs: Set<pid_t>) {
+    init(inspector: CaseProcessInspecting, registrations: [CaseAppRegistration], hostPID: pid_t = 0) {
         self.inspector = inspector
         self.registrations = registrations
-        self.builtInOpenCodePIDs = builtInOpenCodePIDs
+        self.hostPID = hostPID
     }
 
     /// `peerPID` is the already verified helper; it is never itself the
@@ -39,7 +39,11 @@ struct CaseCallerResolver {
         for _ in 0..<Self.maxHops {
             guard next > 1, !visited.contains(next) else { return .human }
             visited.insert(next)
-            if let caller = match(pid: next) { return caller }
+            // Child commands started by Whytap itself (NativeAgentCommand,
+            // legacy OpenCode) are refused instead of falling through to human
+            // Touch ID or matching a bundle-path registration.
+            // WHY: .project-docs/decisions/2026-11-20-case-remove-whytap-agent.md
+            if next == hostPID { return .knownUnregisteredAI(name: Self.hostAppName) }
             guard let process = inspector.info(pid: next) else { return .human }
             if let caller = match(process) { return caller }
             next = process.parentPID
@@ -68,14 +72,6 @@ struct CaseCallerResolver {
 
     // MARK: Matching
 
-    private func match(pid: pid_t) -> CaseCaller? {
-        guard builtInOpenCodePIDs.contains(pid) else { return nil }
-        if let reg = registrations.first(where: { $0.identity == .builtInOpenCode }) {
-            return .registered(reg)
-        }
-        return .knownUnregisteredAI(name: Self.builtInOpenCodeName)
-    }
-
     private func match(_ process: CaseProcessInfo) -> CaseCaller? {
         if let reg = registrations.first(where: { Self.matches($0.identity, process) }) {
             return .registered(reg)
@@ -95,7 +91,7 @@ struct CaseCallerResolver {
         case let .executablePath(path):
             return pathMatches(registered: path, executable: process.executablePath)
         case .builtInOpenCode:
-            return false // by pid only; Whytap launches it itself
+            return false // retired registration; never matches
         }
     }
 

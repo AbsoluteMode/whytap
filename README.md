@@ -31,7 +31,7 @@ Most of the everyday tools people pay for separately on macOS live together in W
 | **Quick desktop AI & voice agent** | $8–20 / mo | **Agent**: tap <kbd>Right ⌘</kbd> to type a question or hold it to speak. Reads files, searches the web and answers in the island using your key. |
 | **Screenshot editor, text blur & OCR** | about $35 once | **Shot**: arrows, text blur and Copy text — built in for free. |
 | **Extra XDR / HDR brightness** | about $20 once | **Display Extra**: brighter whites on XDR and HDR displays beyond the usual maximum — built in for free. |
-| **Clipboard history, live subtitles, translation & dev tools** | about $30 / yr | **History** (clipboard, dictations, agent answers), **Translate** & live **Subtitles**, **Case** (secrets vault for Claude Code, Cursor and Whytap Agent), **Notify**, **Vocab**, **To-do**, **Calendar** and **Monitor** dashboards — all built in. |
+| **Clipboard history, live subtitles, translation & dev tools** | about $30 / yr | **History** (clipboard, dictations, agent answers), **Translate** & live **Subtitles**, **Case** (secrets vault for Claude Code and Cursor), **Notify**, **Vocab**, **To-do**, **Calendar** and **Monitor** dashboards — all built in. |
 
 Bought separately, that is roughly **$320–670 a year** in subscriptions plus about **$55** in one-time purchases. Whytap itself is **$0**: you pay only raw API usage directly to the providers you choose, or nothing at all for on-device dictation and local tools.
 

@@ -1036,7 +1036,7 @@ rights. No alternative composition or decorative screen is needed.
 | --- | --- |
 | Search | Finds project and key names/descriptions, including empty projects and General. A project match shows all its keys; a key match shows just matching keys under its project. The project with the best match (own or a key's) comes first; equal ones keep project order. A query word that starts a word of a project name lets the rest of the query match that project's keys. + Key stays available in project results. Return cannot create a key; name/value fields open separately after + Key. Empty results say Nothing found. |
 | Connected icons | Open the selected registration directly. Connect stays visible beside the horizontally scrolling strip, including when empty. Codex/OpenAI uses blue, Claude/Anthropic orange, Cursor a white halo. Hover/focus change color and glow without changing geometry; keyboard focus has an outline. Reduce Motion removes the short opacity/color transition. |
-| Client picker | Discovers installed OpenCode, Claude Code and Cursor only after Connect (no Codex). Shows bundled brand marks, loading, no installed clients or already-connected states. Selecting a client opens a draft; nothing is registered until Connect on the rights screen. The arbitrary program picker is removed. |
+| Client picker | Discovers installed Claude Code and Cursor only after Connect (no Whytap Agent or Codex). Shows bundled brand marks, loading, no installed clients or already-connected states. Selecting a client opens a draft; nothing is registered until Connect on the rights screen. The arbitrary program picker is removed. |
 | Rights | Default Accept asks before use; Bypass allows use without prompts. All projects includes future projects (explained in native help); Selected shows searchable checkboxes and denies unchecked projects at the broker. Filtering preserves the full draft selection. Existing per-project overrides remain visible/editable. An empty saved scope closes access; a new connection needs at least one project or All. |
 | Save | One transaction stores mode and scope; registration, widening access and enabling Bypass require Touch ID. Pending authentication disables edits and Back. Failure preserves the draft and explains recovery; connector errors remain visible after registration, with Retry setup reusing the same registration and rights. |
 | Back / disconnect | Back discards unsaved rights. Disconnect revokes access before editing client config. Existing island outside-click and Escape dismissal still apply. |
@@ -1204,7 +1204,7 @@ only Connect commits the draft after authentication. The user chose this flow.
   explanation belongs to the commit action; normal mode/scope navigation does
   not request authentication. Errors and retry remain visible above the editor.
 - Loading and both empty states are contained surfaces. With no installation,
-  explain to install OpenCode, Claude Code or Cursor and reopen Connect; with saved supported
+  explain to install Claude Code or Cursor and reopen Connect; with saved supported
   registrations, point to their icons for editing rights. No client config,
   secret, route or vault migration changes are part of this polish.
 

@@ -40,6 +40,8 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
                                       scheduleIdleLock: { _, _ in AccessStubCancellable() },
                                       clients: FakeClientSetup())
         try await viewModel.unlock()
+        XCTAssertFalse(viewModel.registrations.contains { $0.identity == .builtInOpenCode },
+                       "Legacy builtInOpenCode registration stays hidden from the access UI")
 
         let panel = IslandCaseAccessPanel(viewModel: viewModel, onBack: {}, appID: claudeID)
         XCTAssertLessThanOrEqual(measuredWidth(panel, width: width), width)
@@ -97,7 +99,6 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
                 for (name, clients, loading, connected) in [
                     ("all", CaseKnownClient.connectableClients, false, false),
                     ("cursor", [.cursor], false, false),
-                    ("opencode", [.builtInOpenCode], false, false),
                     ("claude-code", [.claudeCode], false, false),
                     ("empty", [], false, false),
                     ("connected", [], false, true),
@@ -108,6 +109,33 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
                         .padding(10), width: width, name: "case-picker-\(name)-\(Int(width))")
                 }
             }
+        }
+    }
+
+    func test_empty_picker_copy_and_connected_strip_omit_retired_whytap_agent() throws {
+        XCTAssertEqual(IslandCaseClientPicker.emptyMessage, "Install Claude Code or Cursor, then open Connect again.")
+        XCTAssertFalse(IslandCaseClientPicker.emptyMessage.contains("OpenCode"))
+        XCTAssertFalse(IslandCaseClientPicker.emptyMessage.contains("Whytap Agent"))
+
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let retired = CaseAppRegistration(id: UUID(), displayName: "Whytap Agent", identity: .builtInOpenCode,
+                                          defaultMode: .bypass, projectModes: [:], createdAt: date)
+        let claude = CaseAppRegistration(id: UUID(), displayName: "Claude Code", identity: CaseKnownClient.claudeCode.identity,
+                                         defaultMode: .approve, projectModes: [:], createdAt: date)
+        let cursor = CaseAppRegistration(id: UUID(), displayName: "Cursor", identity: CaseKnownClient.cursor.identity,
+                                         defaultMode: .approve, projectModes: [:], createdAt: date)
+        XCTAssertEqual(IslandCaseConnectedApps.visibleRegistrations([retired, claude]), [claude])
+        XCTAssertEqual(IslandCaseConnectedApps.visibleRegistrations([retired]), [])
+        XCTAssertNil(IslandCaseConnectedApps.brandAsset(for: .builtInOpenCode))
+
+        try withBrandAssets {
+            let withRetired = IslandCaseConnectedApps(registrations: [retired, claude], onOpenAccess: { _ in }, onConnect: {}).fixedSize()
+            let withoutRetired = IslandCaseConnectedApps(registrations: [claude], onOpenAccess: { _ in }, onConnect: {}).fixedSize()
+            let twoApps = IslandCaseConnectedApps(registrations: [claude, cursor], onOpenAccess: { _ in }, onConnect: {}).fixedSize()
+            XCTAssertEqual(measuredWidth(withRetired, width: 500), measuredWidth(withoutRetired, width: 500))
+            XCTAssertLessThan(measuredWidth(withRetired, width: 500), measuredWidth(twoApps, width: 500))
+            try renderPanel(IslandCaseConnectedApps(registrations: [retired, claude], onOpenAccess: { _ in }, onConnect: {})
+                .padding(10), width: 310, name: "case-connected-retired-hidden-310")
         }
     }
 
@@ -187,7 +215,7 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
     func test_client_highlights_render_in_provider_colors() throws {
         try withBrandAssets {
             let date = Date(timeIntervalSince1970: 1_700_000_000)
-            let clients: [CaseKnownClient] = [.builtInOpenCode, .cursor, .codex, .claudeCode]
+            let clients: [CaseKnownClient] = [.cursor, .codex, .claudeCode]
             let row = HStack(spacing: 30) {
                 ForEach(clients, id: \.self) { client in
                     let app = CaseAppRegistration(id: UUID(), displayName: client.displayName, identity: client.identity,
@@ -232,7 +260,7 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
         }
         // Every Connect row draws a bundled brand mark, never the generic fallback.
         let assets = CaseKnownClient.connectableClients.compactMap { IslandCaseConnectedApps.brandAsset(for: $0.identity) }
-        XCTAssertEqual(assets, ["opencode", "claude-code", "cursor"])
+        XCTAssertEqual(assets, ["claude-code", "cursor"])
         for asset in assets {
             let image = try XCTUnwrap(ProviderBrandIconAsset.image(named: asset, pointSize: 22))
             XCTAssertEqual(image.size, NSSize(width: 22, height: 22))

@@ -74,6 +74,9 @@ enum CaseAccessMode: String, Codable, Equatable {
 enum CaseAppIdentity: Codable, Equatable, Hashable {
     case developerID(teamID: String, signingIdentifier: String)
     case executablePath(String)
+    /// Retired built-in agent identity; kept decodable so existing schema-3
+    /// vaults, backups and rollbacks load without error or data loss.
+    // WHY: .project-docs/decisions/2026-11-20-case-remove-whytap-agent.md
     case builtInOpenCode
 }
 

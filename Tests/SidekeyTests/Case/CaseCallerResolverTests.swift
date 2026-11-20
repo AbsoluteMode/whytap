@@ -52,7 +52,7 @@ final class CaseCallerResolverTests: XCTestCase {
         let fake = FakeProcessInspector()
         claudeDesktopChain(fake)
         let reg = claudeCodeRegistration
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
     }
 
@@ -67,14 +67,14 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(550, parent: 500, "/bin/zsh")
         fake.add(500, parent: 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
                  id: "com.apple.Terminal")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .knownUnregisteredAI(name: "Codex"))
     }
 
     func test_unregistered_claude_code_is_reported_by_name() {
         let fake = FakeProcessInspector()
         claudeDesktopChain(fake)
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .knownUnregisteredAI(name: "Claude Code"))
     }
 
@@ -85,7 +85,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(700, parent: 600, "/usr/bin/login", id: "com.apple.login")
         fake.add(600, parent: 1, "/Applications/iTerm.app/Contents/MacOS/iTerm2",
                  team: "H7V7XYVQ7D", id: "com.googlecode.iterm2")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -96,7 +96,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(700, parent: 600, "/usr/bin/login", id: "com.apple.login")
         fake.add(600, parent: 1, "/Applications/iTerm.app/Contents/MacOS/iTerm2",
                  team: "H7V7XYVQ7D", id: "com.googlecode.iterm2")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [])
         XCTAssertEqual(resolver.terminalAppName(peerPID: 900), "iTerm2", "nearest app ancestor, not the shell")
 
         // sshd / launchd job / cron: the walk reaches pid 1 without a terminal app.
@@ -104,13 +104,13 @@ final class CaseCallerResolverTests: XCTestCase {
         headless.add(900, parent: 800, helper)
         headless.add(800, parent: 700, "/bin/zsh")
         headless.add(700, parent: 1, "/usr/sbin/sshd")
-        XCTAssertNil(CaseCallerResolver(inspector: headless, registrations: [], builtInOpenCodePIDs: [])
+        XCTAssertNil(CaseCallerResolver(inspector: headless, registrations: [])
             .terminalAppName(peerPID: 900))
 
         // A broken chain is unknown too.
         let broken = FakeProcessInspector()
         broken.add(900, parent: 800, helper)
-        XCTAssertNil(CaseCallerResolver(inspector: broken, registrations: [], builtInOpenCodePIDs: [])
+        XCTAssertNil(CaseCallerResolver(inspector: broken, registrations: [])
             .terminalAppName(peerPID: 900))
     }
 
@@ -123,7 +123,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(700, parent: 600, opencode, id: "a.out")
         fake.add(600, parent: 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal")
         let reg = registration("OpenCode", .executablePath(opencode))
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
     }
 
@@ -136,7 +136,7 @@ final class CaseCallerResolverTests: XCTestCase {
                  "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)")
         fake.add(600, parent: 1, "/Applications/Cursor.app/Contents/MacOS/Cursor")
         let reg = registration("Cursor", .executablePath("/Applications/Cursor.app/"))
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
     }
 
@@ -145,7 +145,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 1, "/Applications/Cursor.app.evil/Contents/MacOS/Cursor")
         let reg = registration("Cursor", .executablePath("/Applications/Cursor.app"))
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -154,28 +154,31 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 1, "/bin/zsh")
         let regs = [registration("Empty", .executablePath("")), registration("Root", .executablePath("/"))]
-        let resolver = CaseCallerResolver(inspector: fake, registrations: regs, builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: regs)
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
-    func test_builtin_opencode_pid_matches() {
-        let fake = FakeProcessInspector()
-        fake.add(900, parent: 800, helper)
-        fake.add(800, parent: 700, "/bin/sh")
-        fake.add(700, parent: 600, "/Users/maxim/Library/Application Support/whytap/bin/opencode", id: "a.out")
-        fake.add(600, parent: 1, "/Applications/Whytap.app/Contents/MacOS/Sidekey")
-        let reg = registration("Whytap agent", .builtInOpenCode)
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [700])
-        XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
-    }
-
-    func test_builtin_opencode_without_registration_is_refused() {
+    func test_legacy_builtin_opencode_registration_never_matches_any_process() {
         let fake = FakeProcessInspector()
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 700, "/bin/sh")
         fake.add(700, parent: 1, "/Users/maxim/Library/Application Support/whytap/bin/opencode", id: "a.out")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [], builtInOpenCodePIDs: [700])
-        XCTAssertEqual(resolver.resolve(peerPID: 900), .knownUnregisteredAI(name: CaseCallerResolver.builtInOpenCodeName))
+        var legacy = registration("Whytap Agent", .builtInOpenCode)
+        legacy.defaultMode = .bypass
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [legacy])
+        XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
+    }
+
+    func test_whytap_host_child_is_refused_as_unregistered_ai_even_with_legacy_registration() {
+        let fake = FakeProcessInspector()
+        fake.add(900, parent: 800, helper)
+        fake.add(800, parent: 600, "/bin/sh")
+        fake.add(600, parent: 1, "/Applications/Whytap.app/Contents/MacOS/Sidekey")
+        var legacy = registration("Whytap Agent", .builtInOpenCode)
+        legacy.defaultMode = .bypass
+        let bundleReg = registration("Whytap", .executablePath("/Applications/Whytap.app"))
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [legacy, bundleReg], hostPID: 600)
+        XCTAssertEqual(resolver.resolve(peerPID: 900), .knownUnregisteredAI(name: CaseCallerResolver.hostAppName))
     }
 
     // MARK: Spoofing and nesting
@@ -185,7 +188,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 700, "/bin/zsh")
         fake.add(700, parent: 1, "/tmp/claude", team: nil, id: "com.anthropic.claude-code")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -193,7 +196,7 @@ final class CaseCallerResolverTests: XCTestCase {
         let fake = FakeProcessInspector()
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 1, "/tmp/claude", team: "AAAAAAAAAA", id: "com.anthropic.claude-code")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -205,7 +208,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(840, parent: 830, "/opt/codex/codex", team: "2DC432GLL2", id: "codex")
         fake.add(830, parent: 800, "/opt/homebrew/bin/node")
         claudeDesktopChain(fake, cliPID: 899)
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .knownUnregisteredAI(name: "Codex"))
     }
 
@@ -217,7 +220,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(830, parent: 820, "/bin/zsh")
         fake.add(820, parent: 1, "/opt/codex/codex", team: "2DC432GLL2", id: "codex")
         let reg = claudeCodeRegistration
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
     }
 
@@ -227,7 +230,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 1, "/bin/zsh")
         let reg = registration("Whytap", .executablePath("/Applications/Whytap.app"))
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -235,7 +238,7 @@ final class CaseCallerResolverTests: XCTestCase {
 
     func test_vanished_peer_is_human() {
         let fake = FakeProcessInspector()
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -243,7 +246,7 @@ final class CaseCallerResolverTests: XCTestCase {
         let fake = FakeProcessInspector()
         fake.add(900, parent: 800, helper)
         // 800 exited; its old parent is unknowable.
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -252,7 +255,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 1, "/bin/zsh")
         fake.add(1, parent: 0, "/sbin/launchd", team: "Q6L2SF6YDW", id: "com.anthropic.claude-code")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [1])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], hostPID: 1)
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
         XCTAssertFalse(fake.lookups.contains(1))
     }
@@ -262,7 +265,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 700, "/bin/zsh")
         fake.add(700, parent: 800, "/bin/zsh")
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [claudeCodeRegistration])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
         XCTAssertLessThanOrEqual(fake.lookups.count, 4)
     }
@@ -270,7 +273,7 @@ final class CaseCallerResolverTests: XCTestCase {
     func test_self_parent_terminates() {
         let fake = FakeProcessInspector()
         fake.add(900, parent: 900, helper)
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [])
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
@@ -287,18 +290,18 @@ final class CaseCallerResolverTests: XCTestCase {
         }
         let reg = claudeCodeRegistration
         XCTAssertEqual(
-            CaseCallerResolver(inspector: chain(depth: 32), registrations: [reg], builtInOpenCodePIDs: []).resolve(peerPID: 1000),
+            CaseCallerResolver(inspector: chain(depth: 32), registrations: [reg]).resolve(peerPID: 1000),
             .registered(reg))
         let deep = chain(depth: 33)
         XCTAssertEqual(
-            CaseCallerResolver(inspector: deep, registrations: [reg], builtInOpenCodePIDs: []).resolve(peerPID: 1000),
+            CaseCallerResolver(inspector: deep, registrations: [reg]).resolve(peerPID: 1000),
             .human)
         XCTAssertLessThanOrEqual(deep.lookups.count, 33)
     }
 
     func test_invalid_peer_pid_is_human() {
         let fake = FakeProcessInspector()
-        let resolver = CaseCallerResolver(inspector: fake, registrations: [], builtInOpenCodePIDs: [])
+        let resolver = CaseCallerResolver(inspector: fake, registrations: [])
         XCTAssertEqual(resolver.resolve(peerPID: 0), .human)
         XCTAssertEqual(resolver.resolve(peerPID: -5), .human)
         XCTAssertTrue(fake.lookups.isEmpty)

@@ -87,8 +87,7 @@ final class AgentSettingsStore: ObservableObject {
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
-                                   caseMCPCommand: CaseBuiltInAgentAccess.currentMCPCommand(),
-                                   screenMCPCommand: CaseBuiltInAgentAccess.bundledHelperURL.map {
+                                   screenMCPCommand: BundledWhytapHelper.url.map {
                                        [$0.path, "app", "screen-mcp"]
                                    },
                                    openRouterProvider: selectedOpenCodeProvider == .openRouter

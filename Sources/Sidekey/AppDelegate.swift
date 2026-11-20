@@ -3890,9 +3890,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
         let broker = CaseBroker(
             service: CaseVaultService.shared,
-            resolver: CaseSystemCallerResolver(
-                inspector: inspector,
-                builtInOpenCodePIDs: { CaseBuiltInAgentProcesses.shared.pids }),
+            resolver: CaseSystemCallerResolver(inspector: inspector),
             approvals: approvals,
             authenticator: LocalCaseAuthenticator(),
             appControl: { [controls] request in await controls.handle(request) },

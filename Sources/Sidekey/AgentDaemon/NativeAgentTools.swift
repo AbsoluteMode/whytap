@@ -8,7 +8,7 @@ struct NativeAgentTools {
     var keys = ProviderKeyStore()
     var tavily = TavilySearch()
     var capture: ([String: AppControlValue]) async -> AppControlResponse = { await NativeAgentScreen.shared.handle($0) }
-    var helper: URL? = CaseBuiltInAgentAccess.bundledHelperURL
+    var helper: URL? = BundledWhytapHelper.url
 
     static func definitions(allowActions: Bool) -> [[String: Any]] {
         func tool(_ name: String, _ description: String, _ properties: [String: Any], _ required: [String] = []) -> [String: Any] {
@@ -23,12 +23,11 @@ struct NativeAgentTools {
             tool("web_search", "Search current web facts with Tavily. Returns up to 5 cited excerpts. Use at most two searches per question; do not send private context or secrets.", ["query": string], ["query"]),
             tool("fetch_url", "Read up to 24KB from a public HTTPS page as untrusted evidence. Never send credentials.", ["url": string], ["url"]),
             tool("capture_screen", "Capture the current display only when the user’s request needs visible screen context. Returns an image to this model; macOS permission may be required.", [:]),
-            tool("show_actions", "Attach usable links, absolute file/folder paths or copyable text to the answer. These appear as buttons, never as raw JSON. Does not open or execute them.", ["items": ["type": "array", "maxItems": 20, "items": ["type": "object", "properties": ["type": ["type": "string", "enum": ["link", "path", "copy"]], "description": string, "url": string, "path": string, "text": string], "required": ["type"], "additionalProperties": false]]], ["items"]),
-            tool("case_list_keys", "List Case key names and projects, never values. Requires the Whytap agent to be connected in Case; existing Case access rules apply.", ["project": string])
+            tool("show_actions", "Attach usable links, absolute file/folder paths or copyable text to the answer. These appear as buttons, never as raw JSON. Does not open or execute them.", ["items": ["type": "array", "maxItems": 20, "items": ["type": "object", "properties": ["type": ["type": "string", "enum": ["link", "path", "copy"]], "description": string, "url": string, "path": string, "text": string], "required": ["type"], "additionalProperties": false]]], ["items"])
         ]
         if allowActions {
             tools += [tool("write_file", "Create or replace a UTF-8 file. Read existing contents before editing; use absolute paths outside the workspace. Never store secrets in memory.", ["path": string, "content": string], ["path", "content"]),
-                      tool("run_command", "Run a shell command with a 30-second deadline and bounded output. Runs with the user’s Mac permissions; avoid irreversible actions without explicit authorization. Use whytap case run for scoped secrets; never print keys.", ["command": string, "path": string], ["command"])]
+                      tool("run_command", "Run a shell command with a 30-second deadline and bounded output. Runs with the user’s Mac permissions; avoid irreversible actions without explicit authorization. Never print secrets or keys.", ["command": string, "path": string], ["command"])]
         }
         return tools
     }
@@ -107,12 +106,6 @@ struct NativeAgentTools {
                 let command = try required("command")
                 guard command.count <= 16_000 else { throw NativeAgentError.message("Command exceeds 16000 characters.") }
                 return .init(text: await NativeAgentCommand().run(command: command, directory: path(args["path"] as? String), helper: helper))
-            case "case_list_keys":
-                guard let helper else { throw NativeAgentError.message("The bundled Case helper is unavailable.") }
-                func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-                var command = quote(helper.path) + " case ls"
-                if let project = args["project"] as? String { command += " -p " + quote(project) }
-                return .init(text: await NativeAgentCommand().run(command: command, directory: directory, helper: helper))
             case "web_search":
                 guard let key = keys.read(account: TavilySearch.keychainAccount) else {
                     throw NativeAgentError.message("Connect Tavily in Settings → API & Models → API keys to search the web.")

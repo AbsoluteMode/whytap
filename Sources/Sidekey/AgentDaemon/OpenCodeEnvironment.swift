@@ -10,7 +10,6 @@ enum OpenCodeEnvironment {
     static func make(workingDirectory: URL, model: String, provider: OpenCodeModelProvider = .openRouter,
                      key: String?, allowActions: Bool,
                      modelSpec: OpenCodeModelSpec? = nil,
-                     caseMCPCommand: [String]? = nil,
                      screenMCPCommand: [String]? = nil,
                      openRouterProvider: String? = nil,
                      inherited: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: String] {
@@ -42,9 +41,6 @@ enum OpenCodeEnvironment {
         var permissions: [String: String] = allowActions
             ? ["*": "allow", "question": "deny"]
             : ["*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "webfetch": "allow"]
-        // Case MCP only lists project and key names, so it stays usable with
-        // actions off; running commands still follows the bash permission.
-        if caseMCPCommand != nil { permissions["case_*"] = "allow" }
         if screenMCPCommand != nil {
             permissions["screen_*"] = "allow"
             // V2 exposes MCP through Code Mode. Nested tools still enforce
@@ -67,10 +63,8 @@ enum OpenCodeEnvironment {
             "provider": [id: ["options": ["apiKey": "{env:\(provider.keyEnvironmentName)}"],
                               "models": [normalized: declaration]]]
         ]
-        // Case requires registration; screen capture is independent. Entries
-        // hold bundled helper paths, never credential values or tokens.
+        // Entries hold bundled helper paths, never credential values or tokens.
         var mcp: [String: Any] = [:]
-        if let caseMCPCommand { mcp["case"] = ["type": "local", "command": caseMCPCommand, "enabled": true] }
         if let screenMCPCommand {
             mcp["screen"] = ["type": "local", "command": screenMCPCommand, "enabled": true, "timeout": 15_000]
         }

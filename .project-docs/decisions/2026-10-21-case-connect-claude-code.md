@@ -5,8 +5,8 @@ title: Case Connect offers Claude Code again
 summary: The Connect catalog is OpenCode, Claude Code and Cursor; Codex stays a legacy registration only.
 status: confirmed
 tags: [case, secrets, agents, connect, claude-code]
-canonical_for: [case-connect-catalog]
-verified_at: 2026-10-21
+canonical_for: [historical-case-connect-claude-code]
+verified_at: 2026-11-20
 sources:
   - type: user-confirmed
     reference: On 2026-10-21 the user decided to offer Claude Code in Case → Connect again so a new user can connect the Claude desktop app's Claude Code there, without adding Codex.
@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Case/Clients/CaseClientConnector.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-claude-desktop-binary-layout.md]
+related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-20-case-remove-whytap-agent.md]
 ---
 
 # Case Connect offers Claude Code again
@@ -83,6 +83,9 @@ step; the builder does not change that configuration for smoke.
 
 Amends the Connect catalog of PR #119 and
 [Case Connect and scope](../../docs/decisions/2026-10-20-case-connect-and-scope.md);
-scope, modes and broker checks are unchanged.
+scope, modes and broker checks are unchanged. On 2026-11-20,
+[Remove Whytap Agent from Case](2026-11-20-case-remove-whytap-agent.md) narrowed
+the Connect catalog to `[.claudeCode, .cursor]`; Claude Code discovery, Desktop
+layout handling and connector setup remain as recorded here.
 
 Implementation references: [Case broker](../../docs/decisions/2026-10-19-case-secrets-broker.md), [design](../../docs/DESIGN.md) and [product spec](../../docs/SPEC.md).

@@ -94,6 +94,12 @@ a join. Each has a test now:
 - A joining Mac records no removals: an item it drops before its first shared
   round never reaches the other Macs (second review).
 - A round that started before the switch flipped reports nothing.
+- While a round runs it is the only writer of the ledger; an edit noticed
+  meanwhile makes the next round run at once and is stamped there (third
+  review: a stale save after the write lost such an edit).
+- Keys the shared document names are read even when this Mac's routes do not
+  list them, so a key restored without its server meets the shared removal
+  instead of being uploaded again later (third review).
 - The cached document is bound to the key ID that opened it.
 - Joining stays unfinished until the upload succeeds or nothing needed it.
 - Turning the switch off or on, or a restore waiting for relaunch, stops a
@@ -125,7 +131,7 @@ a join. Each has a test now:
 
 ## What was tested
 
-Twenty-six tests with two simulated Macs sharing a fake repository: first upload
+Twenty-eight tests with two simulated Macs sharing a fake repository: first upload
 without the display and with ciphertext only; joining takes shared values and
 uploads extras; edits to different items both survive; the later edit of one
 item wins; a removed key is removed on the other Mac; an unreadable Keychain
@@ -136,7 +142,9 @@ newer formats are detected; the Contents API transport (404, 304, base64,
 SHA conflict); routes, hotkeys and Toolbox reload; and one test per review
 finding above (key saved during a read, offline edit time, new recovery code,
 join losing a write race, refused Keychain write, quick off and on, an edit
-during backoff, a key dropped before joining, a removal a store re-saves). Timestamps are stored as
+during backoff, a key dropped before joining, a removal a store re-saves, a
+key removed while the joining write is in flight, a restored key of a removed
+server). Timestamps are stored as
 integer milliseconds after the first run showed Date round-off.
 
 Not tested: two real Macs against GitHub, and every store reacting live.

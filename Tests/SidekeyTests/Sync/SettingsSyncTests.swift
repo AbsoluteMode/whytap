@@ -468,6 +468,59 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertNil(first.defaults.object(forKey: meetingKey), "the store's default never comes back as an edit")
     }
 
+    func testARestoredKeyForARemovedServerIsNotUploadedAgain() async throws {
+        let first = mac(), second = mac()
+        let id = UUID()
+        let server = "byok.server.\(id.uuidString.lowercased()).api_key"
+        let endpoint = ServerEndpoint(id: id, name: "Lab", baseURL: "https://lab.example", keyAccount: server)
+        func routing(_ servers: [ServerEndpoint]) throws -> Data {
+            try JSONEncoder().encode(AIRoutingState(routes: [:], migratedRoutes: [:], servers: servers, migrationVersion: 4))
+        }
+        first.defaults.set(try routing([endpoint]), forKey: AIRoutingStore.defaultsKey)
+        first.secrets.values[server] = "server-key"
+        await first.turnOn()
+        // Removing the server removes its key.
+        first.defaults.set(try routing([]), forKey: AIRoutingStore.defaultsKey)
+        first.secrets.values[server] = nil
+        await first.sync()
+        let removal = try await shared()
+        XCTAssertNotNil(removal.entries[SettingsSyncItem.secret(server)])
+        XCTAssertNil(removal.entries[SettingsSyncItem.secret(server)]?.value)
+
+        // An old backup on the other Mac still holds the key, without the server.
+        second.secrets.values[server] = "server-key"
+        await second.turnOn()
+        await second.sync(after: 1000)
+
+        XCTAssertNil(second.secrets.values[server], "joining takes the shared removal")
+        let document = try await shared()
+        XCTAssertNil(document.entries[SettingsSyncItem.secret(server)]?.value)
+    }
+
+    func testAKeyRemovedWhileTheJoiningWriteIsInFlightIsRemovedOnlyAsTheUsersEdit() async throws {
+        let first = mac()
+        first.secrets.values[soniox] = "shared"
+        await first.turnOn()
+
+        let second = mac(at: 100)
+        second.defaults.set("control+m", forKey: meetingKey)
+        let secondMac = second, account = soniox
+        await remote.setInterject { _ in
+            await MainActor.run {
+                secondMac.secrets.values[account] = nil
+                secondMac.service.requestSync()
+            }
+        }
+        await second.turnOn()
+        XCTAssertEqual(second.service.status, .synced(second.clock))
+
+        // The removal was the user's own edit after receiving the key: it is
+        // shared once, from the round that follows the join, never lost.
+        await first.sync(after: 1000)
+        XCTAssertNil(first.secrets.values[soniox])
+        XCTAssertNil(second.secrets.values[soniox])
+    }
+
     func testTurningSyncOffAndOnQuicklyStillSyncs() async throws {
         let first = mac()
         first.defaults.set("smart", forKey: mode)

@@ -183,7 +183,10 @@ final class SettingsSyncService: ObservableObject {
     }
 
     /// Stamps local edits even while rounds back off or GitHub is away.
+    /// While a round runs it alone writes the ledger; the request makes it
+    /// run again at once, and that round stamps the edit.
     private func noticeLocalChanges() {
+        guard running == nil else { return }
         do {
             let ledger = try loadLedger()
             let noticed = ledger.recordingLocalChanges(current: try currentValues(ledger: ledger), now: deps.now())
@@ -265,8 +268,11 @@ final class SettingsSyncService: ObservableObject {
         }
 
         // 3. Values may have changed while GitHub answered: read them again.
+        //    Keys the shared document names are read too, so a key this Mac
+        //    holds but has not agreed on yet is compared, not uploaded later.
         ledger = try loadLedger()
-        let current = try currentValues(ledger: ledger)
+        let sharedAccounts = Set((shared?.entries.keys).map(Array.init) ?? []).compactMap(SettingsSyncItem.secretAccount)
+        let current = try currentValues(ledger: ledger, extraAccounts: Set(sharedAccounts))
         ledger = ledger.recordingLocalChanges(current: current, now: deps.now())
         let plan = SettingsSyncPlan.make(current: current, ledger: ledger, remote: shared.map(Self.sanitized), now: deps.now())
 
@@ -310,6 +316,7 @@ final class SettingsSyncService: ObservableObject {
             let sealed = try SettingsSyncEnvelope.seal(plan.document, key: key)
             let newSHA = try await remote.putSyncFile(path: deps.path, data: sealed, sha: sha)
             cached = (plan.document, newSHA, nil, keyID)
+            try ensureCurrent(round)
         }
         if !next.joined {
             try ensureCurrent(round)
@@ -345,13 +352,14 @@ final class SettingsSyncService: ObservableObject {
     /// Keychain accounts include every key this Mac agreed on before, so a key
     /// counts as removed only when its Keychain item is really gone. An
     /// unreadable value stops the round: it never reads as a removal.
-    private func currentValues(ledger: SettingsSyncLedger) throws -> [String: SettingsSyncValue] {
+    private func currentValues(ledger: SettingsSyncLedger, extraAccounts: Set<String> = []) throws -> [String: SettingsSyncValue] {
         var result: [String: SettingsSyncValue] = [:]
         for (key, value) in try ConfigBackupRegistry.capture(deps.defaults) where SettingsSyncItem.syncsPreference(key) {
             result[SettingsSyncItem.preference(key)] = .preference(value)
         }
         var accounts = try ConfigBackupRegistry.credentialAccounts(in: deps.defaults)
         accounts.formUnion(ledger.records.keys.compactMap(SettingsSyncItem.secretAccount))
+        accounts.formUnion(extraAccounts)
         for account in accounts where SettingsSyncItem.syncsSecret(account) {
             if let value = try deps.secretStore(account).read(), !value.isEmpty {
                 result[SettingsSyncItem.secret(account)] = .secret(value)

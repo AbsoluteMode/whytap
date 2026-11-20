@@ -32,7 +32,7 @@ sources:
   - type: url
     reference: https://docs.github.com/en/rest/releases/assets
     confirmed_at: 2026-10-19
-related: [2026-10-20-simple-github-backup.md, ../project.md, 2026-10-19-backup-management.md, 2026-10-21-backup-tagged-caches.md, 2026-10-21-backup-reliability.md, 2026-10-21-backup-resume-digest.md, 2026-10-21-backup-capture-pacing.md, 2026-10-21-backup-essentials-only.md, 2026-10-21-clipboard-privacy-markers.md]
+related: [2026-10-20-simple-github-backup.md, ../project.md, 2026-10-19-backup-management.md, 2026-10-21-backup-tagged-caches.md, 2026-10-21-backup-reliability.md, 2026-10-21-backup-resume-digest.md, 2026-10-21-backup-capture-pacing.md, 2026-10-21-backup-essentials-only.md, 2026-10-21-clipboard-privacy-markers.md, 2026-11-20-settings-sync.md]
 ---
 
 # Encrypted user artifact backup and recovery

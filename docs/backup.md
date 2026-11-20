@@ -83,6 +83,28 @@ the recovery code.
 A backup restores a saved version; it does not merge edits between Macs.
 No Whytap account, backup server or GitHub Actions is used.
 
+## Sync settings between Macs
+
+**Sync settings between Macs** (off by default) keeps models, provider keys,
+hotkeys, the Toolbox layout, vocabulary and other preferences the same on every
+Mac that uses the same recovery code. Set it up once:
+
+1. On the first Mac, make a backup, then turn the switch on.
+2. On the other Mac, connect GitHub, choose **Restore backup** with the same
+   recovery code, reopen Whytap and turn the switch on.
+
+A change reaches the other Mac within about a minute while both are running,
+without a relaunch. When both Macs change the same setting, the later change
+wins; changes to different settings both stay. Removing a key removes it on the
+other Mac too. A Mac that turns sync on takes the synced settings; its earlier
+values remain in the local settings history.
+
+Each Mac keeps its own island display and calendar accounts. To-do, Case and
+meeting notes are not synced yet; they still travel with backups. Settings are
+encrypted with the recovery code before upload, into the same private
+repository (`whytap-sync/`). Turning sync off on one Mac stops it there and
+leaves the other Macs and the synced copy unchanged.
+
 ## What is included
 
 Planner tasks and local Whytap events have their own To-do & calendar section.

@@ -118,6 +118,39 @@ final class BackupSimpleFlowTests: XCTestCase {
         XCTAssertEqual(try target.credentialStores["byok.soniox.api_key"]!.read(), "synthetic-provider-key")
     }
 
+    func testSettingsSyncIsOfferedAfterRestoreOnACleanMac() async throws {
+        let source = try profile(), target = try profile()
+        let first = model(source)
+        await first.connectGitHub(token: "synthetic-token")
+        await first.backupEverything()
+        let code = first.recoveryCode
+        XCTAssertFalse(code.isEmpty)
+        XCTAssertEqual(remote.publishCount, 1)
+
+        let keyStore = MemoryTokenStore(), githubTokenStore = MemoryTokenStore()
+        let second = model(target, keyStore: keyStore, githubTokenStore: githubTokenStore)
+        await second.connectGitHub(token: "synthetic-token")
+        await second.restoreEverything(code: code)
+        XCTAssertNil(second.errorMessage)
+        XCTAssertTrue(second.needsRestart)
+        _ = try ArtifactBackupEngine.applyPendingRestore(environment: target.environment())
+
+        let restarted = model(target, keyStore: keyStore, githubTokenStore: githubTokenStore)
+        await restarted.start()?.value
+        await restarted.stopAndWait()
+        XCTAssertTrue(restarted.canUseGitHubBackup)
+        XCTAssertTrue(restarted.recoverySaved)
+        XCTAssertFalse(restarted.needsRestart)
+        XCTAssertEqual(remote.publishCount, 1, "Restore does not need to upload another backup")
+        XCTAssertNil(restarted.lastRemoteBackupAt)
+        XCTAssertFalse(restarted.showsAutomaticBackup, "Automatic backup still waits for this Mac's own upload")
+        XCTAssertTrue(restarted.showsSettingsSync, "the sync switch is offered after a restore on a clean Mac")
+
+        let fresh = model(try profile())
+        await fresh.connectGitHub(token: "synthetic-token")
+        XCTAssertFalse(fresh.showsSettingsSync, "without a recovery code there is nothing to sync with")
+    }
+
     func testUploadStatusCountsPartsAndEndsWithTheCheckedResult() async throws {
         let backup = model(try profile())
         await backup.connectGitHub(token: "synthetic-token")

@@ -33,6 +33,12 @@ final class NotificationSoundSettings: ObservableObject {
         selections = defaults.dictionary(forKey: Self.key) as? [String: String] ?? [:]
     }
 
+    /// Settings sync wrote another Mac's choices.
+    func reloadFromDefaults() {
+        let loaded = defaults.dictionary(forKey: Self.key) as? [String: String] ?? [:]
+        if loaded != selections { selections = loaded }
+    }
+
     func sound(for source: String) -> NotificationSound {
         selections[source].flatMap(NotificationSound.init(rawValue:)) ?? .none
     }

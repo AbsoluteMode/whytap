@@ -4,15 +4,17 @@ import SwiftUI
 @MainActor
 struct SettingsBackupView: View {
     @ObservedObject var model: BackupViewModel
+    @ObservedObject var settingsSync: SettingsSyncService
     var openIntegrations: () -> Void
     @State private var showRestore: Bool
     @State private var restoreCode = ""
     @FocusState private var isRestoreCodeFocused: Bool
     @FocusState private var isGitHubFocused: Bool
 
-    init(model: BackupViewModel = .shared, showRestore: Bool = false,
+    init(model: BackupViewModel = .shared, settingsSync: SettingsSyncService = .shared, showRestore: Bool = false,
          openIntegrations: @escaping () -> Void = {}) {
         self.model = model
+        self.settingsSync = settingsSync
         self.openIntegrations = openIntegrations
         _showRestore = State(initialValue: showRestore)
     }
@@ -86,6 +88,16 @@ struct SettingsBackupView: View {
                         MacRow(title: "Automatic backup", subtitle: automaticBackupSubtitle) {
                             MacSwitch(isOn: Binding(get: { model.isEnabled }, set: { model.setAutomaticBackup($0) }),
                                       isEnabled: model.canChangeAutomaticBackup, label: "Automatic backup")
+                        }
+                    }
+                }
+                // Also on a Mac that only restored, and always while on, so it can be turned off.
+                // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+                if model.showsSettingsSync || settingsSync.isEnabled {
+                    MacCard {
+                        MacRow(title: "Sync settings between Macs", subtitle: settingsSyncSubtitle) {
+                            MacSwitch(isOn: Binding(get: { settingsSync.isEnabled }, set: { settingsSync.setEnabled($0) }),
+                                      isEnabled: !model.needsRestart, label: "Sync settings between Macs")
                         }
                     }
                 }
@@ -184,6 +196,17 @@ struct SettingsBackupView: View {
         guard model.isEnabled else { return "Paused. Back up still saves one copy and keeps this off." }
         guard let next = model.nextAutomaticCapture else { return "At most hourly, only when something changed." }
         return "At most hourly, only when something changed. Next check after \(next.formatted(date: .omitted, time: .shortened))."
+    }
+
+    private var settingsSyncSubtitle: String {
+        switch settingsSync.status {
+        case .off:
+            return "Models, provider keys, hotkeys, Toolbox and vocabulary stay the same on Macs with this recovery code. A Mac that turns it on takes the synced settings."
+        case .synced(let date):
+            return "Settings synced · \(date.formatted(date: .omitted, time: .shortened))"
+        default:
+            return settingsSync.status.text
+        }
     }
 
     private func restore() {

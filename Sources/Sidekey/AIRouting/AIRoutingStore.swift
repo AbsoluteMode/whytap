@@ -53,7 +53,7 @@ final class AIRoutingStore: ObservableObject {
     /// The stored value as loaded, when part or all of it could not be read.
     private var pendingBackup: Any?
     /// An independent choice this build cannot decode is not an absent route.
-    private let hasUnreadSubtitleRoute: Bool
+    private var hasUnreadSubtitleRoute: Bool
 
     /// Production uses `UserDefaults.standard`. Tests pass an isolated suite.
     init(defaults: UserDefaults = .standard) {
@@ -65,6 +65,16 @@ final class AIRoutingStore: ObservableObject {
     }
 
     var isMigrated: Bool { state.migrationVersion >= 1 }
+
+    /// Settings sync wrote another Mac's routing document: read it again so
+    /// the next request and Settings use it. Nothing is written here.
+    // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+    func reloadFromDefaults() {
+        let loaded = Self.load(from: defaults)
+        pendingBackup = loaded.unreadValue
+        hasUnreadSubtitleRoute = loaded.hasUnreadSubtitleRoute
+        if loaded.state != state { state = loaded.state }
+    }
 
     // MARK: - Routes
 

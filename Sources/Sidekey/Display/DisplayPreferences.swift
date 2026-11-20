@@ -48,6 +48,14 @@ final class DisplayPreferences: ObservableObject {
         )
     }
 
+    /// Settings sync wrote another Mac's choices.
+    func reloadFromDefaults() {
+        let helpers = defaults.bool(forKey: Key.hideHelpers)
+        if helpers != hideHelpers { hideHelpers = helpers }
+        let widgets = defaults.bool(forKey: Key.hideIslandHoverWidgets)
+        if widgets != hideIslandHoverWidgets { hideIslandHoverWidgets = widgets }
+    }
+
     /// When `true`, every inline helper chip in the UI hides itself.
     /// Setter persists the new value to the bound `UserDefaults`
     /// instance before publishing the change so observers can read the

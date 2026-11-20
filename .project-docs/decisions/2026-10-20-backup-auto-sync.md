@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Backup/BackupViewModel.swift
     confirmed_at: 2026-10-20
-related: [../project.md, 2026-10-20-simple-github-backup.md, 2026-10-21-backup-capture-pacing.md]
+related: [../project.md, 2026-10-20-simple-github-backup.md, 2026-10-21-backup-capture-pacing.md, 2026-11-20-settings-sync.md]
 ---
 
 # Created backups synchronize automatically

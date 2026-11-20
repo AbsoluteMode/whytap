@@ -170,13 +170,14 @@ struct APIHintsView: View {
         // wait for their own provider support (user decision, 2026-11-19).
         Hint(
             category: .models,
-            provider: "Claude Max",
+            provider: "Claude Max & Ultra",
             assetName: "claude-code",
             allowance: "$100–200",
             cadence: "API credit each month",
             access: .paidPlan,
-            detail: "Max 5x: $100; Max 20x: $200. After seven days, link a Console organization in Claude's billing settings. Use its Anthropic key for Agent. Credits expire each cycle.",
-            url: URL(string: "https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans")!
+            detail: "Max includes $100 and Ultra includes $200. After seven days, link a Console organization in Claude's billing settings. Use its Anthropic key for Agent. Credits expire each cycle.",
+            url: URL(string: "https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans")!,
+            checked: "2026-11-19"
         ),
         Hint(
             category: .models,

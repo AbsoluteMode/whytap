@@ -70,6 +70,15 @@ final class AgentOtherSectionTests: XCTestCase {
         }
     }
 
+    /// Google search opens a typed or spoken query (AgentController's Google
+    /// composer, GoogleSearchController); it never reads the selection.
+    func test_google_row_does_not_promise_a_selection_search() throws {
+        let s = try String(contentsOf: projectRoot().appendingPathComponent("Sources/Sidekey/Settings/SettingsOtherView.swift"),
+                           encoding: .utf8)
+        XCTAssertTrue(s.contains("subtitle: \"Type or say a query; it opens in Google. Shortcut in Hotkeys.\""))
+        XCTAssertFalse(s.contains("selection on Google"))
+    }
+
     private func projectRoot() throws -> URL {
         var url = URL(fileURLWithPath: #filePath)
         while url.path != "/" {

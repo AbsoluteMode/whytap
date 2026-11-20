@@ -160,7 +160,7 @@ struct SettingsOtherView: View {
                             title: "Google search",
                             // No key name here: the shortcut is remappable in
                             // Settings -> Hotkeys, so a fixed name would mislead.
-                            subtitle: "Search your selection on Google. Shortcut in Hotkeys."
+                            subtitle: "Type or say a query; it opens in Google. Shortcut in Hotkeys."
                         ) {
                             MacSwitch(isOn: googleToggleBinding, label: "Google search")
                         }

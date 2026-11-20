@@ -231,6 +231,9 @@ final class MeetingsContentController: NSViewController {
         refreshAllOnShow()
     }
 
+    /// A note open for editing: opening another meeting would drop the edit.
+    var isEditingNote: Bool { detailView.isEditing }
+
     /// Open a specific meeting straight in the editor (Dynamic Island Notes tile,
     /// menu entries). Refreshes the list underneath so back lands on fresh data.
     func selectMeeting(id: UUID) {

@@ -75,6 +75,9 @@ struct AgentModeView: View {
                         MacSwitch(isOn: $settings.openCodeAllowActions, label: "Allow file edits and commands")
                     }
                 }
+                if let harnessAccess = HarnessAccessStore.active {
+                    HarnessAccessSettingsSection(store: harnessAccess)
+                }
 
             }
             .padding(.horizontal, 24).padding(.vertical, 22)

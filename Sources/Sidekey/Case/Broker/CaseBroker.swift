@@ -15,6 +15,9 @@ struct CaseApprovalRequest: Equatable {
     /// The registration and project a timed answer would cover; nil in previews.
     var appID: UUID?
     var projectID: UUID?
+    /// Set when the prompt asks to let a coding harness use Whytap instead of
+    /// asking about Case keys. It has no timed answer.
+    var harness: HarnessClient?
 
     init(appName: String, projectName: String, keyNames: [String], command: String, timedMinutes: Int,
          appID: UUID? = nil, projectID: UUID? = nil) {
@@ -105,6 +108,8 @@ final class CaseBroker {
     private let authenticator: CaseAuthenticating
     private let now: () -> Date
     private let appControl: ((AppControlRequest) async -> AppControlResponse)?
+    typealias HarnessAccess = (AppControlRequest, pid_t, (AppControlRequest) async -> AppControlResponse) async -> AppControlResponse
+    private let harnessAccess: HarnessAccess?
     private(set) var grants = CaseTimedGrants()
     private var accessSubscription: AnyCancellable?
 
@@ -114,8 +119,10 @@ final class CaseBroker {
         approvals: CaseApprovalPresenting,
         authenticator: CaseAuthenticating,
         now: @escaping () -> Date = Date.init,
-        appControl: ((AppControlRequest) async -> AppControlResponse)? = nil
+        appControl: ((AppControlRequest) async -> AppControlResponse)? = nil,
+        harnessAccess: HarnessAccess? = nil
     ) {
+        self.harnessAccess = harnessAccess
         self.service = service
         self.resolver = resolver
         self.approvals = approvals
@@ -141,6 +148,12 @@ final class CaseBroker {
             guard let appControl else {
                 return .appControl(.failure("unavailable", "Application controls are unavailable in this build."))
             }
+            // Content and action tools first need the user's Yes for the harness
+            // that started this helper. Its answers are not Case registrations.
+            // WHY: .project-docs/decisions/2026-11-20-harness-access.md
+            // It wraps the call, so an answer changed while content was being
+            // read still stops the response.
+            if let harnessAccess { return .appControl(await harnessAccess(command, peerPID, appControl)) }
             return .appControl(await appControl(command))
         }
         // The cached payload is reused; never re-read the vault per request.

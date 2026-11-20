@@ -73,6 +73,22 @@ final class OnDeviceSpeechCardTests: XCTestCase {
         XCTAssertEqual(Set([fresh, loading, ready, failed].map(\.symbol)).count, 4, "every state has its own symbol")
     }
 
+    /// Reported from the installed app: the card sat on "0% of about 470 MB"
+    /// while the download was being set up and read as stalled.
+    func test_a_download_without_a_whole_percent_says_starting_not_zero() {
+        typealias Presentation = OnDeviceSpeechCard.Presentation
+        for fraction in [0, 0.004, 0.0099, -1] {
+            let starting = Presentation(.downloading(fraction))
+            XCTAssertTrue(Presentation.isStarting(fraction))
+            XCTAssertTrue(starting.detail.hasPrefix("Starting…"), starting.detail)
+            XCTAssertFalse(starting.detail.contains("0%"), starting.detail)
+            XCTAssertTrue(starting.detail.contains("about 470 MB"))
+            XCTAssertEqual(starting.action, "Cancel", "a download that has not started can still be cancelled")
+        }
+        XCTAssertFalse(Presentation.isStarting(0.01))
+        XCTAssertTrue(Presentation(.downloading(0.01)).detail.hasPrefix("1% of"))
+    }
+
     func test_percent_never_leaves_its_range_or_reads_100_before_the_end() {
         typealias Presentation = OnDeviceSpeechCard.Presentation
         XCTAssertEqual(Presentation.percent(-1), 0)

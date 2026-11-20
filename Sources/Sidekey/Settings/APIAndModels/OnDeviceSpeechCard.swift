@@ -30,7 +30,11 @@ struct OnDeviceSpeechCard: View {
             case .downloading(let fraction):
                 symbol = "arrow.down"
                 title = "Downloading \(model.displayName)"
-                detail = "\(Self.percent(fraction))% of \(model.approximateSize). You can leave this tab."
+                // Before the first percent the number says nothing, and "0%"
+                // read as a stalled download.
+                detail = Self.isStarting(fraction)
+                    ? "Starting… \(model.approximateSize). You can leave this tab."
+                    : "\(Self.percent(fraction))% of \(model.approximateSize). You can leave this tab."
                 action = "Cancel"
             case .ready:
                 symbol = "checkmark"
@@ -48,6 +52,10 @@ struct OnDeviceSpeechCard: View {
         static func percent(_ fraction: Double) -> Int {
             Int((min(1, max(0, fraction)) * 100).rounded(.down))
         }
+
+        /// The download has no whole percent yet: the provider is being
+        /// reached or the first bytes are arriving.
+        static func isStarting(_ fraction: Double) -> Bool { percent(fraction) == 0 }
     }
 
     private var presentation: Presentation { Presentation(model.status) }
@@ -94,10 +102,12 @@ struct OnDeviceSpeechCard: View {
                 actionButton
             }
             if let fraction {
-                OnDeviceDownloadBar(fraction: fraction, animated: !reduceMotion)
+                OnDeviceDownloadBar(
+                    fraction: fraction, starting: Presentation.isStarting(fraction), animated: !reduceMotion)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .accessibilityLabel("Download progress")
-                    .accessibilityValue("\(Presentation.percent(fraction)) percent")
+                    .accessibilityValue(Presentation.isStarting(fraction)
+                        ? "Starting" : "\(Presentation.percent(fraction)) percent")
             }
         }
         .padding(16)
@@ -165,17 +175,35 @@ struct OnDeviceSpeechCard: View {
 
 /// The download's progress: a bar that eases to each new fraction, with a
 /// highlight travelling along the filled part so a slow download still looks
-/// alive. With `animated` off it is a plain bar that jumps to its value.
+/// alive. While `starting` (no whole percent yet) there is no filled part to
+/// show, so a tinted highlight travels the whole track instead of a dot
+/// sitting at the left edge. With `animated` off it is a plain bar that
+/// jumps to its value, empty while starting.
 struct OnDeviceDownloadBar: View {
     let fraction: Double
+    var starting = false
     var animated = true
     @State private var sweep = false
 
     var body: some View {
         GeometryReader { proxy in
-            let width = max(6, proxy.size.width * min(1, max(0, fraction)))
+            let width = starting ? 0 : max(6, proxy.size.width * min(1, max(0, fraction)))
             ZStack(alignment: .leading) {
                 Capsule().fill(MacSettingsTheme.controlBg)
+                    .overlay(alignment: .leading) {
+                        if starting, animated {
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [
+                                        MacSettingsTheme.accent.opacity(0), MacSettingsTheme.accent,
+                                        MacSettingsTheme.accent.opacity(0),
+                                    ],
+                                    startPoint: .leading, endPoint: .trailing))
+                                .frame(width: 90)
+                                .offset(x: sweep ? proxy.size.width : -90)
+                        }
+                    }
+                    .clipShape(Capsule())
                 Capsule()
                     .fill(MacSettingsTheme.accent)
                     .frame(width: width)

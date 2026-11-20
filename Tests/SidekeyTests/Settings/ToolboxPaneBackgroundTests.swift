@@ -49,6 +49,18 @@ final class ToolboxPaneBackgroundTests: XCTestCase {
         XCTAssertFalse(island[start.lowerBound..<end.lowerBound].contains("Color.white"))
     }
 
+    /// Review finding: a notification without a link was a disabled button,
+    /// and on light Settings its title fell to 3.37:1 and its body to 1.71:1.
+    func test_an_unlinked_notification_is_a_static_readable_row_on_light_settings() throws {
+        let notify = try source("Sources/Sidekey/DynamicIsland/NotifyHoverPanel.swift")
+        XCTAssertTrue(notify.contains("if event.canActivate || colorScheme == .dark {"))
+        let row = try XCTUnwrap(notify.range(of: "private func historyRow("))
+        let label = try XCTUnwrap(notify.range(of: "private func historyRowLabel("))
+        let body = notify[row.lowerBound..<label.lowerBound]
+        XCTAssertTrue(body.contains("historyRowLabel(event)\n            }"), "the light inactive row is the bare label")
+        XCTAssertTrue(body.contains("Button(\"Copy text\")"), "Copy stays on every row")
+    }
+
     func test_the_ink_is_white_in_the_dark_island_and_dark_on_light_settings() throws {
         func resolved(_ name: NSAppearance.Name) throws -> NSColor {
             var color: NSColor?
@@ -97,7 +109,9 @@ final class ToolboxPaneBackgroundTests: XCTestCase {
         for (index, title) in ["Build finished", "Meeting notes are ready"].enumerated() {
             _ = await hub.receive(LocalNotificationEvent(
                 id: "render-\(index)", source: "render", sourceName: "Render", title: title,
-                body: "Synthetic body text for the review image.", link: nil,
+                body: "Synthetic body text for the review image.",
+                // One row with an action and one without: both must be readable.
+                link: index == 0 ? URL(string: "https://example.com/build") : nil,
                 timestamp: Date(timeIntervalSinceNow: -Double(index + 1) * 600)))
         }
         let supervisor = NotifyScriptSupervisor(directory: notifyRoot, hub: hub)

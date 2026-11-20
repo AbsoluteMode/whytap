@@ -10,6 +10,7 @@ struct NotifyHoverPanel: View {
     let showsBackButton: Bool
     @State private var showsSources: Bool
     @State private var pendingRemoval: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     init(hub: LocalNotificationHub? = nil, supervisor: NotifyScriptSupervisor? = nil,
          meetingNotifications: MeetingReadyNotifications? = nil,
@@ -108,30 +109,39 @@ struct NotifyHoverPanel: View {
             Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.padding(.vertical, 14).frame(maxWidth: .infinity)
     }
-    private func historyRow(_ event: LocalNotificationEvent) -> some View {
-        Button {
-            hub.activate(event)
-        } label: {
-            HStack(spacing: 8) {
-                NotificationSourceIcon(glyph: IslandNotificationPill.resolvedGlyph(for: event),
-                                       tint: IslandNotificationPill.resolvedTint(for: event), size: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Text(event.body.isEmpty ? event.sourceName : event.body)
-                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(.secondary)
-                    .lineLimit(1).frame(maxWidth: 48)
+    /// A notification without a link or internal action is still text the
+    /// user reads. On light Settings a disabled button dimmed it to 1.7:1, so
+    /// there the row is static; the dark island keeps its dimmed inactive row.
+    // WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
+    @ViewBuilder private func historyRow(_ event: LocalNotificationEvent) -> some View {
+        Group {
+            if event.canActivate || colorScheme == .dark {
+                Button { hub.activate(event) } label: { historyRowLabel(event) }
+                    .buttonStyle(.plain)
+                    .disabled(!event.canActivate)
+            } else {
+                historyRowLabel(event)
             }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
-        .disabled(!event.canActivate)
-        .opacity(1)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("\(event.sourceName), \(event.title), \(event.body)")
         .contextMenu { Button("Copy text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(event.title + "\n" + event.body, forType: .string) } }
+    }
+    private func historyRowLabel(_ event: LocalNotificationEvent) -> some View {
+        HStack(spacing: 8) {
+            NotificationSourceIcon(glyph: IslandNotificationPill.resolvedGlyph(for: event),
+                                   tint: IslandNotificationPill.resolvedTint(for: event), size: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Text(event.body.isEmpty ? event.sourceName : event.body)
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(event.timestamp, style: .relative).font(.system(size: 9)).foregroundStyle(.secondary)
+                .lineLimit(1).frame(maxWidth: 48)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
     }
     private func sourceRow(_ source: NotifySourceStatus) -> some View {
         HStack(spacing: 7) {

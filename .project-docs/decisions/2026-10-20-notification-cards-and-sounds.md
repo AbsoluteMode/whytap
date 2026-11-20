@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandNotificationPill.swift
     confirmed_at: 2026-10-20
-related: [2026-10-20-meeting-ready-notifications.md, 2026-10-19-icon-notifications.md]
+related: [2026-10-20-meeting-ready-notifications.md, 2026-10-19-icon-notifications.md, 2026-11-20-input-language-suggestion.md]
 ---
 
 # Notification cards and sounds

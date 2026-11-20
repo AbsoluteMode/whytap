@@ -37,6 +37,7 @@ two different products.
   color: white in a dark appearance, near-black in a light one. The island's
   window is always dark, so the island draws exactly as before.
 - The opacities tuned for white on dark are kept for both appearances.
+- Row and plate surfaces are dynamic too (`IslandInk.row`, `IslandInk.plate`).
 
 ## Why
 
@@ -52,8 +53,13 @@ from light Settings.
 - Tests: no dark card or forced dark scheme remains; the embedded panels have
   no hardcoded white; the ink resolves to white in dark and near-black in
   light.
-- Not rendered: Case, Notify, History and Monitor panes (they need live
-  stores), and nothing was checked in the running app or in the island.
+- The builder's review measured 1.04:1 for a Notify title on light Settings:
+  Notify rows and History rows kept fixed dark fills. They now use
+  `IslandInk.row` and `IslandInk.plate`, which are the same dark surfaces in
+  the island and light ones on light Settings. Notify (History and Sources)
+  and History were rendered with synthetic rows in both appearances.
+- Not rendered: Case and Monitor panes (they need live stores), and nothing
+  was checked in the running app or in the island.
 
 ## Rejected
 

@@ -39,7 +39,7 @@ final class ToolboxPaneBackgroundTests: XCTestCase {
             "Sources/Sidekey/History/HistoryHoverView.swift",
         ] {
             let text = try source(path)
-            for forbidden in [".white", "NSColor(white: 1"] {
+            for forbidden in [".white", "NSColor(white: 1", "Color.black", "Color(red: 0.12"] {
                 XCTAssertFalse(text.contains(forbidden), "\(path) still has \(forbidden)")
             }
         }
@@ -88,7 +88,36 @@ final class ToolboxPaneBackgroundTests: XCTestCase {
             filler.submitCurrentQuery()
         }
 
+        // Notify and History with rows: the builder measured 1.04:1 for a
+        // Notify title on light Settings while the rows kept a dark fill.
+        let notifyRoot = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        addTeardownBlock { try? FileManager.default.removeItem(at: notifyRoot) }
+        let hub = LocalNotificationHub(directory: notifyRoot)
+        let meetings = MeetingReadyNotifications(defaults: defaults, hub: hub)
+        for (index, title) in ["Build finished", "Meeting notes are ready"].enumerated() {
+            _ = await hub.receive(LocalNotificationEvent(
+                id: "render-\(index)", source: "render", sourceName: "Render", title: title,
+                body: "Synthetic body text for the review image.", link: nil,
+                timestamp: Date(timeIntervalSinceNow: -Double(index + 1) * 600)))
+        }
+        let supervisor = NotifyScriptSupervisor(directory: notifyRoot, hub: hub)
+        func notify(_ sources: Bool) -> AnyView {
+            AnyView(NotifyHoverPanel(hub: hub, supervisor: supervisor, meetingNotifications: meetings,
+                                     showsBackButton: false, showsSources: sources, onBack: {}))
+        }
+        let cards: [HistoryStripCard] = (1...3).map {
+            .drop(.init(id: Int64($0), createdAt: Date(timeIntervalSinceNow: -Double($0) * 300),
+                        formattedText: "Synthetic dictation number \($0) for the review image.", targetApp: "Notes"))
+        }
+        let history = AnyView(HistoryHoverView(
+            mode: .constant(.drop), cards: cards, targetAppName: nil, onSelectMode: { _ in },
+            onCopy: { _ in }, onPreviewAnchorChange: { _, _ in }, onPaste: { _ in },
+            allowsKeyboardPaste: false, onDelete: { _ in }))
+
         let panes: [(String, AnyView)] = [
+            ("notify-history", notify(false)),
+            ("notify-sources", notify(true)),
+            ("history", history),
             ("vocab", AnyView(IslandVocabularyEditorPanel(viewModel: vocab))),
             ("filler", AnyView(IslandFillerEditorPanel(viewModel: filler))),
             ("input-language", AnyView(IslandLanguagePickerPanel(

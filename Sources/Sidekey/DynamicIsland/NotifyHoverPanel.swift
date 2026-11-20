@@ -8,12 +8,13 @@ struct NotifyHoverPanel: View {
     @ObservedObject var meetingNotifications: MeetingReadyNotifications
     let onBack: () -> Void
     let showsBackButton: Bool
-    @State private var showsSources = false
+    @State private var showsSources: Bool
     @State private var pendingRemoval: String?
 
     init(hub: LocalNotificationHub? = nil, supervisor: NotifyScriptSupervisor? = nil,
          meetingNotifications: MeetingReadyNotifications? = nil,
-         showsBackButton: Bool = true, onBack: @escaping () -> Void) {
+         showsBackButton: Bool = true, showsSources: Bool = false, onBack: @escaping () -> Void) {
+        _showsSources = State(initialValue: showsSources)
         self.hub = hub ?? .shared; self.supervisor = supervisor ?? .shared; self.onBack = onBack; self.showsBackButton = showsBackButton
         self.meetingNotifications = meetingNotifications ?? .shared
     }
@@ -44,7 +45,7 @@ struct NotifyHoverPanel: View {
                 sectionButton("Sources", selected: showsSources) { showsSources = true }
             }
             .padding(2)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(0.24)))
+            .background(RoundedRectangle(cornerRadius: 7).fill(IslandInk.plate(0.24)))
 
 
             if let error = hub.error ?? supervisor.error {
@@ -63,7 +64,7 @@ struct NotifyHoverPanel: View {
                             Toggle("Enable meeting notes notifications", isOn: $meetingNotifications.enabled)
                                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                         }
-                        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
+                        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
                         if supervisor.sources.isEmpty {
                             empty("No other sources yet", detail: "Ask your agent to connect more notifications.")
                         }
@@ -123,7 +124,7 @@ struct NotifyHoverPanel: View {
                     .lineLimit(1).frame(maxWidth: 48)
             }
             .padding(8)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
@@ -143,7 +144,7 @@ struct NotifyHoverPanel: View {
                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 .accessibilityLabel("Enable \(source.script.name)")
         }
-        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.12, green: 0.12, blue: 0.14)))
+        .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
         .contextMenu { Button("Remove source…", role: .destructive) { pendingRemoval = source.id } }
     }
 }

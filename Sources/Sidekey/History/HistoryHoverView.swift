@@ -282,7 +282,7 @@ struct HistoryHoverView: View {
                     historyForegroundLens(cornerRadius: 10, isHovered: false)
                 } else {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.black.opacity(HistoryHoverVisualStyle.hintOpacity))
+                        .fill(IslandInk.plate(HistoryHoverVisualStyle.hintOpacity))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(IslandInk.color.opacity(0.08), lineWidth: 0.5)
@@ -354,7 +354,7 @@ private func rowBackground(isHovered: Bool) -> some View {
         historyForegroundLens(cornerRadius: 11, isHovered: isHovered)
     } else {
         RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(Color.black.opacity(
+            .fill(IslandInk.plate(
                 isHovered
                     ? HistoryHoverVisualStyle.rowHoverOpacity
                     : HistoryHoverVisualStyle.rowIdleOpacity

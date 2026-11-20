@@ -978,10 +978,11 @@ struct IslandView: View {
                     IslandCameraSurface(
                         compactWidth: compactWidth,
                         compactHeight: compactHeight,
-                        // A card attached below (meeting nudge or Case Approve
-                        // prompt) squares the bottom so both read as one surface.
+                        // A card attached below (meeting nudge, Case Approve
+                        // prompt or its confirmation) squares the bottom so
+                        // both read as one surface.
                         meetingSuggestionActive: appState.meetingSuggestionActive
-                            || appState.caseApprovalActive,
+                            || appState.caseApprovalActive || appState.caseCardAttached,
                         trailingExtension: activeWingExtension,
                         // Use the same width as the content clip for each
                         // ticker frame or rapidly changing label or input.

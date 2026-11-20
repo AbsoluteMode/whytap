@@ -1219,8 +1219,10 @@ keyboard, 60 s timeout, then for 1.9 s the same marks with the dots between
 them turning green one by one and "Claude Code connected" with a checkmark;
 Reduce Motion shows the finished state). The card and its confirmation
 overlap the island's bottom edge by CaseApprovalView.islandSeam (1 pt) and
-caseApprovalActive stays true through the confirmation, so the island keeps
-its square bottom edge and no line or corner shows between them. The prompt is shared by sessions that
+AppState.caseCardAttached stays true through the confirmation, so the island
+keeps its square bottom edge and no line or corner shows between them.
+caseCardAttached is geometry only: caseApprovalActive still ends with the
+answer, so a visible Agent answer owns Escape again at once. The prompt is shared by sessions that
 start together and outlives the request that caused it. The MCP server answers
 initialize at once and sends request_access afterwards through the client that
 never launches Whytap. Yes and No are remembered per Mac in one Keychain item

@@ -174,7 +174,11 @@ confirmation; one line of text; an animation on connecting. The gap had two
 causes. A line of the island's edge showed above the card, so the card now
 overlaps that edge by 1 pt. And the island rounded its bottom corners as soon
 as the question was answered, while the confirmation was still attached under
-it; the island now keeps its square edge until the confirmation leaves. What
+it; the island now keeps its square edge until the confirmation leaves,
+through a separate geometry-only state (`caseCardAttached`). The builder
+caught the first attempt, which stretched `caseApprovalActive` over the
+confirmation: the prompt's key tap had already stopped, so for 1.9 s a
+visible Agent answer did not own Escape and it reached the foreground app. What
 Yes covers is no longer written on the card; VoiceOver still reads it.
 
 ## Builder review

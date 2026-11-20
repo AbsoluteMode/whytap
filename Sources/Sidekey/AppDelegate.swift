@@ -221,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var caseApprovalController: CaseApprovalController?
     private var caseApprovalPanel: CaseApprovalPanel?
     private var caseApprovalCancellable: AnyCancellable?
+    private var caseCardCancellable: AnyCancellable?
     private var nowPlayingController: NowPlayingController?
 
     /// Volume ducking: smoothly lowers the system output volume while the user
@@ -3864,13 +3865,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)
-        // The connected confirmation is the same attached card: the island
-        // keeps its square bottom edge until it leaves too.
+        // The interactive prompt only: Escape, idle-hide and the drawer
+        // follow it, and its key tap stops with the answer.
         caseApprovalCancellable = approvals.$current
+            .map { $0 != nil }
+            .removeDuplicates()
+            .sink { active in AppState.shared.caseApprovalActive = active }
+        // The connected confirmation is the same attached card: the island
+        // keeps its square bottom edge until it leaves too. Geometry only.
+        caseCardCancellable = approvals.$current
             .combineLatest(approvals.$connected)
             .map { $0 != nil || $1 != nil }
             .removeDuplicates()
-            .sink { active in AppState.shared.caseApprovalActive = active }
+            .sink { attached in AppState.shared.caseCardAttached = attached }
         // Answers are per Mac, in this app's Keychain.
         // WHY: .project-docs/decisions/2026-11-20-harness-access.md
         let harnessStore = HarnessAccessStore(

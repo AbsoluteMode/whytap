@@ -33,13 +33,15 @@ paying.
 ## Decision
 
 - `APIHintsView.hints` stays the only source of offers. README's
-  **Free API keys** section lists the offers with `access: .noCard` (provider
-  link, allowance and period, the offer's details and its own check date) and
-  the newest date as "Reviewed monthly · Last checked". Paid-plan credits
+  **Free API keys** section shows the offers with `access: .noCard` as small
+  linked cards (logo, provider, allowance, period, purpose; dark and light
+  SVGs) under one line "No card needed · Reviewed monthly · Last checked".
+  Maxim asked for no extra words: details and per-offer dates stay in the
+  app. Paid-plan credits
   (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
   starting without payment.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
-  one. `APIHintsRenderTests.testReadmeFreeAPITableMatchesNoCardOffers` fails
+  one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.
 - A scheduled task on Maxim's Mac runs on the first of each month. It rechecks
   every offer on the provider's official page, updates changed terms and every

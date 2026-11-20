@@ -3,9 +3,11 @@
 
 The offers live in one place, `APIHintsView.hints` in
 Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift, which Settings ->
-API & Models -> API hints shows. This script lists the offers that need no
-card (`access: .noCard`) as a table at the end of README.md, with each offer's
-own check date and the newest one in the header line.
+API & Models -> API hints shows. This script turns the offers that need no
+card (`access: .noCard`) into small linked cards (docs/assets/readme/
+free-api-*.svg, dark and light, logos from Resources/UsefulLinkIcons) at the
+end of README.md, under one line with the newest check date. Only the
+provider, allowance, period and purpose: details stay in the app.
 
 Usage:
     python3 scripts/readme-free-apis.py          # rewrite README.md
@@ -53,31 +55,72 @@ def display(iso):
     return f"{d:%B} {d.day}, {d.year}"
 
 
+THEMES = {
+    "dark": dict(bg="#151b23", border="#2d333b", ink="#f0f6fc", sub="#9198a1", accent="#b8adff"),
+    "light": dict(bg="#f6f8fa", border="#d1d9e0", ink="#1f2328", sub="#59636e", accent="#5b4bd6"),
+}
+FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
+W, H = 196, 124
+ICONS = REPO / "Resources/UsefulLinkIcons"
+OUT = REPO / "docs/assets/readme"
+
+
+def logo(asset, color, x, y, size):
+    svg = (ICONS / f"{asset}.svg").read_text()
+    svg = re.sub(r"<title>.*?</title>", "", svg, flags=re.S)
+    svg = re.sub(r"#(?:111111|000000)", color, svg)
+    if 'fill="' not in svg.split(">", 1)[0]:
+        svg = svg.replace("<svg ", f'<svg fill="{color}" ', 1)
+    return svg.replace("<svg ", f'<svg x="{x}" y="{y}" width="{size}" height="{size}" ', 1)
+
+
+def short(cadence):
+    return cadence[5:] if cadence.startswith("free ") else cadence
+
+
+def card(o, theme):
+    c = THEMES[theme]
+    e = lambda t: html.escape(t, quote=False)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <rect x="0.5" y="0.5" width="{W-1}" height="{H-1}" rx="14" fill="{c['bg']}" stroke="{c['border']}"/>
+  {logo(o["assetName"], c["ink"], 16, 16, 18)}
+  <text x="42" y="30" font-family="{FONT}" font-size="14" font-weight="600" fill="{c['ink']}">{e(o['provider'])}</text>
+  <text x="16" y="70" font-family="{FONT}" font-size="28" font-weight="700" fill="{c['ink']}">{e(o['allowance'])}</text>
+  <text x="16" y="89" font-family="{FONT}" font-size="12" fill="{c['sub']}">{e(short(o['cadence']))}</text>
+  <text x="16" y="110" font-family="{FONT}" font-size="11.5" font-weight="600" fill="{c['accent']}">{e(CATEGORY[o['category']])}</text>
+</svg>
+'''
+
+
 def section():
     rows = [o for o in offers() if o["access"] == "noCard"]
     order = list(CATEGORY)
     rows.sort(key=lambda o: order.index(o["category"]))  # stable: Swift order within a category
     newest = max(o["checked"] for o in rows)
-    esc = lambda t: html.escape(t, quote=False).replace("|", "\\|")
-    lines = [
+    for old in OUT.glob("free-api-*.svg"):
+        old.unlink()
+    cards = []
+    for o in rows:
+        slug = re.sub(r"[^a-z0-9]+", "-", o["provider"].lower()).strip("-")
+        for t in THEMES:
+            (OUT / f"free-api-{slug}-{t}.svg").write_text(card(o, t))
+        src = lambda t: f"docs/assets/readme/free-api-{slug}-{t}.svg"
+        alt = html.escape(f"{o['provider']}: {o['allowance']} {o['cadence']} ({CATEGORY[o['category']]})")
+        cards.append(
+            f'<a href="{o["url"]}"><picture>'
+            f'<source media="(prefers-color-scheme: dark)" srcset="{src("dark")}">'
+            f'<source media="(prefers-color-scheme: light)" srcset="{src("light")}">'
+            f'<img alt="{alt}" src="{src("dark")}" width="{W}"></picture></a>'
+        )
+    return "\n".join([
         HEADING,
         "",
-        "Whytap is free: you bring the keys. These providers give an allowance without a card,",
-        "so you can try Whytap without spending anything. The same list is in",
-        "Settings → API & Models → API hints.",
+        f"<sub>No card needed · Reviewed monthly · Last checked {display(newest)}</sub>",
         "",
-        f"<sub>Reviewed monthly · Last checked {display(newest)}</sub>",
-        "",
-        "| For | Provider | Free allowance | Good to know | Checked |",
-        "|---|---|---|---|---|",
-    ]
-    for o in rows:
-        lines.append(
-            f"| {CATEGORY[o['category']]} | [{esc(o['provider'])}]({o['url']}) "
-            f"| **{esc(o['allowance'])}** {esc(o['cadence'])} | {esc(o['detail'])} | {display(o['checked'])} |"
-        )
-    lines += ["", "Allowances and terms belong to the providers and can change; check the linked page before you rely on one."]
-    return "\n".join(lines) + "\n"
+        "<p>",
+        "\n".join(cards),
+        "</p>",
+    ]) + "\n"
 
 
 def updated(readme):

@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-19
+verified_at: 2026-11-20
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-20 the maintainer requested cleanup of old remote branches and a recurring branch cleanup rule for agents.
+    confirmed_at: 2026-11-20
   - type: user-confirmed
     reference: On 2026-11-19 the user asked to rebuild the builder so that an agent session runs only while builds are open, later submissions queue behind it and it resolves merge conflicts itself.
     confirmed_at: 2026-11-19
@@ -131,6 +134,14 @@ taps. Keep the user's working instance; do not launch a second app for testing.
 6. Automatically enqueue that reviewed PR/head using the command below, then
    stop acting as an integrator. Do not wait for the user to remember to ask
    for a build. A PR alone, a draft, or an old review is not readiness evidence.
+7. After the builder confirms the merge, verify that GitHub's automatic head
+   branch deletion removed your remote feature branch. If it remains, delete
+   it only if its tip still matches the merged PR head, no open PR uses it as
+   a head or base, and no other session uses it. Use a Git lease with that
+   exact head SHA for manual deletion so a concurrent push is preserved.
+   Keep protected and shared branches, including release branches. Keep
+   branches from closed unmerged PRs until their work lands elsewhere or the
+   maintainer approves discarding it.
 
 Normal technical conflicts are resolved from current code and accepted
 requirements. Reuse one implementation for duplicate work; preserve both

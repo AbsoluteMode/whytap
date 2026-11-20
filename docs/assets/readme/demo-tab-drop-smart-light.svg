@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="60" viewBox="0 0 340 60">
+  <rect x="0.5" y="0.5" width="339" height="59" rx="13" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <circle cx="30" cy="30.0" r="18" fill="#ece9ff"/>
+  <g transform="translate(20 20.0) scale(0.8333)" fill="none" stroke="#5b4bd6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10v3" />
+  <path d="M6 6v11" />
+  <path d="M10 3v18" />
+  <path d="M14 8v7" />
+  <path d="M18 5v13" />
+  <path d="M22 10v3" /></g>
+  <text x="58" y="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#1f2328">Drop Smart</text>
+  <text x="58" y="44" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#59636e">Speak, correct yourself, release</text>
+  <rect x="282" y="9" width="48" height="20" rx="10" fill="#6c5ce7"/>
+  <text x="306" y="23" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#ffffff">Click</text>
+</svg>

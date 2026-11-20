@@ -35,7 +35,7 @@
 Click any row below to watch it right here on GitHub — no external links or page jumps.
 
 <details open>
-<summary><b>Case — API Key Vault for Your Harness</b> &nbsp;·&nbsp; <sub>Replaces ~$10/mo developer secret vaults → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Case — API Key Vault for Your Harness</b><br><sub>&emsp;Replaces ~$10/mo developer secret vaults &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Store API keys locally in Case. **Claude Code**, **Codex**, **Cursor** and the Whytap agent discover key names via MCP and run commands with them after a quick <kbd>Y</kbd> / <kbd>N</kbd> approval in your Mac's notch — secret values never enter `.env` files or model context.
@@ -45,8 +45,10 @@ Store API keys locally in Case. **Claude Code**, **Codex**, **Cursor** and the W
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Drop &amp; Drop Smart — Voice Prompts &amp; Self-Correction</b> &nbsp;·&nbsp; <sub>Replaces ~$12/mo AI voice dictation apps → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Drop &amp; Drop Smart — Voice Prompts</b><br><sub>&emsp;Replaces ~$12/mo AI voice dictation apps &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Hold <kbd>Space</kbd> in any editor, terminal or chat field, speak naturally, and release. **Fast** pastes instantly (for **$0 on-device** with Parakeet v3 on Apple Silicon, or pennies with your speech key); **Smart** removes fillers, keeps self-corrections, and formats lists and paragraphs.
@@ -56,8 +58,10 @@ Hold <kbd>Space</kbd> in any editor, terminal or chat field, speak naturally, an
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Cross-Language Dictation &amp; Custom Vocab</b> &nbsp;·&nbsp; <sub>Included in Drop → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Output Language &amp; Custom Vocab</b><br><sub>&emsp;Built into Drop at no extra cost &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Speak in your native language and paste directly in another with **Output Language**, or teach **Vocab** project names, jargon and handles once so every future take spells them right.
@@ -76,8 +80,10 @@ Speak in your native language and paste directly in another with **Output Langua
 </table>
 </details>
 
+<br>
+
 <details>
-<summary><b>Meeting Notes + Harness MCP — No Call Bot</b> &nbsp;·&nbsp; <sub>Replaces ~$15/mo bot-free meeting-note apps → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Meeting Notes + Harness MCP</b><br><sub>&emsp;Replaces ~$15/mo bot-free meeting apps &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Whytap notices calls in Zoom, Meet, Teams and Slack without a bot joining the room, captures system + mic audio locally, and writes structured speaker notes and tasks. Approve once to let **Claude Code** or **Codex** read your meeting transcripts and tasks directly over MCP.
@@ -87,8 +93,10 @@ Whytap notices calls in Zoom, Meet, Teams and Slack without a bot joining the ro
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Notch AI Agent — Instant Answers &amp; File Lookup</b> &nbsp;·&nbsp; <sub>Replaces ~$16/mo desktop AI launchers → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Notch AI Agent — Answers &amp; File Lookup</b><br><sub>&emsp;Replaces ~$16/mo desktop AI launchers &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Tap your Agent shortcut to type or hold it to speak. Your chosen model answers right inside the notch, searches the web, locates local files, and lets you open or insert results without leaving your current window.
@@ -98,8 +106,10 @@ Tap your Agent shortcut to type or hold it to speak. Your chosen model answers r
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Shot — Area Capture, 1-Click Secret Blur &amp; On-Device OCR</b> &nbsp;·&nbsp; <sub>Replaces ~$35 screenshot &amp; OCR utilities → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Shot — Secret Blur &amp; On-Device OCR</b><br><sub>&emsp;Replaces ~$35 screenshot &amp; OCR tools &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Freeze any screen, draw arrows and labels, blur sensitive text and numbers on invoices or keys in a single click, or extract text completely offline with on-device Apple Vision.
@@ -109,8 +119,10 @@ Freeze any screen, draw arrows and labels, blur sensitive text and numbers on in
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Display Extra — Push XDR / HDR Brightness Past 100%</b> &nbsp;·&nbsp; <sub>Replaces ~$20 MacBook HDR brightness boosters → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Display Extra — HDR Brightness Boost</b><br><sub>&emsp;Replaces ~$20 MacBook brightness tools &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Unlock the full HDR headroom of your MacBook Pro XDR or external HDR display beyond macOS's standard brightness limit, directly from the notch slider.
@@ -120,8 +132,10 @@ Unlock the full HDR headroom of your MacBook Pro XDR or external HDR display bey
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>Notify &amp; Monitor — Agent Alerts &amp; Live Notch Dashboards</b> &nbsp;·&nbsp; <sub>Replaces ~$15 menu-bar alert &amp; widget tools → <b>$0 in Whytap</b></sub></summary>
+<summary><b>Notify &amp; Monitor — Live Notch Dashboards</b><br><sub>&emsp;Replaces ~$15 menu-bar alert &amp; widget apps &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Have your coding harness, CI scripts or cron jobs post rich notification cards right beside the notch, and keep live custom JSON/script dashboards one hover away in Monitor.
@@ -131,8 +145,10 @@ Have your coding harness, CI scripts or cron jobs post rich notification cards r
 </p>
 </details>
 
+<br>
+
 <details>
-<summary><b>History — Clipboard, Dictations &amp; Agent Answers</b> &nbsp;·&nbsp; <sub>Replaces ~$15 clipboard managers → <b>$0 in Whytap</b></sub></summary>
+<summary><b>History — Clipboard, Dictations &amp; Answers</b><br><sub>&emsp;Replaces ~$15 clipboard managers &nbsp;·&nbsp; <b>$0 in Whytap</b></sub></summary>
 <br>
 
 Every copied snippet, image, voice dictation and agent answer stays searchable in one local drawer — ready to copy or paste again at any time.

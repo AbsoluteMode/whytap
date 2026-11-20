@@ -1001,6 +1001,11 @@ A missing, malformed or negative (router) amount shows nothing, never a zero.
 Display only: not searchable, no effect on routes, checks or Costs. Other
 providers show no price. Caches written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
+Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
+and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
+another of their models stays listed and working, except Soniox v5, which
+launch moves to v6 of the same kind (owner-approved; Soniox removes v5 on
+2026-12-15). WHY: .project-docs/decisions/2026-11-20-speech-model-lists.md
 Speech models: Deepgram Updated uses cached newest version dates;
 Soniox/ElevenLabs Released uses exact stable IDs with verified official launch
 dates in ModelRegistry. Unknown models/aliases inherit no release date. Nonempty search

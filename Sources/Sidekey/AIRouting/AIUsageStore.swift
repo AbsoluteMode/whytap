@@ -32,13 +32,16 @@ struct AIUsageEvent: Equatable, Sendable {
 
     static func speech(_ context: AIUsageContext, seconds: Double, id: String = UUID().uuidString,
                        at date: Date = Date()) -> Self {
-        // Public Soniox equivalent hourly rates, verified 2026-10-20:
-        // https://soniox.com/pricing. These are estimates, not account debits.
+        // Public Soniox equivalent hourly rates, verified 2026-11-20 (the same
+        // for v5 and v6): https://soniox.com/pricing. These are estimates, not
+        // account debits.
         // Do not convert ElevenLabs USD prices to credits: the plan/product
         // conversion is not supplied by the streaming API.
         let rate: Double?
-        if context.account == .soniox, ["stt-rt-v5", "stt-async-v5"].contains(context.model) {
-            rate = context.model == "stt-async-v5" ? 0.10 : 0.12
+        if context.account == .soniox, ["stt-rt-v5", "stt-rt-v6"].contains(context.model) {
+            rate = 0.12
+        } else if context.account == .soniox, ["stt-async-v5", "stt-async-v6"].contains(context.model) {
+            rate = 0.10
         } else { rate = nil }
         let duration = seconds.isFinite ? max(0, seconds) : 0
         return Self(id: id, createdAt: date, context: context, currency: context.currency,

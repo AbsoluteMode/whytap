@@ -54,9 +54,9 @@ final class ModelStatusResolverTests: XCTestCase {
 
     private func sonioxCatalog() -> CatalogSnapshot {
         fresh([
-            CatalogModel(id: "stt-rt-v5", uses: [.realtimeSTT]),
-            CatalogModel(id: "stt-rt-v4", uses: [.realtimeSTT], aliasOf: "stt-rt-v5"),
-            CatalogModel(id: "stt-async-v5", uses: [.asyncSTT]),
+            CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
+            CatalogModel(id: "stt-rt-v4", uses: [.realtimeSTT], aliasOf: "stt-rt-v6"),
+            CatalogModel(id: "stt-async-v6", uses: [.asyncSTT]),
         ])
     }
 
@@ -91,28 +91,27 @@ final class ModelStatusResolverTests: XCTestCase {
         let models = try ModelCatalogFetcher.parseDeepgram(Data(json.utf8))
         let env = try makeEnv(snapshots: [.deepgram: fresh(models)], keyed: [.soniox, .deepgram, .elevenLabs])
         let sections = env.resolver.sections(for: .meetings)
-        for (account, model, day) in [(ProviderAccount.soniox, "stt-async-v5", "2026-06-11"),
+        for (account, model, day) in [(ProviderAccount.soniox, "stt-async-v6", "2026-11-03"),
                                       (.elevenLabs, "scribe_v3_live", "2026-11-10")] {
             let option = try XCTUnwrap(sections.first { $0.account == account }?.options.first { $0.model == model })
             XCTAssertTrue(try XCTUnwrap(option.dateLabel).hasPrefix("Released "))
             XCTAssertEqual(option.catalogDate, ModelCatalogFetcher.deepgramVersionDate(day))
         }
         let speechOptions = try XCTUnwrap(env.resolver.sections(for: .dropFast).first { $0.account == .soniox }?.options)
-        XCTAssertEqual(speechOptions.first { $0.model == "stt-rt-v5" }?.catalogDate,
-                       ModelCatalogFetcher.deepgramVersionDate("2026-06-16"))
+        XCTAssertEqual(speechOptions.first { $0.model == "stt-rt-v6" }?.catalogDate,
+                       ModelCatalogFetcher.deepgramVersionDate("2026-11-03"))
         XCTAssertEqual(ModelRegistry.documentedReleaseDate(for: "scribe_v2", kind: .elevenLabs),
                        ModelCatalogFetcher.deepgramVersionDate("2026-01-09"))
-        XCTAssertNil(ModelRegistry.documentedReleaseDate(for: "stt-rt-v6", kind: .soniox))
+        XCTAssertNil(ModelRegistry.documentedReleaseDate(for: "stt-rt-v7", kind: .soniox))
         XCTAssertNil(ModelRegistry.documentedReleaseDate(for: "scribe_v3_realtime", kind: .elevenLabs))
-        XCTAssertNil(ModelRegistry.documentedReleaseDate(for: "stt-rt-v5", kind: .openAICompatible))
+        XCTAssertNil(ModelRegistry.documentedReleaseDate(for: "stt-rt-v6", kind: .openAICompatible))
 
         let deepgram = try XCTUnwrap(sections.first { $0.account == .deepgram })
         XCTAssertTrue(try XCTUnwrap(deepgram.options.first { $0.model == "nova-3" }?.dateLabel).hasPrefix("Updated "))
         XCTAssertEqual(deepgram.options.first { $0.model == "nova-3" }?.catalogDate,
                        ModelCatalogFetcher.deepgramVersionDate("2026-10-20"))
-        XCTAssertNil(deepgram.options.first { $0.model == "nova-undated" }?.dateLabel)
         let sorted = ModelPickerSearch.results(in: [deepgram], query: "nova")
-        XCTAssertEqual(sorted.map(\.option.model), ["nova-3", "nova-3-general", "nova-3-medical", "nova-undated"])
+        XCTAssertEqual(sorted.map(\.option.model), ["nova-3"], "the rest of Deepgram's catalog is not offered")
     }
 
     func test_prod_after_migration_shows_one_switch_for_four_features() throws {
@@ -121,16 +120,16 @@ final class ModelStatusResolverTests: XCTestCase {
         env.routing.completeMigration(
             routes: [
                 .dropFast: rt, .dropSmart: rt, .agentVoice: rt, .voiceSearch: rt,
-                .meetings: FeatureRoute(account: .soniox, model: "stt-async-v5"),
+                .meetings: FeatureRoute(account: .soniox, model: "stt-async-v6"),
             ],
             servers: []
         )
 
         XCTAssertEqual(env.resolver.aliasGroups(), [AliasGroupAction(
-            account: .soniox, from: "stt-rt-v4", to: "stt-rt-v5",
+            account: .soniox, from: "stt-rt-v4", to: "stt-rt-v6",
             features: [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
         )])
-        XCTAssertEqual(env.resolver.status(for: .dropFast), .deprecatedAlias(of: "stt-rt-v5"))
+        XCTAssertEqual(env.resolver.status(for: .dropFast), .deprecatedAlias(of: "stt-rt-v6"))
         XCTAssertEqual(env.resolver.status(for: .meetings), .ok)
     }
 
@@ -199,7 +198,9 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertNil(models.first { $0.id == "odd" }?.updatedAt, "an undated model is never hidden")
     }
 
-    func test_picker_hides_deepgram_models_not_updated_for_a_year_but_keeps_selected_and_built_in() throws {
+    /// The owner's decision: Deepgram's other rows are noise. Only Nova-3 is
+    /// offered, for live and recorded features alike; a saved route stays.
+    func test_deepgram_picker_offers_only_nova_3_and_keeps_a_saved_route() throws {
         let fetched = try XCTUnwrap(ModelCatalogFetcher.deepgramVersionDate("2026-10-19"))
         let day = { (s: String) in ModelCatalogFetcher.deepgramVersionDate(s) }
         let models = [
@@ -214,10 +215,16 @@ final class ModelStatusResolverTests: XCTestCase {
         env.routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-2-meeting"), for: .dropFast)
 
         let ids = try XCTUnwrap(env.resolver.sections(for: .dropFast).first).options.map(\.model)
-        XCTAssertEqual(Set(ids), ["nova-3", "nova-3-medical", "nova-2-meeting"])
-        XCTAssertNotEqual(env.resolver.status(for: .dropFast), .removedByProvider, "a stale model is hidden, not removed")
-        let fresh = try XCTUnwrap(env.resolver.sections(for: .voiceSearch).first).options.map(\.model)
-        XCTAssertFalse(fresh.contains("nova-2-meeting"), "selected on another feature does not count")
+        XCTAssertEqual(Set(ids), ["nova-3", "nova-2-meeting"], "the saved model stays selectable on its own feature")
+        XCTAssertNotEqual(env.resolver.status(for: .dropFast), .removedByProvider, "a hidden model is not removed")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.model, "nova-2-meeting", "the route is not rewritten")
+        for feature in [AIFeature.voiceSearch, .agentVoice, .subtitlesAudio, .meetings] {
+            let offered = try XCTUnwrap(env.resolver.sections(for: feature).first).options.map(\.model)
+            XCTAssertEqual(offered, ["nova-3"], "\(feature)")
+        }
+        XCTAssertTrue(ModelRegistry.offersOnlyBuiltInModels(.soniox))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.elevenLabs))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.openRouter))
     }
 
     func test_deepgram_nova_3_is_not_removed() throws {
@@ -258,11 +265,29 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(env.resolver.verdict(model: "x/tiny", account: .openRouter, for: .dropSmartCleanup), .new)
     }
 
+    /// Soniox keeps deprecated versions in its catalog; only v6 is offered.
+    func test_soniox_picker_offers_only_v6_and_keeps_a_saved_route() throws {
+        let catalog = fresh([
+            CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
+            CatalogModel(id: "stt-rt-v5", uses: [.realtimeSTT]),
+            CatalogModel(id: "stt-rt-v3", uses: [.realtimeSTT]),
+            CatalogModel(id: "stt-async-v6", uses: [.asyncSTT]),
+            CatalogModel(id: "stt-async-v5", uses: [.asyncSTT]),
+        ])
+        let env = try makeEnv(snapshots: [.soniox: catalog], keyed: [.soniox])
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v3"), for: .agentVoice)
+
+        XCTAssertEqual(try XCTUnwrap(env.resolver.sections(for: .dropFast).first).options.map(\.model), ["stt-rt-v6"])
+        XCTAssertEqual(try XCTUnwrap(env.resolver.sections(for: .meetings).first).options.map(\.model), ["stt-async-v6"])
+        XCTAssertEqual(Set(try XCTUnwrap(env.resolver.sections(for: .agentVoice).first).options.map(\.model)),
+                       ["stt-rt-v6", "stt-rt-v3"], "a saved model stays listed on its own feature")
+    }
+
     func test_soniox_meetings_offer_async_models_only() throws {
         let env = try makeEnv(snapshots: [.soniox: sonioxCatalog()], keyed: [.soniox])
         let section = try XCTUnwrap(env.resolver.sections(for: .meetings).first)
 
-        XCTAssertEqual(section.options.map(\.model), ["stt-async-v5"])
+        XCTAssertEqual(section.options.map(\.model), ["stt-async-v6"])
         XCTAssertEqual(section.options.first?.hint, "with speakers")
         XCTAssertFalse(section.options.contains { $0.model == "stt-rt-v4" })
     }
@@ -299,14 +324,14 @@ final class ModelStatusResolverTests: XCTestCase {
 
     func test_rejected_key_shows_key_problem() throws {
         let env = try makeEnv(snapshots: [.soniox: sonioxCatalog()], keyed: [.soniox])
-        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         XCTAssertEqual(env.resolver.status(for: .dropFast), .ok)
 
         env.keyStatuses.set(.rejected(.invalidKey), for: .soniox, at: Date())
         XCTAssertEqual(env.resolver.status(for: .dropFast), .keyProblem)
 
         let keyless = try makeEnv()
-        keyless.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v5"), for: .dropFast)
+        keyless.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         XCTAssertEqual(keyless.resolver.status(for: .dropFast), .notSet)
         XCTAssertEqual(keyless.resolver.status(for: .meetings), .notSet)
     }

@@ -233,6 +233,24 @@ final class AIRoutingStore: ObservableObject {
         commit(updated)
     }
 
+    /// Meetings on ElevenLabs go to its speech-to-text endpoint, which
+    /// refuses the streaming model: a saved Meetings route naming a Scribe
+    /// real-time model moves to Scribe v3 on the same account and key, on the
+    /// owner's decision. Not version-gated, so a route restored from an older
+    /// backup or synced from an older Mac moves too. Nothing else changes;
+    /// Deepgram's nova-3 serves both kinds.
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+    func moveMeetingsToRecordedModelIfNeeded() {
+        guard pendingBackup == nil else { return }
+        let key = AIFeature.meetings.rawValue
+        guard let route = stateWithSubtitleSeparation.routes[key], route.account == .elevenLabs else { return }
+        let recorded = ModelRegistry.elevenLabsRecordedModel(for: route.model)
+        guard recorded != route.model else { return }
+        var updated = stateWithSubtitleSeparation
+        updated.routes[key]?.model = recorded
+        commit(updated)
+    }
+
     /// Soniox v6 replaced v5 on the owner's decision, three weeks before
     /// Soniox itself routes v5 requests to v6: a saved Soniox route moves to
     /// the same kind of v6 model on the same account. Not version-gated, so a

@@ -134,18 +134,28 @@ struct ModelProbe: ModelProbing {
 
     // MARK: - Recorded
 
+    /// The recorded model on the provider's own file / pre-recorded API:
+    /// Soniox, ElevenLabs (meetings) and Deepgram (meetings).
     private func probeAsync(_ route: ResolvedRoute) async -> ProbeOutcome {
-        guard case .soniox = route.account else { return .inconclusive(reason: "Not supported yet") }
         guard let key = route.apiKey, !key.isEmpty else { return .inconclusive(reason: "Key problem") }
         let model = route.model
+        let batchRoute: ProviderBatchRoute
+        switch route.account {
+        case .soniox: batchRoute = .soniox(apiKey: key, model: model)
+        case .elevenLabs: batchRoute = .elevenLabs(apiKey: key, model: model)
+        case .deepgram: batchRoute = .deepgram(apiKey: key, model: model)
+        case .server, .thisMac, .openRouter, .openAI, .anthropic: return .inconclusive(reason: "Not supported yet")
+        }
         let session = session
         let outcome: ProbeOutcome? = await withTimeout {
-            let transcriber = ProviderBatchTranscriber(route: { .soniox(apiKey: key, model: model) }, session: session)
+            let transcriber = ProviderBatchTranscriber(route: { batchRoute }, session: session)
             do {
                 _ = try await transcriber.transcribe(audio: Self.silence, language: "en")
                 return .passed
             } catch ProviderBatchTranscriptionError.httpStatus(let code) where [400, 404, 422].contains(code) {
                 return .failed(reason: "Provider refused the model (HTTP \(code))")
+            } catch ProviderBatchTranscriptionError.elevenLabs {
+                return .inconclusive(reason: "Key problem")
             } catch is URLError {
                 return .inconclusive(reason: "No connection")
             } catch {

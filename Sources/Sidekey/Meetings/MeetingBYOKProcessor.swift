@@ -125,6 +125,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
     private let fileManager: FileManager
     private let sonioxSession: URLSession
     private let makeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
+    private let makeRecordedTranscriber: (RecordedMeetingRoute) throws -> any MeetingRecordedTranscribing
 
     convenience init() {
         self.init(
@@ -144,7 +145,10 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         checks: ModelCheckStore? = nil,
         fileManager: FileManager = .default,
         sonioxSession: URLSession = .shared,
-        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered
+        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered,
+        makeRecordedTranscriber: @escaping (RecordedMeetingRoute) throws -> any MeetingRecordedTranscribing = {
+            RecordedMeetingTranscriber(route: $0)
+        }
     ) {
         self.routing = routing
         self.keys = keys
@@ -155,6 +159,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         self.fileManager = fileManager
         self.sonioxSession = sonioxSession
         self.makeAdapter = makeAdapter
+        self.makeRecordedTranscriber = makeRecordedTranscriber
     }
 
     func shouldProcessDirectly() -> Bool {
@@ -206,14 +211,14 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         if let kept = keptBefore, !kept.isEmpty {
             segments = kept
             transcript = Self.transcriptText(kept)
-        } else if case let transcriptionRoute = try resolveMeetingsRoute(), transcriptionRoute.account == .soniox {
-            guard let key = transcriptionRoute.apiKey, !key.isEmpty else {
-                throw MeetingBYOKProcessingError.missingTranscriptionKey
-            }
-            let result = try await SonioxMeetingTranscriber(
-                apiKey: key, model: transcriptionRoute.model, session: sonioxSession,
-                audioSeconds: event.totalDurationSeconds
-            ).transcribe(chunkURLs: event.chunkURLs, language: language, terms: vocab.terms)
+        } else if case let transcriptionRoute = try resolveMeetingsRoute(),
+                  let recorded = try recordedTranscriber(for: transcriptionRoute, audioSeconds: event.totalDurationSeconds) {
+            // Soniox's file API, ElevenLabs speech-to-text or Deepgram
+            // pre-recorded: the whole recording at once, with speakers.
+            // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+            let result = try await recorded.transcribe(
+                chunkURLs: event.chunkURLs, language: language, terms: vocab.terms
+            )
             // WHY: .project-docs/decisions/2026-10-18-silent-meetings.md
             if result.segments.isEmpty {
                 return try await storeNoSpeechMeeting(
@@ -221,8 +226,9 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
                 )
             }
             segments = result.segments
-            transcript = TranscriptMarkdownFormatter.format(segments)
+            transcript = Self.transcriptText(segments)
         } else {
+            // A user's own server: its real-time adapter, without speakers.
             transcript = try await MeetingBYOKTranscriber(
                 adapter: try makeAdapterMapped(try resolveMeetingsRoute()), terms: vocab.terms
             ).transcribe(chunkURLs: event.chunkURLs, language: language)
@@ -360,6 +366,26 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
     private func resolveMeetingsRoute() throws -> ResolvedRoute {
         do {
             return try FeatureRouteResolver(routing: routing, keys: keys).resolve(.meetings)
+        } catch {
+            throw Self.processingError(for: error)
+        }
+    }
+
+    /// The pre-recorded transcriber of the route's provider, or nil for a
+    /// provider whose meetings run through the real-time adapter (a server).
+    private func recordedTranscriber(
+        for route: ResolvedRoute, audioSeconds: Double
+    ) throws -> (any MeetingRecordedTranscribing)? {
+        if route.account == .soniox {
+            guard let key = route.apiKey, !key.isEmpty else {
+                throw MeetingBYOKProcessingError.missingTranscriptionKey
+            }
+            return SonioxMeetingTranscriber(apiKey: key, model: route.model, session: sonioxSession,
+                                            audioSeconds: audioSeconds)
+        }
+        guard let recorded = try RecordedMeetingRoute.make(for: route) else { return nil }
+        do {
+            return try makeRecordedTranscriber(recorded)
         } catch {
             throw Self.processingError(for: error)
         }

@@ -113,18 +113,18 @@ Subtitles LLM независимы; восстановления через др
 
 ### Режим recorded у митингов
 
-Сейчас митинги расшифровываются по-разному:
+Митинг расшифровывается целиком одной записью у провайдера маршрута `meetings`:
 
 - Soniox — через файловый API: async-модель и спикеры (`SonioxMeetingTranscriber`);
-- Deepgram, ElevenLabs и свой сервер — запись кусками по 30 с прогоняется через
-  их real-time адаптер (`MeetingBYOKTranscriber`).
+- ElevenLabs и Deepgram — через их pre-recorded API одним запросом со спикерами
+  (`RecordedMeetingTranscriber`): ElevenLabs `scribe_v3`, Deepgram `nova-3`;
+- свой сервер — запись прогоняется через его real-time адаптер
+  (`MeetingBYOKTranscriber`), без спикеров.
 
-В v1 пайплайны митингов не меняем. Поэтому список моделей для `meetings` зависит
-от провайдера: у Soniox — его async-модели, у остальных — их real-time модели.
-Подпись «recorded» описывает фичу (она работает с готовой записью), а не тип модели.
-
-Перевод Deepgram, ElevenLabs и своего сервера на пакетный API со спикерами — это
-отдельное предложение на потом, не v1.
+Поэтому список моделей для `meetings` у Soniox, ElevenLabs и Deepgram — их
+recorded-модели, у своего сервера — real-time. Сохранённый маршрут Meetings на
+ElevenLabs со стриминговой моделью при запуске переводится на `scribe_v3` (тот же
+аккаунт и ключ). Почему: `.project-docs/decisions/2026-11-21-recorded-meeting-models.md`.
 
 ## API hints
 
@@ -356,7 +356,7 @@ Keychain есть непустой ключ.
 | Фичи | Откуда берётся модель |
 |---|---|
 | `dropFast`, `dropSmart`, `agentVoice`, `voiceSearch` | `selectedProvider` + `transcriptionModel(for:)`, включая сохранённую `stt-rt-v4` — без замены |
-| `meetings` | тот же провайдер: у Soniox `stt-async-v5`, у остальных их real-time модель (как сейчас) |
+| `meetings` | тот же провайдер: у Soniox `stt-async-v5`, у остальных их real-time модель (как сейчас; ElevenLabs затем переводится на `scribe_v3`, см. «Режим recorded у митингов») |
 | `dropSmartCleanup`, `meetingNotes` | `llmLevel`: `yourKey` → OpenRouter + `openRouterModel`; `custom` → запись сервера из `customLLMBaseURL` + `customLLMModel`; `nil` → Not set |
 | `agent` | `agent.opencode.model` у OpenRouter; пусто → Not set |
 | все real-time фичи при `transcriptionLevel == nil` | Not set — правила `SelfKeyPreferences.storedLevel` (retired Local, Apple Silicon) сохраняются |

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AIRouting/ElevenLabsScribeUpgradeTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-19-api-and-models.md, 2026-10-18-provider-batch-transcription.md, 2026-10-20-model-search.md, 2026-11-20-speech-model-lists.md]
+related: [2026-10-19-api-and-models.md, 2026-10-18-provider-batch-transcription.md, 2026-10-20-model-search.md, 2026-11-20-speech-model-lists.md, 2026-11-21-recorded-meeting-models.md]
 ---
 
 ## Context

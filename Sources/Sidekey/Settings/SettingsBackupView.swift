@@ -201,7 +201,7 @@ struct SettingsBackupView: View {
     private var settingsSyncSubtitle: String {
         switch settingsSync.status {
         case .off:
-            return "Models, provider keys, hotkeys, Toolbox and vocabulary stay the same on Macs with this recovery code. Turn it on first on the Mac whose settings you want everywhere: every Mac that turns it on later takes them."
+            return "Models, provider keys, hotkeys, Toolbox and vocabulary stay the same on Macs with this recovery code. Turn it on first on the Mac whose settings you want everywhere and wait for “Settings synced” before turning it on on another Mac: that Mac takes them."
         case .synced(let date):
             return "Settings synced · \(date.formatted(date: .omitted, time: .shortened))"
         default:

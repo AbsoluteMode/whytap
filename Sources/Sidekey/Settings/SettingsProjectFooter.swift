@@ -147,17 +147,22 @@ private struct SettingsFooterLinkStyle: ButtonStyle {
                 .frame(height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(configuration.isPressed ? MacSettingsTheme.selection : (hovered ? MacSettingsTheme.hover : .clear))
+                        .fill(pressed ? MacSettingsTheme.selection : (highlighted ? MacSettingsTheme.hover : .clear))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .background(SettingsFooterLinkCursor())
-                .onHover { hovered = isEnabled && $0 }
+                // A disabled control (Updating…) shows no pointing hand.
+                .background { if isEnabled { SettingsFooterLinkCursor() } }
+                .onHover { hovered = $0 }
         }
 
+        /// The pointer can stay over Update while it turns into Updating….
+        private var highlighted: Bool { isEnabled && hovered }
+        private var pressed: Bool { isEnabled && configuration.isPressed }
+
         private var foreground: Color {
-            if prominent { return configuration.isPressed ? MacSettingsTheme.accentPress : MacSettingsTheme.accent }
             if !isEnabled { return MacSettingsTheme.text3 }
-            return hovered || configuration.isPressed ? MacSettingsTheme.text : MacSettingsTheme.text2
+            if prominent { return pressed ? MacSettingsTheme.accentPress : MacSettingsTheme.accent }
+            return highlighted || pressed ? MacSettingsTheme.text : MacSettingsTheme.text2
         }
     }
 }

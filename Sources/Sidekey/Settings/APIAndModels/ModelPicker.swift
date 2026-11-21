@@ -103,8 +103,12 @@ struct ModelPicker: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
+                        let notices = ModelPickerSearch.notices(in: shownSections, results: matches)
+                        ForEach(notices, id: \.account) { section in
+                            providerNotice(section)
+                        }
                         if matches.isEmpty {
-                            if unlistedServers.isEmpty || !query.isEmpty { emptyState }
+                            if (unlistedServers.isEmpty && notices.isEmpty) || !query.isEmpty { emptyState }
                         } else {
                             ForEach(Array(matches.enumerated()), id: \.element.id) { index, result in
                                 if index == 0 || matches[index - 1].account != result.account {
@@ -190,6 +194,29 @@ struct ModelPicker: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A provider with a key or catalog problem and no rows still names
+    /// itself and the reason (a sole provider, or the one chosen in the bar).
+    private func providerNotice(_ section: PickerSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ModelPickerSearch.header(title: section.title, refreshFailed: section.refreshFailed,
+                                          keyProblem: section.keyProblem))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text2)
+            Text(ModelPickerSearch.noticeDetail(for: section))
+                .font(.system(size: 12))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            if section.keyProblem != nil {
+                APIModelAction(title: "Open API keys", style: .ghost, action: onAddKey)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     /// A custom server may intentionally omit /models. Give that specific

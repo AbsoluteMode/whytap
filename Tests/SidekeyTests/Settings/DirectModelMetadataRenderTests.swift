@@ -88,3 +88,77 @@ final class DirectModelMetadataRenderTests: XCTestCase {
             .write(to: directory.appendingPathComponent("rows.txt"), atomically: true, encoding: .utf8)
     }
 }
+
+/// A provider whose key was refused, with no first catalog, has no rows: the
+/// picker must still name it and the reason, alone and chosen in the bar.
+@MainActor
+final class ModelPickerProviderNoticeTests: XCTestCase {
+    private func section(_ account: ProviderAccount, options: [String] = [], keyProblem: String? = nil,
+                         refreshFailed: Bool = false) -> PickerSection {
+        PickerSection(account: account, title: account.kind.displayName,
+                      options: options.map { PickerOption(model: $0, state: .new, isSelected: false, hint: nil) },
+                      refreshFailed: refreshFailed, keyProblem: keyProblem)
+    }
+
+    func testNoticesNameProvidersWithoutRows() {
+        let refused = section(.openAI, keyProblem: "Key not accepted")
+        let failed = section(.anthropic, refreshFailed: true)
+        let healthy = section(.openRouter, options: ["vendor/a"])
+        let loading = section(.server(UUID()))
+        let all = [refused, failed, healthy, loading]
+        let results = ModelPickerSearch.results(in: all, query: "")
+        XCTAssertEqual(ModelPickerSearch.notices(in: all, results: results).map(\.account), [.openAI, .anthropic])
+        // A refused key with cached rows keeps its labelled header on the rows instead.
+        let refusedWithRows = section(.openAI, options: ["gpt-6.2-sol"], keyProblem: "Key not accepted")
+        let rows = ModelPickerSearch.results(in: [refusedWithRows], query: "")
+        XCTAssertEqual(ModelPickerSearch.notices(in: [refusedWithRows], results: rows).map(\.account), [])
+        XCTAssertEqual(rows.first?.keyProblem, "Key not accepted")
+        // A search that hides a refused provider's rows still names the provider.
+        let none = ModelPickerSearch.results(in: [refusedWithRows], query: "zzz")
+        XCTAssertEqual(ModelPickerSearch.notices(in: [refusedWithRows], results: none).map(\.account), [.openAI])
+        XCTAssertTrue(ModelPickerSearch.noticeDetail(for: refused).contains("API keys"))
+        XCTAssertFalse(ModelPickerSearch.noticeDetail(for: failed).contains("key"))
+    }
+
+    func testRenderedPickerShowsTheRefusedProviderAloneAndFiltered() throws {
+        let refused = section(.openAI, keyProblem: "Key not accepted")
+        var control = refused
+        control.keyProblem = nil
+        let other = section(.anthropic, options: ["claude-sonnet-5-5"])
+
+        // The builder's regression: a refused key rendered byte-identical to
+        // the plain "No matching models" state. Each case must now differ from
+        // the same picker without the key problem.
+        XCTAssertNotEqual(try rendered([refused], name: "sole"), try rendered([control], name: "sole-control"))
+        XCTAssertNotEqual(try rendered([other, refused], provider: .openAI, name: "filtered"),
+                          try rendered([other, control], provider: .openAI, name: "filtered-control"))
+        XCTAssertNotEqual(try rendered([other, refused], name: "all"),
+                          try rendered([other, control], name: "all-control"))
+    }
+
+    private func rendered(_ sections: [PickerSection], provider: ProviderAccount? = nil,
+                          name: String) throws -> Data {
+        let picker = ModelPicker(sections: sections, missingProviderHint: nil, initialProvider: provider,
+                                 onSelect: { _, _ in }, onRefresh: {}, onAddKey: {}, onClose: {})
+        let host = NSHostingView(rootView: picker.environment(\.colorScheme, .light))
+        host.appearance = NSAppearance(named: .aqua)
+        let size = NSSize(width: 440, height: 400)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertFalse(window.isVisible)
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        if let output = ProcessInfo.processInfo.environment["WHYTAP_MODEL_METADATA_RENDER_DIR"] {
+            try png.write(to: URL(fileURLWithPath: output).appendingPathComponent("notice-\(name).png"))
+        }
+        return png
+    }
+}

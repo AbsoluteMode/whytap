@@ -347,7 +347,10 @@ The closed control retains the shared 30 pt popup label and existing widths.
   count, horizontally scrollable) shows one provider at a time; the selected
   one is accent-tinted and carries the selected trait. A refused or unreadable
   key keeps its section, with `· Key not accepted` / `· Couldn't read the key`
-  in the header. Server rows use `Added` for a real `created` date.
+  in the header. A provider with that problem (or a failed first catalog)
+  and no rows still shows its header, a one-line reason and, for a key, an
+  Open API keys action, never the anonymous "No matching models". Server rows
+  use `Added` for a real `created` date.
   Sources: [Anthropic](https://platform.claude.com/docs/en/api/models/list),
   [OpenAI](https://developers.openai.com/api/reference/resources/models),
   [OpenRouter](https://openrouter.ai/docs/guides/overview/models#model-object-schema).

@@ -47,7 +47,12 @@ scrolled to its own model. In practice every LLM feature stayed on OpenRouter.
   section. Search runs over the shown sections. A provider that disappears
   while the picker is open falls back to All. Nothing switches a route.
 - A refused or unreadable key keeps its section (fixing the key makes it work)
-  with `· Key not accepted` or `· Couldn't read the key` in its header.
+  with `· Key not accepted` or `· Couldn't read the key` in its header. When
+  such a section (or one whose first catalog fetch failed) has no rows, as the
+  sole provider, the one chosen in the bar or alongside others, the picker
+  shows its header, a one-line reason and, for a key, Open API keys. The build
+  queue's review found the first version rendered such a picker byte-identical
+  to a plain "No matching models".
 - A user's server shows `created` from its /v1/models as `Added <date>` when the
   date is over an hour older than the fetch. Ollama sends when the model was
   pulled or changed; vLLM and llama.cpp stamp every model with the request

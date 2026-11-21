@@ -1107,7 +1107,8 @@ come in this order: speech providers, Anthropic, OpenAI, the user's servers,
 OpenRouter last (its hundreds of models used to hide the direct sections below
 the visible rows); every keyed provider that can serve the feature has one,
 and a refused or unreadable key keeps its section with the reason in the
-header. With several sections a provider bar under the search field shows All
+header; a provider with such a problem (or a failed first catalog) and no rows
+still shows its header, the reason and, for a key, Open API keys. With several sections a provider bar under the search field shows All
 or one provider (with model counts); search covers the shown sections and
 never changes a route. A user's server shows `created` from its /v1/models as
 Added only when it is over an hour older than the fetch (vLLM and llama.cpp

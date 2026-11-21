@@ -76,6 +76,23 @@ enum ModelPickerSearch {
         return sections.filter { $0.account == account }
     }
 
+    /// Shown sections that have a problem to name but no row under which its
+    /// header would appear: a refused or unreadable key, or a first catalog
+    /// fetch that failed. The picker lists them with the reason instead of
+    /// an anonymous "No matching models".
+    static func notices(in sections: [PickerSection], results: [Result]) -> [PickerSection] {
+        sections.filter { section in
+            guard !section.acceptsModelName, !results.contains(where: { $0.account == section.account }) else { return false }
+            return section.keyProblem != nil || (section.refreshFailed && section.options.isEmpty)
+        }
+    }
+
+    static func noticeDetail(for section: PickerSection) -> String {
+        section.keyProblem != nil
+            ? "Its models show again once the key works. Check it in API keys."
+            : "Its model list couldn't be loaded. It loads again when this list opens."
+    }
+
     /// A section header: the provider, then why its list may be off.
     static func header(title: String, refreshFailed: Bool, keyProblem: String?) -> String {
         if let keyProblem { return "\(title) · \(keyProblem)" }

@@ -863,7 +863,12 @@ Hover tool search and pointer routing:
   checks passed. Do not claim a proved compositor cause.
   A translucent input lens/rim supplies the foreground surface without child
   native glass. History shares the drawer's Regular backdrop, uses translucent
-  rows/hints and a separate preview backdrop. macOS 14/15 fallback is unchanged;
+  rows/hints and a separate preview backdrop. On macOS 14/15 History and its
+  preview use the drawer's legacy material like every other panel (History
+  used to opt out and showed other windows between its rows); Reduce
+  transparency gives every drawer card an opaque dark backdrop
+  (IslandHoverBackdropPolicy). WHY:
+  .project-docs/decisions/2026-11-21-history-backdrop-always.md
   Case/Vocab/Filler retain their existing transparent panels.
   Internal endEditing does not resign the key window between button down/up;
   captured activation or actual window resignation releases text-entry focus.

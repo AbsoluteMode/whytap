@@ -155,7 +155,7 @@ sources:
   - type: url
     reference: https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views
     confirmed_at: 2026-10-17
-related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-18-brightness-tool.md]
+related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-18-brightness-tool.md, 2026-11-21-history-backdrop-always.md]
 ---
 
 # Native hover glass
@@ -229,8 +229,9 @@ macOS 26 glass path. Native button action/geometry and older fallback remain;
 see the precise [search contract](2026-10-17-hover-tool-search.md).
 History uses
 the common drawer backdrop, translucent row/hint lenses and an independent
-preview backdrop. Existing macOS 14/15 fallback and transparent Case/Vocab/Filler
-panels are retained.
+preview backdrop. Existing transparent Case/Vocab/Filler panels are retained.
+On macOS 14/15 History now also uses the drawer's legacy backdrop
+([2026-11-21 decision](2026-11-21-history-backdrop-always.md)).
 
 Add `IslandHoverGlassRim` as a thin specular edge and inner highlight, preserving
 the native backdrop. The overlay uses `allowsHitTesting(false)` and never routes

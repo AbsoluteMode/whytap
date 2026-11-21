@@ -15,12 +15,15 @@ final class NativeAgentProvider: CLIProvider {
     private let diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
     private let http: NativeAgentHTTP
     private let workspace: () throws -> URL
+    private let appControl: @MainActor () -> NativeAgentAppControl.Handler?
 
     init(keys: ProviderKeyStore = ProviderKeyStore(), http: NativeAgentHTTP = NativeAgentHTTP(),
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
+         appControl: @escaping @MainActor () -> NativeAgentAppControl.Handler? = { NativeAgentAppControl.installed },
          usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
          diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record) {
         self.keys = keys; self.http = http; self.workspace = workspace; self.usageSink = usageSink
+        self.appControl = appControl
         self.diagnosticsSink = diagnosticsSink
     }
 
@@ -82,8 +85,9 @@ final class NativeAgentProvider: CLIProvider {
         let directory = try options.workingDirectory ?? workspace()
         let route = "\(options.openCodeProvider.rawValue)/\(options.model ?? "")/\(options.openRouterProvider ?? "")"
         var conversation = NativeAgentConversation.load(directory: directory, resumeID: resumeSessionID, route: route)
+        let appControl = self.appControl()
         let tools = NativeAgentTools(directory: directory, allowActions: options.allowActions, keys: keys,
-                                     tavily: TavilySearch(http: http))
+                                     tavily: TavilySearch(http: http), appControl: appControl)
         let memoryURL = directory.appendingPathComponent(AgentDaemonWorkingDirectory.memoryFileName)
         let handle = try? FileHandle(forReadingFrom: memoryURL)
         let memory = (try? handle?.read(upToCount: 16_000)).flatMap { $0 }.map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -97,7 +101,8 @@ final class NativeAgentProvider: CLIProvider {
         var model = NativeAgentModel(options: options, key: key,
                                      system: Self.systemPrompt + "\nWorkspace: \(directory.path)\n"
                                         + WhytapCustomizationContext.promptInstructions + "\n"
-                                        + WhytapCustomizationContext.notificationInstructions,
+                                        + WhytapCustomizationContext.notificationInstructions
+                                        + (appControl == nil ? "" : "\n" + NativeAgentAppControl.instructions),
                                      history: history, prompt: prompt, http: http, usageSink: usageSink,
                                      diagnosticsSink: diagnosticsSink)
         let turn = UUID().uuidString
@@ -105,8 +110,11 @@ final class NativeAgentProvider: CLIProvider {
         // Completion is one validated tool object, never free text beside cards.
         // The terminal tool also works on endpoints without response_format.
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
-        let definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions)
+        let definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
+                                                                 appControl: appControl != nil)
         var actionsAttempted = false
+        // Confirmed Whytap changes, shown by the app above the model's answer.
+        var changes: [String] = []
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
@@ -132,7 +140,7 @@ final class NativeAgentProvider: CLIProvider {
                 let final: NativeAgentFinalAnswer
                 do { final = try NativeAgentFinalAnswer(arguments: calls[0].arguments) }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-                let text = final.visibleText
+                let text = (changes + [final.visibleText]).joined(separator: "\n\n")
                 let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions) ?? final.actions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
@@ -162,14 +170,20 @@ final class NativeAgentProvider: CLIProvider {
             for call in calls {
                 try Task.checkCancellation()
                 continuation.yield(.toolExecuting(tool: call.name, label: Self.label(call.name)))
+                let appWrite = appControl != nil && NativeAgentAppControl.tool(named: call.name)?.writes == true
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
                 if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
+                if appWrite { actionsAttempted = true }
                 let result: NativeAgentToolResult
                 if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
                 else if searchCount > 2 && call.name == "web_search" { result = .init(text: "Search limit reached; answer using available results.") }
                 else if screenCount > 2 && call.name == "capture_screen" { result = .init(text: "Screen capture limit reached for this request.") }
                 else { result = await tools.execute(call) }
+                if let change = result.change {
+                    changes.append(change)
+                    continuation.yield(.toolExecuting(tool: call.name, label: change))
+                }
                 try Task.checkCancellation()
                 results.append((call, result))
             }
@@ -219,6 +233,7 @@ final class NativeAgentProvider: CLIProvider {
     """
 
     private static func label(_ tool: String) -> String {
+        if tool.hasPrefix(NativeAgentAppControl.prefix) { return NativeAgentAppControl.label(tool) }
         switch tool {
         case "web_search": return "Searching the web"
         case "capture_screen": return "Reading the screen"

@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Agent/UI/Renderers/MarkdownTableView.swift
     confirmed_at: 2026-11-21
-related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md]
+related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-22-native-agent-app-control.md]
 ---
 
 # Structured Agent answers

@@ -208,3 +208,16 @@ answer for the calling harness (above). This is the local settings-access bounda
 not a sandbox for an already authorized agent. A website's `whytap://` link
 cannot invoke or receive these commands. Case requests keep their existing
 authorization and the app-control namespace never returns secret values.
+
+## The built-in Whytap Agent
+
+The Agent in the island (Right Command) has the same `whytap_*` tools: the
+same names, descriptions and argument schemas, taken from the plugin's own
+catalog and run inside the app by the same controller, without the helper or
+an MCP server. Ask it, for example, "switch Drop Smart cleanup to
+anthropic/claude-sonnet-5.5", "add a task: send the report" or "where did we
+discuss the budget?". Every change still needs the exact current value, and
+each confirmed change appears as one line above the answer, such as
+`Drop Smart cleanup → anthropic/claude-sonnet-5.5`. Meetings need no harness
+prompt there: the request comes from you at this Mac. The Agent still cannot
+read key values, the clipboard or run commands through these tools.

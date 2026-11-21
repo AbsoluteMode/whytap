@@ -9,8 +9,11 @@ struct NativeAgentTools {
     var tavily = TavilySearch()
     var capture: ([String: AppControlValue]) async -> AppControlResponse = { await NativeAgentScreen.shared.handle($0) }
     var helper: URL? = CaseBuiltInAgentAccess.bundledHelperURL
+    /// Whytap's own controls (the plugin's whytap_* tools), run in process.
+    /// WHY: .project-docs/decisions/2026-11-22-native-agent-app-control.md
+    var appControl: NativeAgentAppControl.Handler? = NativeAgentAppControl.installed
 
-    static func definitions(allowActions: Bool) -> [[String: Any]] {
+    static func definitions(allowActions: Bool, appControl: Bool = false) -> [[String: Any]] {
         func tool(_ name: String, _ description: String, _ properties: [String: Any], _ required: [String] = []) -> [String: Any] {
             ["name": name, "description": description, "parameters": ["type": "object", "properties": properties,
                                                                       "required": required, "additionalProperties": false]]
@@ -30,14 +33,15 @@ struct NativeAgentTools {
             tools += [tool("write_file", "Create or replace a UTF-8 file. Read existing contents before editing; use absolute paths outside the workspace. Never store secrets in memory.", ["path": string, "content": string], ["path", "content"]),
                       tool("run_command", "Run a shell command with a 30-second deadline and bounded output. Runs with the user’s Mac permissions; avoid irreversible actions without explicit authorization. Use whytap case run for scoped secrets; never print keys.", ["command": string, "path": string], ["command"])]
         }
+        if appControl { tools += NativeAgentAppControl.definitions() }
         return tools
     }
 
     /// Use one strict mode across the catalog: some endpoints reject a mix of
     /// strict and non-strict functions. Optional inputs remain nullable and keep
     /// their existing defaults. The shared model's other consumers are unchanged.
-    static func structuredDefinitions(allowActions: Bool) -> [[String: Any]] {
-        let tools = definitions(allowActions: allowActions).filter { $0["name"] as? String != "show_actions" }.map { tool in
+    static func structuredDefinitions(allowActions: Bool, appControl: Bool = false) -> [[String: Any]] {
+        let tools = definitions(allowActions: allowActions, appControl: appControl).filter { $0["name"] as? String != "show_actions" }.map { tool in
             var tool = tool
             var schema = tool["parameters"] as! [String: Any]
             var properties = schema["properties"] as! [String: [String: Any]]
@@ -61,6 +65,9 @@ struct NativeAgentTools {
     func execute(_ call: NativeAgentToolCall) async -> NativeAgentToolResult {
         do {
             try Task.checkCancellation()
+            if let appControl, NativeAgentAppControl.tool(named: call.name) != nil {
+                return await NativeAgentAppControl.execute(call, handler: appControl)
+            }
             guard Self.definitions(allowActions: allowActions).contains(where: { $0["name"] as? String == call.name }) else {
                 throw NativeAgentError.message("This tool is unavailable. File edits and commands may be disabled in Settings → Other.")
             }

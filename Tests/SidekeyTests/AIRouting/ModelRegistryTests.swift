@@ -11,7 +11,7 @@ final class ModelRegistryTests: XCTestCase {
         }
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .soniox), "stt-async-v6")
         XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .deepgram), "nova-3")
-        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .elevenLabs), "scribe_v3_live")
+        XCTAssertEqual(ModelRegistry.recommended(for: .meetings, kind: .elevenLabs), "scribe_v3")
         for feature: AIFeature in [.dropSmartCleanup, .meetingNotes] {
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .openRouter), "google/gemini-3.8-flash")
         }
@@ -34,7 +34,8 @@ final class ModelRegistryTests: XCTestCase {
         XCTAssertTrue(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("google/gemini-3.8-flash", kind: .openRouter, use: .chatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("nova-3", kind: .soniox, use: .realtimeSTT))
-        XCTAssertEqual(ModelRegistry.models.filter(\.diarization).map(\.id), ["stt-async-v6"])
+        XCTAssertTrue(ModelRegistry.isVerified("nova-3", kind: .deepgram, use: .asyncSTT))
+        XCTAssertEqual(ModelRegistry.models.filter(\.diarization).map(\.id), ["stt-async-v6", "nova-3", "scribe_v3"])
         XCTAssertEqual(ModelRegistry.adapterVersion(.soniox, .realtimeSTT), 1)
         XCTAssertEqual(ModelRegistry.meetingNotesMinContext, 64_000)
         XCTAssertEqual(ModelRegistry.agentMinContext, 64_000)

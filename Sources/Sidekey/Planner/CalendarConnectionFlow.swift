@@ -31,6 +31,7 @@ final class CalendarConnectionFlow: ObservableObject {
                          onSuccess: @escaping () -> Void = {}) -> Bool {
         guard !working else { return false }
         lastProvider = provider; error = nil
+        if let message = CalendarAvailability.blockReason { error = message; return false }
         let configuration = CalendarClientConfiguration.registered(provider, info: info)
         if let message = CalendarConnectionReadiness.shared(provider, configuration: configuration,
             googleReview: googleReview()).message {
@@ -53,7 +54,7 @@ final class CalendarConnectionFlow: ObservableObject {
     func start(provider: CalendarProvider, clientID: String, secret: String, label: String,
                info: [String: Any]?, onSuccess: @escaping () -> Void) -> Bool {
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !working, CalendarConnectionReadiness.authorization(provider, clientID: clientID, info: info,
+        guard !working, CalendarAvailability.isOpen, CalendarConnectionReadiness.authorization(provider, clientID: clientID, info: info,
                   googleReview: googleReview()) == .available,
               provider == .apple || connections.accountConnectionIssue == nil,
               connections.beginConnecting(provider: provider) else { return false }

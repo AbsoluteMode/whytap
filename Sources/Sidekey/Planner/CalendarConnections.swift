@@ -15,7 +15,7 @@ final class CalendarConnections: ObservableObject {
     @Published private(set) var appleEnabled = false
     @Published private(set) var connectingProvider: CalendarProvider?
     var isConnecting: Bool { connectingProvider != nil }
-    var connectionBlockReason: String? { backup?.calendarConnectionBlockReason }
+    var connectionBlockReason: String? { CalendarAvailability.blockReason ?? backup?.calendarConnectionBlockReason }
     var accountConnectionIssue: String? {
         if let error = errors["accounts"] { return error }
         return accounts.count >= 64 ? "Disconnect an unused calendar account before adding another." : nil
@@ -61,6 +61,7 @@ final class CalendarConnections: ObservableObject {
     }
 
     func add(_ account: ConnectedCalendarAccount) throws {
+        guard CalendarAvailability.isOpen else { throw CalendarConnectionError.comingSoon }
         guard metadataValid, accounts.count < 64, account.provider != .apple, !accounts.contains(where: { $0.id == account.id }),
               !account.label.isEmpty, account.label.count <= 120 else { throw CalendarConnectionError.configuration }
         let candidate = accounts + [account]
@@ -99,6 +100,8 @@ final class CalendarConnections: ObservableObject {
     }
 
     func enableApple() async throws {
+        // Closed: never create the event store or ask macOS for calendar access.
+        guard CalendarAvailability.isOpen else { throw CalendarConnectionError.comingSoon }
         let store = appleStore ?? EKEventStore()
         appleStore = store
         guard try await store.requestFullAccessToEvents() else { throw CalendarConnectionError.denied }
@@ -120,6 +123,8 @@ final class CalendarConnections: ObservableObject {
     }
 
     func refresh(interval: DateInterval) async {
+        // Closed: no provider request and no EventKit read, whatever was connected before.
+        guard CalendarAvailability.isOpen else { return }
         generation += 1
         let current = generation
         refreshing = true
@@ -145,7 +150,7 @@ final class CalendarConnections: ObservableObject {
     }
 
     func refreshAppleIfEnabled(interval: DateInterval) {
-        guard appleEnabled else { return }
+        guard CalendarAvailability.isOpen, appleEnabled else { return }
         do { try refreshApple(interval: interval); errors.removeValue(forKey: "apple"); lastSynced["apple"] = Date() }
         catch { errors["apple"] = error.localizedDescription }
     }

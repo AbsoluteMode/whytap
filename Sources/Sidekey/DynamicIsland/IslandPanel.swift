@@ -996,19 +996,27 @@ final class IslandPanel: NSPanel {
             && ((host?.acceptsExpandedHitTesting ?? false) || (host?.agentRetryActive ?? false))
     }
 
+    private var allowsAnswerPointerDispatch: Bool {
+        isShown && isVisible && !idleHidden && host?.agentActive == true
+            && host?.agentAnswerSize != .zero
+    }
+
     override func sendEvent(_ event: NSEvent) {
         // Use measured control frames instead of the inactive SwiftUI first-
         // mouse bridge. One owned down/drag/up sequence invokes at most once.
         switch event.type {
         case .leftMouseDown:
-            if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch) {
+            if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
+                                        allowsAnswer: allowsAnswerPointerDispatch) {
                 return
             }
         case .leftMouseDragged where hoverHitBridge.consumesPointerSequence:
-            hoverHitBridge.mouseDragged(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch)
+            hoverHitBridge.mouseDragged(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
+                                        allowsAnswer: allowsAnswerPointerDispatch)
             return
         case .leftMouseUp where hoverHitBridge.consumesPointerSequence:
-            hoverHitBridge.mouseUp(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch)
+            hoverHitBridge.mouseUp(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
+                                   allowsAnswer: allowsAnswerPointerDispatch)
             refreshMouseEventRouting()
             return
         case .keyDown where event.keyCode == 53:

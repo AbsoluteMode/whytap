@@ -83,14 +83,20 @@ final class IslandHoverHitBridgeTests: XCTestCase {
     }
 
     @MainActor
-    func testEnabledToolAndSearchSurfacesDispatchFirstMouse() {
+    func testOnlyEnabledControlsOnToolAndSearchSurfacesDispatchFirstMouse() {
         for surface in [IslandHoverHitTargetID.Surface.tile, .result] {
             let bridge = IslandHoverHitBridge()
             bridge.setEnabled(true); bridge.setSurface(surface); bridge.setContext("stable-geometry")
             var activations = 0
-            let host = NSHostingView(rootView: Color.clear.frame(width: 240, height: 44)
-                .islandHoverHitTarget(bridge: bridge, id: .init(surface: surface, tool: .settings),
-                    context: "stable-geometry", action: { activations += 1 })
+            let host = NSHostingView(rootView: HStack(spacing: 0) {
+                Color.clear.frame(width: 120, height: 44)
+                    .islandHoverHitTarget(bridge: bridge, id: .init(surface: surface, tool: .settings),
+                        context: "stable-geometry", action: { activations += 1 })
+                Color.clear.frame(width: 120, height: 44)
+                    .islandHoverHitTarget(bridge: bridge, id: .init(surface: surface, tool: .calendar),
+                        context: "stable-geometry", action: { XCTFail("Disabled controls cannot activate") })
+                    .disabled(true)
+            }
                 .islandHoverHitRegion(bridge: bridge, surface: surface))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
                                   styleMask: .borderless, backing: .buffered, defer: false)
@@ -98,7 +104,10 @@ final class IslandHoverHitBridgeTests: XCTestCase {
             defer { window.close() }
             host.frame = NSRect(x: 0, y: 0, width: 240, height: 44)
             for _ in 0..<3 { host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
-            let point = host.convert(NSPoint(x: 100, y: 22), to: nil)
+            let disabledPoint = host.convert(NSPoint(x: 180, y: 22), to: nil)
+            XCTAssertFalse(bridge.mouseDown(at: disabledPoint, in: window, allowed: true))
+            XCTAssertNil(bridge.pressedID)
+            let point = host.convert(NSPoint(x: 60, y: 22), to: nil)
             XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: true))
             bridge.mouseUp(at: point, in: window, allowed: true)
             XCTAssertEqual(activations, 1)

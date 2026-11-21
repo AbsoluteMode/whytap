@@ -54,6 +54,7 @@ struct AIRoutingMigration {
         routing.retireMeetingRoutesIfNeeded()
         routing.upgradeElevenLabsScribeIfNeeded()
         routing.upgradeSonioxModelsIfNeeded()
+        routing.moveMeetingsToRecordedModelIfNeeded()
     }
 
     // MARK: - Routes
@@ -67,7 +68,8 @@ struct AIRoutingMigration {
 
         let realtime = FeatureRoute(account: account, model: prefs.transcriptionModel(for: provider))
         // Soniox transcribes a finished recording through its file API; the
-        // other providers run it through their real-time model, as before.
+        // other providers ran it through their real-time model then (an
+        // ElevenLabs meeting route moves on in moveMeetingsToRecordedModelIfNeeded).
         let recorded = provider == .soniox
             ? FeatureRoute(account: account, model: SonioxFileAPI.asyncModel)
             : realtime

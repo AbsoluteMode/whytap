@@ -342,6 +342,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
        -> voice: the same STT factory as Drop, route of agentVoice
        -> NativeAgentProvider -> direct model HTTP -> local tool -> model loop
        -> validated finish_answer object -> text and typed cards in the island
+  Native and CLI final text use compact Markdown. Comparisons adapt to the
+  available width, and completed answers open with the conclusion at the top.
+  WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.
@@ -423,6 +426,12 @@ Translation tools:
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
+  Subtitles are the original translator's compact overlay: a borderless
+  transparent panel at the bottom of the screen with one dark caption box (the
+  newest translations, at most five lines, older words leave at the top) and,
+  when idle or hovered, one row of source/target language, Start/Stop and ×.
+  It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
+  .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the
@@ -463,8 +472,13 @@ Meeting Notes:
           recording, WHY: docs/decisions/2026-06-16-system-audio-tap-on-record-only.md)
        -> processing: BYOK processor only (routes of the meetings and
           meetingNotes features: Soniox file API with speaker-attributed
-          turns and durable job/transcript checkpoint; other providers use
-          their adapters, then the LLM route the user chose for notes).
+          turns and durable job/transcript checkpoint; ElevenLabs
+          speech-to-text (Scribe v3) and Deepgram pre-recorded in one
+          diarized request (RecordedMeetingTranscriber; a saved ElevenLabs
+          Meetings route on a streaming model moves to scribe_v3 at launch);
+          a user's server and On this Mac run a realtime adapter; then the LLM route the
+          user chose for notes. WHY:
+          .project-docs/decisions/2026-11-21-recorded-meeting-models.md).
           Speaker labels come from the provider; there is no on-device
           diarizer, so On this Mac gives a meeting without speakers. Without a route for Meetings and Meeting notes
           (including the retired Local route) the meeting is marked failed
@@ -472,7 +486,7 @@ Meeting Notes:
           audio stays staged; a `MeetingFinalizeManifest` re-dispatches it
           later with the language captured at Stop time, for at most 24 hours
           after the last chunk. A recording without
-          speech is not a failure: a completed Soniox job without segments
+          speech is not a failure: a completed job without segments
           stores a "No speech detected" note without the LLM and releases the
           staged audio, so it is never retried. Model failures remain errors.
           WHY: .project-docs/decisions/2026-10-18-silent-meetings.md,
@@ -1209,6 +1223,14 @@ To-do opens a compact inline hover list with Return-to-add, click-to-complete/re
 and a History mode with completion date/time. Completed tasks move below active
 ones for the current opening, then appear only in History. Native tooltips expose
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
+Calendar is currently closed as "Soon": CalendarAvailability.shipped = false
+is the single switch (tile, search row, Toolbox pane and Integrations card show a
+Soon badge and are inert; HoverSlotRouter returns .comingSoon; CalendarConnections
+refuses connect/enable/refresh so macOS is never asked; saved shortcuts register no
+key; stored connections are kept). New surfaces, onboarding included, must check
+CalendarAvailability.isOpen / HoverTool.isComingSoon. WHY:
+.project-docs/decisions/2026-11-21-calendar-soon.md Everything below describes
+the feature as it works once opened.
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,

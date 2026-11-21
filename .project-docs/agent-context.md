@@ -431,8 +431,9 @@ Translation tools:
   when idle or hovered, one row of source/target language, Start/Stop and ×.
   It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
   .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
-  The box shows phrase pairs: original (left, 40 %) and its translation
-  (right), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
+  The box shows phrase pairs: original (left, at most 45 %) and its
+  translation running to the box's edge (PairGridLayout); the box hugs its
+  widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
   still being heard last as a dim live original; Toolbox stacks original over
   translation. SubtitleSegmenter cuts committed text into whole phrases
   (sentence end at once, 0.6 s pause, 60 chars/2.5 s at a clause mark or word

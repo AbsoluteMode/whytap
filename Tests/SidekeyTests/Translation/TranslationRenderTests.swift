@@ -170,6 +170,8 @@ private struct PairPreviewService: TextTranslating {
         "who has spent ten years building speech systems.": "который десять лет создаёт системы распознавания речи.",
         "Before we start, let me explain": "Прежде чем начать, позвольте объяснить,",
         "how a neural network is structured.": "как устроена нейронная сеть.",
+        SubtitlePairRenderTests.longPhrase:
+            "И самое главное: каждый слой передаёт свои числа следующему, и тот постепенно превращает сырой звук в слова, которые мы можем прочитать.",
     ]
     var holds: Set<String> = []
     func translate(_ text: String, target: TranslationTarget) async throws -> String {
@@ -180,6 +182,13 @@ private struct PairPreviewService: TextTranslating {
 
 @MainActor
 final class SubtitlePairRenderTests: XCTestCase {
+    /// One sentence longer than the segmenter's length cut: it stays whole.
+    nonisolated static let longPhrase =
+        "And the most important part is that every layer passes its numbers to the next one, which slowly turns raw sound into words we can read."
+    private static let script = ["Welcome back everyone.", "Today we have a special guest,",
+                                 "who has spent ten years building speech systems.", "Before we start, let me explain",
+                                 "how a neural network is structured."]
+
     /// Offscreen @2x renders of the subtitle overlay with phrase pairs over a
     /// dark video-like frame. Nothing is put on screen.
     func testOffscreenSubtitlePairs() async throws {
@@ -189,29 +198,30 @@ final class SubtitlePairRenderTests: XCTestCase {
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let all = try await session(phrases: Array(PairPreviewService.answers.keys.sorted { order($0) < order($1) }),
-                                    holds: [], live: nil)
+        let all = try await session(phrases: Self.script, holds: [], live: nil)
         try renderOverlay(all, name: "subtitles-pairs.png")
-        let live = try await session(phrases: Array(PairPreviewService.answers.keys.sorted { order($0) < order($1) }),
+        let live = try await session(phrases: Self.script,
                                      holds: ["how a neural network is structured."],
                                      live: "Every layer takes the numbers")
         try renderOverlay(live, name: "subtitles-pairs-live.png")
         try renderToolbox(live, name: "toolbox-subtitles-pairs.png")
         // Chunk-boundary marks for the user to choose from.
-        for marker in SubtitlePairMarker.allCases where marker != .none {
+        // A long sentence wraps only at the box's right edge.
+        let long = try await session(phrases: Self.script + [Self.longPhrase], holds: [], live: nil)
+        let short = try await session(phrases: Array(Self.script.prefix(2)), holds: [], live: nil)
+        for marker in SubtitlePairMarker.allCases {
             try renderOverlay(all, name: "markers/subtitles-pairs-\(marker.rawValue).png", marker: marker)
+            try renderOverlay(long, name: "markers/subtitles-long-\(marker.rawValue).png", marker: marker)
         }
+        try renderOverlay(short, name: "markers/subtitles-short-none.png")
+        await long.model.cancel().value
+        await short.model.cancel().value
         // Stopped: the language row and Start return above the newest pairs.
         all.model.stop()
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
         try renderOverlay(all, name: "subtitles-pairs-stopped.png")
         await all.model.cancel().value
         await live.model.cancel().value
-    }
-
-    private func order(_ phrase: String) -> Int {
-        ["Welcome back everyone.", "Today we have a special guest,", "who has spent ten years building speech systems.",
-         "Before we start, let me explain", "how a neural network is structured."].firstIndex(of: phrase) ?? 99
     }
 
     private struct Session { let model: LiveSubtitleModel; let upstream: FixtureSubtitleUpstream }

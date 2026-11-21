@@ -89,11 +89,16 @@ Where the time went:
 ## Decision
 
 - **Pairs.** The box shows the newest phrases as pairs: the original in a
-  narrower left column (40 %, smaller, dimmed) and the translation in the
-  wider right column, aligned on their first baselines. Russian runs longer
-  than English and is the line being read. Pairs are bottom-anchored and only
-  whole pairs show (`NewestRowsLayout`), so an old pair leaves at the top in
-  one piece; a new pair fades and slides in from the bottom (none with Reduce
+  narrower left column (smaller, dimmed) and the translation in the right
+  column, aligned on their first baselines. Russian runs longer than English
+  and is the line being read. `PairGridLayout` gives all visible pairs one
+  column split chosen from their text: the original takes what it needs, at
+  most 45 %, and the translation runs to the box's inner edge, wrapping only
+  there. The box hugs its widest row up to the former maximum width
+  (`HuggingColumnLayout`) and stays centred, so no empty strip runs beside a
+  short translation; the price is that the box's width can change as pairs
+  arrive (animated with the pairs). Pairs are bottom-anchored and only whole
+  pairs show, so an old pair leaves at the top in one piece; a new pair fades and slides in from the bottom (none with Reduce
   Motion). The phrase still being heard is the last row, original only,
   dimmer, with a pending mark. A pair waiting for its translation shows the
   mark; a failed one shows "Not translated" next to its original. The

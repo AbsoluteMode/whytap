@@ -172,7 +172,9 @@ struct TranslationView: View {
         } else {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                VStack(alignment: .leading, spacing: 10) {
+                // The box hugs its widest pair (up to the panel's inner width)
+                // and stays centred, so no empty strip runs beside the text.
+                HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
                     if showsOverlayControls { subtitleControls }
                     if subtitles.issue != nil || !rows.isEmpty
                         || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
@@ -185,18 +187,21 @@ struct TranslationView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
                 .shadow(radius: 5)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
                 .onHover { overlayHovered = $0 }
                 .contextMenu { subtitleMenu }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsOverlayControls)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(10)
         }
     }
+
+    /// The overlay panel is 760 pt wide: 10 pt outside and 16 pt inside the box.
+    static let overlayContentWidth: CGFloat = 760 - 2 * 10 - 2 * 16
 
     /// While subtitles run, the overlay shows only the caption; the controls
     /// return on hover and whenever capture is not running.
@@ -214,15 +219,35 @@ struct TranslationView: View {
     @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
         if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
             captionText(status)
-        } else {
-            NewestRowsLayout(spacing: embedded ? 6 : 8,
-                             maxHeight: embedded ? 150 : (showsOverlayControls ? 108 : 146)) {
+        } else if embedded {
+            NewestRowsLayout(spacing: 6, maxHeight: 150) {
                 ForEach(rows) { row in
                     pairRow(row)
                         .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .bottomLeading)
+            .clipped()
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Subtitles")
+        } else {
+            // Russian runs about a fifth longer than English and is the line
+            // being read: the grid gives the original only what it needs.
+            let isBand = pairMarker == .band
+            PairGridLayout(rowSpacing: 8, columnSpacing: 18, maxWidth: Self.overlayContentWidth,
+                           maxHeight: showsOverlayControls ? 108 : 146,
+                           inset: isBand ? CGSize(width: 8, height: 3) : .zero) {
+                ForEach(rows) { row in
+                    Group {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(.white.opacity(isBand && row.ordinal.isMultiple(of: 2) ? 0.07 : 0))
+                        sourceText(row)
+                        translationText(row)
+                    }
+                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
             .clipped()
             .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
             .accessibilityElement(children: .combine)
@@ -249,34 +274,24 @@ struct TranslationView: View {
         .font(font)
     }
 
-    @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
-        let isBand = pairMarker == .band
-        pairColumns(row)
-            .padding(.horizontal, isBand ? 8 : 0)
-            .padding(.vertical, isBand ? 3 : 0)
-            .background {
-                if isBand, row.ordinal.isMultiple(of: 2) {
-                    RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.07))
-                }
-            }
+    private func sourceText(_ row: SubtitleCaption.Row) -> some View {
+        marked(row.source, font: .system(size: embedded ? 12 : 15, weight: .regular, design: .rounded),
+               color: .white.opacity(row.isLive ? 0.42 : 0.6))
     }
 
-    @ViewBuilder private func pairColumns(_ row: SubtitleCaption.Row) -> some View {
-        let source = marked(row.source, font: .system(size: embedded ? 12 : 15, weight: .regular, design: .rounded),
-                            color: .white.opacity(row.isLive ? 0.42 : 0.6))
-            .frame(maxWidth: .infinity, alignment: .leading)
-        if embedded {
-            // The Toolbox pane is too narrow for two columns: original above.
-            VStack(alignment: .leading, spacing: 2) {
-                source
-                translationText(row).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            // Russian runs about a fifth longer than English and is the line
-            // being read, so the translation column is the wider one.
-            PairColumnsLayout(sourceFraction: 0.4, spacing: 18) {
-                source
-                translationText(row).frame(maxWidth: .infinity, alignment: .leading)
+    /// Toolbox pairs: the pane is too narrow for two columns, so the original
+    /// sits above its translation.
+    @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
+        let isBand = pairMarker == .band
+        VStack(alignment: .leading, spacing: 2) {
+            sourceText(row).frame(maxWidth: .infinity, alignment: .leading)
+            translationText(row).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, isBand ? 8 : 0)
+        .padding(.vertical, isBand ? 3 : 0)
+        .background {
+            if isBand, row.ordinal.isMultiple(of: 2) {
+                RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.07))
             }
         }
     }

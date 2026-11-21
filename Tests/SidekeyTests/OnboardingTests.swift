@@ -94,7 +94,10 @@ final class OnboardingTests: XCTestCase {
     private func makeModel(_ env: Env, permissions: PermissionsSettingsViewModel,
                            supportsOnDevice: Bool = true) -> OnboardingModel {
         let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: env.controller(),
-                                    supportsOnDevice: supportsOnDevice, defaultsChanges: NotificationCenter())
+                                    supportsOnDevice: supportsOnDevice,
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
+                                    defaultsChanges: NotificationCenter())
         addTeardownBlock { model.stop() }
         return model
     }
@@ -159,28 +162,28 @@ final class OnboardingTests: XCTestCase {
 
     func testPagesFollowWhatIsAlreadyDone() {
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: false, permissionsReady: false)),
-                       [.speech, .permissions, .tryDrop, .features])
+                       [.speech, .permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: false, permissionsReady: true)),
-                       [.speech, .tryDrop, .features], "Access already given hides the permissions page")
+                       [.speech, .tryDrop, .customize, .features], "Access already given hides the permissions page")
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: true, permissionsReady: false)),
-                       [.permissions, .tryDrop, .features], "Drop already set up hides the speech page")
+                       [.permissions, .tryDrop, .customize, .features], "Drop already set up hides the speech page")
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: true, permissionsReady: true)),
-                       [.tryDrop, .features])
+                       [.tryDrop, .customize, .features])
     }
 
     func testCleanMacStartsOnSpeechAndOffersOnThisMac() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
-        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(model.page, .speech)
-        XCTAssertFalse(model.showsKeyForm)
+        XCTAssertTrue(model.supportsOnDevice, "The page offers On this Mac beside the key")
     }
 
     func testAccessAlreadyGivenSkipsThePermissionsPage() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        XCTAssertEqual(model.pages, [.speech, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.speech, .tryDrop, .customize, .features])
     }
 
     func testRejectedConfiguredSpeechRouteKeepsItsSettingsActionUntilDictationSucceeds() throws {
@@ -208,19 +211,19 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv()
         let access = permissions(accessibility: true, microphone: .authorized, hotkey: .shortcutInUse)
         let model = makeModel(env, permissions: access)
-        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features],
+        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features],
                        "Two green checks are not enough: the shortcut must be installed")
         XCTAssertFalse(access.allRequiredGranted, "Continue stays off until it installs")
         AppState.shared.dropHotkeyStatus = .ready
         XCTAssertTrue(access.allRequiredGranted)
     }
 
-    func testIntelGoesStraightToTheKeyForm() throws {
+    func testIntelOffersOnlyTheKey() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready),
                               supportsOnDevice: false)
         XCTAssertEqual(model.page, .speech)
-        XCTAssertTrue(model.showsKeyForm)
+        XCTAssertFalse(model.supportsOnDevice)
     }
 
     // MARK: - Speech
@@ -292,7 +295,7 @@ final class OnboardingTests: XCTestCase {
         env.speech.useOnDevice()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
-        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .customize, .features])
     }
 
     // MARK: - Skipping
@@ -304,7 +307,7 @@ final class OnboardingTests: XCTestCase {
         model.setUpSpeechLater()
         XCTAssertEqual(model.page, .permissions, "The shortcut still needs its permissions")
         model.advance()  // Skip
-        XCTAssertEqual(model.page, .features, "Nothing to dictate with, so no try page")
+        XCTAssertEqual(model.page, .customize, "Nothing to dictate with, so no try page")
     }
 
     func testEveryPageCanBeSkippedToTheEnd() throws {
@@ -317,6 +320,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(model.page, .permissions)
         model.advance()
         XCTAssertEqual(model.page, .tryDrop)
+        model.advance()
+        XCTAssertEqual(model.page, .customize)
         model.advance()
         XCTAssertEqual(model.page, .features)
         XCTAssertFalse(finished)
@@ -340,9 +345,9 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv(modelPresent: true)
         env.speech.useOnDevice()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        XCTAssertEqual(model.pages, [.tryDrop, .features])
+        XCTAssertEqual(model.pages, [.tryDrop, .customize, .features])
         model.showPermissions()
-        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(model.page, .permissions)
     }
 
@@ -394,14 +399,72 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(tap.placeholder.contains("press ⌥D"))
     }
 
-    func testOnThisMacCardSaysItSetsDropOnly() {
-        let fresh = OnboardingOnDevicePage.Presentation(.notDownloaded)
+    func testOnThisMacCardSaysWhatItDownloads() {
+        let fresh = OnboardingSpeechPage.Presentation(.notDownloaded)
         XCTAssertEqual(fresh.action, "Download and use for Drop")
         XCTAssertTrue(fresh.detail.contains("about 470 MB"))
-        XCTAssertEqual(OnboardingOnDevicePage.Presentation(.ready).action, "Use for Drop")
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation(.downloading(0.001)).detail.contains("Starting"))
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation(.downloading(0.42)).detail.contains("42%"))
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation.scope.contains("Drop only"))
+        XCTAssertEqual(OnboardingSpeechPage.Presentation(.ready).action, "Use for Drop")
+        XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.001)).detail.contains("Starting"))
+        XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.42)).detail.contains("42%"))
+    }
+
+    // MARK: - Language
+
+    func testLanguageIsTheInputLanguageSetting() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        let preferences = PrivacyPreferences(defaults: env.defaults)
+        XCTAssertNil(model.language, "A new Mac starts on Auto")
+        XCTAssertEqual(OnboardingLanguageRow.title(nil), OnboardingLanguageRow.autoTitle)
+        model.setLanguage(AppLanguage.find(code: "ru"))
+        XCTAssertEqual(preferences.selectedLanguage?.code, "ru", "The same value as Input Lang and Settings")
+        XCTAssertEqual(model.language?.code, "ru")
+        XCTAssertTrue(OnboardingLanguageRow.title(model.language).hasPrefix("Russian"))
+        model.setLanguage(nil)
+        XCTAssertNil(preferences.selectedLanguage, "Back to Auto")
+    }
+
+    // MARK: - Coding agents
+
+    func testCodingAgentsConnectThroughTheCaseClientSetup() async throws {
+        var connected: [CaseKnownClient] = []
+        let tools = OnboardingCodingTools(detect: { [.codex, .claudeCode] },
+                                          connect: { client in connected.append(client); return .init() })
+        await tools.refreshIfNeeded()
+        XCTAssertEqual(tools.installed, [.claudeCode, .codex], "Offered in a fixed order")
+        XCTAssertEqual(tools.names, "Claude Code and Codex")
+        tools.connect()
+        try await eventually { tools.state == .connected }
+        XCTAssertEqual(connected, [.claudeCode, .codex])
+    }
+
+    func testACodingAgentThatCouldNotBeSetUpSaysWhy() async throws {
+        let tools = OnboardingCodingTools(detect: { [.claudeCode] },
+                                          connect: { _ in CaseClientSetupReport(problems: ["Claude Code: setup failed"]) })
+        await tools.refreshIfNeeded()
+        tools.connect()
+        try await eventually { tools.state != .connecting && tools.state != .idle }
+        XCTAssertEqual(tools.state, .failed("Claude Code: setup failed"))
+    }
+
+    func testNoCodingAgentOffersNothing() async {
+        let tools = OnboardingCodingTools(detect: { [.cursor] }, connect: { _ in .init() })
+        await tools.refreshIfNeeded()
+        XCTAssertTrue(tools.installed.isEmpty, "Only Claude Code and Codex are offered")
+        tools.connect()
+        XCTAssertEqual(tools.state, .idle)
+    }
+
+    func testOnboardingClipsAreBundledLikeTheSettingsClips() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bundle = try XCTUnwrap(Bundle(path: root.appendingPathComponent("Resources").path))
+        for video in OnboardingVideo.allCases {
+            let url = try XCTUnwrap(video.url(in: bundle), "\(video) clip missing")
+            let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+            XCTAssertGreaterThan(size, 40_000)
+            XCTAssertLessThan(size, 3_000_000)
+        }
     }
 
     // MARK: - Features
@@ -500,26 +563,32 @@ final class OnboardingTests: XCTestCase {
         }
         let savedBundle = FeatureVideo.resourceBundle
         FeatureVideo.resourceBundle = try XCTUnwrap(Bundle(path: resources.path))
-        OnboardingFeatureStage.playsVideo = false
+        OnboardingClipStage.playsVideo = false
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons"))
         defer {
+            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
             FeatureVideo.resourceBundle = savedBundle
-            OnboardingFeatureStage.playsVideo = true
+            OnboardingClipStage.playsVideo = true
         }
 
-        enum Stop { case speech, speechListening, speechKey, permissions, tryEmpty, tryDone, tryDownloading, features }
+        enum Stop { case speech, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
+                        customize, customizeHover, features, featuresConnected }
         let shots: [(Stop, String)] = [
-            (.speech, "1-speech"), (.speechListening, "1-speech-listening"), (.speechKey, "1b-speech-key"),
+            (.speech, "1-speech"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
             (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
-            (.tryDownloading, "3-try-drop-downloading"), (.features, "4-features"),
+            (.tryDownloading, "3-try-drop-downloading"), (.customize, "4-customize-shortcuts"),
+            (.customizeHover, "4-customize-hover"), (.features, "5-more"), (.featuresConnected, "5-more-connected"),
         ]
+        let beforeCustomize: [Stop] = [.speech, .speechListening, .speechLanguage]
+        let fromTry: [Stop] = [.tryEmpty, .tryDone, .tryDownloading, .customize, .customizeHover, .features, .featuresConnected]
         for (stop, name) in shots {
             // A new Mac: no model (downloading once asked; landed by the try
             // page), nothing granted.
             let status: OnDeviceSpeechModelStatus
             switch stop {
-            case .speech, .speechListening, .speechKey: status = .notDownloaded
+            case .speech, .speechListening, .speechLanguage: status = .notDownloaded
             case .permissions, .tryDownloading: status = .downloading(0.42)
-            case .tryEmpty, .tryDone, .features: status = .ready
+            default: status = .ready
             }
             let env = try makeEnv(modelPresent: status == .ready)
             let controller = OnDeviceSpeechModelController(store: FixedStore(status))
@@ -531,18 +600,22 @@ final class OnboardingTests: XCTestCase {
                 snapshotProvider: { .init(accessibilityGranted: granted.value,
                                           microphoneStatus: granted.value ? .authorized : .notDetermined) },
                 accessibilityRequester: {}, openAccessibilitySettings: {}, runtimeRefresh: { _, _ in })
+            let tools = OnboardingCodingTools(detect: { [] }, connect: { _ in CaseClientSetupReport() })
+            tools.show([.claudeCode, .codex], state: stop == .featuresConnected ? .connected : .idle)
             let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,
                                         supportsOnDevice: true, models: try offlineModels(env),
+                                        preferences: PrivacyPreferences(defaults: env.defaults), codingTools: tools,
                                         defaultsChanges: NotificationCenter())
             defer { model.stop() }
-            XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features])
-            if stop == .speechKey { model.showsKeyForm = true }
-            if ![.speech, .speechListening, .speechKey].contains(stop) {
+            XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
+            if stop == .speechLanguage { model.setLanguage(AppLanguage.find(code: "ru")) }
+            if stop == .customizeHover { model.customizeVideo = .hover }
+            if !beforeCustomize.contains(stop) {
                 model.startOnDevice()  // Download and use for Drop
                 try await Task.sleep(for: .milliseconds(100))
                 XCTAssertEqual(model.page, .permissions)
             }
-            if [.tryEmpty, .tryDone, .tryDownloading, .features].contains(stop) {
+            if fromTry.contains(stop) {
                 granted.value = true
                 AppState.shared.dropHotkeyStatus = .ready
                 permissions.refresh()
@@ -550,7 +623,8 @@ final class OnboardingTests: XCTestCase {
                 if model.page == .permissions { model.advance() }
                 XCTAssertEqual(model.page, .tryDrop)
             }
-            if stop == .features { model.advance() }
+            if [.customize, .customizeHover, .features, .featuresConnected].contains(stop) { model.advance() }
+            if [.features, .featuresConnected].contains(stop) { model.advance() }
 
             let windowController = OnboardingWindowController(model: model, onClosed: {})
             let window = try XCTUnwrap(windowController.window)
@@ -559,7 +633,7 @@ final class OnboardingTests: XCTestCase {
             content.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(500))
             switch stop {
-            case .speech: model.demo.show(.done)
+            case .speech, .speechLanguage: model.demo.show(.done)
             case .speechListening: model.demo.show(.recording, level: 0.62)
             case .tryDone:
                 let textView = try XCTUnwrap(Self.textView(in: content))

@@ -107,6 +107,15 @@ final class CaseClientSetup: CaseClientConfiguring {
         }.value
     }
 
+    /// Which of `clients` are on this Mac, whatever the Connect catalog
+    /// offers. The onboarding asks about Claude Code and Codex.
+    func installed(among clients: [CaseKnownClient]) async -> [CaseKnownClient] {
+        let connectors = connectors
+        return await Task.detached {
+            clients.filter { connectors[$0]?.isInstalled() ?? false }
+        }.value
+    }
+
     func connect(_ identity: CaseAppIdentity) async -> CaseClientSetupReport {
         guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
             return CaseClientSetupReport(problems: [Self.helperMissingMessage])

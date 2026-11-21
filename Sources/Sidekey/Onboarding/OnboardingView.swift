@@ -21,14 +21,16 @@ struct OnboardingView: View {
             Group {
                 switch model.page {
                 case .speech:
-                    OnboardingSpeechPage(model: model, demo: model.demo, configuration: configuration)
+                    OnboardingSpeechPage(model: model, onDevice: model.onDevice, demo: model.demo, configuration: configuration)
                 case .permissions:
                     OnboardingPermissionsPage(model: model, permissions: model.permissions, onDevice: model.onDevice)
                 case .tryDrop:
                     OnboardingTryPage(model: model, onDevice: model.onDevice, permissions: model.permissions,
                                       configuration: configuration)
+                case .customize:
+                    OnboardingCustomizePage(model: model)
                 case .features:
-                    OnboardingFeaturesPage(model: model, configuration: configuration)
+                    OnboardingFeaturesPage(model: model, codingTools: model.codingTools, configuration: configuration)
                 }
             }
             .id(model.page)
@@ -169,29 +171,17 @@ struct OnboardingIconTile: View {
 
 // MARK: - 1. Speech
 
+/// One page for both ways to get speech: the model on this Mac or the
+/// person's own key, plus the language they dictate in. The stage plays Drop.
 @MainActor
 struct OnboardingSpeechPage: View {
-    @ObservedObject var model: OnboardingModel
-    @ObservedObject var demo: OnboardingDropDemo
-    let configuration: HotkeyConfiguration
-
-    var body: some View {
-        if model.showsKeyForm {
-            OnboardingSpeechKeyPage(model: model, models: model.models)
-        } else {
-            OnboardingOnDevicePage(model: model, onDevice: model.onDevice, demo: demo, configuration: configuration)
-        }
-    }
-}
-
-@MainActor
-struct OnboardingOnDevicePage: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var onDevice: OnDeviceSpeechModelController
     @ObservedObject var demo: OnboardingDropDemo
     let configuration: HotkeyConfiguration
 
-    /// The card's copy for a model state. Pure, so it is tested without a view.
+    /// The On this Mac card's copy for a model state. Pure, so it is tested
+    /// without a view.
     struct Presentation: Equatable {
         let detail: String
         let action: String
@@ -199,24 +189,21 @@ struct OnboardingOnDevicePage: View {
         init(_ status: OnDeviceSpeechModelStatus, model: OnDeviceSpeechModel = .parakeetTdtV3) {
             switch status {
             case .notDownloaded:
-                detail = "\(model.displayName), \(model.approximateSize). No account; works offline."
+                detail = "Free, works offline · \(model.approximateSize)"
                 action = "Download and use for Drop"
             case .downloading(let fraction):
                 detail = OnDeviceSpeechCard.Presentation.isStarting(fraction)
-                    ? "Starting the download… \(model.approximateSize)."
-                    : "Downloading: \(OnDeviceSpeechCard.Presentation.percent(fraction))% of \(model.approximateSize)."
+                    ? "Starting the download…"
+                    : "Downloading · \(OnDeviceSpeechCard.Presentation.percent(fraction))% of \(model.approximateSize)"
                 action = "Use for Drop"
             case .ready:
-                detail = "\(model.displayName) is already on this Mac and works offline."
+                detail = "Already on this Mac · works offline"
                 action = "Use for Drop"
             case .failed:
-                detail = "The download didn't finish. Check your connection and try again."
+                detail = "The download didn't finish. Try again."
                 action = "Download and use for Drop"
             }
         }
-
-        /// What the button changes, said before it is pressed.
-        static let scope = "Sets the speech model of Drop only. Other features stay as they are."
     }
 
     var body: some View {
@@ -227,42 +214,39 @@ struct OnboardingOnDevicePage: View {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
                 OnboardingLede(text: copy.pitch)
-                    .padding(.top, 12)
-                OnboardingCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .top, spacing: 12) {
-                            OnboardingIconTile(systemImage: "laptopcomputer", tint: OnboardingTheme.accent)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Speech on this Mac")
-                                    .font(OnboardingTheme.sans(13.5, weight: .semibold))
-                                    .foregroundColor(OnboardingTheme.ink)
-                                Text(presentation.detail)
-                                    .font(OnboardingTheme.sans(12))
-                                    .foregroundColor(OnboardingTheme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .contentTransition(.numericText())
+                    .padding(.top, 8)
+                OnboardingLanguageRow(model: model)
+                    .padding(.top, 20)
+                if model.supportsOnDevice {
+                    OnboardingCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(alignment: .center, spacing: 12) {
+                                OnboardingIconTile(systemImage: "laptopcomputer", tint: OnboardingTheme.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("On this Mac")
+                                        .font(OnboardingTheme.sans(13.5, weight: .semibold))
+                                        .foregroundColor(OnboardingTheme.ink)
+                                    Text(presentation.detail)
+                                        .font(OnboardingTheme.sans(12))
+                                        .foregroundColor(OnboardingTheme.muted)
+                                        .contentTransition(.numericText())
+                                }
                             }
+                            if case .downloading(let fraction) = onDevice.status {
+                                OnboardingProgressLine(fraction: fraction)
+                                    .accessibilityLabel("Download progress")
+                            }
+                            OnboardingPrimaryButton(title: presentation.action, chevron: false, action: model.startOnDevice)
                         }
-                        if case .downloading(let fraction) = onDevice.status {
-                            OnboardingProgressLine(fraction: fraction)
-                                .accessibilityLabel("Download progress")
-                        }
-                        OnboardingPrimaryButton(title: presentation.action, chevron: false, action: model.startOnDevice)
-                        Text(Presentation.scope)
-                            .font(OnboardingTheme.sans(11.5))
-                            .foregroundColor(OnboardingTheme.faint)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.top, 14)
                 }
-                .padding(.top, 26)
-                HStack(spacing: 2) {
-                    OnboardingQuietButton(title: "I have an API key") { model.showsKeyForm = true }
-                    OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
-                }
-                .padding(.top, 10)
-                .padding(.leading, -10)
+                OnboardingKeyCard(model: model, models: model.models)
+                    .padding(.top, 10)
             }
         } footer: {
+            OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
+            Spacer(minLength: 0)
             OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
         } stage: {
             ZStack {
@@ -275,101 +259,147 @@ struct OnboardingOnDevicePage: View {
     }
 }
 
+/// The language Drop listens for: Auto or one of the menu's languages, the
+/// same setting as the Input Lang tool.
+struct OnboardingLanguageRow: View {
+    @ObservedObject var model: OnboardingModel
+
+    static let autoTitle = "Any language"
+
+    static func title(_ language: AppLanguage?) -> String {
+        guard let language else { return autoTitle }
+        return language.displayName == language.englishName
+            ? language.englishName : "\(language.englishName) · \(language.displayName)"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("I speak")
+                .font(OnboardingTheme.sans(13))
+                .foregroundColor(OnboardingTheme.muted)
+            OnboardingMenu(title: Self.title(model.language), minWidth: 140) {
+                Button(Self.autoTitle) { model.setLanguage(nil) }
+                Divider()
+                ForEach(AppLanguage.all.sorted { $0.englishName < $1.englishName }, id: \.code) { language in
+                    Button(Self.title(language)) { model.setLanguage(language) }
+                }
+            }
+            .accessibilityLabel("Dictation language")
+        }
+    }
+}
+
+/// The person's own speech key: provider, key and Save on one card, with the
+/// providers that start without a card under it.
 @MainActor
-struct OnboardingSpeechKeyPage: View {
+struct OnboardingKeyCard: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var models: APIAndModelsViewModel
+    @State private var key = ""
+    @State private var saving = false
     @State private var failure: String?
+    @FocusState private var focused: Bool
 
     private var freeOffers: [APIHintsView.Hint] {
         APIHintsView.hints.filter { $0.category == .speech && $0.access == .noCard }
     }
 
     var body: some View {
-        let provider = model.keyProvider.displayName
-        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count) {
-            VStack(alignment: .leading, spacing: 0) {
-                OnboardingHeadline(plain: "Bring your", italic: "own key.")
-                OnboardingLede(text: "Drop sends your audio straight to the speech service you choose. "
-                    + "The key stays in this Mac's Keychain and sets the speech model of Drop only.")
-                    .padding(.top, 12)
-                if !freeOffers.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("NO KEY YET? NO CARD NEEDED")
-                            .font(OnboardingTheme.mono(10, weight: .medium))
-                            .tracking(1.2)
+        let provider = model.keyProvider
+        OnboardingCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    OnboardingIconTile(systemImage: "key")
+                    Text("Your API key")
+                        .font(OnboardingTheme.sans(13.5, weight: .semibold))
+                        .foregroundColor(OnboardingTheme.ink)
+                    Spacer(minLength: 4)
+                    OnboardingMenu(title: provider.displayName, minWidth: 104) {
+                        ForEach(OnboardingDropSpeech.keyProviders, id: \.self) { kind in
+                            Button(kind.displayName) { model.keyProvider = kind }
+                        }
+                    }
+                    .accessibilityLabel("Speech service")
+                }
+                if model.keyAvailable(provider) {
+                    HStack(spacing: 10) {
+                        Text("Saved on this Mac.")
+                            .font(OnboardingTheme.sans(12))
+                            .foregroundColor(OnboardingTheme.muted)
+                        Spacer(minLength: 0)
+                        OnboardingOutlineButton(title: "Use for Drop") { model.useKey(provider) }
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        SecureField("Paste your \(provider.displayName) key", text: $key)
+                            .textFieldStyle(.plain)
+                            .font(OnboardingTheme.sans(12.5))
+                            .foregroundColor(OnboardingTheme.ink)
+                            .focused($focused)
+                            .onSubmit(save)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.bg))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(focused ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.borderStrong,
+                                              lineWidth: focused ? 1.2 : 0.75))
+                            .disabled(saving)
+                        if saving {
+                            ProgressView().controlSize(.small).accessibilityLabel("Checking the key")
+                        } else {
+                            OnboardingOutlineButton(title: "Save", action: save)
+                                .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
+                if let failure {
+                    OnboardingStageStatus(tone: .warning, text: failure)
+                } else if !freeOffers.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("No key? Start free:")
                             .foregroundColor(OnboardingTheme.faint)
                         ForEach(freeOffers, id: \.provider) { hint in
                             Link(destination: hint.url) {
-                                HStack(spacing: 6) {
-                                    Text(hint.provider).foregroundColor(OnboardingTheme.ink2)
-                                    Text("\(hint.allowance) \(hint.cadence)").foregroundColor(OnboardingTheme.muted)
-                                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
-                                        .foregroundColor(OnboardingTheme.faint)
+                                HStack(spacing: 3) {
+                                    Text(hint.provider)
+                                    Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .semibold))
                                 }
-                                .font(OnboardingTheme.sans(12.5))
+                                .foregroundColor(OnboardingTheme.muted)
                             }
                             .buttonStyle(.plain)
-                            .help(hint.detail)
+                            .help("\(hint.allowance) \(hint.cadence). \(hint.detail)")
                         }
                     }
-                    .padding(.top, 26)
+                    .font(OnboardingTheme.sans(11.5))
                 }
-                HStack(spacing: 2) {
-                    if model.supportsOnDevice {
-                        OnboardingQuietButton(title: "Use this Mac instead", systemImage: "chevron.left") {
-                            model.showsKeyForm = false
-                        }
-                    }
-                    OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
-                }
-                .padding(.top, 16)
-                .padding(.leading, -10)
-            }
-        } footer: {
-            OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
-        } stage: {
-            ZStack {
-                OnboardingStageBackdrop(corner: UnitPoint(x: 0.2, y: 0.1))
-                    .padding(EdgeInsets(top: -52, leading: -40, bottom: -40, trailing: -40))
-                OnboardingMockWindow(caption: "SPEECH SERVICE") {
-                    EmptyView()
-                } content: {
-                    VStack(alignment: .leading, spacing: 14) {
-                        MacSegmented(
-                            items: OnboardingDropSpeech.keyProviders.map { .init(value: $0, label: $0.displayName) },
-                            selection: $model.keyProvider
-                        )
-                        if model.keyAvailable(model.keyProvider) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Your \(provider) key is already saved.")
-                                    .font(OnboardingTheme.sans(12.5))
-                                    .foregroundColor(OnboardingTheme.muted)
-                                OnboardingPrimaryButton(title: "Use \(provider) for Drop", chevron: false) {
-                                    model.useKey(model.keyProvider)
-                                }
-                            }
-                        } else {
-                            ProviderKeyForm(
-                                viewModel: models, kind: model.keyProvider,
-                                account: OnboardingDropSpeech.account(for: model.keyProvider),
-                                onSaveResult: { accepted in
-                                    if accepted { failure = nil; model.useKey(model.keyProvider) }
-                                },
-                                onSaveFailure: { failure = $0 },
-                                onClose: {},
-                                showsRemove: false
-                            )
-                            .id(model.keyProvider)
-                        }
-                        if let failure { OnboardingStageStatus(tone: .warning, text: failure) }
-                    }
-                    .padding(18)
-                }
-                .frame(maxWidth: 440)
             }
         }
-        .onChange(of: model.keyProvider) { _, _ in failure = nil }
+        .onChange(of: model.keyProvider) { _, _ in failure = nil; key = "" }
+    }
+
+    /// The same check and Keychain save as Settings -> API keys
+    /// (`ProviderKeyForm.save` with the provider's account).
+    private func save() {
+        let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty, !saving else { return }
+        let provider = model.keyProvider
+        saving = true
+        failure = nil
+        Task {
+            let problem: String?
+            if let account = OnboardingDropSpeech.account(for: provider) {
+                problem = await models.replaceKey(candidate, for: account)
+            } else {
+                problem = await models.addKey(candidate, kind: provider)
+            }
+            saving = false
+            if let problem {
+                failure = problem
+            } else {
+                key = ""
+                model.useKey(provider)
+            }
+        }
     }
 }
 
@@ -387,13 +417,13 @@ struct OnboardingPermissionsPage: View {
         OnboardingSplit(step: "Permissions", index: model.pageIndex, count: model.pages.count) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Two quick", italic: "permissions.", stacked: true)
-                OnboardingLede(text: "Whytap listens only while you hold the shortcut, and types where your cursor is.")
+                OnboardingLede(text: "Asked once, used only while you dictate.")
                     .padding(.top, 12)
                 VStack(spacing: 10) {
-                    card(icon: "mic", title: "Microphone", detail: "So Whytap can hear you.",
+                    card(icon: "mic", title: "Microphone", detail: "To hear you.",
                          granted: microphone, requested: false, action: permissions.requestMicrophone)
                     card(icon: "keyboard", title: "Keyboard control",
-                         detail: "So it notices your shortcut and types the text.",
+                         detail: "To type for you.",
                          granted: keyboard, requested: permissions.accessibilityRequested,
                          action: permissions.requestAccessibility)
                 }
@@ -415,7 +445,7 @@ struct OnboardingPermissionsPage: View {
                 VStack(alignment: .leading, spacing: 18) {
                     OnboardingPrivacyMock(microphone: microphone, keyboard: keyboard)
                     if !keyboard {
-                        Text("For Keyboard control, Allow opens System Settings. Turn on Whytap there, then come back.")
+                        Text("Allow opens System Settings. Turn on Whytap there, then come back.")
                             .font(OnboardingTheme.sans(12))
                             .foregroundColor(OnboardingTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -580,18 +610,18 @@ struct OnboardingTryPage: View {
         init(shortcut: String, gesture: HotkeyGesture) {
             switch gesture {
             case .hold:
-                pitch = "Hold \(shortcut) in any text field, speak, and let go. The words land where your cursor is."
+                pitch = "Hold \(shortcut), speak, let go."
                 pressVerb = "Hold"
-                pressDetail = "Keep it down while you speak. Your words show in the island."
+                pressDetail = "Speak while you hold it."
                 releaseVerb = "Let go"
-                releaseDetail = "The text lands at the cursor."
+                releaseDetail = "The text appears at the cursor."
                 placeholder = "Click here, hold \(shortcut) and say a sentence"
             case .tap:
-                pitch = "Press \(shortcut) in any text field, speak, and press it again. The words land where your cursor is."
+                pitch = "Press \(shortcut), speak, press again."
                 pressVerb = "Press"
-                pressDetail = "Speak after the press. Your words show in the island."
+                pressDetail = "Then speak."
                 releaseVerb = "Press again"
-                releaseDetail = "The text lands at the cursor."
+                releaseDetail = "The text appears at the cursor."
                 placeholder = "Click here, press \(shortcut) and say a sentence"
             }
         }
@@ -603,14 +633,12 @@ struct OnboardingTryPage: View {
         OnboardingSplit(step: "Try it", index: model.pageIndex, count: model.pages.count) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Try", italic: "Drop.")
-                OnboardingLede(text: "Say a sentence into the note on the right.")
-                    .padding(.top, 12)
                 VStack(alignment: .leading, spacing: 18) {
-                    OnboardingStepRow(number: 1, verb: "Click", detail: "Put the cursor in the note.")
+                    OnboardingStepRow(number: 1, verb: "Click", detail: "Into the note on the right.")
                     OnboardingStepRow(number: 2, verb: copy.pressVerb, detail: copy.pressDetail, chord: chord)
                     OnboardingStepRow(number: 3, verb: copy.releaseVerb, detail: copy.releaseDetail)
                 }
-                .padding(.top, 30)
+                .padding(.top, 28)
                 .accessibilityLabel("Drop shortcut: \(configuration.dropVoiceShortcut.title)")
             }
         } footer: {
@@ -643,7 +671,7 @@ struct OnboardingTryPage: View {
     @ViewBuilder private var status: some View {
         if model.dictated {
             OnboardingStageStatus(tone: .success,
-                                  text: "That's Drop. It works in any app: click into a text field and use the same shortcut.")
+                                  text: "That's Drop. Same shortcut, any app.")
         } else if !model.dropReady, case .downloading(let fraction) = onDevice.status {
             VStack(alignment: .leading, spacing: 9) {
                 OnboardingStageStatus(tone: .neutral, text: OnDeviceSpeechCard.Presentation.isStarting(fraction)
@@ -669,11 +697,109 @@ struct OnboardingTryPage: View {
     }
 }
 
-// MARK: - 4. Features
+// MARK: - 4. Customize
+
+/// The two onboarding clips, bundled beside the Settings clips in
+/// `Resources/FeatureVideos`.
+enum OnboardingVideo: String, CaseIterable {
+    case hotkeys = "onboarding-hotkeys"
+    case hover = "onboarding-hover"
+
+    var title: String {
+        switch self {
+        case .hotkeys: return "Your shortcuts"
+        case .hover: return "Your tools"
+        }
+    }
+
+    func url(in bundle: Bundle = FeatureVideo.resourceBundle) -> URL? {
+        bundle.url(forResource: rawValue, withExtension: "mp4", subdirectory: FeatureVideo.subdirectory)
+    }
+}
+
+/// Shortcuts for any tool and the tools under the island: two rows, each with
+/// its clip on the stage and the Settings place that changes it.
+@MainActor
+struct OnboardingCustomizePage: View {
+    @ObservedObject var model: OnboardingModel
+
+    var body: some View {
+        let selected = model.customizeVideo
+        OnboardingSplit(step: "Customize", index: model.pageIndex, count: model.pages.count) {
+            VStack(alignment: .leading, spacing: 0) {
+                OnboardingHeadline(plain: "Make it", italic: "yours.")
+                OnboardingLede(text: "Your keys, your tools.")
+                    .padding(.top, 8)
+                VStack(spacing: 8) {
+                    OnboardingSelectableRow(icon: "command", title: "Shortcuts",
+                                            detail: "Any tool on its own keys.",
+                                            selected: selected == .hotkeys, select: { model.customizeVideo = .hotkeys }) {
+                        OnboardingOutlineButton(title: "Open", action: model.openHotkeys)
+                            .accessibilityLabel("Open Hotkeys settings")
+                    }
+                    OnboardingSelectableRow(icon: "square.grid.3x2", title: "Hover tools",
+                                            detail: "What the island shows.",
+                                            selected: selected == .hover, select: { model.customizeVideo = .hover }) {
+                        OnboardingOutlineButton(title: "Open", action: model.openToolbox)
+                            .accessibilityLabel("Open Toolbox settings")
+                    }
+                }
+                .padding(.top, 24)
+            }
+        } footer: {
+            OnboardingPrimaryButton(title: "Continue", action: model.advance)
+        } stage: {
+            ZStack {
+                OnboardingStageBackdrop(corner: UnitPoint(x: 0.3, y: 0.0))
+                    .padding(EdgeInsets(top: -52, leading: -40, bottom: -40, trailing: -40))
+                OnboardingClipStage(title: selected.title, url: selected.url(), shortcuts: [])
+                    .id(selected)
+                    .transition(.opacity)
+            }
+            .animation(.easeInOut(duration: 0.25), value: selected)
+        }
+    }
+}
+
+/// A card that picks what the stage shows, with its own control at the end.
+struct OnboardingSelectableRow<Trailing: View>: View {
+    let icon: String
+    let title: String
+    let detail: String
+    let selected: Bool
+    let select: () -> Void
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        OnboardingCard(highlighted: selected) {
+            HStack(alignment: .center, spacing: 12) {
+                OnboardingIconTile(systemImage: icon, tint: selected ? OnboardingTheme.accent : OnboardingTheme.ink2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(OnboardingTheme.sans(13.5, weight: .semibold))
+                        .foregroundColor(OnboardingTheme.ink)
+                    Text(detail)
+                        .font(OnboardingTheme.sans(12))
+                        .foregroundColor(OnboardingTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                trailing
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: select)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(named: "Watch how \(title) works", select)
+    }
+}
+
+// MARK: - 5. Features
 
 @MainActor
 struct OnboardingFeaturesPage: View {
     @ObservedObject var model: OnboardingModel
+    @ObservedObject var codingTools: OnboardingCodingTools
     let configuration: HotkeyConfiguration
     @State private var selected: FeatureVideo = .googleSearch
 
@@ -681,16 +807,14 @@ struct OnboardingFeaturesPage: View {
         let _ = model.revision
         OnboardingSplit(step: "More", index: model.pageIndex, count: model.pages.count) {
             VStack(alignment: .leading, spacing: 0) {
-                OnboardingHeadline(plain: "Make it", italic: "yours.")
-                OnboardingLede(text: "Three more things on the same keyboard. Each stays off until you turn it on.")
-                    .padding(.top, 12)
+                OnboardingHeadline(plain: "Turn on", italic: "more.")
+                OnboardingLede(text: "Each stays off until you turn it on.")
+                    .padding(.top, 8)
                 VStack(spacing: 8) {
-                    row(.googleSearch, icon: "magnifyingglass", title: "Google search",
-                        detail: "Type or say a query.") {
+                    row(.googleSearch, icon: "magnifyingglass", title: "Google search", detail: "Type or say a query.") {
                         MacSwitch(isOn: Binding(get: { model.googleOn }, set: model.setGoogle), label: "Google search")
                     }
-                    row(.meetings, icon: "waveform", title: "Meeting Notes",
-                        detail: "Notes from your calls.") {
+                    row(.meetings, icon: "waveform", title: "Meeting Notes", detail: "From your calls.") {
                         switch model.meetingsAction {
                         case .toggle:
                             MacSwitch(isOn: Binding(get: { model.meetingsOn }, set: model.setMeetings), label: "Meeting Notes")
@@ -698,8 +822,7 @@ struct OnboardingFeaturesPage: View {
                             OnboardingOutlineButton(title: "Add a model") { model.addModel(feature) }
                         }
                     }
-                    row(.agent, icon: "command", title: "Agent",
-                        detail: "Ask; it answers in the island.") {
+                    row(.agent, icon: "command", title: "Agent", detail: "Ask; it answers.") {
                         switch model.agentAction {
                         case .toggle:
                             HStack(spacing: 8) {
@@ -711,8 +834,11 @@ struct OnboardingFeaturesPage: View {
                             OnboardingOutlineButton(title: "Add a model") { model.addModel(feature) }
                         }
                     }
+                    if !codingTools.installed.isEmpty {
+                        OnboardingCodingToolsRow(tools: codingTools)
+                    }
                 }
-                .padding(.top, 24)
+                .padding(.top, 22)
                 if let problem = model.agentProblem {
                     OnboardingStageStatus(tone: .warning, text: problem)
                         .padding(.top, 10)
@@ -725,36 +851,19 @@ struct OnboardingFeaturesPage: View {
             ZStack {
                 OnboardingStageBackdrop(corner: UnitPoint(x: 0.5, y: 0.0))
                     .padding(EdgeInsets(top: -52, leading: -40, bottom: -40, trailing: -40))
-                OnboardingFeatureStage(video: selected, shortcuts: shortcuts(for: selected))
+                OnboardingClipStage(title: selected.featureTitle, url: selected.url(), shortcuts: shortcuts(for: selected))
                     .id(selected)
                     .transition(.opacity)
             }
             .animation(.easeInOut(duration: 0.25), value: selected)
         }
+        .task { await codingTools.refreshIfNeeded() }
     }
 
     private func row<Trailing: View>(_ video: FeatureVideo, icon: String, title: String, detail: String,
                                      @ViewBuilder trailing: () -> Trailing) -> some View {
-        OnboardingCard(highlighted: selected == video) {
-            HStack(alignment: .center, spacing: 12) {
-                OnboardingIconTile(systemImage: icon, tint: selected == video ? OnboardingTheme.accent : OnboardingTheme.ink2)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(OnboardingTheme.sans(13.5, weight: .semibold))
-                        .foregroundColor(OnboardingTheme.ink)
-                    Text(detail)
-                        .font(OnboardingTheme.sans(12))
-                        .foregroundColor(OnboardingTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 4)
-                trailing()
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture { selected = video }
-        .accessibilityAddTraits(selected == video ? .isSelected : [])
-        .accessibilityAction(named: "Watch how \(title) works") { selected = video }
+        OnboardingSelectableRow(icon: icon, title: title, detail: detail,
+                                selected: selected == video, select: { selected = video }, trailing: trailing)
     }
 
     private func shortcuts(for video: FeatureVideo) -> [FeatureVideoShortcut] {
@@ -767,10 +876,60 @@ struct OnboardingFeaturesPage: View {
     }
 }
 
-/// The selected feature's bundled clip, looping silently, with the person's
-/// own keys under it. Reduce Motion shows its first frame instead.
-struct OnboardingFeatureStage: View {
-    let video: FeatureVideo
+/// Claude Code and Codex, when present: Connect gives them the Whytap plugin's
+/// server, the same setup as Case -> Connect.
+struct OnboardingCodingToolsRow: View {
+    @ObservedObject var tools: OnboardingCodingTools
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            OnboardingCard {
+                HStack(alignment: .center, spacing: 12) {
+                    HStack(spacing: -6) {
+                        ForEach(tools.installed, id: \.self) { client in
+                            ProviderBrandIcon(assetName: client == .codex ? "codex" : "claude-code",
+                                              size: 16, color: OnboardingTheme.ink2)
+                                .frame(width: 26, height: 26)
+                                .background(Circle().fill(OnboardingTheme.surface3))
+                                .overlay(Circle().strokeBorder(OnboardingTheme.surface, lineWidth: 2))
+                        }
+                    }
+                    .frame(width: 34, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Coding agents")
+                            .font(OnboardingTheme.sans(13.5, weight: .semibold))
+                            .foregroundColor(OnboardingTheme.ink)
+                        Text(tools.installed.map(\.displayName).joined(separator: ", "))
+                            .font(OnboardingTheme.sans(12))
+                            .foregroundColor(OnboardingTheme.muted)
+                    }
+                    Spacer(minLength: 4)
+                    switch tools.state {
+                    case .idle, .failed:
+                        OnboardingOutlineButton(title: "Connect", action: tools.connect)
+                            .accessibilityLabel("Connect \(tools.names) to Whytap")
+                    case .connecting:
+                        ProgressView().controlSize(.small).accessibilityLabel("Connecting")
+                    case .connected:
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(OnboardingTheme.green)
+                            .accessibilityLabel("Connected")
+                    }
+                }
+            }
+            if case .failed(let problem) = tools.state {
+                OnboardingStageStatus(tone: .warning, text: problem)
+            }
+        }
+    }
+}
+
+/// A clip looping silently, with the person's own keys under it. Reduce
+/// Motion shows its first frame instead.
+struct OnboardingClipStage: View {
+    let title: String
+    let url: URL?
     let shortcuts: [FeatureVideoShortcut]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var poster: NSImage?
@@ -780,7 +939,7 @@ struct OnboardingFeatureStage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(video.featureTitle + ".")
+            Text(title + ".")
                 .font(OnboardingTheme.serifItalic(30))
                 .foregroundColor(OnboardingTheme.ink)
             ZStack {
@@ -788,7 +947,7 @@ struct OnboardingFeatureStage: View {
                 if let poster {
                     Image(nsImage: poster).resizable().aspectRatio(contentMode: .fit)
                 }
-                if Self.playsVideo, !reduceMotion, let url = video.url() {
+                if Self.playsVideo, !reduceMotion, let url {
                     LoopingVideoView(url: url)
                 }
             }
@@ -818,11 +977,11 @@ struct OnboardingFeatureStage: View {
             }
         }
         .frame(maxWidth: 480)
-        .task(id: video) { poster = await Self.poster(for: video) }
+        .task(id: url) { poster = await Self.poster(for: url) }
     }
 
-    static func poster(for video: FeatureVideo) async -> NSImage? {
-        guard let url = video.url() else { return nil }
+    static func poster(for url: URL?) async -> NSImage? {
+        guard let url else { return nil }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
         guard let image = try? await generator.image(at: CMTime(seconds: 0.2, preferredTimescale: 600)).image

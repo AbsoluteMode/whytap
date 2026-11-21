@@ -320,3 +320,40 @@ struct OnboardingProgressLine: View {
         .animation(.easeOut(duration: 0.3), value: fraction)
     }
 }
+
+/// A native menu behind the onboarding's own dark label (language, speech
+/// service). The menu itself stays the system one.
+struct OnboardingMenu<Content: View>: View {
+    let title: String
+    var minWidth: CGFloat = 0
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(OnboardingTheme.sans(12.5, weight: .medium))
+                    .foregroundColor(OnboardingTheme.ink2)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.muted)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 11)
+            .frame(minWidth: minWidth, minHeight: 28, maxHeight: 28)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.surface2))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(OnboardingTheme.borderStrong, lineWidth: 0.75))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityValue(title)
+    }
+}

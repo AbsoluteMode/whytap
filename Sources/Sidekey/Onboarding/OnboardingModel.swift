@@ -10,9 +10,12 @@ import Foundation
 final class OnboardingModel: ObservableObject {
     @Published private(set) var pages: [OnboardingPage]
     @Published private(set) var page: OnboardingPage
-    /// The speech page's choice: a key form instead of the On this Mac card.
-    @Published var showsKeyForm: Bool
     @Published var keyProvider: AIProviderKind = .soniox
+    /// The dictation language; `nil` is Auto. The same value as the Input
+    /// Lang tool and Settings.
+    @Published private(set) var language: AppLanguage?
+    /// The clip the customize page shows.
+    @Published var customizeVideo: OnboardingVideo = .hotkeys
     /// Drop's speech route runs. Rechecked on every route change.
     @Published private(set) var dropReady: Bool
     /// The speech route the transcription session could not start.
@@ -27,6 +30,8 @@ final class OnboardingModel: ObservableObject {
     let onDevice: OnDeviceSpeechModelController
     let supportsOnDevice: Bool
     let speech: OnboardingDropSpeech
+    let preferences: PrivacyPreferences
+    let codingTools: OnboardingCodingTools
     /// The silent Drop demo on the speech page.
     let demo = OnboardingDropDemo()
     /// The key form's store of keys and routes; built when the form opens.
@@ -48,6 +53,8 @@ final class OnboardingModel: ObservableObject {
         onDevice: OnDeviceSpeechModelController? = nil,
         supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
         models: APIAndModelsViewModel? = nil,
+        preferences: PrivacyPreferences = .shared,
+        codingTools: OnboardingCodingTools? = nil,
         defaultsChanges: NotificationCenter = .default
     ) {
         injectedModels = models
@@ -60,9 +67,11 @@ final class OnboardingModel: ObservableObject {
         self.permissions = permissions
         self.onDevice = onDevice
         self.supportsOnDevice = supportsOnDevice
+        self.preferences = preferences
+        self.codingTools = codingTools ?? OnboardingCodingTools()
+        language = preferences.selectedLanguage
         let ready = speech.isReady
         dropReady = ready
-        showsKeyForm = !supportsOnDevice
         let pages = OnboardingFlow.pages(for: OnboardingConditions(
             dropSpeechReady: ready, permissionsReady: permissions.allRequiredGranted))
         self.pages = pages
@@ -159,6 +168,12 @@ final class OnboardingModel: ObservableObject {
 
     func restoreFromAnotherMac() {
         openSettings(.backup, nil)
+    }
+
+    /// The language Drop listens for; `nil` lets the provider detect it.
+    func setLanguage(_ language: AppLanguage?) {
+        preferences.selectedLanguage = language
+        self.language = preferences.selectedLanguage
     }
 
     // MARK: - Permissions
@@ -267,6 +282,11 @@ final class OnboardingModel: ObservableObject {
     func addModel(_ feature: AIFeature) {
         openSettings(.apiAndModels, feature)
     }
+
+    // MARK: - Customize
+
+    func openHotkeys() { openSettings(.hotkeys, nil) }
+    func openToolbox() { openSettings(.toolbox, nil) }
 
     // MARK: - Routes
 

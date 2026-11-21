@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the README "Free to run" section from the app's API hints.
+"""Write the README "Free to use" section from the app's API hints.
 
 The offers live in one place, `APIHintsView.hints` in
 Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift, which Settings ->
@@ -22,10 +22,19 @@ import datetime, html, pathlib, re, sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SWIFT = REPO / "Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift"
 README = REPO / "README.md"
-HEADING = "## Free to run"
-OLD_HEADINGS = ["## Free API keys"]  # renamed 2026-11-21; replaced in place
+HEADING = "## Free to use"
+OLD_HEADINGS = ["## Free to run", "## Free API keys"]  # renamed 2026-11-21; replaced in place
 CATEGORY = {"speech": "Speech to text", "models": "Language models", "search": "Web search"}
 DEFAULT_CHECKED = "2026-10-19"  # Hint.checked default in the Swift struct
+# A line under the cards saying what an allowance means in dictation. The numbers
+# come from the provider's official API pricing ("Hours included" for the Free
+# plan), not from the app, so the monthly review rechecks them; the script stops
+# when the allowance it was written for changes.
+NOTES = {
+    "ElevenLabs": ("10,000", "ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live "
+                   "dictation on Scribe v3 Live, its most accurate realtime model: about five "
+                   "minutes of speech every day, enough to dictate all month."),
+}
 
 
 def offers():
@@ -235,6 +244,13 @@ def section():
             f'<source media="(prefers-color-scheme: light)" srcset="{wsrc("light")}">'
             f'<img alt="{alt}" src="{wsrc("dark")}" width="49%"></picture></a>'
         )
+    notes = []
+    for o in rows:
+        if o["provider"] in NOTES:
+            allowance, text = NOTES[o["provider"]]
+            if o["allowance"] != allowance:
+                sys.exit(f"{o['provider']}'s allowance is now {o['allowance']}: recheck and update NOTES")
+            notes.append(f'<p align="center">{html.escape(text, quote=False)}</p>')
     for lay in WIDTH:
         for t in THEMES:
             (OUT / f"free-api-summary-{lay}-{t}.svg").write_text(banner(t, lay, newest))
@@ -248,6 +264,7 @@ def section():
         "<p align=\"center\">",
         "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),
         "</p>",
+        *(["", *notes] if notes else []),
     ]) + "\n"
 
 
@@ -268,8 +285,8 @@ if __name__ == "__main__":
     result = updated(current)
     if "--check" in sys.argv:
         if result != current:
-            sys.exit("README.md Free to run section is out of date: run scripts/readme-free-apis.py")
-        print("README.md Free to run section is current")
+            sys.exit("README.md Free to use section is out of date: run scripts/readme-free-apis.py")
+        print("README.md Free to use section is current")
     else:
         README.write_text(result)
         print("ok")

@@ -134,7 +134,7 @@ struct APIHintsView: View {
 
     // Keep amounts and the verification date together when refreshing offers.
     // The header promises a monthly review and shows the newest date below.
-    // README's "Free to run" cards is generated from the no-card offers here:
+    // README's "Free to use" cards is generated from the no-card offers here:
     // run scripts/readme-free-apis.py after changing them.
     // WHY: .project-docs/decisions/2026-11-21-free-api-report.md
     static let hints: [Hint] = [

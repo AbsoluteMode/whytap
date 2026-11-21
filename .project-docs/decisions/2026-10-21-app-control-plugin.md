@@ -103,7 +103,7 @@ the guides. Vocabulary from the words a user edits and adding calendar events
 were not added: Whytap does not observe edits after paste, the plugin cannot
 write Vocab, and Hover calendar events are read-only. It says
 "work with Whytap", not "fully control": recording, keys, permissions and
-quit stay outside the plugin. Case needs its own Connect.
+quit stay outside the plugin. Case needs its own Connect. Maxim then asked for a line telling people who find setup hard to ask Claude Code or Codex for help. It names only what the tools do (read the settings; switch models, providers, Drop mode and languages), not "anything": keys, permissions and other settings stay in Whytap's own Settings.
 
 ## Supersedes / superseded by
 

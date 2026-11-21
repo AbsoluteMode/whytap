@@ -129,13 +129,15 @@ claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 ```
 
+<p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>
+
 ## File an issue in one request
 
 <p align="center">Ask <a href="https://whytap.ai">whytap.ai</a> anything about Whytap. It answers from the code, and when Whytap can't do it yet, it drafts the GitHub issue for you.</p>
 
 <p align="center"><a href="https://whytap.ai"><img alt="whytap.ai Ask: the question “Add support for the Qwen provider”, an answer from the code, follow-up questions and a drafted issue with a Suggest it on GitHub button" src="docs/assets/readme/ask-issue.webp" width="100%"></a></p>
 
-## Free to run
+## Free to use
 
 <p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-summary-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-summary-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-summary-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-summary-wide-light.svg"><img alt="Your own keys (BYOK, billed by the provider); Local speech-to-text (on this Mac, Apple Silicon); Self-hosted (OpenAI-compatible servers). Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026. Similar paid apps cost about $600 a year; Whytap is $0." src="docs/assets/readme/free-api-summary-wide-dark.svg" width="100%"></picture></p>
 
@@ -146,3 +148,5 @@ codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 <a href="https://openrouter.ai/models?max_price=0"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-openrouter-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-openrouter-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-openrouter-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-openrouter-wide-light.svg"><img alt="OpenRouter: 50 / day free model requests (Language models)" src="docs/assets/readme/free-api-openrouter-wide-dark.svg" width="49%"></picture></a>
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
+
+<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>

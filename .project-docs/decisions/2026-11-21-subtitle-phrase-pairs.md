@@ -27,9 +27,6 @@ sources:
     reference: Sources/Sidekey/Translation/SubtitleSegmenter.swift
     confirmed_at: 2026-11-21
   - type: repository
-    reference: Sources/Sidekey/Translation/SubtitlePartialLock.swift
-    confirmed_at: 2026-11-21
-  - type: repository
     reference: Sources/Sidekey/Translation/LiveSubtitleModel.swift
     confirmed_at: 2026-11-21
   - type: repository
@@ -41,13 +38,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Streaming/BYOK/ElevenLabsBYOKAdapter.swift
     confirmed_at: 2026-11-21
-  - type: repository
-    reference: Tests/SidekeyTests/Translation/SubtitlePhrasePairTests.swift
-    confirmed_at: 2026-11-21
-  - type: repository
-    reference: Tests/SidekeyTests/Translation/SubtitleLatencyBenchmarkTests.swift
-    confirmed_at: 2026-11-21
-related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md]
+related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-22-subtitle-audio-translate-slot.md]
 ---
 
 # Subtitle phrase pairs
@@ -87,6 +78,11 @@ Where the time went:
    every later phrase.
 
 ## Decision
+
+Superseded in part on 2026-11-22: Subtitles run only on OpenAI Audio
+translate (2026-11-22-subtitle-audio-translate-slot.md), so the phrase
+segmenter, parallel per-phrase LLM translation, ElevenLabs partial lock and
+their tests below are removed. The pair layout and bands stay.
 
 - **Pairs.** The box shows the newest phrases as pairs: the original in a
   narrower left column (smaller, dimmed) and the translation in the right

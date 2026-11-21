@@ -120,8 +120,8 @@ Voice flow (Drop / dictation):
             .project-docs/decisions/2026-10-19-api-and-models.md
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
             the same route mechanism, for every speech feature (Drop Fast,
-            Drop Smart, Agent voice, Voice search, Meetings, Subtitles audio;
-            no text feature). The API
+            Drop Smart, Agent voice, Voice search, Meetings; no text feature;
+            Subtitles run only on OpenAI Audio translate). The API
             keys tab has an On this Mac card above the key tiles
             (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
             button is in the card, with an animated progress bar and symbol
@@ -148,12 +148,11 @@ Voice flow (Drop / dictation):
             none for Cyrillic ones. The loaded model is released after five
             idle minutes. No Costs rows. WHY:
             .project-docs/decisions/2026-11-19-on-device-dictation.md
-            Meetings and Subtitles audio use OnDeviceStreamingAdapter (from
-            RealtimeAdapterFactory, unmetered): OnDevicePhraseSegmenter cuts
-            the stream at 700 ms pauses or 12 s (at the quietest frame), each
-            phrase is decoded once as a final, digital silence is skipped;
-            Subtitles also get a partial of the phrase in progress about once
-            a second. sendAudio waits while two phrases are queued. A meeting
+            Meetings use OnDeviceStreamingAdapter (from RealtimeAdapterFactory,
+            unmetered): OnDevicePhraseSegmenter cuts the stream at 700 ms
+            pauses or 12 s (at the quietest frame), each phrase is decoded
+            once as a final, digital silence is skipped (its live-partial
+            option served the retired Subtitles route). sendAudio waits while two phrases are queued. A meeting
             on this Mac takes the adapter branch like a user's server: no
             speaker labels ("without speakers" in the picker). WHY:
             .project-docs/decisions/2026-11-21-on-device-everywhere.md
@@ -435,25 +434,27 @@ Translation tools:
   translation running to the box's edge (PairGridLayout); the box hugs its
   widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
   still being heard last as a dim live original; Toolbox stacks original over
-  translation. SubtitleSegmenter cuts committed text into whole phrases
-  (sentence end at once, 0.6 s pause, 60 chars/2.5 s at a clause mark or word
-  boundary, never inside a word or after a function word). Up to three
-  phrases translate at once; each request carries up to three finished pairs
-  as answered turns and the phrases still in flight as quoted context; an 8 s
-  deadline or a transient error marks only that pair Not translated, key and
-  setup errors stop the session. ElevenLabs Subtitles audio commits by VAD
-  (0.5 s) and SubtitlePartialLock translates the stable start of its
-  segment-long partials (0.6 s unchanged, no hyphenated unfinished word),
-  aligning the commit by words; Drop and other takes keep manual commits.
-  Every other pair sits on a faint band that follows the pair's position in
-  the session. WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  Subtitles audio can instead be OpenAI gpt-realtime-translate (model use
-  speechTranslation, OpenAI and Subtitles audio only; the user picks it):
+  translation. Every other pair sits on a faint band that follows the pair's
+  position in the session. WHY:
+  .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
+  -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
+  holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
+  choice. It runs exactly when the OpenAI key from API keys can be read;
+  without one the card has the usual setup contour, its menu adds "Add an
+  OpenAI key…", it counts as a feature without a model, and Start names the
+  missing key and opens API & Models (no system audio is captured). A session
+  stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
+  no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
+  like Decision: their IDs stay for Costs and history, saved routes are
+  ignored and kept for a rollback build. The owner chose this on 2026-11-22
+  (three users, all aware), an exception to keeping saved audio routes. WHY:
+  .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
   OpenAIRealtimeTranslateAdapter streams the capture (24 kHz, 200 ms frames)
   to one session that returns the translation and, with gpt-realtime-whisper
-  input transcription, the heard original; the Subtitles LLM row is unused
-  and says so. SubtitleSpeechPairer cuts the translation at sentence ends,
-  1.2 s pauses or a clause past 160 characters and matches the original's
+  input transcription, the heard original. SubtitleSpeechPairer cuts the
+  translation at sentence ends (SubtitleSegmenter's sentence rules), 1.2 s
+  pauses or a clause past 160 characters and matches the original's
   sentence that ended (elapsed_ms) before it; the live pair shows whole
   words only. Refused key, no credit, busy, unsupported language and a
   dropped socket end the session with a named message; Costs estimates
@@ -466,17 +467,11 @@ Translation tools:
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never
-  the microphone, on the subtitlesAudio real-time route; committed (and, for
-  ElevenLabs, stable partial) phrases go to its independent
-  subtitlesTranslation LLM route. API & Models groups
-  Subtitles Speech/LLM selectors; typed text uses only translation. New routes
-  start unset. Migration v2 copies the previous shared text route once only
-  for configured subtitles; later edits, clears and launches stay independent.
-  Partial v1 documents expose this split in memory without rewriting raw bytes;
-  their first real edit retains a backup and persists the split before the edit.
-  Never borrow other routes at runtime or migrate standalone credentials.
-  Nine untranslated phrases, forty retained lines and a bounded audio relay stop
-  visibly on backlog. Stop uses opt-in CoreAudio terminal EOF after capture
+  the microphone, for the Audio translate session; typed text uses only the
+  translation route. The routing store still splits a partial v1 document's
+  subtitle routes in memory for rollback builds; nothing reads them now.
+  Forty retained lines and a bounded audio relay stop visibly on backlog.
+  Stop uses opt-in CoreAudio terminal EOF after capture
   quiescence and an IO queue barrier, then naturally drains the relay before
   provider endInput. Ordinary meeting/VAD stop keeps streams reusable; hardware
   start/stop/route restart are serialized. Cancel, window close and sleep

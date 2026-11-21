@@ -92,7 +92,8 @@ struct APIAndModelsView: View {
                 if let feature { focus(feature, scroller: scroller) }
             }
             .onChange(of: showUnsetTick) { _, _ in
-                let unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
+                var unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
+                if !viewModel.audioTranslate.isActive { unset.append(.subtitlesAudio) }
                 if let first = unset.first { highlight(Set(unset), scrollTo: first, scroller: scroller) }
             }
             .task {
@@ -230,7 +231,7 @@ struct APIAndModelsView: View {
             .padding(.bottom, viewModel.aliasGroups.isEmpty ? 0 : 10)
             VStack(spacing: 10) {
                 ForEach(viewModel.groups) { group in
-                    MacCard(needsSetup: group.rows.contains { $0.status == .notSet }) {
+                    MacCard(needsSetup: group.needsSetup) {
                         groupRow(group)
                     }
                     .id(group.id)
@@ -286,11 +287,11 @@ struct APIAndModelsView: View {
                         .foregroundStyle(MacSettingsTheme.text)
                         .frame(width: 116, alignment: .leading)
                     HStack(spacing: 7) {
-                        ForEach(Array(group.rows.enumerated()), id: \.element.feature) { index, row in
+                        ForEach(Array(group.summaryParts.enumerated()), id: \.offset) { index, part in
                             if index > 0 {
                                 Text("·").accessibilityHidden(true)
                             }
-                            Text(row.modelSummary)
+                            Text(part)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
@@ -313,7 +314,7 @@ struct APIAndModelsView: View {
             .accessibilityLabel(group.title)
             .accessibilityValue(disclosureValue(group, expanded: expanded))
             .accessibilityHint(expanded ? "Hide model settings" : "Show model settings")
-            .help(group.rows.map(\.selectionLabel).joined(separator: "\n"))
+            .help(Self.helpText(group))
             .onKeyPress(.return) {
                 expandedGroup = expanded ? nil : group.id
                 return .handled
@@ -321,19 +322,7 @@ struct APIAndModelsView: View {
 
             if expanded {
                 MacRowSeparator()
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(group.rows) { row in
-                        pickers(for: row, paired: paired)
-                    }
-                    if group.title == "Drop Smart" {
-                        Text("The text model keeps ready messages unchanged and edits only when corrections or structure are useful.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(MacSettingsTheme.text2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                expandedSettings(group, paired: paired)
             }
 
             ForEach(group.rows) { row in
@@ -346,19 +335,76 @@ struct APIAndModelsView: View {
             focusedGroup = group.id
             return .handled
         }
-        .background(group.rows.contains { highlighted.contains($0.feature) }
+        .background(highlighted.contains(where: group.covers)
                     ? MacSettingsTheme.accent.opacity(0.16) : Color.clear)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: highlighted)
     }
 
+    private static func helpText(_ group: FeatureGroup) -> String {
+        if let slot = group.audioTranslate { return slot.label }
+        return group.rows.map(\.selectionLabel).joined(separator: "\n")
+    }
+
+    private func expandedSettings(_ group: FeatureGroup, paired: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let slot = group.audioTranslate {
+                fixedModelRow(slot)
+            }
+            ForEach(group.rows) { row in
+                pickers(for: row, paired: paired)
+            }
+            if group.title == "Drop Smart" {
+                Text("The text model keeps ready messages unchanged and edits only when corrections or structure are useful.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
     private func disclosureValue(_ group: FeatureGroup, expanded: Bool) -> String {
-        let setup = group.rows.contains { $0.status == .notSet } ? ", Needs setup" : ""
+        let setup = group.needsSetup ? ", Needs setup" : ""
         return "\(expanded ? "Expanded" : "Collapsed"), \(group.summary)\(setup)"
+    }
+
+    private static let providerSlotWidth: CGFloat = 132
+
+    /// Subtitles' model row, laid out like every single-model row: its one
+    /// model is preselected and the menu offers only it. Without the OpenAI
+    /// key the card shows the same setup contour as any row without a model,
+    /// and the menu leads to API keys.
+    // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+    private func fixedModelRow(_ slot: AudioTranslateSlot) -> some View {
+        GeometryReader { geometry in
+            let modelWidth = max(90, geometry.size.width - 52 - 20 - Self.providerSlotWidth)
+            HStack(spacing: 10) {
+                Text("Model")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .frame(width: 52, alignment: .leading)
+                MacMenu(title: slot.label, minWidth: modelWidth, maxWidth: modelWidth) {
+                    Button {} label: { Label(slot.label, systemImage: "checkmark") }
+                    if !slot.isActive {
+                        Divider()
+                        Button("Add an OpenAI key…", action: showKeySetup)
+                    }
+                }
+                Color.clear.frame(width: Self.providerSlotWidth, height: 1)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(height: MacPopupMetrics.height)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Subtitles")
+        .accessibilityValue(slot.isActive ? "" : "Needs setup")
+        .help(slot.isActive ? slot.label : "Add an OpenAI key in API keys.")
     }
 
     private func pickers(for row: FeatureRow, paired: Bool) -> some View {
         GeometryReader { geometry in
-            let providerWidth: CGFloat = 132
+            let providerWidth = Self.providerSlotWidth
             let modelWidth = max(90, geometry.size.width - 52 - 20 - providerWidth)
             HStack(spacing: 10) {
                 Text(paired ? row.fieldLabel : "Model")
@@ -492,7 +538,7 @@ struct APIAndModelsView: View {
     /// Scrolls to `target` and tints the rows of `features` for a moment.
     private func highlight(_ features: Set<AIFeature>, scrollTo target: AIFeature,
                            scroller: ScrollViewProxy, seconds: Double = 2.5) {
-        guard let group = viewModel.groups.first(where: { $0.rows.contains { $0.feature == target } }) else { return }
+        guard let group = viewModel.groups.first(where: { $0.covers(target) }) else { return }
         expandedGroup = group.id
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             scroller.scrollTo(group.id, anchor: .center)

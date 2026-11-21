@@ -89,7 +89,7 @@ final class OnDeviceDictationTests: XCTestCase {
     }
 
     func test_speech_features_are_offered_the_model() {
-        for feature in [AIFeature.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio] {
+        for feature in [AIFeature.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch] {
             XCTAssertEqual(feature.modelUse(on: .onDevice), .realtimeSTT, "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .onDevice), model)
             XCTAssertTrue(ModelRegistry.isVerified(model, kind: .onDevice, use: .realtimeSTT))
@@ -145,7 +145,7 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertEqual(vm.chips.map(\.account), [.thisMac])
         XCTAssertEqual(vm.chips.first?.statusText, "Model downloaded")
         XCTAssertEqual(vm.proposal?.title, "Use On this Mac for")
-        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio])
+        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch])
         XCTAssertNil(env.routing.route(for: .dropFast), "offered, not assigned")
 
         vm.applyProposal(selected: [.dropFast])
@@ -167,7 +167,7 @@ final class OnDeviceDictationTests: XCTestCase {
         vm.onDeviceModelChanged()
 
         XCTAssertEqual(env.routing.route(for: .dropFast), soniox)
-        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio])
+        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropSmart, .meetings, .agentVoice, .voiceSearch])
         let section = vm.sections(for: .dropFast).first { $0.account == .thisMac }
         XCTAssertEqual(section?.title, "On this Mac")
         XCTAssertEqual(section?.options.map(\.model), [model])

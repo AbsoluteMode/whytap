@@ -154,9 +154,8 @@ extension ModelRegistry {
             case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .openAI:
-            // The authenticated live catalog is the source of available IDs;
-            // Subtitles audio offers the one live speech translation model.
-            return feature == .subtitlesAudio ? OpenAIRealtimeTranslateAdapter.model : nil
+            // The authenticated live catalog is the source of available IDs.
+            return nil
         case .openAICompatible:
             return nil
         case .onDevice:

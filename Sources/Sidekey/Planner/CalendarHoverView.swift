@@ -29,12 +29,12 @@ final class CalendarHoverModel: ObservableObject {
     }
 
     func begin() {
-        guard !visible else { return }
+        guard CalendarAvailability.isOpen, !visible else { return }
         visible = true; openToday(); activityChanged(true)
     }
     func end() { visible = false; activityChanged(false) }
     func openToday() {
-        guard !connectionFlow.working else { return }
+        guard CalendarAvailability.isOpen, !connectionFlow.working else { return }
         page = .agenda; today()
     }
     func today() { followingToday = true; selectedDay = Calendar.current.startOfDay(for: now()); refresh() }
@@ -46,7 +46,7 @@ final class CalendarHoverModel: ObservableObject {
     func refresh() { refreshToken += 1 }
     @discardableResult
     func connect(_ provider: CalendarProvider, info: [String: Any]?, onSuccess: @escaping () -> Void = {}) -> Bool {
-        guard !connectionFlow.working else { return false }
+        guard CalendarAvailability.isOpen, !connectionFlow.working else { return false }
         page = .providers
         if provider == .apple && connections.appleEnabled { page = .agenda; return false }
         return connectionFlow.startRegistered(provider: provider, info: info) { [self] in
@@ -160,7 +160,7 @@ struct CalendarHoverView: View {
         .foregroundStyle(.white.opacity(0.96))
         .environment(\.colorScheme, .dark)
         .task(id: "\(model.selectedDay.timeIntervalSince1970):\(model.refreshToken)") {
-            guard liveUpdates else { return }
+            guard liveUpdates, CalendarAvailability.isOpen else { return }
             repeat {
                 await connections.refresh(interval: model.interval)
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
@@ -175,7 +175,7 @@ struct CalendarHoverView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)) { _ in
-                guard liveUpdates else { return }
+                guard liveUpdates, CalendarAvailability.isOpen else { return }
                 connections.refreshAppleIfEnabled(interval: model.interval)
             }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in model.dayChanged() }

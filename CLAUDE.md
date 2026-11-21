@@ -342,6 +342,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
        -> voice: the same STT factory as Drop, route of agentVoice
        -> NativeAgentProvider -> direct model HTTP -> local tool -> model loop
        -> validated finish_answer object -> text and typed cards in the island
+  Native and CLI final text use compact Markdown. Comparisons adapt to the
+  available width, and completed answers open with the conclusion at the top.
+  WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.
@@ -1119,13 +1122,34 @@ API & Models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and
 recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
-First run: no sign-in and no onboarding wizard. Launch and reopen show the
-island immediately. The first GUI launch on each Mac also opens Settings ->
-Permissions once if any listed permission is missing. Already authorized Macs
-skip this presentation; a dismissed screen is not reopened at every launch.
-The local presentation marker is excluded from settings backups. Showing the
-screen requests no permission automatically. WHY:
-.project-docs/decisions/2026-10-26-first-launch-permissions.md.
+First run: no sign-in. Launch and reopen show the island immediately. The
+first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
+OnboardingWindowController, accessory app, no Dock icon) in place of the former
+Settings -> Permissions screen: up to four pages, each hidden when already done
+and each skippable, closing = Done. 1 Speech: On this Mac card ("Download and use
+for Drop", about 470 MB, download continues in the background; when it lands
+OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that cannot
+run, nothing else), "I have an API key" (Soniox/Deepgram/ElevenLabs, saving sets
+that provider for Drop), "Restore from another Mac"; Intel opens on the key form;
+hidden when Drop's speech route runs. 2 Two permissions: Microphone and Keyboard
+control on PermissionsSettingsViewModel, done at dropHotkeyStatus == .ready
+(DropShortcutStatusSection when both are granted but the shortcut is not
+installed); hidden when ready. 3 Hold Space and speak: the user's own shortcut,
+a native field, "That's Drop" only on DropLocalEditor's
+sidekeyDropInsertedIntoLocalEditor for that field; while the onboarding is
+visible a Drop press with no route says so on the page (no Settings over it)
+and one with a missing permission returns to page 2 (no repair window).
+4 Google search / Meeting Notes / Agent: switch and video each, "Add a model"
+when the feature's model does not run; Done. No Calendar. Screen Recording,
+System Audio Recording, Input Monitoring, Automation and Calendar are asked at
+first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
+or the former onboarding's key = ran before, never shown on update;
+sidekey.onboarding.pending.v1 brings it back after a quit until Done; neither key
+is in backups or sync. A first Drop press with the microphone never asked asks
+it and records nothing (DropHotkeyRecovery.startGate); Now Playing's Automation
+prompt waits while the onboarding is visible. To see it again on a Mac:
+`defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
+and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow
@@ -1199,6 +1223,14 @@ To-do opens a compact inline hover list with Return-to-add, click-to-complete/re
 and a History mode with completion date/time. Completed tasks move below active
 ones for the current opening, then appear only in History. Native tooltips expose
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
+Calendar is currently closed as "Soon": CalendarAvailability.shipped = false
+is the single switch (tile, search row, Toolbox pane and Integrations card show a
+Soon badge and are inert; HoverSlotRouter returns .comingSoon; CalendarConnections
+refuses connect/enable/refresh so macOS is never asked; saved shortcuts register no
+key; stored connections are kept). New surfaces, onboarding included, must check
+CalendarAvailability.isOpen / HoverTool.isComingSoon. WHY:
+.project-docs/decisions/2026-11-21-calendar-soon.md Everything below describes
+the feature as it works once opened.
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
@@ -1385,16 +1417,13 @@ Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
-without deleting other retained rows. A clipboard row's context menu offers
-Delete… in hover History and Toolbox History; ClipboardEntryDeletion
-asks Cancel-first like meeting delete and never quotes the copy. deleteClipboardEntry
-removes the image sidecar, then the row with secure_delete and a truncating WAL
-checkpoint, in one store-queue hop; a sidecar that cannot be removed keeps the
-row listed. History key monitors ignore keys while a modal alert is open.
-Uploaded backups are unchanged (pre-2026-10-21 archives restore History). WHY:
-.project-docs/decisions/2026-10-22-clipboard-entry-delete.md
-The History connection sets secure_delete=ON, so cap evictions, agent trimming
-and Delete… zero freed bytes and pages. After store setup,
+without deleting other retained rows. Clipboard rows have no Delete and no
+context menu (the island has no right-click actions; the user removed the
+per-entry Delete on 2026-11-21); only the 50-entry cap removes them. History
+key monitors ignore keys while a modal alert is open. WHY:
+.project-docs/decisions/2026-11-21-clipboard-no-entry-delete.md
+The History connection sets secure_delete=ON, so cap evictions and agent
+trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in
 its own history_maintenance table, so a restored older copy is scrubbed again),
 keeping every row and id, then truncates the WAL. Too little space (2x live rows

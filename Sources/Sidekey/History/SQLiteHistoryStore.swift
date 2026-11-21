@@ -47,8 +47,8 @@ final class SQLiteHistoryStore: HistoryStore, @unchecked Sendable {
         self.path = path
         self.handle = db
         try exec("PRAGMA journal_mode=WAL;")
-        // Every delete on this connection (cap eviction, agent trimming,
-        // Delete…) zeroes the row's bytes and the pages it frees. The system
+        // Every delete on this connection (cap eviction, agent trimming)
+        // zeroes the row's bytes and the pages it frees. The system
         // library's default, FAST, leaves freed overflow pages, such as a
         // long evicted copy, readable in the file.
         // WHY: .project-docs/decisions/2026-10-22-history-free-page-scrub.md
@@ -686,79 +686,6 @@ final class SQLiteHistoryStore: HistoryStore, @unchecked Sendable {
                 sqlite3_bind_int64(stmt, Int32(offset + 1), value)
             }
             try step(stmt)
-        }
-    }
-
-    /// Deletes one clipboard row and, for an image, its sidecar file.
-    /// Returns `false` when the row is already gone (evicted by the cap or
-    /// deleted earlier). Everything runs inside one hop on the store queue,
-    /// so a watcher insert or cap eviction cannot interleave. The sidecar
-    /// goes first: when it cannot be removed the row stays and the entry
-    /// remains listed for a retry, instead of leaving an unlisted copy on
-    /// disk. A missing sidecar counts as removed. The row is erased with
-    /// the connection's `secure_delete`, then the WAL is checkpointed and
-    /// truncated, so the copied bytes do not linger in free pages or the
-    /// write-ahead log.
-    /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
-    @discardableResult
-    func deleteClipboardEntry(id: Int64, assetsDirectory: URL) throws -> Bool {
-        try queue.sync {
-            switch try clipboardRowForDeletion(id: id) {
-            case .missing:
-                return false
-            case .withoutSidecar:
-                break
-            case .image(let image):
-                try Self.removeSidecarIfPresent(image.sidecarURL(in: assetsDirectory))
-            }
-            let stmt = try prepare("DELETE FROM clipboard_entries WHERE id = ?;")
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_int64(stmt, 1, id)
-            try step(stmt)
-            // Best effort: a reader on another connection can keep frames in
-            // the WAL until its next checkpoint; the row itself is gone.
-            sqlite3_wal_checkpoint_v2(handle, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
-            return true
-        }
-    }
-
-    private enum ClipboardRowLookup {
-        case missing
-        case withoutSidecar
-        case image(ClipboardImagePayload)
-    }
-
-    /// Reads what deleting row `id` has to clean up. The statement is
-    /// finalized before returning so no read stays open during the delete
-    /// and checkpoint. Call only on `queue`.
-    private func clipboardRowForDeletion(id: Int64) throws -> ClipboardRowLookup {
-        let stmt = try prepare("""
-            SELECT kind, image_uuid, image_extension
-            FROM clipboard_entries
-            WHERE id = ?;
-        """)
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, id)
-        let rc = sqlite3_step(stmt)
-        if rc == SQLITE_DONE { return .missing }
-        guard rc == SQLITE_ROW else {
-            throw Error.stepFailed(lastErrorMessage())
-        }
-        guard readText(stmt, column: 0) == ClipboardEntryKind.image.rawValue,
-              let uuid = UUID(uuidString: readText(stmt, column: 1) ?? "")
-        else { return .withoutSidecar }
-        return .image(ClipboardImagePayload(
-            uuid: uuid,
-            fileExtension: readText(stmt, column: 2) ?? "",
-            thumbnailData: Data()
-        ))
-    }
-
-    private static func removeSidecarIfPresent(_ url: URL) throws {
-        do {
-            try FileManager.default.removeItem(at: url)
-        } catch let error as CocoaError where error.code == .fileNoSuchFile {
-            return
         }
     }
 

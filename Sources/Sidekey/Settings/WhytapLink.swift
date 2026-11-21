@@ -113,7 +113,8 @@ enum WhytapLink {
         case .quit: return .settings(.quitRow)
         case .settings: return .settings(.tab(.apiAndModels))
         case .tasks: return .hoverPanel(.tasks)
-        case .calendar: return .hoverPanel(.calendar)
+        // Closed Calendar ("Soon"): the link shows its Toolbox pane instead.
+        case .calendar: return tool.isComingSoon ? .toolboxTool(.calendar) : .hoverPanel(.calendar)
         case .translate: return .translation(.text)
         // The window opens idle; subtitles start from its own button.
         case .subtitles: return .translation(.subtitles)
@@ -133,6 +134,7 @@ enum WhytapLink {
 
     /// Whether a link may propose this tool's hotkey.
     static func acceptsLinkHotkey(_ tool: HoverTool) -> Bool {
+        if tool.isComingSoon { return false }
         switch tool {
         // A stray Quit hotkey would end a dictation or recording mid-take.
         case .quit:

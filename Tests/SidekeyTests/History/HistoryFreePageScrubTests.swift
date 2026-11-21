@@ -48,8 +48,8 @@ final class HistoryFreePageScrubTests: XCTestCase {
         XCTAssertEqual(try store.latestAgentEntries(limit: 50).map(\.queryText), ["kept agent"])
     }
 
-    /// Break caught: the scrub loses rows, image sidecars or ids (the UI and
-    /// Delete… keep row ids), or a deleted newest id is handed out again.
+    /// Break caught: the scrub loses rows, image sidecars or ids (the UI
+    /// keeps row ids), or an id is handed out again after it.
     func testScrubKeepsEveryRowAndId() throws {
         let root = makeTempDir()
         let assets = root.appendingPathComponent("history-assets", isDirectory: true)
@@ -60,8 +60,7 @@ final class HistoryFreePageScrubTests: XCTestCase {
             createdAt: date(2), uuid: imageUUID, imageData: Data(repeating: 0xAB, count: 4_096),
             imageExtension: "png", thumbnailData: Data(repeating: 0xCD, count: 64), assetsDirectory: assets)
         try store.insertClipboardFileURLsEntry(createdAt: date(3), urls: [root.appendingPathComponent("a.txt")])
-        let newest = try store.insertClipboardTextEntry(createdAt: date(4), text: "deleted newest")
-        try store.deleteClipboardEntry(id: newest, assetsDirectory: assets)
+        let newest = try store.insertClipboardTextEntry(createdAt: date(4), text: "newest")
         try store.insertDropEntry(createdAt: date(5), rawTranscript: "raw", formattedText: "formatted", targetApp: "Notes")
         let chat = try store.insertAgentEntry(
             createdAt: date(6), queryText: "question", queryMode: .voice, responseMarkdown: "answer", toolNames: ["read"])

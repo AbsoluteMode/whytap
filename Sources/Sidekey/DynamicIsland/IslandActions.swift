@@ -49,9 +49,6 @@ struct IslandActions {
     var historyAssetsDirectory: () -> URL? = { nil }
     /// User pressed Enter on a hovered hover History row.
     var pasteHistoryCard: (HistoryStripCard) -> Void = { _ in }
-    /// User chose Delete… on a clipboard row: confirm, delete, and return
-    /// `true` when the entry is no longer stored so the panel reloads.
-    var deleteHistoryCard: (HistoryStripCard) async -> Bool = { _ in false }
     /// Current validated paste target name captured before History opened.
     var historyPasteTargetName: () -> String? = { nil }
     /// Useful Links nav hotkey — surface Useful Links in the agent response panel.

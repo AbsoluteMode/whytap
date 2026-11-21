@@ -452,6 +452,22 @@ if [ "$FLAVOR" = "beta" ]; then
         "${STAGING_DIR}/appcast.xml"
 fi
 
+# --- 5. Prod: point the Homebrew cask at the release just published ----------
+# The release is already public; a cask failure must not fail it, so it only
+# warns. The cask pins this tag and the verified SHA-256 of the staged archive.
+# EXODIA_HOMEBREW_CASK=0 skips it. Forks publish elsewhere and skip it unless
+# HOMEBREW_TAP_REPO (owner/name) names their own tap.
+# WHY: .project-docs/decisions/2026-11-21-homebrew-tap.md
+if [ "$FLAVOR" = "prod" ] && [ "${EXODIA_HOMEBREW_CASK:-1}" != "0" ] \
+   && { [ "$GITHUB_REPO" = "AbsoluteMode/whytap" ] || [ -n "${HOMEBREW_TAP_REPO:-}" ]; }; then
+    if ! /usr/bin/python3 "${PROJECT_DIR}/scripts/update-homebrew-cask.py" \
+            --repo "$GITHUB_REPO" --tap "${HOMEBREW_TAP_REPO:-AbsoluteMode/homebrew-tap}" \
+            update --version "$SHORT_VERSION" --dmg "${STAGING_DIR}/${LATEST_FILENAME}"; then
+        echo "WARN: the release is published, but the Homebrew cask was NOT updated." >&2
+        echo "      Retry: python3 scripts/update-homebrew-cask.py update --version ${SHORT_VERSION}" >&2
+    fi
+fi
+
 echo ""
 echo "Released ${LATEST_FILENAME}: ${DOWNLOAD_BASE}/${TAG}/${LATEST_FILENAME}"
 echo "Latest alias: ${DOWNLOAD_BASE}/${FEED_TAG}/${LATEST_FILENAME}"

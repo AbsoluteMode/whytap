@@ -105,6 +105,34 @@ extraction.
 The script chooses a build number newer than the live feed and installed copy;
 set `BUILD_VERSION` explicitly for a first release when neither exists.
 
+### Homebrew cask
+
+`brew install absolutemode/tap/whytap` installs from the public tap
+`AbsoluteMode/homebrew-tap` (`Casks/whytap.rb`). The cask pins the release tag
+(`.../releases/download/v#{version}/Whytap-latest.dmg`) and the SHA-256 of that
+archive, so only `version` and `sha256` change between releases. The last step of
+`upload-release.sh` for a **prod** release runs
+`scripts/update-homebrew-cask.py update`, after the release is public: it takes the
+SHA-256 of the staged (already verified) archive, cross-checks it with the digest
+GitHub reports for the published asset, and commits the two lines to the tap
+through the GitHub contents API (no clone, no GitHub Actions). It refuses a
+downgrade, a cask whose url points at another repository and a hash mismatch, and
+is idempotent. A failure only warns, because the release is already out; retry or
+catch up with:
+
+```bash
+python3 scripts/update-homebrew-cask.py check                       # is the tap on the latest release?
+python3 scripts/update-homebrew-cask.py update --version 2.2.26     # re-point it (add --dry-run to preview)
+```
+
+`EXODIA_HOMEBREW_CASK=0` skips the step; beta never touches the cask, and a fork
+(`GITHUB_REPO` other than `AbsoluteMode/whytap`) skips it unless `HOMEBREW_TAP_REPO`
+names its own tap. Tests: `python3 scripts/test-update-homebrew-cask.py`. Check a
+cask change with `brew style` and `brew audit --cask --strict --online` (both after
+`brew tap absolutemode/tap`; `brew audit` also needs a Homebrew-supported Xcode).
+Do not change the `url` shape or the `zap` paths without checking the app's
+storage locations. WHY: `.project-docs/decisions/2026-11-21-homebrew-tap.md`.
+
 ### Release provenance contract
 
 Every upload must be bound to the commit used for its build. The release helper

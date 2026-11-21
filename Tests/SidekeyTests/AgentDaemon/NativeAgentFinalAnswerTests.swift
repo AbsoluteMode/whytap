@@ -48,6 +48,25 @@ final class NativeAgentFinalAnswerTests: XCTestCase {
         XCTAssertEqual(try NativeAgentFinalAnswer(arguments: value).visibleText, "Clarification needed\n\nWhich year do you mean?")
     }
 
+    func testMarkdownAnswerPassesValidationAndURLInACellBecomesACard() throws {
+        let answer = """
+        Three plans are available.
+
+        | Plan | Price | Details |
+        | --- | --- | --- |
+        |Pro|$20|https://example.com/plans|
+        | Max | $100 | Higher limits |
+        | Team | $25 | Per seat |
+
+        > [!NOTE]
+        > Prices exclude tax.
+        """
+        let final = try NativeAgentFinalAnswer(arguments: arguments(answer))
+        XCTAssertEqual(final.visibleText, answer)
+        let cards = NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: final.actions)
+        XCTAssertEqual(cards?.items.map(\.insertText), ["https://example.com/plans"])
+    }
+
     func testTypedCardsPreserveOrderAndDeduplicateWithoutOpeningAnything() throws {
         var value = arguments()
         value["sources"] = [["title": " Source ", "url": "https://example.com"], ["title": "Duplicate", "url": "https://example.com/"]]

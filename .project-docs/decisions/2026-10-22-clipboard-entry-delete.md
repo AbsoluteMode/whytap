@@ -3,9 +3,9 @@ id: clipboard-entry-delete-2026-10-22
 type: decision
 title: Delete one clipboard history entry from History
 summary: Clipboard rows in hover History, Toolbox History and the ⌥V strip offer Delete… behind a Cancel-default confirmation; the store removes the image sidecar and the row in one queue hop with secure_delete and a truncating WAL checkpoint. Uploaded backups are not changed.
-status: confirmed
+status: stale
 tags: [clipboard, history, privacy, sqlite, backup, macos]
-canonical_for: [clipboard-entry-deletion]
+canonical_for: [clipboard-entry-deletion-2026-10]
 verified_at: 2026-10-22
 sources:
   - type: trace
@@ -14,13 +14,10 @@ sources:
   - type: repository
     reference: Sources/Sidekey/History/SQLiteHistoryStore.swift
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/History/ClipboardEntryDeletion.swift
-    confirmed_at: 2026-10-22
-  - type: repository
-    reference: Tests/SidekeyTests/History/ClipboardEntryDeletionTests.swift
-    confirmed_at: 2026-10-22
-related: [2026-10-18-clipboard-retention.md, 2026-10-21-clipboard-privacy-markers.md, 2026-10-21-backup-essentials-only.md, 2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-22-history-free-page-scrub.md]
+  - type: trace
+    reference: The deletion flow (Sources/Sidekey/History/ClipboardEntryDeletion.swift) and its tests were removed on 2026-11-21; see 2026-11-21-clipboard-no-entry-delete.md.
+    confirmed_at: 2026-11-21
+related: [2026-11-21-clipboard-no-entry-delete.md, 2026-10-18-clipboard-retention.md, 2026-10-21-clipboard-privacy-markers.md, 2026-10-21-backup-essentials-only.md, 2026-10-18-delete-meeting-and-staged-audio.md, 2026-10-22-history-free-page-scrub.md]
 ---
 
 # Delete one clipboard history entry
@@ -121,5 +118,11 @@ left in pages freed by past evictions are not scrubbed by this change; the
 [free-page scrub](2026-10-22-history-free-page-scrub.md) handles them. The truncating checkpoint is
 best effort: another active SQLite reader can postpone WAL cleanup, even after
 the row is deleted. This is per-entry removal, not a forensic disk wipe.
+
+## Superseded by
+
+On 2026-11-21 the user removed per-entry Delete from clipboard History; see
+[no clipboard entry delete](2026-11-21-clipboard-no-entry-delete.md). The
+History connection's `secure_delete` and the free-page scrub stay in force.
 
 2026-10-22 · PR: https://github.com/AbsoluteMode/whytap/pull/206

@@ -160,7 +160,7 @@ enum HelpWindowContent {
 
     private static func toolHotkeyRows(for configuration: HotkeyConfiguration) -> [HelpHotkeyRowSpec] {
         HoverTool.allCases.compactMap { tool in
-            guard let shortcut = configuration.toolShortcuts[tool] else { return nil }
+            guard let shortcut = configuration.toolShortcuts[tool], !tool.isComingSoon else { return nil }
             let info = HoverToolRegistry.info(for: tool)
             return HelpHotkeyRowSpec(title: "Tool — \(info.title)", detail: info.description,
                                      iconName: info.sfSymbol, prefix: nil, contents: shortcut.contents)

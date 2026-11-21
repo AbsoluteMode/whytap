@@ -59,6 +59,8 @@ enum HoverSlotEffect: Equatable {
     case openScreenshot
     case quit
     case openPanel(HoverInlinePanel)
+    /// A tool that is listed with a "Soon" badge: activating it does nothing.
+    case comingSoon
 
     /// `true` when the effect needs the Hover drawer expanded to be meaningful
     /// (the inline sub-panels render inside it). Action/navigate effects open
@@ -68,7 +70,8 @@ enum HoverSlotEffect: Equatable {
         case .openPanel:
             return true
         case .toggleDropMode, .openSettings, .openHotkeys, .openNotes,
-             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
+             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit,
+             .comingSoon:
             return false
         }
     }
@@ -116,7 +119,7 @@ enum HoverSlotEffect: Equatable {
             actions.openScreenshot()
         case .quit:
             actions.quitApplication()
-        case .openPanel:
+        case .openPanel, .comingSoon:
             break
         }
     }
@@ -128,6 +131,9 @@ enum HoverSlotEffect: Equatable {
 /// and side-effect free — directly unit-testable.
 enum HoverSlotRouter {
     static func effect(for tool: HoverTool) -> HoverSlotEffect {
+        // The one gate for every path: tile, search, hotkey and Toolbox all end here.
+        // WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
+        if tool.isComingSoon { return .comingSoon }
         switch tool {
         case .dropMode:
             return .toggleDropMode

@@ -126,7 +126,7 @@ final class ToolboxPaneBackgroundTests: XCTestCase {
         let history = AnyView(HistoryHoverView(
             mode: .constant(.drop), cards: cards, targetAppName: nil, onSelectMode: { _ in },
             onCopy: { _ in }, onPreviewAnchorChange: { _, _ in }, onPaste: { _ in },
-            allowsKeyboardPaste: false, onDelete: { _ in }))
+            allowsKeyboardPaste: false))
 
         let panes: [(String, AnyView)] = [
             ("notify-history", notify(false)),

@@ -262,7 +262,10 @@ final class AgentControllerTests: XCTestCase {
         XCTAssertFalse(prompt.contains("AGENTS.md in your working directory is your memory"))
         XCTAssertFalse(prompt.contains("You are Whytap"))
         XCTAssertTrue(prompt.contains("Reply in the language of the user's latest request"))
-        XCTAssertTrue(prompt.contains("normally 1–2 short"))
+        XCTAssertTrue(prompt.contains("One fact: one plain sentence"))
+        XCTAssertTrue(prompt.contains("3 or more items with shared attributes"))
+        XCTAssertTrue(prompt.contains("> [!WARNING]"))
+        XCTAssertTrue(prompt.contains("Put URLs only in link items"))
         XCTAssertTrue(prompt.contains("path in a plain code fence for copying"))
         XCTAssertTrue(prompt.contains("\"useful.actions\""))
         XCTAssertTrue(prompt.contains("whytap_capture_screen"))
@@ -316,6 +319,16 @@ final class AgentControllerTests: XCTestCase {
         XCTAssertTrue(preamble.contains("the fence is in addition, not instead"))
         // The old link-only contract wording must be gone.
         XCTAssertFalse(preamble.contains("When useful links would help"))
+    }
+
+    func testSystemPreambleRequestsMarkdownWithoutRepeatingTheReplyLanguageRule() {
+        let preamble = AgentController.systemPromptPreambleForTesting
+        for rule in ["Markdown in a ~320pt panel", "one plain sentence", "compact tables",
+                     "numbered lists", "> [!NOTE]", "> [!WARNING]", "URLs only in link"] {
+            XCTAssertTrue(preamble.contains(rule), rule)
+        }
+        XCTAssertEqual(preamble.components(separatedBy: "language").count - 1, 1)
+        XCTAssertFalse(preamble.contains("no\n  headings, tables, or lists"))
     }
 
     func testOversizedSelectionIsBoundedAndMarked() {

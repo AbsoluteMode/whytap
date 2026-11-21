@@ -214,6 +214,37 @@ final class AgentControllerHistoryTests: XCTestCase {
         XCTAssertEqual(store.streamingText, answer)
     }
 
+    func testFinalTableMarkdownIsPersistedVerbatimInTextAnswerAndResponseMarkdown() async throws {
+        let (chatStore, history, _) = try makeChatStore()
+        let snapshot = makeSnapshot()
+        let provider = ManualCLIProviderHistory()
+        let controller = makeController(snapshot: snapshot, agentClient: provider, chatStackStore: chatStore)
+        controller.submitTextQuery("Compare the plans", snapshot: snapshot)
+        await waitUntil { provider.calls.count == 1 }
+
+        let answer = """
+        Three plans are available.
+
+        | Plan | Monthly | Annual |
+        | :--- | ---: | ---: |
+        | **Pro** | $20 | $17 |
+        | Max | $100 | — |
+        | Team | $25 | $20 |
+
+        > [!NOTE] Prices exclude tax.
+        """
+        provider.continuations.first?.yield(.finalAnswer(text: answer))
+        provider.continuations.first?.yield(.done(sources: []))
+        provider.continuations.first?.finish()
+        await waitUntil { chatStore.rows.first?.status == .done }
+
+        let row = try XCTUnwrap(history.latestChatRows(limit: 1).first)
+        XCTAssertEqual(row.responseMarkdown, answer)
+        let json = try XCTUnwrap(row.blocksJSON)
+        let blocks = try JSONDecoder().decode([UIBlock].self, from: Data(json.utf8))
+        XCTAssertEqual(blocks, [.textAnswer(TextAnswerBlock(body: answer))])
+    }
+
     func test_error_event_calls_mark_chat_error() async throws {
         let (chatStore, _, _) = try makeChatStore()
         let snapshot = makeSnapshot()

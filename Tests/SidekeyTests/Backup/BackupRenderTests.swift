@@ -5,6 +5,8 @@ import XCTest
 
 @MainActor
 final class BackupRenderTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     private var renderModels: [BackupViewModel] = []
     private var renderSession: URLSession?
     private var renderRoot: URL?

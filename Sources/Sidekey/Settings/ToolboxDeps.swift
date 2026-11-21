@@ -10,8 +10,6 @@ struct ToolboxDeps {
     var currentDropMode: () -> TranscriptionMode = { .fast }
     var historyCards: (HistoryStripMode) async -> [HistoryStripCard] = { _ in [] }
     var copyHistoryCard: (HistoryStripCard) -> Void = { _ in }
-    /// Confirms and deletes a clipboard row; `true` when the list must reload.
-    var deleteHistoryCard: (HistoryStripCard) async -> Bool = { _ in false }
     var toggleMeetingRecord: () -> Void = {}
     var openScreenshot: () -> Void = {}
     /// Show an inline tool in this process, without LaunchServices scheme lookup.

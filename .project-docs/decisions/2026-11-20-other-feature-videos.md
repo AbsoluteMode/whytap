@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/AgentOtherSectionTests.swift
     confirmed_at: 2026-11-20
-related: []
+related: [2026-11-21-first-launch-onboarding.md]
 ---
 
 # Settings -> Other: short descriptions, feature clips, Agent in one group

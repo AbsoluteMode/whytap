@@ -41,6 +41,7 @@ final class PlannerStoreTests: XCTestCase {
     }
     private var directory: URL!
     override func setUp() async throws {
+        openCalendarForThisTest()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("planner-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }

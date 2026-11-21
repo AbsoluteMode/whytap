@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Sync/SettingsSyncModel.swift
     confirmed_at: 2026-11-20
-related: [../project.md, 2026-10-20-backup-auto-sync.md, 2026-10-19-config-backup.md, 2026-10-19-api-and-models.md, 2026-11-21-whytap-backup-repository.md]
+related: [../project.md, 2026-10-20-backup-auto-sync.md, 2026-10-19-config-backup.md, 2026-10-19-api-and-models.md, 2026-11-21-whytap-backup-repository.md, 2026-11-21-first-launch-onboarding.md]
 ---
 
 # Settings sync between Macs

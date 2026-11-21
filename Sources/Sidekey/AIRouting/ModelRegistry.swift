@@ -24,6 +24,15 @@ enum ModelRegistry {
     // WHY: .project-docs/decisions/2026-11-20-elevenlabs-scribe-v3.md
     static let elevenLabsRealtimeModel = "scribe_v3_live"
     static let elevenLabsRetiredRealtimeModel = "scribe_v2_realtime"
+
+    /// The model a finished meeting is sent with on ElevenLabs: a streaming
+    /// model (which the speech-to-text endpoint refuses) maps to Scribe v3,
+    /// any other picked model is kept.
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+    static func elevenLabsRecordedModel(for model: String) -> String {
+        model == elevenLabsRetiredRealtimeModel || model.hasSuffix("_live") || model.hasSuffix("_realtime")
+            ? elevenLabsRecordedModel : model
+    }
     /// The speech model the On this Mac provider downloads and runs.
     static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
@@ -69,9 +78,9 @@ extension ModelRegistry {
     static let models: [RegistryModel] = [
         RegistryModel(kind: .soniox, id: sonioxRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .soniox, id: sonioxRecordedModel, uses: [.asyncSTT], diarization: true),
-        RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .deepgram, id: "nova-3", uses: [.realtimeSTT, .asyncSTT], diarization: true),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
-        RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: false),
+        RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
@@ -123,7 +132,8 @@ extension ModelRegistry {
         case .elevenLabs:
             switch feature {
             case .retiredMeetingText, .retiredMeetingAudio: return nil
-            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .meetings: return elevenLabsRealtimeModel
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio: return elevenLabsRealtimeModel
+            case .meetings: return elevenLabsRecordedModel
             case .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent: return nil
             }
         case .openRouter:

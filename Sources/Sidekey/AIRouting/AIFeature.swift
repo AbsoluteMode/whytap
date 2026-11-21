@@ -92,11 +92,13 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     /// feature's mode; the switches are exhaustive on purpose, so a new
     /// provider kind or mode cannot be added without deciding every cell.
     ///
-    /// Meetings are the odd one: Soniox transcribes the finished recording
-    /// through its file API (async models), while Deepgram, ElevenLabs and a
-    /// user's own server run the recording through their real-time adapter in
-    /// chunks, so they offer real-time models (`docs/specs/api-and-models.md`,
-    /// the recorded mode of meetings).
+    /// Meetings send the finished recording to the provider's pre-recorded
+    /// API with speaker labels: Soniox's file API, ElevenLabs speech-to-text
+    /// and Deepgram pre-recorded, so they offer recorded (async) models. A
+    /// user's own server and On this Mac still run the recording through a
+    /// real-time adapter in chunks, without speakers
+    /// (`docs/specs/api-and-models.md`, the recorded mode of meetings).
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
     func modelUse(on kind: AIProviderKind) -> ModelUse? {
         guard isActive else { return nil }
         switch mode {
@@ -111,8 +113,8 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             }
         case .recorded:
             switch kind {
-            case .soniox: return .asyncSTT
-            case .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
+            case .soniox, .deepgram, .elevenLabs: return .asyncSTT
+            case .openAICompatible: return .realtimeSTT
             // The recording fed through `OnDeviceStreamingAdapter` in phrases,
             // like a user's own server: a transcript without speaker labels.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md

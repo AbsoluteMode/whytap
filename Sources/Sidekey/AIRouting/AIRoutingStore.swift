@@ -74,6 +74,11 @@ final class AIRoutingStore: ObservableObject {
         pendingBackup = loaded.unreadValue
         hasUnreadSubtitleRoute = loaded.hasUnreadSubtitleRoute
         if loaded.state != state { state = loaded.state }
+        // Settings sync can bring a Meetings route from an older Mac that still
+        // names a streaming Scribe model: the row, Check now and the recording
+        // all use the recorded model.
+        // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+        moveMeetingsToRecordedModelIfNeeded()
     }
 
     // MARK: - Routes
@@ -230,6 +235,24 @@ final class AIRoutingStore: ObservableObject {
         where route.account == .elevenLabs && route.model == ModelRegistry.elevenLabsRetiredRealtimeModel {
             updated.routes[feature]?.model = ModelRegistry.elevenLabsRealtimeModel
         }
+        commit(updated)
+    }
+
+    /// Meetings on ElevenLabs go to its speech-to-text endpoint, which
+    /// refuses the streaming model: a saved Meetings route naming a Scribe
+    /// real-time model moves to Scribe v3 on the same account and key, on the
+    /// owner's decision. Not version-gated, so a route restored from an older
+    /// backup or synced from an older Mac moves too. Nothing else changes;
+    /// Deepgram's nova-3 serves both kinds.
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+    func moveMeetingsToRecordedModelIfNeeded() {
+        guard pendingBackup == nil else { return }
+        let key = AIFeature.meetings.rawValue
+        guard let route = stateWithSubtitleSeparation.routes[key], route.account == .elevenLabs else { return }
+        let recorded = ModelRegistry.elevenLabsRecordedModel(for: route.model)
+        guard recorded != route.model else { return }
+        var updated = stateWithSubtitleSeparation
+        updated.routes[key]?.model = recorded
         commit(updated)
     }
 

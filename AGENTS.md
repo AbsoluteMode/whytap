@@ -463,8 +463,13 @@ Meeting Notes:
           recording, WHY: docs/decisions/2026-06-16-system-audio-tap-on-record-only.md)
        -> processing: BYOK processor only (routes of the meetings and
           meetingNotes features: Soniox file API with speaker-attributed
-          turns and durable job/transcript checkpoint; other providers use
-          their adapters, then the LLM route the user chose for notes).
+          turns and durable job/transcript checkpoint; ElevenLabs
+          speech-to-text (Scribe v3) and Deepgram pre-recorded in one
+          diarized request (RecordedMeetingTranscriber; a saved ElevenLabs
+          Meetings route on a streaming model moves to scribe_v3 at launch);
+          a user's server and On this Mac run a realtime adapter; then the LLM route the
+          user chose for notes. WHY:
+          .project-docs/decisions/2026-11-21-recorded-meeting-models.md).
           Speaker labels come from the provider; there is no on-device
           diarizer, so On this Mac gives a meeting without speakers. Without a route for Meetings and Meeting notes
           (including the retired Local route) the meeting is marked failed
@@ -472,7 +477,7 @@ Meeting Notes:
           audio stays staged; a `MeetingFinalizeManifest` re-dispatches it
           later with the language captured at Stop time, for at most 24 hours
           after the last chunk. A recording without
-          speech is not a failure: a completed Soniox job without segments
+          speech is not a failure: a completed job without segments
           stores a "No speech detected" note without the LLM and releases the
           staged audio, so it is never retried. Model failures remain errors.
           WHY: .project-docs/decisions/2026-10-18-silent-meetings.md,

@@ -107,10 +107,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
             extra: [(.dropFast, FeatureRoute(account: .soniox, model: "stt-rt-v4"))]
         )
         var accounts: [ProviderAccount] = []
-        let processor = setup.processor(openRouterClient: SpyLLMClient(), sonioxSession: session) { route in
+        let processor = setup.processor(openRouterClient: SpyLLMClient(), sonioxSession: session, recorded: { route in
             accounts.append(route.account)
             throw StopAfterAdapter()
-        }
+        })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         do {
             _ = try await processor.process(event: Self.emptyEvent(), startedAt: Date(), language: nil, meetingsStore: store)
@@ -149,15 +149,140 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         await store.close()
     }
 
+    // MARK: - Pre-recorded APIs (ElevenLabs, Deepgram)
+
+    /// A route still naming the streaming model (synced from an older Mac)
+    /// sends the recording to the speech-to-text endpoint with Scribe v3, and
+    /// the speakers reach both the stored transcript and the notes model.
+    func test_elevenlabs_meeting_goes_to_speech_to_text_with_speakers() async throws {
+        let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let chunk = staging.appendingPathComponent("chunk-000.wav")
+        try Self.wav(samples: [1, 2, 3, 4]).write(to: chunk)
+        StubURLProtocol.handler = { _ in
+            (200, [:], try JSONSerialization.data(withJSONObject: [
+                "text": "We ship Friday. Agreed.",
+                "words": [
+                    ["text": "We ship Friday.", "type": "word", "start": 0.0, "end": 1.0, "speaker_id": "speaker_0"],
+                    ["text": " ", "type": "spacing"],
+                    ["text": "Agreed.", "type": "word", "start": 1.2, "end": 1.6, "speaker_id": "speaker_1"],
+                ],
+            ]))
+        }
+        let setup = Setup(meetings: FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"))
+        let llm = SwitchableLLMClient()
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, makeAdapter: { _ in
+            XCTFail("a meeting on ElevenLabs never opens the realtime socket")
+            throw StopAfterAdapter()
+        })
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        let event = MeetingRecorder.FinalizedEvent(meetingId: meetingId, chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user)
+
+        _ = try await processor.process(event: event, startedAt: Date(), language: "en", meetingsStore: store)
+
+        let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
+        XCTAssertEqual(request.url?.path, "/v1/speech-to-text")
+        let body = String(decoding: try XCTUnwrap(StubURLProtocol.capturedBodies.first), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"model_id\"\r\n\r\nscribe_v3\r\n"), "never the streaming model")
+        XCTAssertTrue(body.contains("name=\"diarize\"\r\n\r\ntrue\r\n"))
+        XCTAssertTrue(body.contains("xi-api-key") == false, "the key is a header, not a form field")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "meetings-key")
+        let transcript = try await store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.speaker), ["Speaker 1", "Speaker 2"])
+        XCTAssertTrue(llm.transcriptsSeen.first?.contains("Speaker 2") == true, "speaker labels reach the notes model")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path), "the staged audio is released after the note")
+        await store.close()
+    }
+
+    func test_deepgram_silence_stores_no_speech_note_without_llm() async throws {
+        let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let chunk = staging.appendingPathComponent("chunk-000.wav")
+        try Self.wav(samples: [0, 0, 0, 0]).write(to: chunk)
+        StubURLProtocol.handler = { _ in
+            (200, [:], try JSONSerialization.data(withJSONObject: [
+                "results": ["channels": [["alternatives": [["transcript": ""]]]], "utterances": []],
+            ]))
+        }
+        let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
+        let llm = SpyLLMClient()
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session)
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        let event = MeetingRecorder.FinalizedEvent(meetingId: meetingId, chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user)
+
+        _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+
+        XCTAssertEqual(StubURLProtocol.capturedRequests.first?.url?.path, "/v1/listen")
+        XCTAssertEqual(llm.completeCalls, 0)
+        let meta = try await store.list().first { $0.id == meetingId }
+        XCTAssertEqual(meta?.title, MeetingBYOKProcessor.noSpeechTitle)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path))
+        await store.close()
+    }
+
+    /// A provider refusal leaves the meeting failed with fixed copy and its
+    /// audio staged for the retry.
+    func test_elevenlabs_out_of_credit_keeps_the_recording() async throws {
+        let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let chunk = staging.appendingPathComponent("chunk-000.wav")
+        try Self.wav(samples: [1, 2, 3, 4]).write(to: chunk)
+        StubURLProtocol.handler = { _ in
+            (401, [:], try JSONSerialization.data(withJSONObject: ["detail": ["status": "quota_exceeded", "message": "x"]]))
+        }
+        let setup = Setup(meetings: FeatureRoute(account: .elevenLabs, model: "scribe_v3"))
+        let llm = SpyLLMClient()
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session)
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let event = MeetingRecorder.FinalizedEvent(meetingId: UUID(), chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user)
+        do {
+            _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+            XCTFail("expected the refusal")
+        } catch let error as MeetingBYOKProcessingError {
+            XCTAssertTrue(error.description.contains("ElevenLabs is out of credit."), error.description)
+        }
+        XCTAssertEqual(llm.completeCalls, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: chunk.path), "the audio stays for the retry")
+        await store.close()
+    }
+
+    /// A user's own server has no pre-recorded meeting path here: it keeps
+    /// running the recording through its realtime adapter.
+    func test_server_meeting_still_uses_the_realtime_adapter() async throws {
+        let setup = Setup()
+        let server = setup.routing.addServer(name: "S", baseURL: "https://stt.example.test")
+        setup.routing.setRoute(FeatureRoute(account: .server(server.id), model: "whisper-1"), for: .meetings)
+        var adapters = 0
+        let processor = setup.processor(
+            openRouterClient: SpyLLMClient(), sonioxSession: session,
+            recorded: { _ in XCTFail("a server has no recorded path"); throw StopAfterAdapter() },
+            makeAdapter: { _ in adapters += 1; return FixedTranscriptAdapter(text: "Hello team") })
+        let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let chunk = staging.appendingPathComponent("chunk-000.wav")
+        try Self.wav(samples: [1, 2, 3, 4]).write(to: chunk)
+        let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+        let meetingId = UUID()
+        _ = try await processor.process(
+            event: .init(meetingId: meetingId, chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user),
+            startedAt: Date(), language: nil, meetingsStore: store)
+        XCTAssertEqual(adapters, 1)
+        let transcript = try await store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.text), ["Hello team"])
+        await store.close()
+    }
+
     func test_notes_go_to_the_notes_route() async throws {
         let setup = Setup(
             meetings: FeatureRoute(account: .deepgram, model: "nova-3"),
             notes: FeatureRoute(account: .openRouter, model: "anthropic/claude-3.5-haiku")
         )
         let llm = SpyLLMClient()
-        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
-            FixedTranscriptAdapter(text: "Hello team")
-        }
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
+            FixedRecordedTranscriber(text: "Hello team")
+        })
         let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         let chunk = staging.appendingPathComponent("chunk-000.wav")
@@ -183,10 +308,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         var transcriptions = 0
         let llm = SwitchableLLMClient()
         llm.failure = OpenRouterLLMError.unexpectedStatus(402, "Insufficient credits. We ship on Friday.")
-        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
             transcriptions += 1
-            return FixedTranscriptAdapter(text: "We ship on Friday.")
-        }
+            return FixedRecordedTranscriber(text: "We ship on Friday.")
+        })
         let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         let chunk = staging.appendingPathComponent("chunk-000.wav")
@@ -234,10 +359,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
         let llm = SwitchableLLMClient()
         var transcriptions = 0
-        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
             transcriptions += 1
-            return FixedTranscriptAdapter(text: "unused")
-        }
+            return FixedRecordedTranscriber(text: "unused")
+        })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         let meetingId = UUID()
         let started = Date(timeIntervalSince1970: 1_000)
@@ -281,9 +406,9 @@ final class MeetingBYOKProcessorTests: XCTestCase {
 
     func test_kept_transcript_with_the_notes_key_removed_fails_with_fixed_copy_not_a_raw_error() async throws {
         let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
-        let processor = setup.processor(openRouterClient: SwitchableLLMClient(), sonioxSession: session) { _ in
-            FixedTranscriptAdapter(text: "unused")
-        }
+        let processor = setup.processor(openRouterClient: SwitchableLLMClient(), sonioxSession: session, recorded: { _ in
+            FixedRecordedTranscriber(text: "unused")
+        })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         let meetingId = UUID()
         try await store.savePendingTranscript(
@@ -362,7 +487,7 @@ final class MeetingBYOKProcessorTests: XCTestCase {
             openRouterClient: RefusingLLMClient(status: 404),
             checks: checks,
             sonioxSession: session,
-            makeAdapter: { _ in FixedTranscriptAdapter(text: "Hello team") }
+            makeRecordedTranscriber: { _ in FixedRecordedTranscriber(text: "Hello team") }
         )
         let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -399,7 +524,7 @@ final class MeetingBYOKProcessorTests: XCTestCase {
             openRouterClient: SpyLLMClient(),
             checks: checks,
             sonioxSession: session,
-            makeAdapter: { _ in FixedTranscriptAdapter(text: "Hello team") }
+            makeRecordedTranscriber: { _ in FixedRecordedTranscriber(text: "Hello team") }
         )
         let staging = root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -447,10 +572,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
         let llm = SpyLLMClient()
         var adapters = 0
-        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
             adapters += 1
-            return FixedTranscriptAdapter(text: adapters == 1 ? "First call" : "Second call")
-        }
+            return FixedRecordedTranscriber(text: adapters == 1 ? "First call" : "Second call")
+        })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         let stagingRoot = root.appendingPathComponent("staging")
         let id = UUID(), recording = UUID()
@@ -504,10 +629,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
         let llm = SpyLLMClient()
         var adapterCalls = 0
-        let processor = setup.processor(openRouterClient: llm, sonioxSession: session) { _ in
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
             adapterCalls += 1
-            return FixedTranscriptAdapter(text: "Never sent")
-        }
+            return FixedRecordedTranscriber(text: "Never sent")
+        })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         do {
             _ = try await processor.process(event: Self.emptyEvent(), startedAt: Date(), language: nil,
@@ -560,6 +685,7 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         func processor(
             openRouterClient: any OpenRouterLLMClienting,
             sonioxSession: URLSession,
+            recorded: ((RecordedMeetingRoute) throws -> any MeetingRecordedTranscribing)? = nil,
             makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.make
         ) -> MeetingBYOKProcessor {
             MeetingBYOKProcessor(
@@ -569,7 +695,10 @@ final class MeetingBYOKProcessorTests: XCTestCase {
                 notesRoute: DirectLLMRouteResolver(feature: .meetingNotes, routing: routing, keys: keys),
                 openRouterClient: openRouterClient,
                 sonioxSession: sonioxSession,
-                makeAdapter: makeAdapter
+                makeAdapter: makeAdapter,
+                makeRecordedTranscriber: recorded ?? { route in
+                    RecordedMeetingTranscriber(route: route, session: sonioxSession, usageSink: { _ in })
+                }
             )
         }
     }
@@ -635,6 +764,15 @@ private final class RefusingLLMClient: OpenRouterLLMClienting {
 
     func complete(endpoint: OpenAICompatibleLLMEndpoint, model: String, messages: [OpenRouterChatMessage]) async throws -> String {
         throw OpenRouterLLMError.unexpectedStatus(status, nil)
+    }
+}
+
+/// A recorded-API transcriber that answers with one unlabelled segment.
+private struct FixedRecordedTranscriber: MeetingRecordedTranscribing {
+    let text: String
+
+    func transcribe(chunkURLs: [URL], language: String?, terms: [String]) async throws -> SonioxMeetingTranscriber.Result {
+        .init(text: text, segments: [TranscriptSegment(speaker: nil, start: 0, end: 1, text: text)])
     }
 }
 

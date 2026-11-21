@@ -80,7 +80,8 @@ related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agen
 
 From 2026-10-28, native Agent completes only through a sole `finish_answer`
 function call. Its closed schema requires `status`, `answer`, `sources` and
-`actions`. The status is answered, unverified or needs_clarification. Sources
+`actions`, plus `insert_text` for the first Insert card (see the
+[Insert card decision](2026-11-22-agent-insert-card.md); a missing value is none). The status is answered, unverified or needs_clarification. Sources
 carry title/HTTP(S) URL; actions carry an absolute path or copyable text and a
 description. The renderer reuses the existing text and keyboard-action cards;
 there is no new UI-block or persisted conversation schema.

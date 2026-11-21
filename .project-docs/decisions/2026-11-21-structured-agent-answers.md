@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Agent/UI/Renderers/MarkdownTableView.swift
     confirmed_at: 2026-11-21
-related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md]
+related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-22-agent-insert-card.md]
 ---
 
 # Structured Agent answers
@@ -41,7 +41,9 @@ Lead with a plain conclusion and keep factual one-liners plain. Use tables for
 comparisons with shared attributes, numbered lists for procedures and fences
 for copyable commands and paths. Reuse the existing action cards and code
 renderer. Typed NOTE and WARNING share a tinted callout treatment. Other
-markers retain their quote. Numbered lists stay in the selectable text run.
+markers retain their quote. Numbered lists stay in the selectable text run
+and keep their first number, so a list resumed after a line such as "3–4."
+continues at 5 ([Insert card decision](2026-11-22-agent-insert-card.md)).
 
 ## Resolution and consequences
 

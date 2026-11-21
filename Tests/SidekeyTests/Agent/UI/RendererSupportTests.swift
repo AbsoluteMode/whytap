@@ -668,6 +668,42 @@ final class RendererSupportTests: XCTestCase {
         XCTAssertEqual(plain, "1.  Alpha\n2.  Beta\n3.  Gamma")
     }
 
+    func testOrderedListResumedAfterRangeItemKeepsItsWrittenStartNumber() {
+        // Agent answer shape from the user's report: a "3–4." line is not a
+        // CommonMark list marker, so it ends the first list; the list that
+        // follows starts at 5 and must not be renumbered from 1.
+        let markdown = """
+        Порядок действий:
+        1. Обнови Homebrew.
+        2. Проверь версию.
+        3–4. Перезапусти терминал и войди заново.
+        5. Запусти codex.
+        6. Проверь настройки.
+        """
+        let blocks = MarkdownBlockParser.parse(markdown)
+        XCTAssertEqual(blocks, [
+            .paragraph("Порядок действий:"),
+            .orderedList(["Обнови Homebrew.", "Проверь версию."], start: 1),
+            .paragraph("3–4. Перезапусти терминал и войди заново."),
+            .orderedList(["Запусти codex.", "Проверь настройки."], start: 5)
+        ])
+        let plain = String(MarkdownAttributedRun.attributedString(for: blocks).characters)
+        XCTAssertTrue(plain.contains("5.  Запусти codex.\n6.  Проверь настройки."), plain)
+        XCTAssertFalse(plain.contains("1.  Запусти codex."), plain)
+    }
+
+    func testOrderedListStartFollowsCommonMarkMarkers() {
+        // Separate lists keep their first number; later markers do not
+        // renumber items; ")" is a delimiter too; non-markers stay text.
+        XCTAssertEqual(MarkdownBlockParser.parse("1. A\n\n2. B"), [.orderedList(["A"], start: 1), .orderedList(["B"], start: 2)])
+        XCTAssertEqual(MarkdownBlockParser.parse("3) A\n3) B\n9) C"), [.orderedList(["A", "B", "C"], start: 3)])
+        XCTAssertEqual(MarkdownBlockParser.parse("0. Zero\n1. One"), [.orderedList(["Zero", "One"], start: 0)])
+        XCTAssertEqual(MarkdownBlockParser.parse("1.5 million users"), [.paragraph("1.5 million users")])
+        XCTAssertEqual(MarkdownBlockParser.parse("1234567890. Too long"), [.paragraph("1234567890. Too long")])
+        let plain = String(MarkdownAttributedRun.attributedString(for: [.orderedList(["Seven", "Eight"], start: 7)]).characters)
+        XCTAssertEqual(plain, "7.  Seven\n8.  Eight")
+    }
+
     func testAttributedRunJoinsParagraphAndListWithNewlineSeparator() {
         // The block-level separator between paragraph and list is the
         // same single `\n` the run already uses between paragraphs.

@@ -40,6 +40,9 @@ struct TranslationIssue: Equatable {
             default: break
             }
         }
+        if let failure = error as? SpeechTranslationFailure {
+            return speechTranslation(failure, target: nil)
+        }
         if error is CoreAudioSystemAudioSourceError {
             return Self(message: "Could not capture system audio. Check System Audio Recording permission and your output device, then start again.")
         }
@@ -47,6 +50,30 @@ struct TranslationIssue: Equatable {
         return Self(message: feature == .subtitlesAudio
                     ? "The audio connection ended. Check your network and start again."
                     : "Translation failed. Check your connection and try again.")
+    }
+}
+
+extension TranslationIssue {
+    /// Live speech translation (OpenAI) failures, from status codes and error
+    /// codes only. Setup problems open API & Models on Subtitles audio.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
+    static func speechTranslation(_ failure: SpeechTranslationFailure, target: String?) -> Self {
+        switch failure {
+        case .refusedKey:
+            return Self(message: "OpenAI refused the API key. Check it in API & Models.", feature: .subtitlesAudio)
+        case .noCredit:
+            return Self(message: "Your OpenAI account is out of credit. Add credit or choose another Subtitles audio model.",
+                        feature: .subtitlesAudio)
+        case .busy:
+            return Self(message: "OpenAI is busy or its limit was reached. Try again shortly.")
+        case .unsupportedLanguage:
+            let name = target.flatMap { AppLanguage.find(code: $0)?.englishName } ?? "this language"
+            return Self(message: "OpenAI live translation does not support \(name). Choose another target language.")
+        case .connectionLost:
+            return Self(message: "The translation connection ended. Check your network and start again.")
+        case .provider:
+            return Self(message: "OpenAI stopped translating. Start again.")
+        }
     }
 }
 

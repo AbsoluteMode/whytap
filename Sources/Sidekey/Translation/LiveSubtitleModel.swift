@@ -4,11 +4,18 @@ import Foundation
 /// fixed when the phrase is committed; only its own translation fills it in.
 struct SubtitleLine: Identifiable, Equatable {
     let id: UUID
-    let source: String
+    /// Fixed once committed, except for a sentence end a speech translator
+    /// reports with the next word.
+    var source: String
     var translation: String?
     /// The translation failed or timed out: the pair keeps its original.
     var failed = false
-    init(source: String) { id = UUID(); self.source = source }
+    /// Position in the session, kept when older pairs leave, so alternating
+    /// bands never move from one pair to another.
+    var ordinal = 0
+    init(source: String, translation: String? = nil, failed: Bool = false, ordinal: Int = 0) {
+        id = UUID(); self.source = source; self.translation = translation; self.failed = failed; self.ordinal = ordinal
+    }
     var isSettled: Bool { translation != nil || failed }
 }
 
@@ -63,6 +70,9 @@ final class LiveSubtitleModel: ObservableObject {
     /// The phrase being heard: committed text not yet cut into a phrase plus
     /// the provider's partial. Display only; never sent for translation.
     @Published private(set) var live = ""
+    /// The translation still being spoken by a speech translator (OpenAI):
+    /// the live pair's right column. Empty on the LLM path.
+    @Published private(set) var liveTranslation = ""
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
     var onActivityChange: (() -> Void)?
@@ -74,6 +84,12 @@ final class LiveSubtitleModel: ObservableObject {
     private let makeAudio: () -> TerminalSystemAudioSourceStreaming
     private let open: (String?) async throws -> BYOKUpstreamSession
     private let makeService: () async throws -> TextTranslating
+    /// The Subtitles audio route's speech translator, or nil when the route is
+    /// a speech-to-text provider (then the Subtitles LLM translates).
+    private let openTranslator: (_ source: String?, _ target: String) async throws -> SpeechTranslationSession?
+    private var translator: SpeechTranslationSession?
+    private var pairer = SubtitleSpeechPairer()
+    private var nextOrdinal = 0
     private var generation = UUID()
     private var cleanupTask: Task<Void, Never>?
     private var runTask: Task<Void, Never>?
@@ -117,8 +133,17 @@ final class LiveSubtitleModel: ObservableObject {
             let adapter = try RealtimeAdapterFactory.makeMetered(resolver.resolve(route, for: .subtitlesAudio))
             return try await adapter.open(language: language, terms: [])
         },
-        makeService: @escaping () async throws -> TextTranslating = { try await TranslationService.live(for: .subtitlesTranslation) }
+        makeService: @escaping () async throws -> TextTranslating = { try await TranslationService.live(for: .subtitlesTranslation) },
+        openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession? = { _, target in
+            let resolver = FeatureRouteResolver()
+            guard let route = resolver.route(for: .subtitlesAudio), route.account == .openAI else { return nil }
+            let resolved = try resolver.resolve(route, for: .subtitlesAudio)
+            guard let key = resolved.apiKey, !key.isEmpty else { throw FeatureRouteError.missingKey(.subtitlesAudio) }
+            let session = try await OpenAIRealtimeTranslateAdapter(apiKey: key, model: resolved.model).open(target: target)
+            return AIUsageMeteredSpeechTranslation(session: session, context: AIUsageContext(resolved))
+        }
     ) {
+        self.openTranslator = openTranslator
         self.connectionTimeout = connectionTimeout
         self.flushInterval = flushInterval
         self.phraseDeadline = phraseDeadline
@@ -134,7 +159,8 @@ final class LiveSubtitleModel: ObservableObject {
         let token = generation
         let language = sourceCode == "auto" ? nil : sourceCode
         target = .language(targetCode)
-        lines = []; partial = ""; live = ""; issue = nil; waiting = []
+        lines = []; partial = ""; live = ""; liveTranslation = ""; issue = nil; waiting = []
+        pairer = SubtitleSpeechPairer(); nextOrdinal = 0
         segmenter = SubtitleSegmenter(); partialLock.reset(); spansSegment = false
         sawFinal = false; hasAudio = false
         setPhase(.connecting)
@@ -146,6 +172,15 @@ final class LiveSubtitleModel: ObservableObject {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
+                // A speech translator (OpenAI) hears and translates in one
+                // session; the Subtitles LLM route is not used then.
+                // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
+                if let translator = try await self.openTranslator(language, self.targetCode) {
+                    guard self.generation == token, !Task.isCancelled else { await translator.close(); return }
+                    try await self.runSpeechTranslation(translator, token: token)
+                    return
+                }
+                guard self.generation == token, !Task.isCancelled else { return }
                 // Resolve both routes before touching system audio. Never borrow a
                 // Drop/Agent key and never switch the model after a failure.
                 let service = try await self.makeService()
@@ -247,9 +282,13 @@ final class LiveSubtitleModel: ObservableObject {
                 guard self.generation == token else { return }
                 self.partial = ""; self.live = ""; self.service = nil; self.runTask = nil
                 self.setPhase(.idle)
+            } catch let failure as SpeechTranslationFailure {
+                guard self.generation == token, !Task.isCancelled else { return }
+                self.fail(.speechTranslation(failure, target: self.targetCode), token: token)
             } catch {
                 guard self.generation == token, !Task.isCancelled else { return }
-                self.fail(.from(error, feature: self.service == nil ? .subtitlesTranslation : .subtitlesAudio), token: token)
+                let feature: AIFeature = self.service == nil && self.translator == nil ? .subtitlesTranslation : .subtitlesAudio
+                self.fail(.from(error, feature: feature), token: token)
             }
         }
         runTask = task
@@ -285,7 +324,7 @@ final class LiveSubtitleModel: ObservableObject {
         timer?.cancel(); timer = nil
         stopWatchdog?.cancel(); stopWatchdog = nil
         connectionWatchdog?.cancel(); connectionWatchdog = nil
-        waiting = []; service = nil; partial = ""; live = ""
+        waiting = []; service = nil; partial = ""; live = ""; liveTranslation = ""
         setPhase(.finishing)
         let task = Task { [weak self] in
             guard let self else { return }
@@ -313,8 +352,98 @@ final class LiveSubtitleModel: ObservableObject {
         relay?.cancel(); relay = nil
         let source = self.source; self.source = nil
         let upstream = self.upstream; self.upstream = nil
+        let translator = self.translator; self.translator = nil
         await source?.stop()
         await upstream?.close()
+        await translator?.close()
+    }
+
+    // MARK: - Speech translation
+
+    /// One session hears and translates: audio goes in, the heard original
+    /// and the translation come back as two streams that `pairer` cuts into
+    /// pairs. Stop flushes the audio and waits for the provider's close.
+    private func runSpeechTranslation(_ translator: SpeechTranslationSession, token: UUID) async throws {
+        self.translator = translator
+        let source = makeAudio()
+        self.source = source
+        let relay = SubtitleAudioRelay(source: source) { [weak self] in
+            Task { @MainActor in
+                self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
+            }
+        }
+        self.relay = relay
+        try await source.start()
+        guard generation == token, !Task.isCancelled else { await source.stop(); return }
+        connectionWatchdog?.cancel(); connectionWatchdog = nil
+        setPhase(.listening)
+        audioTask = Task { [weak self] in
+            do {
+                for try await pcm in relay.stream {
+                    guard !Task.isCancelled else { return }
+                    if pcm.contains(where: { $0 != 0 }), self?.hasAudio == false { self?.hasAudio = true }
+                    await translator.sendAudio(pcm)
+                }
+                guard !Task.isCancelled else { return }
+                await translator.endInput()
+            } catch {
+                self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
+            }
+        }
+        timer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: self?.flushInterval ?? .milliseconds(250))
+                guard !Task.isCancelled, let self, self.generation == token else { return }
+                self.flushPairs(token: token)
+            }
+        }
+        for await event in translator.events {
+            guard generation == token, !Task.isCancelled else { return }
+            switch event {
+            case .source(let text, let elapsed):
+                pairer.addSource(text, elapsedMs: elapsed)
+                flushPairs(token: token)
+            case .translation(let text, let elapsed):
+                pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
+                flushPairs(token: token)
+            case .closed:
+                break
+            case .failed(let failure):
+                fail(.speechTranslation(failure, target: targetCode), token: token)
+                return
+            }
+            if pairer.liveSource.count > 4_000 {
+                fail(.init(message: "The translation is too far behind the speech. Start again."), token: token)
+                return
+            }
+        }
+        guard generation == token, !Task.isCancelled else { return }
+        guard phase == .finishing else {
+            fail(.speechTranslation(.connectionLost, target: targetCode), token: token)
+            return
+        }
+        stopWatchdog?.cancel(); stopWatchdog = nil
+        timer?.cancel(); timer = nil
+        flushPairs(token: token, force: true)
+        await releaseCapture()
+        guard generation == token else { return }
+        live = ""; liveTranslation = ""; runTask = nil
+        setPhase(.idle)
+    }
+
+    private func flushPairs(token: UUID, force: Bool = false) {
+        guard generation == token else { return }
+        let carry = pairer.takeCarry()
+        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
+        for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
+            let translated = !pair.translation.isEmpty
+            lines.append(SubtitleLine(source: pair.source, translation: translated ? pair.translation : nil,
+                                      failed: !translated, ordinal: nextOrdinal))
+            nextOrdinal += 1
+            if lines.count > 40 { lines.removeFirst() }
+        }
+        if live != pairer.liveSource { live = pairer.liveSource }
+        if liveTranslation != pairer.liveTranslation { liveTranslation = pairer.liveTranslation }
     }
 
     private func updateLive() {
@@ -348,7 +477,8 @@ final class LiveSubtitleModel: ObservableObject {
             fail(.init(message: "Translation cannot keep up with speech. Choose a faster Subtitles LLM model, then start again.", feature: .subtitlesTranslation), token: token)
             return false
         }
-        let line = SubtitleLine(source: text)
+        let line = SubtitleLine(source: text, ordinal: nextOrdinal)
+        nextOrdinal += 1
         lines.append(line); waiting.append(line.id)
         // Never evict a pair that is still waiting for its translation.
         if lines.count > 40, lines[0].isSettled { lines.removeFirst() }

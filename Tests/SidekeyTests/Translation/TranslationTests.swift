@@ -492,7 +492,7 @@ final class TranslationTests: XCTestCase {
         XCTAssertNil(SubtitleCaption.status(hasRows: true, phase: .listening, issue: nil))
         XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: .failed, issue: nil))
 
-        let rows = SubtitleCaption.rows(lines: [line("Hi.", "Привет."), line("  ", "x"), line("Wait", nil),
+        let rows = SubtitleCaption.rows(lines: [line("Hi.", "Привет."), line("  ", " "), line("Wait", nil),
                                                 line("Gone", nil, failed: true)], live: " and then ")
         XCTAssertEqual(rows.map(\.source), ["Hi.", "Wait", "Gone", "and then"])
         XCTAssertEqual(rows.map(\.translation), [.text("Привет."), .pending, .failed, .pending])

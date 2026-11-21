@@ -382,6 +382,8 @@ struct ModelStatusResolver {
         case .chatWithTools:
             if entry.supportsTools == false { return "no tool support" }
             if let uses = entry.uses, !uses.contains(.chatWithTools) { return "no tool support" }
+        case .speechTranslation:
+            if entry.uses?.contains(.speechTranslation) != true { return "not a speech translation model" }
         }
         let minimum: Int?
         switch feature {

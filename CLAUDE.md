@@ -444,8 +444,21 @@ Translation tools:
   setup errors stop the session. ElevenLabs Subtitles audio commits by VAD
   (0.5 s) and SubtitlePartialLock translates the stable start of its
   segment-long partials (0.6 s unchanged, no hyphenated unfinished word),
-  aligning the commit by words; Drop and other takes keep manual commits. WHY:
-  .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  aligning the commit by words; Drop and other takes keep manual commits.
+  Every other pair sits on a faint band that follows the pair's position in
+  the session. WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  Subtitles audio can instead be OpenAI gpt-realtime-translate (model use
+  speechTranslation, OpenAI and Subtitles audio only; the user picks it):
+  OpenAIRealtimeTranslateAdapter streams the capture (24 kHz, 200 ms frames)
+  to one session that returns the translation and, with gpt-realtime-whisper
+  input transcription, the heard original; the Subtitles LLM row is unused
+  and says so. SubtitleSpeechPairer cuts the translation at sentence ends,
+  1.2 s pauses or a clause past 160 characters and matches the original's
+  sentence that ended (elapsed_ms) before it; the live pair shows whole
+  words only. Refused key, no credit, busy, unsupported language and a
+  dropped socket end the session with a named message; Costs estimates
+  $3.06 per audio hour. WHY:
+  .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the

@@ -16,6 +16,8 @@ enum SubtitleCaption {
             case text(String)
             /// The translation failed or timed out: only the original shows.
             case failed
+            /// A speech translator is still saying it (dim, still growing).
+            case live(String)
         }
 
         let id: UUID
@@ -31,10 +33,13 @@ enum SubtitleCaption {
     /// The live row keeps one identity, so it updates in place while growing.
     static let liveID = UUID(uuidString: "00000000-0000-0000-0000-00000000117E")!
 
-    static func rows(lines: [SubtitleLine], live: String) -> [Row] {
-        var rows = lines.enumerated().compactMap { ordinal, line -> Row? in
+    static func rows(lines: [SubtitleLine], live: String, liveTranslation: String = "") -> [Row] {
+        var rows = lines.compactMap { line -> Row? in
             let source = line.source.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !source.isEmpty else { return nil }
+            let hasTranslation = !(line.translation ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            // A speech translator may translate a phrase it reported no
+            // original for; a pair needs at least one side.
+            guard !source.isEmpty || hasTranslation else { return nil }
             let translation: Row.Translation
             if let value = line.translation?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
                 translation = .text(value)
@@ -44,13 +49,26 @@ enum SubtitleCaption {
             } else {
                 translation = .pending
             }
-            return Row(id: line.id, source: source, translation: translation, isLive: false, ordinal: ordinal)
+            return Row(id: line.id, source: source, translation: translation, isLive: false, ordinal: line.ordinal)
         }
-        let heard = live.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !heard.isEmpty {
-            rows.append(Row(id: liveID, source: heard, translation: .pending, isLive: true, ordinal: lines.count))
+        let heard = tail(live.trimmingCharacters(in: .whitespacesAndNewlines))
+        let spoken = liveTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !heard.isEmpty || !spoken.isEmpty {
+            rows.append(Row(id: liveID, source: heard, translation: spoken.isEmpty ? .pending : .live(spoken),
+                            isLive: true, ordinal: (lines.last?.ordinal ?? -1) + 1))
         }
         return Array(rows.suffix(maxPairs))
+    }
+
+    /// The phrase still being heard shows its newest words only, so a long
+    /// sentence waiting for its translation never pushes finished pairs out.
+    static let liveSourceLimit = 90
+
+    static func tail(_ text: String) -> String {
+        guard text.count > liveSourceLimit else { return text }
+        let start = text.index(text.endIndex, offsetBy: -liveSourceLimit)
+        let words = text[start...].drop { !$0.isWhitespace }.drop(while: \.isWhitespace)
+        return "…" + (words.isEmpty ? text[start...] : words)
     }
 
     /// The one line shown instead of pairs: an error, or the session's state

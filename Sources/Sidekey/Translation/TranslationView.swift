@@ -154,7 +154,8 @@ struct TranslationView: View {
     // Its content is phrase pairs, original beside translation.
     // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
     @ViewBuilder private var subtitleContent: some View {
-        let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live)
+        let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live,
+                                        liveTranslation: subtitles.liveTranslation)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
@@ -234,14 +235,12 @@ struct TranslationView: View {
         } else {
             // Russian runs about a fifth longer than English and is the line
             // being read: the grid gives the original only what it needs.
-            let isBand = pairMarker == .band
             PairGridLayout(rowSpacing: 8, columnSpacing: 18, maxWidth: Self.overlayContentWidth,
-                           maxHeight: showsOverlayControls ? 108 : 146,
-                           inset: isBand ? CGSize(width: 8, height: 3) : .zero) {
+                           maxHeight: showsOverlayControls ? 108 : 146, inset: Self.bandInset) {
                 ForEach(rows) { row in
                     Group {
                         RoundedRectangle(cornerRadius: 7)
-                            .fill(.white.opacity(isBand && row.ordinal.isMultiple(of: 2) ? 0.07 : 0))
+                            .fill(.white.opacity(row.ordinal.isMultiple(of: 2) ? Self.bandOpacity : 0))
                         sourceText(row)
                         translationText(row)
                     }
@@ -255,43 +254,33 @@ struct TranslationView: View {
         }
     }
 
-    @Environment(\.subtitlePairMarker) private var pairMarker
-
-    /// The phrase's text with the chosen pair mark: an accent first letter or
-    /// a leading accent dot.
-    private func marked(_ value: String, font: Font, color: Color) -> some View {
-        var body = Text(value)
-        if pairMarker == .initial, let first = value.first {
-            body = Text(String(first)).foregroundColor(SubtitlePairMarker.accent).fontWeight(.semibold)
-                + Text(value.dropFirst())
-        }
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if pairMarker == .dot {
-                Text("•").foregroundStyle(SubtitlePairMarker.accent).accessibilityHidden(true)
-            }
-            body.foregroundStyle(color).lineSpacing(2)
-        }
-        .font(font)
-    }
+    /// Every other pair sits on a faint band, so where one chunk ends and the
+    /// next begins is visible at a glance (chosen by the user from dots, an
+    /// accent first letter and bands). The band follows the pair's position
+    /// in the session, so it never jumps when an old pair leaves.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+    static let bandOpacity = 0.07
+    static let bandInset = CGSize(width: 8, height: 3)
 
     private func sourceText(_ row: SubtitleCaption.Row) -> some View {
-        marked(row.source, font: .system(size: embedded ? 12 : 15, weight: .regular, design: .rounded),
-               color: .white.opacity(row.isLive ? 0.42 : 0.6))
+        Text(row.source)
+            .font(.system(size: embedded ? 12 : 15, weight: .regular, design: .rounded))
+            .foregroundStyle(.white.opacity(row.isLive ? 0.42 : 0.6))
+            .lineSpacing(2)
     }
 
     /// Toolbox pairs: the pane is too narrow for two columns, so the original
     /// sits above its translation.
     @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
-        let isBand = pairMarker == .band
         VStack(alignment: .leading, spacing: 2) {
-            sourceText(row).frame(maxWidth: .infinity, alignment: .leading)
+            if !row.source.isEmpty { sourceText(row).frame(maxWidth: .infinity, alignment: .leading) }
             translationText(row).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, isBand ? 8 : 0)
-        .padding(.vertical, isBand ? 3 : 0)
+        .padding(.horizontal, Self.bandInset.width)
+        .padding(.vertical, Self.bandInset.height)
         .background {
-            if isBand, row.ordinal.isMultiple(of: 2) {
-                RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.07))
+            if row.ordinal.isMultiple(of: 2) {
+                RoundedRectangle(cornerRadius: 7).fill(.white.opacity(Self.bandOpacity))
             }
         }
     }
@@ -299,7 +288,16 @@ struct TranslationView: View {
     @ViewBuilder private func translationText(_ row: SubtitleCaption.Row) -> some View {
         switch row.translation {
         case .text(let value):
-            marked(value, font: .system(size: embedded ? 14 : 18, weight: .medium, design: .rounded), color: .white)
+            Text(value)
+                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
+                .foregroundStyle(.white)
+                .lineSpacing(2)
+        case .live(let value):
+            // Still being spoken by the speech translator.
+            Text(value)
+                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineSpacing(2)
         case .pending:
             Image(systemName: "ellipsis")
                 .font(.system(size: embedded ? 12 : 15, weight: .semibold))

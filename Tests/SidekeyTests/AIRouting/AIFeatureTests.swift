@@ -48,7 +48,8 @@ final class AIFeatureTests: XCTestCase {
             case .deepgram: return deepgram
             case .elevenLabs: return elevenLabs
             case .openRouter: return openRouter
-            case .openAI: return openRouter
+            // OpenAI's live speech translation serves Subtitles audio only.
+            case .openAI: return features == [.subtitlesAudio] ? .speechTranslation : openRouter
             case .anthropic: return anthropic
             case .openAICompatible: return openAICompatible
             // Every speech feature, meetings and subtitles included; no text.
@@ -114,7 +115,8 @@ final class AIFeatureTests: XCTestCase {
             for feature in AIFeature.activeCases {
                 let expected: ModelUse? = feature.mode == .llm ? .chat
                     : (feature.mode == .llmWithTools ? .chatWithTools
-                       : (kind == .openAI && feature.mode == .decision ? .decision : nil))
+                       : (kind == .openAI && feature.mode == .decision ? .decision
+                          : (kind == .openAI && feature == .subtitlesAudio ? .speechTranslation : nil)))
                 XCTAssertEqual(feature.modelUse(on: kind), expected, feature.rawValue)
             }
         }

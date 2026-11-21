@@ -508,6 +508,10 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         return try decode(Response.self, from: data).data.compactMap { model in
             let id = model.id
             let base = id.hasPrefix("ft:") ? String(id.dropFirst(3).split(separator: ":").first ?? "") : id
+            // Live speech translation (Subtitles audio), never a text model.
+            if base.hasPrefix("gpt-realtime-translate") {
+                return CatalogModel(id: id, uses: [.speechTranslation], catalogDate: model.created?.date)
+            }
             guard base.hasPrefix("gpt-") || ["o1", "o3", "o4"].contains(where: { base == $0 || base.hasPrefix($0 + "-") }),
                   !["audio", "realtime", "transcribe", "tts", "image", "search", "codex", "deep-research", "-pro", "instruct"].contains(where: base.contains)
             else { return nil }

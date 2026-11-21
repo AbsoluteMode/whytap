@@ -47,7 +47,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SubtitleLatencyBenchmarkTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md]
+related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md]
 ---
 
 # Subtitle phrase pairs
@@ -98,7 +98,10 @@ Where the time went:
   (`HuggingColumnLayout`) and stays centred, so no empty strip runs beside a
   short translation; the price is that the box's width can change as pairs
   arrive (animated with the pairs). Pairs are bottom-anchored and only whole
-  pairs show, so an old pair leaves at the top in one piece; a new pair fades and slides in from the bottom (none with Reduce
+  pairs show, so an old pair leaves at the top in one piece; every other
+  pair sits on a faint band (white at 7 %), the chunk mark the user chose,
+  and the band follows the pair's position in the session, so it never
+  jumps to another pair when an old one leaves; a new pair fades and slides in from the bottom (none with Reduce
   Motion). The phrase still being heard is the last row, original only,
   dimmer, with a pending mark. A pair waiting for its translation shows the
   mark; a failed one shows "Not translated" next to its original. The
@@ -222,11 +225,12 @@ so it is proposed, not built here.
 
 ## Rejected
 
-- Switching Subtitles to OpenAI `gpt-realtime-translate` in this change: it
-  is the source of the reference's quality and speed, but it would replace
-  the user's chosen speech and LLM routes, and its original text for pairs
-  is a separate transcription aligned only by elapsed time. Proposed to the
-  user as an opt-in Subtitles engine instead.
+- Switching Subtitles to OpenAI `gpt-realtime-translate` for everyone: it
+  would replace the user's chosen speech and LLM routes. The user then chose
+  it as an opt-in Subtitles audio route
+  (2026-11-21-subtitle-speech-translation.md).
+- Chunk marks as an accent dot or an accent first letter: rendered beside
+  bands for the user, who chose bands.
 - A larger context (whole session history): more tokens on every request for
   little gain once the neighbouring phrases are present.
 - Translating every partial: paid requests for text that is still changing,

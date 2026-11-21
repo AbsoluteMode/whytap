@@ -27,6 +27,10 @@ In **Settings → API & Models**, choose:
   Deepgram, ElevenLabs or a compatible realtime speech endpoint to transcribe
   system audio; **LLM** uses OpenRouter or a compatible text endpoint to
   translate the recognized phrases. Both model names remain in its summary.
+  **Speech** can also be OpenAI `gpt-realtime-translate` with your OpenAI key:
+  it hears and translates in one step, so the **LLM** row is not used while
+  it is selected (about $3.06 per hour of audio: $0.034 a minute for the
+  translation and $0.017 for the transcript of the original).
 
 Keys stay in Whytap's existing Keychain store. New routes start **Not set**.
 When upgrading already configured subtitles, their previous shared Translation
@@ -90,8 +94,17 @@ the start of its live text once it has stayed unchanged for 0.6 s, instead of
 waiting for Scribe's 36-second segments. Other interim speech is shown but never
 translated or billed as an LLM request. This is a speech-to-text → LLM
 pipeline; latency depends on the provider, the network and the chosen model (a
-faster LLM is the largest remaining gain). It does not use the standalone app's
-OpenAI translation endpoint or its credential files.
+faster LLM is the largest remaining gain).
+
+With OpenAI `gpt-realtime-translate` as Subtitles audio there is no separate
+speech model or LLM request: one OpenAI session receives the system audio and
+returns the translation together with the transcript of what it heard. Each
+translated sentence becomes a pair with the sentence of the original it
+translates; the sentence still being heard shows its original and the
+translation so far, dimmed. A refused key, an empty OpenAI balance, a busy
+service, a target language OpenAI does not offer (Punjabi, for example) or a
+lost connection stops subtitles with a message saying which; finished pairs
+stay. It uses only the key saved in Whytap, not the standalone app's files.
 
 **Stop** stops capture, drains queued audio, waits up to ten seconds for speech
 finals and completes queued translations. Audio already captured at Stop is sent

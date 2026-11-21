@@ -205,17 +205,26 @@ final class SubtitlePairRenderTests: XCTestCase {
                                      live: "Every layer takes the numbers")
         try renderOverlay(live, name: "subtitles-pairs-live.png")
         try renderToolbox(live, name: "toolbox-subtitles-pairs.png")
-        // Chunk-boundary marks for the user to choose from.
-        // A long sentence wraps only at the box's right edge.
+        // A long sentence wraps only at the box's right edge; two short pairs
+        // make a narrow box.
         let long = try await session(phrases: Self.script + [Self.longPhrase], holds: [], live: nil)
         let short = try await session(phrases: Array(Self.script.prefix(2)), holds: [], live: nil)
-        for marker in SubtitlePairMarker.allCases {
-            try renderOverlay(all, name: "markers/subtitles-pairs-\(marker.rawValue).png", marker: marker)
-            try renderOverlay(long, name: "markers/subtitles-long-\(marker.rawValue).png", marker: marker)
-        }
-        try renderOverlay(short, name: "markers/subtitles-short-none.png")
+        try renderOverlay(long, name: "subtitles-pairs-long.png")
+        try renderOverlay(short, name: "subtitles-pairs-short.png")
         await long.model.cancel().value
         await short.model.cancel().value
+        // OpenAI speech translation: the recorded session, the last sentence
+        // still being heard and translated.
+        let speech = FakeSpeechTranslation()
+        let openAI = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { FixtureSubtitleAudio() },
+                                       makeService: { PairPreviewService() }, openTranslator: { _, _ in speech })
+        openAI.start()
+        for _ in 0..<200 where openAI.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
+        speech.yieldRecorded(until: 31_600)
+        for _ in 0..<200 where openAI.lines.count < 5 { try await Task.sleep(for: .milliseconds(5)) }
+        try renderOverlay(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "subtitles-openai-live.png")
+        try renderToolbox(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "toolbox-subtitles-openai.png")
+        await openAI.cancel().value
         // Stopped: the language row and Start return above the newest pairs.
         all.model.stop()
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
@@ -258,7 +267,7 @@ final class SubtitlePairRenderTests: XCTestCase {
     }
 
     /// The overlay panel is 760 x 190 pt; it floats over whatever plays.
-    private func renderOverlay(_ session: Session, name: String, marker: SubtitlePairMarker = .none) throws {
+    private func renderOverlay(_ session: Session, name: String) throws {
         let frame = ZStack {
             LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.20), Color(red: 0.20, green: 0.16, blue: 0.22)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -269,7 +278,6 @@ final class SubtitlePairRenderTests: XCTestCase {
             VStack {
                 Spacer()
                 view(session, embedded: false).frame(width: 760, height: 190)
-                    .environment(\.subtitlePairMarker, marker)
             }
         }
         .frame(width: 860, height: 300)

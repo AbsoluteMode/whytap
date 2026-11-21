@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LiveText/LiveTextTickerTests.swift
     confirmed_at: 2026-11-15
-related: [2026-11-13-live-text-sand.md, 2026-11-19-live-text-rewrite-hold.md]
+related: [2026-11-13-live-text-sand.md, 2026-11-19-live-text-rewrite-hold.md, 2026-11-21-live-text-forward-only.md]
 ---
 
 # Rewrites keep the line in place

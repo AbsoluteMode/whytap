@@ -7,14 +7,11 @@ struct MonitorHoverPanel: View {
     @StateObject private var store: MonitorStore
     @State private var selectedID: String?
     @State private var deleting = false
+    @StateObject private var confirmation = MonitorDeletionConfirmation()
     let onBack: () -> Void
-    private let deletionPrompts: MonitorDashboardDeletionPrompts
 
-    init(store: MonitorStore? = nil,
-         deletionPrompts: MonitorDashboardDeletionPrompts = .system,
-         onBack: @escaping () -> Void) {
+    init(store: MonitorStore? = nil, onBack: @escaping () -> Void) {
         self._store = StateObject(wrappedValue: store ?? MonitorStore())
-        self.deletionPrompts = deletionPrompts
         self.onBack = onBack
     }
 
@@ -30,7 +27,7 @@ struct MonitorHoverPanel: View {
         guard !deleting else { return }
         deleting = true
         Task { @MainActor in
-            let outcome = await MonitorDashboardDeletion(store: store, prompts: deletionPrompts)
+            let outcome = await MonitorDashboardDeletion(store: store, prompts: confirmation.prompts)
                 .delete(id: id, title: title)
             selectedID = Self.selection(afterDeleting: id, outcome: outcome, selectedID: selectedID)
             deleting = false
@@ -109,8 +106,30 @@ struct MonitorHoverPanel: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay { confirmationOverlay }
         .task { store.start() }
-        .onDisappear { store.stop() }
+        .onDisappear {
+            confirmation.answer(delete: false)
+            confirmation.dismissFailure()
+            store.stop()
+        }
+    }
+
+    /// The delete question, or a failed delete, over the whole panel so
+    /// nothing else can be clicked until it is answered.
+    @ViewBuilder private var confirmationOverlay: some View {
+        if let request = confirmation.request {
+            MonitorConfirmationCard(
+                message: MonitorDeletionConfirmation.question(title: request.title),
+                cancelTitle: "Cancel", confirmTitle: "Delete",
+                onCancel: { confirmation.answer(delete: false) },
+                onConfirm: { confirmation.answer(delete: true) })
+        } else if confirmation.failed {
+            MonitorConfirmationCard(
+                message: MonitorDeletionConfirmation.failureText,
+                cancelTitle: "OK", confirmTitle: nil,
+                onCancel: { confirmation.dismissFailure() }, onConfirm: {})
+        }
     }
 
     /// The scroller sits in the panel's right margin, beside the cards
@@ -182,6 +201,13 @@ struct MonitorPickerControlAppearance: Equatable {
         return Self(fill: pressed ? 0.2 : hovered ? 0.12 : 0,
                     focusRing: focused ? 0.85 : 0,
                     symbol: pressed || hovered ? 0.95 : 0.5)
+    }
+
+    static func confirmButton(hovered: Bool, pressed: Bool, focused: Bool, enabled: Bool) -> Self {
+        guard enabled else { return Self(fill: 0.06, focusRing: 0, symbol: 0.4) }
+        return Self(fill: pressed ? 0.26 : hovered ? 0.19 : 0.12,
+                    focusRing: focused ? 0.85 : 0,
+                    symbol: 1)
     }
 
     static func row(hovered: Bool, pressed: Bool, focused: Bool, enabled: Bool) -> Self {
@@ -284,6 +310,103 @@ private struct MonitorDashboardDeleteStyle: ButtonStyle {
                 .allowsHitTesting(false))
             .contentShape(Circle())
             // The pointer is still tracked while disabled; the look ignores it.
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: look)
+    }
+}
+
+/// A question in the Monitor panel: Cancel first (Escape), Delete red and
+/// without a key, the meeting and clipboard order.
+struct MonitorConfirmationCard: View {
+    let message: String
+    let cancelTitle: String
+    let confirmTitle: String?
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    /// In the island, clicks reach the window's first-mouse dispatcher
+    /// before SwiftUI: the card registers its buttons there and hides the
+    /// targets under it (Back), so only Cancel and Delete answer.
+    @Environment(\.islandHoverNavigation) private var navigation
+
+    var body: some View {
+        ZStack {
+            // Covers the panel so rows and × cannot be clicked meanwhile.
+            Rectangle().fill(IslandInk.plate(0.5))
+                .contentShape(Rectangle())
+                .onTapGesture {}
+                .accessibilityHidden(true)
+            VStack(spacing: 14) {
+                Text(message)
+                    .font(.system(size: 13, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    nativeTarget(Button(cancelTitle, action: onCancel)
+                        .buttonStyle(MonitorConfirmButtonStyle(destructive: false))
+                        .keyboardShortcut(.cancelAction), action: .cancel, perform: onCancel)
+                    if let confirmTitle {
+                        nativeTarget(Button(confirmTitle, action: onConfirm)
+                            .buttonStyle(MonitorConfirmButtonStyle(destructive: true)),
+                            action: .confirm, perform: onConfirm)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: 260)
+            .background(IslandInk.row, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+        }
+        .modifier(MonitorModalRegistration(navigation: navigation))
+    }
+
+    @ViewBuilder
+    private func nativeTarget<B: View>(_ button: B, action: IslandHoverHitTargetID.ModalAction,
+                                       perform: @escaping () -> Void) -> some View {
+        if let navigation {
+            button.islandHoverHitTarget(bridge: navigation.bridge, id: .init(modal: action),
+                                        context: navigation.context, action: perform)
+        } else {
+            button
+        }
+    }
+}
+
+private struct MonitorModalRegistration: ViewModifier {
+    let navigation: IslandHoverNavigationContext?
+
+    func body(content: Content) -> some View {
+        if let navigation {
+            content.islandHoverHitModal(bridge: navigation.bridge)
+        } else {
+            content
+        }
+    }
+}
+
+private struct MonitorConfirmButtonStyle: ButtonStyle {
+    let destructive: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandHoverNativePressed) private var nativePressed
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let look = MonitorPickerControlAppearance.confirmButton(hovered: hovered,
+            pressed: configuration.isPressed || nativePressed, focused: focused, enabled: enabled)
+        let tint = destructive ? Color.red : IslandInk.color
+        return configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(destructive ? Color.red.opacity(look.symbol) : IslandInk.color.opacity(look.symbol))
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(tint.opacity(look.fill), in: Capsule())
+            .overlay(Capsule().strokeBorder(IslandInk.color.opacity(look.focusRing), lineWidth: 1.5)
+                .allowsHitTesting(false))
+            .contentShape(Capsule())
+            .focused($focused)
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: look)
     }

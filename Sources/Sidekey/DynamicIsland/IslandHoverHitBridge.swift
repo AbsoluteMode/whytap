@@ -6,9 +6,11 @@ struct IslandHoverHitTargetID: Hashable {
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
+    /// Buttons of a question shown over a panel (Monitor's delete question).
+    enum ModalAction: Hashable { case cancel, confirm }
     private enum Control: Hashable {
         case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction)
-        case deliveryFailure(DeliveryFailureAction), tableDisclosure(UUID)
+        case deliveryFailure(DeliveryFailureAction), tableDisclosure(UUID), modal(ModalAction)
     }
     let surface: Surface
     private let control: Control
@@ -20,6 +22,9 @@ struct IslandHoverHitTargetID: Hashable {
     init(tableDisclosure id: UUID) { surface = .agentAnswer; control = .tableDisclosure(id) }
     init(back destination: String) { surface = .navigation; control = .back(destination) }
     init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
+    init(modal action: ModalAction) { surface = .navigation; control = .modal(action) }
+    /// While a modal question is shown, only its own buttons take clicks.
+    var isModal: Bool { if case .modal = control { return true }; return false }
 }
 
 struct IslandHoverHitSnapshot: Equatable {
@@ -84,6 +89,8 @@ final class IslandHoverHitBridge: ObservableObject {
 
     private struct WeakTarget { weak var view: IslandHoverHitTargetView? }
     private struct WeakRegion { weak var view: IslandHoverHitRegionView? }
+    private struct WeakModal { weak var view: IslandHoverHitModalView? }
+    private var modals: [ObjectIdentifier: WeakModal] = [:]
 
     var consumesPointerSequence: Bool { tracking.consumesSequence }
 
@@ -139,12 +146,29 @@ final class IslandHoverHitBridge: ObservableObject {
         }
     }
 
+    fileprivate func registerModal(_ view: IslandHoverHitModalView) {
+        modals[ObjectIdentifier(view)] = WeakModal(view: view)
+        cancelPress()
+    }
+
+    fileprivate func unregisterModal(_ view: IslandHoverHitModalView) {
+        modals[ObjectIdentifier(view)] = nil
+    }
+
     /// Compute frames at event time, including scroll clipping. A search row
     /// must also intersect its measured viewport, never the search/footer.
+    /// While a modal question is shown in this window, targets under it
+    /// (Back, tiles) are left out and only the question's buttons remain.
     private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool) -> [IslandHoverHitSnapshot] {
         targets = targets.filter { $0.value.view != nil }
+        modals = modals.filter { $0.value.view != nil }
+        let modalShown = modals.values.contains { entry in
+            guard let view = entry.view else { return false }
+            return view.window === window && !view.isHiddenOrHasHiddenAncestor
+        }
         return targets.values.compactMap { entry in
             guard let view = entry.view,
+                  !modalShown || view.targetID.isModal,
                   accepts(view, allowsHover: allowsHover, allowsAnswer: allowsAnswer),
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
                   let region = regions[view.targetID.surface]?.view, region.surface == view.targetID.surface,
@@ -233,6 +257,39 @@ extension View {
     func islandHoverHitRegion(bridge: IslandHoverHitBridge,
                               surface: IslandHoverHitTargetID.Surface) -> some View {
         background(IslandHoverHitRegionReporter(bridge: bridge, surface: surface))
+    }
+
+    /// Marks a question shown over the panel: while it is in the window, the
+    /// window's first-mouse dispatch reaches only `.modal` targets.
+    func islandHoverHitModal(bridge: IslandHoverHitBridge) -> some View {
+        background(IslandHoverHitModalReporter(bridge: bridge))
+    }
+}
+
+@MainActor
+private struct IslandHoverHitModalReporter: NSViewRepresentable {
+    let bridge: IslandHoverHitBridge
+
+    func makeNSView(context: Context) -> IslandHoverHitModalView { IslandHoverHitModalView(frame: .zero) }
+    func updateNSView(_ view: IslandHoverHitModalView, context: Context) {
+        if view.bridge !== bridge { view.bridge?.unregisterModal(view) }
+        view.bridge = bridge
+        if view.window != nil { bridge.registerModal(view) }
+    }
+    static func dismantleNSView(_ view: IslandHoverHitModalView, coordinator: ()) {
+        view.bridge?.unregisterModal(view)
+        view.bridge = nil
+    }
+}
+
+@MainActor
+fileprivate final class IslandHoverHitModalView: NSView {
+    weak var bridge: IslandHoverHitBridge?
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { bridge?.registerModal(self) }
+        else { bridge?.unregisterModal(self) }
     }
 }
 

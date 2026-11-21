@@ -100,15 +100,61 @@ struct MonitorRemovedDashboards: Equatable {
 }
 
 /// What Monitor says around deleting one dashboard. A struct of closures so
-/// tests answer without showing a window.
+/// tests answer without showing anything.
 struct MonitorDashboardDeletionPrompts {
     var confirm: @MainActor (_ id: String, _ title: String) async -> Bool
     var reportFailure: @MainActor () async -> Void
+}
 
-    static let system = MonitorDashboardDeletionPrompts(
-        confirm: { id, title in MonitorDashboardDeletionAlerts.confirm(id: id, title: title) },
-        reportFailure: { MonitorDashboardDeletionAlerts.reportFailure() }
-    )
+/// The confirmation shown inside the Monitor panel itself. A system alert
+/// opened under the island's panel and could not be clicked (the user's
+/// report on 2026-11-21), so the question and its buttons live in the panel,
+/// where clicks already work. One question at a time: a new one cancels an
+/// unanswered one, and closing the panel answers Cancel.
+/// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+@MainActor
+final class MonitorDeletionConfirmation: ObservableObject {
+    struct Request: Equatable {
+        let id: String
+        let title: String
+    }
+
+    @Published private(set) var request: Request?
+    @Published private(set) var failed = false
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    static func question(title: String) -> String {
+        "Are you sure you want to delete the “\(title)” dashboard?"
+    }
+
+    static let failureText = "Couldn’t delete this dashboard. Try again in a moment."
+
+    func ask(id: String, title: String) async -> Bool {
+        answer(delete: false)
+        failed = false
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            request = Request(id: id, title: title)
+        }
+    }
+
+    /// Cancel and Delete; also Cancel when the panel goes away.
+    func answer(delete: Bool) {
+        let waiting = continuation
+        continuation = nil
+        request = nil
+        waiting?.resume(returning: delete)
+    }
+
+    func reportFailure() { failed = true }
+
+    func dismissFailure() { failed = false }
+
+    var prompts: MonitorDashboardDeletionPrompts {
+        MonitorDashboardDeletionPrompts(
+            confirm: { [weak self] id, title in await self?.ask(id: id, title: title) ?? false },
+            reportFailure: { [weak self] in self?.reportFailure() })
+    }
 }
 
 /// Deletes one dashboard after the user confirms. Every board in the list,
@@ -128,7 +174,7 @@ struct MonitorDashboardDeletion {
     }
 
     let store: MonitorStore
-    var prompts: MonitorDashboardDeletionPrompts = .system
+    let prompts: MonitorDashboardDeletionPrompts
 
     func delete(_ dashboard: MonitorDashboard) async -> Outcome {
         await delete(id: dashboard.id, title: dashboard.title)
@@ -143,57 +189,4 @@ struct MonitorDashboardDeletion {
             return .failed
         }
     }
-}
-
-/// The real alerts, ordered like meeting and clipboard delete: Cancel comes
-/// first and takes Escape, Delete has no key equivalent, so a stray Return or
-/// Escape never deletes.
-@MainActor
-enum MonitorDashboardDeletionAlerts {
-    static func confirm(id: String, title: String) -> Bool {
-        let alert = makeConfirmation(id: id, title: title)
-        // Monitor lives in a non-activating panel; activate so the alert
-        // takes the keyboard (Escape cancels) instead of the user's app.
-        NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertSecondButtonReturn
-    }
-
-    static func reportFailure() {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Couldn’t delete this dashboard"
-        alert.informativeText = "It is still in Monitor. Try again in a moment."
-        alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-    }
-
-    /// Builds the dialog without displaying or activating it.
-    static func makeConfirmation(id: String, title: String) -> NSAlert {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = messageText(title: title)
-        alert.informativeText = informativeText(id: id)
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
-        return alert
-    }
-
-    static func messageText(title: String) -> String {
-        "Delete the “\(title)” dashboard?"
-    }
-
-    static func informativeText(id: String) -> String {
-        id == MonitorStore.serverStatusID ? serverStatusText : collectorText
-    }
-
-    static let collectorText =
-        "It will be removed from Monitor on this Mac and stays removed even if its collector writes it again. "
-        + "The collector and its scripts are not touched; turn the collector off separately. "
-        + "Ask your agent to restore the dashboard to bring it back."
-
-    static let serverStatusText =
-        "It will be removed from Monitor on this Mac, and Whytap stops connecting to your servers. "
-        + "servers.json is not touched. "
-        + "Ask your agent to restore the dashboard to bring it back."
 }

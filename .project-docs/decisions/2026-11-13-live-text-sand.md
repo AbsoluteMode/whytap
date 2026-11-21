@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LiveText/LiveTextTickerTests.swift
     confirmed_at: 2026-11-13
-related: [2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-15-live-text-rewrites.md, 2026-11-19-live-text-rewrite-hold.md]
+related: [2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-15-live-text-rewrites.md, 2026-11-19-live-text-rewrite-hold.md, 2026-11-21-live-text-forward-only.md]
 ---
 
 # Paced live text with gathering characters

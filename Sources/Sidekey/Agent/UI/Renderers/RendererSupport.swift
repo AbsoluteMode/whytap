@@ -91,6 +91,8 @@ struct MarkdownBodyText: View {
             CodeBlockView(code: code)
         case .table(let headers, let rows):
             MarkdownTableView(headers: headers, rows: rows)
+        case .callout(let kind, let text):
+            MarkdownCalloutView(kind: kind, text: text)
         case .blockquote(let text):
             HStack(alignment: .top, spacing: 7) {
                 Rectangle()
@@ -168,7 +170,7 @@ private extension MarkdownBlock {
         switch self {
         case .paragraph, .heading, .unorderedList, .orderedList:
             return true
-        case .codeBlock, .table, .blockquote:
+        case .codeBlock, .table, .blockquote, .callout:
             return false
         }
     }
@@ -244,7 +246,7 @@ enum MarkdownAttributedRun {
             return listAttributedString(items: items, marker: { _ in unorderedListMarker })
         case .orderedList(let items):
             return listAttributedString(items: items, marker: { index in "\(index + 1)." })
-        case .codeBlock, .table, .blockquote:
+        case .codeBlock, .table, .blockquote, .callout:
             // Defensive fallback. `MarkdownRenderItem.group` only emits
             // text-shaped blocks (paragraph + heading + lists) inside a
             // textRun, so these branches are unreachable from production
@@ -301,7 +303,7 @@ enum MarkdownAttributedRun {
         return result
     }
 
-    private static func parseInline(_ text: String) -> AttributedString {
+    static func parseInline(_ text: String) -> AttributedString {
         // `inlineOnlyPreservingWhitespace` keeps `**bold**`, `*italic*`,
         // `[text](url)` and `` `code` `` while ignoring block-level
         // markdown (`#`, `>`, list markers) — those are already handled
@@ -317,7 +319,7 @@ enum MarkdownAttributedRun {
 
     private static func plainText(for block: MarkdownBlock) -> String {
         switch block {
-        case .paragraph(let text), .heading(_, let text), .blockquote(let text):
+        case .paragraph(let text), .heading(_, let text), .blockquote(let text), .callout(_, let text):
             return text
         case .unorderedList(let items), .orderedList(let items):
             return items.joined(separator: "\n")
@@ -339,6 +341,12 @@ enum MarkdownBlock: Equatable {
     case codeBlock(language: String?, code: String)
     case table(headers: [String], rows: [[String]])
     case blockquote(String)
+    case callout(kind: MarkdownCalloutKind, text: String)
+}
+
+enum MarkdownCalloutKind: String, Equatable {
+    case note = "[!NOTE]"
+    case warning = "[!WARNING]"
 }
 
 enum MarkdownBlockParser {
@@ -384,7 +392,7 @@ enum MarkdownBlockParser {
             }
 
             if let quote = blockquote(from: lines, startingAt: index) {
-                blocks.append(.blockquote(quote.text))
+                blocks.append(quote.block)
                 index = quote.nextIndex
                 continue
             }
@@ -454,12 +462,14 @@ enum MarkdownBlockParser {
         guard index + 1 < lines.count else { return nil }
         let headers = tableCells(from: lines[index])
         let delimiter = tableCells(from: lines[index + 1])
-        guard !headers.isEmpty, isTableDelimiter(delimiter) else { return nil }
+        guard !headers.isEmpty, headers.count == delimiter.count, isTableDelimiter(delimiter) else { return nil }
 
         var rows: [[String]] = []
         var cursor = index + 2
         while cursor < lines.count {
-            let cells = tableCells(from: lines[cursor])
+            let line = lines[cursor].trimmingCharacters(in: .whitespaces)
+            guard !line.hasPrefix(">"), !line.hasPrefix("```"), !line.hasPrefix("~~~") else { break }
+            let cells = tableCells(from: line)
             guard !cells.isEmpty else { break }
             rows.append(cells)
             cursor += 1
@@ -503,7 +513,7 @@ enum MarkdownBlockParser {
     private static func blockquote(
         from lines: [String],
         startingAt index: Int
-    ) -> (text: String, nextIndex: Int)? {
+    ) -> (block: MarkdownBlock, nextIndex: Int)? {
         var quotedLines: [String] = []
         var cursor = index
 
@@ -514,7 +524,14 @@ enum MarkdownBlockParser {
             cursor += 1
         }
 
-        return quotedLines.isEmpty ? nil : (quotedLines.joined(separator: "\n"), cursor)
+        guard let firstLine = quotedLines.first else { return nil }
+        let parts = firstLine.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        if let marker = parts.first, let kind = MarkdownCalloutKind(rawValue: marker.uppercased()) {
+            let inlineText = parts.dropFirst().first.map(String.init)
+            let body = ([inlineText].compactMap { $0 } + quotedLines.dropFirst()).joined(separator: "\n")
+            return (.callout(kind: kind, text: body), cursor)
+        }
+        return (.blockquote(quotedLines.joined(separator: "\n")), cursor)
     }
 
     private static func paragraph(
@@ -563,19 +580,30 @@ enum MarkdownBlockParser {
     }
 
     private static func tableCells(from line: String) -> [String] {
-        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.contains("|") else { return [] }
 
-        if trimmed.first == "|" {
-            trimmed.removeFirst()
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for character in trimmed {
+            if character == "|" {
+                if escaped {
+                    cell.removeLast()
+                    cell.append(character)
+                } else {
+                    cells.append(cell.trimmingCharacters(in: .whitespaces))
+                    cell = ""
+                }
+            } else {
+                cell.append(character)
+            }
+            escaped = character == "\\" && !escaped
         }
-        if trimmed.last == "|" {
-            trimmed.removeLast()
-        }
-
-        return trimmed
-            .split(separator: "|", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard !cells.isEmpty else { return [] }
+        if trimmed.first == "|" { cells.removeFirst() }
+        if !cell.isEmpty { cells.append(cell.trimmingCharacters(in: .whitespaces)) }
+        return cells
     }
 
     private static func isTableDelimiter(_ cells: [String]) -> Bool {
@@ -593,182 +621,17 @@ enum MarkdownBlockParser {
     }
 }
 
-/// Renders a parsed markdown table with cell-wrap and globally consistent
-/// column widths.
-///
-/// The previous implementation wrapped the table in
-/// `ScrollView(.horizontal)` around a `Grid`. With no horizontal bound the
-/// `Text(.init(...))` cells never wrapped, and long content pushed the
-/// table off-screen. Worse, when Sonnet emitted rows with subtly different
-/// cell counts (escaped pipes, ragged data) `Grid` aligned by column
-/// index but each row still implied its own intrinsic width, which made
-/// the table read as a stack of unrelated rows.
-///
-/// The current renderer is driven by a custom `Layout`. It receives the
-/// bounded width proposal from its parent, computes one width vector for
-/// the whole table via `MarkdownTableColumnLayout.columnWidths`, and
-/// applies the same vector to every row. Cells are plain `Text` views
-/// with `fixedSize(horizontal: false, vertical: true)` — once their
-/// horizontal bound is honoured by `place(at:proposal:)`, they wrap
-/// vertically as needed and the layout reports the table's natural
-/// height back to the parent `VStack`.
-private struct MarkdownTableView: View {
-    let headers: [String]
-    let rows: [[String]]
+enum MarkdownTableStyle: Equatable {
+    case grid(columnWidths: [CGFloat])
+    case records
 
-    var body: some View {
-        MarkdownTableLayout(headers: headers, rows: rows) {
-            ForEach(0..<cellTexts.count, id: \.self) { index in
-                let position = cellTexts[index]
-                Text(.init(position.text))
-                    .font(.system(size: 11, weight: position.isHeader ? .semibold : .regular))
-                    .foregroundColor(.primary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, MarkdownTableColumnLayout.cellHorizontalPadding)
-                    .padding(.vertical, MarkdownTableColumnLayout.cellVerticalPadding)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(position.isHeader
-                        ? Color.primary.opacity(0.08)
-                        : Color.primary.opacity(0.03))
-                    .border(Color.primary.opacity(0.10), width: 0.5)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 5))
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-        )
-    }
-
-    /// Flat list of cells in row-major order, tagged with header flag.
-    /// The custom `Layout` walks these in lockstep with the rendered
-    /// subviews, so the array order is the contract.
-    private var cellTexts: [CellPosition] {
+    static func choose(headers: [String], rows: [[String]], width: CGFloat) -> Self {
         let columnCount = max(headers.count, rows.map(\.count).max() ?? 0)
-        guard columnCount > 0 else { return [] }
-        var output: [CellPosition] = []
-        output.reserveCapacity((rows.count + 1) * columnCount)
-        for column in 0..<columnCount {
-            let text = column < headers.count ? headers[column] : ""
-            output.append(CellPosition(text: text, isHeader: true))
+        guard (1...3).contains(columnCount), width.isFinite, width >= CGFloat(columnCount) * 72 else {
+            return .records
         }
-        for row in rows {
-            for column in 0..<columnCount {
-                let text = column < row.count ? row[column] : ""
-                output.append(CellPosition(text: text, isHeader: false))
-            }
-        }
-        return output
-    }
-}
-
-private struct CellPosition: Equatable {
-    let text: String
-    let isHeader: Bool
-}
-
-/// Custom `Layout` that places markdown-table cells in a row-major grid
-/// using globally-aligned column widths. `MarkdownTableLayout` accepts
-/// the same `(headers, rows)` the parent view uses so the column-width
-/// vector and the cell order stay in sync.
-private struct MarkdownTableLayout: Layout {
-    let headers: [String]
-    let rows: [[String]]
-
-    private var columnCount: Int {
-        max(headers.count, rows.map(\.count).max() ?? 0)
-    }
-
-    private var rowCount: Int {
-        // Header row + data rows.
-        1 + rows.count
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) -> CGSize {
-        let width = proposal.width ?? subviews.reduce(into: CGFloat.zero) { acc, sub in
-            acc += sub.sizeThatFits(.unspecified).width
-        }
-        let columns = columnCount
-        guard columns > 0, !subviews.isEmpty else {
-            return CGSize(width: width, height: 0)
-        }
-
-        let widths = MarkdownTableColumnLayout.columnWidths(
-            headers: headers,
-            rows: rows,
-            available: width
-        )
-
-        let height = totalHeight(forSubviews: subviews, widths: widths)
-        return CGSize(width: width, height: height)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        let columns = columnCount
-        guard columns > 0, !subviews.isEmpty else { return }
-
-        let widths = MarkdownTableColumnLayout.columnWidths(
-            headers: headers,
-            rows: rows,
-            available: bounds.width
-        )
-
-        var rowOrigins: [CGFloat] = [bounds.minY]
-        for row in 0..<rowCount {
-            let height = rowHeight(at: row, subviews: subviews, widths: widths)
-            rowOrigins.append((rowOrigins.last ?? bounds.minY) + height)
-        }
-
-        for row in 0..<rowCount {
-            let height = rowOrigins[row + 1] - rowOrigins[row]
-            for column in 0..<columns {
-                let index = row * columns + column
-                guard index < subviews.count else { return }
-                var x = bounds.minX
-                for k in 0..<column {
-                    x += widths[k]
-                }
-                let subviewProposal = ProposedViewSize(width: widths[column], height: height)
-                subviews[index].place(
-                    at: CGPoint(x: x, y: rowOrigins[row]),
-                    anchor: .topLeading,
-                    proposal: subviewProposal
-                )
-            }
-        }
-    }
-
-    private func totalHeight(forSubviews subviews: Subviews, widths: [CGFloat]) -> CGFloat {
-        (0..<rowCount).reduce(CGFloat.zero) { acc, row in
-            acc + rowHeight(at: row, subviews: subviews, widths: widths)
-        }
-    }
-
-    /// A row takes the height of its tallest cell. Each cell measures
-    /// itself with its column width as the horizontal proposal so wrap
-    /// lands inside the actual width the cell will be placed at.
-    private func rowHeight(at row: Int, subviews: Subviews, widths: [CGFloat]) -> CGFloat {
-        let columns = columnCount
-        var maxHeight: CGFloat = 0
-        for column in 0..<columns {
-            let index = row * columns + column
-            guard index < subviews.count else { continue }
-            let measurement = subviews[index].sizeThatFits(
-                ProposedViewSize(width: widths[column], height: nil)
-            )
-            maxHeight = max(maxHeight, measurement.height)
-        }
-        return maxHeight
+        let columnWidths = MarkdownTableColumnLayout.columnWidths(headers: headers, rows: rows, available: width)
+        return columnWidths.allSatisfy { $0 >= 72 } ? .grid(columnWidths: columnWidths) : .records
     }
 }
 

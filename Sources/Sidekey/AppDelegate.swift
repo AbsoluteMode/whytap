@@ -253,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardWatcher: ClipboardWatcher?
     private var assetsDirectory: URL?
     private var permissionRepairWindowController: PermissionRepairWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
     private var didCompleteReadyStartup = false
     private var runtimeAccessibilityGranted = false
     private var runtimePermissionsObserver: NSObjectProtocol?
@@ -525,13 +526,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BackupViewModel.shared.start()
         SettingsSyncService.shared.start()
 
-        if FirstLaunchPermissions.consumePresentation(
-            in: .standard,
-            requiredPermissionsGranted: PermissionsHelper.allRequiredPermissionsGranted(),
-            screenRecordingGranted: PermissionsHelper.screenRecordingGranted()
-        ) {
-            openSettingsWindow(tab: .permissions)
+        // The first launch on a Mac opens the onboarding instead of Settings ->
+        // Permissions; a Mac that ran Whytap before never sees it.
+        // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+        if OnboardingLaunch.consume(in: .standard) {
+            presentOnboarding()
         }
+    }
+
+    private func presentOnboarding() {
+        if let existing = onboardingWindowController {
+            existing.show()
+            return
+        }
+        let model = OnboardingModel()
+        model.openSettings = { [weak self] tab, feature in
+            self?.openSettingsWindow(tab: tab, feature: feature)
+        }
+        let controller = OnboardingWindowController(model: model) { [weak self] in
+            OnboardingLaunch.finish(in: .standard)
+            NowPlayingAutomationConsent.promptsDeferred = false
+            // Released after AppKit finishes closing the window.
+            DispatchQueue.main.async { self?.onboardingWindowController = nil }
+        }
+        onboardingWindowController = controller
+        NowPlayingAutomationConsent.promptsDeferred = true
+        controller.show()
+    }
+
+    /// The onboarding on screen, if any: Drop's setup problems are shown in it
+    /// instead of opening a second window over it.
+    private var visibleOnboarding: OnboardingWindowController? {
+        onboardingWindowController.flatMap { $0.isVisible ? $0 : nil }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -708,6 +734,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func explainMissingDropPermission() {
         publishDropHotkeyStatus()
         startPermissionRecoveryPollingIfNeeded()
+        if let onboarding = visibleOnboarding {
+            onboarding.model.showPermissions()
+            onboarding.show()
+            return
+        }
         presentPermissionRepair { [weak self] in self?.refreshRuntimePermissions(forceRebuild: true) }
     }
 
@@ -787,7 +818,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentDropMode: actions.currentDropMode,
             historyCards: actions.historyCards,
             copyHistoryCard: actions.copyHistoryCard,
-            deleteHistoryCard: actions.deleteHistoryCard,
             toggleMeetingRecord: actions.toggleMeetingRecord,
             openScreenshot: actions.openScreenshot,
             openHoverPanel: { [weak self] panel in self?.show(.hoverPanel(panel)) },
@@ -1106,9 +1136,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pasteHistoryCard: { [weak self] card in
                 self?.pasteHistoryCardFromIsland(card)
             },
-            deleteHistoryCard: { [weak self] card in
-                await self?.deleteHistoryCard(card) ?? false
-            },
             historyPasteTargetName: { [weak self] in
                 self?.historyInteraction?.targetAppName
             },
@@ -1135,7 +1162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             },
             openCalendar: { [weak self] in
-                guard let self else { return }
+                // Closed Calendar ("Soon"): nothing opens.
+                guard let self, CalendarAvailability.isOpen else { return }
                 self.registerIslandHotkeyActivity()
                 AppState.shared.programmaticHoverExpansion = true
                 self.hoverPanelRequestToken += 1
@@ -1664,6 +1692,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // invisible and reads as "the hotkey does nothing".
             let newMode = IslandPanel.shared.actions.toggleDropMode()
             AppState.shared.publishDropModeHotkeyToggle(newMode)
+        case .comingSoon:
+            // A tool listed with a "Soon" badge has no effect.
+            break
         case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty
@@ -1832,14 +1863,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         copiedToastController?.show()
-    }
-
-    /// Delete a clipboard row so the requesting History view can reload its feed.
-    /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
-    private func deleteHistoryCard(_ card: HistoryStripCard) async -> Bool {
-        guard let store = historyStore, let assets = assetsDirectory else { return false }
-        let outcome = await ClipboardEntryDeletion(store: store, assetsDirectory: assets).delete(card)
-        return outcome.removesEntry
     }
 
     private func pasteHistoryCardFromIsland(_ card: HistoryStripCard) {
@@ -2430,6 +2453,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.phase = .idle
     }
 
+    private var microphoneRequestInFlight = false
+
+    /// The first press on a Mac that never answered the microphone question
+    /// asks it and records nothing: the next press dictates. Before, the
+    /// system dialog opened while the user was already speaking.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    private func askMicrophoneBeforeFirstTake() {
+        guard !microphoneRequestInFlight else { return }
+        microphoneRequestInFlight = true
+        Task { @MainActor [weak self] in
+            _ = await PermissionsHelper.requestMicrophone()
+            self?.microphoneRequestInFlight = false
+            self?.refreshRuntimePermissions()
+        }
+    }
+
     private func rememberDropTarget() {
         autoPasteEngine.rememberDropTarget()
         AppState.shared.dropTargetsHoverEditor = autoPasteEngine.hasLocalDropTarget && DropLocalEditor.keyWindow is IslandPanel
@@ -2437,15 +2476,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleDropHotkeyRoute(_ route: DropFlowRoute) {
         if DropHotkeyRecovery.requiresStartPermission(route) {
-            let snapshot = PermissionsHelper.snapshot()
-            guard snapshot.accessibilityGranted,
-                  snapshot.microphoneStatus != .denied,
-                  snapshot.microphoneStatus != .restricted else {
+            // Never put this check on stop/finalize/release routes.
+            switch DropHotkeyRecovery.startGate(PermissionsHelper.snapshot()) {
+            case .proceed:
+                break
+            case .explain:
                 explainMissingDropPermission()
                 return
+            case .askMicrophone:
+                askMicrophoneBeforeFirstTake()
+                return
             }
-            // The OS may show the initial microphone prompt when capture starts.
-            // Never put this check on stop/finalize/release routes.
         }
         // Escaping a parked total-offline take must ALWAYS clear the banner.
         if route == .discardFailedTakeAndStart {
@@ -2790,7 +2831,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // a dead hotkey: open API & Models on the failing feature's
                 // row, where its key and model are one click away.
                 if case StreamingSessionSetupError.byokMisconfigured(let routeError) = error {
-                    openSettingsWindow(tab: .apiAndModels, feature: routeError.feature)
+                    if let onboarding = visibleOnboarding {
+                        // The try page says Drop is not set up yet (or still
+                        // downloading) instead of Settings opening over it.
+                        onboarding.model.noteDropSetupFailure(routeError.feature)
+                    } else {
+                        openSettingsWindow(tab: .apiAndModels, feature: routeError.feature)
+                    }
                 }
                 return
             }

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Planner/CalendarHoverView.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-calendar-integrations.md, 2026-10-20-todo-hover.md, 2026-10-19-planner.md, 2026-11-20-calendar-day-view.md]
+related: [2026-10-21-calendar-integrations.md, 2026-10-20-todo-hover.md, 2026-10-19-planner.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-soon.md]
 ---
 
 # Calendar in Hover

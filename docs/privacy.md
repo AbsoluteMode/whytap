@@ -24,17 +24,11 @@ is a verifiable claim rather than a slogan.
   concealed, transient or auto-generated (password managers, text expanders,
   Whytap's recovery code) are never recorded.
   History → Clipboard displays the latest 20 retained copies with scrolling.
-  To remove one entry, right-click it in History and choose Delete…; only a
-  click on Delete in the confirmation removes it. Its saved image goes with it; for a copied file list
-  only the entry is removed, never the files. SQLite overwrites the deleted
-  row and folds its write-ahead log back into the database, so the copy is
-  not left readable in those files. Deleting does not change encrypted
-  backups already uploaded: archives made before 2026-10-21 contain the
-  History database, and restoring one brings its entries back. Time Machine
-  and other copies of your disk are not changed either.
+  Single entries cannot be deleted: an entry leaves the history when 50 newer
+  copies push it out, together with its saved image.
   Every removal from the History database also overwrites the removed bytes:
-  copies pushed out by the 50-entry limit, older dictations and agent chats,
-  and Delete…. Earlier versions removed entries without overwriting them, so
+  copies pushed out by the 50-entry limit and older dictations and agent
+  chats. Earlier versions removed entries without overwriting them, so
   pieces of old copies could stay readable in the database's unused space.
   Whytap therefore rewrites each History database once (SQLite `VACUUM`),
   in the background after launch. Every entry is kept. When the disk lacks

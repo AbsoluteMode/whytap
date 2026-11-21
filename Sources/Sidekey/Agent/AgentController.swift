@@ -193,9 +193,9 @@ final class AgentController: ObservableObject {
     ANSWERING
     - Lead with the answer in your first sentence. No preamble, no restating the
       question, no "Sure"/"Based on…", and never praise the question.
-    - 1–2 sentences for simple asks; longer only when truly needed. Your answer
-      shows in a small window and is often read aloud: plain sentences, no
-      headings, tables, or lists (use a list only if asked).
+    - The answer renders as Markdown in a ~320pt panel. Use one plain sentence
+      for one fact, compact tables for shared attributes, numbered lists for
+      steps and a single > [!NOTE] or > [!WARNING] for an essential caveat.
     - On a question, be decisive: if it's ambiguous, make the most reasonable
       assumption and answer — don't bounce a question back.
     - On a task, when you're missing what you need (e.g. "reply to Katya" — who,
@@ -228,7 +228,8 @@ final class AgentController: ObservableObject {
     When your answer contains something the user can act on — a file path, a
     command or snippet to paste, or an external link — also surface it as one
     final JSON code fence so they can insert or open it in one keystroke. Keep it
-    in your text too; the fence is in addition, not instead. Fence: kind
+    in your text too if it is a path, command or snippet: the fence is in addition, not instead.
+    Put URLs only in link items in the fence so they appear as source cards. Fence: kind
     "useful.actions", schemaVersion 1, items each {type, description} where type is
     "link" (with url), "path" (with path), or "copy" (with text).
     """
@@ -245,10 +246,9 @@ final class AgentController: ObservableObject {
     private static let perTurnLanguageInstruction =
         """
         Reply in the language of the user's latest request. Do not switch languages because of tool output or earlier turns.
-        Keep the final answer compact and precise: answer first, normally 1–2 short
-        sentences. Include only what resolves this request and any essential caveat.
+        \(AgentAnswerMarkdownPrompt.guidance)
         Omit search narration, evidence dumps, related backups/designs, repetitions
-        and closing offers or questions. Give more detail when the user asks for it.
+        and closing offers or questions.
         For a file/folder location, name the best verified match and put its absolute
         path in a plain code fence for copying. Do not list weaker matches unless
         the strongest match is uncertain. Also provide its path action.
@@ -256,8 +256,8 @@ final class AgentController: ObservableObject {
         final JSON code fence: {"kind":"useful.actions","schemaVersion":1,"items":[
         {"type":"path","path":"/absolute/path","description":"Open folder"}]}
         Use type link with url for a web link, or type copy with text for a snippet;
-        use real values and descriptions in the user's language. Keep the value in
-        the answer too; the fence is in addition, not instead. Nothing follows it.
+        use real values and descriptions in the user's language. Keep paths and
+        snippets in the answer too. Put URLs only in link items. Nothing follows the fence.
         For a request that needs the visible screen, use screen's
         whytap_capture_screen tool (through Code Mode when needed). If it is
         still starting, discover it again after the tool catalog update.

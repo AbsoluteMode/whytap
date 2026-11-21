@@ -128,6 +128,7 @@ enum HoverToolRegistry {
         inputLanguage: AppLanguage?,
         outputLanguage: AppLanguage?
     ) -> String {
+        if tool.isComingSoon { return CalendarAvailability.message }
         let baseDescription = info(for: tool).description
         guard tool == .dropMode,
               mode == .smart,

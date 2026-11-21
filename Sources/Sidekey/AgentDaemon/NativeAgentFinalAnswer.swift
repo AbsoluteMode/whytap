@@ -32,7 +32,7 @@ struct NativeAgentFinalAnswer {
                 "parameters": object([
                     "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"],
                                "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."],
-                    "answer": ["type": "string", "description": "Direct, nonempty answer to the latest question. Explain uncertainty when applicable. Sources, URL lists and instructions to check links cannot replace the answer."],
+                    "answer": ["type": "string", "description": "Direct, nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. Use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
                     "sources": ["type": "array", "items": source, "description": "Supporting public HTTP(S) links with short titles; empty when no sources are needed."],
                     "actions": ["type": "array", "items": ["anyOf": [path, copy]],
                                 "description": "Verified absolute paths or copyable snippets with short descriptions; empty when none are needed."]

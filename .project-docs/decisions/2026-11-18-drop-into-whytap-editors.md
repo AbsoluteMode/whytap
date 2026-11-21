@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AutoPasteEngineTests.swift
     confirmed_at: 2026-11-18
-related: [2026-10-20-translation-tools.md]
+related: [2026-10-20-translation-tools.md, 2026-11-21-first-launch-onboarding.md]
 ---
 
 # Drop into Whytap's own text editors

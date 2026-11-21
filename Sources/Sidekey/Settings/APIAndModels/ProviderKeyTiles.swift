@@ -199,6 +199,8 @@ struct ProviderKeyForm: View {
     var onSaveResult: (Bool) -> Void = { _ in }
     var onSaveFailure: (String) -> Void = { _ in }
     let onClose: () -> Void
+    /// The onboarding's form only adds a key; removing one stays in Settings.
+    var showsRemove = true
 
     @State private var key = ""
     @State private var name = ""
@@ -229,10 +231,12 @@ struct ProviderKeyForm: View {
                 .onHover { keyHovered = $0 }
                 .onSubmit(save)
             HStack(spacing: 10) {
-                APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil) {
-                    guard let account else { return }
-                    viewModel.remove(account)
-                    onClose()
+                if showsRemove {
+                    APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil) {
+                        guard let account else { return }
+                        viewModel.remove(account)
+                        onClose()
+                    }
                 }
                 Spacer(minLength: 0)
                 if busy { ProgressView().controlSize(.small).accessibilityLabel("Saving key") }

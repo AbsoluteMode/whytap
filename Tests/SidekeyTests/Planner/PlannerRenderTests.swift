@@ -5,6 +5,8 @@ import XCTest
 
 @MainActor
 final class PlannerRenderTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     func testOffscreenPlannerFixtures() async throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_PLANNER_RENDER_DIR"] else {
             throw XCTSkip("Set EXODIA_PLANNER_RENDER_DIR for offscreen Planner fixtures.")

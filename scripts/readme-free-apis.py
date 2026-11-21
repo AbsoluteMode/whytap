@@ -215,7 +215,9 @@ def responsive(kind, alt, width):
 # they are, one column (Maxim asked on 2026-11-22: "just my setup, as it
 # actually is"). Speech runs on ElevenLabs and every text feature on Claude
 # Sonnet 5.5 with an Anthropic key (Maxim, 2026-11-22: "replace OpenRouter
-# with Anthropic"; the mark is the Anthropic one used by the plan cards). Agent stands for the Agent and its voice;
+# with Anthropic"; the mark is the Anthropic one used by the plan cards).
+# The providers appear only in the logo row: column headers and cells name
+# models alone (Maxim, 2026-11-22: "remove the providers everywhere"). Agent stands for the Agent and its voice;
 # Google is the voice search, which needs speech only. Subtitles run only on
 # GPT-Realtime-Translate, which hears and translates in one model, so that row
 # spans the speech and model columns and needs the OpenAI key
@@ -234,9 +236,9 @@ SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (fea
     ("Agent", SPEECH, MODEL),           # voice requests and the Agent itself
     ("Google", SPEECH, None),           # voice search: speech only
     ("Translation", None, MODEL),
-    ("Subtitles", "GPT-Realtime-Translate · OpenAI"),
+    ("Subtitles", "GPT-Realtime-Translate"),
 ]
-SETUP_COLUMNS = ["Feature", "Speech · ElevenLabs", "Model · Anthropic"]
+SETUP_COLUMNS = ["Feature", "Speech", "Model"]  # providers only in the logo row (Maxim, 2026-11-22)
 
 
 def setup_svg(theme, layout):
@@ -280,7 +282,7 @@ def setup_alt():
     rows = "; ".join(f"{r[0]}: {r[1]} (speech and translation in one model)" if len(r) == 2
                      else f"{r[0]}: " + " + ".join(t for t in r[1:] if t) for r in SETUP_ROWS)
     keys = ", ".join(name for _, _, name in SETUP_KEYS)
-    return (f"My setup. Keys: {keys}. Speech on ElevenLabs, language model on Anthropic. {rows}. "
+    return (f"My setup. Keys: {keys}. {rows}. "
             f"Updated monthly, last checked {display(SETUP_CHECKED)}.")
 
 

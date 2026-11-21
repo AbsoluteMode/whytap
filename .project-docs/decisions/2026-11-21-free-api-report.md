@@ -83,8 +83,10 @@ paying.
   asterisk are gone: OpenRouter is not paid from a subscription's API credit,
   so the claim would be false for this setup. Later the same day Maxim asked
   to replace OpenRouter with Anthropic: the keys line shows the Anthropic mark
-  (as on the plan cards) and the column reads "Model · Anthropic", with the
-  same Claude Sonnet 5.5. The plan and free claims stay out.
+  (as on the plan cards) and the column read "Model · Anthropic", with the
+  same Claude Sonnet 5.5. The plan and free claims stay out. Then Maxim asked
+  to remove the providers everywhere else: the logo row alone names them, the
+  columns read "Speech" and "Model", and Subtitles reads GPT-Realtime-Translate.
 - Between the free cards and My setup, **Already paying for an OpenAI or
   Anthropic subscription?** (asked by Maxim on 2026-11-21: Whytap is the app
   that puts a paid plan's API quota to work). After a first version with

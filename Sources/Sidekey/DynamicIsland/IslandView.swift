@@ -1216,7 +1216,7 @@ struct IslandView: View {
                                     historyPreviewAnchor = nil
                                 }
                             },
-                            onPasteHistoryCard: actions.pasteHistoryCard,
+                            onPasteHistoryCards: actions.pasteHistoryCards,
                             historyPasteTargetName: actions.historyPasteTargetName,
                             onOpenNotes: actions.openMeetings,
                             onOpenMonitor: actions.openMonitor,
@@ -2574,7 +2574,7 @@ private struct IslandDropModeHoverPanel: View {
     let onSelectHistoryMode: (HistoryStripMode) -> Void
     let onCopyHistoryCard: (HistoryStripCard) -> Void
     let onHistoryPreviewAnchorChange: (HistoryStripCard, CGRect?) -> Void
-    let onPasteHistoryCard: (HistoryStripCard) -> Void
+    let onPasteHistoryCards: ([HistoryStripCard]) -> Void
     let historyPasteTargetName: () -> String?
     let onOpenNotes: () -> Void
     var onOpenMonitor: () -> Void = {}
@@ -2636,8 +2636,8 @@ private struct IslandDropModeHoverPanel: View {
                     onSelectMode: onSelectHistoryMode,
                     onCopy: onCopyHistoryCard,
                     onPreviewAnchorChange: onHistoryPreviewAnchorChange,
-                    onPaste: { card in
-                        onPasteHistoryCard(card)
+                    onPaste: { cards in
+                        onPasteHistoryCards(cards)
                         panelMode = .controls  // release key before synth Cmd+V
                     }
                 )

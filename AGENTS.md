@@ -1468,6 +1468,18 @@ context menu (the island has no right-click actions; the user removed the
 per-entry Delete on 2026-11-21); only the 50-entry cap removes them. History
 key monitors ignore keys while a modal alert is open. WHY:
 .project-docs/decisions/2026-11-21-clipboard-no-entry-delete.md
+Island History pastes several rows in one opening: with a paste target,
+⌘-click marks rows in click order (a blue numbered badge; ⌘-click again
+unmarks), Enter pastes the marked rows instead of the hovered one and closes
+History, and Escape clears the marks. Plain click (copy) and plain Enter on
+one row are unchanged; the footer says "⌘-click for several", then "Enter to
+paste N to <app>   Esc to clear". HistoryPastePlan keeps mark order and merges
+neighbouring rows of a kind: files and images go out as one multi-item paste
+(one Cmd+V), texts as one paste a line each; text, files, text is three pastes
+400 ms apart, stopping at the first that fails. Marks live only while the panel
+is open, survive the Agent/Drop/Clipboard tabs, and are off without a target
+and in Toolbox. Multi-row pastes stay out of clipboard history. WHY:
+.project-docs/decisions/2026-11-22-history-multi-paste.md
 The History connection sets secure_delete=ON, so cap evictions and agent
 trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in

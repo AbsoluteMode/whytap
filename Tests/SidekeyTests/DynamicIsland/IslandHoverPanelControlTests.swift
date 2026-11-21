@@ -76,7 +76,7 @@ final class IslandHoverPanelControlTests: XCTestCase {
         let source = try Self.source(
             "Sources/Sidekey/DynamicIsland/IslandView.swift"
         )
-        XCTAssertTrue(source.contains("onPasteHistoryCard(card)"))
+        XCTAssertTrue(source.contains("onPasteHistoryCards(cards)"))
         XCTAssertTrue(source.contains("panelMode = .controls  // release key before synth Cmd+V"))
     }
 

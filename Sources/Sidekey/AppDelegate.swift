@@ -1133,8 +1133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             historyAssetsDirectory: { [weak self] in
                 self?.assetsDirectory
             },
-            pasteHistoryCard: { [weak self] card in
-                self?.pasteHistoryCardFromIsland(card)
+            pasteHistoryCards: { [weak self] cards in
+                self?.pasteHistoryCardsFromIsland(cards)
             },
             historyPasteTargetName: { [weak self] in
                 self?.historyInteraction?.targetAppName
@@ -1865,17 +1865,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copiedToastController?.show()
     }
 
-    private func pasteHistoryCardFromIsland(_ card: HistoryStripCard) {
+    private func pasteHistoryCardsFromIsland(_ cards: [HistoryStripCard]) {
         guard let historyInteraction,
               historyInteraction.targetAppName != nil,
-              let assets = assetsDirectory
+              let assets = assetsDirectory,
+              !cards.isEmpty
         else {
             return
         }
 
-        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
+        if cards.count == 1, let card = cards.first {
+            historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
+            Task { @MainActor in
+                _ = await autoPasteEngine.pasteAlreadyOnPasteboard()
+            }
+            return
+        }
+
+        // Several marked rows. Their combined pastes are not new copies:
+        // keep them out of clipboard history like History's own Copy.
+        // WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+        let groups = HistoryPastePlan.groups(for: cards)
+        let engine = autoPasteEngine
+        let paster = HistoryMultiPaster(
+            write: { group in
+                historyInteraction.writeGroupToPasteboard(group, assetsDirectory: assets)
+            },
+            paste: { await engine.pasteAlreadyOnPasteboard() },
+            sleep: { ns in try? await Task.sleep(nanoseconds: ns) }
+        )
+        ClipboardSuppression.shared.setSuppressed(true)
         Task { @MainActor in
-            _ = await autoPasteEngine.pasteAlreadyOnPasteboard()
+            await paster.run(groups)
+            // Let the last target read its paste before copies count again.
+            try? await Task.sleep(nanoseconds: HistoryMultiPaster.gapBetweenPastesNs)
+            ClipboardSuppression.shared.suppressThrough(changeCount: NSPasteboard.general.changeCount)
+            ClipboardSuppression.shared.setSuppressed(false)
         }
     }
 

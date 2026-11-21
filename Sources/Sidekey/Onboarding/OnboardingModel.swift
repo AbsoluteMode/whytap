@@ -27,6 +27,8 @@ final class OnboardingModel: ObservableObject {
     let onDevice: OnDeviceSpeechModelController
     let supportsOnDevice: Bool
     let speech: OnboardingDropSpeech
+    /// The silent Drop demo on the speech page.
+    let demo = OnboardingDropDemo()
     /// The key form's store of keys and routes; built when the form opens.
     private(set) lazy var models: APIAndModelsViewModel = injectedModels ?? APIAndModelsViewModel()
     private let injectedModels: APIAndModelsViewModel?
@@ -103,6 +105,7 @@ final class OnboardingModel: ObservableObject {
     /// The window closed: nothing keeps polling. A running download goes on.
     func stop() {
         stopPermissionPolling()
+        demo.stop()
     }
 
     private func show(_ next: OnboardingPage) {

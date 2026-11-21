@@ -384,11 +384,14 @@ final class OnboardingTests: XCTestCase {
 
     func testTryCopyNamesTheUsersOwnShortcutAndGesture() {
         let hold = OnboardingTryPage.Copy(shortcut: "Space", gesture: .hold)
-        XCTAssertEqual(hold.title, "Hold Space and speak")
-        XCTAssertTrue(hold.subtitle.contains("let go"))
+        XCTAssertTrue(hold.pitch.hasPrefix("Hold Space"))
+        XCTAssertEqual(hold.pressVerb, "Hold")
+        XCTAssertEqual(hold.releaseVerb, "Let go")
+        XCTAssertTrue(hold.placeholder.contains("hold Space"))
         let tap = OnboardingTryPage.Copy(shortcut: "⌥D", gesture: .tap)
-        XCTAssertEqual(tap.title, "Press ⌥D and speak")
-        XCTAssertTrue(tap.subtitle.contains("again"))
+        XCTAssertTrue(tap.pitch.hasPrefix("Press ⌥D"))
+        XCTAssertEqual(tap.releaseVerb, "Press again")
+        XCTAssertTrue(tap.placeholder.contains("press ⌥D"))
     }
 
     func testOnThisMacCardSaysItSetsDropOnly() {
@@ -479,77 +482,103 @@ final class OnboardingTests: XCTestCase {
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
     }
 
-    /// Offscreen PNGs of every page for review; never shown on screen.
+    /// Offscreen PNGs of every page, walked the way a new Mac goes through
+    /// them, in the real window; never shown on screen.
     func testRenderEveryPage() async throws {
         guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
             throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
         }
+        _ = NSApplication.shared
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // The packaged app registers its fonts through ATSApplicationFontsPath.
-        let font = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Resources/Fonts/InstrumentSerif-Regular.ttf")
-        CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
-
-        struct Case {
-            let name: String
-            let status: OnDeviceSpeechModelStatus
-            let hotkey: DropHotkeyStatus
-            let accessibility: Bool
-            let microphone: AVAuthorizationStatus
-            var supportsOnDevice = true
-            var dropReady = false
-            let setUp: @MainActor (OnboardingModel) -> Void
+        // The packaged app registers its fonts through ATSApplicationFontsPath
+        // and finds the clips in its own bundle.
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources")
+        for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
+            CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
         }
-        let cases: [Case] = [
-            Case(name: "1-speech", status: .notDownloaded, hotkey: .accessibilityRequired, accessibility: false,
-                 microphone: .notDetermined, setUp: { _ in }),
-            Case(name: "1b-speech-key", status: .notDownloaded, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, supportsOnDevice: false, setUp: { _ in }),
-            Case(name: "2-permissions", status: .downloading(0.42), hotkey: .accessibilityRequired, accessibility: false,
-                 microphone: .notDetermined, setUp: { $0.startOnDevice() }),
-            Case(name: "2b-permissions-shortcut", status: .downloading(0.42), hotkey: .shortcutInUse, accessibility: true,
-                 microphone: .authorized, setUp: { $0.showPermissions() }),
-            Case(name: "3-try-downloading", status: .downloading(0.42), hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.startOnDevice() }),
-            Case(name: "3b-try-dictated", status: .downloading(0.42), hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.startOnDevice(); $0.noteDictated() }),
-            Case(name: "3c-try-route-error", status: .ready, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, dropReady: true, setUp: { $0.noteDropSetupFailure(.dropFast) }),
-            Case(name: "4-features", status: .ready, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.setUpSpeechLater() }),
+        let savedBundle = FeatureVideo.resourceBundle
+        FeatureVideo.resourceBundle = try XCTUnwrap(Bundle(path: resources.path))
+        OnboardingFeatureStage.playsVideo = false
+        defer {
+            FeatureVideo.resourceBundle = savedBundle
+            OnboardingFeatureStage.playsVideo = true
+        }
+
+        enum Stop { case speech, speechListening, speechKey, permissions, tryEmpty, tryDone, tryDownloading, features }
+        let shots: [(Stop, String)] = [
+            (.speech, "1-speech"), (.speechListening, "1-speech-listening"), (.speechKey, "1b-speech-key"),
+            (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
+            (.tryDownloading, "3-try-drop-downloading"), (.features, "4-features"),
         ]
-        for dark in [false, true] {
-            for item in cases {
-                let env = try makeEnv(modelPresent: item.dropReady)
-                if item.dropReady { env.speech.useOnDevice() }
-                let controller = OnDeviceSpeechModelController(store: FixedStore(item.status))
-                await controller.refresh()
-                let model = OnboardingModel(
-                    speech: env.speech,
-                    permissions: permissions(accessibility: item.accessibility, microphone: item.microphone, hotkey: item.hotkey),
-                    onDevice: controller, supportsOnDevice: item.supportsOnDevice,
-                    models: try offlineModels(env), defaultsChanges: NotificationCenter())
-                defer { model.stop() }
-                item.setUp(model)
-                let host = NSHostingView(rootView: OnboardingView(model: model))
-                host.frame = NSRect(origin: .zero, size: OnboardingView.size)
-                let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: OnboardingView.size.width,
-                                                          height: OnboardingView.size.height),
-                                      styleMask: .borderless, backing: .buffered, defer: true)
-                window.isReleasedWhenClosed = false
-                window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                window.contentView = host
-                host.layoutSubtreeIfNeeded()
-                try await Task.sleep(for: .milliseconds(500))
-                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-                host.cacheDisplay(in: host.bounds, to: bitmap)
-                let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-                try png.write(to: directory.appendingPathComponent("\(item.name)-\(dark ? "dark" : "light").png"))
-                XCTAssertFalse(window.isVisible)
-                window.contentView = nil
-                window.close()
+        for (stop, name) in shots {
+            // A new Mac: no model (downloading once asked; landed by the try
+            // page), nothing granted.
+            let status: OnDeviceSpeechModelStatus
+            switch stop {
+            case .speech, .speechListening, .speechKey: status = .notDownloaded
+            case .permissions, .tryDownloading: status = .downloading(0.42)
+            case .tryEmpty, .tryDone, .features: status = .ready
             }
+            let env = try makeEnv(modelPresent: status == .ready)
+            let controller = OnDeviceSpeechModelController(store: FixedStore(status))
+            await controller.refresh()
+            let granted = Flag(false)
+            AppState.shared.dropHotkeyStatus = .accessibilityRequired
+            let permissions = PermissionsSettingsViewModel(
+                onComplete: {}, autoComplete: true,
+                snapshotProvider: { .init(accessibilityGranted: granted.value,
+                                          microphoneStatus: granted.value ? .authorized : .notDetermined) },
+                accessibilityRequester: {}, openAccessibilitySettings: {}, runtimeRefresh: { _, _ in })
+            let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,
+                                        supportsOnDevice: true, models: try offlineModels(env),
+                                        defaultsChanges: NotificationCenter())
+            defer { model.stop() }
+            XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features])
+            if stop == .speechKey { model.showsKeyForm = true }
+            if ![.speech, .speechListening, .speechKey].contains(stop) {
+                model.startOnDevice()  // Download and use for Drop
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertEqual(model.page, .permissions)
+            }
+            if [.tryEmpty, .tryDone, .tryDownloading, .features].contains(stop) {
+                granted.value = true
+                AppState.shared.dropHotkeyStatus = .ready
+                permissions.refresh()
+                try await Task.sleep(for: .milliseconds(100))
+                if model.page == .permissions { model.advance() }
+                XCTAssertEqual(model.page, .tryDrop)
+            }
+            if stop == .features { model.advance() }
+
+            let windowController = OnboardingWindowController(model: model, onClosed: {})
+            let window = try XCTUnwrap(windowController.window)
+            window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            let content = try XCTUnwrap(window.contentView)
+            content.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(500))
+            switch stop {
+            case .speech: model.demo.show(.done)
+            case .speechListening: model.demo.show(.recording, level: 0.62)
+            case .tryDone:
+                let textView = try XCTUnwrap(Self.textView(in: content))
+                XCTAssertTrue(window.makeFirstResponder(textView))
+                let editor = try XCTUnwrap(DropLocalEditor(focusedIn: window, isPresented: { _ in true }))
+                XCTAssertTrue(editor.insert("Let's move the launch review to Thursday at ten and send the agenda tonight."))
+                XCTAssertTrue(model.dictated)
+            default: break
+            }
+            try await Task.sleep(for: .milliseconds(900))
+            let frameView = try XCTUnwrap(content.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            try png.write(to: directory.appendingPathComponent("\(name).png"))
+            XCTAssertFalse(window.isVisible)
+            window.contentViewController = nil
+            window.close()
         }
     }
 

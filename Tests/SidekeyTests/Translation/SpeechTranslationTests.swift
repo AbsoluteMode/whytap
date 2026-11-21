@@ -176,6 +176,40 @@ final class SpeechTranslationModelTests: XCTestCase {
         XCTAssertLessThanOrEqual(row?.source.count ?? 0, SubtitleCaption.liveSourceLimit + 1)
     }
 
+    func testAConnectionLostAfterStopKeepsTheTranslatedTailAndSaysSo() async throws {
+        let session = FakeSpeechTranslation()
+        session.closesOnEndInput = false
+        let model = makeModel(translator: { session })
+        model.start()
+        try await wait(model.phase == .listening)
+        session.pair.continuation.yield(.source(" Thank you all", elapsedMs: 600))
+        session.pair.continuation.yield(.translation("Спасибо всем", elapsedMs: 1_000))
+        session.pair.continuation.yield(.translation(" и до вст", elapsedMs: 1_200))
+        try await wait(model.liveTranslation == "Спасибо всем и до")
+        model.stop()
+        try await wait(session.endInputCount == 1)
+        session.pair.continuation.yield(.failed(.connectionLost))
+        try await wait(model.phase == .failed)
+        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.lines.map(\.source), ["Thank you all"])
+        XCTAssertEqual(model.lines.map(\.translation), ["Спасибо всем и до"], "kept in whole words")
+    }
+
+    func testAStreamThatEndsAfterStopWithoutClosingIsNotComplete() async throws {
+        let session = FakeSpeechTranslation()
+        session.closesOnEndInput = false
+        let model = makeModel(translator: { session })
+        model.start()
+        try await wait(model.phase == .listening)
+        session.pair.continuation.yield(.translation("Привет.", elapsedMs: 600))
+        model.stop()
+        try await wait(session.endInputCount == 1)
+        session.pair.continuation.finish()
+        try await wait(model.phase == .failed)
+        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.lines.map(\.translation), ["Привет."])
+    }
+
     func testATranslationWithoutAnOriginalStillShows() async throws {
         let session = FakeSpeechTranslation()
         let model = makeModel(translator: { session })
@@ -289,6 +323,43 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
         var events: [SpeechTranslationEvent] = []
         for await event in session.events { events.append(event) }
         XCTAssertEqual(events, [.failed(.connectionLost)])
+    }
+
+    /// Stop sends session.close; only session.closed is a clean ending. A
+    /// socket lost before it may have dropped the last translation.
+    /// (Regressions found by the integration builder, ticket #360.)
+    func testNetworkLossAfterSessionCloseRequestIsNotCleanCompletion() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(#"{"type":"session.updated"}"#)
+        let session = try await open(transport)
+        await session.endInput()
+        transport.deliver(.failure(URLError(.networkConnectionLost)))
+        var events: [SpeechTranslationEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.failed(.connectionLost)])
+        await session.close()
+    }
+
+    func testSessionCloseSendFailureIsNotCleanCompletion() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(#"{"type":"session.updated"}"#)
+        let session = try await open(transport)
+        transport.sendError = URLError(.networkConnectionLost)
+        await session.endInput()
+        var events: [SpeechTranslationEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.failed(.connectionLost)])
+        await session.close()
+    }
+
+    func testTheAppsOwnCloseEndsQuietly() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(#"{"type":"session.updated"}"#)
+        let session = try await open(transport)
+        await session.close()
+        var events: [SpeechTranslationEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.closed])
     }
 
     func testNoAnswerAtStartTimesOut() async throws {

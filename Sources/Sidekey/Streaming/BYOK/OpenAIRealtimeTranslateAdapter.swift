@@ -94,7 +94,10 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     private var started = false
     /// Why the session failed before `start` began waiting for it.
     private var startFailure: SpeechTranslationFailure?
+    /// `endInput` sent session.close: only session.closed completes cleanly.
     private var closing = false
+    /// `close()` was called: the app tore the session down itself.
+    private var clientClosed = false
     private var finished = false
     private var pending = Data()
     private var acceptedBytes = 0
@@ -161,8 +164,11 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
             while let self, !Task.isCancelled {
                 switch await self.transport.receive() {
                 case .failure(let error):
-                    let isClosing = self.lock.withLock { self.closing }
-                    if isClosing {
+                    // Only the app's own teardown ends quietly. A socket lost
+                    // after session.close, before session.closed, may have
+                    // dropped the last translation: that is a lost connection.
+                    // https://developers.openai.com/api/docs/guides/realtime-translation#close-a-websocket-session
+                    if self.lock.withLock({ self.clientClosed }) {
                         self.finish(.closed)
                     } else {
                         self.fail(self.failure(for: error))
@@ -295,11 +301,11 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
             return finished
         }
         guard !alreadyOver else { return }
-        do { try await send(["type": "session.close"]) } catch { finish(.closed) }
+        do { try await send(["type": "session.close"]) } catch { fail(failure(for: error)) }
     }
 
     func close() async {
-        lock.withLock { closing = true }
+        lock.withLock { closing = true; clientClosed = true }
         receiveTask?.cancel()
         finish(.closed)
         transport.cancel(reason: "client closed")

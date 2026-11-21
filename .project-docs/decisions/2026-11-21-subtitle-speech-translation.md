@@ -69,7 +69,12 @@ their own OpenAI quota, with Whytap's pairs and look kept.
   before any audio, so a refused key or language fails at Start. The 16 kHz
   capture is upsampled to 24 kHz and sent in 200 ms frames. Stop flushes the
   rest, sends `session.close` and waits for `session.closed` (the existing
-  10 s stop watchdog bounds it).
+  10 s stop watchdog bounds it). Only `session.closed` is a complete ending:
+  a failed `session.close` send, or a socket lost before `session.closed`,
+  is a lost connection, because the last translation may be missing (found
+  by the integration builder's review). Only the app's own teardown ends
+  quietly. On any failure the translation already received becomes pairs,
+  without a half-said last word, before the error shows.
 - **No separate speech model.** The heard original comes from the same
   session's input transcript. A translation without an original still shows
   (right column only).

@@ -71,6 +71,16 @@ struct SubtitleSpeechPairer {
         lastTranslationAt = now
     }
 
+    /// The session broke off: drop a word the model had only begun, so the
+    /// pairs kept on screen never end in a fragment.
+    mutating func dropUnfinishedWord() {
+        let text = String(translation.map(\.character))
+        guard let last = text.last, !last.isWhitespace, !SubtitleSegmenter.clauseMarks.contains(last),
+              !SubtitleSegmenter.endsSentence(text) else { return }
+        let keep = text.lastIndex(where: \.isWhitespace).map { text.distance(from: text.startIndex, to: $0) } ?? 0
+        translation.removeLast(translation.count - keep)
+    }
+
     mutating func takeCarry() -> String {
         defer { carry = "" }
         return carry

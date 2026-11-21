@@ -341,6 +341,12 @@ final class LiveSubtitleModel: ObservableObject {
 
     private func fail(_ issue: TranslationIssue, token: UUID) {
         guard generation == token else { return }
+        // A speech translator that broke off keeps what it already said as
+        // pairs (whole words), before the error replaces the live row.
+        if translator != nil {
+            pairer.dropUnfinishedWord()
+            flushPairs(token: token, force: true)
+        }
         self.issue = issue
         cancel()
     }
@@ -397,6 +403,7 @@ final class LiveSubtitleModel: ObservableObject {
                 self.flushPairs(token: token)
             }
         }
+        var closedCleanly = false
         for await event in translator.events {
             guard generation == token, !Task.isCancelled else { return }
             switch event {
@@ -407,7 +414,7 @@ final class LiveSubtitleModel: ObservableObject {
                 pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
                 flushPairs(token: token)
             case .closed:
-                break
+                closedCleanly = true
             case .failed(let failure):
                 fail(.speechTranslation(failure, target: targetCode), token: token)
                 return
@@ -418,7 +425,9 @@ final class LiveSubtitleModel: ObservableObject {
             }
         }
         guard generation == token, !Task.isCancelled else { return }
-        guard phase == .finishing else {
+        // Only session.closed after Stop is a complete ending; anything else
+        // may have lost the last translation.
+        guard phase == .finishing, closedCleanly else {
             fail(.speechTranslation(.connectionLost, target: targetCode), token: token)
             return
         }

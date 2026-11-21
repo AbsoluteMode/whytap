@@ -123,4 +123,15 @@ final class SubtitleSpeechPairerTests: XCTestCase {
         single.addTranslation("Доб", elapsedMs: 600, now: 1)
         XCTAssertEqual(single.liveTranslation, "")
     }
+
+    func testABrokenOffSessionDropsOnlyTheUnfinishedWord() {
+        var pairer = SubtitleSpeechPairer()
+        pairer.addTranslation("Спасибо всем и до вст", elapsedMs: 900, now: 1)
+        pairer.dropUnfinishedWord()
+        XCTAssertEqual(pairer.take(now: 1, force: true), [.init(source: "", translation: "Спасибо всем и до")])
+        var finished = SubtitleSpeechPairer()
+        finished.addTranslation("Готово.", elapsedMs: 900, now: 1)
+        finished.dropUnfinishedWord()
+        XCTAssertEqual(finished.take(now: 1, force: true), [.init(source: "", translation: "Готово.")])
+    }
 }

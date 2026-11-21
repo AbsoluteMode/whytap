@@ -30,17 +30,28 @@ public final class AppControlCommand {
         }
     }
 
+    /// `whytap app mcp` (caseServer nil), `whytap app screen-mcp`, and the
+    /// unified `whytap mcp`, which adds the names-only Case tools.
+    // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
+    public func serveMCP(screenOnly: Bool = false, caseServer: CaseMCPServer?,
+                         readLine: () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
+        FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
+    }) -> Int32 {
+        let server = AppControlMCPServer(screenOnly: screenOnly, todo: todo.map { todo in { todo.respond($0, $1) } },
+                                         accessProbe: direct.map { direct in
+                                             { _ = try? direct.send(.appControl(AppControlRequest("request_access", arguments: [:]))) }
+                                         },
+                                         caseServer: caseServer,
+                                         cancellableCall: { self.call($0, cancellation: $1) })
+        server.run(readLine: readLine, write: write)
+        return 0
+    }
+
     public func run(args: [String], readLine: () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
         FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
     }) -> Int32 {
         if args == ["mcp"] || args == ["screen-mcp"] {
-            let server = AppControlMCPServer(screenOnly: args == ["screen-mcp"], todo: todo.map { todo in { todo.respond($0, $1) } },
-                                             accessProbe: direct.map { direct in
-                                                 { _ = try? direct.send(.appControl(AppControlRequest("request_access", arguments: [:]))) }
-                                             },
-                                             cancellableCall: { self.call($0, cancellation: $1) })
-            server.run(readLine: readLine, write: write)
-            return 0
+            return serveMCP(screenOnly: args == ["screen-mcp"], caseServer: nil, readLine: readLine, write: write)
         }
         let names = ["status": "get_state", "settings": "get_settings", "models": "list_models",
                      "set-model": "set_model", "providers": "list_providers", "set-provider": "set_provider",

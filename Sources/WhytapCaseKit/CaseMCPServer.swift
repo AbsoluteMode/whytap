@@ -76,6 +76,8 @@ public final class CaseMCPServer {
         }
     }
 
+    static var toolNames: Set<String> { Set(tools.compactMap { $0["name"] as? String }) }
+
     static let tools: [[String: Any]] = [
         [
             "name": "case_list_projects",
@@ -91,7 +93,9 @@ public final class CaseMCPServer {
         ]
     ]
 
-    private func callTool(name: String, arguments: [String: Any]) -> [String: Any] {
+    /// Also called by the unified `whytap mcp` server (AppControlMCPServer):
+    /// the same broker requests, the same registration/scope/approval checks.
+    func callTool(name: String, arguments: [String: Any]) -> [String: Any] {
         let request: CaseBrokerRequest
         switch name {
         case "case_list_projects": request = .listProjects

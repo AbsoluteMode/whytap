@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "whytap",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Find and read your Whytap meetings, manage models and settings, add To-do tasks, and find Case projects and key names on this Mac.",
   "author": { "name": "Whytap" },
   "repository": "https://github.com/AbsoluteMode/whytap",

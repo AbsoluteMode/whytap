@@ -1,19 +1,20 @@
 # Whytap agent plugin
 
-The local `plugins/whytap` plugin includes two stdio MCP servers: `whytap` for
-live application state, models, allowlisted settings, To-do and (after the
-user's Yes) meetings, and `case` for
-authorized Case project and key names. Case never returns secret values over
-MCP. The application-control server does not need Accessibility,
+The local `plugins/whytap` plugin runs one stdio MCP server, `whytap mcp`. It
+serves live application state, models, allowlisted settings, To-do and (after
+the user's Yes) meetings, plus authorized Case project and key names. Case
+never returns secret values over MCP. The server does not need Accessibility,
 mouse/keyboard automation, a source checkout at runtime, or provider keys in
 the agent's configuration. The plugin requires a Whytap build that includes
-`whytap app`; an older helper cannot serve these tools. Source tests do not establish
+`whytap mcp`; with an older helper use the two older commands below. Source tests do not establish
 that the installed application or a host's plugin connection has been updated.
 
 ## Commands
 
 The installed helper is `/Applications/Whytap.app/Contents/Helpers/whytap`.
-Use `whytap app mcp` for stdio MCP. Other clients can invoke its CLI directly:
+Use `whytap mcp` for stdio MCP. The older `whytap app mcp` (application tools
+only) and `whytap case mcp` (Case tools only) keep working for hosts already
+set up with them. Other clients can invoke the CLI directly:
 
 ```sh
 /Applications/Whytap.app/Contents/Helpers/whytap app status
@@ -95,7 +96,7 @@ or read a key.
 
 ## Case projects and keys
 
-The same plugin also starts `whytap case mcp`, reusing the existing Case server:
+The same `whytap mcp` server serves the names-only Case tools of `whytap case mcp`:
 
 | MCP tool | Behavior |
 | --- | --- |
@@ -116,12 +117,17 @@ operation. Add `-p <project>` when the same key name exists in several projects.
 Case injects values into the child environment and masks recognized values in
 output on a best-effort basis. MCP has no command-execution or value-read tool.
 
-Installing the plugin does not register the agent or broaden its Case rights.
-The existing client registration, project scope, Accept/Bypass policy and
-approval flow still apply. An unregistered client must first be connected in
-Whytap -> Case -> Connect. The standalone Case MCP connection remains supported;
-hosts with both connections may show duplicate Case tools. Keep the working
-connection until the plugin's Case tools have connected and been verified.
+Installing the plugin or adding the server does not register the agent or
+broaden its Case rights. Each Case tool call is the same broker request
+`whytap case mcp` sends, so the existing client registration, project scope,
+Accept/Bypass policy and approval flow still apply. An unregistered client
+gets "Access denied" from the Case tools and must first be connected in
+Whytap -> Case -> Connect; the application tools of the same server work as
+before. Connect adds this same `whytap` server to Claude Code, Codex or Cursor
+and removes the older `case` entry it wrote; Disconnect removes only that older
+entry and leaves `whytap`. An older `case` entry left in a host still works,
+but shows the Case tools twice next to `whytap`; remove it once `whytap` is
+connected (`claude mcp remove -s user case`, `codex mcp remove case`).
 
 ## Read, change, verify
 
@@ -172,23 +178,24 @@ to `plugins/whytap`. It follows the [official plugin packaging format](https://d
 with a [local stdio MCP server](https://developers.openai.com/plugins/deploy/desktop-only).
 Use a local marketplace to install it in Codex. The package is not publicly
 published and does not require a hosted Whytap service. Other MCP hosts can
-configure the helper command with `app`, `mcp` for application controls and
-`case`, `mcp` for Case discovery directly.
+configure the helper command with the single argument `mcp`.
 
 Claude Code needs no checkout; on each Mac run once:
 
 ```sh
-claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
-Codex also needs no checkout for the application-control server:
+Codex also needs no checkout:
 
 ```sh
-codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
-To install the whole plugin (with Case discovery) with the current Codex CLI,
-run from this checkout:
+A host that already has `whytap` pointing at `app mcp` keeps working; to move
+it to the one server, remove it and add it again with the line above.
+
+To install the whole plugin with the current Codex CLI, run from this checkout:
 
 ```sh
 codex plugin marketplace add .

@@ -81,22 +81,12 @@ struct HistoryHoverPreviewBubble: View {
     let assetsDirectory: URL?
 
     var body: some View {
-        if IslandHoverGlass.usesNativeLiquidGlass {
-            content
-                .padding(HistoryHoverPreviewPolicy.contentPadding)
-                .islandHoverGlassSurface(cornerRadius: 11)
-        } else {
-            content
-                .padding(HistoryHoverPreviewPolicy.contentPadding)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.black.opacity(0.46))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                        )
-                )
-        }
+        // The same readable backdrop as the drawer on every system; the
+        // former macOS 14/15 black 46% wash stayed see-through.
+        // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+        content
+            .padding(HistoryHoverPreviewPolicy.contentPadding)
+            .islandHoverGlassSurface(cornerRadius: 11)
     }
 
     @ViewBuilder

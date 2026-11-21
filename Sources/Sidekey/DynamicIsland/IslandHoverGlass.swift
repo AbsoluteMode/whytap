@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum IslandHoverGlass {
@@ -12,50 +13,95 @@ enum IslandHoverGlass {
     }
 }
 
-/// Applies a native macOS 26+ optical backdrop separately from foreground
-/// lenses and icons, preserving their colors. Earlier systems retain the
-/// layered `IslandDetachedHoverPanelBackground` fallback.
-struct IslandHoverGlassSurfaceModifier: ViewModifier {
-    var cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
-    var showGlass: Bool = true
+/// Which backdrop a hover drawer card draws behind its content.
+enum IslandHoverBackdrop: Equatable {
+    /// macOS 26+ `glassEffect(.regular)`.
+    case nativeGlass
+    /// macOS 14/15 (or an older SDK): `IslandDetachedHoverPanelBackground`.
+    case legacyMaterial
+    /// A solid dark card: Reduce transparency is on.
+    case opaque
+}
 
-    func body(content: Content) -> some View {
+/// Every hover drawer card, History included, always has a readable
+/// backdrop. History on macOS 14/15 used to opt out and left its gaps
+/// see-through over other windows.
+// WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+enum IslandHoverBackdropPolicy {
+    static func backdrop(nativeGlassAvailable: Bool, reduceTransparency: Bool) -> IslandHoverBackdrop {
+        if reduceTransparency { return .opaque }
+        return nativeGlassAvailable ? .nativeGlass : .legacyMaterial
+    }
+
+    /// The island window is always dark; this matches its compact pill.
+    static let opaqueFill = Color(nsColor: NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1))
+}
+
+/// The backdrop shape alone, so offscreen checks can render each kind.
+struct IslandHoverBackdropView: View {
+    let backdrop: IslandHoverBackdrop
+    var cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
+
+    var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if !showGlass {
-            content
-                .background(Color.clear)
-                .clipShape(shape)
-        } else {
-            #if compiler(>=6.2)
-            if #available(macOS 26.0, *) {
-                content
-                    .background {
-                        // Keep the optical backdrop separate from the foreground
-                        // lenses, matching the reference's independent layers.
-                        shape.fill(Color.clear)
-                            // Regular retains adaptive contrast over bright
-                            // desktops when this panel becomes key for search.
-                            .glassEffect(.regular, in: shape)
-                            // Active appearance only; the utility stays non-key.
-                            .environment(\.appearsActive, true)
-                    }
-                    .overlay {
-                        IslandHoverGlassRim(shape: shape)
-                            .allowsHitTesting(false)
-                    }
-            } else {
-                legacySurface(content: content, shape: shape)
-            }
-            #else
-            legacySurface(content: content, shape: shape)
-            #endif
+        switch backdrop {
+        case .opaque:
+            shape.fill(IslandHoverBackdropPolicy.opaqueFill)
+                .overlay(shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
+        case .legacyMaterial:
+            IslandDetachedHoverPanelBackground(cornerRadius: cornerRadius)
+        case .nativeGlass:
+            nativeGlass(shape)
         }
     }
 
-    private func legacySurface(content: Content, shape: RoundedRectangle) -> some View {
-        content
-            .background(IslandDetachedHoverPanelBackground(cornerRadius: cornerRadius))
-            .clipShape(shape)
+    @ViewBuilder
+    private func nativeGlass(_ shape: RoundedRectangle) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            // Keep the optical backdrop separate from the foreground
+            // lenses, matching the reference's independent layers.
+            shape.fill(Color.clear)
+                // Regular retains adaptive contrast over bright
+                // desktops when this panel becomes key for search.
+                .glassEffect(.regular, in: shape)
+                // Active appearance only; the utility stays non-key.
+                .environment(\.appearsActive, true)
+        } else {
+            IslandDetachedHoverPanelBackground(cornerRadius: cornerRadius)
+        }
+        #else
+        IslandDetachedHoverPanelBackground(cornerRadius: cornerRadius)
+        #endif
+    }
+}
+
+/// Applies a native macOS 26+ optical backdrop separately from foreground
+/// lenses and icons, preserving their colors. Earlier systems retain the
+/// layered `IslandDetachedHoverPanelBackground` fallback; Reduce transparency
+/// gets an opaque dark card on every system.
+struct IslandHoverGlassSurfaceModifier: ViewModifier {
+    var cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let backdrop = IslandHoverBackdropPolicy.backdrop(
+            nativeGlassAvailable: IslandHoverGlass.usesNativeLiquidGlass,
+            reduceTransparency: reduceTransparency
+        )
+        if backdrop == .nativeGlass {
+            content
+                .background { IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius) }
+                .overlay {
+                    IslandHoverGlassRim(shape: shape)
+                        .allowsHitTesting(false)
+                }
+        } else {
+            content
+                .background(IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius))
+                .clipShape(shape)
+        }
     }
 }
 
@@ -135,14 +181,8 @@ extension View {
     }
 
     func islandHoverGlassSurface(
-        cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius,
-        showGlass: Bool = true
+        cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
     ) -> some View {
-        modifier(
-            IslandHoverGlassSurfaceModifier(
-                cornerRadius: cornerRadius,
-                showGlass: showGlass
-            )
-        )
+        modifier(IslandHoverGlassSurfaceModifier(cornerRadius: cornerRadius))
     }
 }

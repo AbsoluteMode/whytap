@@ -1242,9 +1242,9 @@ struct IslandView: View {
                                 && !(hoverPanelMode == .calendar && appState.calendarHoverConnectionActive),
                             onDismiss: dismissHoverMenu
                         ))
-                        .islandHoverGlassSurface(
-                            showGlass: hoverPanelMode != .history || IslandHoverGlass.usesNativeLiquidGlass
-                        )
+                        // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
+                        // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+                        .islandHoverGlassSurface()
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.

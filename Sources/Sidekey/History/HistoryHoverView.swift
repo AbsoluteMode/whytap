@@ -25,6 +25,24 @@ enum HistoryHoverContent {
     }
 }
 
+extension HistoryHoverContent {
+    /// The one-line text a History row shows: lines trimmed, blank lines
+    /// dropped, the rest joined by spaces. A copy that starts with a line
+    /// break or indentation (common from web pages and code) used to leave
+    /// the row blank or shifted. Copy and paste still use the full entry.
+    // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+    static func rowText(for card: HistoryStripCard) -> String {
+        displayText(for: card)
+            .split(whereSeparator: \.isNewline)
+            .map { line in
+                let head = line.drop(while: \.isWhitespace)
+                return String(head.reversed().drop(while: \.isWhitespace).reversed())
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
 enum HistoryHoverVisualStyle {
     // Legacy rows have no shared optical backdrop. Preserve their readable
     // dark fill on older macOS; native panels use foreground lenses instead.
@@ -296,7 +314,7 @@ private struct HistoryHoverRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(HistoryHoverContent.displayText(for: card))
+            Text(HistoryHoverContent.rowText(for: card))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(IslandInk.color.opacity(0.84))
                 .lineLimit(1)

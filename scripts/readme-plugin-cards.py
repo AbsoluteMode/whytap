@@ -51,6 +51,10 @@ HARNESSES = [
      f"codex mcp add whytap -- {HELPER} app mcp"),
 ]
 ICONS = REPO / "Resources/UsefulLinkIcons"
+# The section's last line: what to do when setup is confusing. Only what the
+# plugin's tools do (read settings; change models, providers, Drop mode, languages).
+HELP = ("Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read "
+        "your Whytap settings and switch models, providers, Drop mode and languages for you.")
 
 THEMES = {
     "dark": dict(bg="#151b23", border="#2d333b", ink="#f0f6fc", sub="#9198a1", accent="#b8adff"),
@@ -160,6 +164,7 @@ def section():
         f'<p align="center">{cards}</p>',
         "",
         *install,
+        f'<p align="center">{HELP}</p>',
     ]).rstrip("\n") + "\n"
 
 

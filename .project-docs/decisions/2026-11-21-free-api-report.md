@@ -44,7 +44,15 @@ paying.
   "Your own keys" (BYOK), "Local speech-to-text" (on this Mac, Apple Silicon)
   and "Self-hosted" (OpenAI-compatible servers). With them the section is no
   longer only about keys, so it is now **Free to run**; the generator replaces
-  the old "Free API keys" heading in place.
+  the old "Free API keys" heading in place. Later that day Maxim renamed it
+  **Free to use**, and asked for a line under the cards saying what
+  ElevenLabs' free credits mean for dictation. The ElevenLabs API pricing page
+  lists 2 h 30 min of Scribe v3 Live (realtime) for the Free plan, so the line
+  says "up to 2.5 hours", about five minutes of speech a day; Vocab terms are
+  billed as keyterm prompting on top and leave fewer hours. The numbers are not
+  in the app, so the script keeps them in `NOTES` with the allowance they were
+  written for and stops when that allowance changes; the monthly review
+  rechecks them on the same page.
   Maxim asked for no extra words: details and per-offer dates stay in the
   app. Above the cards a banner compares a struck-through $600 ("≈ paid apps
   per year") with $0 for Whytap. The figure is an estimate Maxim chose: the

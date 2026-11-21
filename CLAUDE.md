@@ -327,6 +327,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
        -> voice: the same STT factory as Drop, route of agentVoice
        -> NativeAgentProvider -> direct model HTTP -> local tool -> model loop
        -> validated finish_answer object -> text and typed cards in the island
+  Native and CLI final text use compact Markdown. Comparisons adapt to the
+  available width, and completed answers open with the conclusion at the top.
+  WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.

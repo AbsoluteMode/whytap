@@ -52,6 +52,48 @@ final class NativeAgentTests: XCTestCase {
                        "Another language sentence made card descriptions come out in Russian or German")
     }
 
+    func testSystemPromptRequestsCompactMarkdownAndSourceCards() {
+        let prompt = NativeAgentProvider.systemPrompt
+        for rule in ["Markdown in a ~320pt panel", "One fact: one plain sentence",
+                     "conclusion\n  on the first line", "3 or more items", "at most 3 columns",
+                     "8 data rows", "numbered list", "fenced code blocks", "> [!NOTE]", "> [!WARNING]",
+                     "No headings, nested lists, emoji, HTML or Sources section", "finish_answer.sources",
+                     "about 12 lines", "| Тариф | В месяц | При годовой |"] {
+            XCTAssertTrue(prompt.contains(rule), rule)
+        }
+        XCTAssertFalse(prompt.contains("usually 1–2 short sentences"))
+    }
+
+    func testFinishAnswerSchemaMatchesExistingWireContract() throws {
+        func withoutDescriptions(_ value: Any) -> Any {
+            if let object = value as? [String: Any] {
+                return object.filter { $0.key != "description" || $0.value is [String: Any] }
+                    .mapValues(withoutDescriptions)
+            }
+            if let array = value as? [Any] { return array.map(withoutDescriptions) }
+            return value
+        }
+        func object(_ properties: [String: Any]) -> [String: Any] {
+            ["type": "object", "required": properties.keys.sorted(), "additionalProperties": false,
+             "properties": properties]
+        }
+        let string = ["type": "string"]
+        let expected: [String: Any] = [
+            "name": "finish_answer", "strict": true, "parameters": object([
+                "answer": string,
+                "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"]],
+                "sources": ["type": "array", "items": object(["title": string, "url": string])],
+                "actions": ["type": "array", "items": ["anyOf": [
+                    object(["type": ["type": "string", "enum": ["path"]], "path": string, "description": string]),
+                    object(["type": ["type": "string", "enum": ["copy"]], "text": string, "description": string])
+                ]]]
+            ])
+        ]
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: withoutDescriptions(NativeAgentFinalAnswer.definition),
+                                                  options: .sortedKeys),
+                       try JSONSerialization.data(withJSONObject: expected, options: .sortedKeys))
+    }
+
     func testFirstRequestHasToolsAndExactRouteWithoutBootstrapAndActionsStayOutOfText() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("router-secret", account: OpenRouterLLMKeyStore.account)

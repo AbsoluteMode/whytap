@@ -6,8 +6,8 @@
   <path d="M13 6h8" />
   <path d="M13 12h8" />
   <path d="M13 18h8" /></g>
-  <text x="60" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" xml:space="preserve"><tspan font-size="16" font-weight="600" fill="#1f2328">To-do &amp; Calendar (soon)</tspan><tspan dx="14" font-size="12.5" font-weight="500" fill="#5b4bd6"><tspan>Tasks in the notch</tspan><tspan fill="#b3aae8">  ·  </tspan><tspan>Added by your agents</tspan></tspan></text>
-  <text x="60" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#59636e">Subtasks and statuses in the notch; agents add tasks through the whytap CLI. Calendar is coming soon.</text>
+  <text x="60" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" xml:space="preserve"><tspan font-size="16" font-weight="600" fill="#1f2328">To-do &amp; Calendar (soon)</tspan><tspan dx="14" font-size="12.5" font-weight="500" fill="#5b4bd6"><tspan>Tasks in the notch</tspan><tspan fill="#b3aae8">  ·  </tspan><tspan>Today&#x27;s agenda</tspan></tspan></text>
+  <text x="60" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#59636e">Subtasks and statuses; agents add tasks via the whytap CLI. Your day in Calendar is coming soon.</text>
   <rect x="780" y="15.0" width="64" height="24" rx="12.0" fill="#6c5ce7"/>
   <text x="812.0" y="31.3" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#ffffff">Click</text>
 </svg>

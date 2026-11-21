@@ -133,7 +133,8 @@ final class NativeAgentProvider: CLIProvider {
                 do { final = try NativeAgentFinalAnswer(arguments: calls[0].arguments) }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 let text = final.visibleText
-                let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions) ?? final.actions
+                let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions,
+                                                                 insert: final.insert) ?? final.actions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
                 // Returned card destinations are part of the answer too: the

@@ -14,6 +14,8 @@ struct NativeAgentFinalAnswer {
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String
+    /// The explicit insert_text card, also first in `actions`; nil when none.
+    let insert: ActionItem?
     let actions: UsefulActionsBlock
 
     var visibleText: String {
@@ -92,6 +94,7 @@ struct NativeAgentFinalAnswer {
         }
         self.status = status
         self.answer = text
+        self.insert = insert.isEmpty ? nil : .copy(text: insert, description: nil)
         // The requested result and actions come before supporting links.
         self.actions = NativeAgentAnswerArtifacts.merging(nil, UsefulActionsBlock(items: items + links))
     }

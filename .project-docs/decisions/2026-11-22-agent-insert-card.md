@@ -58,8 +58,14 @@ with its Insert hint. The Agent rarely produced one, for four reasons in code:
    install/update/run X", which the answer leads with in a `bash` fence and
    checks against evidence; empty for plain questions. Further commands go to
    copy actions.
-3. Card order is insert text, then paths and other actions, then sources.
-   `NativeAgentAnswerArtifacts.merging` moves copy cards first for every path.
+3. Card order is the explicit insert text, then the answer's own shell
+   commands in answer order, then the model's other copy actions, paths and
+   sources. When a lax endpoint drops `insert_text`, the command the answer
+   leads with is therefore preselected, not an alternative the model listed
+   as a copy action (builder regression on ticket 377: Homebrew in the answer,
+   npm as an alternative card). A command the model also listed keeps its
+   label. `NativeAgentAnswerArtifacts` keeps copy cards before paths and links
+   on every path.
 4. Fallback: a closed shell fence (`bash`, `sh`, `zsh`, `shell`, `fish`,
    `console`, `terminal`) with exactly one command line becomes a copy card,
    at most three. A `$ ` or `% ` prompt and comments are dropped; several

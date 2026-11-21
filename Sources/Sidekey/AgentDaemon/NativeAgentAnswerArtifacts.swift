@@ -5,20 +5,33 @@ import Foundation
 /// whether a validated final included every card. No network or file I/O.
 enum NativeAgentAnswerArtifacts {
     static func merging(_ existing: UsefulActionsBlock?, _ incoming: UsefulActionsBlock) -> UsefulActionsBlock {
+        ordered((existing?.items ?? []) + incoming.items)
+    }
+
+    /// Deduplicates (the first occurrence wins) and puts Insert-ready text
+    /// (a rewrite, a command) first, so the preselected card is Insert; paths
+    /// and links keep their order after it.
+    /// WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
+    private static func ordered(_ all: [ActionItem]) -> UsefulActionsBlock {
         var seen = Set<String>()
-        let items = ((existing?.items ?? []) + incoming.items).filter { seen.insert(identity($0)).inserted }
-        // Insert-ready text (a rewrite, a command) is the requested result and
-        // comes first, so the preselected card is Insert; paths and links keep
-        // their order after it. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
-        func isInsert(_ item: ActionItem) -> Bool { if case .copy = item { return true }; return false }
+        let items = all.filter { seen.insert(identity($0)).inserted }
         return UsefulActionsBlock(items: items.filter(isInsert) + items.filter { !isInsert($0) })
+    }
+
+    private static func isInsert(_ item: ActionItem) -> Bool {
+        if case .copy = item { return true }
+        return false
     }
 
     /// Fence languages whose single command line becomes an Insert card.
     static let shellFenceLanguages: Set<String> = ["bash", "sh", "zsh", "shell", "fish", "console", "terminal"]
     static let maxInferredCommands = 3
 
-    static func collect(from answer: String, existing: UsefulActionsBlock? = nil,
+    /// `insert` is the final's explicit insert_text card: it stays first. The
+    /// answer's own shell commands come next, in answer order, ahead of copy
+    /// alternatives the model listed: an answer that leads with a command
+    /// (when a lax endpoint dropped insert_text) preselects that command.
+    static func collect(from answer: String, existing: UsefulActionsBlock? = nil, insert: ActionItem? = nil,
                         homeDirectory: String = NSHomeDirectory()) -> UsefulActionsBlock? {
         let text = String(answer.prefix(32_000))
         let ns = text as NSString
@@ -160,7 +173,11 @@ enum NativeAgentAnswerArtifacts {
         var seen = Set<String>()
         let inferred = candidates.sorted { $0.0.location < $1.0.location }.map(\.1)
             .filter { seen.insert(identity($0)).inserted }
-        let block = merging(existing, UsefulActionsBlock(items: inferred))
+        let explicit = existing?.items ?? []
+        // A command the model also listed keeps its explicit metadata.
+        let metadata = Dictionary(explicit.map { (identity($0), $0) }, uniquingKeysWith: { first, _ in first })
+        let answerCommands = inferred.filter(isInsert).map { metadata[identity($0)] ?? $0 }
+        let block = ordered((insert.map { [$0] } ?? []) + answerCommands + explicit + inferred.filter { !isInsert($0) })
         return block.items.isEmpty ? nil : block
     }
 

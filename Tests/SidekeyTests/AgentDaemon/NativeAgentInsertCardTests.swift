@@ -93,6 +93,37 @@ final class NativeAgentInsertCardTests: XCTestCase {
         XCTAssertEqual(items.map(\.insertText), [codexUpdate, "https://developers.openai.com/codex/cli"])
     }
 
+    func testLeadingCommandBeatsCopyAlternativesWhenTheFieldIsMissing() async throws {
+        // Builder regression (ticket 377): a lax endpoint drops insert_text,
+        // the answer leads with Homebrew and lists npm as a copy alternative.
+        // The answer's command must be the preselected card; npm stays.
+        let brew = "brew upgrade --cask codex"
+        let answer = "Codex установлен через Homebrew, обнови его так:\n\n```bash\n\(brew)\n```\n\nЕсли ставил через npm — вторая карточка."
+        let items = try await run("как обновить Codex", reply: arguments(answer, insert: nil,
+            sources: [["title": "Codex CLI", "url": "https://developers.openai.com/codex/cli"]],
+            actions: [["type": "copy", "text": codexUpdate, "description": "npm"]]))
+        XCTAssertEqual(items.map(\.insertText), [brew, codexUpdate, "https://developers.openai.com/codex/cli"])
+        XCTAssertEqual(UsefulLinksSelectionState(items: items).selectedItem?.insertText, brew)
+    }
+
+    func testExplicitInsertStaysFirstAheadOfAnswerCommandsAndAlternatives() throws {
+        let brew = "brew upgrade --cask codex"
+        let final = try NativeAgentFinalAnswer(arguments: arguments(
+            "Обнови:\n\n```bash\n\(brew)\n```", insert: codexUpdate,
+            sources: [["title": "Codex CLI", "url": "https://developers.openai.com/codex/cli"]],
+            actions: [["type": "copy", "text": "codex --version", "description": "Check version"]]))
+        let items = try XCTUnwrap(NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: final.actions,
+                                                                     insert: final.insert)).items
+        XCTAssertEqual(items.map(\.insertText), [codexUpdate, brew, "codex --version", "https://developers.openai.com/codex/cli"])
+        // A command the model also listed keeps its label at the command's place.
+        let labelled = try NativeAgentFinalAnswer(arguments: arguments("```bash\n\(brew)\n```", insert: nil,
+            actions: [["type": "copy", "text": codexUpdate, "description": "npm"],
+                      ["type": "copy", "text": brew, "description": "Homebrew"]]))
+        let cards = try XCTUnwrap(NativeAgentAnswerArtifacts.collect(from: labelled.visibleText, existing: labelled.actions,
+                                                                     insert: labelled.insert)).items
+        XCTAssertEqual(cards, [.copy(text: brew, description: "Homebrew"), .copy(text: codexUpdate, description: "npm")])
+    }
+
     func testQuestionWithoutTextToUseGetsNoInsertCard() async throws {
         let items = try await run("что такое Codex?", reply: arguments(
             "Codex — агент OpenAI для программирования в терминале.", insert: "",

@@ -1479,7 +1479,8 @@ text (selected or pasted) and asks to rewrite, shorten, translate, fix or
 reformat it or asks for a message, and with the one exact command for how to
 install/update/run questions, whose answer leads with that command; links
 only support it. Empty for plain questions. One enclosing fence is unwrapped.
-Cards are ordered insert text, then paths and other actions, then sources.
+Cards are ordered insert text, the answer's own commands, other copy actions,
+paths, then sources.
 Without the field, a closed bash/sh/zsh/shell/fish/console/terminal fence with
 one command line (no script, continuation or heredoc; at most three) is the
 card. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md

@@ -9,5 +9,10 @@
          prompt-free Now Playing source. Notarization-allowed. -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <!-- Hardened runtime resource access for EventKit (Apple Calendar in
+         Planner/Hover). Without it macOS denies calendar access without
+         showing the NSCalendarsFullAccessUsageDescription prompt. -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
 </dict>
 </plist>

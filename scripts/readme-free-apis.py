@@ -214,18 +214,21 @@ def responsive(kind, alt, width):
 # "My setup": the maintainer's own routes from Settings -> API & Models, as
 # they are, one column (Maxim asked on 2026-11-22: "just my setup, as it
 # actually is"). Speech runs on ElevenLabs and every text feature on Claude
-# Sonnet 5.5 through OpenRouter. Agent stands for the Agent and its voice;
+# Sonnet 5.5 with an Anthropic key (Maxim, 2026-11-22: "replace OpenRouter
+# with Anthropic"; the mark is the Anthropic one used by the plan cards).
+# The providers appear only in the logo row: column headers and cells name
+# models alone (Maxim, 2026-11-22: "remove the providers everywhere"). Agent stands for the Agent and its voice;
 # Google is the voice search, which needs speech only. Subtitles run only on
 # GPT-Realtime-Translate, which hears and translates in one model, so that row
 # spans the speech and model columns and needs the OpenAI key
 # (.project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md). The
-# keys line names only the keys this set uses; no plan or free claim, because
-# OpenRouter is not paid from a subscription's API credit. Reviewed monthly
-# together with the offers.
+# keys line names only the keys this set uses, without plan or free claims.
+# Reviewed monthly together with the offers.
 SETUP_CHECKED = "2026-11-22"
 SPEECH = "Scribe v3 Live"
 MODEL = "Claude Sonnet 5.5"
-SETUP_KEYS = [("elevenlabs", "ElevenLabs"), ("openrouter", "OpenRouter"), ("openai", "OpenAI")]  # logo, key
+SETUP_KEYS = [("elevenlabs", None, "ElevenLabs"), ("claude-code", "#d97757", "Anthropic"),
+              ("openai", None, "OpenAI")]  # logo, logo colour (None = ink), key
 SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (feature, text)
     ("Drop Fast", SPEECH, None),
     ("Drop Smart", SPEECH, MODEL),
@@ -233,9 +236,9 @@ SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (fea
     ("Agent", SPEECH, MODEL),           # voice requests and the Agent itself
     ("Google", SPEECH, None),           # voice search: speech only
     ("Translation", None, MODEL),
-    ("Subtitles", "GPT-Realtime-Translate · OpenAI"),
+    ("Subtitles", "GPT-Realtime-Translate"),
 ]
-SETUP_COLUMNS = ["Feature", "Speech · ElevenLabs", "Model · OpenRouter"]
+SETUP_COLUMNS = ["Feature", "Speech", "Model"]  # providers only in the logo row (Maxim, 2026-11-22)
 
 
 def setup_svg(theme, layout):
@@ -252,8 +255,8 @@ def setup_svg(theme, layout):
     out = [f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup</text>',
            f'  <rect x="0.5" y="{top + 0.5}" width="{w - 1}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>']
     x, size = col[0], (18 if wide else 14)
-    for asset, name in SETUP_KEYS:  # logo and key name, in a row
-        out.append("  " + logo(asset, c["ink"], x, top + (14 if wide else 13), size))
+    for asset, color, name in SETUP_KEYS:  # logo and key name, in a row
+        out.append("  " + logo(asset, color or c["ink"], x, top + (14 if wide else 13), size))
         out.append(f'  <text x="{x + size + 6}" y="{top + (28 if wide else 24.5)}" font-family="{FONT}" font-size="{hs}" font-weight="600" fill="{c["ink"]}">{e(name)}</text>')
         x += size + 6 + len(name) * hs * 0.6 + (22 if wide else 12)
     hy = top + ph + 16
@@ -278,8 +281,8 @@ def setup_svg(theme, layout):
 def setup_alt():
     rows = "; ".join(f"{r[0]}: {r[1]} (speech and translation in one model)" if len(r) == 2
                      else f"{r[0]}: " + " + ".join(t for t in r[1:] if t) for r in SETUP_ROWS)
-    keys = ", ".join(name for _, name in SETUP_KEYS)
-    return (f"My setup. Keys: {keys}. Speech on ElevenLabs, language model through OpenRouter. {rows}. "
+    keys = ", ".join(name for _, _, name in SETUP_KEYS)
+    return (f"My setup. Keys: {keys}. {rows}. "
             f"Updated monthly, last checked {display(SETUP_CHECKED)}.")
 
 

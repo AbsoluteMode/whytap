@@ -94,6 +94,7 @@ final class CodexCLIConfigReadingTests: XCTestCase {
             XCTAssertEqual(runner.calls, [], label)
         }
         for (label, extra) in [("timeout", "startup_timeout_sec = 45\n"), ("disabled", "enabled = false\n"),
+                               ("empty tool allowlist", "enabled_tools = []\n"), ("empty tool blocklist", "disabled_tools = []\n"),
                                ("env", "[mcp_servers.whytap.env]\nTOKEN = \"synthetic-value-4821\"\n")] {
             (home, helper) = try sandbox(nil)
             let toml = "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n" + extra
@@ -106,6 +107,27 @@ final class CodexCLIConfigReadingTests: XCTestCase {
             XCTAssertEqual(runner.calls, [], label)
             XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml, label)
         }
+    }
+
+    /// The real CLI: a plain entry (only `env_vars = []` reported) is plain,
+    /// so an older plain `case` entry is still removed on Disconnect, while one
+    /// with `enabled_tools = []` stays.
+    func test_real_codex_disconnect_keeps_an_explicit_empty_filter() throws {
+        var (home, helper) = try sandbox(nil)
+        try "[mcp_servers.case]\ncommand = \"\(helper)\"\nargs = [\"case\", \"mcp\"]\nenabled_tools = []\n"
+            .write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+        var runner = FakeCommandRunner()
+        try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
+            .uninstall(helperPath: helper)
+        XCTAssertEqual(runner.calls, [])
+
+        (home, helper) = try sandbox(nil)
+        try "[mcp_servers.case]\ncommand = \"\(helper)\"\nargs = [\"case\", \"mcp\"]\n"
+            .write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+        runner = FakeCommandRunner()
+        try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
+            .uninstall(helperPath: helper)
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "case"]])
     }
 
     /// A temporary HOME with `.codex/config.toml` and a stand-in helper file,

@@ -70,9 +70,10 @@ not because they need separate processes.
   with `claude mcp add`, reporting the add's failure (or that the restore
   failed too). An entry already `<helper> mcp` (exact path) is left as it
   is, whatever else it sets. An older entry of ours is replaced only when it
-  is plain: nothing but stdio, command, args and an empty env (for Codex: no
-  env, env_vars, cwd, disabled state, timeouts, tool lists or unknown set
-  fields, as `codex mcp get --json` reports them). Anything more is the
+  is plain: nothing but stdio, command, args and an empty env (for Codex:
+  every other field `null` or `false` in `codex mcp get --json`, apart from
+  `env_vars: []`, which is how Codex reports none; an explicit empty
+  `enabled_tools`, `disabled_tools` or `env` is a setting). Anything more is the
   person's own setting: a rewrite would drop it and a restore would have to
   pass it on a command line, so Connect refuses before any change. Our older
   `case` entry is removed only when plain. After
@@ -187,6 +188,10 @@ not because they need separate processes.
 - Builder review 6 (queue run 93934): Disconnect still removed a customized
   older `case` entry in Claude Code and Cursor. It now applies the plain rule
   too; a test covers both hosts, and a plain entry is still removed.
+- Builder review 7 (queue run 93934, second probe): an explicit
+  `enabled_tools = []` read as plain, so Connect rewrote and Disconnect
+  removed such entries. Only `null`/`false` count as unset now (plus Codex's
+  `env_vars: []`); fake and real-CLI tests cover empty tool lists and env.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

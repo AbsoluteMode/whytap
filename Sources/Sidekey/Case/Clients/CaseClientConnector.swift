@@ -482,18 +482,21 @@ enum CodexMCPEntry: Equatable {
         case let list as [String]: args = list
         default: return .other
         }
+        let envVars = transport["env_vars"]
+        let envVarsUnset = envVars == nil || envVars is NSNull || (envVars as? [Any])?.isEmpty == true
         let plain = isNeutral(object, except: ["name", "enabled", "transport"])
             && (object["enabled"] == nil || isTrue(object["enabled"]))
-            && isNeutral(transport, except: ["type", "command", "args"])
+            && isNeutral(transport, except: ["type", "command", "args", "env_vars"])
+            && envVarsUnset
         return plain ? .stdio(command: command, args: args) : .customized(command: command, args: args)
     }
 
-    /// Every other field is unset: null, false, or an empty list or table.
+    /// Every other field is unset: null or false. An empty list or table is a
+    /// setting (`enabled_tools = []` allows no tool), except `env_vars`, which
+    /// Codex reports as `[]` when absent and which passes no value when empty.
     private static func isNeutral(_ object: [String: Any], except: Set<String>) -> Bool {
         object.allSatisfy { key, value in
             if except.contains(key) || value is NSNull { return true }
-            if let list = value as? [Any] { return list.isEmpty }
-            if let table = value as? [String: Any] { return table.isEmpty }
             return isBoolean(value) && !isTrue(value)
         }
     }

@@ -428,6 +428,9 @@ final class CaseClientConnectorTests: XCTestCase {
         let customizations: [([String: Any], [String: Any])] = [
             (["startup_timeout_sec": 45], [:]), (["enabled": false], [:]), (["tool_timeout_sec": 30.5], [:]),
             (["enabled_tools": ["case_list_keys"]], [:]), (["required": true], [:]),
+            // Builder review (queue run 93934): an explicit empty filter is a setting.
+            (["enabled_tools": [String]()], [:]), (["disabled_tools": [String]()], [:]),
+            ([:], ["env": [String: String]()]),
             ([:], ["env": ["TOKEN": "synthetic-value-4821"]]), ([:], ["env_vars": ["HOME"]]), ([:], ["cwd": "/tmp"]),
         ]
         for (settings, transport) in customizations {
@@ -452,6 +455,21 @@ final class CaseClientConnectorTests: XCTestCase {
             try codexConnector(try temporaryHome(), runner).install(helperPath: helper)
             XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]], "case kept: \(label)")
         }
+    }
+
+    /// Disconnect leaves our older `case` entry in Codex when it has settings
+    /// of its own, an explicit empty tool filter included; a plain one goes.
+    func test_codex_disconnect_keeps_a_customized_case_entry() throws {
+        for settings in [["enabled_tools": [String]()], ["disabled_tools": ["case_list_keys"]], ["startup_timeout_sec": 45]] as [[String: Any]] {
+            let runner = FakeCommandRunner()
+            runner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper, args: ["case", "mcp"], settings: settings)
+            try codexConnector(try temporaryHome(), runner).uninstall(helperPath: helper)
+            XCTAssertEqual(runner.calls, [], "\(settings)")
+        }
+        let runner = FakeCommandRunner()
+        runner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper, args: ["case", "mcp"])
+        try codexConnector(try temporaryHome(), runner).uninstall(helperPath: helper)
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "case"]])
     }
 
     func test_claude_current_entry_with_its_own_settings_is_left_alone() throws {

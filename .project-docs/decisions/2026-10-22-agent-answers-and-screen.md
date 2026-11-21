@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Sources/WhytapCaseKit/AppControlMCPServer.swift
     confirmed_at: 2026-10-22
-related: [2026-10-22-native-agent.md, 2026-10-21-app-control-plugin.md, 2026-10-21-opencode-v2.md, 2026-11-21-structured-agent-answers.md]
+related: [2026-10-22-native-agent.md, 2026-10-21-app-control-plugin.md, 2026-10-21-opencode-v2.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md]
 ---
 
 # Decision

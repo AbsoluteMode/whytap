@@ -5,7 +5,7 @@ import Foundation
 /// WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
 struct NativeAgentFinalAnswer {
     static let toolName = "finish_answer"
-    static let actionWarning = " Earlier file edits or commands may have completed; check before retrying."
+    static let actionWarning = " Earlier file edits, commands or Whytap changes may have completed; check before retrying."
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String

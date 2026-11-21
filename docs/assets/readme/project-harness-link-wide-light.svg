@@ -2,7 +2,7 @@
   <rect x="0.5" y="0.5" width="420" height="111" rx="14" fill="#f6f8fa" stroke="#d1d9e0"/>
   <text x="18" y="34" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Harness Link</text>
   <g transform="translate(389 21.0) scale(0.6667)" fill="none" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></g>
-  <text x="18" y="58" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#5b4bd6">Claude Code · Codex · Antigravity (Gemini)</text>
+  <text x="18" y="58" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#5b4bd6">Claude Code · Codex · Antigravity</text>
   <text x="18" y="80" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e">Connects their sessions: shared rooms, addressed messages</text>
   <text x="18" y="98" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e">to running sessions and persistent Claude consultations.</text>
 </svg>

@@ -38,6 +38,9 @@ struct PickerSection: Equatable {
     let options: [PickerOption]
     /// The latest catalog refresh failed: the list is the cached one.
     let refreshFailed: Bool
+    /// The provider refused the key or it can't be read: the section stays
+    /// (a fixed key makes it work again) but its header says so.
+    var keyProblem: String? = nil
     /// A custom server without a catalog still accepts its configured model
     /// name, even when the selected route is included in `options`.
     var acceptsModelName = false
@@ -76,7 +79,11 @@ extension OpenRouterLLMError {
 struct ModelStatusResolver {
     static let refusedReason = "The provider refused this model"
 
-    private static let builtInAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .thisMac]
+    /// Picker order. OpenRouter lists hundreds of models, so it comes after
+    /// the direct providers and the user's servers: first it buried the
+    /// Anthropic and OpenAI sections far below the visible rows.
+    // WHY: .project-docs/decisions/2026-11-22-direct-model-list-prices.md
+    private static let directAccounts: [ProviderAccount] = [.soniox, .deepgram, .elevenLabs, .anthropic, .openAI, .thisMac]
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
@@ -141,11 +148,15 @@ struct ModelStatusResolver {
 
     func sections(for feature: AIFeature) -> [PickerSection] {
         let selected = routing.route(for: feature)
-        var accounts = Self.builtInAccounts.filter { credential(of: $0) != .missing }
+        let openRouterModels = Dictionary(
+            (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        var accounts = Self.directAccounts.filter { credential(of: $0) != .missing }
         let servers = routing.state.servers.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
         accounts += servers.map { ProviderAccount.server($0.id) }
+        if credential(of: .openRouter) != .missing { accounts.append(.openRouter) }
 
         return accounts.compactMap { account in
             guard let use = feature.modelUse(on: account.kind) else { return nil }
@@ -170,15 +181,23 @@ struct ModelStatusResolver {
                 let state = verdict(model: id, account: account, for: feature)
                 if case .notSupported = state, !isSelected(id) { continue }
                 let entry = snapshot?.models.first { $0.id == id }
-                let date = account == .deepgram ? entry?.updatedAt
-                    : (entry?.catalogDate ?? ModelRegistry.documentedReleaseDate(for: id, kind: account.kind))
+                let date: Date?
+                switch account {
+                case .deepgram: date = entry?.updatedAt
+                case .server: date = Self.serverModelDate(entry?.catalogDate, fetchedAt: snapshot?.fetchedAt)
+                default: date = entry?.catalogDate ?? ModelRegistry.documentedReleaseDate(for: id, kind: account.kind)
+                }
                 let dateLabel = Self.catalogDateLabel(date, account: account)
+                // Price and "always reasons" come from OpenRouter's catalog:
+                // the row itself there, its counterpart for a direct route.
+                let listing = account == .openRouter ? entry
+                    : Self.openRouterCounterpart(of: id, account: account, in: openRouterModels)
                 options.append(PickerOption(
                     model: id, state: state, isSelected: isSelected(id),
-                    hint: hint(model: id, account: account, feature: feature, use: use),
+                    hint: hint(model: id, account: account, feature: feature, use: use, listing: listing),
                     dateLabel: dateLabel,
                     catalogDate: dateLabel == nil ? nil : date,
-                    priceLabel: Self.catalogPriceLabel(entry?.tokenPrice, account: account)
+                    priceLabel: Self.catalogPriceLabel(listing?.tokenPrice)
                 ))
             }
             return PickerSection(
@@ -186,6 +205,7 @@ struct ModelStatusResolver {
                 title: title(of: account),
                 options: options,
                 refreshFailed: snapshot?.lastRefreshFailed ?? false,
+                keyProblem: keyProblem(of: account),
                 acceptsModelName: account.kind == .openAICompatible && (snapshot?.models.isEmpty ?? true)
             )
         }
@@ -204,21 +224,71 @@ struct ModelStatusResolver {
         case .deepgram: title = "Updated"
         case .openAI: title = "Created"
         case .openRouter: title = "Added to OpenRouter"
-        default: return nil
+        case .server: title = "Added"
+        case .thisMac: return nil
         }
         return "\(title) \(catalogDateFormatter.string(from: date))"
     }
 
-    /// OpenRouter only: `$1.25 in / $10 out per 1M tokens`, or `Free` when the
-    /// catalog states zero for both. An unknown price has no label.
+    /// A user's server may send `created` in /v1/models: Ollama the time the
+    /// model was pulled or changed there, while vLLM and llama.cpp stamp every
+    /// model with the time of the request. A date within an hour of the fetch
+    /// is that stamp, not the model's, and is not shown.
+    static func serverModelDate(_ date: Date?, fetchedAt: Date?) -> Date? {
+        guard let date, let fetchedAt, date < fetchedAt.addingTimeInterval(-3_600) else { return nil }
+        return date
+    }
+
+    /// OpenRouter's list price: `$1.25 in / $10 out per 1M tokens`, or `Free`
+    /// when the catalog states zero for both. An unknown price has no label.
     // WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
-    static func catalogPriceLabel(_ price: CatalogTokenPrice?, account: ProviderAccount) -> String? {
-        guard account == .openRouter, let price,
+    static func catalogPriceLabel(_ price: CatalogTokenPrice?) -> String? {
+        guard let price,
               let input = priceAmount(price.inputPerMillion),
               let output = priceAmount(price.outputPerMillion)
         else { return nil }
         if price.inputPerMillion == 0, price.outputPerMillion == 0 { return "Free" }
         return "$\(input) in / $\(output) out per 1M tokens"
+    }
+
+    /// The same model in OpenRouter's catalog, for a direct Anthropic or
+    /// OpenAI row: their own model lists carry no price and do not say whether
+    /// a model always reasons. OpenAI IDs match exactly (`gpt-5.4` is
+    /// `openai/gpt-5.4`; a dated snapshot only when OpenRouter lists that
+    /// snapshot). Anthropic IDs also match without the date suffix and with
+    /// dots between version digits (`claude-opus-4-5-20251101` is
+    /// `anthropic/claude-opus-4.5`). No match, no OpenRouter catalog or any
+    /// other provider: nil, so the row shows no price rather than a guess.
+    // WHY: .project-docs/decisions/2026-11-22-direct-model-list-prices.md
+    static func openRouterCounterpart(
+        of model: String, account: ProviderAccount, in openRouterModels: [String: CatalogModel]
+    ) -> CatalogModel? {
+        guard !openRouterModels.isEmpty else { return nil }
+        return openRouterCounterpartIDs(of: model, account: account).lazy
+            .compactMap { openRouterModels[$0] }.first
+    }
+
+    static func openRouterCounterpartIDs(of model: String, account: ProviderAccount) -> [String] {
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty, !model.contains("/") else { return [] }
+        switch account {
+        case .openAI:
+            return ["openai/\(model)"]
+        case .anthropic:
+            var base = model
+            if let range = base.range(of: #"-\d{8}$"#, options: .regularExpression) {
+                base.removeSubrange(range)
+            }
+            let dotted = base.replacingOccurrences(
+                of: #"(?<=\d)-(?=\d)"#, with: ".", options: .regularExpression)
+            var ids: [String] = []
+            for candidate in [model, dotted] where !ids.contains("anthropic/\(candidate)") {
+                ids.append("anthropic/\(candidate)")
+            }
+            return ids
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .thisMac, .server:
+            return []
+        }
     }
 
     /// Two decimals from $1 up; three significant digits below, so a small
@@ -334,6 +404,12 @@ struct ModelStatusResolver {
         }
     }
 
+    private func keyProblem(of account: ProviderAccount) -> String? {
+        if credential(of: account) == .unreadable { return "Couldn't read the key" }
+        if case .rejected = keyStatuses.record(for: account)?.status { return "Key not accepted" }
+        return nil
+    }
+
     private func title(of account: ProviderAccount) -> String {
         if case .server(let id) = account, let server = routing.server(id) { return server.name }
         return account.kind.displayName
@@ -397,11 +473,14 @@ struct ModelStatusResolver {
         return nil
     }
 
-    private func hint(model: String, account: ProviderAccount, feature: AIFeature, use: ModelUse) -> String? {
+    /// `listing` is the model's OpenRouter catalog entry (its counterpart for
+    /// a direct Anthropic or OpenAI row).
+    private func hint(
+        model: String, account: ProviderAccount, feature: AIFeature, use: ModelUse, listing: CatalogModel?
+    ) -> String? {
         switch feature {
         case .dropSmartCleanup:
-            let entry = catalogs.snapshot(for: account)?.models.first { $0.id == model }
-            return entry?.reasoning?.mandatory == true ? "always reasons, slower" : nil
+            return listing?.reasoning?.mandatory == true ? "always reasons, slower" : nil
         case .dropSmartDecision:
             return nil // Historical feature only; never shown as a configurable row.
         case .meetings:

@@ -17,9 +17,12 @@ struct ModelPicker: View {
     @State private var refreshing = false
     @FocusState private var focusedResult: ModelPickerSearch.ID?
     @State private var serverModelNames: [ProviderAccount: String] = [:]
+    /// The provider bar's choice; nil shows every provider.
+    @State private var providerFilter: ProviderAccount?
 
     init(sections: [PickerSection], missingProviderHint: String?,
-         initialQuery: String = "", onSelect: @escaping (ProviderAccount, String) -> Void,
+         initialQuery: String = "", initialProvider: ProviderAccount? = nil,
+         onSelect: @escaping (ProviderAccount, String) -> Void,
          onRefresh: @escaping () async -> Void, onAddKey: @escaping () -> Void,
          onClose: @escaping () -> Void) {
         self.sections = sections
@@ -29,14 +32,63 @@ struct ModelPicker: View {
         self.onAddKey = onAddKey
         self.onClose = onClose
         _query = State(initialValue: initialQuery)
+        _providerFilter = State(initialValue: initialProvider)
+    }
+
+    private var shownSections: [PickerSection] {
+        ModelPickerSearch.sections(sections, showing: providerFilter)
     }
 
     private var results: [ModelPickerSearch.Result] {
-        ModelPickerSearch.results(in: sections, query: query)
+        ModelPickerSearch.results(in: shownSections, query: query)
     }
 
     private var unlistedServers: [PickerSection] {
-        sections.filter(\.acceptsModelName)
+        shownSections.filter(\.acceptsModelName)
+    }
+
+    /// Several providers: name each one above the list, so a long catalog
+    /// (OpenRouter) never hides the others below the visible rows.
+    // WHY: .project-docs/decisions/2026-11-22-direct-model-list-prices.md
+    private var providerBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                providerButton(title: "All", count: nil, account: nil)
+                ForEach(sections, id: \.account) { section in
+                    providerButton(title: section.title,
+                                   count: section.acceptsModelName && section.options.isEmpty ? nil : section.options.count,
+                                   account: section.account)
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+        .padding(.bottom, 10)
+    }
+
+    private func providerButton(title: String, count: Int?, account: ProviderAccount?) -> some View {
+        let current = sections.contains { $0.account == providerFilter } ? providerFilter : nil
+        let selected = current == account
+        return Button {
+            providerFilter = account
+        } label: {
+            HStack(spacing: 4) {
+                Text(title).lineLimit(1)
+                if let count {
+                    Text("\(count)").foregroundStyle(selected ? MacSettingsTheme.text : MacSettingsTheme.text2)
+                }
+            }
+            .font(.system(size: 11.5, weight: selected ? .semibold : .regular))
+            .foregroundStyle(MacSettingsTheme.text)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(selected ? MacSettingsTheme.accent.opacity(0.18) : MacSettingsTheme.hover,
+                        in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(APIModelFeedbackStyle(cornerRadius: 12))
+        .accessibilityLabel(account == nil ? "All providers" : title)
+        .accessibilityValue(count.map { "\($0) models" } ?? "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     var body: some View {
@@ -46,18 +98,23 @@ struct ModelPicker: View {
                              onMove: move, onSubmit: chooseActive, onEscape: escape)
                 .frame(height: 30)
                 .padding(12)
+            if sections.count > 1 { providerBar }
             Divider()
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
+                        let notices = ModelPickerSearch.notices(in: shownSections, results: matches)
+                        ForEach(notices, id: \.account) { section in
+                            providerNotice(section)
+                        }
                         if matches.isEmpty {
-                            if unlistedServers.isEmpty || !query.isEmpty { emptyState }
+                            if (unlistedServers.isEmpty && notices.isEmpty) || !query.isEmpty { emptyState }
                         } else {
                             ForEach(Array(matches.enumerated()), id: \.element.id) { index, result in
                                 if index == 0 || matches[index - 1].account != result.account {
-                                    Text(result.refreshFailed
-                                         ? "\(result.providerTitle) · Couldn't refresh"
-                                         : result.providerTitle)
+                                    Text(ModelPickerSearch.header(title: result.providerTitle,
+                                                                  refreshFailed: result.refreshFailed,
+                                                                  keyProblem: result.keyProblem))
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(MacSettingsTheme.text2)
                                         .padding(.horizontal, 10)
@@ -77,11 +134,15 @@ struct ModelPicker: View {
                 .frame(height: 300)
                 // A filtered list needs a fresh viewport. Reusing the lazy
                 // layout can leave even a nonempty result set visually blank.
-                .id(query)
+                .id("\(providerFilter?.storageID ?? "all")|\(query)")
                 .onChange(of: activeID) { _, id in
                     if let id { scroll.scrollTo(id) }
                 }
                 .onChange(of: query) { _, _ in
+                    resetActive()
+                    if let activeID { scroll.scrollTo(activeID) }
+                }
+                .onChange(of: providerFilter) { _, _ in
                     resetActive()
                     if let activeID { scroll.scrollTo(activeID) }
                 }
@@ -133,6 +194,29 @@ struct ModelPicker: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A provider with a key or catalog problem and no rows still names
+    /// itself and the reason (a sole provider, or the one chosen in the bar).
+    private func providerNotice(_ section: PickerSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ModelPickerSearch.header(title: section.title, refreshFailed: section.refreshFailed,
+                                          keyProblem: section.keyProblem))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text2)
+            Text(ModelPickerSearch.noticeDetail(for: section))
+                .font(.system(size: 12))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            if section.keyProblem != nil {
+                APIModelAction(title: "Open API keys", style: .ghost, action: onAddKey)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     /// A custom server may intentionally omit /models. Give that specific

@@ -133,6 +133,19 @@ final class ModelCatalogFetcherTests: XCTestCase {
         }
     }
 
+    func test_server_catalog_keeps_created_dates_and_tolerates_their_absence() async throws {
+        // Ollama sends `created` (when the model was pulled); LM Studio may send
+        // none; a malformed value never breaks the list.
+        let fetcher = makeFetcher(body: #"{"object":"list","data":[{"id":"qwen3:8b","object":"model","created":1762000000,"owned_by":"library"},{"id":"llama3.2:1b"},{"id":"odd","created":"soon"}]}"#)
+        let models = try await fetcher.fetch(account: .server(UUID()), apiKey: nil, server: server("http://localhost:11434/v1"))
+        XCTAssertEqual(models.map(\.id), ["qwen3:8b", "llama3.2:1b", "odd"])
+        XCTAssertEqual(models[0].catalogDate, Date(timeIntervalSince1970: 1_762_000_000))
+        XCTAssertNil(models[1].catalogDate)
+        XCTAssertNil(models[2].catalogDate)
+        XCTAssertTrue(models.allSatisfy { $0.tokenPrice == nil && $0.reasoning == nil })
+        XCTAssertEqual(StubURLProtocol.capturedRequests.first?.url?.absoluteString, "http://localhost:11434/v1/models")
+    }
+
     func test_server_models_url_rules() {
         XCTAssertEqual(server("http://h:8000/v1").modelsURL?.absoluteString, "http://h:8000/v1/models")
         XCTAssertEqual(server("http://h:8000/v1/").modelsURL?.absoluteString, "http://h:8000/v1/models")

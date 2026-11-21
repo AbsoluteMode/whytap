@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <sub>or with Homebrew: <code>brew install absolutemode/tap/whytap</code></sub>
+</p>
+
+<p align="center">
   <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 

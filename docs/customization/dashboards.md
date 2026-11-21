@@ -108,7 +108,8 @@ freshness; an old timestamp displays stale data.
 
 ## Delete a dashboard
 
-In Monitor's dashboard list, click the **×** on a custom dashboard's row. The
+In Monitor's dashboard list, click the **×** on the dashboard's row. Every
+dashboard, Server status included, is deleted the same way. The
 confirmation's default button
 is Cancel. Confirming removes the board from Monitor on this Mac: its ID is
 recorded in `Monitor/removed-dashboards.json` (`{"removed": ["<id>"]}`) and the
@@ -116,8 +117,16 @@ snapshot files with that ID are removed from `Monitor/dashboards/`. The board
 stays deleted when its collector writes the snapshot again, including after a
 relaunch. Whytap never stops or deletes the collector, its scripts or its
 launchd agent: turn the collector off yourself if it should stop running.
-Server status is built in and cannot be deleted. `install-dashboard` takes the
-ID off the list, so installing the dashboard again brings it back. The
+Deleting Server status records `server-status` in the same list: Whytap stops
+connecting to the servers in `servers.json` (a check already under way is
+cancelled) and leaves that file as it is. While `removed-dashboards.json` cannot
+be read, Server status pauses with a notice instead of connecting.
+
+To bring a deleted dashboard back, run
+`python3 scripts/customize.py restore-dashboard <id> --flavor prod` (for example
+`server-status`). It only takes the ID off the list: Server status reconnects to
+its servers, and a custom dashboard appears when its collector next writes the
+snapshot. `install-dashboard` also takes the ID off the list. The
 snapshot and the list change together: if either cannot be written (or the list
 is unreadable), both stay as they were. Whytap's Delete and the installer run
 only while holding an exclusive `flock` on `Monitor/removed-dashboards.lock`.

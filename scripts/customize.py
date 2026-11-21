@@ -425,6 +425,55 @@ def install_dashboard_snapshot(monitor: Path, destination: Path, dashboard_id: s
     return relisted
 
 
+def monitor_directory(flavor: str) -> Path:
+    bundle_id = "com.rootwise.sidekey" + (".beta" if flavor == "beta" else "")
+    monitor = Path.home() / "Library/Application Support" / bundle_id / "Monitor"
+    for parent in (monitor, *monitor.parents):
+        if parent.is_symlink():
+            raise ValueError("Refusing a symlink Monitor path")
+    return monitor
+
+
+def restore_dashboard_command(args: argparse.Namespace) -> int:
+    """Lists a dashboard deleted in Monitor again, Server status included.
+
+    Only the ID leaves the deleted list, under the same lock Whytap takes. A
+    custom board appears when its collector next writes its snapshot (or after
+    install-dashboard); Server status reconnects to the servers in servers.json.
+    WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    """
+    dashboard_id = args.id
+    if not (len(dashboard_id) <= 120 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", dashboard_id)):
+        raise ValueError("Invalid dashboard ID")
+    monitor = monitor_directory(args.flavor)
+    if args.dry_run:
+        deleted = dashboard_id in read_removed_dashboards(monitor)
+        print(f"Would list {dashboard_id} again in {args.flavor} Monitor" if deleted
+              else f"{dashboard_id} is not deleted in {args.flavor} Monitor; nothing to restore")
+        return 0
+    if not monitor.is_dir():
+        print(f"{dashboard_id} is not deleted in {args.flavor} Monitor; nothing to restore")
+        return 0
+    with removed_dashboards_lock(monitor):
+        removed = read_removed_dashboards(monitor)
+        if dashboard_id not in removed:
+            print(f"{dashboard_id} is not deleted in {args.flavor} Monitor; nothing to restore")
+            return 0
+        document = {"removed": sorted(set(removed) - {dashboard_id})}
+        temporary = _private_temporary(
+            monitor, ".removed-dashboards-", (json.dumps(document, indent=2) + "\n").encode("utf-8"))
+        try:
+            os.replace(temporary, monitor / REMOVED_DASHBOARDS)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+    if dashboard_id == "server-status":
+        print("Server status is listed again; Whytap reconnects to the servers in servers.json")
+    else:
+        print(f"{dashboard_id} is listed again; it appears when its collector next writes its snapshot")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -461,6 +510,11 @@ def main(argv: list[str] | None = None) -> int:
             child.add_argument("--replace", action="store_true", help="Replace an existing dashboard with the same ID")
             child.add_argument("--dry-run", action="store_true")
         child.set_defaults(function=dashboard_command)
+    child = subparsers.add_parser("restore-dashboard", help="List a dashboard deleted in Monitor again")
+    child.add_argument("id", help="Dashboard ID, or server-status")
+    child.add_argument("--flavor", choices=("prod", "beta"), default="beta")
+    child.add_argument("--dry-run", action="store_true")
+    child.set_defaults(function=restore_dashboard_command)
     args = parser.parse_args(argv)
     try:
         return args.function(args)

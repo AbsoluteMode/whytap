@@ -102,17 +102,17 @@ struct MonitorRemovedDashboards: Equatable {
 /// What Monitor says around deleting one dashboard. A struct of closures so
 /// tests answer without showing a window.
 struct MonitorDashboardDeletionPrompts {
-    var confirm: @MainActor (_ title: String) async -> Bool
+    var confirm: @MainActor (_ id: String, _ title: String) async -> Bool
     var reportFailure: @MainActor () async -> Void
 
     static let system = MonitorDashboardDeletionPrompts(
-        confirm: { title in MonitorDashboardDeletionAlerts.confirm(title: title) },
+        confirm: { id, title in MonitorDashboardDeletionAlerts.confirm(id: id, title: title) },
         reportFailure: { MonitorDashboardDeletionAlerts.reportFailure() }
     )
 }
 
-/// Deletes one custom dashboard after the user confirms. Server status is
-/// built in and is never offered.
+/// Deletes one dashboard after the user confirms. Every board in the list,
+/// Server status included, is deleted the same way.
 /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
 @MainActor
 struct MonitorDashboardDeletion {
@@ -131,9 +131,13 @@ struct MonitorDashboardDeletion {
     var prompts: MonitorDashboardDeletionPrompts = .system
 
     func delete(_ dashboard: MonitorDashboard) async -> Outcome {
-        guard await prompts.confirm(dashboard.title) else { return .cancelled }
+        await delete(id: dashboard.id, title: dashboard.title)
+    }
+
+    func delete(id: String, title: String) async -> Outcome {
+        guard await prompts.confirm(id, title) else { return .cancelled }
         do {
-            return try store.deleteDashboard(id: dashboard.id) ? .deleted : .alreadyGone
+            return try store.deleteDashboard(id: id) ? .deleted : .alreadyGone
         } catch {
             await prompts.reportFailure()
             return .failed
@@ -146,8 +150,8 @@ struct MonitorDashboardDeletion {
 /// Escape never deletes.
 @MainActor
 enum MonitorDashboardDeletionAlerts {
-    static func confirm(title: String) -> Bool {
-        let alert = makeConfirmation(title: title)
+    static func confirm(id: String, title: String) -> Bool {
+        let alert = makeConfirmation(id: id, title: title)
         // Monitor lives in a non-activating panel; activate so the alert
         // takes the keyboard (Escape cancels) instead of the user's app.
         NSApp.activate(ignoringOtherApps: true)
@@ -165,11 +169,11 @@ enum MonitorDashboardDeletionAlerts {
     }
 
     /// Builds the dialog without displaying or activating it.
-    static func makeConfirmation(title: String) -> NSAlert {
+    static func makeConfirmation(id: String, title: String) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = messageText(title: title)
-        alert.informativeText = informativeText
+        alert.informativeText = informativeText(id: id)
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Delete").hasDestructiveAction = true
         return alert
@@ -179,8 +183,17 @@ enum MonitorDashboardDeletionAlerts {
         "Delete the “\(title)” dashboard?"
     }
 
-    static let informativeText =
+    static func informativeText(id: String) -> String {
+        id == MonitorStore.serverStatusID ? serverStatusText : collectorText
+    }
+
+    static let collectorText =
         "It will be removed from Monitor on this Mac and stays removed even if its collector writes it again. "
         + "The collector and its scripts are not touched; turn the collector off separately. "
-        + "Installing the dashboard again brings it back."
+        + "Ask your agent to restore the dashboard to bring it back."
+
+    static let serverStatusText =
+        "It will be removed from Monitor on this Mac, and Whytap stops connecting to your servers. "
+        + "servers.json is not touched. "
+        + "Ask your agent to restore the dashboard to bring it back."
 }

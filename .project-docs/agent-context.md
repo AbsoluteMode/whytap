@@ -678,15 +678,21 @@ Monitor inside hover:
   Refresh calls requestRefresh and reuses existing collectors/snapshot rendering.
   Hover launch and the legacy openMonitor callback both request inline .monitor
   with programmatic expansion; neither opens a window. The legacy window class
-  is retained for compatibility only. A custom dashboard's picker row has an ×
+  is retained for compatibility only. Every picker row, Server status included,
+  has an ×
   (no context menu: the island has no right-click actions; rows have no chevron
   and the scroller sits in the right margin beside the cards; row and × show
   hover/press/focus only while enabled). The × asks first
-  (Cancel-first alert; Server status has none). It records the ID in Monitor/removed-dashboards.json,
+  (Cancel-first alert). One rule for every board: it records the ID in
+  Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
+  A listed server-status hides Server status and stops its SSH polling,
+  cancelling a poll in flight on every live surface (an in-process notice per
+  Monitor folder); an unreadable list pauses polling too.
   Collectors, their scripts and servers.json are never touched; install-dashboard
-  lists the ID again, changing snapshot and list together (rollback on failure).
+  lists the ID again, changing snapshot and list together (rollback on failure),
+  and customize.py restore-dashboard <id> (server-status too) lists it again.
   Delete and install each run under an flock on Monitor/removed-dashboards.lock.
   WHY:
   .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md

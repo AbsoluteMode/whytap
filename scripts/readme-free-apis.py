@@ -217,7 +217,11 @@ def responsive(kind, alt, width):
 # and speech from ElevenLabs' free credits. One panel per key, with OpenAI's
 # model of the same price class in place of Claude's: on 2026-11-21 Maxim moved
 # every text feature to Claude Sonnet 5.5, so each key has one model. He reviews
-# and updates it every month together with the offers.
+# and updates it every month together with the offers. Subtitles on the OpenAI
+# key run on GPT-Realtime-Translate, which hears and translates in one model, so
+# that row spans the speech and model columns. Anthropic has no such model: the
+# Anthropic panel keeps its ElevenLabs + Claude pair rather than show a model
+# its key cannot run (.project-docs/decisions/2026-11-21-subtitle-speech-translation.md).
 SETUP_CHECKED = "2026-11-21"
 SPEECH = "Scribe v3 Live"
 SETUP_ROWS = [  # feature, speech model, uses the key's language model
@@ -230,13 +234,13 @@ SETUP_ROWS = [  # feature, speech model, uses the key's language model
     ("Translation", None, True),
     ("Subtitles", SPEECH, True),
 ]
-SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), model
+SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), model, one-model rows
     ("claude-code", "#d97757", "Anthropic key",
      ("Claude Max or Ultra: $100–200 API credit a month", "Max or Ultra: $100–200 credit a month"),
-     "Claude Sonnet 5.5"),
+     "Claude Sonnet 5.5", {}),
     ("openai", None, "OpenAI key",
      ("ChatGPT Pro: $100–500 API credit a month", "ChatGPT Pro: $100–500 credit a month"),
-     "GPT-6.2 Sol"),
+     "GPT-6.2 Sol", {"Subtitles": "GPT-Realtime-Translate"}),
 ]
 SETUP_FOOT = [
     "* The models are paid from your plan’s monthly API credit; speech uses",
@@ -260,7 +264,7 @@ def setup_svg(theme, layout):
         f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup'
         f'<tspan dx="{10 if wide else 7}" font-size="{14 if wide else 11.5}" font-weight="600" fill="{c["accent"]}">free* right now</tspan></text>',
     ]
-    for k, (asset, color, title, plan, model) in enumerate(SETUP_KEYS):
+    for k, (asset, color, title, plan, model, single) in enumerate(SETUP_KEYS):
         x = k * (pw + gap) if wide else 0
         y = top if wide else top + k * (panel_h + 14)
         out.append(f'  <rect x="{x + 0.5:.1f}" y="{y + 0.5:.1f}" width="{pw - 1:.1f}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>')
@@ -273,6 +277,10 @@ def setup_svg(theme, layout):
         out.append(f'  <line x1="{x + col[0]:.1f}" y1="{hy + 8}" x2="{x + pw - col[0]:.1f}" y2="{hy + 8}" stroke="{c["border"]}"/>')
         for i, (feature, speech, uses_model) in enumerate(SETUP_ROWS):
             ry = hy + 8 + rh * (i + 1) - rh * 0.32
+            if feature in single:  # one model hears and translates: it spans both columns
+                for cx, (text, weight) in zip(col, [(feature, "600"), (single[feature], "400")]):
+                    out.append(f'  <text x="{x + cx:.1f}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{c["ink"]}">{e(text)}</text>')
+                continue
             cells = [(feature, c["ink"], "600"), (speech or "—", c["ink"] if speech else c["sub"], "400"),
                      (model if uses_model else "—", c["ink"] if uses_model else c["sub"], "400")]
             for cx, (text, fill, weight) in zip(col, cells):
@@ -289,8 +297,10 @@ def setup_svg(theme, layout):
 
 def setup_alt():
     parts = []
-    for _, _, title, plan, model in SETUP_KEYS:
-        rows = "; ".join(f"{f}: " + " + ".join(x for x in [s, model if m else None] if x) for f, s, m in SETUP_ROWS)
+    for _, _, title, plan, model, single in SETUP_KEYS:
+        rows = "; ".join(f"{f}: " + (f"{single[f]} (speech and translation in one model)" if f in single
+                                     else " + ".join(x for x in [s, model if m else None] if x))
+                         for f, s, m in SETUP_ROWS)
         parts.append(f"{title} ({plan[0]}): {rows}")
     return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
 
@@ -313,7 +323,7 @@ def paid_plans():
     plans = [o for o in offers() if o["access"] == "paidPlan" and o["category"] == "models"]
     plans.sort(key=lambda o: PLAN_ORDER.index(o["assetName"]))
     for o in plans:
-        if not any(o["allowance"] in plan[0] for _, _, _, plan, _ in SETUP_KEYS):
+        if not any(o["allowance"] in plan[0] for _, _, _, plan, _, _ in SETUP_KEYS):
             sys.exit(f"My setup does not show {o['provider']}'s {o['allowance']}")
     return plans
 

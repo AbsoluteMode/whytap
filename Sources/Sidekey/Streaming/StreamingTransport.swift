@@ -16,6 +16,8 @@ enum StreamingFrame {
 /// to serialize one outstanding receive at a time.
 protocol StreamingTransporting: AnyObject, Sendable {
     var responseRequestID: String? { get }
+    /// The handshake's HTTP status: a refused upgrade (401, 429) has no frame.
+    var responseStatusCode: Int? { get }
     func resume()
     func cancel(reason: String?)
     func send(_ frame: StreamingFrame) async throws
@@ -23,7 +25,10 @@ protocol StreamingTransporting: AnyObject, Sendable {
 }
 
 /// Concrete `StreamingTransporting` backed by `URLSessionWebSocketTask`.
-extension StreamingTransporting { var responseRequestID: String? { nil } }
+extension StreamingTransporting {
+    var responseRequestID: String? { nil }
+    var responseStatusCode: Int? { nil }
+}
 
 final class URLSessionWebSocketTransport: StreamingTransporting, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
@@ -38,6 +43,8 @@ final class URLSessionWebSocketTransport: StreamingTransporting, @unchecked Send
             ?? response.value(forHTTPHeaderField: "xi-request-id")
             ?? response.value(forHTTPHeaderField: "x-request-id")
     }
+
+    var responseStatusCode: Int? { (task.response as? HTTPURLResponse)?.statusCode }
 
     func resume() {
         task.resume()

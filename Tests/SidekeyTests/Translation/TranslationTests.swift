@@ -48,6 +48,8 @@ final class FixtureSubtitleUpstream: BYOKUpstreamSession {
     let pair = AsyncStream<BYOKStreamEvent>.makeStream()
     var events: AsyncStream<BYOKStreamEvent> { pair.stream }
     var finalsJoin: BYOKTranscriptJoin = .verbatim
+    var spansSegment = false
+    var partialsSpanSegment: Bool { spansSegment }
     var audio: [Data] = []
     var closed = false
     var endCount = 0
@@ -80,10 +82,12 @@ final class TranslationTests: XCTestCase {
         segmenter.append("Hello", join: .wordBoundary, now: 0)
         segmenter.append("world", join: .wordBoundary, now: 0.1)
         XCTAssertEqual(segmenter.take(now: 1), "Hello world")
+        // One bad provider event (a 1,500-character "word") still yields
+        // bounded requests.
         segmenter.append(String(repeating: "a", count: 1_500), join: .verbatim, now: 0)
         var parts: [String] = []
         while let part = segmenter.take(now: 1, force: true) { parts.append(part) }
-        XCTAssertEqual(parts.map(\.count), [600, 600, 300])
+        XCTAssertEqual(parts.map(\.count), [300, 300, 300, 300, 300])
     }
 
     func testPCM16ClampsAndRejectsNonFiniteSamples() {
@@ -374,7 +378,7 @@ final class TranslationTests: XCTestCase {
         model.start()
         await waitUntil { model.phase == .listening }
         for index in 0..<55 {
-            upstream.pair.continuation.yield(.final("Line \(index) " + String(repeating: "word ", count: 65)))
+            upstream.pair.continuation.yield(.final("Line \(index) " + String(repeating: "word ", count: 40) + "end. "))
             await waitUntil { model.lines.last?.source.hasPrefix("Line \(index) ") == true && model.lines.last?.translation != nil }
         }
         XCTAssertEqual(model.lines.count, 40)
@@ -477,23 +481,28 @@ final class TranslationTests: XCTestCase {
         XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
-    func testSubtitleCaptionShowsNewestTranslationsAsOneRunningLine() {
-        func line(_ source: String, _ translation: String?) -> SubtitleLine {
-            var value = SubtitleLine(source: source); value.translation = translation; return value
+    func testSubtitleCaptionShowsNewestPairsWithTheLiveOriginalLast() {
+        func line(_ source: String, _ translation: String?, failed: Bool = false) -> SubtitleLine {
+            var value = SubtitleLine(source: source); value.translation = translation; value.failed = failed; return value
         }
-        XCTAssertNil(SubtitleCaption.text(lines: [], phase: .idle, issue: nil),
+        XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: .idle, issue: nil),
                      "An idle overlay shows only its controls, no empty-state copy")
-        XCTAssertEqual(SubtitleCaption.text(lines: [], phase: .connecting, issue: nil), "Connecting…")
-        XCTAssertEqual(SubtitleCaption.text(lines: [], phase: .listening, issue: nil), "Waiting for speech…")
-        XCTAssertEqual(SubtitleCaption.text(lines: [line("hi", nil)], phase: .listening, issue: nil), "Translating…")
-        XCTAssertNil(SubtitleCaption.text(lines: [], phase: .failed, issue: nil))
-        XCTAssertEqual(SubtitleCaption.text(lines: [line("a", "Привет."), line("b", "  "), line("c", "Как дела?")],
-                                            phase: .listening, issue: nil), "Привет. Как дела?")
+        XCTAssertEqual(SubtitleCaption.status(hasRows: false, phase: .connecting, issue: nil), "Connecting…")
+        XCTAssertEqual(SubtitleCaption.status(hasRows: false, phase: .listening, issue: nil), "Waiting for speech…")
+        XCTAssertNil(SubtitleCaption.status(hasRows: true, phase: .listening, issue: nil))
+        XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: .failed, issue: nil))
+
+        let rows = SubtitleCaption.rows(lines: [line("Hi.", "Привет."), line("  ", " "), line("Wait", nil),
+                                                line("Gone", nil, failed: true)], live: " and then ")
+        XCTAssertEqual(rows.map(\.source), ["Hi.", "Wait", "Gone", "and then"])
+        XCTAssertEqual(rows.map(\.translation), [.text("Привет."), .pending, .failed, .pending])
+        XCTAssertEqual(rows.map(\.isLive), [false, false, false, true])
+        XCTAssertEqual(rows.last?.id, SubtitleCaption.liveID)
+
         let many = (1...12).map { line("s\($0)", "t\($0)") }
-        XCTAssertEqual(SubtitleCaption.text(lines: many, phase: .idle, issue: nil),
-                       (5...12).map { "t\($0)" }.joined(separator: " "))
+        XCTAssertEqual(SubtitleCaption.rows(lines: many, live: "").map(\.source), (9...12).map { "s\($0)" })
         let issue = TranslationIssue(message: "Set up Subtitles in API & Models.", feature: .subtitlesAudio)
-        XCTAssertEqual(SubtitleCaption.text(lines: many, phase: .failed, issue: issue), issue.message)
+        XCTAssertEqual(SubtitleCaption.status(hasRows: true, phase: .failed, issue: issue), issue.message)
     }
 
     func testSubtitlesUseTheCompactBottomOverlayAndTextKeepsItsPalette() throws {

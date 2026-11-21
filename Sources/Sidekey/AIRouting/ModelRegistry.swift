@@ -82,6 +82,7 @@ extension ModelRegistry {
         RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .openAI, id: OpenAIRealtimeTranslateAdapter.model, uses: [.speechTranslation], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
         RegistryModel(kind: .anthropic, id: anthropicAgentModel, uses: [.chatWithTools], diarization: false),
@@ -153,8 +154,9 @@ extension ModelRegistry {
             case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .openAI:
-            // The authenticated live catalog is the source of available IDs.
-            return nil
+            // The authenticated live catalog is the source of available IDs;
+            // Subtitles audio offers the one live speech translation model.
+            return feature == .subtitlesAudio ? OpenAIRealtimeTranslateAdapter.model : nil
         case .openAICompatible:
             return nil
         case .onDevice:

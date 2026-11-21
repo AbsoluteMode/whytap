@@ -151,14 +151,18 @@ struct TranslationView: View {
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
     // The original RealtimeTranslator overlay: a bottom-anchored dark caption
     // box of at most five lines. Only the language pair and Start/Stop were added.
+    // Its content is phrase pairs, original beside translation.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
     @ViewBuilder private var subtitleContent: some View {
+        let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live,
+                                        liveTranslation: subtitles.liveTranslation)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
                 if let issue = subtitles.issue {
                     errorCard(issue)
-                } else if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase, issue: nil) {
-                    captionText(caption)
+                } else if !rows.isEmpty || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
+                    caption(rows)
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
                         .contextMenu { subtitleMenu }
@@ -169,11 +173,13 @@ struct TranslationView: View {
         } else {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                VStack(alignment: .leading, spacing: 10) {
+                // The box hugs its widest pair (up to the panel's inner width)
+                // and stays centred, so no empty strip runs beside the text.
+                HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
                     if showsOverlayControls { subtitleControls }
-                    if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase,
-                                                          issue: subtitles.issue) {
-                        captionText(caption)
+                    if subtitles.issue != nil || !rows.isEmpty
+                        || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
+                        caption(rows)
                     }
                     if let feature = subtitles.issue?.feature {
                         Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
@@ -182,25 +188,127 @@ struct TranslationView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
                 .shadow(radius: 5)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
                 .onHover { overlayHovered = $0 }
                 .contextMenu { subtitleMenu }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsOverlayControls)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(10)
         }
     }
 
+    /// The overlay panel is 760 pt wide: 10 pt outside and 16 pt inside the box.
+    static let overlayContentWidth: CGFloat = 760 - 2 * 10 - 2 * 16
+
     /// While subtitles run, the overlay shows only the caption; the controls
     /// return on hover and whenever capture is not running.
     private var showsOverlayControls: Bool { !subtitles.phase.isActive || overlayHovered }
 
     private var waitingWithoutAudio: Bool {
-        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty
+        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
+    }
+
+    /// Pairs when there are phrases, otherwise one status line. The box keeps
+    /// the overlay panel's height: pairs are bottom-anchored and only whole
+    /// pairs show, so the newest pair never moves and the oldest leaves at the
+    /// top in one piece; a new pair fades and slides in from the bottom. The
+    /// controls row, shown on hover, takes its height from the pairs.
+    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
+        if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
+            captionText(status)
+        } else if embedded {
+            NewestRowsLayout(spacing: 6, maxHeight: 150) {
+                ForEach(rows) { row in
+                    pairRow(row)
+                        .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .bottomLeading)
+            .clipped()
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Subtitles")
+        } else {
+            // Russian runs about a fifth longer than English and is the line
+            // being read: the grid gives the original only what it needs.
+            PairGridLayout(rowSpacing: 8, columnSpacing: 18, maxWidth: Self.overlayContentWidth,
+                           maxHeight: showsOverlayControls ? 108 : 146, inset: Self.bandInset) {
+                ForEach(rows) { row in
+                    Group {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(.white.opacity(row.ordinal.isMultiple(of: 2) ? Self.bandOpacity : 0))
+                        sourceText(row)
+                        translationText(row)
+                    }
+                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .clipped()
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Subtitles")
+        }
+    }
+
+    /// Every other pair sits on a faint band, so where one chunk ends and the
+    /// next begins is visible at a glance (chosen by the user from dots, an
+    /// accent first letter and bands). The band follows the pair's position
+    /// in the session, so it never jumps when an old pair leaves.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+    static let bandOpacity = 0.07
+    static let bandInset = CGSize(width: 8, height: 3)
+
+    private func sourceText(_ row: SubtitleCaption.Row) -> some View {
+        Text(row.source)
+            .font(.system(size: embedded ? 12 : 15, weight: .regular, design: .rounded))
+            .foregroundStyle(.white.opacity(row.isLive ? 0.42 : 0.6))
+            .lineSpacing(2)
+    }
+
+    /// Toolbox pairs: the pane is too narrow for two columns, so the original
+    /// sits above its translation.
+    @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !row.source.isEmpty { sourceText(row).frame(maxWidth: .infinity, alignment: .leading) }
+            translationText(row).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, Self.bandInset.width)
+        .padding(.vertical, Self.bandInset.height)
+        .background {
+            if row.ordinal.isMultiple(of: 2) {
+                RoundedRectangle(cornerRadius: 7).fill(.white.opacity(Self.bandOpacity))
+            }
+        }
+    }
+
+    @ViewBuilder private func translationText(_ row: SubtitleCaption.Row) -> some View {
+        switch row.translation {
+        case .text(let value):
+            Text(value)
+                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
+                .foregroundStyle(.white)
+                .lineSpacing(2)
+        case .live(let value):
+            // Still being spoken by the speech translator.
+            Text(value)
+                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineSpacing(2)
+        case .pending:
+            Image(systemName: "ellipsis")
+                .font(.system(size: embedded ? 12 : 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.35))
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion && !row.isLive)
+                .accessibilityLabel(row.isLive ? "Listening" : "Translating")
+        case .failed:
+            Text("Not translated")
+                .font(.system(size: embedded ? 11 : 13, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.35))
+        }
     }
 
     private func captionText(_ value: String) -> some View {

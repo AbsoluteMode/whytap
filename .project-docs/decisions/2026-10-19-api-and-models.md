@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/APIAndModels/APIAndModelsView.swift
     confirmed_at: 2026-10-19
-related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-10-19-deepgram-language-policy.md, 2026-10-19-api-hints.md, 2026-10-21-provider-key-tiles.md, 2026-11-17-openrouter-model-prices.md, 2026-11-19-on-device-dictation.md, 2026-11-19-provider-failure-reasons.md, 2026-11-20-elevenlabs-scribe-v3.md, 2026-11-20-speech-model-lists.md, 2026-11-20-settings-sync.md, 2026-11-21-recorded-meeting-models.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-10-19-deepgram-language-policy.md, 2026-10-19-api-hints.md, 2026-10-21-provider-key-tiles.md, 2026-11-17-openrouter-model-prices.md, 2026-11-19-on-device-dictation.md, 2026-11-19-provider-failure-reasons.md, 2026-11-20-elevenlabs-scribe-v3.md, 2026-11-20-speech-model-lists.md, 2026-11-20-settings-sync.md, 2026-11-21-recorded-meeting-models.md, 2026-11-21-subtitle-speech-translation.md]
 ---
 
 # API & Models

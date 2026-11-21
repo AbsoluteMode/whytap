@@ -65,6 +65,11 @@ protocol BYOKUpstreamSession: AnyObject {
     /// tail (possibly empty). Only that event has the complete display text.
     var emitsPartialAfterFrameFinals: Bool { get }
 
+    /// Every partial is the whole uncommitted segment so far (ElevenLabs),
+    /// and finals arrive only when a segment is committed. Subtitles translate
+    /// the stable start of such a partial instead of waiting for the commit.
+    var partialsSpanSegment: Bool { get }
+
     func sendAudio(_ pcm: Data) async
     func endInput() async
     func close() async
@@ -80,6 +85,7 @@ struct BYOKUsageSnapshot: Sendable {
 extension BYOKUpstreamSession {
     func usageSnapshot() async -> BYOKUsageSnapshot? { nil }
     var emitsPartialAfterFrameFinals: Bool { false }
+    var partialsSpanSegment: Bool { false }
     /// Default matches the historical behavior: BYOK providers emit whole
     /// words/segments, so segments are joined at word boundaries.
     var finalsJoin: BYOKTranscriptJoin { .wordBoundary }

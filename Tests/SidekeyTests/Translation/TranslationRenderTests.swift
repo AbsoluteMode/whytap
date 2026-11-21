@@ -160,3 +160,151 @@ private struct TranslationPreviewService: TextTranslating {
         text == "что нового?" ? "What’s new?" : "Translation: " + text
     }
 }
+
+/// Fixed EN -> RU answers for the phrase-pair renders; a phrase in `holds`
+/// never answers, so its pair shows the pending mark.
+private struct PairPreviewService: TextTranslating {
+    static let answers = [
+        "Welcome back everyone.": "С возвращением, друзья.",
+        "Today we have a special guest,": "Сегодня у нас особый гость,",
+        "who has spent ten years building speech systems.": "который десять лет создаёт системы распознавания речи.",
+        "Before we start, let me explain": "Прежде чем начать, позвольте объяснить,",
+        "how a neural network is structured.": "как устроена нейронная сеть.",
+        SubtitlePairRenderTests.longPhrase:
+            "И самое главное: каждый слой передаёт свои числа следующему, и тот постепенно превращает сырой звук в слова, которые мы можем прочитать.",
+    ]
+    var holds: Set<String> = []
+    func translate(_ text: String, target: TranslationTarget) async throws -> String {
+        if holds.contains(text) { try await Task.sleep(for: .seconds(3600)) }
+        return Self.answers[text] ?? text
+    }
+}
+
+@MainActor
+final class SubtitlePairRenderTests: XCTestCase {
+    /// One sentence longer than the segmenter's length cut: it stays whole.
+    nonisolated static let longPhrase =
+        "And the most important part is that every layer passes its numbers to the next one, which slowly turns raw sound into words we can read."
+    private static let script = ["Welcome back everyone.", "Today we have a special guest,",
+                                 "who has spent ten years building speech systems.", "Before we start, let me explain",
+                                 "how a neural network is structured."]
+
+    /// Offscreen @2x renders of the subtitle overlay with phrase pairs over a
+    /// dark video-like frame. Nothing is put on screen.
+    func testOffscreenSubtitlePairs() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_TRANSLATION_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_TRANSLATION_RENDER_DIR for offscreen visual checks.")
+        }
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let all = try await session(phrases: Self.script, holds: [], live: nil)
+        try renderOverlay(all, name: "subtitles-pairs.png")
+        let live = try await session(phrases: Self.script,
+                                     holds: ["how a neural network is structured."],
+                                     live: "Every layer takes the numbers")
+        try renderOverlay(live, name: "subtitles-pairs-live.png")
+        try renderToolbox(live, name: "toolbox-subtitles-pairs.png")
+        // A long sentence wraps only at the box's right edge; two short pairs
+        // make a narrow box.
+        let long = try await session(phrases: Self.script + [Self.longPhrase], holds: [], live: nil)
+        let short = try await session(phrases: Array(Self.script.prefix(2)), holds: [], live: nil)
+        try renderOverlay(long, name: "subtitles-pairs-long.png")
+        try renderOverlay(short, name: "subtitles-pairs-short.png")
+        await long.model.cancel().value
+        await short.model.cancel().value
+        // OpenAI speech translation: the recorded session, the last sentence
+        // still being heard and translated.
+        let speech = FakeSpeechTranslation()
+        let openAI = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { FixtureSubtitleAudio() },
+                                       makeService: { PairPreviewService() }, openTranslator: { _, _ in speech })
+        openAI.start()
+        for _ in 0..<200 where openAI.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
+        speech.yieldRecorded(until: 31_600)
+        for _ in 0..<200 where openAI.lines.count < 5 { try await Task.sleep(for: .milliseconds(5)) }
+        try renderOverlay(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "subtitles-openai-live.png")
+        try renderToolbox(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "toolbox-subtitles-openai.png")
+        await openAI.cancel().value
+        // Stopped: the language row and Start return above the newest pairs.
+        all.model.stop()
+        for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
+        try renderOverlay(all, name: "subtitles-pairs-stopped.png")
+        await all.model.cancel().value
+        await live.model.cancel().value
+    }
+
+    private struct Session { let model: LiveSubtitleModel; let upstream: FixtureSubtitleUpstream }
+
+    private func session(phrases: [String], holds: Set<String>, live: String?) async throws -> Session {
+        let audio = FixtureSubtitleAudio()
+        let upstream = FixtureSubtitleUpstream()
+        upstream.finalsJoin = .wordBoundary
+        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { audio }, open: { _ in upstream },
+                                      makeService: { PairPreviewService(holds: holds) })
+        model.sourceCode = "en"
+        model.targetCode = "ru"
+        model.start()
+        for _ in 0..<200 where model.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
+        for phrase in phrases {
+            upstream.pair.continuation.yield(.final(phrase))
+            for _ in 0..<200 where model.lines.last?.source != phrase { try await Task.sleep(for: .milliseconds(5)) }
+        }
+        for _ in 0..<200 where model.lines.contains(where: { !$0.isSettled && !holds.contains($0.source) }) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        if let live {
+            upstream.pair.continuation.yield(.partial(live))
+            for _ in 0..<200 where model.live != live { try await Task.sleep(for: .milliseconds(5)) }
+        }
+        return Session(model: model, upstream: upstream)
+    }
+
+    private func view(_ session: Session, embedded: Bool) -> TranslationView {
+        let presentation = TranslationWindowController.Presentation()
+        presentation.mode = .subtitles
+        return TranslationView(text: TextTranslationModel(makeService: { FixtureTranslator() }), subtitles: session.model,
+                               presentation: presentation, openSettings: { _ in }, embedded: embedded)
+    }
+
+    /// The overlay panel is 760 x 190 pt; it floats over whatever plays.
+    private func renderOverlay(_ session: Session, name: String) throws {
+        let frame = ZStack {
+            LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.20), Color(red: 0.20, green: 0.16, blue: 0.22)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(Color(red: 0.35, green: 0.42, blue: 0.55).opacity(0.45)).frame(width: 260).blur(radius: 50)
+                .offset(x: -220, y: -40)
+            Circle().fill(Color(red: 0.55, green: 0.40, blue: 0.32).opacity(0.35)).frame(width: 200).blur(radius: 50)
+                .offset(x: 260, y: 20)
+            VStack {
+                Spacer()
+                view(session, embedded: false).frame(width: 760, height: 190)
+            }
+        }
+        .frame(width: 860, height: 300)
+        .environment(\.colorScheme, .dark)
+        try write(frame, to: directoryURL().appendingPathComponent(name))
+    }
+
+    private func renderToolbox(_ session: Session, name: String) throws {
+        let pane = view(session, embedded: true)
+            .padding(16)
+            .frame(width: 360, height: 300, alignment: .topLeading)
+            .background(Color(white: 0.13))
+            .environment(\.colorScheme, .dark)
+        try write(pane, to: directoryURL().appendingPathComponent(name))
+    }
+
+    private func directoryURL() -> URL {
+        URL(fileURLWithPath: ProcessInfo.processInfo.environment["WHYTAP_TRANSLATION_RENDER_DIR"] ?? NSTemporaryDirectory())
+    }
+
+    private func write<V: View>(_ content: V, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        let image = try XCTUnwrap(renderer.nsImage)
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+    }
+}

@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-20
+verified_at: 2026-11-21
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-21 the maintainer's disk filled up (about 30 GB of leftover `.build` folders in finished feature worktrees) and asked that agents remove their own build output after the merge.
+    confirmed_at: 2026-11-21
   - type: user-confirmed
     reference: On 2026-11-20 the maintainer requested cleanup of old remote branches and a recurring branch cleanup rule for agents.
     confirmed_at: 2026-11-20
@@ -142,6 +145,21 @@ taps. Keep the user's working instance; do not launch a second app for testing.
    Keep protected and shared branches, including release branches. Keep
    branches from closed unmerged PRs until their work lands elsewhere or the
    maintainer approves discarding it.
+8. In the same step, remove your own worktree's build output: each feature
+   worktree's `.build` takes about 1.7 GB, and 2026-11-21 leftovers filled the
+   disk. From the root of **your** worktree, check that the folder is untracked
+   and Git-ignored, then delete it by its absolute path:
+
+   ```bash
+   git ls-files .build | head -1   # must print nothing
+   git check-ignore -q .build && rm -rf "$(pwd -P)/.build"
+   ```
+
+   Do the same for any other Git-ignored build output you created there
+   (`build/`, `node_modules/`). Delete only that output: keep the worktree, its
+   source and uncommitted changes, and never touch another session's worktree.
+   Skip this while a PR is still open or a fix may follow; a later `swift build`
+   recreates `.build`.
 
 Normal technical conflicts are resolved from current code and accepted
 requirements. Reuse one implementation for duplicate work; preserve both

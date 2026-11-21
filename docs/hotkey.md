@@ -2,6 +2,25 @@
 
 Single source of truth for how Whytap renders hotkey hints in its UI.
 
+## Default shortcuts
+
+Out of the box (`HotkeyConfiguration.defaults` and the meeting-record
+default). Remap any of them, or give any tool its own shortcut, in
+**Settings → Hotkeys**.
+
+| Action | Default |
+|---|---|
+| Dictate into the focused field | hold <kbd>Space</kbd> |
+| Ask the agent by text / by voice | tap / hold <kbd>Right ⌘</kbd> |
+| Google the selection / your voice | tap / hold <kbd>Right ⌥</kbd> |
+| Start or stop a meeting recording | <kbd>⌥</kbd> <kbd>M</kbd> |
+| Close the agent answer | <kbd>⌥</kbd> <kbd>Q</kbd> |
+| Close the agent answer | <kbd>Esc</kbd> |
+
+Keep this table in step with the defaults: the Ask assistant on whytap.ai
+reads it to confirm the keys it shows in answers. WHY:
+.project-docs/decisions/2026-11-21-hotkey-defaults-table.md
+
 ## Component
 
 All hotkey hints route through one SwiftUI component:

@@ -553,8 +553,39 @@ final class TranslationTests: XCTestCase {
             controller.resize(for: .text)
             XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5, "saved \(savedWidth) pt subtitle frame")
             XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
-            XCTAssertNil(defaults.object(forKey: TranslationWindowController.textWidthKey))
+            XCTAssertEqual(defaults.double(forKey: TranslationWindowController.textWidthKey), 560, accuracy: 0.5)
             panel.setFrameAutosaveName("") // free the name for the next simulated launch
+        }
+    }
+
+    func testUpdateKeepsThePaletteWidthSavedByThePreviousVersion() throws {
+        // The previous version kept the text palette only in the shared
+        // autosaved frame; its subtitles were a window at least 340 pt tall.
+        let autosaveName = "WhytapTranslationCompact"
+        let savedKey = "NSWindow Frame " + autosaveName
+        let previous = UserDefaults.standard.object(forKey: savedKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: savedKey) }
+            else { UserDefaults.standard.removeObject(forKey: savedKey) }
+        }
+        let screen = IslandScreenResolver.currentVisibleFrame()
+        for (saved, expected) in [(NSSize(width: 620, height: 140), CGFloat(620)),
+                                  (NSSize(width: 700, height: 400), CGFloat(560))] {
+            NSWindow(contentRect: NSRect(x: screen.midX - saved.width / 2, y: screen.midY - saved.height / 2,
+                                         width: saved.width, height: saved.height),
+                     styleMask: [.borderless], backing: .buffered, defer: true)
+                .saveFrame(usingName: autosaveName)
+            let (controller, defaults) = try makeLayoutController()
+            let panel = try XCTUnwrap(controller.window as? NSPanel)
+            XCTAssertEqual(panel.frame.size.width, saved.width, accuracy: 0.5, "Fixture must restore the old frame")
+            controller.resize(for: .text)
+            XCTAssertEqual(panel.frame.width, expected, accuracy: 0.5, "previous frame \(saved)")
+            controller.resize(for: .subtitles)
+            controller.resize(for: .text)
+            XCTAssertEqual(panel.frame.width, expected, accuracy: 0.5, "after subtitles, previous frame \(saved)")
+            XCTAssertEqual(defaults.double(forKey: TranslationWindowController.textWidthKey), expected, accuracy: 0.5,
+                           "The width is stored once, so later launches never read the shared frame")
+            panel.setFrameAutosaveName("")
         }
     }
 

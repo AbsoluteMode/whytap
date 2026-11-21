@@ -94,6 +94,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             },
             close: { [weak self] in self?.dismiss() }
         ))
+        adoptTextWidth(restoredFrame: panel.frame)
         configureChrome(for: .text)
         let publish = { [weak self] in
             guard let self else { return }
@@ -267,6 +268,18 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         guard !applyingLayout, laidOutMode == .text else { return }
         rememberTextWidth(panel.frame.width)
+    }
+
+    /// Once per Mac: until this version stores the palette width, the shared
+    /// autosaved frame belonged to the previous version, whose text palette
+    /// used it too. Keep that width unless the frame is a subtitles window
+    /// (the old window is at least 340 pt tall, this version's overlay 190 pt),
+    /// then store the width so later launches never read the shared frame.
+    private func adoptTextWidth(restoredFrame frame: NSRect) {
+        guard defaults.object(forKey: Self.textWidthKey) == nil else { return }
+        let isSubtitlesFrame = frame.height >= 340 || abs(frame.height - Self.subtitleSize.height) < 0.5
+        if !isSubtitlesFrame, frame.width >= 360 { textWidth = frame.width }
+        defaults.set(Double(textWidth), forKey: Self.textWidthKey)
     }
 
     private func rememberTextWidth(_ width: CGFloat) {

@@ -66,7 +66,11 @@ that back. Languages may be added to it; nothing else.
   wider overlay. Both modes share one autosaved frame, so that frame says
   nothing about the palette: its width is stored separately
   (`sidekey.translation.textPaletteWidth`, written when the user resizes the
-  palette) and every text layout uses it (560 pt by default).
+  palette) and every text layout uses it (560 pt by default). On the first
+  launch of this version the key is absent and the shared frame was written by
+  the previous version: its width is kept unless the frame is a subtitles
+  window (old ≥ 340 pt tall, or this overlay's 190 pt), then stored at once,
+  so the guess happens only that one time.
 
 ## Why
 
@@ -88,6 +92,9 @@ the reading position stable, which is why it was kept exactly.
   still uses the palette width. A palette width the user chose survives
   subtitles and relaunch. The builder found the 760 pt case on ticket #320 and
   the 680 pt case on ticket #322, which rejected a width-based guess.
+- Update test: a 620×140 palette frame saved by the previous version stays
+  620 pt; the previous version's 700×400 subtitles window gives 560 pt; both
+  are stored once (ticket #327).
 - Offscreen renders (`WHYTAP_TRANSLATION_RENDER_DIR`) of the idle overlay, a
   result and the Toolbox pane while listening. They do not prove hover,
   physical focus or live provider behavior.

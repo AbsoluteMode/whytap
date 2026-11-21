@@ -1743,6 +1743,13 @@ is separate from the removed app-managed speech/LLM models. Guide:
   request listed no Whytap on a clean Mac. The button then reads Open Settings
   and opens the pane on later presses; the asked state is not saved. WHY:
   .project-docs/decisions/2026-11-19-permission-request-before-settings.md
+  First-use surfaces (Screenshot, the onboarding) ask through one function,
+  ScreenRecordingAccess.shared.requestOnce(): that ScreenCaptureKit request at
+  most once per launch (in memory), never CGRequestScreenCaptureAccess, and the
+  caller shows nothing beside it. Screenshot (ScreenshotPermissionGate) starts
+  no capture session on that press; presses within 1 s are repeats and do
+  nothing; later presses without access show Whytap's help. WHY:
+  .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
 
 - **Accessibility** gates `NSEvent.addGlobalMonitorForEvents`
   (`RightCmdGestureMonitor`; `EscapeCloseEventMonitor` consumes only the first

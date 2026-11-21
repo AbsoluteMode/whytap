@@ -608,6 +608,7 @@ struct OnboardingPermissionsPage: View {
                          detail: "To type for you.",
                          granted: keyboard, requested: permissions.accessibilityRequested,
                          action: permissions.requestAccessibility)
+                    screenRecordingRow
                 }
                 .padding(.top, 24)
                 // Both allowed but no shortcut: the repair actions, never a
@@ -641,6 +642,49 @@ struct OnboardingPermissionsPage: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissions.refresh(restartRecoveryPolling: false)
         }
+    }
+
+    /// Optional, for Shot: never holds Continue. Allow is the same single
+    /// request as Settings -> Permissions (`requestScreenRecording`); a
+    /// second press opens System Settings.
+    // WHY: .project-docs/decisions/2026-11-19-permission-request-before-settings.md
+    private var screenRecordingRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "rectangle.dashed.badge.record")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(OnboardingTheme.muted)
+                .frame(width: 34, height: 26)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Screen Recording")
+                    .font(OnboardingTheme.sans(12.5, weight: .medium))
+                    .foregroundColor(OnboardingTheme.ink2)
+                Text("OPTIONAL · FOR SHOT")
+                    .font(OnboardingTheme.mono(9.5, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundColor(OnboardingTheme.faint)
+            }
+            Spacer(minLength: 4)
+            if permissions.screenRecordingGranted {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(OnboardingTheme.green)
+                    .accessibilityLabel("Screen Recording: Allowed")
+            } else if permissions.isRequestingScreenRecording {
+                ProgressView().controlSize(.small).accessibilityLabel("Asking for Screen Recording")
+            } else {
+                OnboardingOutlineButton(title: permissions.screenRecordingRequested ? "Open Settings" : "Allow") {
+                    Task { await permissions.requestScreenRecording() }
+                }
+                .accessibilityLabel(permissions.screenRecordingRequested
+                    ? "Open System Settings for Screen Recording" : "Allow Screen Recording, optional, for Shot")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(OnboardingTheme.border, style: StrokeStyle(lineWidth: 0.75, dash: [4, 3])))
+        .accessibilityElement(children: .contain)
     }
 
     private func card(icon: String, title: String, detail: String, granted: Bool, requested: Bool,

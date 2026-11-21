@@ -408,6 +408,26 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.42)).detail.contains("42%"))
     }
 
+    func testScreenRecordingIsOptionalAndAskedOnce() async throws {
+        AppState.shared.dropHotkeyStatus = .ready
+        var requests = 0
+        var settingsOpened = 0
+        let access = PermissionsSettingsViewModel(
+            onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
+            screenRecordingAccessProvider: { false },
+            screenRecordingRequester: { requests += 1 },
+            accessibilityRequester: {}, openAccessibilitySettings: {},
+            openScreenRecordingSettings: { settingsOpened += 1 },
+            runtimeRefresh: { _, _ in })
+        XCTAssertTrue(access.allRequiredGranted, "Continue does not wait for Screen Recording")
+        await access.requestScreenRecording()
+        XCTAssertEqual(requests, 1, "One request to macOS")
+        await access.requestScreenRecording()
+        XCTAssertEqual(requests, 1, "No second request")
+        XCTAssertEqual(settingsOpened, 1, "The next press opens System Settings")
+    }
+
     // MARK: - Language
 
     func testLanguageIsTheInputLanguageSetting() throws {
@@ -634,6 +654,7 @@ final class OnboardingTests: XCTestCase {
                 onComplete: {}, autoComplete: true,
                 snapshotProvider: { .init(accessibilityGranted: granted.value,
                                           microphoneStatus: granted.value ? .authorized : .notDetermined) },
+                screenRecordingAccessProvider: { false },
                 accessibilityRequester: {}, openAccessibilitySettings: {}, runtimeRefresh: { _, _ in })
             let tools = OnboardingCodingTools(detect: { [] }, connect: { _ in CaseClientSetupReport() })
             tools.show([.claudeCode, .codex], state: stop == .featuresConnected ? .connected : .idle)

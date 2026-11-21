@@ -159,7 +159,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 
 ## You may also like
 
-<p align="center"><a href="https://github.com/AbsoluteMode/session-recall"><b>Session Recall</b></a><br>Shared memory for Claude Code, Codex and Cursor: find an old decision by meaning across all your agents' chats, with links back to the original turns.</p>
+<p align="center"><a href="https://github.com/AbsoluteMode/session-recall"><b>Session Recall</b></a><br>Shared semantic memory for Claude Code, Codex, Cursor, and Antigravity: find an old decision by meaning across all your agents' chats, with links back to the original turns.</p>
 
 <p align="center"><a href="https://github.com/AbsoluteMode/flora"><b>flora</b></a><br>Workflow contracts for coding harnesses: every step says what proves it is done, and an independent verifier checks that before the next step starts.</p>
 

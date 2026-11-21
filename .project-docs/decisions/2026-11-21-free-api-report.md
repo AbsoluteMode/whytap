@@ -74,19 +74,20 @@ paying.
   use). This is the one place the README names paid-plan credits, labelled as
   such. Maxim updates the setup himself every month (`SETUP_*` in the script,
   with its own check date).
-- Between the free cards and My setup, **Already paying for Claude Max or
-  ChatGPT Pro?** (asked by Maxim on 2026-11-21: Whytap is the app that puts
-  a paid plan's API quota to work). It shows the two plans' monthly API
-  credit, what Whytap spends it on (Smart dictation, Meeting notes, Agent,
-  Translation) and that it is included, needs no API card and expires unused.
-  It names no competing apps, at Maxim's request. The ranges come from the
-  app's paid-plan hints and the tiers from the official pages, checked on
-  2026-11-21: [Anthropic, Max $100 and Ultra $200 a month](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans),
+- Between the free cards and My setup, **Already paying for an OpenAI or
+  Anthropic subscription?** (asked by Maxim on 2026-11-21: Whytap is the app
+  that puts a paid plan's API quota to work). After a first version with
+  tiers, uses and conditions, Maxim asked for the plain form: the line and two
+  linked cards, ChatGPT Pro ($100–500) and Claude Max & Ultra ($100–200 API
+  credit each month), each opening the provider's own page about the offer.
+  No competing apps are named. The cards have a fixed width, so they sit side
+  by side on a wide column and one under the other on a narrow one. Amounts
+  come from the app's paid-plan hints, checked on 2026-11-21 against the
+  official pages: [Anthropic, Max $100 and Ultra $200 a month](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans),
   [OpenAI, Pro $100, $200 or $500 a month](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
-  The script stops when the hint's range, the tiers or My setup disagree.
-  It sits there because it leads straight into My setup, which shows the
-  same credit at work, rather than in the header or next to the $600 → $0
-  banner about free use.
+  The script stops when My setup shows another range, and
+  `APIHintsRenderTests` checks the cards against the hints. The block leads
+  into My setup, which shows the same credit at work.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.

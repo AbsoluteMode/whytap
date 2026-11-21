@@ -995,7 +995,7 @@ and Cloudflare wait for their own provider support. The tab has no footer.
 Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
-The no-card offers also form README's Free API keys cards (provider,
+The no-card offers also form README's Free to run cards (provider,
 allowance, period, purpose only), generated from APIHintsView.hints by
 scripts/readme-free-apis.py (APIHintsRenderTests fails on stale cards). A monthly review rechecks every offer on its official page,
 updates terms and dates in both places through one PR and reports changes to

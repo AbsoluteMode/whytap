@@ -131,9 +131,9 @@ codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 
 <p align="center"><sub>Case keys: Whytap → Case → Connect · <a href="docs/customization/app-control.md">What the plugin can do</a></sub></p>
 
-## Free API keys
+## Free to run
 
-<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-banner-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-banner-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0" src="docs/assets/readme/free-api-banner-wide-dark.svg" width="640"></picture></p>
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-banner-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-banner-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0. Your own keys (BYOK, billed by the provider); Local speech-to-text (on this Mac, Apple Silicon); Self-hosted (OpenAI-compatible servers). Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026." src="docs/assets/readme/free-api-banner-wide-dark.svg" width="640"></picture></p>
 
 <p align="center">
 <a href="https://deepgram.com/pricing"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-deepgram-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-deepgram-light.svg"><img alt="Deepgram: $200 one-time starter credit (Speech to text)" src="docs/assets/readme/free-api-deepgram-dark.svg" width="196"></picture></a>
@@ -141,6 +141,3 @@ codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 <a href="https://openrouter.ai/models?max_price=0"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-openrouter-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-openrouter-light.svg"><img alt="OpenRouter: 50 / day free model requests (Language models)" src="docs/assets/readme/free-api-openrouter-dark.svg" width="196"></picture></a>
 <a href="https://www.tavily.com/pricing"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-dark.svg" width="196"></picture></a>
 </p>
-
-<p align="center">Everyday use fits in the free quotas.<br>
-<sub>No card needed · Reviewed monthly · Last checked November 21, 2026</sub></p>

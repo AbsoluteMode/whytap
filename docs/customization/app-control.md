@@ -236,10 +236,11 @@ authorization and the app-control namespace never returns secret values.
 
 ## The built-in Whytap Agent
 
-The Agent in the island (Right Command) has the same `whytap_*` tools: the
-same names, descriptions and argument schemas, taken from the plugin's own
+The Agent in the island (Right Command) has the same `whytap_*` operations:
+the same names, descriptions and argument schemas, taken from the plugin's own
 catalog and run inside the app by the same controller, without the helper or
-an MCP server. Ask it, for example, "switch Drop Smart cleanup to
+an MCP server. The model sees them as one `whytap` tool (operation plus a JSON
+arguments string), which keeps every provider's strict tool limits. Ask it, for example, "switch Drop Smart cleanup to
 anthropic/claude-sonnet-5.5", "add a task: send the report" or "where did we
 discuss the budget?". Every change still needs the exact current value, and
 each confirmed change appears as one line above the answer, such as

@@ -91,6 +91,18 @@ final class NativeAgentAppControlTests: XCTestCase {
             ["id": id, "type": "function", "function": ["name": name, "arguments": text]]]],
             "finish_reason": "tool_calls"]], "usage": ["cost": 0.001]]
     }
+    private func json(_ object: [String: Any]) -> String {
+        String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+    /// The model's call of the one whytap tool: operation + arguments string.
+    private func app(_ operation: String, _ arguments: [String: Any], id: String) -> [String: Any] {
+        call(NativeAgentAppControl.toolName, ["operation": operation, "arguments": json(arguments)], id: id)
+    }
+    private func dispatch(_ operation: String, _ arguments: [String: Any]) -> NativeAgentToolCall {
+        NativeAgentToolCall(id: "x", name: NativeAgentAppControl.toolName,
+                            arguments: ["operation": operation, "arguments": json(arguments)])
+    }
+
     private func final(_ answer: String) -> [String: Any] {
         call("finish_answer", ["status": "answered", "answer": answer, "sources": [], "actions": []], id: "final")
     }
@@ -143,8 +155,8 @@ final class NativeAgentAppControlTests: XCTestCase {
     func testSwitchDropSmartCleanupModelShowsOneConfirmedLine() async throws {
         let e = try env()
         let result = try await turn(e, "переключи Drop Smart cleanup на candidate-text", [
-            call("whytap_get_state", [:], id: "s"),
-            call("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
+            app("whytap_get_state", [:], id: "s"),
+            app("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
                                       "model": "candidate-text", "expected": [
                                         "account": "openRouter", "model": "old-text", "provider": "old/pin"]], id: "m"),
             final("Готово.")
@@ -154,19 +166,19 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertTrue(result.labels.contains("Reading Whytap settings"))
         XCTAssertTrue(result.labels.contains("Drop Smart cleanup → candidate-text"), "\(result.labels)")
         XCTAssertEqual(result.events.last, .done(sources: []))
-        // The model got the same tools and the app-owned instructions.
+        // The model got the one whytap tool and the app-owned instructions.
         let first = try XCTUnwrap(result.bodies.first)
         let names = (first["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
-        XCTAssertTrue(Set(AppControlMCPServer.tools.compactMap { $0.object?["name"]?.string }).isSubset(of: Set(names)))
+        XCTAssertEqual(names.filter { $0.hasPrefix("whytap") }, [NativeAgentAppControl.toolName])
         let system = (first["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
-        XCTAssertTrue(system.contains("Whytap tools (whytap_*) read and change this app itself"))
+        XCTAssertTrue(system.contains("The whytap tool reads and changes this app itself"))
         XCTAssertFalse(result.toolResults().joined().contains("fake-provider-key"))
     }
 
     func testAddTaskWithStrictNullsSavesExactlyTheTask() async throws {
         let e = try env()
         let result = try await turn(e, "добавь задачу купить молоко", [
-            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(),
+            app("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(),
                                      "tasks": [["title": "Купить молоко", "status": NSNull(), "children": NSNull()]]], id: "t"),
             final("Добавил.")
         ])
@@ -186,7 +198,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertTrue(seeded.ok)
         let original = try XCTUnwrap(e.planner.archive.tasks.first?.node)
         let result = try await turn(e, "Add Review agent with the status ready", [
-            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(),
+            app("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(),
                                      "tasks": [["title": "Review agent", "status": "ready", "children": NSNull()]]], id: "t"),
             final("Recorded.")
         ])
@@ -205,7 +217,7 @@ final class NativeAgentAppControlTests: XCTestCase {
             .object(["title": .string("Review agent"), "status": .string("waiting")])])]))
         _ = await e.controller.handle(AppControlRequest("todo_add", arguments: ["titles": .array([.string("Plain")])]))
         let result = try await turn(e, "Add Review agent (waiting) and Plain again", [
-            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
+            app("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
                 ["title": "Review agent", "status": "waiting", "children": NSNull()],
                 ["title": "Plain", "status": NSNull(), "children": NSNull()]]], id: "t"),
             final("Already there.")
@@ -220,7 +232,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         let e = try env()
         _ = await e.controller.handle(AppControlRequest("todo_add", arguments: ["titles": .array([.string("Report")])]))
         let result = try await turn(e, "Report is in review, add Send it", [
-            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
+            app("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
                 ["title": "Report", "status": "in review", "children": NSNull()],
                 ["title": "Send it", "status": NSNull(), "children": NSNull()]]], id: "t"),
             final("Done.")
@@ -234,7 +246,7 @@ final class NativeAgentAppControlTests: XCTestCase {
             .object(["title": .string("Отчёт"), "status": .string("жду данных")])])]))
         let id = try XCTUnwrap(added.data.object?["tasks"]?.array?.first?.object?["id"]?.string)
         let result = try await turn(e, "убери статус у задачи Отчёт и закрой её", [
-            call("whytap_todo_update", ["id": id, "title": NSNull(), "status": "", "parentID": NSNull(),
+            app("whytap_todo_update", ["id": id, "title": NSNull(), "status": "", "parentID": NSNull(),
                                         "completed": true], id: "u"),
             final("Сделано.")
         ])
@@ -249,7 +261,7 @@ final class NativeAgentAppControlTests: XCTestCase {
     func testListModelsAnswersFromTheAppCatalogWithoutAChange() async throws {
         let e = try env()
         let result = try await turn(e, "какие у меня модели для Drop Smart cleanup", [
-            call("whytap_list_models", ["feature": "dropSmartCleanup", "query": NSNull(), "account": NSNull(),
+            app("whytap_list_models", ["feature": "dropSmartCleanup", "query": NSNull(), "account": NSNull(),
                                         "limit": NSNull()], id: "l"),
             final("candidate-text")
         ])
@@ -266,7 +278,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         let e = try env()
         await e.probe.configure(.failed(reason: "model not found"))
         let result = try await turn(e, "поставь Drop Smart cleanup на no-such-model", [
-            call("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
+            app("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
                                       "model": "no-such-model", "expected": [
                                         "account": "openRouter", "model": "old-text", "provider": "old/pin"]], id: "m"),
             final("Не получилось: такой модели нет.")
@@ -279,7 +291,7 @@ final class NativeAgentAppControlTests: XCTestCase {
     func testStaleExpectedValueIsAConflictAndChangesNothing() async throws {
         let e = try env()
         let result = try await turn(e, "переключи Drop Smart cleanup на candidate-text", [
-            call("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
+            app("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
                                       "model": "candidate-text", "expected": NSNull()], id: "m"),
             final("Значение изменилось, перечитаю.")
         ])
@@ -295,13 +307,13 @@ final class NativeAgentAppControlTests: XCTestCase {
         let names = NativeAgentAppControl.tools.map(\.name)
         XCTAssertFalse(names.contains { $0.localizedCaseInsensitiveContains("key") || $0.contains("clipboard") })
         let result = try await turn(e, "покажи мой ключ OpenRouter", [
-            call("whytap_get_key", ["account": "openRouter"], id: "k"),
-            call("whytap_set_setting", ["key": "openRouterApiKey", "value": "x", "expected": NSNull()], id: "s"),
-            call("whytap_get_settings", [:], id: "g"),
+            app("whytap_get_key", ["account": "openRouter"], id: "k"),
+            app("whytap_set_setting", ["key": "openRouterApiKey", "value": "x", "expected": NSNull()], id: "s"),
+            app("whytap_get_settings", [:], id: "g"),
             final("Ключи нельзя показать.")
         ])
         let told = result.toolResults()
-        XCTAssertTrue(told[0].contains("unavailable"), told[0])
+        XCTAssertTrue(told[0].contains("unknown_operation"), told[0])
         XCTAssertTrue(told[1].contains("invalid_arguments"), told[1])
         XCTAssertFalse(told.joined().contains("fake-provider-key"))
         XCTAssertFalse(told.joined().contains("router-secret"))
@@ -314,37 +326,49 @@ final class NativeAgentAppControlTests: XCTestCase {
         for arguments: [String: Any] in [["feature": 5], ["feature": "dropSmartCleanup", "bogus": "x"],
                                          ["feature": "noSuchFeature"], ["feature": ["nested": true]]] {
             let result = await NativeAgentAppControl.execute(
-                NativeAgentToolCall(id: "x", name: "whytap_list_models", arguments: arguments), handler: handler)
+                dispatch("whytap_list_models", arguments), handler: handler)
             XCTAssertTrue(result.text.contains("invalid_arguments"), "\(arguments): \(result.text)")
             XCTAssertNil(result.change)
         }
-        let write = await NativeAgentAppControl.execute(NativeAgentToolCall(id: "w", name: "whytap_set_setting",
-            arguments: ["key": "dropMode", "value": "turbo", "expected": "fast"]), handler: handler)
+        let write = await NativeAgentAppControl.execute(dispatch("whytap_set_setting",
+            ["key": "dropMode", "value": "turbo", "expected": "fast"]), handler: handler)
         XCTAssertTrue(write.text.contains("invalid_arguments"), write.text)
         XCTAssertNil(write.change)
+        // The arguments string itself: not JSON, not an object, unknown operation.
+        for call in [NativeAgentToolCall(id: "j", name: NativeAgentAppControl.toolName,
+                                         arguments: ["operation": "whytap_get_state", "arguments": "{broken"]),
+                     NativeAgentToolCall(id: "a", name: NativeAgentAppControl.toolName,
+                                         arguments: ["operation": "whytap_get_state", "arguments": "[1,2]"]),
+                     NativeAgentToolCall(id: "n", name: NativeAgentAppControl.toolName,
+                                         arguments: ["operation": "whytap_get_state", "arguments": 42])] {
+            let result = await NativeAgentAppControl.execute(call, handler: handler)
+            XCTAssertTrue(result.text.contains("invalid_arguments"), result.text)
+        }
+        let unknown = await NativeAgentAppControl.execute(dispatch("whytap_delete_everything", [:]), handler: handler)
+        XCTAssertTrue(unknown.text.contains("unknown_operation"), unknown.text)
         XCTAssertEqual(e.routing.route(for: .dropSmartCleanup)?.model, "old-text")
     }
 
     func testSettingChangeLineComesFromSavedValue() async throws {
         let e = try env()
         let handler: NativeAgentAppControl.Handler = { await e.controller.handle($0) }
-        let result = await NativeAgentAppControl.execute(NativeAgentToolCall(id: "w", name: "whytap_set_setting",
-            arguments: ["key": "dropMode", "value": "smart", "expected": "fast"]), handler: handler)
+        let result = await NativeAgentAppControl.execute(dispatch("whytap_set_setting",
+            ["key": "dropMode", "value": "smart", "expected": "fast"]), handler: handler)
         XCTAssertEqual(result.change, "Drop mode → Smart")
-        let language = await NativeAgentAppControl.execute(NativeAgentToolCall(id: "l", name: "whytap_set_setting",
-            arguments: ["key": "inputLanguage", "value": "ru", "expected": NSNull()]), handler: handler)
+        let language = await NativeAgentAppControl.execute(dispatch("whytap_set_setting",
+            ["key": "inputLanguage", "value": "ru", "expected": NSNull()]), handler: handler)
         XCTAssertEqual(language.change, "Input language → Russian")
     }
 
     func testWithoutTheAppTheAgentIsOfferedNoWhytapTools() async throws {
         let e = try env()
         let result = try await turn(e, "переключи модель", [
-            call("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
+            app("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
                                       "model": "candidate-text", "expected": NSNull()], id: "m"),
             final("Не могу.")
         ], installed: false)
         let names = (result.bodies.first?["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
-        XCTAssertFalse(names.contains { $0.hasPrefix("whytap_") })
+        XCTAssertFalse(names.contains { $0.hasPrefix("whytap") })
         XCTAssertTrue(result.toolResults().first?.contains("unavailable") == true)
         XCTAssertEqual(e.routing.route(for: .dropSmartCleanup)?.model, "old-text")
         let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
@@ -353,44 +377,90 @@ final class NativeAgentAppControlTests: XCTestCase {
 
     // MARK: Catalog contract
 
-    func testDescriptionsAndNamesComeFromTheMCPCatalogAndSchemasAreStrict() throws {
+    func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {
         let mcp = AppControlMCPServer.tools.compactMap(\.object)
-        let native = NativeAgentTools.structuredDefinitions(allowActions: false, appControl: true)
         XCTAssertEqual(NativeAgentAppControl.tools.count, mcp.count)
-        for tool in mcp {
-            let name = try XCTUnwrap(tool["name"]?.string)
-            let definition = try XCTUnwrap(native.first { $0["name"] as? String == name }, name)
-            XCTAssertEqual(definition["description"] as? String, tool["description"]?.string, name)
-            XCTAssertEqual(definition["strict"] as? Bool, true, name)
-            try assertStrict(definition["parameters"] as Any, path: name)
+        let native = NativeAgentTools.structuredDefinitions(allowActions: false, appControl: true)
+        XCTAssertFalse(native.contains { ($0["name"] as? String)?.hasPrefix("whytap_") == true })
+        let tool = try XCTUnwrap(native.first { $0["name"] as? String == NativeAgentAppControl.toolName })
+        XCTAssertEqual(tool["strict"] as? Bool, true)
+        let parameters = try XCTUnwrap(tool["parameters"] as? [String: Any])
+        let operation = try XCTUnwrap((parameters["properties"] as? [String: Any])?["operation"] as? [String: Any])
+        XCTAssertEqual(operation["enum"] as? [String], mcp.compactMap { $0["name"]?.string })
+        let description = try XCTUnwrap(tool["description"] as? String)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        for entry in mcp {
+            let name = try XCTUnwrap(entry["name"]?.string)
+            XCTAssertTrue(description.contains(name + ": " + (entry["description"]?.string ?? "-")), name)
+            let schema = String(decoding: try encoder.encode(try XCTUnwrap(entry["inputSchema"])), as: UTF8.self)
+            XCTAssertTrue(description.contains("Arguments schema: " + schema), name)
         }
-        // To-do nesting keeps its five levels without a recursive $ref.
-        let add = try XCTUnwrap(native.first { $0["name"] as? String == "whytap_todo_add" })
-        var depth = 0
-        var level = ((add["parameters"] as? [String: Any])?["properties"] as? [String: Any])?["tasks"]
-        while let array = (level as? [String: Any])?["anyOf"].flatMap({ ($0 as? [[String: Any]])?.first }) ?? (level as? [String: Any]),
-              let item = array["items"] as? [String: Any] {
-            depth += 1
-            level = (item["properties"] as? [String: Any])?["children"]
-        }
-        XCTAssertEqual(depth, TodoTree.maxDepth)
     }
 
-    private func assertStrict(_ schema: Any, path: String) throws {
-        if let list = schema as? [Any] { for item in list { try assertStrict(item, path: path) }; return }
-        guard let object = schema as? [String: Any] else { return }
-        for banned in ["$ref", "$defs", "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum"] {
-            XCTAssertNil(object[banned], "\(path) has \(banned)")
+    /// Every first request must compile on each native route, with and
+    /// without file edits and commands. Anthropic: at most 20 strict tools,
+    /// 24 optional and 16 union parameters across them, no recursion
+    /// (https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+    /// OpenAI strict: every property required, closed objects, nesting <= 10.
+    func testFirstRequestFitsStrictSchemaLimitsOnEveryRoute() async throws {
+        StubURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        addTeardownBlock { session.invalidateAndCancel(); StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in (500, ["Content-Type": "application/json"], Data("{}".utf8)) }
+        for provider in [OpenCodeModelProvider.anthropic, .openAI, .openRouter] {
+            for allowActions in [false, true] {
+                let options = AgentRunOptions(model: "synthetic-model", allowActions: allowActions, openCodeProvider: provider)
+                var model = NativeAgentModel(options: options, key: "fixture-only", system: "Fixture", history: [],
+                                             prompt: "Say hello", http: NativeAgentHTTP(session: session),
+                                             usageSink: { _ in }, diagnosticsSink: { _ in })
+                _ = try? await model.next(tools: NativeAgentTools.structuredDefinitions(allowActions: allowActions,
+                                                                                     appControl: true),
+                                          structuredCompletion: true)
+                let label = "\(provider) allowActions=\(allowActions)"
+                let data = try XCTUnwrap(StubURLProtocol.capturedBodies.last, label)
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                let tools = try XCTUnwrap(body["tools"] as? [[String: Any]], label)
+                let strict = tools.map { $0["function"] as? [String: Any] ?? $0 }.filter { $0["strict"] as? Bool == true }
+                XCTAssertEqual(strict.count, tools.count, label + ": one strict mode across the catalog")
+                XCTAssertTrue(strict.contains { $0["name"] as? String == NativeAgentAppControl.toolName }, label)
+                XCTAssertTrue(strict.contains { $0["name"] as? String == NativeAgentFinalAnswer.toolName }, label)
+                XCTAssertLessThanOrEqual(strict.count, 20, label)
+                var count = SchemaCount()
+                for tool in strict {
+                    let schema = tool["input_schema"] ?? tool["parameters"] ?? NSNull()
+                    count.visit(schema, depth: 1, path: label + "/" + (tool["name"] as? String ?? "?"))
+                }
+                XCTAssertLessThanOrEqual(count.unions, 16, label)
+                XCTAssertLessThanOrEqual(count.optional, 24, label)
+                XCTAssertLessThanOrEqual(count.depth, 10, label)
+                XCTAssertTrue(count.problems.isEmpty, label + ": " + count.problems.joined(separator: "; "))
+            }
         }
-        if let type = object["type"] { XCTAssertTrue(type is String, "\(path) uses a type list") }
-        if object["type"] as? String == "object" {
-            XCTAssertEqual(object["additionalProperties"] as? Bool, false, path)
-            let properties = object["properties"] as? [String: Any] ?? [:]
-            XCTAssertEqual(Set(object["required"] as? [String] ?? []), Set(properties.keys), path)
-            for (key, value) in properties { try assertStrict(value, path: path + "." + key) }
+    }
+
+    private struct SchemaCount {
+        var unions = 0, optional = 0, depth = 0
+        var problems: [String] = []
+        mutating func visit(_ node: Any, depth level: Int, path: String) {
+            guard let schema = node as? [String: Any] else { return }
+            depth = max(depth, level)
+            for banned in ["$ref", "$defs", "oneOf", "minLength", "maxLength", "maxItems", "minimum", "maximum"]
+                where schema[banned] != nil { problems.append("\(path) has \(banned)") }
+            let branches = schema["anyOf"] as? [Any] ?? []
+            if !branches.isEmpty || schema["type"] is [Any] { unions += 1 }
+            branches.forEach { visit($0, depth: level, path: path) }
+            if schema["type"] as? String == "object" {
+                let properties = schema["properties"] as? [String: Any] ?? [:]
+                let required = Set(schema["required"] as? [String] ?? [])
+                optional += properties.keys.filter { !required.contains($0) }.count
+                if schema["additionalProperties"] as? Bool != false { problems.append("\(path) is open") }
+                for (key, value) in properties { visit(value, depth: level + 1, path: path + "." + key) }
+            }
+            if let items = schema["items"] { visit(items, depth: level + 1, path: path + "[]") }
         }
-        if let items = object["items"] { try assertStrict(items, path: path + "[]") }
-        if let anyOf = object["anyOf"] { try assertStrict(anyOf, path: path) }
     }
 
     func testInstructionsKeepTheSingleReplyLanguageRule() {

@@ -33,12 +33,15 @@ Agent in Whytap's own island had none of these tools, so "switch Drop Smart to
 
 ## Decision
 
-- **One catalog.** The native Agent is offered every tool of
-  `AppControlMCPServer.tools` under the same `whytap_*` name with the same
-  description. The only change in the shared file is that the list is
-  `public`. `NativeAgentAppControl` derives the native definitions, the
-  operation names and which tools write (`readOnlyHint`) from it; a new MCP
-  tool reaches the Agent without another list.
+- **One catalog, one tool.** The native Agent gets every operation of
+  `AppControlMCPServer.tools` through ONE strict tool, `whytap`, with two
+  required strings: `operation` (an enum of the MCP names, `whytap_set_model`
+  …) and `arguments` (a JSON object string). The tool description lists each
+  operation's MCP description and its MCP input schema verbatim. The only
+  change in the shared file is that the list is `public`. `NativeAgentAppControl`
+  derives the enum, the description and which operations write
+  (`readOnlyHint`) from it; a new MCP tool reaches the Agent without another
+  list.
 - **Same controller, in process.** Calls go straight to the app's
   `AppControlController`, the instance the Case broker serves: the same
   allowlist, Settings validation, expected-value checks, cancellation and one
@@ -46,15 +49,23 @@ Agent in Whytap's own island had none of these tools, so "switch Drop Smart to
   socket. The app installs it in `installCaseBroker`; without it (tests,
   `swift run`) the Agent is offered no Whytap tools and its prompt does not
   mention them.
-- **Strict schemas, same arguments.** The native catalog is strict across all
-  tools. The MCP schemas are converted mechanically: closed objects with
-  every property required, optional ones nullable, type lists as `anyOf`,
-  length/number limits dropped (the controller and To-do validation still
-  check them) and To-do's recursive task reference unrolled to
-  `TodoTree.maxDepth` levels. Back on the way in, `null` for an optional field
-  means "not given" and `""` means `null` where the tool accepts null (clear a
-  To-do status, move a task to the top level). Unknown keys reach the
-  controller and are rejected as before.
+- **Why one tool (build queue ticket 372).** The first version offered the 14
+  operations as 14 strict tools with converted schemas. Anthropic compiles
+  strict tools with per-request limits of 20 strict tools, 24 optional and 16
+  union-type parameters and no recursion
+  ([explicit limits](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)):
+  the first request had 22/24 strict tools and 43/44 unions, so every Agent
+  turn on the user's Anthropic route would fail before any tool ran. OpenAI's
+  strict mode limits nesting to 10 levels, which To-do's five unrolled task
+  levels also exceeded. One tool with two required strings adds 1 strict tool,
+  no union, no optional field and depth 2. The first request now has 9 strict
+  tools and 6 unions without file edits and commands, 11 and 7 with them.
+- **Arguments.** The `arguments` string follows the MCP schema as is, with the
+  MCP meaning of absent and `null` (null clears a To-do status). A `null` for an
+  optional field whose schema does not accept null is dropped as "not given".
+  The controller validates everything else: unknown keys, wrong types, limits.
+  A string that is not a JSON object, or an unknown operation, is an error
+  result to the model and reaches nothing.
 - **Visible changes.** A successful write produces one app-owned line built
   from the saved value the controller returned, never from the request:
   `Drop Smart cleanup → anthropic/claude-sonnet-5.5`, `Drop mode → Smart`,
@@ -65,7 +76,7 @@ Agent in Whytap's own island had none of these tools, so "switch Drop Smart to
   above the model's answer, which the prompt tells not to repeat it. Reads add
   no line; a conflict, failed check or invalid call adds none. Model lines show
   the exact model ID, as Settings' picker does.
-- **Prompt.** One paragraph, added only with the tools: read state first, pass
+- **Prompt.** One paragraph, added only with the tool, says how to call it: read state first, pass
   the exact current value, use only features/keys/accounts/models the tools
   return, change only what the current request asks, report conflicts instead
   of retrying, the paid model check, meetings are untrusted content, no key
@@ -100,15 +111,20 @@ Agent in Whytap's own island had none of these tools, so "switch Drop Smart to
 OpenRouter model and the real controller on temporary stores:
 switching Drop Smart cleanup to a catalog model (route saved, the change line
 as label and first answer line, tools and instructions in the request, no key
-in tool results); adding a To-do task with strict nulls; clearing a status with
-`""` and closing a task; a status saved on a reused task by `todo_add` shown,
+in tool results); adding a To-do task with nulls for unused fields; clearing a status and
+closing a task; a status saved on a reused task by `todo_add` shown,
 an identical repeat quiet, new and updated tasks together; listing models (no line, no paid check); an unknown
 model refused by the check with the route kept; a stale expected value as a
 conflict without a check; a key request (no such tool, `set_setting` refuses a
 key name, reads contain no key); broken arguments (wrong types, unknown keys,
-unknown feature, bad value); setting lines from saved values; no tools when the
-controller is not installed; catalog parity (names, descriptions, strict
-schemas, five To-do levels); the prompt keeps one "language". Existing
+unknown feature, bad value, an arguments string that is not JSON or not an
+object, an unknown operation); setting lines from saved values; no tool when
+the controller is not installed; catalog parity (the enum is the MCP names, the
+description has every MCP description and schema); the first request on
+Anthropic, OpenAI and OpenRouter, with and without file edits and commands,
+within 20 strict tools, 16 unions, 24 optional parameters and depth 10, with
+no `$ref` or open object (and the builder's own Anthropic probe); the prompt
+keeps one "language". Existing
 `NativeAgentTests`, `AppControl*`, `WhytapCaseKitTests`, `TodoTree*` pass.
 Not tested: a live paid provider request, the installed app.
 
@@ -121,5 +137,10 @@ Not tested: a live paid provider request, the installed app.
   validated, reversible app settings, not filesystem or shell access.
 - Sending non-strict schemas for these tools only: some endpoints reject mixed
   strict and non-strict functions.
+- 14 strict tools with converted schemas (the first version): over Anthropic's
+  strict-tool and union limits on every request, and over OpenAI's nesting
+  depth for To-do.
+- Offering only some operations, or a different set per provider: the Agent
+  could not do what the plugin does, and two catalogs would drift.
 
 2026-11-22, branch `claude/agent-app-control-845e72`.

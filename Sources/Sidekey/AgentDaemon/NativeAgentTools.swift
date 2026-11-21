@@ -33,7 +33,7 @@ struct NativeAgentTools {
             tools += [tool("write_file", "Create or replace a UTF-8 file. Read existing contents before editing; use absolute paths outside the workspace. Never store secrets in memory.", ["path": string, "content": string], ["path", "content"]),
                       tool("run_command", "Run a shell command with a 30-second deadline and bounded output. Runs with the user’s Mac permissions; avoid irreversible actions without explicit authorization. Use whytap case run for scoped secrets; never print keys.", ["command": string, "path": string], ["command"])]
         }
-        if appControl { tools += NativeAgentAppControl.definitions() }
+        if appControl { tools.append(NativeAgentAppControl.definition()) }
         return tools
     }
 
@@ -65,7 +65,7 @@ struct NativeAgentTools {
     func execute(_ call: NativeAgentToolCall) async -> NativeAgentToolResult {
         do {
             try Task.checkCancellation()
-            if let appControl, NativeAgentAppControl.tool(named: call.name) != nil {
+            if let appControl, call.name == NativeAgentAppControl.toolName {
                 return await NativeAgentAppControl.execute(call, handler: appControl)
             }
             guard Self.definitions(allowActions: allowActions).contains(where: { $0["name"] as? String == call.name }) else {

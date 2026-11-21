@@ -1476,20 +1476,24 @@ the provider may retain them according to its policy. Never substitute a vision
 model. The separate screen MCP helper remains for compatibility; the settings
 MCP scope does not accept capture. WHY:
 .project-docs/decisions/2026-10-22-native-agent.md
-Whytap controls in the Agent: the native Agent is offered the plugin's
-whytap_* tools (AppControlMCPServer.tools: the same names, descriptions and
-schemas, made strict by NativeAgentAppControl: closed objects, optional fields
-nullable, limits checked by the controller, To-do nesting unrolled to five
-levels) and runs them in process through the broker's AppControlController
-(one allowlist, write lock and expected-value check). No MCP server or helper.
-In a call, null means not given and "" means null (clear a status, top level).
-Each confirmed write becomes one app-owned line, built from the saved value,
-shown as the step label and above the answer ("Drop Smart cleanup → model").
-Meetings need no harness prompt (the user is at this Mac) and stay untrusted
-content. No key values, clipboard or commands; the prompt paragraph is added
-only with the tools and never mentions the reply language. Offered only when
-the app installed the controller (packaged app), never in tests or swift run.
-The CLI providers are not reachable (only native connects). WHY:
+Whytap controls in the Agent: the native Agent gets every operation of the
+plugin (AppControlMCPServer.tools) through ONE strict tool, whytap, with two
+required strings: operation (enum of the MCP names) and arguments (a JSON
+object string following that operation's MCP schema; descriptions and schemas
+are listed in the tool description). Separate strict tools broke Anthropic's
+limits (20 strict tools, 16 unions per request) and OpenAI's nesting depth; a
+test checks every route's first request. NativeAgentAppControl runs them in
+process through the broker's AppControlController (one allowlist, write lock
+and expected-value check). No MCP server or helper. An optional field's null
+that its schema does not accept means not given; the controller validates the
+rest. Each confirmed write becomes one app-owned line, built from the saved
+value, shown as the step label and above the answer ("Drop Smart cleanup →
+model"); todo_add's status saved on a reused task too, identical repeats stay
+quiet. Meetings need no harness prompt (the user is at this Mac) and stay
+untrusted content. No key values, clipboard or commands; the prompt paragraph
+is added only with the tool and never mentions the reply language. Offered
+only when the app installed the controller (packaged app), never in tests or
+swift run. The CLI providers are not reachable (only native connects). WHY:
 .project-docs/decisions/2026-11-22-native-agent-app-control.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and

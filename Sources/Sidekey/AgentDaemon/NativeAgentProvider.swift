@@ -169,8 +169,10 @@ final class NativeAgentProvider: CLIProvider {
             // edits never race a read or another command from the same answer.
             for call in calls {
                 try Task.checkCancellation()
-                continuation.yield(.toolExecuting(tool: call.name, label: Self.label(call.name)))
-                let appWrite = appControl != nil && NativeAgentAppControl.tool(named: call.name)?.writes == true
+                let appOperation = appControl == nil ? nil : NativeAgentAppControl.operation(of: call)
+                continuation.yield(.toolExecuting(tool: call.name, label: appOperation.map { NativeAgentAppControl.label($0.name) }
+                                                  ?? Self.label(call.name)))
+                let appWrite = appOperation?.writes == true
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
                 if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
@@ -233,7 +235,7 @@ final class NativeAgentProvider: CLIProvider {
     """
 
     private static func label(_ tool: String) -> String {
-        if tool.hasPrefix(NativeAgentAppControl.prefix) { return NativeAgentAppControl.label(tool) }
+        if tool == NativeAgentAppControl.toolName { return "Checking Whytap" }
         switch tool {
         case "web_search": return "Searching the web"
         case "capture_screen": return "Reading the screen"

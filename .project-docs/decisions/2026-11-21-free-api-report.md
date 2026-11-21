@@ -70,7 +70,7 @@ paying.
   routes from API & Models as "free* right now", in two panels: an Anthropic
   key (Claude Sonnet 5.5 for Drop Smart and Meetings notes, Haiku 5.5 for
   Agent, Translation and Subtitles) and an OpenAI key with the same price
-  class (GPT-6.1 Terra, GPT-6 Luna, his choice); speech is ElevenLabs Scribe
+  class (GPT-6.2 Sol, GPT-6 Luna, his choice); speech is ElevenLabs Scribe
   v3 Live in both. The asterisk explains it: the models are paid from a Claude
   Max/Ultra or ChatGPT Pro plan's monthly API credit, speech from ElevenLabs'
   free credits (non-commercial use). This is the one place the README names

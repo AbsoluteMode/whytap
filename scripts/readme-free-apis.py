@@ -244,7 +244,7 @@ SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone)
      {"smart": "Claude Sonnet 5.5", "fast": "Claude Haiku 5.5"}),
     ("openai", None, "OpenAI key",
      ("ChatGPT Pro: $100–500 API credit a month", "ChatGPT Pro: $100–500 credit a month"),
-     {"smart": "GPT-6.1 Terra", "fast": "GPT-6 Luna"}),
+     {"smart": "GPT-6.2 Sol", "fast": "GPT-6 Luna"}),
 ]
 SETUP_FOOT = [
     "* The models are paid from your plan’s monthly API credit; speech uses",

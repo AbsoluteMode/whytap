@@ -60,9 +60,20 @@ final class CodexCLIConfigReadingTests: XCTestCase {
         runner = FakeCommandRunner()
         try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
             .install(helperPath: helper)
-        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "whytap"],
-                                                      ["mcp", "add", "whytap", "--", helper, "mcp"],
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"],
                                                       ["mcp", "remove", "case"]])
+    }
+
+    /// The connector never removes our `whytap` before adding (builder review,
+    /// queue run 16213): the real `codex mcp add` replaces it in one write.
+    func test_real_codex_add_replaces_our_entry_in_place() throws {
+        let (home, helper) = try sandbox(nil)
+        try "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n"
+            .write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+        let connector = CodexCaseConnector(home: home, runner: SystemCaseCommandRunner(), reader: SystemCaseCommandRunner(),
+                                           locate: { self.codex })
+        try connector.install(helperPath: helper)
+        XCTAssertEqual(connector.entry("whytap", codex: codex), .stdio(command: helper, args: ["mcp"]))
     }
 
     /// A temporary HOME with `.codex/config.toml` and a stand-in helper file,

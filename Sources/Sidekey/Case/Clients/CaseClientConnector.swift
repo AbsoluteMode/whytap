@@ -40,6 +40,8 @@ enum CaseClientConnectorError: Error, Equatable {
     case writeFailed(String)
     /// The client already has an MCP server named `whytap` that is not Whytap's.
     case foreignEntry
+    /// Replacing our `whytap` entry failed and the previous one could not be put back.
+    case restoreFailed
 
     var userMessage: String {
         switch self {
@@ -50,6 +52,8 @@ enum CaseClientConnectorError: Error, Equatable {
         case .writeFailed(let path): return "couldn’t write ~/\(path)"
         case .foreignEntry:
             return "another MCP server named “whytap” already exists; rename or remove it, then connect again"
+        case .restoreFailed:
+            return "the new “whytap” entry was refused and the previous one couldn’t be put back; connect again"
         }
     }
 }
@@ -286,7 +290,8 @@ struct CaseJSONConfigFile {
 
 // MARK: Claude Code
 
-/// `claude mcp add -s user whytap -- <helper> mcp`, then removes our older
+/// `claude mcp add -s user whytap -- <helper> mcp` (our older `whytap` is
+/// removed first and put back if the add is refused), then removes our older
 /// user-scope `case` entry. When Claude's sandbox is on, the broker socket is
 /// added to `sandbox.network.allowUnixSockets`. `~/.claude.json` is read with
 /// the system JSON parser (escapes in keys included); it is written only by
@@ -332,14 +337,40 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
             throw CaseClientConnectorError.foreignEntry
         }
         let claude = try binary()
-        if entry != nil {
-            try check(run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.name]))
+        if let existing = entry as? [String: Any] {
+            if !Self.isCurrent(existing, helperPath: helperPath) {
+                try replace(existing, claude: claude, helperPath: helperPath)
+            }
+        } else {
+            try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
         }
-        try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
         if CaseMCPEntryOwnership.isOurs(servers[WhytapMCPEntry.legacyName], helperPath: helperPath) {
             _ = try? run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName])
         }
         try updateSandbox(current, adding: true)
+    }
+
+    /// Already `<helper> mcp` exactly: nothing to change.
+    private static func isCurrent(_ entry: [String: Any], helperPath: String) -> Bool {
+        entry["command"] as? String == helperPath && entry["args"] as? [String] == WhytapMCPEntry.arguments
+            && (entry["env"] as? [String: Any] ?? [:]).isEmpty
+    }
+
+    /// `claude mcp add` refuses a name that exists, so our older entry is
+    /// removed first. A refused add puts the previous entry back exactly as it
+    /// was (`claude mcp add-json`), so a failed Connect never leaves the person
+    /// without the server that worked before.
+    // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
+    private func replace(_ previous: [String: Any], claude: URL, helperPath: String) throws {
+        let previousJSON = try JSONSerialization.data(withJSONObject: previous, options: [.sortedKeys])
+        try check(run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.name]))
+        do {
+            try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
+        } catch {
+            let restored = (try? run(claude, ["mcp", "add-json", "-s", "user", WhytapMCPEntry.name,
+                                              String(decoding: previousJSON, as: UTF8.self)]))?.status == 0
+            throw restored ? error : CaseClientConnectorError.restoreFailed
+        }
     }
 
     func uninstall(helperPath: String?) throws {
@@ -426,7 +457,8 @@ enum CodexMCPEntry: Equatable {
 }
 
 /// `codex mcp add whytap -- <helper> mcp`, then removes our older `case`
-/// entry. `codex mcp add` replaces a server by name, so the existing entry is
+/// entry. `codex mcp add` replaces a server by name in one write (ours is
+/// never removed first, so a refused add keeps it), so the existing entry is
 /// first read with `codex mcp get --json` through `reader` (read-only); only
 /// an absent name or our own entry lets a changing command run. Codex's
 /// sandbox settings are never changed; `config.toml` is written only by codex.
@@ -466,11 +498,13 @@ struct CodexCaseConnector: CaseClientConnector {
         guard let codex = locate() else { throw CaseClientConnectorError.clientNotFound }
         let current = entry(WhytapMCPEntry.name, codex: codex)
         switch current {
+        // `codex mcp add` replaces an entry of that name in one write, so ours
+        // is never removed first: a refused add leaves the working one as it was.
         case .absent:
             break
         case .stdio(let command, let args)
             where CaseMCPEntryOwnership.isOurServer(command: command, args: args, helperPath: helperPath):
-            try check(run(codex, ["mcp", "remove", WhytapMCPEntry.name]))
+            break
         case .stdio, .other, .uncertain:
             throw CaseClientConnectorError.foreignEntry
         }

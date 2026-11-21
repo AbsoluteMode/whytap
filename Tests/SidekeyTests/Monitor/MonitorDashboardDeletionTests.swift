@@ -184,6 +184,43 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(MonitorRemovedDashboards.fileName, "removed-dashboards.json")
     }
 
+    func testDeleteWaitsForTheInstallerLockAndFailsCleanlyWhenItIsHeld() async throws {
+        try writeDashboard("anthropic-budget", title: "Anthropic")
+        let store = makeStore()
+        store.removedListLockTimeout = 0.1
+        let board = try XCTUnwrap(store.dashboards.first)
+
+        // customize.py install-dashboard holds the same flock while it edits the list.
+        let lockPath = root.appendingPathComponent(MonitorRemovedDashboards.lockFileName).path
+        let installer = open(lockPath, O_RDWR | O_CREAT, 0o600)
+        XCTAssertGreaterThanOrEqual(installer, 0)
+        XCTAssertEqual(flock(installer, LOCK_EX | LOCK_NB), 0)
+        let failures = Counter()
+        let blocked = await MonitorDashboardDeletion(
+            store: store, prompts: prompts(answer: true, failures: failures)).delete(board)
+        XCTAssertEqual(blocked, .failed)
+        XCTAssertEqual(failures.value, 1)
+        XCTAssertTrue(exists("anthropic-budget.json"), "nothing is removed while the list is busy")
+        XCTAssertEqual(store.dashboards.map(\.id), ["anthropic-budget"])
+
+        close(installer)
+        let outcome = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true)).delete(board)
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertEqual(try MonitorRemovedDashboards.load(root: root).ids, ["anthropic-budget"])
+    }
+
+    func testDeleteKeepsIDsAnotherWriterSavedBefore() async throws {
+        try writeDashboard("openai-usage", title: "OpenAI")
+        // Saved by another Monitor surface or the installer before this delete.
+        try MonitorRemovedDashboards(ids: ["anthropic-budget"]).save(root: root)
+        let store = makeStore()
+        let board = try XCTUnwrap(store.dashboards.first)
+
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true)).delete(board)
+
+        XCTAssertEqual(try MonitorRemovedDashboards.load(root: root).ids, ["anthropic-budget", "openai-usage"])
+    }
+
     // MARK: - Confirmation
 
     func testConfirmationPutsCancelFirstAndDeleteHasNoKey() {

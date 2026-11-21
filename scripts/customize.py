@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 from datetime import datetime
 import hashlib
 import json
@@ -16,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -291,9 +294,16 @@ def dashboard_command(args: argparse.Namespace) -> int:
         raise ValueError("Refusing a symlink dashboard destination")
     if destination.exists() and not args.replace:
         raise ValueError("Dashboard already exists; inspect it before using --replace")
+    monitor = directory.parent
     if args.dry_run:
-        print(f"Would install {snapshot['id']} to {args.flavor} Monitor/dashboards/{destination.name}")
+        relist = snapshot["id"] in read_removed_dashboards(monitor)
+        print(f"Would install {snapshot['id']} to {args.flavor} Monitor/dashboards/{destination.name}"
+              + ("; it was deleted in Monitor earlier and would be listed again" if relist else ""))
         return 0
+    # The deleted list changes first: if it is unreadable or cannot be saved,
+    # nothing on disk changed and the previous snapshot stays as it was.
+    # WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    relisted = forget_removed_dashboard(monitor, snapshot["id"])
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     temporary_path = None
     try:
@@ -312,42 +322,85 @@ def dashboard_command(args: argparse.Namespace) -> int:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-    if forget_removed_dashboard(directory.parent, snapshot["id"]):
+    if relisted:
         print(f"{snapshot['id']} was deleted in Monitor earlier; it is listed again")
     print(f"Installed dashboard {snapshot['id']} for {args.flavor}; open Monitor to view it")
     return 0
 
 
+REMOVED_DASHBOARDS = "removed-dashboards.json"
+REMOVED_DASHBOARDS_LOCK = "removed-dashboards.lock"
+REMOVED_DASHBOARDS_LOCK_SECONDS = 5.0
+
+
+def read_removed_dashboards(monitor: Path) -> list[str]:
+    """IDs deleted in Monitor; a missing list is empty, a broken one is an error."""
+    path = monitor / REMOVED_DASHBOARDS
+    if not path.exists() and not path.is_symlink():
+        return []
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Refusing an unexpected removed-dashboards.json")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"removed-dashboards.json is unreadable ({error}); fix it before installing") from None
+    removed = document.get("removed") if isinstance(document, dict) else None
+    id_pattern = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+    if not isinstance(removed, list) or not all(
+            isinstance(item, str) and len(item) <= 120 and re.fullmatch(id_pattern, item) for item in removed):
+        raise ValueError("removed-dashboards.json is invalid; fix it before installing")
+    return removed
+
+
+@contextlib.contextmanager
+def removed_dashboards_lock(monitor: Path):
+    """The same exclusive flock Whytap takes before changing the list."""
+    lock_path = monitor / REMOVED_DASHBOARDS_LOCK
+    if lock_path.is_symlink():
+        raise ValueError("Refusing a symlink removed-dashboards.lock")
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        deadline = time.monotonic() + REMOVED_DASHBOARDS_LOCK_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError("Monitor is changing its deleted dashboards; try again in a moment") from None
+                time.sleep(0.02)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def forget_removed_dashboard(monitor: Path, dashboard_id: str) -> bool:
     """Installing a board again takes its ID off Monitor's deleted list.
 
+    Read, change and replace happen under the list's lock, so a deletion the
+    app saves meanwhile is never lost.
     WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     """
-    path = monitor / "removed-dashboards.json"
-    if not path.exists():
+    if dashboard_id not in read_removed_dashboards(monitor):
         return False
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("Refusing an unexpected removed-dashboards.json")
-    document = json.loads(path.read_text(encoding="utf-8"))
-    removed = document.get("removed") if isinstance(document, dict) else None
-    if not isinstance(removed, list) or not all(isinstance(item, str) for item in removed):
-        raise ValueError("removed-dashboards.json is invalid; fix it before installing")
-    if dashboard_id not in removed:
-        return False
-    data = (json.dumps({"removed": sorted(set(removed) - {dashboard_id})}, indent=2) + "\n").encode("utf-8")
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=monitor, prefix=".removed-dashboards-", delete=False) as stream:
-            temporary_path = Path(stream.name)
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, path)
+    with removed_dashboards_lock(monitor):
+        removed = read_removed_dashboards(monitor)
+        if dashboard_id not in removed:
+            return False
+        data = (json.dumps({"removed": sorted(set(removed) - {dashboard_id})}, indent=2) + "\n").encode("utf-8")
         temporary_path = None
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+        try:
+            with tempfile.NamedTemporaryFile(dir=monitor, prefix=".removed-dashboards-", delete=False) as stream:
+                temporary_path = Path(stream.name)
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary_path, 0o600)
+            os.replace(temporary_path, monitor / REMOVED_DASHBOARDS)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
     return True
 
 

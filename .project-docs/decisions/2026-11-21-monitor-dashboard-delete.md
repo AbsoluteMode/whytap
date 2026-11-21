@@ -20,6 +20,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Monitor/MonitorDashboardDeletionTests.swift
     confirmed_at: 2026-11-21
+  - type: repository
+    reference: scripts/tests/test_monitor_dashboard_install.py
+    confirmed_at: 2026-11-21
+  - type: user-confirmed
+    reference: On 2026-11-21 the user chose to delete the snapshot file and remember its ID (option A, "delete and remember").
+    confirmed_at: 2026-11-21
 related: []
 ---
 
@@ -50,7 +56,15 @@ minutes), which Whytap neither installs nor owns.
   surface (island and Toolbox each have a store) drops it on its next reload
   and shows its existing "no longer available" text if it had it open.
 - `customize.py install-dashboard` removes the ID from the list, so installing
-  a board again lists it again.
+  a board again lists it again. It changes the list before writing the
+  snapshot: an unreadable list or a failed list save stops the install with
+  nothing written, so a reinstall keeps the previous snapshot and a first
+  install leaves no file behind that would block a retry.
+- Whytap and the installer change the list only while holding an exclusive
+  `flock` on `Monitor/removed-dashboards.lock`, re-reading the list inside the
+  lock, so neither overwrites a deletion or re-listing the other just saved.
+  Whytap waits at most 2 s, the installer 5 s; a busy lock fails without
+  changes.
 - An unreadable list shows every board with a notice and makes Delete fail
   with an alert instead of overwriting the list.
 
@@ -72,13 +86,24 @@ minutes), which Whytap neither installs nor owns.
   are all removed; an unreadable list fails without deleting; Server status and
   invalid IDs are refused; the list file is 0600 and round-trips; the alert
   orders Cancel first with Delete keyless.
-- `install-dashboard`'s list clean-up was run against a scratch folder.
+- `scripts/tests/test_monitor_dashboard_install.py`: an unreadable list keeps
+  the previous snapshot on `--replace` and creates nothing on a first install
+  (a retry after fixing the list installs); re-listing keeps other deletions
+  with mode 0600; `--dry-run` changes nothing; the installer waits for a held
+  lock and keeps the deletion saved meanwhile; a lock that stays busy fails
+  without changes. Swift: Delete fails cleanly while the installer holds the
+  lock and succeeds after; earlier saved deletions are kept.
+- The builder's first review (queue ticket 298) found the snapshot written
+  before a list failure and a lost update between list writers; both are the
+  reason for the order and the lock above.
 - Not tested: the real context menu and alert over the live island panel.
 
 ## Rejected
 
 - Deleting only the snapshot file: the collector writes it again.
 - Hiding without deleting the file: leaves stale data behind for no reason.
+- Compare-before-rename without a lock: still loses an update in the window
+  between the check and the rename.
 - Stopping or deleting the collector: not Whytap's to touch.
 
 2026-11-21 · PR: see the pull request that adds this file.

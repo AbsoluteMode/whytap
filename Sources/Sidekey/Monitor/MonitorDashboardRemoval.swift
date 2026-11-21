@@ -12,6 +12,11 @@ struct MonitorRemovedDashboards: Equatable {
     static let maxBytes = 64_000
     static let maxIDs = 512
 
+    /// Whytap and `customize.py install-dashboard` both take an exclusive
+    /// flock on this file around read-change-replace of the list, so neither
+    /// loses the other's change.
+    static let lockFileName = "removed-dashboards.lock"
+
     private(set) var ids: Set<String> = []
 
     init(ids: Set<String> = []) {
@@ -43,6 +48,26 @@ struct MonitorRemovedDashboards: Equatable {
             throw MonitorValidationError.invalidDashboard
         }
         return Self(ids: Set(document.removed))
+    }
+
+    /// Runs `body` holding the list's lock; gives up with EBUSY after
+    /// `timeout` so a stuck installer never freezes Monitor.
+    static func withLock<T>(root: URL, timeout: TimeInterval, _ body: () throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let path = root.appendingPathComponent(lockFileName, isDirectory: false).path
+        let descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(descriptor) }
+        let deadline = Date().addingTimeInterval(timeout)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR, Date() < deadline else {
+                throw POSIXError(.EBUSY)
+            }
+            usleep(20_000)
+        }
+        return try body()
     }
 
     func contains(_ id: String) -> Bool { ids.contains(id) }

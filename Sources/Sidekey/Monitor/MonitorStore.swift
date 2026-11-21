@@ -19,6 +19,8 @@ final class MonitorStore: ObservableObject {
     /// Every dashboard file by the ID it decodes to, duplicates included, so
     /// Delete removes each copy of the board it lists.
     private var dashboardFiles: [String: [URL]] = [:]
+    /// How long Delete waits for an installer holding the deleted list.
+    var removedListLockTimeout: TimeInterval = 2
 
     init(root: URL = MonitorPaths.root,
          collector: @escaping (MonitorServer) async throws -> MonitorServerMetrics = {
@@ -152,10 +154,12 @@ final class MonitorStore: ObservableObject {
         }
         reloadFiles()
         let wasListed = dashboards.contains { $0.id == id }
-        var removed = try MonitorRemovedDashboards.load(root: root)
-        if !removed.contains(id) {
-            removed.insert(id)
-            try removed.save(root: root)
+        try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
+            var removed = try MonitorRemovedDashboards.load(root: root)
+            if !removed.contains(id) {
+                removed.insert(id)
+                try removed.save(root: root)
+            }
         }
         let fm = FileManager.default
         for file in dashboardFiles[id] ?? [] {

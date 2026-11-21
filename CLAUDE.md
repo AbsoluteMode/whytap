@@ -684,7 +684,8 @@ Monitor inside hover:
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
   Collectors, their scripts and servers.json are never touched; install-dashboard
-  lists the ID again. WHY:
+  lists the ID again, editing the list before the snapshot. Both writers hold
+  an flock on Monitor/removed-dashboards.lock around the list. WHY:
   .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
   Historical 2.2.6 Monitor/search proof:
   2,949 tests, 8 skipped, 0 failures (45.711 s); search-focused 9/0 (3.901 s).

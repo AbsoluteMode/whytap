@@ -74,6 +74,11 @@ final class AIRoutingStore: ObservableObject {
         pendingBackup = loaded.unreadValue
         hasUnreadSubtitleRoute = loaded.hasUnreadSubtitleRoute
         if loaded.state != state { state = loaded.state }
+        // Settings sync can bring a Meetings route from an older Mac that still
+        // names a streaming Scribe model: the row, Check now and the recording
+        // all use the recorded model.
+        // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+        moveMeetingsToRecordedModelIfNeeded()
     }
 
     // MARK: - Routes

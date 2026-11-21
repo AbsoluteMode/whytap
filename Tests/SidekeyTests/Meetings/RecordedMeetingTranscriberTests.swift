@@ -91,6 +91,35 @@ final class RecordedMeetingTranscriberTests: XCTestCase {
         XCTAssertEqual(leftovers, [], "the upload file is removed")
     }
 
+    /// The saved vocabulary accepts terms the batch endpoint refuses (six
+    /// words, angle brackets). They are left out of this request so the
+    /// meeting is still transcribed; the allowed terms are kept and the saved
+    /// vocabulary is not touched. (Builder review of PR 351.)
+    func test_existing_vocabulary_never_invalidates_the_elevenlabs_request() async throws {
+        let valid = "Whytap", sixWords = "a b c d e f", brackets = "std::array<T>"
+        for term in [sixWords, brackets] {
+            XCTAssertEqual(VocabularyCache.validate(term, against: [valid]), .added, "the vocabulary accepts \(term)")
+        }
+        let url = try chunk()
+        StubURLProtocol.handler = { _ in (200, [:], try Self.json(["text": "", "words": []])) }
+        let transcriber = RecordedMeetingTranscriber(
+            route: .elevenLabs(apiKey: "k", model: "scribe_v3"), session: session, usageSink: { _ in })
+        _ = try await transcriber.transcribe(chunkURLs: [url], language: "en", terms: [valid, sixWords, brackets, "two words"])
+        let body = String(decoding: try XCTUnwrap(StubURLProtocol.capturedBodies.first), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"keyterms\"\r\n\r\n\(valid)\r\n"))
+        XCTAssertTrue(body.contains("name=\"keyterms\"\r\n\r\ntwo words\r\n"))
+        XCTAssertFalse(body.contains(sixWords), "at most five words per term")
+        XCTAssertFalse(body.contains(brackets), "angle brackets are not accepted")
+    }
+
+    func test_elevenlabs_keyterm_limits() {
+        XCTAssertEqual(RecordedMeetingTranscriber.elevenLabsKeyterms(
+            [" Whytap ", "whytap", "", "one two three four five", "a{b}", "x[y]", "back\\slash",
+             String(repeating: "a", count: 51), "Claude-Code"]),
+            ["Whytap", "one two three four five", "Claude-Code"])
+        XCTAssertEqual(RecordedMeetingTranscriber.elevenLabsKeyterms((0..<1_200).map { "term\($0)" }).count, 1_000)
+    }
+
     func test_elevenlabs_without_language_or_terms_sends_neither() async throws {
         let url = try chunk()
         StubURLProtocol.handler = { _ in (200, [:], try Self.json(["text": "", "words": []])) }

@@ -71,6 +71,54 @@ final class MeetingsRecordedModelMigrationTests: XCTestCase {
         XCTAssertEqual(routing.route(for: .dropFast), live)
     }
 
+    /// Settings sync can bring the streaming model back from an older Mac:
+    /// after the live reload, the row, Check now and the recording all use
+    /// Scribe v3, and Drop keeps the streaming model. (Builder review of PR 351.)
+    func test_a_synced_streaming_meetings_route_is_checked_and_shown_as_scribe_v3() async throws {
+        let defaults = defaults()
+        let store = AIRoutingStore(defaults: defaults)
+        let synced = AIRoutingState(routes: ["meetings": live, "dropFast": live], migratedRoutes: [:],
+                                    servers: [], migrationVersion: 4)
+        defaults.set(try JSONEncoder().encode(synced), forKey: AIRoutingStore.defaultsKey)
+        store.reloadFromDefaults()
+
+        XCTAssertEqual(store.route(for: .meetings), recorded, "the row shows the model the recording uses")
+        XCTAssertEqual(store.route(for: .dropFast), live, "dictation keeps the streaming model")
+        XCTAssertEqual(AIRoutingStore(defaults: defaults).route(for: .meetings), recorded, "and it is saved")
+
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
+        try keys.save("fixture", account: try XCTUnwrap(live.account.keychainAccount(in: store)))
+        let resolved = try FeatureRouteResolver(routing: store, keys: keys).resolve(.meetings)
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { _ in (200, [:], Data(#"{"text":"","words":[]}"#.utf8)) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: config)
+        addTeardownBlock { session.invalidateAndCancel(); StubURLProtocol.reset() }
+        let outcome = await ModelProbe(session: session)
+            .probe(resolved, use: try XCTUnwrap(AIFeature.meetings.modelUse(on: resolved.account.kind)), catalog: nil)
+        XCTAssertEqual(outcome, .passed)
+        let body = String(decoding: try XCTUnwrap(StubURLProtocol.capturedBodies.first), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"model_id\"\r\n\r\nscribe_v3\r\n"))
+        XCTAssertFalse(body.contains("scribe_v3_live"))
+    }
+
+    /// Even a streaming model the store still holds (a partial document it may
+    /// not rewrite) is checked as Scribe v3.
+    func test_check_now_maps_a_streaming_scribe_model() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { _ in (200, [:], Data(#"{"text":"","words":[]}"#.utf8)) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: config)
+        addTeardownBlock { session.invalidateAndCancel(); StubURLProtocol.reset() }
+        let route = ResolvedRoute(feature: .meetings, account: .elevenLabs, model: "scribe_v3_live", apiKey: "k", server: nil)
+        _ = await ModelProbe(session: session).probe(route, use: .asyncSTT, catalog: nil)
+        let body = String(decoding: try XCTUnwrap(StubURLProtocol.capturedBodies.first), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"model_id\"\r\n\r\nscribe_v3\r\n"))
+    }
+
     func test_meetings_offer_recorded_models_on_every_hosted_speech_provider() {
         XCTAssertEqual(AIFeature.meetings.modelUse(on: .soniox), .asyncSTT)
         XCTAssertEqual(AIFeature.meetings.modelUse(on: .elevenLabs), .asyncSTT)

@@ -142,7 +142,8 @@ struct ModelProbe: ModelProbing {
         let batchRoute: ProviderBatchRoute
         switch route.account {
         case .soniox: batchRoute = .soniox(apiKey: key, model: model)
-        case .elevenLabs: batchRoute = .elevenLabs(apiKey: key, model: model)
+        // The model a recording would be sent with, never a streaming one.
+        case .elevenLabs: batchRoute = .elevenLabs(apiKey: key, model: ModelRegistry.elevenLabsRecordedModel(for: model))
         case .deepgram: batchRoute = .deepgram(apiKey: key, model: model)
         case .server, .thisMac, .openRouter, .openAI, .anthropic: return .inconclusive(reason: "Not supported yet")
         }

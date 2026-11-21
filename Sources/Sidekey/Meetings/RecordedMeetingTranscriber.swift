@@ -94,7 +94,7 @@ struct RecordedMeetingTranscriber: MeetingRecordedTranscribing {
                 ("tag_audio_events", "false"), ("no_verbatim", "true"),
             ]
             if let language { fields.append(("language_code", language)) }
-            for term in terms { fields.append(("keyterms", term)) }
+            for term in Self.elevenLabsKeyterms(terms) { fields.append(("keyterms", term)) }
             var prefix = Data()
             for (name, value) in fields {
                 prefix.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
@@ -146,6 +146,30 @@ struct RecordedMeetingTranscriber: MeetingRecordedTranscribing {
                log: Self.log, type: .info, route.providerName, pcmBytes,
                elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000, result.segments.count)
         return result
+    }
+
+    /// The saved vocabulary terms the ElevenLabs batch endpoint accepts: at
+    /// most 50 characters and five words, none of `< > { } [ ] \`, at most
+    /// 1,000 terms. A term outside these limits would make the whole request
+    /// fail, so it is left out of this request only; the saved vocabulary and
+    /// Drop are unchanged. Words are counted at every non-alphanumeric
+    /// boundary, stricter than the provider's normalisation, so a sent term
+    /// never exceeds it.
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+    static func elevenLabsKeyterms(_ terms: [String]) -> [String] {
+        let unsupported = CharacterSet(charactersIn: "<>{}[]\\")
+        var seen = Set<String>()
+        var accepted: [String] = []
+        for raw in terms {
+            let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty, term.count <= 50,
+                  term.unicodeScalars.allSatisfy({ !unsupported.contains($0) }) else { continue }
+            let words = term.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+            guard !words.isEmpty, words.count <= 5, seen.insert(term.lowercased()).inserted else { continue }
+            accepted.append(term)
+            if accepted.count == 1_000 { break }
+        }
+        return accepted
     }
 
     /// Deepgram pre-recorded `/v1/listen` with the realtime query's language

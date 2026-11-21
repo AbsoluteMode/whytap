@@ -54,6 +54,11 @@ moving them to batch APIs with speakers as a later proposal.
   out of credit, busy, not responding, refused recording) and keep the audio
   staged for the retry; the provider's body is never shown. A refused request
   records no cost; a successful one records the audio seconds for Costs.
+- ElevenLabs gets only the saved vocabulary terms its batch endpoint
+  accepts (at most 50 characters and five words, none of `< > { } [ ] \`,
+  at most 1,000 terms; words counted at every non-alphanumeric boundary).
+  The vocabulary itself accepts terms outside these limits, which would make
+  the whole request fail; they are left out of that request only.
 - `AIFeature.meetings.modelUse` is `.asyncSTT` on Soniox, ElevenLabs and
   Deepgram (a user's server keeps `.realtimeSTT` and its adapter path). The
   registry recommends `scribe_v3` for Meetings, marks `nova-3` as both kinds
@@ -63,7 +68,9 @@ moving them to batch APIs with speakers as a later proposal.
   Meetings route on ElevenLabs naming a streaming Scribe model to
   `scribe_v3`: same account and key. At runtime
   `ModelRegistry.elevenLabsRecordedModel(for:)` also maps a streaming ID, so a
-  route synced from an older Mac never reaches the endpoint with it.
+  route synced from an older Mac never reaches the endpoint with it. The same
+  move runs after a Settings sync live reload (`reloadFromDefaults`), so the
+  row, Check now and the recording agree; Check now also maps the ID.
 
 ## Why
 
@@ -83,6 +90,11 @@ model kind that the endpoint accepts.
   with speakers reaching the stored transcript and the notes model, Deepgram
   silence, ElevenLabs out of credit keeping the audio, a server still using
   its adapter; launch migration and picker contents. Full suite run locally.
+- The build queue's review of the first head reproduced two defects with real
+  request building: vocabulary terms the batch endpoint refuses (six words,
+  angle brackets) were sent, and after a Settings sync reload Check now sent
+  `scribe_v3_live` to the batch endpoint. Both are fixed and covered by tests
+  (including the builder's reproducer).
 - Not checked: a real request with a key, ElevenLabs' encoding of repeated
   `keyterms` multipart fields (the docs show the list type but not the wire
   form), processing time for multi-hour recordings against the 30-minute

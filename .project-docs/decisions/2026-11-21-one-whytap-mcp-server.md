@@ -164,6 +164,20 @@ not because they need separate processes.
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were
   replaced as described above; all four fixtures are in the tests.
+- New-user stress test (2026-11-22; report outside the repository): 50
+  scenarios in Russian and English, written and graded by one Codex as a
+  new user, answered by another Codex through the installed 1691 helper's
+  `app mcp` + `case mcp` (tool definitions byte-identical to this branch's
+  `whytap mcp`), then re-run on the branch helper. Codex refused both Case
+  tools: without MCP annotations they count as destructive and open-world,
+  and needed an approval a non-interactive run could not ask for. They are
+  now annotated read-only (a test checks every tool declares its effects).
+  Descriptions now say which settings exist and that hotkeys, meeting
+  recording and displays do not; that meeting search does not translate and
+  `to` includes the whole day; that tasks have no due date; that nothing
+  deletes tasks or meetings; and that Case keys are separate from Whytap's
+  provider keys. A helper outside the app bundle now says to point the MCP
+  entry at the installed app instead of "Open the Whytap app".
 - Not tested: a live Claude Code / Codex / Cursor host against the installed
   app, and Connect against real client configurations. Those are acceptance
   steps after the builder installs the build.

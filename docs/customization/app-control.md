@@ -130,14 +130,13 @@ gets "Access denied" from the Case tools and must first be connected in
 Whytap -> Case -> Connect; the application tools of the same server work as
 before. Connect is offered for Claude Code and Cursor and adds this same
 `whytap` server there; Disconnect removes only the older `case` entry it wrote
-(when it holds nothing of your own) and leaves `whytap`. An entry that already runs `<helper> mcp` stays as it is,
-whatever else it sets. An older entry of ours (`app mcp`, `case mcp`, another
-spelling of the helper path) is replaced only when it holds nothing of your
-own (env values, disabled, timeouts, tool lists, other fields); otherwise
-Connect stops and asks you to remove it, and a refused replacement keeps the
-previous entry. Any other `whytap` server (including a moved or beta Whytap)
-stops Connect until you remove it. Our older `case` entry is removed only when
-it holds nothing of your own. An older `case` entry left in a host still works,
+and leaves `whytap`. Whytap changes an entry only when it is exactly what
+Whytap writes (`<helper> mcp`, or the older `<helper> case mcp`, with nothing
+else). Any other `whytap` entry (your env, a disabled flag, a timeout, a tool
+filter, `app mcp`, another path, another server) stays as it is: Connect shows
+"Configured manually — Whytap left it as is" and changes nothing, the older
+`case` entry included. To let Connect manage it, remove that `whytap` entry
+and connect again. An older `case` entry left in a host still works,
 but shows the Case tools twice next to `whytap`; remove it once `whytap` is
 connected (`claude mcp remove -s user case`, `codex mcp remove case`).
 

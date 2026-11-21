@@ -55,30 +55,23 @@ not because they need separate processes.
   `codex mcp add whytap -- <helper> mcp`, and its Case tools answer only for
   a registration kept from an earlier build. The Codex connector below serves
   such a kept registration (Disconnect) and follows the same rules.
-- **Ours means one thing:** a stdio entry whose command is an absolute path
-  equal to this app's helper path once both are standardized and their
-  symlinks resolved, with arguments `mcp`, `app mcp` or `case mcp` (the
-  older `case` entry: only `case mcp`). No basename or prefix matching:
-  `/opt/local/bin/whytap-metrics`, a copy of Whytap in Downloads, a beta
-  helper or a bare `whytap` on PATH are someone else's. Such an existing
-  `whytap` entry of ours is replaced; any other, or one that cannot be read
-  for certain, stops Connect with a message naming it and no changing CLI
-  call. Replacing never leaves the person without the entry that worked:
-  `codex mcp add` replaces a name in one write, so Codex is never asked to
-  remove it first; `claude mcp add` refuses an existing name, so ours is
-  removed, and a refused add puts the previous command and arguments back
-  with `claude mcp add`, reporting the add's failure (or that the restore
-  failed too). An entry already `<helper> mcp` (exact path) is left as it
-  is, whatever else it sets. An older entry of ours is replaced only when it
-  is plain: nothing but stdio, command, args and an empty env (for Codex:
-  every other field `null` or `false` in `codex mcp get --json`, apart from
-  `env_vars: []`, which is how Codex reports none; an explicit empty
-  `enabled_tools`, `disabled_tools` or `env` is a setting). Anything more is the
-  person's own setting: a rewrite would drop it and a restore would have to
-  pass it on a command line, so Connect refuses before any change. Our older
-  `case` entry is removed only when plain. After
-  adding, our older `case` entry is removed, best effort; any other `case`
-  entry is never touched.
+- **One rule: Whytap touches only what it writes itself.** Connect and
+  Disconnect change an entry only when it is exactly the canonical form:
+  `whytap` -> `{command: <helper>, args: ["mcp"]}` and the older
+  `case` -> `{command: <helper>, args: ["case", "mcp"]}`, with nothing else
+  (JSON hosts may also carry `type: "stdio"` and an empty `env`, which Claude
+  Code writes itself; for Codex every other field of `codex mcp get --json`
+  is `null` or `false`, apart from `env_vars: []`, its report of none). The
+  helper path is compared as written. Any other `whytap` entry, whatever it
+  is (env, a disabled flag, timeouts, a tool filter, `app mcp`, another path
+  spelling, someone else's server), is left as it is: Connect stops with
+  "Configured manually — Whytap left it as is" and changes nothing, our
+  older `case` entry included (it may be that host's only working Case
+  server). Nothing is migrated. With no `whytap`, Connect adds the canonical
+  one; with the canonical one in place, a canonical older `case` entry is
+  removed (best effort) through the host's CLI (Claude Code, Codex) or, for
+  Cursor, which has no CLI, in the same write of its JSON file. Any other
+  `case` entry is never touched.
 - **Codex is read through Codex.** `codex mcp add` replaces a server by name,
   so Connect first runs the read-only `codex mcp get <name> --json` (Codex's
   own TOML parser decides escapes, inline tables, comments) through a
@@ -86,11 +79,11 @@ not because they need separate processes.
   that name's JSON gives the entry; a failure whose last stderr line is
   exactly Codex's "No MCP server named '<name>' found." means absent; any
   other answer, a newer wording, a timeout or more than 256 KB means
-  uncertain, which refuses. Claude Code's `.claude.json` (home folder) and Cursor's
+  uncertain, which changes nothing. Claude Code's `.claude.json` (home folder) and Cursor's
   `mcp.json` are JSON read by the system parser (escaped keys included); an
   unreadable file or a non-object `mcpServers` refuses as well.
-- Disconnect removes only our older `case` entry, and only when plain (the
-  same rule as Connect). The `whytap` entry stays.
+- Disconnect removes only our older `case` entry, and only when canonical.
+  The `whytap` entry stays.
 
 ## Why
 
@@ -124,6 +117,13 @@ not because they need separate processes.
   --json` returns only the named entry (its env values stay in memory, are
   parsed and dropped, never logged). `claude mcp get` has no JSON output, so
   Claude Code's JSON file is read directly.
+- **One rule instead of a parser of intentions.** Seven builder reviews
+  found a new case each time Connect tried to decide which non-canonical
+  entries were "ours" and how to migrate them (TOML escapes, look-alike
+  paths, env on a restore command line, dropped timeouts, `enabled_tools =
+  []`, a disabled entry whose `case` was removed). Touching only the exact
+  canonical form closes the class: anything else is the person's, and one
+  line tells them so.
 - **Exact path, no look-alikes.** A basename rule took
   `/opt/local/bin/whytap-metrics` for ours and would have replaced it. A
   moved or beta Whytap is not replaced either; the person removes that entry
@@ -145,25 +145,27 @@ not because they need separate processes.
   broker; a stdio session survives a bad line, answers both kinds of tool and
   asks for harness access once; `app mcp` and `case mcp` still serve only
   their own tools; `screen-mcp` never lists Case tools.
-- `CaseClientConnectorTests`: Connect writes `whytap` -> `mcp` for Claude
-  Code and Cursor (and the kept Codex path); migrates our older `case` entry; replaces our own
-  `whytap` (`mcp`, `app mcp`, `case mcp`, also through a symlink); refuses
-  with zero changing CLI calls and the file unchanged: look-alike helpers
-  (`whytap-metrics`, a Downloads copy, a beta helper, bare `whytap`,
-  `<helper>/../whytap-metrics`), a JSON-escaped `why\u0074ap` key, URL
-  servers, other subcommands, missing or odd `args`, unreadable files, and
-  for Codex every answer it cannot prove (empty, not JSON, another name,
-  broken config, other wording, truncated, failed read); leaves any foreign
-  `case` alone; a failed cleanup keeps the connection; Disconnect removes
-  only our older entry and nothing without a helper path.
+- `CaseConnectMatrixTests`: absent / canonical / eight customized `whytap`
+  forms × canonical / customized `case` × Connect / Disconnect × Claude
+  Code, Codex, Cursor; a customized `whytap` throws `.configuredManually`
+  with zero changes and keeps `case`; no configured value reaches a command
+  line.
+- `CaseClientConnectorTests`: the CLI command and environment, Claude's
+  sandbox socket, missing or failing CLIs, look-alike helpers, a
+  JSON-escaped `why\u0074ap` key, URL servers, unreadable files, and for
+  Codex every answer it cannot prove (empty, not JSON, another name, broken
+  config, other wording, truncated, failed read) change nothing; a foreign
+  `case` is left alone; a failed cleanup keeps the connection.
 - `CodexCLIConfigReadingTests` (skipped without Codex) runs the installed
   `codex mcp get --json` on fixture configs in a temporary HOME, changing
   commands going to a fake runner: the builder's header comment, inline
   table, `[mcp_servers."why\u0074ap"]` and `whytap-metrics` fixtures, a
-  literal key with CRLF, dotted keys and a URL server are each read by Codex
-  (asserted) and refused with no changing call; nothing configured adds once;
-  our own `app mcp` entry plus our multi-line `case` entry are replaced and
-  migrated. Run with codex-cli 0.170.0.
+  literal key with CRLF, dotted keys and a URL server are read by Codex and
+  left as they are; nothing configured adds once; the canonical `whytap`
+  with a multi-line canonical `case` removes only `case`; a disabled,
+  filtered, timed-out or env-carrying `whytap` (current or `app mcp`) is
+  left with `case` kept; Disconnect keeps `case` with `enabled_tools = []`.
+  Run with codex-cli 0.171.0.
 - The built helper outside an app bundle (no broker client, nothing launched):
   `whytap mcp` lists 16 tools and answers a bad line with a parse error;
   `app mcp` lists 14, `case mcp` 2; `whytap mcp extra` exits 64.
@@ -192,6 +194,13 @@ not because they need separate processes.
   `enabled_tools = []` read as plain, so Connect rewrote and Disconnect
   removed such entries. Only `null`/`false` count as unset now (plus Codex's
   `env_vars: []`); fake and real-CLI tests cover empty tool lists and env.
+- Builder review 8 (queue run 57521): a current `whytap` that was disabled
+  or had `enabled_tools = []` was left alone while the working `case` entry
+  was removed. Replaced by the one rule above; `CaseConnectMatrixTests`
+  covers absent / canonical / eight customized `whytap` forms and canonical
+  / customized `case`, for Connect and Disconnect, in all three hosts, with
+  no configured value on any command line; the real Codex CLI covers the
+  disabled, filtered, timeout and env forms.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

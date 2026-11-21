@@ -36,7 +36,7 @@ final class CodexCLIConfigReadingTests: XCTestCase {
             // Codex itself read the entry: the refusal is not a failed read.
             XCTAssertEqual(connector.entry("whytap", codex: codex), expected, label)
             XCTAssertThrowsError(try connector.install(helperPath: helper), label) { error in
-                XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry, label)
+                XCTAssertEqual(error as? CaseClientConnectorError, .configuredManually, label)
             }
             XCTAssertTrue(runner.calls.isEmpty, "\(label): no changing CLI call")
             XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml, label)
@@ -52,60 +52,39 @@ final class CodexCLIConfigReadingTests: XCTestCase {
             .install(helperPath: helper)
         XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]])
 
-        // Our own entry (older `app mcp`) with our older `case` entry: replaced, then migrated.
+        // The canonical `whytap` with our older multi-line `case` entry: only `case` goes.
         (home, helper) = try sandbox(nil)
-        let toml = "[mcp_servers.\"whytap\"] # Whytap\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n"
+        let toml = "[mcp_servers.\"whytap\"] # Whytap\ncommand = \"\(helper)\"\nargs = [\"mcp\"]\n"
             + "[mcp_servers.case]\ncommand = '\(helper)'\nargs = [\n  \"case\",\n  \"mcp\",\n]\n"
         try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
         runner = FakeCommandRunner()
         try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
             .install(helperPath: helper)
-        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"],
-                                                      ["mcp", "remove", "case"]])
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "case"]])
     }
 
-    /// The connector never removes our `whytap` before adding (builder review,
-    /// queue run 16213): the real `codex mcp add` replaces it in one write.
-    func test_real_codex_add_replaces_our_entry_in_place() throws {
-        let (home, helper) = try sandbox(nil)
-        try "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n"
-            .write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
-        let connector = CodexCaseConnector(home: home, runner: SystemCaseCommandRunner(), reader: SystemCaseCommandRunner(),
-                                           locate: { self.codex })
-        try connector.install(helperPath: helper)
-        XCTAssertEqual(connector.entry("whytap", codex: codex), .stdio(command: helper, args: ["mcp"]))
-    }
-
-    /// Builder review (queue run 66143), on the real CLI: settings of the
-    /// person's own are read as such, so Connect neither rewrites a current
-    /// entry nor migrates a customized older one.
-    func test_real_codex_settings_are_kept() throws {
-        var (home, helper) = try sandbox(nil)
-        let fixtures: [(String, String)] = [
-            ("current, startup timeout", "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"mcp\"]\nstartup_timeout_sec = 45\n"),
-            ("current, disabled", "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"mcp\"]\nenabled = false\n"),
-        ]
-        for (label, toml) in fixtures {
-            try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
-            let runner = FakeCommandRunner()
-            let connector = CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
-            if case .customized = connector.entry("whytap", codex: codex) {} else { XCTFail("\(label): read as customized") }
-            try connector.install(helperPath: helper)
-            XCTAssertEqual(runner.calls, [], label)
-        }
-        for (label, extra) in [("timeout", "startup_timeout_sec = 45\n"), ("disabled", "enabled = false\n"),
-                               ("empty tool allowlist", "enabled_tools = []\n"), ("empty tool blocklist", "disabled_tools = []\n"),
-                               ("env", "[mcp_servers.whytap.env]\nTOKEN = \"synthetic-value-4821\"\n")] {
-            (home, helper) = try sandbox(nil)
-            let toml = "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n" + extra
-            try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
-            let runner = FakeCommandRunner()
-            XCTAssertThrowsError(try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(),
-                                                        locate: { self.codex }).install(helperPath: helper), label) { error in
-                XCTAssertEqual(error as? CaseClientConnectorError, .customizedEntry, label)
+    /// Builder reviews (queue runs 66143, 57521), on the real CLI: any
+    /// `whytap` that is not exactly `<helper> mcp` stops Connect with no
+    /// changing call and keeps a working `case` entry, including a current
+    /// entry that is disabled or has an empty tool allowlist.
+    func test_real_codex_customized_whytap_is_left_as_is_and_case_kept() throws {
+        let extras = [("timeout", "startup_timeout_sec = 45\n"), ("disabled", "enabled = false\n"),
+                      ("empty tool allowlist", "enabled_tools = []\n"), ("empty tool blocklist", "disabled_tools = []\n"),
+                      ("env", "[mcp_servers.whytap.env]\nTOKEN = \"synthetic-value-4821\"\n")]
+        for args in ["[\"mcp\"]", "[\"app\", \"mcp\"]"] {
+            for (label, extra) in extras + (args == "[\"mcp\"]" ? [] : [("plain older", "")]) {
+                let (home, helper) = try sandbox(nil)
+                let toml = "[mcp_servers.case]\ncommand = \"\(helper)\"\nargs = [\"case\", \"mcp\"]\n"
+                    + "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = \(args)\n" + extra
+                try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+                let runner = FakeCommandRunner()
+                XCTAssertThrowsError(try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(),
+                                                            locate: { self.codex }).install(helperPath: helper), "\(args) \(label)") { error in
+                    XCTAssertEqual(error as? CaseClientConnectorError, .configuredManually, "\(args) \(label)")
+                }
+                XCTAssertEqual(runner.calls, [], "\(args) \(label): case kept, nothing changed")
+                XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml)
             }
-            XCTAssertEqual(runner.calls, [], label)
-            XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml, label)
         }
     }
 

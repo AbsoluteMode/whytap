@@ -26,12 +26,13 @@ struct MonitorHoverPanel: View {
     }
 
     /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
-    private func delete(_ dashboard: MonitorDashboard) {
+    private func delete(id: String, title: String) {
         guard !deleting else { return }
         deleting = true
         Task { @MainActor in
-            let outcome = await MonitorDashboardDeletion(store: store, prompts: deletionPrompts).delete(dashboard)
-            selectedID = Self.selection(afterDeleting: dashboard.id, outcome: outcome, selectedID: selectedID)
+            let outcome = await MonitorDashboardDeletion(store: store, prompts: deletionPrompts)
+                .delete(id: id, title: title)
+            selectedID = Self.selection(afterDeleting: id, outcome: outcome, selectedID: selectedID)
             deleting = false
         }
     }
@@ -41,7 +42,7 @@ struct MonitorHoverPanel: View {
     }
 
     private var title: String {
-        if selectedID == "server-status" { return "Server status" }
+        if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved { return "Server status" }
         return selectedDashboard?.title ?? "Monitor"
     }
 
@@ -91,7 +92,7 @@ struct MonitorHoverPanel: View {
             Group {
                 if selectedID == nil {
                     dashboardPicker
-                } else if selectedID == "server-status" {
+                } else if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved {
                     MonitorServersView(store: store, allowsOpeningFolder: false, showsHeader: false,
                                        compactPresentation: true)
                 } else if let dashboard = selectedDashboard {
@@ -119,12 +120,16 @@ struct MonitorHoverPanel: View {
     private var dashboardPicker: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 8) {
-                dashboardRow(id: "server-status", title: "Server status",
-                             image: "server.rack", subtitle: "CPU, memory and GPU readings", onDelete: nil)
+                // Every board, Server status included, has the same row and ×.
+                if !store.serverStatusRemoved {
+                    dashboardRow(id: MonitorStore.serverStatusID, title: "Server status",
+                                 image: "server.rack", subtitle: "CPU, memory and GPU readings",
+                                 onDelete: { delete(id: MonitorStore.serverStatusID, title: "Server status") })
+                }
                 ForEach(store.dashboards) { dashboard in
                     dashboardRow(id: dashboard.id, title: dashboard.title,
                                  image: dashboard.systemImage, subtitle: dashboard.subtitle,
-                                 onDelete: { delete(dashboard) })
+                                 onDelete: { delete(id: dashboard.id, title: dashboard.title) })
                 }
             }
             .frame(maxWidth: .infinity)
@@ -138,7 +143,7 @@ struct MonitorHoverPanel: View {
     /// asks before deleting. No context menu: the island has no right-click
     /// interactions. WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     private func dashboardRow(id: String, title: String, image: String, subtitle: String,
-                              onDelete: (() -> Void)?) -> some View {
+                              onDelete: @escaping () -> Void) -> some View {
         MonitorDashboardRowButton(title: title, action: { selectedID = id }) {
             HStack(spacing: 8) {
                 Image(systemName: image)
@@ -154,14 +159,12 @@ struct MonitorHoverPanel: View {
             }
             .padding(10)
             // Room for the × so long titles never run under it.
-            .padding(.trailing, onDelete == nil ? 0 : MonitorDashboardDeleteButton.size)
+            .padding(.trailing, MonitorDashboardDeleteButton.size)
         }
         .overlay(alignment: .trailing) {
-            if let onDelete {
-                MonitorDashboardDeleteButton(title: title, action: onDelete)
-                    .disabled(deleting)
-                    .padding(.trailing, 6)
-            }
+            MonitorDashboardDeleteButton(title: title, action: onDelete)
+                .disabled(deleting)
+                .padding(.trailing, 6)
         }
     }
 }

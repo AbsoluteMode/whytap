@@ -8,6 +8,12 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var dashboardError: String?
     @Published private(set) var serverError: String?
     @Published private(set) var refreshSeconds: Double = 15
+    /// Server status was deleted like any other board: it is not listed and
+    /// Whytap does not connect to the servers in servers.json.
+    @Published private(set) var serverStatusRemoved = false
+
+    /// Server status's ID in the deleted list; never a snapshot's ID.
+    static let serverStatusID = "server-status"
 
     let root: URL
     private let collector: (MonitorServer) async throws -> MonitorServerMetrics
@@ -105,8 +111,12 @@ final class MonitorStore: ObservableObject {
             dashboardError = rejected > 0 ? "\(rejected) dashboard file(s) could not be loaded. Ask your agent to validate them." : nil
         }
 
+        // WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+        serverStatusRemoved = removed?.contains(Self.serverStatusID) == true
         let configFile = root.appendingPathComponent("servers.json")
-        guard fm.fileExists(atPath: configFile.path) else {
+        // A deleted Server status reads no configuration, so refreshServers
+        // has nothing to connect to; servers.json itself stays as it is.
+        guard !serverStatusRemoved, fm.fileExists(atPath: configFile.path) else {
             configuration = nil
             readings = []
             serverError = nil
@@ -141,15 +151,17 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    /// Deletes one custom dashboard: records its ID as removed first (so a
-    /// collector that rewrites the snapshot cannot bring it back), then
-    /// removes every snapshot file with that ID. Collectors and other files
-    /// in Monitor are never touched. Returns false when the board was no
-    /// longer listed (another surface deleted it); its ID is still recorded.
+    /// Deletes one dashboard: records its ID as removed first (so a collector
+    /// that rewrites the snapshot cannot bring it back), then removes every
+    /// snapshot file with that ID. Server status is deleted the same way; it
+    /// has no snapshot, and once listed Whytap stops polling its servers.
+    /// Collectors, servers.json and other files in Monitor are never touched.
+    /// Returns false when the board was no longer listed (another surface
+    /// deleted it); its ID is still recorded.
     /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     @discardableResult
     func deleteDashboard(id: String) throws -> Bool {
-        guard id != "server-status", MonitorDashboard.validID(id) else {
+        guard MonitorDashboard.validID(id) else {
             throw MonitorValidationError.invalidDashboard
         }
         // The whole change runs under the list's lock, which install-dashboard
@@ -157,7 +169,8 @@ final class MonitorStore: ObservableObject {
         // removing the files (and lose its fresh snapshot).
         let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
             reloadFiles()
-            let wasListed = dashboards.contains { $0.id == id }
+            let wasListed = id == Self.serverStatusID
+                ? !serverStatusRemoved : dashboards.contains { $0.id == id }
             var removed = try MonitorRemovedDashboards.load(root: root)
             if !removed.contains(id) {
                 removed.insert(id)

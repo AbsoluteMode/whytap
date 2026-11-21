@@ -19,7 +19,8 @@
     "scaffold_hover": ["python3", "scripts/customize.py", "scaffold-hover", "--id", "<toolId>", "--title", "<title>"],
     "scaffold_dashboard": ["python3", "scripts/customize.py", "scaffold-dashboard", "--id", "<dashboard-id>", "--title", "<title>"],
     "validate_dashboard": ["python3", "scripts/customize.py", "validate-dashboard", "<snapshot.json>"],
-    "install_dashboard": ["python3", "scripts/customize.py", "install-dashboard", "<snapshot.json>", "--flavor", "beta"]
+    "install_dashboard": ["python3", "scripts/customize.py", "install-dashboard", "<snapshot.json>", "--flavor", "beta"],
+    "restore_dashboard": ["python3", "scripts/customize.py", "restore-dashboard", "<dashboard-id>", "--flavor", "beta"]
   },
   "contracts": [
     "No Whytap account, hosted backend, plans or telemetry.",

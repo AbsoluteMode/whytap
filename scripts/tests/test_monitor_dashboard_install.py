@@ -211,5 +211,76 @@ class MonitorDashboardInstallTests(unittest.TestCase):
         self.assertEqual(self.removed_ids(), ["fixture-a"])
 
 
+class MonitorDashboardRestoreTests(unittest.TestCase):
+    """restore-dashboard lists a deleted board again, Server status included."""
+
+    setUp = MonitorDashboardInstallTests.setUp
+    removed_ids = MonitorDashboardInstallTests.removed_ids
+
+    def restore(self, dashboard_id, *extra):
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            code = customize.main(["restore-dashboard", dashboard_id, "--flavor", "prod", *extra])
+        return code, output.getvalue(), errors.getvalue()
+
+    def test_server_status_comes_back_and_other_deletions_stay(self):
+        self.removed.write_text('{"removed": ["fixture-a", "server-status"]}\n')
+        servers = self.monitor / "servers.json"
+        servers.write_text('{"servers": []}\n')
+
+        code, output, _ = self.restore("server-status")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Server status is listed again", output)
+        self.assertEqual(self.removed_ids(), ["fixture-a"])
+        self.assertEqual(self.removed.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(servers.read_text(), '{"servers": []}\n', "servers.json is not touched")
+        self.assertEqual(sorted(p.name for p in self.monitor.iterdir() if p.name.startswith(".")), [])
+
+    def test_custom_board_is_relisted_without_writing_a_snapshot(self):
+        self.removed.write_text('{"removed": ["fixture-a"]}\n')
+
+        code, output, _ = self.restore("fixture-a")
+
+        self.assertEqual(code, 0)
+        self.assertIn("collector next writes", output)
+        self.assertEqual(self.removed_ids(), [])
+        self.assertEqual(list(self.dashboards.iterdir()), [])
+
+    def test_board_that_was_not_deleted_changes_nothing(self):
+        code, output, _ = self.restore("server-status")
+        self.assertEqual(code, 0)
+        self.assertIn("nothing to restore", output)
+        self.assertFalse(self.removed.exists())
+
+    def test_dry_run_changes_nothing(self):
+        self.removed.write_text('{"removed": ["server-status"]}\n')
+        code, output, _ = self.restore("server-status", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("Would list server-status again", output)
+        self.assertEqual(self.removed_ids(), ["server-status"])
+
+    def test_broken_list_and_bad_id_are_refused(self):
+        self.removed.write_text("{invalid JSON\n")
+        code, _, error = self.restore("server-status")
+        self.assertEqual(code, 2)
+        self.assertIn("unreadable", error)
+        self.assertEqual(self.removed.read_text(), "{invalid JSON\n")
+        code, _, error = self.restore("../servers")
+        self.assertEqual(code, 2)
+        self.assertIn("Invalid dashboard ID", error)
+
+    def test_held_lock_times_out_without_changes(self):
+        self.removed.write_text('{"removed": ["server-status"]}\n')
+        lock = os.open(self.monitor / customize.REMOVED_DASHBOARDS_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        self.addCleanup(os.close, lock)
+        with patch.object(customize, "REMOVED_DASHBOARDS_LOCK_SECONDS", 0.1):
+            code, _, error = self.restore("server-status")
+        self.assertEqual(code, 2)
+        self.assertIn("try again", error)
+        self.assertEqual(self.removed_ids(), ["server-status"])
+
+
 if __name__ == "__main__":
     unittest.main()

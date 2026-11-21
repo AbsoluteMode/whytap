@@ -136,10 +136,6 @@ codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 ```
 
-<p align="center">Meeting search (the <b>Meetings</b> tile above) is in the next release; the latest release, 2.2.25, does not have it yet.</p>
-
-<p align="center">The second line in each block is Case: it lists key and project names, never values, and using a key still needs your approval. Connect in the Case drawer sets up the same entry for you.</p>
-
 <p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>
 
 ## File an issue in one request

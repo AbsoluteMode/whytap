@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="196" height="124" viewBox="0 0 196 124">
+  <rect x="0.5" y="0.5" width="195" height="123" rx="14" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <g transform="translate(16 15) scale(0.75)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
+  <path d="m3 7 2 2 4-4" />
+  <path d="M13 6h8" />
+  <path d="M13 12h8" />
+  <path d="M13 18h8" /></g>
+  <text x="42" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#1f2328">To-do</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#1f2328"><tspan x="16" y="62">“Turn my last call</tspan><tspan x="16" y="81">into tasks”</tspan></text>
+  <text x="16" y="110" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#5b4bd6">Saved to To-do</text>
+</svg>

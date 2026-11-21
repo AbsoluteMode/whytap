@@ -180,7 +180,14 @@ Claude Code needs no checkout; on each Mac run once:
 claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 ```
 
-With the current Codex CLI, run from this checkout:
+Codex also needs no checkout for the application-control server:
+
+```sh
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+```
+
+To install the whole plugin (with Case discovery) with the current Codex CLI,
+run from this checkout:
 
 ```sh
 codex plugin marketplace add .

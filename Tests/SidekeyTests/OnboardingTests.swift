@@ -94,7 +94,10 @@ final class OnboardingTests: XCTestCase {
     private func makeModel(_ env: Env, permissions: PermissionsSettingsViewModel,
                            supportsOnDevice: Bool = true) -> OnboardingModel {
         let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: env.controller(),
-                                    supportsOnDevice: supportsOnDevice, defaultsChanges: NotificationCenter())
+                                    supportsOnDevice: supportsOnDevice,
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
+                                    defaultsChanges: NotificationCenter())
         addTeardownBlock { model.stop() }
         return model
     }
@@ -159,28 +162,28 @@ final class OnboardingTests: XCTestCase {
 
     func testPagesFollowWhatIsAlreadyDone() {
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: false, permissionsReady: false)),
-                       [.speech, .permissions, .tryDrop, .features])
+                       [.speech, .permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: false, permissionsReady: true)),
-                       [.speech, .tryDrop, .features], "Access already given hides the permissions page")
+                       [.speech, .tryDrop, .customize, .features], "Access already given hides the permissions page")
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: true, permissionsReady: false)),
-                       [.permissions, .tryDrop, .features], "Drop already set up hides the speech page")
+                       [.permissions, .tryDrop, .customize, .features], "Drop already set up hides the speech page")
         XCTAssertEqual(OnboardingFlow.pages(for: .init(dropSpeechReady: true, permissionsReady: true)),
-                       [.tryDrop, .features])
+                       [.tryDrop, .customize, .features])
     }
 
     func testCleanMacStartsOnSpeechAndOffersOnThisMac() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
-        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(model.page, .speech)
-        XCTAssertFalse(model.showsKeyForm)
+        XCTAssertTrue(model.supportsOnDevice, "The page offers On this Mac beside the key")
     }
 
     func testAccessAlreadyGivenSkipsThePermissionsPage() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        XCTAssertEqual(model.pages, [.speech, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.speech, .tryDrop, .customize, .features])
     }
 
     func testRejectedConfiguredSpeechRouteKeepsItsSettingsActionUntilDictationSucceeds() throws {
@@ -208,19 +211,19 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv()
         let access = permissions(accessibility: true, microphone: .authorized, hotkey: .shortcutInUse)
         let model = makeModel(env, permissions: access)
-        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .features],
+        XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features],
                        "Two green checks are not enough: the shortcut must be installed")
         XCTAssertFalse(access.allRequiredGranted, "Continue stays off until it installs")
         AppState.shared.dropHotkeyStatus = .ready
         XCTAssertTrue(access.allRequiredGranted)
     }
 
-    func testIntelGoesStraightToTheKeyForm() throws {
+    func testIntelOffersOnlyTheKey() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready),
                               supportsOnDevice: false)
         XCTAssertEqual(model.page, .speech)
-        XCTAssertTrue(model.showsKeyForm)
+        XCTAssertFalse(model.supportsOnDevice)
     }
 
     // MARK: - Speech
@@ -292,7 +295,7 @@ final class OnboardingTests: XCTestCase {
         env.speech.useOnDevice()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
-        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .customize, .features])
     }
 
     // MARK: - Skipping
@@ -304,7 +307,7 @@ final class OnboardingTests: XCTestCase {
         model.setUpSpeechLater()
         XCTAssertEqual(model.page, .permissions, "The shortcut still needs its permissions")
         model.advance()  // Skip
-        XCTAssertEqual(model.page, .features, "Nothing to dictate with, so no try page")
+        XCTAssertEqual(model.page, .customize, "Nothing to dictate with, so no try page")
     }
 
     func testEveryPageCanBeSkippedToTheEnd() throws {
@@ -317,6 +320,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(model.page, .permissions)
         model.advance()
         XCTAssertEqual(model.page, .tryDrop)
+        model.advance()
+        XCTAssertEqual(model.page, .customize)
         model.advance()
         XCTAssertEqual(model.page, .features)
         XCTAssertFalse(finished)
@@ -340,9 +345,9 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv(modelPresent: true)
         env.speech.useOnDevice()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        XCTAssertEqual(model.pages, [.tryDrop, .features])
+        XCTAssertEqual(model.pages, [.tryDrop, .customize, .features])
         model.showPermissions()
-        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .features])
+        XCTAssertEqual(model.pages, [.permissions, .tryDrop, .customize, .features])
         XCTAssertEqual(model.page, .permissions)
     }
 
@@ -384,21 +389,218 @@ final class OnboardingTests: XCTestCase {
 
     func testTryCopyNamesTheUsersOwnShortcutAndGesture() {
         let hold = OnboardingTryPage.Copy(shortcut: "Space", gesture: .hold)
-        XCTAssertEqual(hold.title, "Hold Space and speak")
-        XCTAssertTrue(hold.subtitle.contains("let go"))
+        XCTAssertEqual(hold.pressVerb, "Hold")
+        XCTAssertEqual(hold.releaseVerb, "Let go")
+        XCTAssertTrue(hold.placeholder.contains("hold Space"))
         let tap = OnboardingTryPage.Copy(shortcut: "⌥D", gesture: .tap)
-        XCTAssertEqual(tap.title, "Press ⌥D and speak")
-        XCTAssertTrue(tap.subtitle.contains("again"))
+        XCTAssertEqual(tap.pressVerb, "Press")
+        XCTAssertEqual(tap.releaseVerb, "Press again")
+        XCTAssertTrue(tap.placeholder.contains("press ⌥D"))
     }
 
-    func testOnThisMacCardSaysItSetsDropOnly() {
-        let fresh = OnboardingOnDevicePage.Presentation(.notDownloaded)
+    func testOnThisMacCardSaysWhatItDownloads() {
+        let fresh = OnboardingSpeechPage.Presentation(.notDownloaded)
         XCTAssertEqual(fresh.action, "Download and use for Drop")
         XCTAssertTrue(fresh.detail.contains("about 470 MB"))
-        XCTAssertEqual(OnboardingOnDevicePage.Presentation(.ready).action, "Use for Drop")
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation(.downloading(0.001)).detail.contains("Starting"))
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation(.downloading(0.42)).detail.contains("42%"))
-        XCTAssertTrue(OnboardingOnDevicePage.Presentation.scope.contains("Drop only"))
+        XCTAssertEqual(OnboardingSpeechPage.Presentation(.ready).action, "Use for Drop")
+        XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.001)).detail.contains("Starting"))
+        XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.42)).detail.contains("42%"))
+    }
+
+    func testScreenRecordingIsOptionalAndAskedOnceWithShot() async throws {
+        let env = try makeEnv()
+        let access = permissions(accessibility: true, microphone: .authorized, hotkey: .ready)
+        var requests = 0
+        var settingsOpened = 0
+        let shared = ScreenRecordingAccess(isGranted: { false }, request: { requests += 1 })
+        let model = OnboardingModel(speech: env.speech, permissions: access, onDevice: env.controller(),
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
+                                    screenRecording: shared, openScreenRecordingSettings: { settingsOpened += 1 },
+                                    defaultsChanges: NotificationCenter())
+        addTeardownBlock { model.stop() }
+        XCTAssertTrue(access.allRequiredGranted, "Continue does not wait for Screen Recording")
+        XCTAssertFalse(model.screenRecordingAsked)
+        model.requestScreenRecording()
+        XCTAssertTrue(model.screenRecordingAsked)
+        XCTAssertEqual(settingsOpened, 0, "Nothing of ours beside macOS's dialog")
+        model.requestScreenRecording()
+        XCTAssertEqual(settingsOpened, 1, "The next press opens System Settings")
+        guard case .alreadyRequested = shared.requestOnce() else {
+            return XCTFail("Shot shares the same launch's request")
+        }
+        try await eventually { requests == 1 }
+        XCTAssertEqual(requests, 1, "macOS is asked once")
+    }
+
+    func testAKeySavedAfterLeavingTheSpeechPageDoesNotMoveOn() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        model.setUpSpeechLater()
+        XCTAssertEqual(model.page, .permissions)
+        try env.keys.save("fixture", account: BYOKKeyStore.account(for: .soniox))
+        model.useKey(.soniox)  // the check finished late
+        XCTAssertTrue(model.dropReady, "The key still becomes Drop's speech")
+        XCTAssertEqual(model.page, .permissions, "and the person stays where they are")
+    }
+
+    // MARK: - Language
+
+    func testLanguageIsTheInputLanguageSetting() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        let preferences = PrivacyPreferences(defaults: env.defaults)
+        XCTAssertNil(model.language, "A new Mac starts on Auto")
+        XCTAssertEqual(OnboardingLanguageRow.title(nil), OnboardingLanguageRow.autoTitle)
+        model.setLanguage(AppLanguage.find(code: "ru"))
+        XCTAssertEqual(preferences.selectedLanguage?.code, "ru", "The same value as Input Lang and Settings")
+        XCTAssertEqual(model.language?.code, "ru")
+        XCTAssertTrue(OnboardingLanguageRow.title(model.language).hasPrefix("Russian"))
+        model.setLanguage(nil)
+        XCTAssertNil(preferences.selectedLanguage, "Back to Auto")
+    }
+
+    func testLanguageSearchFindsEnglishAndNativeNames() {
+        let all = OnboardingLanguageSearch.results("")
+        XCTAssertNotNil(all.first)
+        XCTAssertNil(all.first ?? nil, "Any language leads the full list")
+        XCTAssertEqual(OnboardingLanguageSearch.results("").count, AppLanguage.all.count + 1)
+        XCTAssertEqual(OnboardingLanguageSearch.results("Russian").first??.code, "ru")
+        XCTAssertEqual(OnboardingLanguageSearch.results("рус").first??.code, "ru", "Native name, typed in Cyrillic")
+        XCTAssertEqual(OnboardingLanguageSearch.results("RUS").first??.code, "ru", "Case does not matter")
+        XCTAssertEqual(OnboardingLanguageSearch.results("deu").first??.code, "de", "Deutsch")
+        XCTAssertEqual(OnboardingLanguageSearch.results("espanol").first??.code, "es", "Accents do not matter")
+        XCTAssertEqual(OnboardingLanguageSearch.results("any").count, 1, "Any language itself")
+        XCTAssertTrue(OnboardingLanguageSearch.results("zzzz").isEmpty)
+        let ukr = OnboardingLanguageSearch.results("ukr")
+        XCTAssertEqual(ukr.first??.code, "uk", "A name that starts with the query comes first")
+    }
+
+    func testKeyCardOffersEveryProviderWithItsAPIHintsOffer() {
+        let offers = OnboardingKeyOffer.all
+        XCTAssertEqual(offers.map(\.target), [.provider(.soniox), .provider(.deepgram), .provider(.elevenLabs),
+                                               .provider(.openRouter), .provider(.openAI), .provider(.anthropic), .tavily],
+                       "Speech first, then language models, then search")
+        func offer(_ target: OnboardingKeyTarget) -> OnboardingKeyOffer? { offers.first { $0.target == target } }
+        XCTAssertEqual(offer(.provider(.deepgram))?.short, "$200 credit")
+        XCTAssertEqual(offer(.provider(.deepgram))?.url?.host, "deepgram.com")
+        XCTAssertEqual(offer(.provider(.elevenLabs))?.short, "10k credits/mo")
+        XCTAssertEqual(offer(.provider(.openRouter))?.short, "50/day free")
+        XCTAssertEqual(offer(.tavily)?.short, "1k credits/mo")
+        XCTAssertEqual(offer(.provider(.anthropic))?.needsPlan, true, "Claude Max credit needs the plan")
+        XCTAssertEqual(offer(.provider(.openAI))?.needsPlan, true, "ChatGPT Pro credit needs the plan")
+        XCTAssertNil(offer(.provider(.soniox))?.short, "No offer is invented where API hints list none")
+        for hint in APIHintsView.hints {
+            XCTAssertNotNil(OnboardingKeyOffer.target(of: hint), "\(hint.provider) offer has no tile")
+        }
+        XCTAssertEqual(offers.filter { $0.target.speechKind != nil }.count, OnboardingDropSpeech.keyProviders.count,
+                       "Only speech keys become Drop's speech")
+    }
+
+    func testNoProviderIsChosenUntilClicked() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        XCTAssertNil(model.keyTarget)
+    }
+
+    // MARK: - Coding agents
+
+    func testCodingAgentsConnectThroughTheCaseClientSetup() async throws {
+        var connected: [CaseKnownClient] = []
+        let tools = OnboardingCodingTools(detect: { [.codex, .claudeCode] },
+                                          connect: { client in connected.append(client); return .init() })
+        await tools.refreshIfNeeded()
+        XCTAssertEqual(tools.installed, [.claudeCode, .codex], "Offered in a fixed order")
+        XCTAssertEqual(tools.names, "Claude Code and Codex")
+        tools.connect()
+        try await eventually { tools.state == .connected }
+        XCTAssertEqual(connected, [.claudeCode, .codex])
+    }
+
+    /// The page's Connect through the real `CaseClientSetup` and host
+    /// connectors: Claude Code and Codex get the one `whytap` server
+    /// (`<helper> mcp`, app tools and Case key names), and our older Case-only
+    /// `case` entry is retired, never written. No configured value reaches a
+    /// command line.
+    // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
+    func testCodingAgentsConnectWritesTheOneWhytapServer() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-connect-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let binDir = root.appendingPathComponent("bin")
+        let helper = root.appendingPathComponent("Whytap.app/Contents/Helpers/whytap")
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let legacyCase = #"{"command":"\#(helper.path)","args":["case","mcp"]}"#
+        try Data(#"{"mcpServers":{"case":\#(legacyCase)}}"#.utf8).write(to: home.appendingPathComponent(".claude.json"))
+
+        let claudeRunner = FakeCommandRunner()
+        let codexRunner = FakeCommandRunner()
+        codexRunner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper.path, args: ["case", "mcp"])
+        let setup = CaseClientSetup(
+            helperURL: helper, binDir: binDir, flavorName: BuildFlavor.prod.rawValue,
+            connectors: [
+                .claudeCode: ClaudeCodeCaseConnector(home: home, socketPath: root.appendingPathComponent("broker.sock").path,
+                                                     runner: claudeRunner,
+                                                     locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }),
+                .codex: CodexCaseConnector(home: home, runner: codexRunner, reader: codexRunner,
+                                           locate: { URL(fileURLWithPath: "/usr/local/bin/codex") }),
+            ],
+            builtInAgentAvailable: { true })
+        let tools = OnboardingCodingTools(detect: { await setup.installed(among: OnboardingCodingTools.offered) },
+                                          connect: { await setup.connect($0.identity) })
+
+        await tools.refreshIfNeeded()
+        XCTAssertEqual(tools.installed, [.claudeCode, .codex])
+        tools.connect()
+        try await eventually { tools.state != .connecting && tools.state != .idle }
+        XCTAssertEqual(tools.state, .connected)
+
+        XCTAssertEqual(claudeRunner.calls.map(\.arguments), [
+            ["mcp", "add", "-s", "user", "whytap", "--", helper.path, "mcp"],
+            ["mcp", "remove", "-s", "user", "case"],
+        ])
+        XCTAssertEqual(codexRunner.calls.map(\.arguments), [
+            ["mcp", "add", "whytap", "--", helper.path, "mcp"],
+            ["mcp", "remove", "case"],
+        ])
+        let added = (claudeRunner.calls + codexRunner.calls).filter { $0.arguments.starts(with: ["mcp", "add"]) }
+        XCTAssertFalse(added.contains { $0.arguments.contains("case") }, "Never a Case-only server")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: binDir.appendingPathComponent("whytap").path),
+                       helper.path, "The whytap command points at the bundled helper")
+    }
+
+    func testACodingAgentThatCouldNotBeSetUpSaysWhy() async throws {
+        let tools = OnboardingCodingTools(detect: { [.claudeCode] },
+                                          connect: { _ in CaseClientSetupReport(problems: ["Claude Code: setup failed"]) })
+        await tools.refreshIfNeeded()
+        tools.connect()
+        try await eventually { tools.state != .connecting && tools.state != .idle }
+        XCTAssertEqual(tools.state, .failed("Claude Code: setup failed"))
+    }
+
+    func testNoCodingAgentOffersNothing() async {
+        let tools = OnboardingCodingTools(detect: { [.cursor] }, connect: { _ in .init() })
+        await tools.refreshIfNeeded()
+        XCTAssertTrue(tools.installed.isEmpty, "Only Claude Code and Codex are offered")
+        tools.connect()
+        XCTAssertEqual(tools.state, .idle)
+    }
+
+    func testOnboardingClipsAreBundledLikeTheSettingsClips() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bundle = try XCTUnwrap(Bundle(path: root.appendingPathComponent("Resources").path))
+        for video in OnboardingVideo.allCases {
+            let url = try XCTUnwrap(video.url(in: bundle), "\(video) clip missing")
+            let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+            XCTAssertGreaterThan(size, 40_000)
+            XCTAssertLessThan(size, 3_000_000)
+        }
     }
 
     // MARK: - Features
@@ -479,77 +681,139 @@ final class OnboardingTests: XCTestCase {
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
     }
 
-    /// Offscreen PNGs of every page for review; never shown on screen.
+    /// Offscreen PNGs of every page, walked the way a new Mac goes through
+    /// them, in the real window; never shown on screen.
     func testRenderEveryPage() async throws {
         guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
             throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
         }
+        _ = NSApplication.shared
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // The packaged app registers its fonts through ATSApplicationFontsPath.
-        let font = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Resources/Fonts/InstrumentSerif-Regular.ttf")
-        CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
-
-        struct Case {
-            let name: String
-            let status: OnDeviceSpeechModelStatus
-            let hotkey: DropHotkeyStatus
-            let accessibility: Bool
-            let microphone: AVAuthorizationStatus
-            var supportsOnDevice = true
-            var dropReady = false
-            let setUp: @MainActor (OnboardingModel) -> Void
+        // The packaged app registers its fonts through ATSApplicationFontsPath
+        // and finds the clips in its own bundle.
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources")
+        for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
+            CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
         }
-        let cases: [Case] = [
-            Case(name: "1-speech", status: .notDownloaded, hotkey: .accessibilityRequired, accessibility: false,
-                 microphone: .notDetermined, setUp: { _ in }),
-            Case(name: "1b-speech-key", status: .notDownloaded, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, supportsOnDevice: false, setUp: { _ in }),
-            Case(name: "2-permissions", status: .downloading(0.42), hotkey: .accessibilityRequired, accessibility: false,
-                 microphone: .notDetermined, setUp: { $0.startOnDevice() }),
-            Case(name: "2b-permissions-shortcut", status: .downloading(0.42), hotkey: .shortcutInUse, accessibility: true,
-                 microphone: .authorized, setUp: { $0.showPermissions() }),
-            Case(name: "3-try-downloading", status: .downloading(0.42), hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.startOnDevice() }),
-            Case(name: "3b-try-dictated", status: .downloading(0.42), hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.startOnDevice(); $0.noteDictated() }),
-            Case(name: "3c-try-route-error", status: .ready, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, dropReady: true, setUp: { $0.noteDropSetupFailure(.dropFast) }),
-            Case(name: "4-features", status: .ready, hotkey: .ready, accessibility: true,
-                 microphone: .authorized, setUp: { $0.setUpSpeechLater() }),
+        let savedBundle = FeatureVideo.resourceBundle
+        FeatureVideo.resourceBundle = try XCTUnwrap(Bundle(path: resources.path))
+        OnboardingClipStage.playsVideo = false
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons"))
+        defer {
+            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
+            FeatureVideo.resourceBundle = savedBundle
+            OnboardingClipStage.playsVideo = true
+        }
+
+        enum Stop { case speech, speechProvider, speechModelProvider, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
+                        customize, customizeHover, features, featuresConnected }
+        let shots: [(Stop, String)] = [
+            (.speech, "1-speech"), (.speechProvider, "1-speech-deepgram"), (.speechModelProvider, "1-speech-anthropic"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
+            (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
+            (.tryDownloading, "3-try-drop-downloading"), (.customize, "4-customize-shortcuts"),
+            (.customizeHover, "4-customize-hover"), (.features, "5-more"), (.featuresConnected, "5-more-connected"),
         ]
-        for dark in [false, true] {
-            for item in cases {
-                let env = try makeEnv(modelPresent: item.dropReady)
-                if item.dropReady { env.speech.useOnDevice() }
-                let controller = OnDeviceSpeechModelController(store: FixedStore(item.status))
-                await controller.refresh()
-                let model = OnboardingModel(
-                    speech: env.speech,
-                    permissions: permissions(accessibility: item.accessibility, microphone: item.microphone, hotkey: item.hotkey),
-                    onDevice: controller, supportsOnDevice: item.supportsOnDevice,
-                    models: try offlineModels(env), defaultsChanges: NotificationCenter())
-                defer { model.stop() }
-                item.setUp(model)
-                let host = NSHostingView(rootView: OnboardingView(model: model))
-                host.frame = NSRect(origin: .zero, size: OnboardingView.size)
-                let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: OnboardingView.size.width,
-                                                          height: OnboardingView.size.height),
-                                      styleMask: .borderless, backing: .buffered, defer: true)
-                window.isReleasedWhenClosed = false
-                window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                window.contentView = host
-                host.layoutSubtreeIfNeeded()
-                try await Task.sleep(for: .milliseconds(500))
-                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-                host.cacheDisplay(in: host.bounds, to: bitmap)
-                let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-                try png.write(to: directory.appendingPathComponent("\(item.name)-\(dark ? "dark" : "light").png"))
-                XCTAssertFalse(window.isVisible)
-                window.contentView = nil
-                window.close()
+        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage]
+        let fromTry: [Stop] = [.tryEmpty, .tryDone, .tryDownloading, .customize, .customizeHover, .features, .featuresConnected]
+        for (stop, name) in shots {
+            // A new Mac: no model (downloading once asked; landed by the try
+            // page), nothing granted.
+            let status: OnDeviceSpeechModelStatus
+            switch stop {
+            case .speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage: status = .notDownloaded
+            case .permissions, .tryDownloading: status = .downloading(0.42)
+            default: status = .ready
             }
+            let env = try makeEnv(modelPresent: status == .ready)
+            let controller = OnDeviceSpeechModelController(store: FixedStore(status))
+            await controller.refresh()
+            let granted = Flag(false)
+            AppState.shared.dropHotkeyStatus = .accessibilityRequired
+            let permissions = PermissionsSettingsViewModel(
+                onComplete: {}, autoComplete: true,
+                snapshotProvider: { .init(accessibilityGranted: granted.value,
+                                          microphoneStatus: granted.value ? .authorized : .notDetermined) },
+                screenRecordingAccessProvider: { false },
+                accessibilityRequester: {}, openAccessibilitySettings: {}, runtimeRefresh: { _, _ in })
+            let tools = OnboardingCodingTools(detect: { [] }, connect: { _ in CaseClientSetupReport() })
+            tools.show([.claudeCode, .codex], state: stop == .featuresConnected ? .connected : .idle)
+            let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,
+                                        supportsOnDevice: true, models: try offlineModels(env),
+                                        preferences: PrivacyPreferences(defaults: env.defaults), codingTools: tools,
+                                        screenRecording: ScreenRecordingAccess(isGranted: { false }, request: {}),
+                                        defaultsChanges: NotificationCenter())
+            defer { model.stop() }
+            XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
+            if stop == .speechLanguage { model.setLanguage(AppLanguage.find(code: "ru")) }
+            if stop == .speechProvider { model.keyTarget = .provider(.deepgram) }
+            if stop == .speechModelProvider { model.keyTarget = .provider(.anthropic) }
+            if stop == .customizeHover { model.customizeVideo = .hover }
+            if !beforeCustomize.contains(stop) {
+                model.startOnDevice()  // Download and use for Drop
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertEqual(model.page, .permissions)
+            }
+            if fromTry.contains(stop) {
+                granted.value = true
+                AppState.shared.dropHotkeyStatus = .ready
+                permissions.refresh()
+                try await Task.sleep(for: .milliseconds(100))
+                if model.page == .permissions { model.advance() }
+                XCTAssertEqual(model.page, .tryDrop)
+            }
+            if [.customize, .customizeHover, .features, .featuresConnected].contains(stop) { model.advance() }
+            if [.features, .featuresConnected].contains(stop) { model.advance() }
+
+            let windowController = OnboardingWindowController(model: model, onClosed: {})
+            let window = try XCTUnwrap(windowController.window)
+            window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            let content = try XCTUnwrap(window.contentView)
+            content.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(500))
+            switch stop {
+            case .speech, .speechProvider, .speechModelProvider, .speechLanguage: model.demo.show(.done)
+            case .speechListening: model.demo.show(.recording, level: 0.62)
+            case .tryDone:
+                let textView = try XCTUnwrap(Self.textView(in: content))
+                XCTAssertTrue(window.makeFirstResponder(textView))
+                let editor = try XCTUnwrap(DropLocalEditor(focusedIn: window, isPresented: { _ in true }))
+                XCTAssertTrue(editor.insert("Let's move the launch review to Thursday at ten and send the agenda tonight."))
+                XCTAssertTrue(model.dictated)
+            default: break
+            }
+            try await Task.sleep(for: .milliseconds(900))
+            let frameView = try XCTUnwrap(content.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            try png.write(to: directory.appendingPathComponent("\(name).png"))
+            XCTAssertFalse(window.isVisible)
+            window.contentViewController = nil
+            window.close()
+        }
+
+        // The language list opens in a popover, which an offscreen window
+        // does not draw: render its content alone, searched in Russian.
+        for (query, name) in [("", "1-speech-language-list"), ("рус", "1-speech-language-search")] {
+            let list = OnboardingLanguageList(selected: nil, query: query, choose: { _ in })
+            let hosting = NSHostingView(rootView: list)
+            hosting.frame = NSRect(x: 0, y: 0, width: 260, height: 285)
+            let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.contentView = hosting
+            window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            hosting.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(300))
+            let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("\(name).png"))
+            window.contentView = nil
+            window.close()
         }
     }
 

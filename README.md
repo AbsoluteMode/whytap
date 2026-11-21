@@ -114,11 +114,21 @@
 
 ## Homebrew
 
-<p align="center">If you use <a href="https://brew.sh">Homebrew</a>, one command installs the same signed and notarized build as the Download button. Whytap then updates itself, and <code>brew upgrade --cask whytap</code> works too. Details are in the <a href="docs/install.md#install-with-homebrew">install guide</a>.</p>
+<p align="center"><a href="https://brew.sh"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/homebrew-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/homebrew-light.svg"><img alt="Homebrew" src="docs/assets/readme/homebrew-dark.svg" width="48" height="48"></picture></a></p>
+
+### Install
 
 ```bash
 brew install absolutemode/tap/whytap
 ```
+
+### Update
+
+```bash
+brew upgrade --cask whytap
+```
+
+<p align="center"><sub>Whytap also updates itself from the island.</sub></p>
 
 ## Plugins
 

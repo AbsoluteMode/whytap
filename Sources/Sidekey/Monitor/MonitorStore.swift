@@ -16,6 +16,11 @@ final class MonitorStore: ObservableObject {
     private var lastServerRefresh: Date?
     private var refreshRequested = false
     private var generation: UInt64 = 0
+    /// Every dashboard file by the ID it decodes to, duplicates included, so
+    /// Delete removes each copy of the board it lists.
+    private var dashboardFiles: [String: [URL]] = [:]
+    /// How long Delete waits for an installer holding the deleted list.
+    var removedListLockTimeout: TimeInterval = 2
 
     init(root: URL = MonitorPaths.root,
          collector: @escaping (MonitorServer) async throws -> MonitorServerMetrics = {
@@ -74,6 +79,9 @@ final class MonitorStore: ObservableObject {
         var decoded: [MonitorDashboard] = []
         var rejected = 0
         var ids = Set<String>()
+        var filesByID: [String: [URL]] = [:]
+        // WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+        let removed = try? MonitorRemovedDashboards.load(root: root)
         for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where file.pathExtension == "json" {
             do {
                 let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -82,12 +90,20 @@ final class MonitorStore: ObservableObject {
                     throw MonitorValidationError.invalidDashboard
                 }
                 let dashboard = try MonitorDashboard.decode(Data(contentsOf: file))
+                filesByID[dashboard.id, default: []].append(file)
+                // A deleted board stays hidden while its collector rewrites it.
+                if removed?.contains(dashboard.id) == true { continue }
                 guard ids.insert(dashboard.id).inserted else { throw MonitorValidationError.invalidDashboard }
                 decoded.append(dashboard)
             } catch { rejected += 1 }
         }
+        dashboardFiles = filesByID
         dashboards = decoded.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        dashboardError = rejected > 0 ? "\(rejected) dashboard file(s) could not be loaded. Ask your agent to validate them." : nil
+        if removed == nil {
+            dashboardError = "The list of deleted dashboards could not be read. Ask your agent to validate removed-dashboards.json."
+        } else {
+            dashboardError = rejected > 0 ? "\(rejected) dashboard file(s) could not be loaded. Ask your agent to validate them." : nil
+        }
 
         let configFile = root.appendingPathComponent("servers.json")
         guard fm.fileExists(atPath: configFile.path) else {
@@ -123,6 +139,43 @@ final class MonitorStore: ObservableObject {
                 return stale
             }
         }
+    }
+
+    /// Deletes one custom dashboard: records its ID as removed first (so a
+    /// collector that rewrites the snapshot cannot bring it back), then
+    /// removes every snapshot file with that ID. Collectors and other files
+    /// in Monitor are never touched. Returns false when the board was no
+    /// longer listed (another surface deleted it); its ID is still recorded.
+    /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    @discardableResult
+    func deleteDashboard(id: String) throws -> Bool {
+        guard id != "server-status", MonitorDashboard.validID(id) else {
+            throw MonitorValidationError.invalidDashboard
+        }
+        // The whole change runs under the list's lock, which install-dashboard
+        // also takes, so a reinstall cannot land between hiding the ID and
+        // removing the files (and lose its fresh snapshot).
+        let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
+            reloadFiles()
+            let wasListed = dashboards.contains { $0.id == id }
+            var removed = try MonitorRemovedDashboards.load(root: root)
+            if !removed.contains(id) {
+                removed.insert(id)
+                try removed.save(root: root)
+            }
+            let fm = FileManager.default
+            for file in dashboardFiles[id] ?? [] {
+                // Only regular files inside dashboards/ that decoded to this ID.
+                guard file.deletingLastPathComponent().standardizedFileURL
+                        == dashboardsDirectory.standardizedFileURL else { continue }
+                // The ID is already hidden; a file that cannot be removed is
+                // simply rewritten or left by its collector.
+                try? fm.removeItem(at: file)
+            }
+            return wasListed
+        }
+        reloadFiles()
+        return wasListed
     }
 
     func refreshServers(generation refreshGeneration: UInt64? = nil) async {

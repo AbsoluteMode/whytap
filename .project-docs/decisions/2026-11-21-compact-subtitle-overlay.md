@@ -11,8 +11,8 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-21 the user asked to remove the status line, the Original/Follow checkboxes and the "Understand what you hear" empty screen from Subtitles, called the window a huge application and asked to restore the neat window of their local translator, allowing languages to be added to it.
     confirmed_at: 2026-11-21
-  - type: repository
-    reference: ~/eye/examples/realtime-translator/Sources/RealtimeTranslator/SubtitleView.swift (the original overlay)
+  - type: user-confirmed
+    reference: The reference is the SubtitleView of the user's standalone RealtimeTranslator (a local example project outside this repository), read on 2026-11-21.
     confirmed_at: 2026-11-21
   - type: repository
     reference: Sources/Sidekey/Translation/TranslationView.swift

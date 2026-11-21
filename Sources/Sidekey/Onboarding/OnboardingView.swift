@@ -561,7 +561,7 @@ struct OnboardingKeyCard: View {
                 Text(offer.category.rawValue)
                     .font(OnboardingTheme.mono(7.5, weight: .semibold))
                     .tracking(0.6)
-                    .foregroundColor(offer.category == .speech ? OnboardingTheme.accent : OnboardingTheme.faint)
+                    .foregroundColor(OnboardingTheme.faint)
                 Group {
                     switch offer.target {
                     case .provider(let kind): ProviderKindIcon(kind: kind, size: 17)

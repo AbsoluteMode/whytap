@@ -3503,12 +3503,15 @@ struct IslandDetachedHoverPanelBackground: View {
             .clipShape(shape)
     }
 
-    /// Keep the historical dark wash only on the legacy fallback.
-    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md
+    /// Keep the dark wash only on the legacy fallback. It sits over the
+    /// material at legacyDarkLayerOpacity so the window underneath never
+    /// reads through, blurred or not.
+    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md,
+    // .project-docs/decisions/2026-11-21-history-backdrop-always.md
     private func glassBase(in shape: RoundedRectangle) -> some View {
         shape
             .fill(.ultraThinMaterial)
-            .overlay(shape.fill(.black.opacity(0.25)))
+            .overlay(shape.fill(.black.opacity(IslandDetachedHoverPanelGlassStyle.legacyDarkLayerOpacity)))
     }
 
     /// Vertical darkening: the slab reads thicker toward the bottom.

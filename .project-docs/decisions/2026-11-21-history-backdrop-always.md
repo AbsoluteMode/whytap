@@ -2,7 +2,7 @@
 id: history-backdrop-always-2026-11-21
 type: decision
 title: History always has a readable backdrop
-summary: The hover History drawer and its preview use the shared drawer backdrop on every macOS version; Reduce transparency gives every hover drawer card an opaque dark backdrop; rows show their text on one line without leading line breaks.
+summary: The hover History drawer and its preview use the shared drawer backdrop on every macOS version, the macOS 14/15 backdrop is darkened to 80%; Reduce transparency gives every hover drawer card an opaque dark backdrop; rows show their text on one line without leading line breaks.
 status: confirmed
 tags: [history, island, hover, glass, accessibility]
 canonical_for: [history-drawer-backdrop, hover-backdrop-reduce-transparency, history-row-text]
@@ -16,6 +16,9 @@ sources:
     confirmed_at: 2026-11-21
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandView.swift
+    confirmed_at: 2026-11-21
+  - type: repository
+    reference: Sources/Sidekey/DynamicIsland/IslandDropModeControl.swift
     confirmed_at: 2026-11-21
   - type: repository
     reference: Sources/Sidekey/History/HistoryHoverPreview.swift
@@ -58,6 +61,11 @@ display or first-launch state switches it off.
   native glass when available, else the legacy material. The rule applies to
   every user of `islandHoverGlassSurface` (drawer, music strip, History
   preview).
+- The macOS 14/15 backdrop (`IslandDetachedHoverPanelBackground`) puts an
+  80% black layer (`legacyDarkLayerOpacity`, was 25%) over its material, so
+  small text under any hover panel does not read through even where the
+  material does not blur. The specular top, edge lens and rim keep the glass
+  look. This applies to every macOS 14/15 hover panel, not only History.
 - History's own row, segment and hint plates are unchanged; they sit on the
   backdrop now.
 - A History row shows its entry on one line without leading line breaks or
@@ -76,9 +84,16 @@ setting.
 - Offscreen renders of the History drawer over a bright chat-like window:
   the former see-through drawer, the legacy backdrop and the Reduce
   transparency card (`HistoryBackdropTests.testRenderHistoryBackdrops`,
-  `WHYTAP_HISTORY_BG_RENDER_DIR`). Offscreen capture cannot reproduce the
-  live behind-window blur of the material, so the legacy render shows its
-  dark wash only. macOS 14/15 itself was not available.
+  `WHYTAP_HISTORY_BG_RENDER_DIR`). They force the macOS 14/15 row style
+  (`IslandHoverGlass.drawsLegacyPathForReview`), so "before" matches the
+  reported screen: dark rows, see-through gaps.
+- A probe image in the same run captures SwiftUI's `.ultraThinMaterial` and
+  `NSVisualEffectView` (behind and within window) over text: offscreen
+  capture draws no blur for any of them (crisp text or a flat fill). The
+  first legacy render, with the former 25% wash, therefore showed the
+  no-blur worst case, and the text under the panel read through. The 80%
+  layer keeps that worst case readable; live blur only improves it.
+  macOS 14/15 itself was not available.
 - The "Click for copy" hint is a separate plate by design (hint row under the
   results, the same plate style as rows); on the backdrop it reads as the
   drawer's footer.
@@ -101,8 +116,10 @@ joined with spaces. Copy, paste and the preview still use the full entry.
 
 - Keeping floating rows and only raising their opacity: the gaps and
   surroundings would still show the window underneath.
-- An opaque dark card for every macOS 14/15 user: changes every legacy panel;
-  the existing material is readable there.
+- A fully opaque card for every macOS 14/15 user: loses the glass look; an
+  80% layer under the specular and rim keeps it and is readable without blur.
+- Keeping the 25% wash and relying on live blur: the blur could not be shown
+  offscreen, and without it the window underneath read through.
 - Detecting Reduce transparency only through the system's material rendering:
   not testable and differs between macOS versions.
 

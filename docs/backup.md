@@ -89,15 +89,26 @@ No Whytap account, backup server or GitHub Actions is used.
 hotkeys, the Toolbox layout, vocabulary and other preferences the same on every
 Mac that uses the same recovery code. Set it up once:
 
-1. On the first Mac, make a backup, then turn the switch on.
+1. On the Mac whose settings you want everywhere, make a backup, turn the
+   switch on and wait until it reads **Settings synced**. Its settings and keys
+   become the synced ones.
 2. On the other Mac, connect GitHub, choose **Restore backup** with the same
-   recovery code, reopen Whytap and turn the switch on.
+   recovery code, reopen Whytap and turn the switch on. Its own settings are
+   replaced by the synced ones; keys only it has are added for both.
 
 A change reaches the other Mac within about a minute while both are running,
 without a relaunch. When both Macs change the same setting, the later change
 wins; changes to different settings both stay. Removing a key removes it on the
-other Mac too. A Mac that turns sync on takes the synced settings; its earlier
-values remain in the local settings history.
+other Mac too. A Mac that turns sync on after another takes the synced
+settings; its earlier values remain in the local settings history.
+
+Whichever Mac's first sync reaches GitHub first sets the synced settings. If
+the Mac you turned on first was offline and the other one synced before it,
+the other Mac's settings are kept; that is why step 1 waits for
+**Settings synced**.
+
+Sync uses the GitHub connection and the backup recovery code, which this Mac
+usually gets by making or restoring a backup.
 
 Each Mac keeps its own island display and calendar accounts. To-do, Case and
 meeting notes are not synced yet; they still travel with backups. Settings are

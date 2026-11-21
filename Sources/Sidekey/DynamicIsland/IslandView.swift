@@ -1337,13 +1337,17 @@ struct IslandView: View {
         .overlay(alignment: .topLeading) {
             if let anchor = calendarPreview.anchor, isHoverExpanded, hoverPanelMode == .calendar,
                CalendarAvailability.isOpen {
+                let area = compactHeight + activeHoverPanelHeight
                 CalendarEventPreviewBubble(content: anchor.content)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { calendarPreviewHeight = $0 }
+                    // The window ends with the island area; a taller bubble would be cut
+                    // off, so it gets at most that height and its description gives way.
+                    .frame(width: CalendarEventPreviewPolicy.bubbleWidth, height: area, alignment: .top)
                     .offset(
                         x: -(CalendarEventPreviewPolicy.bubbleWidth + 8
                             + IslandHoverPanelHitZone.leftOverhang(compactWidth: compactWidth)),
                         y: CalendarEventPreviewPolicy.bubbleTop(eventTop: anchor.rowFrame.minY,
-                            bubbleHeight: calendarPreviewHeight, areaHeight: compactHeight + activeHoverPanelHeight))
+                            bubbleHeight: calendarPreviewHeight, areaHeight: area))
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }

@@ -154,7 +154,20 @@ enum CalendarDisplayService {
 }
 
 /// Event descriptions as plain text: Google sends HTML, the others plain text.
+/// Invitation boilerplate's decorative rules (Teams' underscores, Google's
+/// `-::~:~::-`) and Outlook's `text<https://…>` link targets are removed; the
+/// meeting link is shown on its own.
 enum CalendarEventText {
+    private static let bracketedLink = try! NSRegularExpression(pattern: "<(?:https?|mailto|tel):[^<>\\s]*>",
+                                                              options: [.caseInsensitive])
+    private static let ruleCharacters = Set("_-=─━*~:")
+
+    /// A line made only of repeated rule characters (and spaces), at least three of them.
+    static func isSeparator(_ line: String) -> Bool {
+        let marks = line.filter { !$0.isWhitespace }
+        return marks.count >= 3 && marks.allSatisfy(ruleCharacters.contains) && marks.contains { $0 != ":" }
+    }
+
     private static let tag = try! NSRegularExpression(
         pattern: "</?(br|p|div|li|ul|ol|b|strong|i|em|u|span|a|font|h[1-6]|html|body)(?:\\s[^<>]*)?/?>",
         options: [.caseInsensitive])
@@ -174,6 +187,12 @@ enum CalendarEventText {
                 result = result.replacingOccurrences(of: entity, with: value)
             }
         }
+        result = bracketedLink.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result),
+                                                        withTemplate: "")
+        result = result.components(separatedBy: "\n").compactMap { line -> String? in
+            if isSeparator(line) { return nil }
+            return line.allSatisfy(\.isWhitespace) ? "" : line
+        }.joined(separator: "\n")
         while result.contains("\n\n\n") { result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n") }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }

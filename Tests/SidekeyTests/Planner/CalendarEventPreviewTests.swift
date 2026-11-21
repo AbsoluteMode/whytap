@@ -125,6 +125,71 @@ final class CalendarEventPreviewTests: XCTestCase {
         XCTAssertEqual(CalendarEventText.plain(""), "")
     }
 
+    func testTeamsInvitationsLoseTheirSeparatorsAndBracketedLinks() {
+        let rule = String(repeating: "_", count: 80)
+        let russian = """
+        \(rule)
+        Совещание в Microsoft Teams
+        Присоединиться на компьютере, в мобильном приложении или в Интернете
+        Щелкните здесь, чтобы присоединиться к собранию<https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%3a%22x%22%7d>
+        Идентификатор собрания: 938 763 481 588 9
+        Секретный код: Ab3cDe
+        Скачать Teams<https://www.microsoft.com/en-us/microsoft-teams/download-app> | Присоединиться в Интернете<https://www.microsoft.com/microsoft-teams/join-a-meeting>
+        Подробнее<https://aka.ms/JoinTeamsMeeting> | Параметры собрания<https://teams.microsoft.com/meetingOptions/?organizerId=x>
+        \(rule)
+        """
+        XCTAssertEqual(CalendarEventText.plain(russian), """
+        Совещание в Microsoft Teams
+        Присоединиться на компьютере, в мобильном приложении или в Интернете
+        Щелкните здесь, чтобы присоединиться к собранию
+        Идентификатор собрания: 938 763 481 588 9
+        Секретный код: Ab3cDe
+        Скачать Teams | Присоединиться в Интернете
+        Подробнее | Параметры собрания
+        """)
+        let english = "Agenda: roadmap\r\n\r\n\(rule)\r\nMicrosoft Teams Need help?<https://aka.ms/JoinTeamsMeeting?omkt=en-US>\r\n"
+            + "Join the meeting now<https://teams.microsoft.com/l/meetup-join/1>\r\nMeeting ID: 938 763 481 588 9\r\n"
+            + "Passcode: Ab3cDe\r\n \u{00A0}\r\n\(rule)\r\n  \r\n"
+        XCTAssertEqual(CalendarEventText.plain(english),
+                       "Agenda: roadmap\n\nMicrosoft Teams Need help?\nJoin the meeting now\nMeeting ID: 938 763 481 588 9\nPasscode: Ab3cDe")
+    }
+
+    func testGoogleMeetInvitationsLoseTheirSeparators() {
+        let rule = "-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-"
+        let invitation = """
+        Weekly sync notes in the doc.
+        \(rule)
+        Join with Google Meet: https://meet.google.com/abc-defg-hij
+        Or dial: (US) +1 555-555-0100 PIN: 123456789#
+
+        Learn more about Meet at: https://support.google.com/a/users/answer/9282720
+
+        Please do not edit this section.
+        \(rule)
+        """
+        XCTAssertEqual(CalendarEventText.plain(invitation), """
+        Weekly sync notes in the doc.
+        Join with Google Meet: https://meet.google.com/abc-defg-hij
+        Or dial: (US) +1 555-555-0100 PIN: 123456789#
+
+        Learn more about Meet at: https://support.google.com/a/users/answer/9282720
+
+        Please do not edit this section.
+        """)
+        let html = "<p>Notes</p><p>\(rule)</p>Join with Google Meet: <a href=\"https://meet.google.com/x\">meet.google.com/x</a>"
+        XCTAssertEqual(CalendarEventText.plain(html), "Notes\n\nJoin with Google Meet: meet.google.com/x")
+    }
+
+    func testOnlyWholeDecorativeLinesAreSeparators() {
+        for rule in ["---", "= = = =", "────────", "━━━━", "*****", "~~~~", "___ ___", "-:~:-"] {
+            XCTAssertEqual(CalendarEventText.plain("A\n\(rule)\nB"), "A\nB", rule)
+        }
+        XCTAssertEqual(CalendarEventText.plain("A\n-\nB"), "A\n-\nB", "A single dash is content")
+        XCTAssertEqual(CalendarEventText.plain("Q&A -- 10 min\nsnake_case_name\n2 * 3 = 6"), "Q&A -- 10 min\nsnake_case_name\n2 * 3 = 6")
+        XCTAssertEqual(CalendarEventText.plain("Docs <https://x.com/doc> and <notes>"), "Docs  and <notes>",
+                       "Only bracketed web, mail and phone links go")
+    }
+
     // MARK: Preview state
 
     private func content(_ id: String) -> CalendarEventPreviewContent {
@@ -145,6 +210,15 @@ final class CalendarEventPreviewTests: XCTestCase {
         let state = CalendarEventPreviewState(hideDelay: .milliseconds(40))
         state.show(content("a"), frame: CGRect(x: 0, y: 0, width: 100, height: 40))
         XCTAssertNil(state.anchor, "Calendar is Soon: no event details anywhere")
+    }
+
+    func testTheDescriptionGetsTheLinesItsRoomHolds() {
+        XCTAssertEqual(CalendarEventPreviewPolicy.descriptionLines(room: 131, lineHeight: 13.1), 10)
+        XCTAssertEqual(CalendarEventPreviewPolicy.descriptionLines(room: 38.9, lineHeight: 13.1), 3)
+        XCTAssertEqual(CalendarEventPreviewPolicy.descriptionLines(room: 2, lineHeight: 13.1), 1, "Never less than a line")
+        XCTAssertNil(CalendarEventPreviewPolicy.descriptionLines(room: .greatestFiniteMagnitude, lineHeight: 13.1),
+                     "Before the first layout there is no limit")
+        XCTAssertNil(CalendarEventPreviewPolicy.descriptionLines(room: 100, lineHeight: 0))
     }
 
     func testMovingBetweenEventsNeverFlashesAnEmptyPreview() async throws {

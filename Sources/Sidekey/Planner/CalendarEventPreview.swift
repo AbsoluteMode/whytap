@@ -97,8 +97,16 @@ struct CalendarEventPreviewContent: Equatable {
 
 enum CalendarEventPreviewPolicy {
     static let bubbleWidth = HistoryHoverPreviewPolicy.bubbleWidth
-    /// Attendees listed by name; the rest are counted.
-    static let listedAttendees = 12
+    /// Attendees listed by name; the rest are counted. Fewer beside a
+    /// description, which comes first when the bubble runs out of height.
+    static func listedAttendees(hasNotes: Bool) -> Int { hasNotes ? 6 : 12 }
+
+    /// Description lines that fit `room`, at least one; nil (no limit) before
+    /// the first layout measured the room.
+    static func descriptionLines(room: CGFloat, lineHeight: CGFloat) -> Int? {
+        guard lineHeight > 0, room < 100_000 else { return nil }
+        return max(1, Int((room / lineHeight).rounded()))
+    }
 
     /// Beside the event, lifted so the bubble's bottom stays inside the island area.
     static func bubbleTop(eventTop: CGFloat, bubbleHeight: CGFloat, areaHeight: CGFloat) -> CGFloat {
@@ -152,6 +160,12 @@ final class CalendarEventPreviewState: ObservableObject {
 
 /// Non-interactive bubble left of the drawer, styled like the To-do and
 /// History previews. A click on the event itself joins or opens it.
+///
+/// The bubble sits outside the panel's mouse area (`IslandHoverPanelHitZone`),
+/// so the window passes clicks and scrolling there to the app behind it, and
+/// leaving the event hides the bubble. It cannot scroll; instead the caller
+/// proposes the island area's height and the description, laid out last,
+/// gives way and ends with "…" only when everything does not fit.
 struct CalendarEventPreviewBubble: View {
     let content: CalendarEventPreviewContent
 
@@ -164,6 +178,7 @@ struct CalendarEventPreviewBubble: View {
                 shape.fill(Color(white: 0.14))
                     .overlay(shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
             }
+            .clipShape(shape)
     }
 
     private var details: some View {
@@ -190,8 +205,7 @@ struct CalendarEventPreviewBubble: View {
                 }
             }
             if let notes = content.notes {
-                Text(notes).font(.system(size: 11)).foregroundStyle(.white.opacity(0.88))
-                    .lineLimit(10).fixedSize(horizontal: false, vertical: true)
+                CalendarEventPreviewNotes(text: notes).layoutPriority(-1)
             }
             if !content.attendees.isEmpty { attendees }
         }
@@ -208,7 +222,7 @@ struct CalendarEventPreviewBubble: View {
     }
 
     private var attendees: some View {
-        let listed = content.attendees.prefix(CalendarEventPreviewPolicy.listedAttendees)
+        let listed = content.attendees.prefix(CalendarEventPreviewPolicy.listedAttendees(hasNotes: content.notes != nil))
         let rest = content.attendees.count - listed.count
         return VStack(alignment: .leading, spacing: 3) {
             Text(content.attendees.count == 1 ? "1 attendee" : "\(content.attendees.count) attendees")
@@ -236,5 +250,31 @@ struct CalendarEventPreviewBubble: View {
         }
         return Image(systemName: symbol).font(.system(size: 9)).foregroundStyle(color).frame(width: 12)
             .accessibilityLabel(status?.rawValue ?? "no response")
+    }
+}
+
+/// The description: whole when it fits, else as many lines as the bubble's
+/// height leaves, the last ending in "…". A hidden copy takes the room the
+/// layout gives; the shown copy gets the matching line limit, because a
+/// height-squeezed Text drops lines at a line break without an ellipsis.
+private struct CalendarEventPreviewNotes: View {
+    static let font = NSFont.systemFont(ofSize: 11)
+    let text: String
+    @State private var room: CGFloat = .greatestFiniteMagnitude
+
+    var body: some View {
+        styled(Text(text)).hidden()
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
+            .overlay(alignment: .topLeading) {
+                styled(Text(text)).lineLimit(CalendarEventPreviewPolicy.descriptionLines(
+                    room: room, lineHeight: NSLayoutManager().defaultLineHeight(for: Self.font)))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(text)
+    }
+
+    private func styled(_ text: Text) -> some View {
+        text.font(.system(size: 11)).foregroundStyle(.white.opacity(0.88))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

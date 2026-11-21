@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/PermissionsSettingsViewModelTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-26-first-launch-permissions.md]
+related: [2026-10-26-first-launch-permissions.md, 2026-11-21-first-launch-onboarding.md]
 ---
 
 # Context
@@ -49,8 +49,9 @@ Never open the privacy pane in the action that makes the system request.
   request on a Mac whose permissions were reset, which is the failure above.
 
 This replaces the "open the system pane after a failed request" sentence of
-`2026-10-26-first-launch-permissions.md`. Showing Permissions on first launch
-and requesting nothing until Allow are unchanged.
+`2026-10-26-first-launch-permissions.md`. Requesting nothing until Allow is
+unchanged; since 2026-11-21 the first launch shows the onboarding, whose
+permissions page follows the same order (`2026-11-21-first-launch-onboarding.md`).
 
 # Why
 

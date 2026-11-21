@@ -537,8 +537,9 @@ real provider output remain acceptance in the shared app after promotion.
 
 ## Screenshot permission — 2026-10-20
 
-First launch update (2026-10-26): a new Mac with missing permissions opens this
-existing screen once alongside the island. The marker stays on that Mac and
+First launch update (2026-10-26, replaced 2026-11-21 by the onboarding below):
+a new Mac with missing permissions opened this existing screen once alongside
+the island. The marker stays on that Mac and
 does not travel in backups. A fully authorized Mac is not interrupted. The
 Screen Recording Allow action shows a small progress indicator in its reserved
 60 × 26 pt action slot while macOS handles the request; repeated requests are
@@ -1639,3 +1640,30 @@ Validation uses invisible non-key native fixtures for distinct first-mouse targe
 text/gap exclusion, drag cancellation, removed/disabled controls, content width and
 rest/pressed/disabled images. Physical pointer, keyboard and VoiceOver behavior
 remain shared-app acceptance.
+
+## First-launch onboarding — 2026-11-21
+
+One fixed 600 × 540 pt window beside the island, one column, built from the
+Settings components (MacCard, MacRow, MacButton, MacSwitch, MacSegmented) so it
+follows light and dark appearance like Settings. Each page has a 38 pt
+Instrument Serif heading (bundled font, system fallback), one 14 pt sentence,
+its controls, and a footer with the way on aligned right: quiet text actions
+(Set up later, Skip) beside one primary button. Progress is a row of dots, the
+current one a wider accent capsule. Pages slide 24 pt with a fade (0.25 s);
+Reduce Motion keeps only the fade. Hidden pages leave no dot.
+
+Speech is one card (On this Mac, size, the primary button and, beside it, the
+sentence that it sets Drop only), with two quiet links under it. The key form
+reuses ProviderKeyForm without Remove, a provider segment and the no-card offers
+as links. Permissions reuse the Settings rows and the Drop shortcut repair
+section. The try page shows the shortcut with HotkeyHintView ("Hold Space"),
+a native text field with a placeholder, and one status line (download progress,
+a missing model or shortcut with its one action, or the green success line;
+the field's outline turns green with it). The features page is one card of
+three rows, each with its ▶ video and its switch or "Add a model".
+
+Why: the first success is the person's own sentence; everything else is one
+line and one action. Offscreen renders of every page in both appearances were
+reviewed (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the native TCC
+dialogs and the real island remain acceptance in the installed app. See
+`.project-docs/decisions/2026-11-21-first-launch-onboarding.md`.

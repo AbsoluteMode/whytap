@@ -42,11 +42,25 @@ final class NowPlayingAutomationConsent: @unchecked Sendable {
     }
 
     private let status: StatusFunction
+    private let promptDeferred: () -> Bool
     private let lock = NSLock()
     private var decisions: [String: Decision] = [:]
 
-    init(status: @escaping StatusFunction = NowPlayingAutomationConsent.realStatus) {
+    /// While the onboarding is on screen a background poll must not raise
+    /// the Automation dialog over it: the first-time prompt waits until the
+    /// window closes and is asked on a later poll. Read from the script queue.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    private static let deferLock = NSLock()
+    private static var deferredValue = false
+    static var promptsDeferred: Bool {
+        get { deferLock.withLock { deferredValue } }
+        set { deferLock.withLock { deferredValue = newValue } }
+    }
+
+    init(status: @escaping StatusFunction = NowPlayingAutomationConsent.realStatus,
+         promptDeferred: @escaping () -> Bool = { NowPlayingAutomationConsent.promptsDeferred }) {
         self.status = status
+        self.promptDeferred = promptDeferred
     }
 
     /// Ensure Automation consent for `app`, prompting at most once.
@@ -102,6 +116,8 @@ final class NowPlayingAutomationConsent: @unchecked Sendable {
             store(.denied, for: bundleID)
             return false
         case OSStatus(errAEEventWouldRequireUserConsent):
+            // Not decided and not cached: a later poll asks once it may.
+            if promptDeferred() { return false }
             // Present the system Automation prompt exactly once. This BLOCKS
             // until the user decides — caller guarantees we are off-main and
             // not under the read timeout.

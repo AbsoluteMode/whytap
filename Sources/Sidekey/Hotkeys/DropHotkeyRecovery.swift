@@ -89,6 +89,26 @@ enum DropHotkeyRecovery {
         }
     }
 
+    enum StartGate: Equatable {
+        case proceed
+        /// A permission is missing or refused: explain and repair.
+        case explain
+        /// The microphone was never asked: ask now and start nothing. The
+        /// system dialog then never opens in the middle of a take.
+        case askMicrophone
+    }
+
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    static func startGate(_ snapshot: PermissionsHelper.Snapshot) -> StartGate {
+        guard snapshot.accessibilityGranted else { return .explain }
+        switch snapshot.microphoneStatus {
+        case .authorized: return .proceed
+        case .notDetermined: return .askMicrophone
+        case .denied, .restricted: return .explain
+        @unknown default: return .explain
+        }
+    }
+
     /// Only starting a NEW take needs permission. Stop/finalize/cancel must
     /// remain usable if permission changes during an existing recording.
     static func requiresStartPermission(_ route: DropFlowRoute) -> Bool {

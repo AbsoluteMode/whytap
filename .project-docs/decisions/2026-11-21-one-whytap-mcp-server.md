@@ -50,11 +50,27 @@ not because they need separate processes.
 - `plugins/whytap/mcp.json` has one server, `whytap` -> `mcp` (plugin 0.3.0).
 - Case -> Connect writes `whytap` -> `<helper> mcp` for Claude Code
   (`claude mcp add -s user`), Codex (`codex mcp add`) and Cursor
-  (`.cursor/mcp.json` in the home folder). An existing `whytap` entry of ours (`mcp`, or the
-  older README's `app mcp`, any flavor or location) is replaced; a foreign
-  `whytap` entry stops Connect with a message naming it. After adding, our
-  older `case` entry (`<whytap helper> case mcp`) is removed, best effort;
-  another server called `case` is never touched.
+  (`.cursor/mcp.json` in the home folder).
+- **Ours means one thing:** a stdio entry whose command is an absolute path
+  equal to this app's helper path once both are standardized and their
+  symlinks resolved, with arguments `mcp`, `app mcp` or `case mcp` (the
+  older `case` entry: only `case mcp`). No basename or prefix matching:
+  `/opt/local/bin/whytap-metrics`, a copy of Whytap in Downloads, a beta
+  helper or a bare `whytap` on PATH are someone else's. Such an existing
+  `whytap` entry of ours is replaced; any other, or one that cannot be read
+  for certain, stops Connect with a message naming it and no changing CLI
+  call. After adding, our older `case` entry is removed, best effort; any
+  other `case` entry is never touched.
+- **Codex is read through Codex.** `codex mcp add` replaces a server by name,
+  so Connect first runs the read-only `codex mcp get <name> --json` (Codex's
+  own TOML parser decides escapes, inline tables, comments) through a
+  separate reading seam, never the runner that changes settings. Exit 0 with
+  that name's JSON gives the entry; a failure whose last stderr line is
+  exactly Codex's "No MCP server named '<name>' found." means absent; any
+  other answer, a newer wording, a timeout or more than 256 KB means
+  uncertain, which refuses. Claude Code's `.claude.json` (home folder) and Cursor's
+  `mcp.json` are JSON read by the system parser (escaped keys included); an
+  unreadable file or a non-object `mcpServers` refuses as well.
 - Disconnect removes only our older `case` entry. The `whytap` entry stays.
 
 ## Why
@@ -81,6 +97,18 @@ not because they need separate processes.
   application controls a person may have set up by hand (Connect cannot tell
   a hand-made `whytap mcp` entry from its own). Access is already closed at
   the broker: an unregistered client gets "Access denied" from the Case tools.
+- **Reading through the client, not a parser of our own.** Two builder
+  reviews showed a hand-written TOML reader keeps missing valid forms
+  (a comment after a header, an inline table, a `\u` escape in a quoted key).
+  No TOML library is in the dependencies; adding one for one read is more
+  surface than asking the Codex that will apply the change. `codex mcp get
+  --json` returns only the named entry (its env values stay in memory, are
+  parsed and dropped, never logged). `claude mcp get` has no JSON output, so
+  Claude Code's JSON file is read directly.
+- **Exact path, no look-alikes.** A basename rule took
+  `/opt/local/bin/whytap-metrics` for ours and would have replaced it. A
+  moved or beta Whytap is not replaced either; the person removes that entry
+  once, which is safer than guessing.
 - **Best-effort cleanup.** If removing the older `case` entry fails, the host
   keeps a working but duplicate Case server; failing Connect for that would
   report a broken connection that in fact works.
@@ -100,27 +128,30 @@ not because they need separate processes.
   their own tools; `screen-mcp` never lists Case tools.
 - `CaseClientConnectorTests`: Connect writes `whytap` -> `mcp` for Claude
   Code, Codex and Cursor; migrates our older `case` entry; replaces our own
-  `whytap` (`app mcp`, moved app, beta helper); refuses a foreign `whytap`;
-  leaves a foreign `case` alone; a failed cleanup keeps the connection;
-  Disconnect removes only the older entry.
+  `whytap` (`mcp`, `app mcp`, `case mcp`, also through a symlink); refuses
+  with zero changing CLI calls and the file unchanged: look-alike helpers
+  (`whytap-metrics`, a Downloads copy, a beta helper, bare `whytap`,
+  `<helper>/../whytap-metrics`), a JSON-escaped `why\u0074ap` key, URL
+  servers, other subcommands, missing or odd `args`, unreadable files, and
+  for Codex every answer it cannot prove (empty, not JSON, another name,
+  broken config, other wording, truncated, failed read); leaves any foreign
+  `case` alone; a failed cleanup keeps the connection; Disconnect removes
+  only our older entry and nothing without a helper path.
+- `CodexCLIConfigReadingTests` (skipped without Codex) runs the installed
+  `codex mcp get --json` on fixture configs in a temporary HOME, changing
+  commands going to a fake runner: the builder's header comment, inline
+  table, `[mcp_servers."why\u0074ap"]` and `whytap-metrics` fixtures, a
+  literal key with CRLF, dotted keys and a URL server are each read by Codex
+  (asserted) and refused with no changing call; nothing configured adds once;
+  our own `app mcp` entry plus our multi-line `case` entry are replaced and
+  migrated. Run with codex-cli 0.170.0.
 - The built helper outside an app bundle (no broker client, nothing launched):
   `whytap mcp` lists 16 tools and answers a bad line with a parse error;
   `app mcp` lists 14, `case mcp` 2; `whytap mcp extra` exits 64.
-- Builder review (queue run 7446) found that the line reader inherited from
-  the `case` connector missed a foreign Codex `whytap` written as
-  `[mcp_servers.whytap] # comment` or as an inline table under
-  `[mcp_servers]`, and `codex mcp add` replaces a server by name. The
-  connector now uses `CodexMCPConfigScanner`: comments and multi-line strings
-  are removed first, every header/dotted-key/inline form of the name is
-  found, and only the plain table `codex mcp add` writes can count as ours;
-  anything uncertain (inline or dotted definitions, arrays of tables,
-  repeated headers or keys, escapes, unterminated strings, unreadable files)
-  is refused before any CLI call. The older `case` entry is removed only in
-  that plain form. Claude Code and Cursor likewise refuse an unreadable
-  config, a non-object `mcpServers` and `args` that are not a list of
-  strings. `CodexMCPConfigScannerTests` holds the builder's two regressions
-  verbatim plus quoted keys, spaces, tabs, CRLF, multi-line arrays, sub-tables,
-  comments and multi-line strings mentioning the name.
+- Builder reviews (queue runs 7446, 44301) found the earlier hand-written
+  TOML reader missing a commented header, an inline table and a `\u`
+  escaped key, and a basename rule accepting `whytap-metrics`. Both were
+  replaced as described above; all four fixtures are in the tests.
 - Not tested: a live Claude Code / Codex / Cursor host against the installed
   app, and Connect against real client configurations. Those are acceptance
   steps after the builder installs the build.

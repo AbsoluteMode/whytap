@@ -66,7 +66,12 @@ minutes), which Whytap neither installs nor owns.
   Cancel first (Escape) and a red Delete without a key. A system alert opened
   under the island's panel and could not be clicked (the user's report on
   2026-11-21), and the user asked for just the question. Closing the panel
-  answers Cancel; a failed delete shows its message in the same card.
+  answers Cancel; a failed delete shows its message in the same card. In the
+  island, clicks reach the window's first-mouse dispatcher
+  (`IslandHoverHitBridge`) before SwiftUI, so the card registers Cancel,
+  Delete and OK there as `.modal` targets and marks itself modal: while it is
+  in the window the dispatcher offers only modal targets, so Back under the
+  dimmed panel takes no click.
 - Confirming records the dashboard ID in `Monitor/removed-dashboards.json`
   (`{"removed": [...]}`, atomic, mode 0600) and then removes every snapshot
   file in `dashboards/` that decodes to that ID. Other dashboards, collectors,
@@ -158,6 +163,11 @@ minutes), which Whytap neither installs nor owns.
   other surface (a second store) still connecting. All three reproducers are
   now tests and pass, plus a check that a store over another folder (beta) is
   not affected.
+- The builder's review (queue ticket 323) found the card's buttons not
+  registered with the window dispatcher and Back under the card still taking
+  the click. Its fixture now passes, and `MonitorConfirmationHitTests` sweeps
+  the card through the dispatcher: Cancel and Delete answer, Back does not,
+  and Back works again once the card is gone.
 - Not tested: the real × and the in-panel question over the live island.
 
 ## Rejected

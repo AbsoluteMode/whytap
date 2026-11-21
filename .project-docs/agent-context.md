@@ -684,7 +684,9 @@ Monitor inside hover:
   and the scroller sits in the right margin beside the cards; row and × show
   hover/press/focus only while enabled). The × asks first
   inside the panel (a card with only the question, Cancel first, red Delete;
-  a system alert opened under the island and could not be clicked). One rule
+  a system alert opened under the island and could not be clicked). The card
+  registers its buttons as IslandHoverHitBridge .modal targets and, while
+  shown, the window dispatcher offers only those (Back under it takes no click). One rule
   for every board: it records the ID in
   Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the

@@ -323,6 +323,10 @@ struct MonitorConfirmationCard: View {
     let confirmTitle: String?
     let onCancel: () -> Void
     let onConfirm: () -> Void
+    /// In the island, clicks reach the window's first-mouse dispatcher
+    /// before SwiftUI: the card registers its buttons there and hides the
+    /// targets under it (Back), so only Cancel and Delete answer.
+    @Environment(\.islandHoverNavigation) private var navigation
 
     var body: some View {
         ZStack {
@@ -338,12 +342,13 @@ struct MonitorConfirmationCard: View {
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    Button(cancelTitle, action: onCancel)
+                    nativeTarget(Button(cancelTitle, action: onCancel)
                         .buttonStyle(MonitorConfirmButtonStyle(destructive: false))
-                        .keyboardShortcut(.cancelAction)
+                        .keyboardShortcut(.cancelAction), action: .cancel, perform: onCancel)
                     if let confirmTitle {
-                        Button(confirmTitle, action: onConfirm)
-                            .buttonStyle(MonitorConfirmButtonStyle(destructive: true))
+                        nativeTarget(Button(confirmTitle, action: onConfirm)
+                            .buttonStyle(MonitorConfirmButtonStyle(destructive: true)),
+                            action: .confirm, perform: onConfirm)
                     }
                 }
             }
@@ -353,6 +358,30 @@ struct MonitorConfirmationCard: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isModal)
+        }
+        .modifier(MonitorModalRegistration(navigation: navigation))
+    }
+
+    @ViewBuilder
+    private func nativeTarget<B: View>(_ button: B, action: IslandHoverHitTargetID.ModalAction,
+                                       perform: @escaping () -> Void) -> some View {
+        if let navigation {
+            button.islandHoverHitTarget(bridge: navigation.bridge, id: .init(modal: action),
+                                        context: navigation.context, action: perform)
+        } else {
+            button
+        }
+    }
+}
+
+private struct MonitorModalRegistration: ViewModifier {
+    let navigation: IslandHoverNavigationContext?
+
+    func body(content: Content) -> some View {
+        if let navigation {
+            content.islandHoverHitModal(bridge: navigation.bridge)
+        } else {
+            content
         }
     }
 }

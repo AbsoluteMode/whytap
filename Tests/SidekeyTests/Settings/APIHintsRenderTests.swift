@@ -88,13 +88,16 @@ final class APIHintsRenderTests: XCTestCase {
         }
         let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
         let section = try XCTUnwrap(readme.range(of: "## Free to use").map { String(readme[$0.lowerBound...]) })
+        let cards = section.split(separator: "\n").filter { line in
+            line.hasPrefix("<a href=") && line.contains("<picture>")
+        }
         let free = APIHintsView.hints.filter { $0.access == .noCard }
-        XCTAssertEqual(section.components(separatedBy: "<a href=").count - 1, free.count)
+        XCTAssertEqual(cards.count, free.count)
         let newest = try XCTUnwrap(free.map(\.checked).max())
         XCTAssertTrue(section.contains("Last checked \(APIHintsView.displayDate(newest))"))
         for hint in free {
-            XCTAssertTrue(section.contains("<a href=\"\(hint.url.absoluteString)\">"), hint.provider)
-            XCTAssertTrue(section.contains("alt=\"\(hint.provider): \(hint.allowance) \(hint.cadence) ("), hint.provider)
+            let card = try XCTUnwrap(cards.first { $0.hasPrefix("<a href=\"\(hint.url.absoluteString)\">") }, hint.provider)
+            XCTAssertTrue(card.contains("alt=\"\(hint.provider): \(hint.allowance) \(hint.cadence) ("), hint.provider)
         }
     }
 

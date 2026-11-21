@@ -44,7 +44,9 @@ feature sessions with regular checked integration and one working application.
   `enqueue` rejects a head whose guidance sync or documentation validation
   fails. The configured builder processes FIFO, sends queue/start/result
   messages to the originating sessions and alone integrates/packages/promotes;
-  it resolves routine merge conflicts itself. It is an on-demand headless
+  it resolves routine merge conflicts itself and blocks a PR once, listing
+  every finding; a re-block is only for a problem the fix introduced or a
+  listed item still unfixed. It is an on-demand headless
   session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
   starts only while the queue has open work; only the maintainer activates or
   deactivates it. These queue messages are user-authorized. Workers follow the

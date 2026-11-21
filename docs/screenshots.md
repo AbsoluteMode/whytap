@@ -9,8 +9,10 @@ for screenshots. Click **Allow** to request access; **Open** returns to its syst
 settings when already allowed. A previous denial opens System Settings →
 Privacy & Security → Screen & System Audio Recording. Returning to Whytap or
 clicking Refresh updates the status. Screenshot invocation can also request
-this access; opening Settings or launching Whytap never requests it. It is
-optional for other features. Follow macOS's reopen instruction after finishing
+this access; opening Settings or launching Whytap never requests it. The first
+Screenshot press without access shows only the macOS dialog; its button leads to
+System Settings. A later press without access shows Whytap's own explanation with
+Open System Settings. It is optional for other features. Follow macOS's reopen instruction after finishing
 current work.
 
 The visible screen freezes before the editor opens, including Whytap's current

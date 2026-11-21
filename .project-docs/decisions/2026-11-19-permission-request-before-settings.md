@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/PermissionsSettingsViewModelTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-26-first-launch-permissions.md, 2026-11-21-first-launch-onboarding.md]
+related: [2026-10-26-first-launch-permissions.md, 2026-11-21-first-launch-onboarding.md, 2026-11-22-shot-single-permission-prompt.md]
 ---
 
 # Context

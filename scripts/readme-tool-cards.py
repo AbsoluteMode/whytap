@@ -53,7 +53,7 @@ DEMOS = [
      'Cards from Claude Code, Codex, CI or any script. Dashboards for your servers and your own data.', ["demo-notify.webp"]),
     ("calendar-todo", "calendar-check", "Calendar & To-do", "Check your agenda and manage tasks",
      ["Today's agenda", "Tasks in the notch"],
-     'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar.webp", "demo-todo.webp"]),
+     'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar-todo.gif"]),
     ("display-extra", "sun-medium", "Display Extra", "Use the display’s available HDR headroom",
      ["Open Display", "Turn on Extra", "Slide"],
      "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level steady.", ["demo-brightness.webp"]),

@@ -95,8 +95,7 @@
 <summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
-<p>&emsp;&emsp;<picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-calendar-still.webp"><img src="docs/assets/readme/demo-calendar.webp" width="43.5%" loading="lazy" alt="Calendar &amp; To-do demo"></picture>
-<picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-todo-still.webp"><img src="docs/assets/readme/demo-todo.webp" width="43.5%" loading="lazy" alt="Calendar &amp; To-do demo"></picture>
+<p>&emsp;&emsp;<picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-calendar-todo-still.webp"><img src="docs/assets/readme/demo-calendar-todo.gif" width="88%" loading="lazy" alt="Calendar &amp; To-do demo"></picture>
 </p>
 
 </details>

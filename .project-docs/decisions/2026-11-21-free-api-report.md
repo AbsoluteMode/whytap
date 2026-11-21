@@ -63,17 +63,17 @@ paying.
   starting without payment.
 - Under the cards, **My setup** (asked by Maxim on 2026-11-21) shows his own
   routes from API & Models as "free* right now", in two panels: an Anthropic
-  key (Claude Sonnet 5.5 for Drop Smart and Meetings notes, Haiku 5.5 for
-  Agent, Translation and Subtitles) and an OpenAI key with the same price
-  class (GPT-6.2 Sol, GPT-6 Luna, his choice); speech is ElevenLabs Scribe
-  v3 Live in both, and Scribe v3 (recorded audio) for Meetings. The asterisk explains it: the models are paid from a Claude
-  Max/Ultra or ChatGPT Pro plan's monthly API credit, speech from ElevenLabs'
-  free credits (non-commercial use). This is the one place the README names
-  paid-plan credits, labelled as such. Maxim updates the setup himself every
-  month (`SETUP_*` in the script, with its own check date). Meetings shows Scribe v3, the recorded-audio
-  model: Meetings on ElevenLabs used to stream the recording through the
-  realtime socket, and a separate change moves them to the recorded model,
-  so this README waits for it.
+  key and an OpenAI key with a model of the same price class (his choice).
+  The same evening he moved every text feature to Claude Sonnet 5.5, so the
+  Anthropic panel has Sonnet 5.5 for Drop Smart, Meetings notes, Agent,
+  Translation and Subtitles, and the OpenAI panel GPT-6.2 Sol in the same
+  rows. Speech is ElevenLabs Scribe v3 Live in both, and Scribe v3 for
+  Meetings, which go to ElevenLabs as recorded audio. The asterisk explains
+  it: the models are paid from a Claude Max/Ultra or ChatGPT Pro plan's
+  monthly API credit, speech from ElevenLabs' free credits (non-commercial
+  use). This is the one place the README names paid-plan credits, labelled as
+  such. Maxim updates the setup himself every month (`SETUP_*` in the script,
+  with its own check date).
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
+  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account &amp; Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 
 </div>
@@ -160,7 +160,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
 
-<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-setup-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-setup-wide-light.svg"><img alt="My setup, free* right now. Anthropic key (Claude Max or Ultra: $100–200 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + Claude Sonnet 5.5; Meetings: Scribe v3 + Claude Sonnet 5.5; Agent: Claude Sonnet 5.5; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: Claude Sonnet 5.5; Subtitles: Scribe v3 Live + Claude Sonnet 5.5. OpenAI key (ChatGPT Pro: $100–500 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + GPT-6.2 Sol; Meetings: Scribe v3 + GPT-6.2 Sol; Agent: GPT-6.2 Sol; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: GPT-6.2 Sol; Subtitles: Scribe v3 Live + GPT-6.2 Sol. * The models are paid from your plan’s monthly API credit; speech uses ElevenLabs’ 10,000 free credits (non-commercial use)." src="docs/assets/readme/free-api-setup-wide-dark.svg" width="100%"></picture></p>
 
 ## You may also like
 

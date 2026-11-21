@@ -215,27 +215,28 @@ def responsive(kind, alt, width):
 # because the language models are paid from a subscription's monthly API credit
 # (the Claude Max & Ultra and ChatGPT Pro offers above in APIHintsView.hints)
 # and speech from ElevenLabs' free credits. One panel per key, with OpenAI's
-# models of the same price class in place of Claude's. Maxim reviews and updates
-# it every month together with the offers (2026-11-21).
+# model of the same price class in place of Claude's: on 2026-11-21 Maxim moved
+# every text feature to Claude Sonnet 5.5, so each key has one model. He reviews
+# and updates it every month together with the offers.
 SETUP_CHECKED = "2026-11-21"
 SPEECH = "Scribe v3 Live"
-SETUP_ROWS = [  # feature, speech model, language model role ("smart", "fast" or None)
-    ("Drop Fast", SPEECH, None),
-    ("Drop Smart", SPEECH, "smart"),
-    ("Meetings", "Scribe v3", "smart"),  # recorded audio, not the live model
-    ("Agent", None, "fast"),
-    ("Agent voice", SPEECH, None),
-    ("Voice search", SPEECH, None),
-    ("Translation", None, "fast"),
-    ("Subtitles", SPEECH, "fast"),
+SETUP_ROWS = [  # feature, speech model, uses the key's language model
+    ("Drop Fast", SPEECH, False),
+    ("Drop Smart", SPEECH, True),
+    ("Meetings", "Scribe v3", True),  # recorded audio, not the live model
+    ("Agent", None, True),
+    ("Agent voice", SPEECH, False),
+    ("Voice search", SPEECH, False),
+    ("Translation", None, True),
+    ("Subtitles", SPEECH, True),
 ]
-SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), models
+SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), model
     ("claude-code", "#d97757", "Anthropic key",
      ("Claude Max or Ultra: $100–200 API credit a month", "Max or Ultra: $100–200 credit a month"),
-     {"smart": "Claude Sonnet 5.5", "fast": "Claude Haiku 5.5"}),
+     "Claude Sonnet 5.5"),
     ("openai", None, "OpenAI key",
      ("ChatGPT Pro: $100–500 API credit a month", "ChatGPT Pro: $100–500 credit a month"),
-     {"smart": "GPT-6.2 Sol", "fast": "GPT-6 Luna"}),
+     "GPT-6.2 Sol"),
 ]
 SETUP_FOOT = [
     "* The models are paid from your plan’s monthly API credit; speech uses",
@@ -259,7 +260,7 @@ def setup_svg(theme, layout):
         f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup'
         f'<tspan dx="{10 if wide else 7}" font-size="{14 if wide else 11.5}" font-weight="600" fill="{c["accent"]}">free* right now</tspan></text>',
     ]
-    for k, (asset, color, title, plan, models) in enumerate(SETUP_KEYS):
+    for k, (asset, color, title, plan, model) in enumerate(SETUP_KEYS):
         x = k * (pw + gap) if wide else 0
         y = top if wide else top + k * (panel_h + 14)
         out.append(f'  <rect x="{x + 0.5:.1f}" y="{y + 0.5:.1f}" width="{pw - 1:.1f}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>')
@@ -270,10 +271,10 @@ def setup_svg(theme, layout):
         for cx, label in zip(col, ["Feature", "Speech · ElevenLabs", "Model"]):
             out.append(f'  <text x="{x + cx:.1f}" y="{hy}" font-family="{FONT}" font-size="{fs - 2.5}" font-weight="600" fill="{c["accent"]}">{e(label)}</text>')
         out.append(f'  <line x1="{x + col[0]:.1f}" y1="{hy + 8}" x2="{x + pw - col[0]:.1f}" y2="{hy + 8}" stroke="{c["border"]}"/>')
-        for i, (feature, speech, role) in enumerate(SETUP_ROWS):
+        for i, (feature, speech, uses_model) in enumerate(SETUP_ROWS):
             ry = hy + 8 + rh * (i + 1) - rh * 0.32
             cells = [(feature, c["ink"], "600"), (speech or "—", c["ink"] if speech else c["sub"], "400"),
-                     (models[role] if role else "—", c["ink"] if role else c["sub"], "400")]
+                     (model if uses_model else "—", c["ink"] if uses_model else c["sub"], "400")]
             for cx, (text, fill, weight) in zip(col, cells):
                 out.append(f'  <text x="{x + cx:.1f}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{fill}">{e(text)}</text>')
     y = top + panel_h + 26 if wide else top + 2 * panel_h + 14 + 22
@@ -288,8 +289,8 @@ def setup_svg(theme, layout):
 
 def setup_alt():
     parts = []
-    for _, _, title, plan, models in SETUP_KEYS:
-        rows = "; ".join(f"{f}: " + " + ".join(x for x in [s, models[r] if r else None] if x) for f, s, r in SETUP_ROWS)
+    for _, _, title, plan, model in SETUP_KEYS:
+        rows = "; ".join(f"{f}: " + " + ".join(x for x in [s, model if m else None] if x) for f, s, m in SETUP_ROWS)
         parts.append(f"{title} ({plan[0]}): {rows}")
     return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
 

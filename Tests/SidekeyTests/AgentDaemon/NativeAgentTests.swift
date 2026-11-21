@@ -358,7 +358,7 @@ final class NativeAgentTests: XCTestCase {
             XCTAssertEqual(count, 2)
             XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("written.txt"), encoding: .utf8), "fixture")
             XCTAssertEqual(store.status, .failed)
-            XCTAssertTrue(store.errorMessage?.contains("Earlier file edits or commands may have completed") == true)
+            XCTAssertTrue(store.errorMessage?.contains("Earlier file edits, commands or Whytap changes may have completed") == true)
             XCTAssertFalse(store.errorMessage?.contains("SYNTHETIC_PRIVATE_BROKEN_JSON") == true)
             XCTAssertNil(provider.lastSessionID)
             XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(NativeAgentConversation.fileName).path))

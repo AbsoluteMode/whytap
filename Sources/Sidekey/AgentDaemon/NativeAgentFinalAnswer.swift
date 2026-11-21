@@ -10,7 +10,7 @@ struct NativeAgentFinalAnswer {
     /// model decides every turn; a missing value (endpoints that ignore strict
     /// schemas) means none. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
     static let insertField = "insert_text"
-    static let actionWarning = " Earlier file edits or commands may have completed; check before retrying."
+    static let actionWarning = " Earlier file edits, commands or Whytap changes may have completed; check before retrying."
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String

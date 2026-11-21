@@ -215,7 +215,7 @@ public final class AppControlMCPServer {
             ("whytap_" + $0, $0)
         })
 
-    static let tools: [AppControlValue] = {
+    public static let tools: [AppControlValue] = {
         let string: AppControlValue = .object(["type": .string("string")])
         let route: AppControlValue = .object(["anyOf": .array([
             .object(["type": .string("null")]),

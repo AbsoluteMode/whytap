@@ -165,7 +165,10 @@ final class CalendarConnections: ObservableObject {
         let calendars = store.calendars(for: .event)
         let foundFeeds = calendars.map { calendar in
             CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
-                title: calendar.title + " · " + calendar.source.title, provider: .apple)
+                title: calendar.title + " · " + calendar.source.title, provider: .apple,
+                displayService: calendar.source.map {
+                    CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
+                })
         }
         let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
         let foundEvents = store.events(matching: predicate).map { event in
@@ -173,7 +176,8 @@ final class CalendarConnections: ObservableObject {
                 feedID: "apple:" + event.calendar.calendarIdentifier,
                 event: PlannerEvent(title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate,
                     allDay: event.isAllDay, location: event.location ?? "", notes: event.notes ?? "",
-                    meetingURL: CalendarDateCodec.meetingURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " "))),
+                    meetingURL: CalendarDateCodec.meetingURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " ")),
+                    attendees: PlannerEventAttendee.eventKit(event)),
                 sourceURL: CalendarEventAction.appleEventURL(identifier: event.calendarItemIdentifier),
                 externalUID: event.calendarItemExternalIdentifier)
         }

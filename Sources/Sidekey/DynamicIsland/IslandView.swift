@@ -389,6 +389,8 @@ struct IslandView: View {
     /// Hovered History row whose content earned a preview bubble.
     @State private var historyPreviewAnchor: HistoryHoverPreviewAnchor?
     @ObservedObject private var todoPreview = TodoHoverPreviewState.shared
+    @ObservedObject private var calendarPreview = CalendarEventPreviewState.shared
+    @State private var calendarPreviewHeight: CGFloat = 0
     @State private var targetLanguage: AppLanguage?
     @StateObject private var vocabularyViewModel: IslandVocabularyViewModel
     @StateObject private var fillerViewModel: IslandFillerViewModel
@@ -1331,8 +1333,24 @@ struct IslandView: View {
                 .transition(.opacity)
             }
         }
+        // Calendar's event details, same zone; lifted to stay inside the island area.
+        .overlay(alignment: .topLeading) {
+            if let anchor = calendarPreview.anchor, isHoverExpanded, hoverPanelMode == .calendar,
+               CalendarAvailability.isOpen {
+                CalendarEventPreviewBubble(content: anchor.content)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { calendarPreviewHeight = $0 }
+                    .offset(
+                        x: -(CalendarEventPreviewPolicy.bubbleWidth + 8
+                            + IslandHoverPanelHitZone.leftOverhang(compactWidth: compactWidth)),
+                        y: CalendarEventPreviewPolicy.bubbleTop(eventTop: anchor.rowFrame.minY,
+                            bubbleHeight: calendarPreviewHeight, areaHeight: compactHeight + activeHoverPanelHeight))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.12), value: historyPreviewAnchor)
         .animation(.easeOut(duration: 0.12), value: todoPreview.anchor)
+        .animation(.easeOut(duration: 0.12), value: calendarPreview.anchor)
         .animation(
             Self.hoverExpansionAnimation(programmatic: appState.programmaticHoverExpansion),
             value: isHoverExpanded
@@ -1427,6 +1445,7 @@ struct IslandView: View {
                 historyPreviewAnchor = nil
             }
             if newValue != .tasks { todoPreview.anchor = nil }
+            if newValue != .calendar { calendarPreview.clear() }
         }
     }
 

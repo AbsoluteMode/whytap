@@ -107,8 +107,8 @@ the Mac you turned on first was offline and the other one synced before it,
 the other Mac's settings are kept; that is why step 1 waits for
 **Settings synced**.
 
-Sync uses the backup recovery code, so it needs GitHub connected and a backup
-made or restored on this Mac. Until then the switch is hidden.
+Sync uses the GitHub connection and the backup recovery code, which this Mac
+usually gets by making or restoring a backup.
 
 Each Mac keeps its own island display and calendar accounts. To-do, Case and
 meeting notes are not synced yet; they still travel with backups. Settings are

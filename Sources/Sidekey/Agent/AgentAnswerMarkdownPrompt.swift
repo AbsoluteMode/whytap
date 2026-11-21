@@ -6,7 +6,8 @@ enum AgentAnswerMarkdownPrompt {
       on the first line in a plain sentence, never a heading or table.
     - For 3 or more items with shared attributes, use a table with at most 3 columns
       and 8 data rows. Put the item name first and use a few words per cell.
-    - For steps in order, use a numbered list. Put commands and paths in fenced code blocks.
+    - For steps in order, use a numbered list numbered 1, 2, 3 (one step per number, never
+      "3–4."). Put each shell command in its own ```bash fence and paths in fenced code blocks.
     - Use at most one > [!NOTE] or > [!WARNING] for an essential caveat. If sources
       disagree, say what they disagree on in that callout.
     - No headings, nested lists, emoji, HTML or Sources section. Put links only in the source cards.

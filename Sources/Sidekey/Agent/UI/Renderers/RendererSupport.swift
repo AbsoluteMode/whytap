@@ -77,11 +77,11 @@ struct MarkdownBodyText: View {
                     }
                 }
             }
-        case .orderedList(let items):
+        case .orderedList(let items, let start):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(index + 1).")
+                        Text("\(start + index).")
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                         inlineText(item)
                     }
@@ -244,8 +244,8 @@ enum MarkdownAttributedRun {
             return attributed
         case .unorderedList(let items):
             return listAttributedString(items: items, marker: { _ in unorderedListMarker })
-        case .orderedList(let items):
-            return listAttributedString(items: items, marker: { index in "\(index + 1)." })
+        case .orderedList(let items, let start):
+            return listAttributedString(items: items, marker: { index in "\(start + index)." })
         case .codeBlock, .table, .blockquote, .callout:
             // Defensive fallback. `MarkdownRenderItem.group` only emits
             // text-shaped blocks (paragraph + heading + lists) inside a
@@ -321,7 +321,7 @@ enum MarkdownAttributedRun {
         switch block {
         case .paragraph(let text), .heading(_, let text), .blockquote(let text), .callout(_, let text):
             return text
-        case .unorderedList(let items), .orderedList(let items):
+        case .unorderedList(let items), .orderedList(let items, _):
             return items.joined(separator: "\n")
         case .codeBlock(_, let code):
             return code
@@ -337,7 +337,9 @@ enum MarkdownBlock: Equatable {
     case paragraph(String)
     case heading(level: Int, text: String)
     case unorderedList([String])
-    case orderedList([String])
+    /// `start` is the first item's written number (CommonMark list start):
+    /// a list resumed after a paragraph such as "3–4. …" begins at 5, not 1.
+    case orderedList([String], start: Int = 1)
     case codeBlock(language: String?, code: String)
     case table(headers: [String], rows: [[String]])
     case blockquote(String)
@@ -386,7 +388,7 @@ enum MarkdownBlockParser {
             }
 
             if let list = orderedList(from: lines, startingAt: index) {
-                blocks.append(.orderedList(list.items))
+                blocks.append(.orderedList(list.items, start: list.start))
                 index = list.nextIndex
                 continue
             }
@@ -494,20 +496,24 @@ enum MarkdownBlockParser {
         return items.isEmpty ? nil : (items, cursor)
     }
 
+    /// Items are numbered consecutively from the first marker's number, as in
+    /// CommonMark; later markers' own numbers do not renumber the list.
     private static func orderedList(
         from lines: [String],
         startingAt index: Int
-    ) -> (items: [String], nextIndex: Int)? {
+    ) -> (items: [String], start: Int, nextIndex: Int)? {
         var items: [String] = []
+        var start = 1
         var cursor = index
 
         while cursor < lines.count {
             guard let item = orderedListItem(from: lines[cursor]) else { break }
-            items.append(item)
+            if items.isEmpty { start = item.number }
+            items.append(item.text)
             cursor += 1
         }
 
-        return items.isEmpty ? nil : (items, cursor)
+        return items.isEmpty ? nil : (items, start, cursor)
     }
 
     private static func blockquote(
@@ -569,14 +575,17 @@ enum MarkdownBlockParser {
         return nil
     }
 
-    private static func orderedListItem(from line: String) -> String? {
+    /// CommonMark ordered marker: 1–9 ASCII digits, then `.` or `)`, then a
+    /// space. "3–4. …" is not a marker and stays a paragraph.
+    private static func orderedListItem(from line: String) -> (number: Int, text: String)? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
-        let number = trimmed[..<dotIndex]
-        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
-        let textStart = trimmed.index(after: dotIndex)
+        guard let delimiter = trimmed.firstIndex(where: { $0 == "." || $0 == ")" }) else { return nil }
+        let digits = trimmed[..<delimiter]
+        guard (1...9).contains(digits.count), digits.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let number = Int(digits) else { return nil }
+        let textStart = trimmed.index(after: delimiter)
         guard textStart < trimmed.endIndex, trimmed[textStart] == " " else { return nil }
-        return String(trimmed[trimmed.index(after: textStart)...]).trimmingCharacters(in: .whitespaces)
+        return (number, String(trimmed[trimmed.index(after: textStart)...]).trimmingCharacters(in: .whitespaces))
     }
 
     private static func tableCells(from line: String) -> [String] {

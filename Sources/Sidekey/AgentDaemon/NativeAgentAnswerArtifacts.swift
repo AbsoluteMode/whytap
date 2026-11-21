@@ -5,12 +5,33 @@ import Foundation
 /// whether a validated final included every card. No network or file I/O.
 enum NativeAgentAnswerArtifacts {
     static func merging(_ existing: UsefulActionsBlock?, _ incoming: UsefulActionsBlock) -> UsefulActionsBlock {
-        var seen = Set<String>()
-        let items = ((existing?.items ?? []) + incoming.items).filter { seen.insert(identity($0)).inserted }
-        return UsefulActionsBlock(items: items)
+        ordered((existing?.items ?? []) + incoming.items)
     }
 
-    static func collect(from answer: String, existing: UsefulActionsBlock? = nil,
+    /// Deduplicates (the first occurrence wins) and puts Insert-ready text
+    /// (a rewrite, a command) first, so the preselected card is Insert; paths
+    /// and links keep their order after it.
+    /// WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
+    private static func ordered(_ all: [ActionItem]) -> UsefulActionsBlock {
+        var seen = Set<String>()
+        let items = all.filter { seen.insert(identity($0)).inserted }
+        return UsefulActionsBlock(items: items.filter(isInsert) + items.filter { !isInsert($0) })
+    }
+
+    private static func isInsert(_ item: ActionItem) -> Bool {
+        if case .copy = item { return true }
+        return false
+    }
+
+    /// Fence languages whose single command line becomes an Insert card.
+    static let shellFenceLanguages: Set<String> = ["bash", "sh", "zsh", "shell", "fish", "console", "terminal"]
+    static let maxInferredCommands = 3
+
+    /// `insert` is the final's explicit insert_text card: it stays first. The
+    /// answer's own shell commands come next, in answer order, ahead of copy
+    /// alternatives the model listed: an answer that leads with a command
+    /// (when a lax endpoint dropped insert_text) preselects that command.
+    static func collect(from answer: String, existing: UsefulActionsBlock? = nil, insert: ActionItem? = nil,
                         homeDirectory: String = NSHomeDirectory()) -> UsefulActionsBlock? {
         let text = String(answer.prefix(32_000))
         let ns = text as NSString
@@ -40,6 +61,9 @@ enum NativeAgentAnswerArtifacts {
         }
         // Code/config examples aren't source links. A fence containing only a
         // path/URL remains a copyable value and can also get its usual card.
+        // A shell fence holding exactly one command line is the command to run:
+        // it becomes an Insert card even when the model left insert_text empty.
+        var commands = 0
         for opening in matches(#"(?m)^[ \t]{0,3}(`{3,}|~{3,})([^\n]*)\n"#) {
             guard !overlaps(opening.range, excluded) else { continue }
             let marker = ns.substring(with: opening.range(at: 1))
@@ -53,9 +77,17 @@ enum NativeAgentAnswerArtifacts {
                                 length: (closing.map { NSMaxRange($0.range) } ?? ns.length) - opening.range.location)
             excluded.append(fence)
             let language = ns.substring(with: opening.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard closing != nil, ["", "text", "plaintext", "path"].contains(language) else { continue }
+            guard closing != nil else { continue }
             let body = ns.substring(with: NSRange(location: bodyStart, length: bodyEnd - bodyStart))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            if shellFenceLanguages.contains(language) {
+                if commands < maxInferredCommands, let command = singleCommand(body) {
+                    commands += 1
+                    candidates.append((fence, .copy(text: command, description: nil)))
+                }
+                continue
+            }
+            guard ["", "text", "plaintext", "path"].contains(language) else { continue }
             if let item = path(body) { candidates.append((fence, item)) }
             else if let url = webURL(body) { candidates.append((fence, link(url))) }
         }
@@ -141,8 +173,27 @@ enum NativeAgentAnswerArtifacts {
         var seen = Set<String>()
         let inferred = candidates.sorted { $0.0.location < $1.0.location }.map(\.1)
             .filter { seen.insert(identity($0)).inserted }
-        let block = merging(existing, UsefulActionsBlock(items: inferred))
+        let explicit = existing?.items ?? []
+        // A command the model also listed keeps its explicit metadata.
+        let metadata = Dictionary(explicit.map { (identity($0), $0) }, uniquingKeysWith: { first, _ in first })
+        let answerCommands = inferred.filter(isInsert).map { metadata[identity($0)] ?? $0 }
+        let block = ordered((insert.map { [$0] } ?? []) + answerCommands + explicit + inferred.filter { !isInsert($0) })
         return block.items.isEmpty ? nil : block
+    }
+
+    /// The one command line of a shell fence, without a `$ `/`% ` prompt.
+    /// Comments and blank lines are ignored; several commands, a line
+    /// continuation or a heredoc mean a script, which gets no card.
+    static func singleCommand(_ body: String) -> String? {
+        let lines = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+        guard lines.count == 1, var command = lines.first else { return nil }
+        for prompt in ["$ ", "% "] where command.hasPrefix(prompt) {
+            command = String(command.dropFirst(prompt.count)).trimmingCharacters(in: .whitespaces)
+        }
+        guard !command.isEmpty, command.count <= 2_000, !command.hasSuffix("\\"), !command.contains("<<") else { return nil }
+        return command
     }
 
     private static func webURL(_ text: String) -> URL? {

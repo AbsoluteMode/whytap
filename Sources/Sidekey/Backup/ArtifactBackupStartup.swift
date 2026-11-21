@@ -6,7 +6,10 @@ import AppKit
 enum ArtifactBackupStartup {
     static func finishPendingRestore() -> Bool {
         let transaction = ArtifactBackupEnvironment().transaction()
-        guard transaction.isArmed || transaction.hasApplyJournal else { return true }
+        guard transaction.isArmed || transaction.hasApplyJournal else {
+            SettingsSyncService.resolveInterruptedRestore()
+            return true
+        }
         while true {
             let progress = progressPanel()
             do {
@@ -15,11 +18,17 @@ enum ArtifactBackupStartup {
                 return true
             } catch ArtifactBackupError.restoreInterrupted {
                 progress.close()
+                SettingsSyncService.restoreFinished(applied: false)
                 // The durable rollback succeeded. Settings → Backup explains
                 // the interruption without forcing a second app launch.
                 return true
             } catch {
                 progress.close()
+                // Nothing left to retry: the outcome says whether it applied
+                // (a disk error after the applied outcome was written still applied).
+                if !transaction.isArmed && !transaction.hasApplyJournal {
+                    SettingsSyncService.restoreFinished(applied: transaction.readOutcome()?.state == .applied)
+                }
                 let alert = NSAlert()
                 alert.messageText = "Restore needs attention"
                 alert.informativeText = "Your backup and recovery files are kept. Unlock this Mac and check free disk space, then retry. If the restore key is missing, enter your saved recovery code."
@@ -41,7 +50,7 @@ enum ArtifactBackupStartup {
                     continue
                 }
                 if canCancel && response.rawValue == NSApplication.ModalResponse.alertFirstButtonReturn.rawValue + 3 {
-                    do { _ = try transaction.cancelPlanned(); return true }
+                    do { _ = try transaction.cancelPlanned(); SettingsSyncService.restoreFinished(applied: false); return true }
                     catch { continue }
                 }
                 if !code.stringValue.isEmpty {
@@ -74,7 +83,14 @@ enum ArtifactBackupStartup {
 
     private static func performAttempt(showing panel: NSPanel) throws {
         try runAttempt(operation: {
-            _ = try ArtifactBackupEnvironment().transaction().applyIfPending()
+            let transaction = ArtifactBackupEnvironment().transaction()
+            // Restored settings or keys are older than the synced ones: an
+            // applied restore makes this Mac rejoin sync. A restore of other
+            // sections, or one rolled back, keeps this Mac's agreement.
+            // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+            try SettingsSyncService.restoreWillStart(sections: transaction.plannedSections ?? [.settings, .credentials])
+            let outcome = try transaction.applyIfPending()
+            SettingsSyncService.restoreFinished(applied: outcome?.state == .applied)
         }, pump: { _ = NSApplication.shared.runModal(for: panel) },
            completed: { NSApplication.shared.stopModal() })
     }

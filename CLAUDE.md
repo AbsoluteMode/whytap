@@ -1148,17 +1148,22 @@ full truncated titles. Drafts survive closing; saved Toolbox slots remain unchan
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
-red now line). Events are blocks from start to end, tinted with their calendar's
-colour (provider colour or a stable fallback), with time range and calendar name.
+red now line). Events are blocks from start to end in one colour, each with the
+small logo of its service (bundled official Google Calendar and Outlook icons,
+Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range and
+calendar name. Every connected calendar is shown: Hover has no calendar hiding
+or Refresh button (open, day change, account change and a 60 s poll refresh).
+WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
 Overlaps share the width and all-day events are chips above the grid. A click
 joins the meeting link, else opens the event in its own calendar (Google/Outlook
 web, ical://ekevent on this Mac). There is no details page. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
-Day navigation, feed selection (with colour dots) and Connect stay in Hover.
+A compact day switcher and Connect stay in Hover; Connect rows carry the
+provider logos, and connection errors and Retry are listed there.
 Connect starts the provider browser or macOS permission prompt directly, using
 the same CalendarConnectionFlow as Settings → Integrations. No intermediate
 form, account-name field, Advanced app setup or Whytap account is shown.
-Unavailability/errors stay inline; progress and Cancel remain on the source list. Toolbox uses the same inline entry; there are no runtime
+Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime
 PlannerWindowController calls. CalendarConnectionFlow keeps permission work alive
 through temporary Hover hiding. Only Hover-owned connections pin its menu;
 Settings connections do not. Repeat opens preserve an active connection.
@@ -1450,6 +1455,40 @@ data remain included. Names alone never exclude a directory and links are not
 followed. WHY:
 `.project-docs/decisions/2026-10-21-backup-tagged-caches.md`.
 
+Settings sync (Settings -> Backup -> Sync settings between Macs, off by
+default) keeps preferences and provider keys the same on Macs sharing one
+recovery code. SettingsSyncService keeps one document sealed with the backup
+key (AES-GCM, readable key ID) at whytap-sync/settings.v1.json
+(settings-beta.v1.json for beta) in the same private Exodia-Backup repository,
+through the Contents API: conditional GET with ETag, PUT with the blob SHA, so
+a write that lost a race re-reads, merges and retries (three attempts). Rounds
+run every minute and 2 s after a defaults change. Items are the backup
+allowlist minus per-Mac ones (island display, calendar accounts and their
+rotating tokens, the routing repair copy) plus the backup's provider key
+accounts minus calendar.*. Each item merges alone: the later change wins, ties
+go to the greater device ID, a removal is recorded so a deleted key is deleted
+everywhere. The routing document is one item. A Mac that turns sync on, or
+restores a backup, joins: shared values replace its own, its extra items
+upload; the previous values stay in local settings history. A Mac has joined
+once it takes an existing shared document (the first Mac, once its upload
+succeeds); values it had before are stamped at the epoch and never replace a
+shared entry. A local ledger (Application Support/<bundle id>/
+settings-sync/ledger.json, hashes only, never backed up) records what this Mac
+agreed; turning sync off deletes it. An applied restore (marked before it
+starts; a rollback changes nothing) makes only the sections it replaced,
+settings or keys, join again; other items keep their agreement. While a round runs it alone writes the ledger; edits seen meanwhile
+keep their time in memory for the next round. A round stamps
+local edits in the ledger before any request, reads local values again after
+the read, saves the agreement before applying (a refused Keychain write keeps
+its old agreement) and checks the repository is private before writing. The
+cache is bound to the key ID; flipping the switch or a pending restore stops a
+round before it writes. An unreadable Keychain item or defaults value stops the
+round, never reads as a removal. Another recovery code is reported and never overwritten; values this
+build rejects and items from a newer app are left alone. Stores that keep their
+own copy reload (SettingsSyncLiveReload: routes, hotkeys, Toolbox layout,
+notification sounds, Brightness keys, island helpers, Drop mode, capability
+flags, idle hide). WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+
 ArtifactBackupEngine receives the actual live MeetingsStore/AIUsageStore
 instances, whose export methods freeze database/sidecar generations. Restore
 validates into a parked transaction and applies before any stores or jobs open,
@@ -1706,7 +1745,7 @@ input layout, including live recording and previously saved non-English titles.
    audio or text) sent only to that provider when a model is picked or on
    Check now, its official OpenCode native package downloads from the npm registry, `google.com` opened in the
    browser, the Sparkle feed on GitHub Releases, and optional encrypted backups
-   to the user's own GitHub repository or selected sync folder.
+   and settings sync to the user's own GitHub repository or selected sync folder.
    `Tests/SidekeyTests/CloudRemovalTests.swift` fails the build on any
    Whytap hostname or removed cloud symbol under `Sources/`.
 2. **Keys and content never leave through logs.** Active BYOK keys live in

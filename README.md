@@ -1,10 +1,12 @@
-<h1 align="center"><img alt="" src="docs/assets/readme/whytap-mark.svg" width="30" height="36" align="absmiddle">&nbsp;Whytap<br><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640" align="absbottom"></h1>
+<h1 align="center"><img alt="" src="docs/assets/readme/whytap-mark.svg" width="30" height="36" align="absmiddle">&nbsp;Whytap</h1>
 
 <div align="center">
 
 <p align="center">
   <b>The MacOS productivity app, built for your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16">.</b>
 </p>
+
+<p align="center"><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640"></p>
 
 <p align="center">
   <a href="https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg"><img alt="Download" src="docs/assets/readme/btn-download.svg" height="44"></a>&nbsp;&nbsp;<a href="https://whytap.ai"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/btn-site-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/btn-site-light.svg"><img alt="Ask &amp; Help" src="docs/assets/readme/btn-site-dark.svg" height="44"></picture></a>

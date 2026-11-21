@@ -2,8 +2,9 @@
 
 Open **Search all tools → To-do** for a compact list inside hover.
 **Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
-Events are blocks from start to end in their calendar's colour, with the time
-range and calendar name. Clicking one joins its meeting link, or opens it in its
+Events are blocks from start to end, all one colour, each with the small logo
+of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
+range and the calendar name. Every connected calendar is shown. Clicking one joins its meeting link, or opens it in its
 own calendar (Google or Outlook on the web, Calendar on this Mac).
 The tools can also be added from Settings → Toolbox; adding this
 feature does not change existing saved tool layouts or positional shortcuts.
@@ -115,9 +116,10 @@ item; unrelated events are never merged by title. Events spanning midnight and
 all-day events appear on each applicable day with an exclusive end boundary.
 
 Events are read-only in Hover. Whytap fetches the selected day on opening, day
-changes, account changes, Refresh, and every minute while visible. Native
-calendar-change notifications update EventKit feeds. Errors retain the last
-loaded data and offer connection details through Calendars. Closing Hover stops
+changes, account changes and every minute while visible; there is no Refresh
+button. Native calendar-change notifications update EventKit feeds at once.
+Google, Outlook and Zoom cannot push changes to an app without a server, so
+they are polled. Errors retain the last loaded data and are listed on Connect. Closing Hover stops
 polling; there is no background sync or persistent external-event cache.
 
 The explicitly opened panel survives pointer exit; Escape/outside click closes
@@ -162,8 +164,8 @@ Settings → **Integrations** lists **Google Calendar**, **Outlook Calendar**,
 **Apple Calendar** and **Zoom Calendar** with separate permission descriptions,
 account controls and direct provider authorization. Google and Zoom show
 their pending review/publication state and do not start new shared-client sign-in
-before public approval. Existing accounts can still be disconnected. Hover keeps
-feed selection and its compact source list; Connect starts the provider browser
+before public approval. Existing accounts can still be disconnected. Hover has
+no calendar selection (removed on 2026-11-21); Connect starts the provider browser
 or macOS prompt directly, without an intermediate form or account-name field. Repeated accounts receive
 distinct provider-based names automatically.
 
@@ -286,8 +288,9 @@ setup or an explicit configuration; `--require-all` still fails without registra
 Closing Planner stops calendar polling. Reopening refreshes the visible range.
 EventKit change notifications are debounced and refresh only Apple calendars;
 they do not restart remote-account requests. Disconnecting an account or removing
-a calendar prunes its hidden-feed IDs. Visibility supports up to 256 hidden
-calendars with the same bound in settings backup validation.
+a calendar prunes its hidden-feed IDs. Hover no longer reads them; the saved
+list stays for backups and older builds, with up to 256 hidden calendars and
+the same bound in settings backup validation.
 An open editor keeps its draft when another tool hotkey brings Planner forward.
 An active calendar connection flow also defers Sparkle restart and backup restore,
 even if its Settings window closes. Planner or inline To-do being visible, or a retained new-task draft, defers Sparkle
@@ -351,7 +354,7 @@ For Google's verification form, justify each requested scope from the actual UI:
 
 | Scope | Required behavior |
 | --- | --- |
-| `calendar.calendarlist.readonly` | List subscribed calendars by name and colour so the user can choose the feeds to display and tell them apart in the day. |
+| `calendar.calendarlist.readonly` | List subscribed calendars by name so Whytap can read their events and label each event with its calendar. |
 | `calendar.events.readonly` | Read events for the selected day, show them on the day grid, and open an event's meeting/original link on click. |
 
 The review video must show the real app and browser flow in English: open the

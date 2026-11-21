@@ -1655,6 +1655,26 @@ final class HotkeyPreferences: ObservableObject {
         )
     }
 
+    /// Settings sync wrote another Mac's shortcuts. Only changed values are
+    /// assigned, so the hotkey observers rebuild just what moved.
+    // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+    func reloadFromDefaults() {
+        let loaded = HotkeyPreferences(defaults: defaults)
+        if loaded.agentTextShortcut != agentTextShortcut { agentTextShortcut = loaded.agentTextShortcut }
+        if loaded.agentVoiceShortcut != agentVoiceShortcut { agentVoiceShortcut = loaded.agentVoiceShortcut }
+        if loaded.agentVoiceGesture != agentVoiceGesture { agentVoiceGesture = loaded.agentVoiceGesture }
+        if loaded.dropVoiceGesture != dropVoiceGesture { dropVoiceGesture = loaded.dropVoiceGesture }
+        if loaded.dropVoiceShortcut != dropVoiceShortcut { dropVoiceShortcut = loaded.dropVoiceShortcut }
+        if loaded.agentCloseShortcut != agentCloseShortcut { agentCloseShortcut = loaded.agentCloseShortcut }
+        if loaded.usefulLinksInsertShortcut != usefulLinksInsertShortcut { usefulLinksInsertShortcut = loaded.usefulLinksInsertShortcut }
+        if loaded.usefulLinksOpenShortcut != usefulLinksOpenShortcut { usefulLinksOpenShortcut = loaded.usefulLinksOpenShortcut }
+        if loaded.usefulLinksNextShortcut != usefulLinksNextShortcut { usefulLinksNextShortcut = loaded.usefulLinksNextShortcut }
+        if loaded.usefulLinksPreviousShortcut != usefulLinksPreviousShortcut { usefulLinksPreviousShortcut = loaded.usefulLinksPreviousShortcut }
+        if loaded.screenshotArrowBindings != screenshotArrowBindings { screenshotArrowBindings = loaded.screenshotArrowBindings }
+        if loaded.toolShortcuts != toolShortcuts { toolShortcuts = loaded.toolShortcuts }
+        if loaded.meetingRecordShortcut != meetingRecordShortcut { meetingRecordShortcut = loaded.meetingRecordShortcut }
+    }
+
     private static func loadScreenshotArrows(_ defaults: UserDefaults) -> ScreenshotArrowBindings {
         var saved = defaults.dictionary(forKey: screenshotArrowsDefaultsKey) as? [String: String]
         if defaults.integer(forKey: screenshotArrowDefaultsVersionKey) < 2 {

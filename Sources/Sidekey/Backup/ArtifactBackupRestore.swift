@@ -414,6 +414,8 @@ struct ArtifactRestoreTransaction {
 
     var isArmed: Bool { FileManager.default.fileExists(atPath: planURL.path) }
     var hasApplyJournal: Bool { FileManager.default.fileExists(atPath: journalURL.path) }
+    /// The sections an armed restore will replace, when its plan is readable.
+    var plannedSections: [ArtifactBackupSection]? { try? readPlan().sections }
 
     func readOutcome() -> ArtifactRestoreOutcome? {
         guard let data = try? Data(contentsOf: outcomeURL) else { return nil }

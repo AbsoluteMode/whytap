@@ -523,6 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startReady()
         ArtifactBackupEngine.shared.register(meetings: meetingsStore, usage: AIUsageStore.shared)
         BackupViewModel.shared.start()
+        SettingsSyncService.shared.start()
 
         if FirstLaunchPermissions.consumePresentation(
             in: .standard,
@@ -553,6 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()
+        SettingsSyncService.shared.stop()
         // Give the display its own transfer table back; Extra never changes the backlight.
         ScreenBrightnessController.shared.shutdown()
         BrightnessKeys.shared.stop()

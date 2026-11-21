@@ -641,6 +641,12 @@ final class BackupViewModel: ObservableObject {
     /// continue offline, so pausing them must too.
     var showsAutomaticBackup: Bool { lastRemoteBackupAt != nil && destinationKind != nil }
 
+    /// Settings sync needs the recovery-code key and the GitHub repository,
+    /// not an upload from this Mac: a second Mac that restored the backup
+    /// qualifies before it ever backs up itself.
+    // WHY: .project-docs/decisions/2026-11-20-settings-sync.md
+    var showsSettingsSync: Bool { showsAutomaticBackup || (canUseGitHubBackup && recoverySaved) }
+
     var canChangeAutomaticBackup: Bool {
         showsAutomaticBackup && recoverySaved && !needsRestart && !hasPendingMaintenance
     }

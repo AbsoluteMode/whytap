@@ -1,11 +1,11 @@
 import AppKit
-import EventKit
 import XCTest
 @testable import Sidekey
 
-/// The Calendar hover day view: blocks on an hour grid, calendar colours and
+/// The Calendar hover day view: blocks on an hour grid, service logos and
 /// what a click on an event does.
-/// WHY: .project-docs/decisions/2026-11-20-calendar-day-view.md
+/// WHY: .project-docs/decisions/2026-11-20-calendar-day-view.md,
+/// .project-docs/decisions/2026-11-21-calendar-logos.md
 @MainActor
 final class CalendarDayViewTests: XCTestCase {
     private let calendar = Calendar.current
@@ -110,36 +110,58 @@ final class CalendarDayViewTests: XCTestCase {
         XCTAssertNil(CalendarEventAction.appleEventURL(identifier: ""))
     }
 
-    func testAppleCalendarWithoutAColourUsesTheFallbackInsteadOfCrashing() throws {
-        let unsaved = EKCalendar(for: .event, eventStore: EKEventStore())
-        XCTAssertNil(CalendarFeedColor.hex(appleColor: unsaved.color), "An unsaved EKCalendar has no colour yet")
-        XCTAssertNil(CalendarFeedColor.hex(appleColor: nil))
-        XCTAssertEqual(CalendarFeedColor.hex(appleColor: NSColor(srgbRed: 1, green: 0.5, blue: 0, alpha: 1)), "#FF8000")
-    }
-
-    func testCalendarColoursComeFromTheProviderOrAStableFallback() {
-        XCTAssertEqual(CalendarFeedColor.hex("#9fe1e7"), "#9FE1E7")
-        for bad: Any? in [nil, "", "9fe1e7", "#9fe1e", "#zzzzzz", "lightBlue", 42] { XCTAssertNil(CalendarFeedColor.hex(bad)) }
-        let first = CalendarFeedColor.fallback(for: "account:work")
-        XCTAssertEqual(first, CalendarFeedColor.fallback(for: "account:work"), "Same calendar, same colour on every launch")
-        XCTAssertTrue(CalendarFeedColor.palette.contains(first))
-        XCTAssertEqual(Set((0..<40).map { CalendarFeedColor.fallback(for: "feed-\($0)") }).count, CalendarFeedColor.palette.count,
-                       "Different calendars spread over the palette")
-    }
-
-    func testProvidersReportTheirCalendarColours() async throws {
+    func testEachEventNamesItsServiceAndEveryCalendarIsShown() async throws {
         let tests = CalendarHoverTests(); try await tests.setUp()
         defer { Task { try? await tests.tearDown() } }
         let model = try tests.fakeGoogleModel()
         model.begin(); await model.connections.refresh(interval: model.interval)
-        let colors = Dictionary(uniqueKeysWithValues: model.connections.feeds.map { ($0.title, $0.color) })
-        XCTAssertEqual(colors["Work"], "#4986E7"); XCTAssertEqual(colors["Family"], "#F691B2")
         let review = try XCTUnwrap(model.events.first { $0.event.title == "Design review" })
-        XCTAssertEqual(model.feedColor(review.feedID), "#4986E7")
+        XCTAssertEqual(model.source(review.feedID), .provider(.google))
         XCTAssertEqual(model.actionTitle(review), "Join meeting")
         let standup = try XCTUnwrap(model.events.first { $0.event.title == "Team standup" })
         XCTAssertEqual(model.actionTitle(standup), "Open in Google Calendar")
-        XCTAssertEqual(model.feedColor("local"), CalendarFeedColor.local)
+        XCTAssertEqual(model.source("local"), .whytap)
+        XCTAssertNil(model.source("gone:calendar"), "A calendar that disappeared gets the generic symbol")
         XCTAssertEqual(model.events.filter(\.event.allDay).map(\.event.title), ["Company offsite"])
+        // A hiding choice saved by an older build no longer removes anything from Hover.
+        for feed in model.connections.feeds { model.connections.setVisible(false, feedID: feed.id) }
+        XCTAssertEqual(Set(model.events.map(\.event.title)), ["Company offsite", "Team standup", "Design review", "School pickup"])
+        XCTAssertTrue(model.isConnected(.google)); XCTAssertFalse(model.isConnected(.microsoft))
+        // The Connect rows say the same thing on screen and to VoiceOver.
+        XCTAssertEqual(model.connectState(.google), .addAccount)
+        XCTAssertEqual(model.connectAccessibilityLabel(.google), "Add Google Calendar account")
+        XCTAssertEqual(model.connectState(.microsoft), .connect)
+        XCTAssertEqual(model.connectAccessibilityLabel(.microsoft), "Connect Outlook Calendar")
+    }
+
+    func testLogosComeFromTheBundleOrTheInstalledApp() throws {
+        let icons = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/UsefulLinkIcons")
+        let lookup = CalendarSourceLogo.applicationURL
+        defer { CalendarSourceLogo.resourceDirectoryForTesting = nil; CalendarSourceLogo.applicationURL = lookup }
+        CalendarSourceLogo.resourceDirectoryForTesting = icons
+        CalendarSourceLogo.applicationURL = { _ in nil }
+        for source: CalendarEventSource in [.whytap, .provider(.google), .provider(.microsoft), .provider(.zoom)] {
+            let image = try XCTUnwrap(CalendarSourceLogo.image(for: source), "\(source) is bundled")
+            XCTAssertFalse(image.isTemplate, "Logos keep their own colours")
+        }
+        XCTAssertNil(CalendarSourceLogo.image(for: .provider(.apple)), "No Calendar app, no logo: the view falls back to a symbol")
+        CalendarSourceLogo.applicationURL = { $0 == CalendarSourceLogo.appleCalendarBundleID
+            ? URL(fileURLWithPath: "/System/Applications/Calendar.app") : nil }
+        XCTAssertNotNil(CalendarSourceLogo.image(for: .provider(.apple)))
+        CalendarSourceLogo.resourceDirectoryForTesting = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        XCTAssertNil(CalendarSourceLogo.image(for: .whytap), "A missing asset is no image, not a crash")
+    }
+
+    /// An app icon's transparent margin is cut away so it is as big as a flat logo.
+    func testLogoMarginsAreTrimmedSoLogosMatchInSize() throws {
+        let padded = NSImage(size: NSSize(width: 100, height: 100), flipped: false) { _ in
+            NSColor.red.setFill(); NSRect(x: 20, y: 30, width: 60, height: 60).fill(); return true
+        }
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(CalendarSourceLogo.trimmed(padded).tiffRepresentation)))
+        let corner = try XCTUnwrap(bitmap.colorAt(x: 2, y: 2))
+        XCTAssertGreaterThan(corner.alphaComponent, 0.9, "The visible square reaches the corners after trimming")
+        let blank = NSImage(size: NSSize(width: 10, height: 10))
+        XCTAssertTrue(CalendarSourceLogo.trimmed(blank) === blank, "A fully transparent image is left as it is")
     }
 }

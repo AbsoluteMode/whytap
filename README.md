@@ -113,23 +113,33 @@
 
 ## Plugins
 
-<p align="center">Ask Claude Code or Codex to work with Whytap for you.</p>
+<p align="center">Ask <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="114" align="absmiddle"></picture> or <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="64" align="absmiddle"></picture> to work with Whytap for you.</p>
 
 <p align="center">
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-meetings-light.svg"><img alt="Meetings: “Where did we discuss pricing?” (Asks you once)" src="docs/assets/readme/plugin-meetings-dark.svg" width="196"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-todo-light.svg"><img alt="To-do: “Turn my last call into tasks” (Saved to To-do)" src="docs/assets/readme/plugin-todo-dark.svg" width="196"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-models-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-models-light.svg"><img alt="Models: “Switch Drop Smart to a faster model” (Checked like Settings)" src="docs/assets/readme/plugin-models-dark.svg" width="196"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-case-light.svg"><img alt="Case: “Deploy with my API key” (Key names, never values)" src="docs/assets/readme/plugin-case-dark.svg" width="196"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-meetings-light.svg"><img alt="Meetings: “Where did we discuss pricing?” (Asks you once)" src="docs/assets/readme/plugin-meetings-dark.svg" width="172"></picture>
+&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-todo-light.svg"><img alt="To-do: “Turn my last call into tasks” (Saved to To-do)" src="docs/assets/readme/plugin-todo-dark.svg" width="172"></picture>
+&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-notify-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-notify-light.svg"><img alt="Notify: “Tell me when CI fails” (A local script)" src="docs/assets/readme/plugin-notify-dark.svg" width="172"></picture>
+<br><br>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-monitor-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-monitor-light.svg"><img alt="Monitor: “Build a dashboard for my server” (Shown in Monitor)" src="docs/assets/readme/plugin-monitor-dark.svg" width="172"></picture>
+&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-models-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-models-light.svg"><img alt="Models: “Switch Drop Smart to a faster model” (Checked like Settings)" src="docs/assets/readme/plugin-models-dark.svg" width="172"></picture>
+&nbsp;&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-case-light.svg"><img alt="Case: “Deploy with my API key” (Key names, never values)" src="docs/assets/readme/plugin-case-dark.svg" width="172"></picture>
 </p>
 
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="114" align="absmiddle"></picture></p>
+
 ```bash
-# Claude Code
 claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
-# Codex
-codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 ```
 
-<p align="center"><sub>Case keys: Whytap → Case → Connect · <a href="docs/customization/app-control.md">What the plugin can do</a></sub></p>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="64" align="absmiddle"></picture></p>
+
+```bash
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+```
 
 ## Free to run
 

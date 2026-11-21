@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="172" height="104" viewBox="0 0 172 104">
+  <rect x="0.5" y="0.5" width="171" height="103" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <g transform="translate(14 12) scale(0.6667)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+  <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  <path d="M4 2C2.8 3.7 2 5.7 2 8" />
+  <path d="M22 8c0-2.3-.8-4.3-2-6" /></g>
+  <text x="36" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1f2328">Notify</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#1f2328"><tspan x="14" y="52">“Tell me when</tspan><tspan x="14" y="69">CI fails”</tspan></text>
+  <text x="14" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#5b4bd6">A local script</text>
+</svg>

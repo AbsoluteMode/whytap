@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="196" height="124" viewBox="0 0 196 124">
-  <rect x="0.5" y="0.5" width="195" height="123" rx="14" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(16 15) scale(0.75)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
+<svg xmlns="http://www.w3.org/2000/svg" width="172" height="104" viewBox="0 0 172 104">
+  <rect x="0.5" y="0.5" width="171" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(14 12) scale(0.6667)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
   <path d="m3 7 2 2 4-4" />
   <path d="M13 6h8" />
   <path d="M13 12h8" />
   <path d="M13 18h8" /></g>
-  <text x="42" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">To-do</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="16" y="62">“Turn my last call</tspan><tspan x="16" y="81">into tasks”</tspan></text>
-  <text x="16" y="110" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#b8adff">Saved to To-do</text>
+  <text x="36" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0f6fc">To-do</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#f0f6fc"><tspan x="14" y="52">“Turn my last call</tspan><tspan x="14" y="69">into tasks”</tspan></text>
+  <text x="14" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#b8adff">Saved to To-do</text>
 </svg>

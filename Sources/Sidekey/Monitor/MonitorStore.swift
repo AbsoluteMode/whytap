@@ -28,6 +28,11 @@ final class MonitorStore: ObservableObject {
     /// The server poll in flight; cancelled as soon as polling is no longer
     /// allowed, so a poll still preparing its connection never reaches SSH.
     private var refreshTask: Task<Void, Never>?
+    /// Island and Toolbox each have a store; a Delete on one reaches the
+    /// others at once through this notification (object: the Monitor root),
+    /// so their polls in flight are cancelled too, not on their next loop.
+    static let removedDashboardsChanged = Notification.Name("Whytap.Monitor.removedDashboardsChanged")
+    private var removedListObserver: AnyCancellable?
     /// How long Delete waits for an installer holding the deleted list.
     var removedListLockTimeout: TimeInterval = 2
 
@@ -37,6 +42,13 @@ final class MonitorStore: ObservableObject {
          }) {
         self.root = root
         self.collector = collector
+        let ownRoot = root.standardizedFileURL
+        // Posted synchronously on the main thread by deleteDashboard.
+        removedListObserver = NotificationCenter.default.publisher(for: Self.removedDashboardsChanged)
+            .filter { ($0.object as? URL)?.standardizedFileURL == ownRoot }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadFiles() }
+            }
     }
 
     var dashboardsDirectory: URL { root.appendingPathComponent("dashboards", isDirectory: true) }
@@ -198,6 +210,8 @@ final class MonitorStore: ObservableObject {
             return wasListed
         }
         reloadFiles()
+        // Every other live Monitor surface over this folder reloads now.
+        NotificationCenter.default.post(name: Self.removedDashboardsChanged, object: root.standardizedFileURL)
         return wasListed
     }
 

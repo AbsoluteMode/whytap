@@ -688,7 +688,8 @@ Monitor inside hover:
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
   A listed server-status hides Server status and stops its SSH polling,
-  cancelling a poll in flight; an unreadable list pauses polling too.
+  cancelling a poll in flight on every live surface (an in-process notice per
+  Monitor folder); an unreadable list pauses polling too.
   Collectors, their scripts and servers.json are never touched; install-dashboard
   lists the ID again, changing snapshot and list together (rollback on failure),
   and customize.py restore-dashboard <id> (server-status too) lists it again.

@@ -285,6 +285,54 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertTrue(store.readings.isEmpty)
     }
 
+    /// Builder's reproducer (queue ticket 317): island and Toolbox have their
+    /// own stores; Delete on one stops the other's poll before SSH as well.
+    func testDeletionOnOneSurfaceStopsAnotherSurfacePreparingItsConnection() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "second surface reached authentication")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = Counter()
+        let island = serverStore(SSHCalls())
+        let toolbox = MonitorStore(root: root) { _ in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.value += 1 }
+            throw CancellationError()
+        }
+        toolbox.start()
+        defer { toolbox.stop() }
+        await fulfillment(of: [began], timeout: 2)
+
+        let outcome = await MonitorDashboardDeletion(store: island, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertTrue(toolbox.serverStatusRemoved, "the other surface learns at once, not on its next loop")
+
+        release.continuation.yield(())
+        release.continuation.finish()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(contacted.value, 0, "a confirmed delete must stop another live surface from starting SSH")
+    }
+
+    func testDeletionNoticeReachesOnlyStoresOfTheSameFolder() async throws {
+        _ = try writeServers()
+        let otherRoot = root.appendingPathComponent("other-flavor", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherRoot, withIntermediateDirectories: true)
+        try Data(contentsOf: root.appendingPathComponent("servers.json"))
+            .write(to: otherRoot.appendingPathComponent("servers.json"))
+        let other = MonitorStore(root: otherRoot, collector: { _ in throw CancellationError() })
+        other.reloadFiles()
+        let store = serverStore(SSHCalls())
+
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+
+        XCTAssertTrue(store.serverStatusRemoved)
+        XCTAssertFalse(other.serverStatusRemoved)
+        XCTAssertEqual(other.readings.map(\.server.id), ["sferyx"])
+    }
+
     /// Builder's reproducer: an unreadable list may hide a deletion, so it
     /// pauses polling, in the running store and after relaunch.
     func testUnreadableListPausesServerPollingUntilItCanBeRead() async throws {

@@ -1481,6 +1481,11 @@ struct IslandView: View {
         // IslandActions closure directly in `AppDelegate`.
         .onChange(of: appState.programmaticHoverPanelRequest) { _, request in
             guard let request, isHoverExpanded else { return }
+            // A closed Calendar ("Soon") never opens its panel, whoever asks.
+            if request.panel == .calendar, !CalendarAvailability.isOpen {
+                appState.programmaticHoverExpansion = false
+                return
+            }
             if request.isGlance, !Self.brightnessGlanceMayOpen(
                 over: hoverPanelMode, hovering: isHovering, searchFocused: hoverSearchFocused,
                 vocabularyFocused: hoverVocabularyFocused
@@ -2790,6 +2795,7 @@ private struct IslandDropModeHoverPanel: View {
                                         context: hitTargetContext,
                                         action: { activateTool(tool) }
                                     )
+                                    .disabled(tool.isComingSoon)
                                     .overlay(alignment: .top) {
                                         toolHotkeyHint(for: tool)
                                             .opacity(hoveredTool == tool ? 1 : 0)
@@ -2799,7 +2805,7 @@ private struct IslandDropModeHoverPanel: View {
                                     }
                                     .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
                                     .onHover { isHovering in
-                                        if isHovering { hoveredTool = tool }
+                                        if isHovering, !tool.isComingSoon { hoveredTool = tool }
                                         else if hoveredTool == tool { hoveredTool = nil }
                                     }
                             }
@@ -2889,6 +2895,8 @@ private struct IslandDropModeHoverPanel: View {
     }
 
     private func activateSearchTool(_ tool: HoverTool) {
+        // A "Soon" result stays listed and inert: the search keeps its query and focus.
+        if tool.isComingSoon { return }
         if tool == .screenshot { onOpenScreenshot(); return }
         // Capture the tool before changing query/focus; mouse clicks can resign
         // the field editor before the Button fires. Searching never pins it.
@@ -2899,6 +2907,8 @@ private struct IslandDropModeHoverPanel: View {
     }
 
     private func activateTool(_ tool: HoverTool) {
+        // A tool listed with a "Soon" badge does nothing, tile or search row alike.
+        if tool.isComingSoon { return }
         if tool == .screenshot { onOpenScreenshot(); return }
         // A tile can be clicked while an empty search field owns the key window.
         // End text entry only after the activation has captured its tool.
@@ -2918,6 +2928,7 @@ private struct IslandDropModeHoverPanel: View {
         case .openSubtitles: onOpenSubtitles()
         case .openScreenshot: onOpenScreenshot()
         case .quit: onQuit()
+        case .comingSoon: break
         case .openPanel(let panel):
             switch panel {
             case .calendar: panelMode = .calendar
@@ -2958,6 +2969,8 @@ private struct IslandDropModeHoverPanel: View {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
                             let info = HoverToolRegistry.info(for: tool)
+                            let isPressed = hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
+                            let highlight = isPressed ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
                             Button { activateSearchTool(tool) } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: info.sfSymbol)
@@ -2972,6 +2985,9 @@ private struct IslandDropModeHoverPanel: View {
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 0)
+                                    if let soon = tool.comingSoonBadge {
+                                        IslandSoonBadge(text: soon)
+                                    }
                                     if tool == .notifs && notificationHub.unreadCount > 0 {
                                         Circle().fill(.red).frame(width: 6, height: 6)
                                             .accessibilityHidden(true)
@@ -2982,10 +2998,7 @@ private struct IslandDropModeHoverPanel: View {
                                 .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
                                 .background(
                                     RoundedRectangle(cornerRadius: 9)
-                                        .fill(.white.opacity(
-                                            hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
-                                                ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
-                                        ))
+                                        .fill(.white.opacity(tool.isComingSoon ? 0 : highlight))
                                 )
                                 .contentShape(Rectangle())
                             }
@@ -2996,13 +3009,16 @@ private struct IslandDropModeHoverPanel: View {
                                 context: hitTargetContext,
                                 action: { activateSearchTool(tool) }
                             )
+                            .disabled(tool.isComingSoon)
                             .accessibilityLabel(info.title)
                             .accessibilityHint(info.description)
-                            .accessibilityValue(tool == .notifs && notificationHub.unreadCount > 0
-                                ? "\(notificationHub.unreadCount) new notifications" : "")
+                            .accessibilityValue(tool.comingSoonBadge
+                                ?? (tool == .notifs && notificationHub.unreadCount > 0
+                                    ? "\(notificationHub.unreadCount) new notifications" : ""))
+                            .opacity(tool.isComingSoon ? 0.6 : 1)
                             .id(index)
                             .onHover { inside in
-                                if inside {
+                                if inside, !tool.isComingSoon {
                                     hoveredTool = tool
                                     selectedSearchIndex = index
                                 } else if hoveredTool == tool { hoveredTool = nil }
@@ -3046,9 +3062,10 @@ private struct IslandDropModeHoverPanel: View {
             label: presentation.status,
             circleSize: circleSize,
             accessibilityLabel: presentation.title,
-            isDimmed: tool == .outputLang && mode == .fast,
+            isDimmed: (tool == .outputLang && mode == .fast) || tool.isComingSoon,
             isRecording: tool == .meetingRecord && meetingRecordingActive,
             showsDot: tool == .notifs && notificationHub.unreadCount > 0,
+            badge: tool.comingSoonBadge,
             width: IslandHoverControlsLayout.tileWidth(panelWidth: panelWidth),
             action: { activateTool(tool) }
         )

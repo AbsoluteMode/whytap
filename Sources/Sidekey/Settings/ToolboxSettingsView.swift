@@ -129,7 +129,7 @@ struct ToolboxSettingsView: View {
             isSelected: isSelected,
             isLocked: isLocked,
             isAdded: false,
-            badge: languageBadge(for: tool),
+            badge: languageBadge(for: tool) ?? tool.comingSoonBadge,
             onTap: { handleToolTap(tool) }
         )
         .help(toolDescription(for: tool))
@@ -203,7 +203,7 @@ struct ToolboxSettingsView: View {
             isSelected: isSelected,
             isLocked: false,
             isAdded: isInHover,
-            badge: languageBadge(for: tool),
+            badge: languageBadge(for: tool) ?? tool.comingSoonBadge,
             onTap: { handleToolTap(tool) }
         )
         .draggable(tool.rawValue) {
@@ -375,10 +375,18 @@ struct ToolboxSettingsView: View {
                 ToolboxDisplayPane()
             case .tasks, .calendar:
                 VStack(spacing: 14) {
-                    Text(tool == .calendar ? "Open today’s calendar inside Hover." : "Open your task list inside Hover.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    IntegrationAction(title: "Open " + HoverToolRegistry.info(for: tool).title) {
-                        deps.openHoverPanel(tool == .calendar ? .calendar : .tasks)
+                    if tool.isComingSoon {
+                        // Closed Calendar: visible, inert, no button.
+                        // WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
+                        Text(CalendarAvailability.message)
+                            .font(.callout).foregroundStyle(.secondary)
+                        IntegrationAction(title: "Open " + HoverToolRegistry.info(for: tool).title, enabled: false) {}
+                    } else {
+                        Text(tool == .calendar ? "Open today’s calendar inside Hover." : "Open your task list inside Hover.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        IntegrationAction(title: "Open " + HoverToolRegistry.info(for: tool).title) {
+                            deps.openHoverPanel(tool == .calendar ? .calendar : .tasks)
+                        }
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             case .monitor:

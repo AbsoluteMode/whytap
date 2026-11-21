@@ -3,6 +3,8 @@ import XCTest
 
 @MainActor
 final class PlannerBackupTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     func testRefreshRotationDoesNotConsumeSettingsHistoryButRealChangesCaptureIt() async throws {
         var profile = try ArtifactBackupTestProfile()
         let account = ConnectedCalendarAccount(id: UUID(), provider: .microsoft, label: "Synthetic")

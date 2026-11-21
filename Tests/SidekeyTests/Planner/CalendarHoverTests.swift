@@ -12,6 +12,7 @@ final class CalendarHoverTests: XCTestCase {
     var day: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 21))! }
 
     override func setUp() async throws {
+        openCalendarForThisTest()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         suite = "calendar.hover.test." + UUID().uuidString

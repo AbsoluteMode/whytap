@@ -3,6 +3,8 @@ import XCTest
 
 @MainActor
 final class CalendarIntegrationTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     private func info(_ provider: CalendarProvider, approval: Any? = nil) -> [String: Any] {
         var client: [String: Any] = ["clientID": "shared-fixture"]
         if let approval { client["publicAccessApproved"] = approval }

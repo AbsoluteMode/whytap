@@ -237,14 +237,19 @@ extension EnvironmentValues {
 
 private struct IslandHoverHitTargetModifier: ViewModifier {
     @ObservedObject var bridge: IslandHoverHitBridge
+    @Environment(\.isEnabled) private var isEnabled
     let id: IslandHoverHitTargetID
     let context: String
     let action: () -> Void
 
     func body(content: Content) -> some View {
         content
-            .environment(\.islandHoverNativePressed, bridge.pressedID == id)
-            .background(IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context, action: action))
+            .environment(\.islandHoverNativePressed, isEnabled && bridge.pressedID == id)
+            .background {
+                if isEnabled {
+                    IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context, action: action)
+                }
+            }
     }
 }
 

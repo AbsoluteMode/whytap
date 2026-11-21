@@ -1202,6 +1202,14 @@ To-do opens a compact inline hover list with Return-to-add, click-to-complete/re
 and a History mode with completion date/time. Completed tasks move below active
 ones for the current opening, then appear only in History. Native tooltips expose
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
+Calendar is currently closed as "Soon": CalendarAvailability.shipped = false
+is the single switch (tile, search row, Toolbox pane and Integrations card show a
+Soon badge and are inert; HoverSlotRouter returns .comingSoon; CalendarConnections
+refuses connect/enable/refresh so macOS is never asked; saved shortcuts register no
+key; stored connections are kept). New surfaces, onboarding included, must check
+CalendarAvailability.isOpen / HoverTool.isComingSoon. WHY:
+.project-docs/decisions/2026-11-21-calendar-soon.md Everything below describes
+the feature as it works once opened.
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,

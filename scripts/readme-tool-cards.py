@@ -23,6 +23,13 @@ LUCIDE = pathlib.Path(sys.argv[1])
 OUT = REPO / "docs/assets/readme"
 A = "docs/assets/readme"
 
+# Calendar is closed as Soon in the app (CalendarAvailability.shipped = false,
+# AbsoluteMode/whytap#360), so its card is about To-do and marks Calendar "(soon)".
+# When Calendar ships: set this to False, add its demo to the card's media and rerun.
+# The slug changes with it, so GitHub's image cache cannot keep showing the old card.
+CALENDAR_SOON = True
+SOON = " (soon)" if CALENDAR_SOON else ""
+
 # slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card, one
 # line: keep it under ~105 characters), media (a <name>-still.webp beside a file is its
 # reduced-motion frame)
@@ -51,9 +58,10 @@ DEMOS = [
     ("notify-monitor", "bell-ring", "Notify & Monitor", "Keep an eye on your tools",
      ["Cards from agents, CI", "Live dashboards"],
      'Cards from Claude Code, Codex, CI or any script. Dashboards for your servers and your own data.', ["demo-notify.webp"]),
-    ("calendar-todo", "calendar-check", "Calendar & To-do", "Check your agenda and manage tasks",
-     ["Today's agenda", "Tasks in the notch"],
-     'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar-todo.gif"]),
+    ("todo-calendar" + ("-soon" if CALENDAR_SOON else ""), "list-todo", f"To-do & Calendar{SOON}", "Manage tasks in the notch",
+     ["Tasks in the notch", "Added by your agents"],
+     'Subtasks and statuses in the notch; agents add tasks through the whytap CLI.'
+     + (" Calendar is coming soon." if CALENDAR_SOON else ""), ["demo-todo.webp"]),
     ("display-extra", "sun-medium", "Display Extra", "Use the display’s available HDR headroom",
      ["Open Display", "Turn on Extra", "Slide"],
      "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level steady.", ["demo-brightness.webp"]),

@@ -2,8 +2,13 @@ import AppKit
 import SwiftUI
 
 enum IslandHoverGlass {
+    /// Offscreen review renders draw the macOS 14/15 path on a newer Mac.
+    /// The app never sets it.
+    nonisolated(unsafe) static var drawsLegacyPathForReview = false
+
     /// Whether the current runtime supports native macOS 26 Liquid Glass.
     static var usesNativeLiquidGlass: Bool {
+        if drawsLegacyPathForReview { return false }
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             return true

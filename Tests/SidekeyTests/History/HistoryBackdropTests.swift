@@ -46,6 +46,16 @@ final class HistoryBackdropTests: XCTestCase {
         XCTAssertLessThan(color.redComponent + color.greenComponent + color.blueComponent, 0.5)
     }
 
+    func test_the_legacy_backdrop_hides_the_window_underneath_without_blur() {
+        // Over a bright window the dark layer plus the depth wash leave at
+        // at most ~20% of what is underneath, before any blur.
+        let layer = IslandDetachedHoverPanelGlassStyle.legacyDarkLayerOpacity
+        XCTAssertGreaterThanOrEqual(layer, 0.7)
+        XCTAssertLessThanOrEqual(layer, 0.85)
+        let throughTop = (1 - layer) * (1 - IslandDetachedHoverPanelGlassStyle.depthWashTopOpacity)
+        XCTAssertLessThanOrEqual(throughTop, 0.2)
+    }
+
     // MARK: - No panel opts out
 
     func test_no_hover_drawer_can_turn_its_backdrop_off() throws {
@@ -112,6 +122,10 @@ final class HistoryBackdropTests: XCTestCase {
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let size = CGSize(width: 312, height: HistoryHoverView.requiredContentHeight + 8)
+        // Rows as macOS 14/15 draws them (dark plates), whatever this Mac runs.
+        IslandHoverGlass.drawsLegacyPathForReview = true
+        defer { IslandHoverGlass.drawsLegacyPathForReview = false }
+        try await renderMaterialProbe(into: directory)
         let variants: [(String, IslandHoverBackdrop?)] = [
             ("before-no-backdrop", nil),
             ("after-legacy-material", .legacyMaterial),
@@ -151,6 +165,50 @@ final class HistoryBackdropTests: XCTestCase {
             window.contentView = nil
             window.close()
         }
+    }
+}
+
+extension HistoryBackdropTests {
+    /// Evidence for the review images: offscreen capture of SwiftUI's
+    /// material and of NSVisualEffectView (behind and within window) over the
+    /// same text. Crisp text inside all three means capture draws no blur.
+    fileprivate func renderMaterialProbe(into directory: URL) async throws {
+        struct Effect: NSViewRepresentable {
+            let mode: NSVisualEffectView.BlendingMode
+            func makeNSView(context: Context) -> NSVisualEffectView {
+                let view = NSVisualEffectView()
+                view.material = .hudWindow
+                view.blendingMode = mode
+                view.state = .active
+                return view
+            }
+            func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+        }
+        let probe = ZStack {
+            BusyWindow()
+            HStack(spacing: 12) {
+                Rectangle().fill(.ultraThinMaterial)
+                Effect(mode: .behindWindow)
+                Effect(mode: .withinWindow)
+            }
+            .padding(24)
+        }
+        .frame(width: 520, height: 260)
+        let host = NSHostingView(rootView: probe)
+        host.frame = NSRect(x: 0, y: 0, width: 520, height: 260)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 520, height: 260),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(500))
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: directory.appendingPathComponent("probe-material-offscreen.png"))
+        window.contentView = nil
+        window.close()
     }
 }
 

@@ -867,7 +867,8 @@ Hover tool search and pointer routing:
   preview use the drawer's legacy material like every other panel (History
   used to opt out and showed other windows between its rows); Reduce
   transparency gives every drawer card an opaque dark backdrop
-  (IslandHoverBackdropPolicy). WHY:
+  (IslandHoverBackdropPolicy); the macOS 14/15 backdrop has an 80% dark
+  layer over its material (legacyDarkLayerOpacity). WHY:
   .project-docs/decisions/2026-11-21-history-backdrop-always.md
   Case/Vocab/Filler retain their existing transparent panels.
   Internal endEditing does not resign the key window between button down/up;

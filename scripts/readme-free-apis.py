@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the README "Free API keys" section from the app's API hints.
+"""Write the README "Free to run" section from the app's API hints.
 
 The offers live in one place, `APIHintsView.hints` in
 Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift, which Settings ->
@@ -22,7 +22,8 @@ import datetime, html, pathlib, re, sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SWIFT = REPO / "Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift"
 README = REPO / "README.md"
-HEADING = "## Free API keys"
+HEADING = "## Free to run"
+OLD_HEADINGS = ["## Free API keys"]  # renamed 2026-11-21; replaced in place
 CATEGORY = {"speech": "Speech to text", "models": "Language models", "search": "Web search"}
 DEFAULT_CHECKED = "2026-10-19"  # Hint.checked default in the Swift struct
 
@@ -97,8 +98,16 @@ def card(o, theme):
 # README's earlier per-tool comparison), about $636 a year. An estimate, shown
 # as approximate; Maxim chose the figure on 2026-11-21.
 PAID_YEARLY = "$600"  # shown struck through; the caption and alt say it is approximate
-BANNER = {"wide": (640, 158), "phone": (300, 150)}
+BANNER = {"wide": (640, 232), "phone": (300, 222)}
 QUOTAS = "Everyday use fits in the free quotas."
+# Ways to run Whytap without paying for a subscription (CLAUDE.md: BYOK, the
+# On this Mac speech model on Apple Silicon, OpenAI-compatible self-hosted
+# servers for text and realtime speech). The phone banner uses shorter words.
+WAYS = [
+    dict(title="Your own keys", sub="BYOK, billed by the provider", phone_title="Own keys", phone_sub="BYOK"),
+    dict(title="Local speech-to-text", sub="on this Mac, Apple Silicon", phone_title="Local STT", phone_sub="on this Mac"),
+    dict(title="Self-hosted", sub="OpenAI-compatible servers", phone_title="Self-hosted", phone_sub="OpenAI-compatible"),
+]
 
 
 def facts(checked):
@@ -108,7 +117,8 @@ def facts(checked):
 
 def banner(theme, layout, checked):
     # WHY: .project-docs/decisions/2026-11-21-free-api-report.md (2026-11-21
-    # follow-up: the footer lines moved into the banner so it is not empty).
+    # follow-up: the banner also names the ways to run free and holds the
+    # quota lines, so it is not empty).
     c = THEMES[theme]
     w, h = BANNER[layout]
     wide = layout == "wide"
@@ -120,14 +130,26 @@ def banner(theme, layout, checked):
     strike = c["sub"]
     green = "#3fb950" if theme == "dark" else "#1a7f37"
     e = lambda t: html.escape(t, quote=False)
-    items = facts(checked)
+    text = lambda x, y, size, fill, body, weight="400": (
+        f'  <text x="{x}" y="{y}" text-anchor="middle" font-family="{FONT}" font-size="{size}" '
+        f'font-weight="{weight}" fill="{fill}">{e(body)}</text>')
+    # Three ways to run free, in columns.
+    col = (w - 48) / 3
+    y_way = y_rule + (28 if wide else 24)
+    ways = []
+    for i, way in enumerate(WAYS):
+        x = 24 + col * (i + 0.5)
+        ways.append(text(x, y_way, 13 if wide else 11, c["ink"], way["title"] if wide else way["phone_title"], "600"))
+        ways.append(text(x, y_way + (18 if wide else 15), 11.5 if wide else 9.5, c["sub"], way["sub"] if wide else way["phone_sub"]))
+    y_rule2 = y_way + (36 if wide else 31)
     # One footer line on the wide banner; the phone banner splits it in two.
+    items = facts(checked)
     lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
-    y_quota = y_rule + (24 if wide else 20)
-    footer = "\n".join(
-        f'  <text x="{mid}" y="{y_quota + (20 if wide else 16) * (i + 1)}" text-anchor="middle" font-family="{FONT}" '
-        f'font-size="{12 if wide else 10.5}" fill="{c["sub"]}">{e(line)}</text>'
-        for i, line in enumerate(lines))
+    y_quota = y_rule2 + (26 if wide else 22)
+    footer = [text(mid, y_quota, 14 if wide else 12, c["ink"], QUOTAS, "600")] + [
+        text(mid, y_quota + (20 if wide else 16) * (i + 1), 12 if wide else 10.5, c["sub"], line)
+        for i, line in enumerate(lines)]
+    body = "\n".join(ways + [f'  <line x1="24" y1="{y_rule2}" x2="{w - 24}" y2="{y_rule2}" stroke="{c["border"]}"/>'] + footer)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
   <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="16" fill="{c['bg']}" stroke="{c['border']}"/>
   <text x="{left}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{c['sub']}">{html.escape(PAID_YEARLY)}</text>
@@ -137,8 +159,7 @@ def banner(theme, layout, checked):
   <text x="{right}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{green}">$0</text>
   <text x="{right}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" font-weight="600" fill="{c['ink']}">Whytap</text>
   <line x1="24" y1="{y_rule}" x2="{w - 24}" y2="{y_rule}" stroke="{c['border']}"/>
-  <text x="{mid}" y="{y_quota}" text-anchor="middle" font-family="{FONT}" font-size="{14 if wide else 12}" font-weight="600" fill="{c['ink']}">{e(QUOTAS)}</text>
-{footer}
+{body}
 </svg>
 '''
 
@@ -167,7 +188,8 @@ def section():
         for t in THEMES:
             (OUT / f"free-api-banner-{lay}-{t}.svg").write_text(banner(t, lay, newest))
     b = lambda lay, t: f"docs/assets/readme/free-api-banner-{lay}-{t}.svg"
-    alt_text = (f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0. {QUOTAS} "
+    alt_text = (f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0. "
+                + "; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
                 + ", ".join(facts(newest)) + ".")
     banner_html = (
         "<picture>"
@@ -191,10 +213,11 @@ def section():
 
 def updated(readme):
     new = section()
-    if HEADING in readme:
-        start = readme.index(HEADING)
-        nxt = re.search(r"^## ", readme[start + len(HEADING):], re.M)
-        end = start + len(HEADING) + nxt.start() if nxt else len(readme)
+    found = next((h for h in [HEADING, *OLD_HEADINGS] if h in readme), None)
+    if found:
+        start = readme.index(found)
+        nxt = re.search(r"^## ", readme[start + len(found):], re.M)
+        end = start + len(found) + nxt.start() if nxt else len(readme)
         tail = "\n" + readme[end:] if nxt else ""
         return readme[:start] + new + tail
     return readme.rstrip("\n") + "\n\n" + new
@@ -205,8 +228,8 @@ if __name__ == "__main__":
     result = updated(current)
     if "--check" in sys.argv:
         if result != current:
-            sys.exit("README.md Free API keys section is out of date: run scripts/readme-free-apis.py")
-        print("README.md Free API keys section is current")
+            sys.exit("README.md Free to run section is out of date: run scripts/readme-free-apis.py")
+        print("README.md Free to run section is current")
     else:
         README.write_text(result)
         print("ok")

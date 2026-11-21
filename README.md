@@ -111,9 +111,9 @@
 
 </details>
 
-## Free API keys
+## Free to run
 
-<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-banner-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-banner-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0. Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026." src="docs/assets/readme/free-api-banner-wide-dark.svg" width="640"></picture></p>
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-banner-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-banner-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0. Your own keys (BYOK, billed by the provider); Local speech-to-text (on this Mac, Apple Silicon); Self-hosted (OpenAI-compatible servers). Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026." src="docs/assets/readme/free-api-banner-wide-dark.svg" width="640"></picture></p>
 
 <p align="center">
 <a href="https://deepgram.com/pricing"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-deepgram-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-deepgram-light.svg"><img alt="Deepgram: $200 one-time starter credit (Speech to text)" src="docs/assets/readme/free-api-deepgram-dark.svg" width="196"></picture></a>

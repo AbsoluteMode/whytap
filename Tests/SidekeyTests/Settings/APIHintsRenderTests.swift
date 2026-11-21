@@ -79,7 +79,7 @@ final class APIHintsRenderTests: XCTestCase {
         XCTAssertEqual(Set(APIHintsView.hints.map(\.provider)).count, APIHintsView.hints.count)
     }
 
-    /// README's "Free API keys" cards are generated from these offers; stale cards
+    /// README's "Free to run" cards are generated from these offers; stale cards
     /// would advertise terms the app no longer shows.
     func testReadmeFreeAPICardsMatchNoCardOffers() throws {
         var root = URL(fileURLWithPath: #filePath)
@@ -87,7 +87,7 @@ final class APIHintsRenderTests: XCTestCase {
             root.deleteLastPathComponent()
         }
         let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
-        let section = try XCTUnwrap(readme.range(of: "## Free API keys").map { String(readme[$0.lowerBound...]) })
+        let section = try XCTUnwrap(readme.range(of: "## Free to run").map { String(readme[$0.lowerBound...]) })
         let free = APIHintsView.hints.filter { $0.access == .noCard }
         XCTAssertEqual(section.components(separatedBy: "<a href=").count - 1, free.count)
         let newest = try XCTUnwrap(free.map(\.checked).max())

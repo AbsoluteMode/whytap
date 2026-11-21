@@ -329,10 +329,11 @@ final class LiveTextTickerTests: XCTestCase {
         XCTAssertLessThan(previous, before, "the longer word moved the line left")
     }
 
-    /// A word taken back in the middle of the visible line: the text on both
-    /// sides stays where it was and the gap closes smoothly.
+    /// A word taken back in the middle of a full line: the text before it
+    /// stays where it is, the words after it close the gap, and the line
+    /// never travels back to press its end against the edge.
     @MainActor
-    func testAWordRemovedMidLineLeavesBothSidesInPlace() {
+    func testAWordRemovedMidLineNeverMovesTheStartBack() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
         let start = String(repeating: "привет ", count: 8)
@@ -346,12 +347,146 @@ final class LiveTextTickerTests: XCTestCase {
         let moved = right - "лишнее ".count
         XCTAssertEqual(model.glyphX(at: left), leftBefore, accuracy: 0.01)
         XCTAssertEqual(model.glyphX(at: moved), rightBefore, accuracy: 0.01)
-        _ = render(model, now: 1 + 1.0 / 60, name: "mid-moving")
-        XCTAssertLessThan(abs(model.glyphX(at: left) - leftBefore), 8)
-        XCTAssertEqual(model.glyphX(at: moved), rightBefore, accuracy: 0.01)
-        _ = render(model, now: 3, name: "mid-settled")
-        XCTAssertEqual(model.glyphX(at: moved) - model.glyphX(at: left),
-                       rightBefore - leftBefore - 46, accuracy: 12, "the gap is closed")
+        var previous = rightBefore
+        for frame in 1...60 {
+            _ = render(model, now: 1 + Double(frame) / 60, name: "mid-moving-\(frame)")
+            XCTAssertEqual(model.glyphX(at: left), leftBefore, accuracy: 0.01, "frame \(frame)")
+            let x = model.glyphX(at: moved)
+            XCTAssertLessThanOrEqual(x, previous + 0.01, "the words after it only move forward")
+            XCTAssertLessThan(previous - x, 8, "and glide, frame \(frame)")
+            previous = x
+        }
+        XCTAssertEqual(rightBefore - previous, 46, accuracy: 12, "the gap is closed")
+    }
+
+    /// A provider that cuts the end of the phrase (ElevenLabs does, for a
+    /// moment) must not pull the rest of the line back to the right edge.
+    @MainActor
+    func testAShorterPartialLeavesTheLineWhereItIs() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0
+        let start = String(repeating: "привет ", count: 8)
+        model.prime(start + "подготовить короткий отчёт", now: 0)
+        _ = render(model, now: 1, name: "short-before")
+        let index = start.count + 4
+        let before = model.glyphX(at: index)
+        XCTAssertGreaterThan(before, 0)
+        model.textArrived(start + "подготовить", now: 1)
+        for frame in 0...30 {
+            _ = render(model, now: 1 + Double(frame) / 60, name: "short-\(frame)")
+            XCTAssertEqual(model.glyphX(at: index), before, accuracy: 0.01, "frame \(frame)")
+        }
+        // The words come back: they fill the free space, nothing else moves.
+        model.textArrived(start + "подготовить короткий", now: 1.6)
+        for frame in 0...30 {
+            _ = render(model, now: 1.6 + Double(frame) / 60, name: "short-back-\(frame)")
+            XCTAssertEqual(model.glyphX(at: index), before, accuracy: 0.01, "frame \(frame)")
+        }
+    }
+
+    /// New words right after a shorter rewrite: the words that were closing
+    /// the gap keep gliding (they used to snap), and the new words appear in
+    /// their own place, not displaced.
+    @MainActor
+    func testNewWordsAfterAShorterRewriteDoNotSnapTheLine() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0
+        let start = String(repeating: "привет ", count: 8)
+        model.prime(start + "лишнее длинное слово в конце", now: 0)
+        _ = render(model, now: 1, name: "snap-before")
+        let short = start + "слово в конце"
+        model.textArrived(short, now: 1)
+        _ = render(model, now: 1, name: "snap-corrected")
+        let tail = short.count - 3
+        var previous = model.glyphX(at: tail)
+        model.textArrived(short + " и ещё немного слов", now: 1.05)
+        for frame in 1...90 {
+            _ = render(model, now: 1.05 + Double(frame) / 60, name: "snap-\(frame)")
+            let x = model.glyphX(at: tail)
+            XCTAssertLessThanOrEqual(x, previous + 0.01, "frame \(frame)")
+            XCTAssertLessThan(previous - x, 16, "no snap, frame \(frame)")
+            previous = x
+        }
+        XCTAssertGreaterThan(model.revealedGlyphCount, short.count + 3, "the new words were revealed")
+    }
+
+    /// The end of the phrase is cut and new words follow at once: they are
+    /// drawn where they belong, right after the surviving text.
+    @MainActor
+    func testWordsAfterACutEndAreNotDisplaced() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0
+        let start = String(repeating: "привет ", count: 8)
+        model.prime(start + "подготовить короткий отчёт", now: 0)
+        _ = render(model, now: 1, name: "cut-before")
+        let kept = start + "подготовить"
+        model.textArrived(kept, now: 1)
+        model.textArrived(kept + " другой", now: 1.02)
+        var checked = 0
+        for frame in 1...60 {
+            _ = render(model, now: 1.02 + Double(frame) / 60, name: "cut-\(frame)")
+            guard model.revealedGlyphCount > kept.count + 1 else { continue }
+            let step = model.glyphX(at: kept.count + 1) - model.glyphX(at: kept.count - 1)
+            XCTAssertEqual(step, 10, accuracy: 9, "the new word starts right after the old one")
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 10)
+    }
+
+    /// The committed text of a segment may differ from the last partial
+    /// (a finished word, other punctuation); the next partial starts a new
+    /// segment after it.
+    @MainActor
+    func testCommittedTextAfterAPartialOnlyMovesTheLineForward() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0
+        let start = String(repeating: "привет ", count: 8)
+        model.prime(start + "не забыть написать реб-", now: 0)
+        _ = render(model, now: 1, name: "commit-before")
+        let index = start.count + 3
+        var previous = model.glyphX(at: index)
+        model.textArrived(start + "не забыть написать ребятам.", now: 1)
+        for frame in 0...90 {
+            if frame == 24 {
+                model.textArrived(start + "не забыть написать ребятам. Что встр", now: 1.4)
+            }
+            _ = render(model, now: 1 + Double(frame) / 60, name: "commit-\(frame)")
+            let x = model.glyphX(at: index)
+            XCTAssertLessThanOrEqual(x, previous + 0.01, "frame \(frame)")
+            previous = x
+        }
+    }
+
+    /// Scribe adds and removes a comma far behind the live word on every
+    /// other partial. The words on screen must not answer by moving back.
+    @MainActor
+    func testPunctuationToggledBehindTheLiveWordNeverMovesTheLineBack() {
+        let model = IslandLiveTextTickerModel()
+        model.rewriteHoldSeconds = 0  // every toggle reaches the screen
+        var commas = 0
+        let start = String(repeating: "привет ", count: 8)
+        let plain = start + "на три часа дня и попросить их подготовить"
+        let comma = start + "на три часа дня, и попросить их подготовить"
+        model.prime(plain, now: 0)
+        _ = render(model, now: 1, name: "comma-before")
+        let index = plain.count - 6
+        var previous = model.glyphX(at: index)
+        var now = 1.0
+        for step in 0..<8 {
+            let text = step.isMultiple(of: 2) ? comma : plain
+            model.textArrived(text + String(repeating: " ещё", count: step), now: now)
+            for _ in 0..<18 {
+                now += 1.0 / 60
+                _ = render(model, now: now, name: "skip")
+                let shown = model.shownText
+                let position = shown.hasPrefix(comma) ? index + 1 : index
+                if shown.hasPrefix(comma) { commas += 1 }
+                let x = model.glyphX(at: position)
+                XCTAssertLessThanOrEqual(x, previous + 0.01, "step \(step)")
+                previous = x
+            }
+        }
+        XCTAssertGreaterThan(commas, 30, "the comma was really shown")
     }
 
     /// The recorded case (2026-11-19): the provider dropped "Как ты думаешь, "
@@ -473,12 +608,37 @@ final class LiveTextTickerTests: XCTestCase {
         let model = IslandLiveTextTickerModel()
         model.prime("я пишу письмо", now: 0)
         _ = render(model, now: 1, name: "stay-before")
-        model.textArrived("я пишу письма", now: 1)
-        model.textArrived("я пишу письма маме", now: 1.2)
-        _ = render(model, now: 1.49, name: "stay-waiting")
+        model.textArrived("я пишу записку", now: 1)
+        model.textArrived("я пишу записку маме", now: 1.2)
+        _ = render(model, now: 1.34, name: "stay-waiting")
         XCTAssertEqual(model.shownText, "я пишу письмо")
-        _ = render(model, now: 1.5, name: "stay-shown")
-        XCTAssertEqual(model.shownText, "я пишу письма маме")
+        _ = render(model, now: 1.36, name: "stay-shown")
+        XCTAssertEqual(model.shownText, "я пишу записку маме")
+    }
+
+    /// A provisional mark at the end of a partial ("сто-", "дня.") is replaced
+    /// by the next partial. That is not a rewrite worth waiting for.
+    @MainActor
+    func testAProvisionalMarkAtTheLiveEdgeIsReplacedAtOnce() {
+        for (first, second) in [
+            ("чем сто-", "чем стоит?"), ("на три часа дня.", "на три часа дня и"),
+            ("диктовку.", "диктовку"), ("на анимацию текста и .", "на анимацию текста и только-"),
+            ("как мы будем, ну...", "как мы будем, ну, как-"),
+        ] {
+            let model = IslandLiveTextTickerModel()
+            model.prime(first, now: 0)
+            model.textArrived(second, now: 1)
+            XCTAssertEqual(model.shownText, second, first)
+        }
+    }
+
+    /// A change three or more characters behind the live edge still waits.
+    @MainActor
+    func testARewriteDeeperThanTheLastTwoCharactersIsStillHeld() {
+        let model = IslandLiveTextTickerModel()
+        model.prime("я пишу письмо", now: 0)
+        model.textArrived("я пишу записку", now: 1)
+        XCTAssertEqual(model.shownText, "я пишу письмо")
     }
 
     /// Text that is not on screen yet is never held.

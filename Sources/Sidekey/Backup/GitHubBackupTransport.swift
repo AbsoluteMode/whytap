@@ -4,9 +4,14 @@ import Foundation
 /// GitHub receives only an already encrypted archive. Authentication and the
 /// recovery credential are separate; no secret enters a URL or process argv.
 actor GitHubBackupTransport {
-    // Existing encrypted destinations and archive markers survive the product rename.
-    // WHY: .project-docs/decisions/2026-10-19-whytap-name.md
-    static let repository = "Exodia-Backup"
+    // New connections create Whytap-Backup; an existing Exodia-Backup keeps
+    // being used, and archive markers survive the product rename.
+    // WHY: .project-docs/decisions/2026-11-21-whytap-backup-repository.md
+    static let repository = "Whytap-Backup"
+    static let legacyRepository = "Exodia-Backup"
+    /// The defaults key that remembers which of the two this Mac uses. A
+    /// connection saved before it existed is an Exodia-Backup connection.
+    static let repositoryDefaultsKey = "backup.github-repository.v1"
     static let partBytes = 16 * 1024 * 1024
     // GitHub permits 1,000 assets per release. Reserve one for the index;
     // grow individual parts for large archives while bounding memory.
@@ -16,6 +21,7 @@ actor GitHubBackupTransport {
     private let session: URLSession
     private let token: String
     private let owner: String
+    let repositoryName: String
 
     enum Failure: Error, LocalizedError, Equatable {
         case authentication, permission, publicRepository, unavailable, invalidResponse, incomplete, noCLI, noLogin
@@ -24,8 +30,8 @@ actor GitHubBackupTransport {
         var errorDescription: String? {
             switch self {
             case .authentication: return "GitHub could not sign you in. Reconnect with a valid token or GitHub CLI login."
-            case .permission: return "GitHub needs access to Exodia-Backup. Give the token Contents read and write access; creating the private repository also requires repository creation permission."
-            case .publicRepository: return "Exodia-Backup is public. Your backups are encrypted, but automatic uploads are paused. Make the repository private, then reconnect."
+            case .permission: return "GitHub needs access to your backup repository (Whytap-Backup, or Exodia-Backup if you already have one). Give the token Contents read and write access; creating the private repository also requires repository creation permission."
+            case .publicRepository: return "Your backup repository is public. Your backups are encrypted, but automatic uploads are paused. Make the repository private, then reconnect."
             case .unavailable, .rateLimited: return "GitHub is unavailable or its request limit was reached. Your local copy is safe; Whytap will retry."
             case .invalidResponse: return "GitHub returned an unexpected response. Reconnect and try again."
             case .incomplete: return "This GitHub backup is incomplete or damaged. Choose another version."
@@ -78,13 +84,29 @@ actor GitHubBackupTransport {
         }
     }
 
-    init(token: String, owner: String, session: URLSession = GitHubBackupNetwork.session) throws {
-        guard Self.validOwner(owner), Self.validToken(token) else { throw Failure.authentication }
-        self.token = token; self.owner = owner; self.session = session
+    init(token: String, owner: String, repository: String = GitHubBackupTransport.legacyRepository,
+         session: URLSession = GitHubBackupNetwork.session) throws {
+        guard Self.validOwner(owner), Self.validToken(token), Self.isBackupRepository(repository) else { throw Failure.authentication }
+        self.token = token; self.owner = owner; self.repositoryName = repository; self.session = session
+    }
+
+    nonisolated static func isBackupRepository(_ name: String) -> Bool {
+        [repository, legacyRepository].contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    /// The repository saved with this Mac's connection.
+    nonisolated static func savedRepository(_ defaults: UserDefaults) -> String {
+        defaults.string(forKey: repositoryDefaultsKey).flatMap { isBackupRepository($0) ? $0 : nil } ?? legacyRepository
     }
 
     /// Creating a destination is invoked only by an explicit Connect action.
-    static func connect(token: String, session: URLSession = GitHubBackupNetwork.session) async throws -> GitHubBackupTransport {
+    /// `saved` is this Mac's existing connection: reconnecting the same account
+    /// keeps its repository even when the other backup name also exists. A
+    /// saved repository the token cannot see (GitHub answers 404 for a private
+    /// repository outside a fine-grained token) is an access failure, never a
+    /// reason to move to the other name; a rename GitHub reports is followed.
+    static func connect(token: String, saved: (owner: String, repository: String)? = nil,
+                        session: URLSession = GitHubBackupNetwork.session) async throws -> GitHubBackupTransport {
         guard validToken(token) else { throw Failure.authentication }
         var request = URLRequest(url: URL(string: "https://api.github.com/user")!)
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -94,23 +116,47 @@ actor GitHubBackupTransport {
         let (data, response) = try await session.data(for: request)
         try check(response)
         guard let user = try? JSONDecoder().decode(User.self, from: data) else { throw Failure.invalidResponse }
-        let transport = try GitHubBackupTransport(token: token, owner: user.login, session: session)
+        // An existing Exodia-Backup (or the repository it was renamed to) keeps
+        // every earlier backup reachable; only a new user gets Whytap-Backup.
+        var found: String?
+        if let saved, saved.owner.caseInsensitiveCompare(user.login) == .orderedSame, isBackupRepository(saved.repository) {
+            let previous = try GitHubBackupTransport(token: token, owner: user.login, repository: saved.repository, session: session)
+            guard let kept = try await previous.existingRepositoryName() else { throw Failure.permission }
+            found = kept
+        }
+        if found == nil {
+            let legacy = try GitHubBackupTransport(token: token, owner: user.login, repository: legacyRepository, session: session)
+            found = try await legacy.existingRepositoryName()
+        }
+        let name = found ?? repository
+        let transport = try GitHubBackupTransport(token: token, owner: user.login, repository: name, session: session)
         try await transport.ensureRepository()
         return transport
     }
 
-    var destinationName: String { owner + "/" + Self.repository }
+    var destinationName: String { owner + "/" + repositoryName }
 
-    nonisolated static func backupURL(owner: String) -> URL? {
-        guard validOwner(owner) else { return nil }
+    nonisolated static func backupURL(owner: String, repository: String) -> URL? {
+        guard validOwner(owner), isBackupRepository(repository) else { return nil }
         return URL(string: "https://github.com/" + owner + "/" + repository + "/releases")
+    }
+
+    /// The name GitHub reports for this repository (it follows renames), or
+    /// nil when there is none.
+    func existingRepositoryName() async throws -> String? {
+        let (data, response) = try await session.data(for: request(path: repoPath))
+        if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
+        try Self.check(response)
+        guard let found = try? JSONDecoder().decode(Repository.self, from: data),
+              Self.isBackupRepository(found.name) else { throw Failure.invalidResponse }
+        return found.name
     }
 
     func ensureRepository() async throws {
         let (data, response) = try await session.data(for: request(path: repoPath))
         if (response as? HTTPURLResponse)?.statusCode == 404 {
             _ = try await json(path: "/user/repos", method: "POST", body: [
-                "name": Self.repository, "private": true, "auto_init": true,
+                "name": repositoryName, "private": true, "auto_init": true,
                 "description": "Encrypted Whytap backups. Keep your recovery code in a separate password manager."
             ])
             try await requirePrivateRepository()
@@ -127,7 +173,7 @@ actor GitHubBackupTransport {
     }
     private func validateRepository(_ data: Data) throws {
         guard let repository = try? JSONDecoder().decode(Repository.self, from: data),
-              repository.name.lowercased() == Self.repository.lowercased() else { throw Failure.invalidResponse }
+              repository.name.lowercased() == repositoryName.lowercased() else { throw Failure.invalidResponse }
         guard repository.isPrivate else { throw Failure.publicRepository }
         if repository.permissions?.push == false { throw Failure.permission }
     }
@@ -236,7 +282,7 @@ actor GitHubBackupTransport {
     func deleteBackups(except keptID: UUID? = nil) async throws {
         let data = try await json(path: repoPath)
         guard let repository = try? JSONDecoder().decode(Repository.self, from: data),
-              repository.name.lowercased() == Self.repository.lowercased() else { throw Failure.invalidResponse }
+              repository.name.lowercased() == repositoryName.lowercased() else { throw Failure.invalidResponse }
         if repository.permissions?.push == false { throw Failure.permission }
         let releases = try await managedReleases()
         for release in releases where Self.snapshotID(release.tag_name) != keptID {
@@ -360,7 +406,7 @@ actor GitHubBackupTransport {
     }
 
     // MARK: HTTP. Only GitHub-owned fixed API origins receive the token.
-    private var repoPath: String { "/repos/" + owner + "/" + Self.repository }
+    private var repoPath: String { "/repos/" + owner + "/" + repositoryName }
     private func request(path: String, method: String = "GET", upload: Bool = false) -> URLRequest {
         var request = URLRequest(url: URL(string: (upload ? "https://uploads.github.com" : "https://api.github.com") + path)!)
         request.httpMethod = method; request.timeoutInterval = 120

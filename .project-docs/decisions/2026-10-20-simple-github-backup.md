@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Backup/ArtifactBackupStaging.swift
     confirmed_at: 2026-10-20
-related: [2026-10-20-backup-auto-sync.md, ../project.md, 2026-10-19-config-backup.md, 2026-10-19-backup-management.md, 2026-10-21-backup-resume-digest.md, 2026-10-21-backup-essentials-only.md]
+related: [2026-10-20-backup-auto-sync.md, ../project.md, 2026-10-19-config-backup.md, 2026-10-19-backup-management.md, 2026-10-21-backup-resume-digest.md, 2026-10-21-backup-essentials-only.md, 2026-11-21-whytap-backup-repository.md]
 ---
 
 # GitHub integration and simple complete backup
@@ -25,7 +25,8 @@ related: [2026-10-20-backup-auto-sync.md, ../project.md, 2026-10-19-config-backu
 ## Decision
 
 Settings has an Integrations tab with GitHub. Connect reuses a GitHub CLI login
-or accepts an access token and checks the private Exodia-Backup repository.
+or accepts an access token and checks the private Exodia-Backup repository
+(new connections: Whytap-Backup, see 2026-11-21-whytap-backup-repository.md).
 It does not create a user-data backup or require an encryption code.
 The existing token account, destination defaults and repository name remain
 compatible; existing connected users do not have to migrate their backups.

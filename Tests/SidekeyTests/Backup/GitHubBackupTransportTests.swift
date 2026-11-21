@@ -14,8 +14,8 @@ final class GitHubBackupTransportTests: XCTestCase {
         session.invalidateAndCancel(); session = nil; StubURLProtocol.reset(); super.tearDown()
     }
     private func json(_ object: Any) -> Data { try! JSONSerialization.data(withJSONObject: object) }
-    private func repository(private isPrivate: Bool = true) -> Data {
-        json(["name": "Exodia-Backup", "private": isPrivate, "permissions": ["push": true]])
+    private func repository(private isPrivate: Bool = true, name: String = "Exodia-Backup") -> Data {
+        json(["name": name, "private": isPrivate, "permissions": ["push": true]])
     }
 
     func testRateLimitedForbiddenResponsesCarryTheirRetryDeadline() async throws {
@@ -90,7 +90,7 @@ final class GitHubBackupTransportTests: XCTestCase {
         catch { XCTAssertEqual(error as? GitHubBackupTransport.Failure, .incomplete) }
     }
 
-    func testConnectCreatesOnlyAPrivateRepositoryAndChecksTheResult() async throws {
+    func testConnectCreatesOnlyAPrivateWhytapBackupRepositoryAndChecksTheResult() async throws {
         var seenRepository = false
         StubURLProtocol.handler = { request in
             if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
@@ -98,17 +98,103 @@ final class GitHubBackupTransportTests: XCTestCase {
                 let body = try JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies.last!) as! [String: Any]
                 XCTAssertEqual(body["private"] as? Bool, true)
                 XCTAssertEqual(body["auto_init"] as? Bool, true)
-                XCTAssertEqual(body["name"] as? String, "Exodia-Backup")
+                XCTAssertEqual(body["name"] as? String, "Whytap-Backup")
                 seenRepository = true
-                return (201, [:], self.repository())
+                return (201, [:], self.repository(name: "Whytap-Backup"))
             }
-            return (seenRepository ? 200 : 404, [:], self.repository())
+            if request.url!.path == "/repos/developer/Whytap-Backup", seenRepository {
+                return (200, [:], self.repository(name: "Whytap-Backup"))
+            }
+            return (404, [:], Data())
         }
         let connection = try await GitHubBackupTransport.connect(token: "synthetic-token", session: session)
         let name = await connection.destinationName
-        XCTAssertEqual(name, "developer/Exodia-Backup")
-        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url!.host! }, Array(repeating: "api.github.com", count: 4))
+        XCTAssertEqual(name, "developer/Whytap-Backup")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url!.path },
+                       ["/user", "/repos/developer/Exodia-Backup", "/repos/developer/Whytap-Backup", "/user/repos", "/repos/developer/Whytap-Backup"])
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url!.host! }, Array(repeating: "api.github.com", count: 5))
         XCTAssertFalse(StubURLProtocol.capturedRequests.contains { $0.url!.absoluteString.contains("synthetic-token") })
+    }
+
+    func testConnectKeepsAnExistingExodiaBackupWithoutCreatingAnother() async throws {
+        StubURLProtocol.handler = { request in
+            switch request.url!.path {
+            case "/user": return (200, [:], self.json(["login": "developer"]))
+            case "/repos/developer/Exodia-Backup": return (200, [:], self.repository())
+            default: XCTFail("unexpected request \(request.url!.path)"); return (404, [:], Data())
+            }
+        }
+        let connection = try await GitHubBackupTransport.connect(token: "synthetic-token", session: session)
+        let name = await connection.destinationName
+        XCTAssertEqual(name, "developer/Exodia-Backup", "earlier backups stay reachable")
+        XCTAssertTrue(StubURLProtocol.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testReconnectKeepsTheSavedRepositoryOnlyForTheSameAccount() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
+            return (200, [:], self.repository(name: request.url!.lastPathComponent))   // both names exist
+        }
+        let same = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                           saved: (owner: "Developer", repository: "Whytap-Backup"), session: session)
+        let kept = await same.destinationName
+        XCTAssertEqual(kept, "developer/Whytap-Backup")
+        let other = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                            saved: (owner: "someone-else", repository: "Whytap-Backup"), session: session)
+        let found = await other.destinationName
+        XCTAssertEqual(found, "developer/Exodia-Backup", "another account's choice does not carry over")
+    }
+
+    func testReconnectRefusesASavedRepositoryTheTokenCannotSee() async throws {
+        StubURLProtocol.handler = { request in
+            switch request.url!.path {
+            case "/user": return (200, [:], self.json(["login": "developer"]))
+            case "/repos/developer/Exodia-Backup": return (200, [:], self.repository())
+            default: return (404, [:], Data())                     // the saved Whytap-Backup is hidden
+            }
+        }
+        do {
+            _ = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                        saved: (owner: "developer", repository: "Whytap-Backup"), session: session)
+            XCTFail("a hidden saved repository must not switch the destination")
+        } catch { XCTAssertEqual(error as? GitHubBackupTransport.Failure, .permission) }
+        XCTAssertFalse(StubURLProtocol.capturedRequests.contains { $0.url!.path == "/repos/developer/Exodia-Backup" })
+    }
+
+    func testReconnectFollowsARenameOfTheSavedRepository() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
+            return (200, [:], self.repository(name: "Whytap-Backup"))  // GitHub answers the old name with the new one
+        }
+        let connection = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                                 saved: (owner: "developer", repository: "Exodia-Backup"), session: session)
+        let name = await connection.destinationName
+        XCTAssertEqual(name, "developer/Whytap-Backup")
+    }
+
+    func testConnectFollowsAnExodiaBackupRenamedOnGitHub() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
+            // GitHub answers the old name with the renamed repository.
+            return (200, [:], self.repository(name: "Whytap-Backup"))
+        }
+        let connection = try await GitHubBackupTransport.connect(token: "synthetic-token", session: session)
+        let name = await connection.destinationName
+        XCTAssertEqual(name, "developer/Whytap-Backup")
+        XCTAssertTrue(StubURLProtocol.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testOnlyTheTwoBackupRepositoryNamesAreAccepted() throws {
+        let defaults = UserDefaults(suiteName: "repo-" + UUID().uuidString)!
+        XCTAssertEqual(GitHubBackupTransport.savedRepository(defaults), "Exodia-Backup")
+        defaults.set("Whytap-Backup", forKey: GitHubBackupTransport.repositoryDefaultsKey)
+        XCTAssertEqual(GitHubBackupTransport.savedRepository(defaults), "Whytap-Backup")
+        defaults.set("../other", forKey: GitHubBackupTransport.repositoryDefaultsKey)
+        XCTAssertEqual(GitHubBackupTransport.savedRepository(defaults), "Exodia-Backup")
+        XCTAssertThrowsError(try GitHubBackupTransport(token: "synthetic-token", owner: "developer", repository: "Other"))
+        XCTAssertEqual(GitHubBackupTransport.backupURL(owner: "developer", repository: "Whytap-Backup")?.absoluteString,
+                       "https://github.com/developer/Whytap-Backup/releases")
+        XCTAssertNil(GitHubBackupTransport.backupURL(owner: "developer", repository: "Other"))
     }
 
     func testPublicDestinationIsRefusedWithoutChangingItsVisibility() async throws {

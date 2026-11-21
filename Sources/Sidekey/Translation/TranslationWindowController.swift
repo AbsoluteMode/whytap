@@ -39,9 +39,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     private var globalMouseMonitor: Any?
     private var menuObservers: [NSObjectProtocol] = []
     private var trackingMenus = 0
-    /// The text palette keeps its own width; the subtitle overlay is wider.
-    private var textWidth: CGFloat = 560
-    private var laidOutMode: Mode = .text
+    /// The text palette keeps its own width, stored apart from the shared
+    /// autosaved frame, so the wider subtitle overlay never changes it.
+    // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
+    static let textWidthKey = "sidekey.translation.textPaletteWidth"
+    static let defaultTextWidth: CGFloat = 560
+    private let defaults: UserDefaults
+    private var textWidth: CGFloat
+    /// nil until the first layout: a restored frame says nothing about its mode.
+    private var laidOutMode: Mode?
+    private var applyingLayout = false
 
     var window: NSWindow { panel }
 
@@ -51,6 +58,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
          activityChanged: @escaping (Bool) -> Void) {
         text = textModel ?? TextTranslationModel()
         subtitles = subtitleModel ?? LiveSubtitleModel()
+        self.defaults = defaults
+        let storedWidth = defaults.double(forKey: Self.textWidthKey)
+        textWidth = storedWidth >= 360 ? CGFloat(storedWidth) : Self.defaultTextWidth
         panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 140),
                                  styleMask: [.borderless, .resizable, .nonactivatingPanel],
                                  backing: .buffered, defer: false)
@@ -84,14 +94,6 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             },
             close: { [weak self] in self?.dismiss() }
         ))
-        // Both modes share one autosaved frame. A frame saved by the subtitle
-        // overlay is laid out as subtitles, so the next text layout uses the
-        // palette width instead of adopting the wide overlay.
-        if panel.frame.width < Self.subtitleSize.width {
-            textWidth = panel.frame.width
-        } else {
-            laidOutMode = .subtitles
-        }
         configureChrome(for: .text)
         let publish = { [weak self] in
             guard let self else { return }
@@ -152,16 +154,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         panel.minSize = NSSize(width: 360, height: isText ? 120 : 140)
         let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
-        if laidOutMode == .text { textWidth = frame.width }
+        if laidOutMode == .text { rememberTextWidth(frame.width) }
         if isText {
             let top = frame.maxY
             frame.size = NSSize(width: max(textWidth, panel.minSize.width), height: 140)
-            if laidOutMode == .subtitles {
-                frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.midY - frame.height / 2)
-            } else {
+            if laidOutMode == .text {
                 frame.origin.y = top - frame.height
+            } else {
+                frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.midY - frame.height / 2)
             }
-        } else if laidOutMode == .text || !panel.isVisible {
+        } else if laidOutMode != .subtitles || !panel.isVisible {
             // Entering subtitles places the overlay at the bottom of the screen;
             // a repeated show of the visible overlay keeps where it was dragged.
             frame.size = NSSize(width: min(Self.subtitleSize.width, screen.width - 32),
@@ -169,7 +171,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.minY + 72)
         }
         laidOutMode = mode
+        applyingLayout = true
         panel.setFrame(frame, display: panel.isVisible)
+        applyingLayout = false
         presentation.isTextPresented = isText && panel.isVisible
         if presentation.isTextPresented { presentation.requestInputFocus() }
         updateOutsideClickMonitors(for: mode)
@@ -258,6 +262,18 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     @discardableResult
     func cancel() -> Task<Void, Never> { text.cancel(); return subtitles.cancel() }
     func windowWillClose(_ notification: Notification) { dismiss() }
+
+    /// A user's resize of the text palette is its new width.
+    func windowDidResize(_ notification: Notification) {
+        guard !applyingLayout, laidOutMode == .text else { return }
+        rememberTextWidth(panel.frame.width)
+    }
+
+    private func rememberTextWidth(_ width: CGFloat) {
+        guard width >= 360, abs(width - textWidth) >= 0.5 else { return }
+        textWidth = width
+        defaults.set(Double(width), forKey: Self.textWidthKey)
+    }
 
     deinit {
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }

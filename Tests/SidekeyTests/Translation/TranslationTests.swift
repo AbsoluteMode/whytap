@@ -513,8 +513,7 @@ final class TranslationTests: XCTestCase {
                                              makeService: { FixtureTranslator() }),
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         let panel = try XCTUnwrap(controller.window as? NSPanel)
-        let textWidth = panel.frame.width
-        XCTAssertEqual(textWidth, 560, accuracy: 0.5)
+        let textWidth: CGFloat = 560
         controller.resize(for: .subtitles)
         let screen = IslandScreenResolver.currentVisibleFrame()
         XCTAssertFalse(panel.isVisible)
@@ -533,7 +532,8 @@ final class TranslationTests: XCTestCase {
 
     func testTextPaletteKeepsItsWidthAfterRelaunchFromSavedSubtitleFrame() throws {
         // Both modes share this autosave name; a quit while subtitles were
-        // shown leaves the wide overlay frame for the next launch.
+        // shown leaves the overlay frame (any width: resized or clamped by a
+        // small screen) for the next launch.
         let autosaveName = "WhytapTranslationCompact"
         let savedKey = "NSWindow Frame " + autosaveName
         let previous = UserDefaults.standard.object(forKey: savedKey)
@@ -542,25 +542,53 @@ final class TranslationTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: savedKey) }
         }
         let screen = IslandScreenResolver.currentVisibleFrame()
-        let saved = NSWindow(contentRect: NSRect(x: screen.midX - 380, y: screen.minY + 72, width: 760, height: 190),
-                             styleMask: [.borderless], backing: .buffered, defer: true)
-        saved.saveFrame(usingName: autosaveName)
-        let suite = "translation-relaunch-" + UUID().uuidString
+        for savedWidth: CGFloat in [680, 760, 420] {
+            let saved = NSWindow(contentRect: NSRect(x: screen.midX - savedWidth / 2, y: screen.minY + 72,
+                                                     width: savedWidth, height: 190),
+                                 styleMask: [.borderless], backing: .buffered, defer: true)
+            saved.saveFrame(usingName: autosaveName)
+            let (controller, defaults) = try makeLayoutController()
+            let panel = try XCTUnwrap(controller.window as? NSPanel)
+            XCTAssertEqual(panel.frame.width, savedWidth, accuracy: 0.5, "Fixture must restore the saved subtitle frame")
+            controller.resize(for: .text)
+            XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5, "saved \(savedWidth) pt subtitle frame")
+            XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
+            XCTAssertNil(defaults.object(forKey: TranslationWindowController.textWidthKey))
+            panel.setFrameAutosaveName("") // free the name for the next simulated launch
+        }
+    }
+
+    func testTextPaletteWidthChosenByTheUserSurvivesSubtitlesAndRelaunch() throws {
+        let (controller, defaults) = try makeLayoutController()
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+        controller.resize(for: .text)
+        var frame = panel.frame
+        frame.size.width = 620
+        panel.setFrame(frame, display: false) // a user's drag of the palette edge
+        controller.resize(for: .subtitles)
+        XCTAssertEqual(panel.frame.height, 190, accuracy: 0.5)
+        controller.resize(for: .text)
+        XCTAssertEqual(panel.frame.width, 620, accuracy: 0.5)
+        let relaunched = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                             makeService: { FixtureTranslator() }),
+            defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
+        relaunched.resize(for: .subtitles)
+        relaunched.resize(for: .text)
+        XCTAssertEqual(relaunched.window.frame.width, 620, accuracy: 0.5)
+    }
+
+    private func makeLayoutController() throws -> (TranslationWindowController, UserDefaults) {
+        let suite = "translation-layout-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let controller = TranslationWindowController(
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
             subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
                                              makeService: { FixtureTranslator() }),
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
-        let panel = try XCTUnwrap(controller.window as? NSPanel)
-        XCTAssertGreaterThanOrEqual(panel.frame.width, 759, "Fixture must restore the wide subtitle frame")
-        controller.resize(for: .text)
-        XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5)
-        XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
-        controller.resize(for: .subtitles)
-        controller.resize(for: .text)
-        XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5)
+        return (controller, defaults)
     }
 
     func testOutsideClickDismissesOnlyTheVisibleTextPalette() {

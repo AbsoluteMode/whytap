@@ -1590,7 +1590,9 @@ caption is the whole surface: a transparent borderless panel (760×190 pt,
 clamped, 72 pt above the bottom of the island's display) holds one bottom-anchored
 box, black at 60 % with 14 pt corners and a soft shadow. The caption is 20 pt
 rounded medium white, the newest translated phrases as one paragraph, at most
-five lines with older words leaving at the top; the box hugs shorter text.
+five lines with older words leaving at the top. The box height hugs shorter
+text; its width spans the panel like the original, so it does not jump with
+each phrase.
 Status (Connecting…, Waiting for speech…, Translating…, an error with Open API &
 Models) replaces the caption. One row inside the box holds source → target,
 Start/Stop (Cancel while connecting/finishing) and ×; it shows while idle and on

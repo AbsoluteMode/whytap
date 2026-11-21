@@ -204,7 +204,8 @@ struct TranslationView: View {
     }
 
     private func captionText(_ value: String) -> some View {
-        // At most five lines; the box hugs shorter text and older words leave
+        // At most five lines; the box height hugs shorter text (its width spans
+        // the panel, as in the original) and older words leave
         // at the top, so the newest line never moves.
         Text(value)
             .font(.system(size: embedded ? 15 : 20, weight: .medium, design: .rounded))

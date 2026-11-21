@@ -47,7 +47,9 @@ that back. Languages may be added to it; nothing else.
 - The caption is the newest translated phrases as one paragraph in 20 pt
   rounded medium white, at most five lines; older words leave at the top
   (`SubtitleCaption`, head truncation), so the newest line never moves and the
-  box hugs shorter text. Status text replaces it: Connecting…, Waiting for
+  box height hugs shorter text while its width spans the panel, exactly as
+  the original box did (its text frame takes the full width); a box whose width
+  followed each phrase would jump left and right while reading. Status text replaces it: Connecting…, Waiting for
   speech…, Translating…, or the error with an Open API & Models button.
 - The only additions to the original are one row inside the box: source →
   target language and Start/Stop (Cancel while connecting or finishing), plus
@@ -61,7 +63,10 @@ that back. Languages may be added to it; nothing else.
 - The Toolbox pane uses the same pieces: language row with Start/Stop and the
   same dark caption box, shown only when there is something to say.
 - The text palette keeps its own width when the panel switches back from the
-  wider overlay.
+  wider overlay. Both modes share one autosaved frame, so that frame says
+  nothing about the palette: its width is stored separately
+  (`sidekey.translation.textPaletteWidth`, written when the user resizes the
+  palette) and every text layout uses it (560 pt by default).
 
 ## Why
 
@@ -78,9 +83,11 @@ the reading position stable, which is why it was kept exactly.
 - Window layout test: subtitles are borderless, without window shadow, sized
   and placed at the bottom centre; switching back restores the text palette's
   width, height and shadow. The panel is never put on screen.
-- Relaunch test: both modes share one autosaved frame, so a quit during
-  subtitles restores the 760 pt overlay frame; the first text layout still
-  uses the 560 pt palette. The builder found this case on ticket #320.
+- Relaunch tests: a quit during subtitles restores the overlay frame (420,
+  680 and 760 pt: resized or clamped by the screen); the first text layout
+  still uses the palette width. A palette width the user chose survives
+  subtitles and relaunch. The builder found the 760 pt case on ticket #320 and
+  the 680 pt case on ticket #322, which rejected a width-based guess.
 - Offscreen renders (`WHYTAP_TRANSLATION_RENDER_DIR`) of the idle overlay, a
   result and the Toolbox pane while listening. They do not prove hover,
   physical focus or live provider behavior.

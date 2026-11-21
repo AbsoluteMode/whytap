@@ -41,7 +41,9 @@ final class NativeAgentAnswerArtifactsTests: XCTestCase {
         ```
         mailto:user@example.com javascript:alert(1) https://user:password@example.com
         """
-        XCTAssertNil(NativeAgentAnswerArtifacts.collect(from: answer))
+        // The one-line shell command is an Insert card; its URL and path stay code.
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: answer)?.items,
+                       [.copy(text: "curl https://example.com/api -o /tmp/output", description: nil)])
         XCTAssertNil(NativeAgentAnswerArtifacts.collect(from: "Обычный ответ без ссылок."))
     }
 
@@ -70,9 +72,11 @@ final class NativeAgentAnswerArtifactsTests: XCTestCase {
 
     func testInlineCommandArgumentsAndUnclosedOrTildeCodeStayCode() {
         for text in ["`/usr/bin/python3 -m venv`", "`/Applications/Xcode.app --args -X`",
-                     "```bash\nrm -rf /Users/test/tmp/build", "~~~sh\ncat ~/.ssh/config\n~~~"] {
+                     "```bash\nrm -rf /Users/test/tmp/build"] {
             XCTAssertNil(NativeAgentAnswerArtifacts.collect(from: text, homeDirectory: "/Users/test"), text)
         }
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: "~~~sh\ncat ~/.ssh/config\n~~~", homeDirectory: "/Users/test")?.items,
+                       [.copy(text: "cat ~/.ssh/config", description: nil)], "A closed shell fence is a command, not a path")
     }
 
     func testRootURLSlashAndHostCaseDeduplicateWithoutMergingDifferentResourcePaths() throws {

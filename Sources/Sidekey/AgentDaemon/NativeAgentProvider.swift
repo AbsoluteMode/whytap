@@ -133,7 +133,8 @@ final class NativeAgentProvider: CLIProvider {
                 do { final = try NativeAgentFinalAnswer(arguments: calls[0].arguments) }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 let text = final.visibleText
-                let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions) ?? final.actions
+                let actions = NativeAgentAnswerArtifacts.collect(from: text, existing: final.actions,
+                                                                 insert: final.insert) ?? final.actions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
                 // Returned card destinations are part of the answer too: the
@@ -213,6 +214,15 @@ final class NativeAgentProvider: CLIProvider {
     link into finish_answer.sources and every returned file/folder into its actions, so the user
     gets the existing keyboard-selectable cards with insert/open actions. Use copy items for snippets.
     Actions are UI metadata: never print useful.actions JSON in the answer.
+    finish_answer.insert_text is the first card, Insert: it pastes into the field the user came
+    from, replacing their selection. Text the user selected or pasted into the request is usually
+    meant for use there. When they ask to rewrite, shorten, translate, fix or reformat it, or ask for
+    a message or reply, show the complete result as the answer and put the same text, without
+    commentary, in insert_text. When they ask how to install, update, run or configure a tool,
+    lead with the exact command in a ```bash fence and put it in insert_text; links only support it.
+    Check the command against evidence (web_search, or the installed tool when commands are
+    enabled) instead of guessing; with several install methods, put the likely one first and
+    others in copy actions. Leave insert_text empty when the user only asks about something.
     Use Case key names via case_list_keys. If actions are enabled, `whytap case run -p PROJECT
     --only KEY 'command'` executes with scoped secrets under existing Case approvals. Never
     read vault files, reveal key values, or bypass access denials. Stop when tools deny access.

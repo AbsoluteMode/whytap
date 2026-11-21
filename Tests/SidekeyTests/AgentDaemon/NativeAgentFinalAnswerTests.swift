@@ -73,9 +73,10 @@ final class NativeAgentFinalAnswerTests: XCTestCase {
         value["actions"] = [["type": "path", "path": "/tmp/My Project", "description": "Folder"],
                             ["type": "copy", "text": "let x = 42", "description": "Code"]]
         let final = try NativeAgentFinalAnswer(arguments: value)
-        XCTAssertEqual(final.actions.items.map(\.insertText), ["https://example.com", "/tmp/My Project", "let x = 42"])
-        XCTAssertEqual(final.actions.items.first?.description, "Source")
-        XCTAssertNil(final.actions.items.last?.openTarget)
+        // Insert-ready text first, then actions, then supporting sources.
+        XCTAssertEqual(final.actions.items.map(\.insertText), ["let x = 42", "/tmp/My Project", "https://example.com"])
+        XCTAssertEqual(final.actions.items.last?.description, "Source")
+        XCTAssertNil(final.actions.items.first?.openTarget)
     }
 
     func testInvalidCardsRejectTheWholeAnswerRatherThanSilentlyDroppingItems() {

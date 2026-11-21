@@ -345,6 +345,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
        -> validated finish_answer object -> text and typed cards in the island
   Native and CLI final text use compact Markdown. Comparisons adapt to the
   available width, and completed answers open with the conclusion at the top.
+  An ordered list keeps its first marker's number (CommonMark start), so a list
+  resumed after a non-marker line such as "3–4." continues at 5, not 1.
   WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
@@ -1447,7 +1449,8 @@ meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
-only with a sole finish_answer call containing status, answer, sources and actions.
+only with a sole finish_answer call containing status, answer, insert_text, sources
+and actions.
 Strict tool schemas and application-required completion preserve the selected route.
 Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
 forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
@@ -1461,12 +1464,26 @@ Legacy CLI compatibility extractors remain separate from native completion.
 NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
 absolute/tilde paths into the same keyboard-action cards if the model omits
 card metadata in a valid final. Explicit metadata wins; destinations deduplicate and cap at 20.
-The fallback scans at most 32,000 characters, skips ordinary code/config fences,
+The fallback scans at most 32,000 characters, skips ordinary code/config fences
+(a closed shell fence's single command line becomes an Insert card),
 and does no network/file I/O or extra model call. It formats returned paths,
 not verifies their existence; nothing opens or inserts before user interaction. A
 folder answer provides the verified absolute path in a copyable code fence
 and a path action for open/insert. Simple answers use 1–2 short sentences;
 longer answers remain available when requested.
+Insert card: finish_answer.insert_text (required in the strict schema; absent or
+null from a lax endpoint means none) becomes the first, preselected copy card,
+whose Insert pastes into the field the user came from and replaces their
+selection. The prompt fills it with the complete result when the user gives
+text (selected or pasted) and asks to rewrite, shorten, translate, fix or
+reformat it or asks for a message, and with the one exact command for how to
+install/update/run questions, whose answer leads with that command; links
+only support it. Empty for plain questions. One enclosing fence is unwrapped.
+Cards are ordered insert text, the answer's own commands, other copy actions,
+paths, then sources.
+Without the field, a closed bash/sh/zsh/shell/fish/console/terminal fence with
+one command line (no script, continuation or heredoc; at most three) is the
+card. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
 The native capture_screen tool calls AgentScreenCapture directly, independent
 of Case and the edit/command switch. It uses the app's Screen Recording grant,
 selects the island display, and returns JPEG (long edge <=1920, <=2 MB) within

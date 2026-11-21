@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarDayViewTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-21-calendar-logos.md, 2026-11-21-calendar-soon.md]
+related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-21-calendar-logos.md, 2026-11-21-calendar-soon.md, 2026-11-21-calendar-event-details.md]
 ---
 
 # Calendar day view in Hover

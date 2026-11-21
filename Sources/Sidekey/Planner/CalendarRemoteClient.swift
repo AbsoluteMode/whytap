@@ -116,7 +116,10 @@ struct CalendarRemoteClient {
             CalendarDateCodec.meetingURL(in: notes + " " + location)
         let event = PlannerEvent(title: (row["summary"] as? String) ?? (row["subject"] as? String) ?? "Untitled event",
             start: start, end: end == start ? start.addingTimeInterval(1) : end, allDay: allDay,
-            location: location, notes: notes, meetingURL: meetingURL)
+            location: location, notes: notes, meetingURL: meetingURL,
+            // WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md
+            // Google direct access keeps exactly the data declared for its verification.
+            attendees: feed.provider == .microsoft ? PlannerEventAttendee.graph(row) : [])
         return CalendarFeedEvent(id: feed.id + ":" + id, feedID: feed.id, event: event,
             sourceURL: CalendarDateCodec.safeURL((row["htmlLink"] as? String) ?? (row["webLink"] as? String)),
             externalUID: (row["iCalUID"] as? String) ?? (row["iCalUId"] as? String))

@@ -67,6 +67,9 @@ struct CalendarFeed: Identifiable, Equatable {
     var remoteID: String
     var title: String
     var provider: CalendarProvider?
+    /// The service whose logo the calendar shows when it differs from the
+    /// connection: a Google or Exchange account synced by Calendar on this Mac.
+    var displayService: CalendarProvider?
 }
 
 struct CalendarFeedEvent: Identifiable, Equatable {
@@ -85,6 +88,11 @@ struct CalendarFeedEvent: Identifiable, Equatable {
 enum CalendarEventSource: Equatable, Hashable {
     case whytap
     case provider(CalendarProvider)
+
+    /// A calendar's logo: its display service, else its connection's provider.
+    static func of(_ feed: CalendarFeed) -> CalendarEventSource? {
+        (feed.displayService ?? feed.provider).map(CalendarEventSource.provider)
+    }
 }
 
 /// What a click on an event does: join its meeting, else open it in its own calendar.
@@ -123,6 +131,7 @@ enum CalendarEventMerger {
                 if !feeds.contains(event.feedID) { result[index].additionalFeedIDs.append(event.feedID) }
                 if result[index].event.meetingURL == nil { result[index].event.meetingURL = event.event.meetingURL }
                 if result[index].sourceURL == nil { result[index].sourceURL = event.sourceURL }
+                if result[index].event.attendees.isEmpty { result[index].event.attendees = event.event.attendees }
             } else { indices[key] = result.count; result.append(event) }
         }
         return result

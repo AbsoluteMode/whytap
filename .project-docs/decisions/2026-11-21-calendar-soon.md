@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarSoonTests.swift
     confirmed_at: 2026-11-21
-related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-logos.md]
+related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-logos.md, 2026-11-21-calendar-event-details.md]
 ---
 
 # Calendar is Soon

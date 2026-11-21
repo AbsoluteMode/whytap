@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="196" height="182" viewBox="0 0 196 182">
+  <rect x="0.5" y="0.5" width="195" height="181" rx="14" fill="#151b23" stroke="#2d333b"/>
+  <circle cx="28" cy="28" r="14" fill="#2a2350"/>
+  <g transform="translate(20.5 20.5) scale(0.6250)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
+  <path d="m3 7 2 2 4-4" />
+  <path d="M13 6h8" />
+  <path d="M13 12h8" />
+  <path d="M13 18h8" /></g>
+  <text x="50" y="33" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#f0f6fc">flora</text>
+  <g transform="translate(166 21.0) scale(0.5833)" fill="none" stroke="#9198a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10" />
+  <path d="M7 17 17 7" /></g>
+  <text x="16" y="66" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#b8adff">Workflow contracts for</text>
+  <text x="16" y="81" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#b8adff">coding harnesses</text>
+  <text x="16" y="106" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">Every step says what</text>
+  <text x="16" y="122" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">proves it is done; a</text>
+  <text x="16" y="138" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">verifier checks it before</text>
+  <text x="16" y="154" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">the next step starts.</text>
+</svg>

@@ -58,7 +58,7 @@ DEMOS = [
     ("notify-monitor", "bell-ring", "Notify & Monitor", "Keep an eye on your tools",
      ["Cards from agents, CI", "Live dashboards"],
      'Cards from Claude Code, Codex, CI or any script. Dashboards for your servers and your own data.', ["demo-notify.webp"]),
-    ("todo-calendar" + ("-soon" if CALENDAR_SOON else ""), "list-todo", f"To-do & Calendar{SOON}", "Manage tasks and see your day",
+    ("todo-agenda" + ("-soon" if CALENDAR_SOON else ""), "list-todo", f"To-do & Calendar{SOON}", "Manage tasks and see your day",
      ["Tasks in the notch", "Today's agenda"],
      'Subtasks and statuses; agents add tasks via the whytap CLI.'
      + (" Your day in Calendar is coming soon." if CALENDAR_SOON else " Your day in Calendar under the island."), ["demo-todo.webp", "demo-calendar.webp"]),

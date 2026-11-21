@@ -71,6 +71,10 @@ struct IslandScreenDescriptor: Equatable {
     /// by `IslandSystemIslandPolicy`.
     var isBuiltInTouchDisplay: Bool { isBuiltIn && isTouchCapable }
 
+    /// The narrowest middle gap the capsule wraps: on a touch display a
+    /// narrow reported cutout would shrink the drawer's tiles below 90 pt.
+    var minimumCapsuleGap: CGFloat { isTouchCapable ? IslandFrameLayout.syntheticNotchWidth : 0 }
+
     func placing(besideSystemIsland: Bool, reservedWidth: CGFloat) -> IslandScreenDescriptor {
         IslandScreenDescriptor(
             uuid: uuid,

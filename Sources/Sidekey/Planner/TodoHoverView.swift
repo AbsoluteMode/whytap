@@ -285,11 +285,18 @@ private struct TodoHoverRow: View {
     @State private var hovering = false
     @State private var rowFrame: CGRect = .zero
     @State private var textWidth: CGFloat = 0
+    @ObservedObject private var touchReveal = IslandTouchReveal.shared
 
     private var task: PlannerTask { row.task }
+    private var touchID: String { "todo:\(task.id)" }
+    /// Hovered, or revealed by a first tap on a touch display. WHY:
+    /// .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+    private var revealed: Bool {
+        hovering || touchReveal.isRevealed(touchID, touchSessionActive: AppState.shared.islandTouchSessionActive)
+    }
 
     private func reportPreview() {
-        let show = hovering && model.editor == nil
+        let show = revealed && model.editor == nil
             && TodoHoverPreviewPolicy.needsPreview(title: task.title, status: task.status, textWidth: textWidth)
         TodoHoverPreviewState.shared.set(task.id, show ? rowFrame : nil)
     }
@@ -343,7 +350,13 @@ private struct TodoHoverRow: View {
                     }
                     .frame(minHeight: 18)
                     .contentShape(Rectangle())
-                    .onTapGesture { model.toggle(task.id) }
+                    .onTapGesture {
+                        // A first tap by touch reveals the row instead of
+                        // completing the task by accident.
+                        if !touchReveal.revealsOnTap(touchID, touchSessionActive: AppState.shared.islandTouchSessionActive) {
+                            model.toggle(task.id)
+                        }
+                    }
                 }
                 if editingStatus {
                     TodoInlineField(placeholder: "Status, press Enter (empty clears)", depth: 0, model: model, focused: editorFocused)
@@ -377,8 +390,8 @@ private struct TodoHoverRow: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(eligibility != .allowed)
-                .opacity(hovering && model.editor == nil && eligibility != .completed ? (eligibility == .allowed ? 1 : 0.35) : 0)
-                .allowsHitTesting(hovering && eligibility == .allowed)
+                .opacity(revealed && model.editor == nil && eligibility != .completed ? (eligibility == .allowed ? 1 : 0.35) : 0)
+                .allowsHitTesting(revealed && eligibility == .allowed)
                 .help(eligibility == .tooDeep ? "To-do allows \(TodoTree.maxDepth) levels" : "Add subtask")
                 .accessibilityHidden(eligibility == .completed)
                 .accessibilityLabel("Add subtask to \(task.title)")
@@ -387,11 +400,12 @@ private struct TodoHoverRow: View {
         .padding(.leading, CGFloat(row.depth) * todoIndent + (showingHistory ? 8 : 4))
         .padding(.trailing, 8).padding(.vertical, 7)
         .frame(minHeight: showingHistory ? 46 : 32)
-        .background(.white.opacity(hovering ? 0.14 : 0.035), in: RoundedRectangle(cornerRadius: 8))
+        .background(.white.opacity(revealed ? 0.14 : 0.035), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(HistoryHoverView.hoverZoneSpaceName)) } action: { rowFrame = $0 }
         .onHover { hovering = $0; reportPreview() }
         .onChange(of: model.editor) { reportPreview() }
+        .onChange(of: touchReveal.revealedID) { reportPreview() }
         .onDisappear { TodoHoverPreviewState.shared.set(task.id, nil) }
         .contextMenu {
             if !showingHistory {

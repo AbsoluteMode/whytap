@@ -32,6 +32,9 @@ struct IslandHoverHitSnapshot: Equatable {
     let id: IslandHoverHitTargetID
     let context: String
     let frame: CGRect
+    /// The control as drawn; differs from `frame` only while a touch session
+    /// grows small hit areas (`IslandTouchHitGeometry`).
+    var drawnFrame: CGRect? = nil
 }
 
 enum IslandHoverHitGeometry {
@@ -50,7 +53,18 @@ struct IslandHoverPointerTracking {
     mutating func begin(at point: CGPoint, targets: [IslandHoverHitSnapshot], enabled: Bool) -> Bool {
         captured = nil
         consumesSequence = false
-        guard enabled, let target = targets.first(where: { $0.frame.contains(point) }) else { return false }
+        let picked: IslandHoverHitSnapshot?
+        if targets.contains(where: { $0.drawnFrame != nil }) {
+            // Touch: the drawn control wins, else the nearest grown area.
+            picked = IslandTouchHitGeometry.target(
+                at: point,
+                exact: targets.map { $0.drawnFrame ?? $0.frame },
+                grown: targets.map(\.frame)
+            ).map { targets[$0] }
+        } else {
+            picked = targets.first(where: { $0.frame.contains(point) })
+        }
+        guard enabled, let target = picked else { return false }
         captured = target
         consumesSequence = true
         return true
@@ -80,6 +94,10 @@ struct IslandHoverPointerTracking {
 @MainActor
 final class IslandHoverHitBridge: ObservableObject {
     @Published private(set) var pressedID: IslandHoverHitTargetID?
+    /// Set by the island while a touch session runs (36 pt); 0 keeps every
+    /// pointer hit area exactly as drawn. WHY:
+    /// .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+    var minimumTouchTargetSide: CGFloat = 0
     private var tracking = IslandHoverPointerTracking()
     private var targets: [UUID: WeakTarget] = [:]
     private var regions: [IslandHoverHitTargetID.Surface: WeakRegion] = [:]
@@ -180,8 +198,14 @@ final class IslandHoverHitBridge: ObservableObject {
             guard let clipped = IslandHoverHitGeometry.visibleFrame(
                 target: targetFrame, visible: visibleFrame, region: regionFrame
             ) else { return nil }
-            return IslandHoverHitSnapshot(owner: view.owner, id: view.targetID,
-                                          context: view.targetContext, frame: clipped)
+            guard minimumTouchTargetSide > 0 else {
+                return IslandHoverHitSnapshot(owner: view.owner, id: view.targetID,
+                                              context: view.targetContext, frame: clipped)
+            }
+            return IslandHoverHitSnapshot(
+                owner: view.owner, id: view.targetID, context: view.targetContext,
+                frame: IslandTouchHitGeometry.grown(clipped, minimumSide: minimumTouchTargetSide, within: regionFrame),
+                drawnFrame: clipped)
         }
         .sorted { $0.owner.uuidString < $1.owner.uuidString }
     }

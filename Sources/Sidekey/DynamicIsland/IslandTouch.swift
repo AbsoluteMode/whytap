@@ -45,6 +45,11 @@ struct IslandTouchSession: Equatable {
 }
 
 enum IslandTouchRouting {
+    /// Apple's touch target on macOS: 36 pt (the physical size of 44 pt on
+    /// iOS). Island controls keep their drawing; only their hit area grows,
+    /// and only while a touch session runs.
+    static let minimumTargetSide: CGFloat = 36
+
     enum TapAction: Equatable {
         /// The compact capsule hides its tools and Update buttons until
         /// hovered; a tap reveals them the way hovering does.
@@ -212,4 +217,58 @@ final class IslandTouchTargetView: NSView {
     override func mouseUp(with event: NSEvent) {}
     /// A long press arrives as a right click; the island has no context menu.
     override func rightMouseDown(with event: NSEvent) {}
+}
+
+/// Hover-only details on a touch display: during a touch session the first
+/// tap on a History or To-do row shows what hovering shows (the full-text
+/// preview, the hidden "+"); the next tap on the same row does what a click
+/// does. Without a session every tap acts at once, exactly as before.
+/// WHY: .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+@MainActor
+final class IslandTouchReveal: ObservableObject {
+    static let shared = IslandTouchReveal()
+
+    @Published private(set) var revealedID: String?
+
+    /// `true` when this tap only reveals the item; `false` when it should act.
+    func revealsOnTap(_ id: String, touchSessionActive: Bool) -> Bool {
+        guard touchSessionActive, revealedID != id else { return false }
+        revealedID = id
+        return true
+    }
+
+    func isRevealed(_ id: String, touchSessionActive: Bool) -> Bool {
+        touchSessionActive && revealedID == id
+    }
+
+    func clear() {
+        if revealedID != nil { revealedID = nil }
+    }
+}
+
+/// Touch hit areas for the island's measured controls: each target grows to
+/// at least `minimumSide` around its center (never beyond the visible region
+/// it lives in); a point inside a control's own frame always picks that
+/// control, otherwise the nearest grown target wins.
+enum IslandTouchHitGeometry {
+    static func grown(_ frame: CGRect, minimumSide: CGFloat, within region: CGRect) -> CGRect {
+        guard minimumSide > 0 else { return frame }
+        let dx = max(0, (minimumSide - frame.width) / 2)
+        let dy = max(0, (minimumSide - frame.height) / 2)
+        let grown = frame.insetBy(dx: -dx, dy: -dy).intersection(region)
+        return grown.isNull || grown.isEmpty ? frame : grown.union(frame)
+    }
+
+    /// Index of the target a touch at `point` belongs to: `exact` frames are
+    /// the controls as drawn, `grown` the same targets after `grown(_:)`.
+    static func target(at point: CGPoint, exact: [CGRect], grown: [CGRect]) -> Int? {
+        if let hit = exact.firstIndex(where: { $0.contains(point) }) { return hit }
+        return grown.indices
+            .filter { grown[$0].contains(point) }
+            .min { distance(point, exact[$0]) < distance(point, exact[$1]) }
+    }
+
+    private static func distance(_ point: CGPoint, _ rect: CGRect) -> CGFloat {
+        hypot(point.x - rect.midX, point.y - rect.midY)
+    }
 }

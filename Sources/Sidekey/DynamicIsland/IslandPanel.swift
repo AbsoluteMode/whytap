@@ -1826,6 +1826,7 @@ final class IslandPanel: NSPanel {
         )
         touchSession.begin(at: ProcessInfo.processInfo.systemUptime, openedDrawer: action == .openDrawer)
         AppState.shared.islandTouchSessionActive = true
+        hoverHitBridge.minimumTouchTargetSide = IslandTouchRouting.minimumTargetSide
         onIslandMouseActivity()
         scheduleTouchSessionCheck()
         refreshMouseEventRouting(layout: layout)
@@ -1870,6 +1871,8 @@ final class IslandPanel: NSPanel {
         touchSessionCheck = nil
         let closeDrawer = touchSession.end()
         AppState.shared.islandTouchSessionActive = false
+        IslandTouchReveal.shared.clear()
+        hoverHitBridge.minimumTouchTargetSide = 0
         if closeDrawer {
             AppState.shared.programmaticHoverExpansion = false
         }

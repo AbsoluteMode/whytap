@@ -366,7 +366,9 @@ enum IslandFrameLayout {
     /// the right band: the camera cutout when the capsule wraps it, the
     /// synthetic gap when it sits beside the system island.
     static func capsuleGapWidth(on screen: IslandScreenDescriptor) -> CGFloat {
-        screen.besideSystemIsland ? syntheticNotchWidth : notchMetrics(on: screen).width
+        screen.besideSystemIsland
+            ? syntheticNotchWidth
+            : max(notchMetrics(on: screen).width, screen.minimumCapsuleGap)
     }
 
     // MARK: - Frame computation
@@ -391,7 +393,8 @@ enum IslandFrameLayout {
         auxiliaryTopLeftArea: NSRect?,
         auxiliaryTopRightArea: NSRect?,
         besideSystemIsland: Bool = false,
-        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        minimumCapsuleGap: CGFloat = 0
     ) -> NSRect {
         let metrics = notchMetrics(
             safeAreaTopInset: safeAreaTopInset,
@@ -433,13 +436,18 @@ enum IslandFrameLayout {
             )
         }
 
-        let width = leftSideWidth + metrics.width + rightSideWidth
+        // A touch display may report a narrower cutout than today's notch;
+        // the capsule (and its drawer) keeps at least the external-monitor
+        // width, centered on the cutout. Zero elsewhere: unchanged. WHY:
+        // .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+        let gap = max(metrics.width, minimumCapsuleGap)
+        let width = leftSideWidth + gap + rightSideWidth
 
         let originX: CGFloat
         if metrics.isRealNotch, let notchLeft = metrics.leftEdgeX {
             // Pill straddles the notch: left side panel sits to the
             // left of the notch, right side panel sits to the right.
-            originX = notchLeft - leftSideWidth
+            originX = notchLeft - leftSideWidth - (gap - metrics.width) / 2
         } else {
             // Non-notched: top-centered with the synthetic notch
             // placeholder in the middle.
@@ -462,7 +470,8 @@ enum IslandFrameLayout {
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
             besideSystemIsland: screen.besideSystemIsland,
-            systemIslandReservedWidth: screen.systemIslandReservedWidth
+            systemIslandReservedWidth: screen.systemIslandReservedWidth,
+            minimumCapsuleGap: screen.minimumCapsuleGap
         )
     }
 
@@ -486,6 +495,7 @@ enum IslandFrameLayout {
         auxiliaryTopRightArea: NSRect?,
         besideSystemIsland: Bool = false,
         systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        minimumCapsuleGap: CGFloat = 0,
         expanded: Bool = true,
         agentActive: Bool = false
     ) -> NSRect {
@@ -496,7 +506,8 @@ enum IslandFrameLayout {
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
             auxiliaryTopRightArea: auxiliaryTopRightArea,
             besideSystemIsland: besideSystemIsland,
-            systemIslandReservedWidth: systemIslandReservedWidth
+            systemIslandReservedWidth: systemIslandReservedWidth,
+            minimumCapsuleGap: minimumCapsuleGap
         )
         var result = compactFrame
         if expanded {
@@ -530,6 +541,7 @@ enum IslandFrameLayout {
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
             besideSystemIsland: screen.besideSystemIsland,
             systemIslandReservedWidth: screen.systemIslandReservedWidth,
+            minimumCapsuleGap: screen.minimumCapsuleGap,
             expanded: expanded,
             agentActive: agentActive
         )
@@ -551,6 +563,7 @@ enum IslandFrameLayout {
         auxiliaryTopRightArea: NSRect?,
         besideSystemIsland: Bool = false,
         systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        minimumCapsuleGap: CGFloat = 0,
         expanded: Bool = true
     ) -> NSRect {
         let compactFrame = islandFrame(
@@ -560,7 +573,8 @@ enum IslandFrameLayout {
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
             auxiliaryTopRightArea: auxiliaryTopRightArea,
             besideSystemIsland: besideSystemIsland,
-            systemIslandReservedWidth: systemIslandReservedWidth
+            systemIslandReservedWidth: systemIslandReservedWidth,
+            minimumCapsuleGap: minimumCapsuleGap
         )
         guard expanded else {
             return compactFrame
@@ -590,6 +604,7 @@ enum IslandFrameLayout {
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
             besideSystemIsland: screen.besideSystemIsland,
             systemIslandReservedWidth: screen.systemIslandReservedWidth,
+            minimumCapsuleGap: screen.minimumCapsuleGap,
             expanded: expanded
         )
     }
@@ -607,7 +622,8 @@ enum IslandFrameLayout {
         auxiliaryTopLeftArea: NSRect?,
         auxiliaryTopRightArea: NSRect?,
         besideSystemIsland: Bool = false,
-        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        minimumCapsuleGap: CGFloat = 0
     ) -> NSRect {
         let island = islandFrame(
             frame: frame,
@@ -616,7 +632,8 @@ enum IslandFrameLayout {
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
             auxiliaryTopRightArea: auxiliaryTopRightArea,
             besideSystemIsland: besideSystemIsland,
-            systemIslandReservedWidth: systemIslandReservedWidth
+            systemIslandReservedWidth: systemIslandReservedWidth,
+            minimumCapsuleGap: minimumCapsuleGap
         )
         let height = max(island.height, IslandNotificationPill.pillHeight)
         let leading = IslandNotificationPill.panelLeadingOverflow
@@ -654,7 +671,8 @@ enum IslandFrameLayout {
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
             besideSystemIsland: screen.besideSystemIsland,
-            systemIslandReservedWidth: screen.systemIslandReservedWidth
+            systemIslandReservedWidth: screen.systemIslandReservedWidth,
+            minimumCapsuleGap: screen.minimumCapsuleGap
         )
     }
 }

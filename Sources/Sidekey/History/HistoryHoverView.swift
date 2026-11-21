@@ -381,7 +381,19 @@ private struct HistoryHoverRow: View {
         .frame(height: HistoryHoverView.rowHeight)
         .background(rowBackground(isHovered: isHovered, isSelected: selectionPosition != nil))
         .contentShape(Rectangle())
-        .onTapGesture(perform: onCopy)
+        .onTapGesture {
+            // Touch display: the first tap shows the preview hover would
+            // show; the next one copies. WHY:
+            // .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+            if IslandTouchReveal.shared.revealsOnTap(
+                "history:\(card.id)", touchSessionActive: AppState.shared.islandTouchSessionActive
+            ) {
+                onHover(true)
+                onAnchorChange(rowFrame)
+            } else {
+                onCopy()
+            }
+        }
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named(HistoryHoverView.hoverZoneSpaceName))
         } action: { rowFrame = $0 }

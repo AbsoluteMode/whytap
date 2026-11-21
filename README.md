@@ -111,6 +111,26 @@
 
 </details>
 
+## Plugins
+
+<p align="center">Ask Claude Code or Codex to work with Whytap for you.</p>
+
+<p align="center">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-meetings-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-meetings-light.svg"><img alt="Meetings: “Where did we discuss pricing?” (Asks you once)" src="docs/assets/readme/plugin-meetings-dark.svg" width="196"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-todo-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-todo-light.svg"><img alt="To-do: “Turn my last call into tasks” (Saved to To-do)" src="docs/assets/readme/plugin-todo-dark.svg" width="196"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-models-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-models-light.svg"><img alt="Models: “Switch Drop Smart to a faster model” (Checked like Settings)" src="docs/assets/readme/plugin-models-dark.svg" width="196"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-case-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-case-light.svg"><img alt="Case: “Deploy with my API key” (Key names, never values)" src="docs/assets/readme/plugin-case-dark.svg" width="196"></picture>
+</p>
+
+```bash
+# Claude Code
+claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+# Codex
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+```
+
+<p align="center"><sub>Case keys: Whytap → Case → Connect · <a href="docs/customization/app-control.md">What the plugin can do</a></sub></p>
+
 ## Free API keys
 
 <p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-banner-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-banner-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-banner-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0" src="docs/assets/readme/free-api-banner-wide-dark.svg" width="640"></picture></p>

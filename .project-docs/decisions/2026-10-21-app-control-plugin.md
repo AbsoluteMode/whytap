@@ -92,6 +92,13 @@ route without input automation. The installed helper and app must be from
 the same build. Provider validation can run a tiny paid synthetic probe,
 as it does in Settings. Public directory distribution is not part of this change.
 
+README's **Plugins** section (2026-11-21, `scripts/readme-plugin-cards.py`,
+asked by Maxim as "control Whytap with plugins") shows four requests the
+tools really serve (meetings, To-do, models, Case key names) and one block
+that adds the application-control server to Claude Code and Codex. It says
+"work with Whytap", not "fully control": recording, keys, permissions and
+quit stay outside the plugin. Case needs its own Connect.
+
 ## Supersedes / superseded by
 
 No prior decision is superseded. Show-only links and source customization

@@ -134,6 +134,9 @@ struct APIHintsView: View {
 
     // Keep amounts and the verification date together when refreshing offers.
     // The header promises a monthly review and shows the newest date below.
+    // README's "Free API keys" table is generated from the no-card offers here:
+    // run scripts/readme-free-apis.py after changing them.
+    // WHY: .project-docs/decisions/2026-11-21-free-api-report.md
     static let hints: [Hint] = [
         Hint(
             category: .speech,
@@ -142,8 +145,9 @@ struct APIHintsView: View {
             allowance: "$200",
             cadence: "one-time starter credit",
             access: .noCard,
-            detail: "Speech recognition credit for new accounts. No card needed to start.",
-            url: URL(string: "https://deepgram.com/pricing")!
+            detail: "Speech recognition credit for new accounts. It does not expire. No card needed to start.",
+            url: URL(string: "https://deepgram.com/pricing")!,
+            checked: "2026-11-21"
         ),
         Hint(
             category: .speech,
@@ -152,9 +156,9 @@ struct APIHintsView: View {
             allowance: "10,000",
             cadence: "free credits each month",
             access: .noCard,
-            detail: "The Free plan includes API access, for non-commercial use. Check Scribe's allowance: realtime and batch audio have different quotas.",
-            url: URL(string: "https://elevenlabs.io/pricing/api")!,
-            checked: "2026-11-19"
+            detail: "The Free plan includes Speech to Text, for non-commercial use with attribution. Speech to Text spends credits per minute of audio.",
+            url: URL(string: "https://elevenlabs.io/pricing")!,
+            checked: "2026-11-21"
         ),
         Hint(
             category: .models,
@@ -163,8 +167,9 @@ struct APIHintsView: View {
             allowance: "50 / day",
             cadence: "free model requests",
             access: .noCard,
-            detail: "Choose a :free model. Limit: 20 requests a minute. Tool support and availability vary; agent turns may use several requests.",
-            url: URL(string: "https://openrouter.ai/models?max_price=0")!
+            detail: "Choose a :free model. Limit: 20 requests a minute; buying $10 of credit once raises the daily limit to 1,000. Tool support and availability vary; agent turns may use several requests.",
+            url: URL(string: "https://openrouter.ai/models?max_price=0")!,
+            checked: "2026-11-21"
         ),
         // List only offers whose key works in Whytap as it is: Groq and Cloudflare
         // wait for their own provider support (user decision, 2026-11-19).
@@ -177,7 +182,7 @@ struct APIHintsView: View {
             access: .paidPlan,
             detail: "Max includes $100 and Ultra includes $200. After seven days, link a Console organization in Claude's billing settings. Use its Anthropic key for Agent. Credits expire each cycle.",
             url: URL(string: "https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans")!,
-            checked: "2026-11-19"
+            checked: "2026-11-21"
         ),
         Hint(
             category: .models,
@@ -188,7 +193,7 @@ struct APIHintsView: View {
             access: .paidPlan,
             detail: "Pro tiers: $100, $200 or $500; Business: up to $500 per workspace. After seven days, claim it in ChatGPT's billing settings and link an API organization you own. Use its OpenAI key for Agent. Credits expire each cycle.",
             url: URL(string: "https://developers.openai.com/api/docs/guides/chatgpt-api-credits")!,
-            checked: "2026-11-19"
+            checked: "2026-11-21"
         ),
         Hint(
             category: .search,
@@ -199,7 +204,7 @@ struct APIHintsView: View {
             access: .noCard,
             detail: "Web search for Agent. No card required. One basic search uses one credit. Add the Tavily key in API keys.",
             url: URL(string: "https://www.tavily.com/pricing")!,
-            checked: "2026-10-22"
+            checked: "2026-11-21"
         ),
     ]
 

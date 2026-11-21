@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="54" viewBox="0 0 860 54">
+  <rect x="0.5" y="0.5" width="859" height="53" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <circle cx="30" cy="27.0" r="17" fill="#2a2350"/>
+  <g transform="translate(21.0 18.0) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+  <path d="M20 3v4" />
+  <path d="M22 5h-4" />
+  <path d="M4 17v2" />
+  <path d="M5 18H3" /></g>
+  <text x="60" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" xml:space="preserve"><tspan font-size="16" font-weight="600" fill="#f0f6fc">Agent</tspan><tspan dx="14" font-size="12.5" font-weight="500" fill="#b8adff"><tspan>Tap or hold the shortcut</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Ask</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Insert</tspan></tspan></text>
+  <text x="60" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#9198a1">Your model, your key. Searches the web, reads local files, returns cards you open or insert.</text>
+  <rect x="780" y="15.0" width="64" height="24" rx="12.0" fill="#6c5ce7"/>
+  <text x="812.0" y="31.3" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#ffffff">Click</text>
+</svg>

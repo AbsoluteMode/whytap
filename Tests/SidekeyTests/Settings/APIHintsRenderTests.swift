@@ -79,6 +79,25 @@ final class APIHintsRenderTests: XCTestCase {
         XCTAssertEqual(Set(APIHintsView.hints.map(\.provider)).count, APIHintsView.hints.count)
     }
 
+    /// README's "Free API keys" cards are generated from these offers; stale cards
+    /// would advertise terms the app no longer shows.
+    func testReadmeFreeAPICardsMatchNoCardOffers() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        while !FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path) {
+            root.deleteLastPathComponent()
+        }
+        let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
+        let section = try XCTUnwrap(readme.range(of: "## Free API keys").map { String(readme[$0.lowerBound...]) })
+        let free = APIHintsView.hints.filter { $0.access == .noCard }
+        XCTAssertEqual(section.components(separatedBy: "<a href=").count - 1, free.count)
+        let newest = try XCTUnwrap(free.map(\.checked).max())
+        XCTAssertTrue(section.contains("Last checked \(APIHintsView.displayDate(newest))"))
+        for hint in free {
+            XCTAssertTrue(section.contains("<a href=\"\(hint.url.absoluteString)\">"), hint.provider)
+            XCTAssertTrue(section.contains("alt=\"\(hint.provider): \(hint.allowance) \(hint.cadence) ("), hint.provider)
+        }
+    }
+
     /// A row without a bundled mark falls back to the generic globe, which reads as a missing logo.
     func testEveryOfferHasItsBundledMark() throws {
         var root = URL(fileURLWithPath: #filePath)

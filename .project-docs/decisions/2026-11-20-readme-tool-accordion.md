@@ -35,8 +35,10 @@ image. GitHub keeps the `name` attribute (prefixed `user-content-`), so the
 browser keeps only one of them open. The card is an SVG generated in four
 variants, wide and phone, dark and light, chosen by `<picture>` media queries;
 the image sits in a `<picture>`, which stops GitHub from wrapping it in a link
-to the raw file. The wide card holds the title, short steps and a two or
-three line description; the phone card has the title and steps. Opening a
+to the raw file. The wide card is two lines: the title with its short steps
+beside it, then a one-line description; the phone card has the title and the
+steps below it. On 2026-11-21 Maxim asked for lower rows with the steps moved
+up and the description on one line, so the section takes less scrolling. Opening a
 card shows only the motion video, 88% wide behind two em spaces so it sits
 under the card, after an empty paragraph that gives 16 px of space.
 `scripts/readme-tool-cards.py` generates the cards and the section.

@@ -11,8 +11,8 @@ Usage (icons come from Lucide, ISC, see docs/assets/readme/tool-icons.LICENSE.tx
     npm pack lucide-static@0.460.0 && tar xzf lucide-static-0.460.0.tgz
     python3 scripts/readme-tool-cards.py package/icons
 
-It rewrites docs/assets/readme/tool-tile-*.svg and the "## Tools" section of
-README.md. When a card changes, rename the tile prefix: GitHub caches README
+It rewrites docs/assets/readme/tool-line-*.svg and the "## Tools" section of
+README.md. When a card changes, rename the file prefix: GitHub caches README
 images for several minutes under the same URL.
 """
 # WHY: .project-docs/decisions/2026-11-20-readme-tool-accordion.md
@@ -23,20 +23,22 @@ LUCIDE = pathlib.Path(sys.argv[1])
 OUT = REPO / "docs/assets/readme"
 A = "docs/assets/readme"
 
-# slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card), media (list of files; Calendar has a reduced-motion still)
+# slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card, one
+# line: keep it under ~105 characters), media (a <name>-still.webp beside a file is its
+# reduced-motion frame)
 DEMOS = [
     ("drop-smart", "audio-lines", "Drop Smart", "Speak, correct yourself, release",
      ["Hold Space", "Speak", "Release to paste"],
-     'Smart removes fillers and keeps your final wording; Fast pastes it as said. Use your own speech key or Parakeet v3 on Apple Silicon.', ["demo-drop-smart.webp"]),
+     'Smart drops fillers and keeps your final wording; Fast pastes it as said. Your key or on-device Parakeet.', ["demo-drop-smart.webp"]),
     ("agent", "sparkles", "Agent", "Get an answer in the notch",
      ["Tap or hold the shortcut", "Ask", "Insert"],
-     'Your chosen model with your own key. It can search the web, read local files and return cards you open or insert.', ["demo-agent.webp"]),
+     'Your model, your key. Searches the web, reads local files, returns cards you open or insert.', ["demo-agent.webp"]),
     ("case", "key-round", "Case", "Approve a command in the notch",
      ["Save a key", "Agent asks", "Allow or deny"],
-     'Secrets stay on your Mac. Claude Code and Cursor see key names only; the value goes to the command you approve.', ["demo-case.webp"]),
+     'Secrets stay on your Mac. Claude Code and Cursor see key names; values go only to approved commands.', ["demo-case.webp"]),
     ("meetings", "notebook-pen", "Meeting Notes", "From a call to the next steps",
      ["Take notes", "End the call", "Get action items"],
-     'Zoom, Meet, Teams and Slack without a bot in the call. Summary, action items and transcript, readable over MCP.', ["demo-meetings.webp"]),
+     'Zoom, Meet, Teams, Slack, no bot in the call. Summary, action items and transcript, readable over MCP.', ["demo-meetings.webp"]),
     ("language-vocab", "languages", "Output Language & Vocab", "Set up dictation for the way you speak",
      ["Pick an output language", "Add your terms"],
      'Dictate in one language and paste in another. Teach Drop your project names, jargon and handles.', ["demo-output-lang.webp", "demo-vocab.webp"]),
@@ -54,7 +56,7 @@ DEMOS = [
      'One agenda from your connected calendars. Coding agents can add tasks through the whytap CLI.', ["demo-calendar-todo.gif"]),
     ("display-extra", "sun-medium", "Display Extra", "Use the display’s available HDR headroom",
      ["Open Display", "Turn on Extra", "Slide"],
-     "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level when macOS changes it.", ["demo-brightness.webp"]),
+     "Brighter than the slider's maximum on XDR and HDR displays. Hold keeps your level steady.", ["demo-brightness.webp"]),
 ]
 
 THEMES = {
@@ -67,10 +69,11 @@ FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, A
 
 # Geometry per layout. Desktop is shown at 92% of the README column (~760 px), phone at ~290 px.
 LAYOUTS = {
-    "wide": dict(dx=420, dwrap=48, dfs=13, dlh=18.5, W=860, H=92, rx=16, cx=46, r=26, isz=26, tx=92, ty=41, ts=18, py=64, ps=13.5,
-                 pw=78, ph=32, pfs=14, pill_mid=True),
-    "phone": dict(W=300, H=60, rx=12, cx=25, r=16, isz=18, tx=50, ty=26, ts=14, py=45, ps=11,
-                  pw=44, ph=18, pfs=11, pill_mid=False),
+    # wide: title and steps on the first line, the description on one line below
+    "wide": dict(inline=True, W=860, H=54, rx=12, cx=30, r=17, isz=18, tx=60, ty=23, ts=16, gap=14, ps=12.5,
+                 dy=42, dfs=12, pw=64, ph=24, pfs=12, pill_mid=True),
+    "phone": dict(W=300, H=44, rx=10, cx=21, r=13, isz=15, tx=41, ty=19, ts=13.5, py=34, ps=10.5,
+                  pw=42, ph=17, pfs=10.5, pill_mid=False),
 }
 
 
@@ -80,15 +83,11 @@ def icon_inner(name):
     return re.search(r"<svg[^>]*>(.*)</svg>", svg, re.S).group(1).strip()
 
 
-def desc_block(desc, c, g):
-    if not g.get("dx"):
+def desc_line(desc, c, g):
+    if not g.get("inline"):
         return ""
-    import textwrap
-    lines = textwrap.wrap(desc, g["dwrap"])
-    top = g["H"] / 2 - (len(lines) - 1) * g["dlh"] / 2 + g["dfs"] * 0.35
-    spans = "".join(f'<tspan x="{g["dx"]}" y="{top + i * g["dlh"]:.1f}">{html.escape(l)}</tspan>' for i, l in enumerate(lines))
-    return (f'  <line x1="{g["dx"]-22}" y1="18" x2="{g["dx"]-22}" y2="{g["H"]-18}" stroke="{c["border"]}"/>\n'
-            f'  <text font-family="{FONT}" font-size="{g["dfs"]}" fill="{c["sub"]}">{spans}</text>')
+    return (f'  <text x="{g["tx"]}" y="{g["dy"]}" font-family="{FONT}" font-size="{g["dfs"]}" '
+            f'fill="{c["sub"]}">{html.escape(desc)}</text>')
 
 
 def card(title, sub, steps, desc, icon, theme, layout):
@@ -97,17 +96,24 @@ def card(title, sub, steps, desc, icon, theme, layout):
     sep = f'<tspan fill="{c["dot"]}">  ·  </tspan>'
     steps_svg = sep.join(f"<tspan>{html.escape(s)}</tspan>" for s in steps)
     sc = g["isz"] / 24
-    if g["pill_mid"]:
-        px, py = W - g["pw"] - 22, H / 2 - g["ph"] / 2
+    title_svg = html.escape(title)
+    if g.get("inline"):  # steps follow the title on the same line
+        head = (f'  <text x="{g["tx"]}" y="{g["ty"]}" font-family="{FONT}" xml:space="preserve">'
+                f'<tspan font-size="{g["ts"]}" font-weight="600" fill="{c["title"]}">{title_svg}</tspan>'
+                f'<tspan dx="{g["gap"]}" font-size="{g["ps"]}" font-weight="500" fill="{c["steps"]}">{steps_svg}</tspan></text>')
     else:
-        px, py = W - g["pw"] - 8, 8
+        head = (f'  <text x="{g["tx"]}" y="{g["ty"]}" font-family="{FONT}" font-size="{g["ts"]}" font-weight="600" fill="{c["title"]}">{title_svg}</text>\n'
+                f'  <text x="{g["tx"]}" y="{g["py"]}" font-family="{FONT}" font-size="{g["ps"]}" font-weight="500" fill="{c["steps"]}" xml:space="preserve">{steps_svg}</text>')
+    if g["pill_mid"]:
+        px, py = W - g["pw"] - 16, H / 2 - g["ph"] / 2
+    else:
+        px, py = W - g["pw"] - 6, 5
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
   <rect x="0.5" y="0.5" width="{W-1}" height="{H-1}" rx="{g['rx']}" fill="{c['bg']}" stroke="{c['border']}"/>
   <circle cx="{g['cx']}" cy="{H/2}" r="{g['r']}" fill="{c['disk']}"/>
   <g transform="translate({g['cx']-g['isz']/2} {H/2-g['isz']/2}) scale({sc:.4f})" fill="none" stroke="{c['icon']}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_inner(icon)}</g>
-  <text x="{g['tx']}" y="{g['ty']}" font-family="{FONT}" font-size="{g['ts']}" font-weight="600" fill="{c['title']}">{html.escape(title)}</text>
-  <text x="{g['tx']}" y="{g['py']}" font-family="{FONT}" font-size="{g['ps']}" font-weight="500" fill="{c['steps']}" xml:space="preserve">{steps_svg}</text>
-{desc_block(desc, c, g)}
+{head}
+{desc_line(desc, c, g)}
   <rect x="{px}" y="{py}" width="{g['pw']}" height="{g['ph']}" rx="{g['ph']/2}" fill="{c['pill']}"/>
   <text x="{px+g['pw']/2}" y="{py+g['ph']/2+g['pfs']*0.36:.1f}" text-anchor="middle" font-family="{FONT}" font-size="{g['pfs']}" font-weight="600" fill="{c['pilltext']}">Click</text>
 </svg>
@@ -116,24 +122,27 @@ def card(title, sub, steps, desc, icon, theme, layout):
 
 def media_html(slug, files, title):
     alt = html.escape(f"{title} demo")
-    if slug == "calendar-todo":
-        return ("<picture>"
-                f'<source media="(prefers-reduced-motion: reduce)" srcset="{A}/demo-calendar-todo-still.webp">'
-                f'<img src="{A}/demo-calendar-todo.gif" width="88%" loading="lazy" alt="{alt}">'
-                "</picture>")
-    if len(files) == 1:
-        return f'<img src="{A}/{files[0]}" width="88%" loading="lazy" alt="{alt}">'
-    return "\n".join(f'<img src="{A}/{f}" width="43.5%" loading="lazy" alt="{alt}">' for f in files)
+    width = "88%" if len(files) == 1 else "43.5%"
+
+    def one(f):
+        img = f'<img src="{A}/{f}" width="{width}" loading="lazy" alt="{alt}">'
+        still = f.rsplit(".", 1)[0] + "-still.webp"
+        if (OUT / still).exists():
+            return ("<picture>"
+                    f'<source media="(prefers-reduced-motion: reduce)" srcset="{A}/{still}">'
+                    f"{img}</picture>")
+        return img
+
+    return "\n".join(one(f) for f in files)
 
 
-section = ["## Tools", "",
-           "<sub>Click a tool to play its demo. Opening one closes the previous.</sub>", ""]
+section = ["## Tools", ""]
 for slug, icon, title, sub, steps, desc, media in DEMOS:
     for t in THEMES:
         for lay in LAYOUTS:
-            (OUT / f"tool-tile-{slug}-{lay}-{t}.svg").write_text(card(title, sub, steps, desc, icon, t, lay))
+            (OUT / f"tool-line-{slug}-{lay}-{t}.svg").write_text(card(title, sub, steps, desc, icon, t, lay))
     alt = html.escape(f"{title}: {sub}")
-    src = lambda lay, t: f"{A}/tool-tile-{slug}-{lay}-{t}.svg"
+    src = lambda lay, t: f"{A}/tool-line-{slug}-{lay}-{t}.svg"
     section += [
         '<details name="tool-demo">',
         "<summary><picture>"

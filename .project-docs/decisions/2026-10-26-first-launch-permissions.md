@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/PermissionsHelper.swift
     confirmed_at: 2026-10-26
-related: [2026-11-21-first-launch-onboarding.md, ../project.md, 2026-10-17-local-workspace.md, 2026-10-20-screenshot-toolbar.md, 2026-11-19-permission-request-before-settings.md]
+related: [2026-11-21-first-launch-onboarding.md, ../project.md, 2026-10-17-local-workspace.md, 2026-10-20-screenshot-toolbar.md, 2026-11-19-permission-request-before-settings.md, 2026-11-22-shot-single-permission-prompt.md]
 ---
 
 # Decision

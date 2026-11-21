@@ -87,15 +87,22 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
     private let captureTimeout: Duration
     private let captureFailure: (String) -> Void
     private var displayLayout: [ScreenshotDisplayLayout] = []
+    private let permissionGate: ScreenshotPermissionGate
+    private let permissionHelp: () -> Void
+    private var permissionHelpVisible = false
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "Screenshot")
     var isActive: Bool { generation != nil }
 
     init(activityChanged: @escaping (Bool) -> Void, preparationChanged: @escaping (Bool) -> Void = { _ in },
          captureOverride: (() async throws -> [(NSScreen, CGImage)])? = nil,
          captureTimeout: Duration = .seconds(10), captureFailure: ((String) -> Void)? = nil,
-         environment: ScreenshotCaptureEnvironment? = nil) {
+         environment: ScreenshotCaptureEnvironment? = nil,
+         permissionGate: ScreenshotPermissionGate? = nil, permissionHelp: (() -> Void)? = nil) {
         self.activityChanged = activityChanged; self.preparationChanged = preparationChanged; self.captureOverride = captureOverride
         self.captureTimeout = captureTimeout
+        // Injected captures stand in for the system and never ask macOS.
+        self.permissionGate = permissionGate ?? (captureOverride == nil ? ScreenshotPermissionGate() : .granted)
+        self.permissionHelp = permissionHelp ?? Self.showPermissionHelp
         self.environment = environment ?? .system
         self.captureFailure = captureFailure ?? { message in
             let alert = NSAlert(); alert.messageText = "Screenshot unavailable"
@@ -126,6 +133,31 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
             os_log("screenshot_start ignored_already_active", log: Self.log, type: .info)
             return
         }
+        // One window per press: the first press without access only asks macOS;
+        // Whytap's help never opens beside the system dialog.
+        // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
+        switch permissionGate.step() {
+        case .capture:
+            break
+        case .requestOnly:
+            os_log("screenshot_permission request", log: Self.log, type: .info)
+            let gate = permissionGate
+            Task { await gate.performRequest() }
+            return
+        case .ignoreRepeat:
+            os_log("screenshot_permission ignored_repeat", log: Self.log, type: .info)
+            return
+        case .showHelp:
+            guard !permissionHelpVisible else { return }
+            os_log("screenshot_permission help", log: Self.log, type: .info)
+            permissionHelpVisible = true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.permissionHelpVisible = false }
+                self.permissionHelp()
+            }
+            return
+        }
         previousApp = environment.frontmostApplication()
         let token = UUID(); generation = token; activityChanged(true)
         setPreparing(true)
@@ -139,10 +171,6 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
                     self.startCaptureDeadline(token: token)
                     snapshots = try await captureOverride()
                 } else {
-                    guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
-                        self.cancel(); self.showPermissionHelp(); return
-                    }
-                    guard self.generation == token, !Task.isCancelled else { return }
                     self.startCaptureDeadline(token: token)
                     // Freeze the visible screen before ordering editor windows or releasing
                     // Hover. Include Whytap's own visible surfaces, like Apple's area capture.
@@ -191,7 +219,7 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
         NSScreen.screens.map { ScreenshotDisplayLayout(screen: $0) }
     }
 
-    private func showPermissionHelp() {
+    private static func showPermissionHelp() {
         let alert = NSAlert(); alert.messageText = "Allow screenshots"
         alert.informativeText = "Enable Whytap in System Settings → Privacy & Security → Screen & System Audio Recording. If macOS asks you to reopen Whytap, finish your current work first."
         alert.addButton(withTitle: "Open System Settings"); alert.addButton(withTitle: "Cancel")

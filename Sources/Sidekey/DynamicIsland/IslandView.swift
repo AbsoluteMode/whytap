@@ -2981,6 +2981,7 @@ private struct IslandDropModeHoverPanel: View {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
                             let info = HoverToolRegistry.info(for: tool)
+                            let label = IslandHoverToolSearch.resultLabel(for: tool, query: searchQuery)
                             let isPressed = hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
                             let highlight = isPressed ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
                             Button { activateSearchTool(tool) } label: {
@@ -2989,9 +2990,9 @@ private struct IslandDropModeHoverPanel: View {
                                         .font(.system(size: 15))
                                         .frame(width: 24)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(info.title)
+                                        Text(label.title)
                                             .font(.system(size: 12, weight: .medium))
-                                        Text(info.description)
+                                        Text(label.description)
                                             .font(.system(size: 10))
                                             .foregroundStyle(.white.opacity(0.5))
                                             .lineLimit(1)
@@ -3022,8 +3023,8 @@ private struct IslandDropModeHoverPanel: View {
                                 action: { activateSearchTool(tool) }
                             )
                             .disabled(tool.isComingSoon)
-                            .accessibilityLabel(info.title)
-                            .accessibilityHint(info.description)
+                            .accessibilityLabel(label.title)
+                            .accessibilityHint(label.description)
                             .accessibilityValue(tool.comingSoonBadge
                                 ?? (tool == .notifs && notificationHub.unreadCount > 0
                                     ? "\(notificationHub.unreadCount) new notifications" : ""))

@@ -1651,7 +1651,16 @@ then shows a frozen selection canvas and a wrapping native toolbar exposing all
 commands, Copy & exit with a centered Return keycap, and Download. The keycap
 uses HotkeyHintView through a click-through hosting view inside the same native
 button; its label and keycap group are centered together. Color/width and other contextual controls
-live in a separate adjacent ScreenshotToolSettings panel. Capture requests the
+live in a separate adjacent ScreenshotToolSettings panel. Every toolbar and
+settings control has short hover help (what it does, plus its key) shown by
+ScreenshotHoverHint: one click-through panel just above screen-saver level,
+after 0.45 s, at once when moving to the next control, hidden on exit, click,
+key or editor close. AppKit tool tips never appear in this inactive editor, so
+ScreenshotToolbarButton keeps its toolTip text without registering one; the
+text is also accessibility help. Hover search finds Shot by OCR words
+(OCR, copy/recognize text, text from screen, also in Russian) and labels that
+result "Shot — Copy text". WHY:
+.project-docs/decisions/2026-11-22-shot-hover-hints.md. Capture requests the
 filter's full Retina pixel dimensions with best resolution; PNG export keeps
 those pixels without resizing. Repeated activation
 preserves the editor; unchanged display notifications are ignored. Capture has

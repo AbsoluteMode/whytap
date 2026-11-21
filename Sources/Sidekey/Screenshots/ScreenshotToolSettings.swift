@@ -47,21 +47,26 @@ final class ScreenshotToolSettings: NSView {
         title.font = .systemFont(ofSize: 12, weight: .medium); title.textColor = .secondaryLabelColor
         row.addArrangedSubview(title)
         color.target = self; color.action = #selector(updateSettings(_:))
-        color.setAccessibilityLabel("Annotation color"); color.toolTip = "Annotation color"
+        color.setAccessibilityLabel("Annotation color")
         color.widthAnchor.constraint(equalToConstant: 32).isActive = true
         color.heightAnchor.constraint(equalToConstant: 24).isActive = true
         row.addArrangedSubview(color)
         width.addItems(withTitles: ["2 pt", "3 pt", "5 pt", "8 pt"])
         width.target = self; width.action = #selector(updateSettings(_:)); width.setAccessibilityLabel("Line width")
-        width.toolTip = "Line width"; row.addArrangedSubview(width)
+        row.addArrangedSubview(width)
         shape.addItems(withTitles: ["Rectangle", "Oval"])
         shape.target = self; shape.action = #selector(updateSettings(_:)); shape.setAccessibilityLabel("Shape")
-        shape.toolTip = "Shape"; row.addArrangedSubview(shape)
+        row.addArrangedSubview(shape)
         mode.addItems(withTitles: ScreenshotBlurMode.allCases.map(\.rawValue))
         mode.target = self; mode.action = #selector(updateSettings(_:)); mode.setAccessibilityLabel("What to blur")
-        mode.toolTip = "What to blur"; row.addArrangedSubview(mode)
+        row.addArrangedSubview(mode)
         row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10).isActive = true
-        hoverFeedback = [color as NSControl, width, shape, mode].map(ScreenshotSettingHover.init)
+        hoverFeedback = [
+            ScreenshotSettingHover(color, help: "Color of new annotations for this tool"),
+            ScreenshotSettingHover(width, help: "Line width for this tool"),
+            ScreenshotSettingHover(shape, help: "Draw a rectangle or an oval"),
+            ScreenshotSettingHover(mode, help: "Blur only text and numbers, or the entire area")
+        ]
         refresh()
     }
     required init?(coder: NSCoder) { nil }
@@ -110,15 +115,24 @@ final class ScreenshotToolSettings: NSView {
 private final class ScreenshotSettingHover: NSObject {
     private weak var control: NSControl?
     private var hovered = false
-    init(_ control: NSControl) {
-        self.control = control
+    /// Shown by ScreenshotHoverHint; no AppKit tool tip (it never appears here).
+    let help: String
+    init(_ control: NSControl, help: String) {
+        self.control = control; self.help = help
         super.init()
+        control.toolTip = nil; control.setAccessibilityHelp(help)
         control.wantsLayer = true
         control.layer?.cornerRadius = 5
         control.addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self))
     }
-    @objc func mouseEntered(with event: NSEvent) { hovered = true; refresh() }
-    @objc func mouseExited(with event: NSEvent) { hovered = false; refresh() }
+    @objc func mouseEntered(with event: NSEvent) {
+        hovered = true; refresh()
+        if let control { ScreenshotHoverHint.shared.hover(control, text: help) }
+    }
+    @objc func mouseExited(with event: NSEvent) {
+        hovered = false; refresh()
+        if let control { ScreenshotHoverHint.shared.leave(control) }
+    }
     func refresh() {
         control?.layer?.borderWidth = 1
         control?.layer?.borderColor = hovered && control?.isEnabled == true ? NSColor.labelColor.withAlphaComponent(0.4).cgColor : NSColor.clear.cgColor

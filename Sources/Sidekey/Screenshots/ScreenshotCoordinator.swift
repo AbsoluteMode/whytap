@@ -283,7 +283,9 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
 
     private func positionToolbar() {
         guard let canvas = selectedCanvas, let parent = canvas.window, let panel = toolbarPanel, let toolbar else { return }
-        guard !canvas.selection.isEmpty else { settingsPanel?.orderOut(nil); panel.orderOut(nil); return }
+        guard !canvas.selection.isEmpty else {
+            ScreenshotHoverHint.shared.hide(); settingsPanel?.orderOut(nil); panel.orderOut(nil); return
+        }
         toolbar.configure(availableWidth: parent.frame.width)
         let size = toolbar.fittingSize, safeTop = parent.screen?.safeAreaInsets.top ?? 0
         let frame = ScreenshotGeometry.toolbarFrame(selection: parent.convertToScreen(canvas.selection), screen: parent.frame,
@@ -324,7 +326,7 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
         captureDeadlineTask?.cancel(); captureDeadlineTask = nil
         setPreparing(false)
         copyWaitReason = nil; copyAfterProcessing = false
-        toolbar?.closeAuxiliaryWindows()
+        toolbar?.closeAuxiliaryWindows(); ScreenshotHoverHint.shared.hide()
         if let settingsPanel { settingsPanel.parent?.removeChildWindow(settingsPanel); settingsPanel.orderOut(nil); settingsPanel.close() }
         settingsPanel = nil
         if let toolbarPanel { toolbarPanel.parent?.removeChildWindow(toolbarPanel); toolbarPanel.orderOut(nil); toolbarPanel.close() }

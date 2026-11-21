@@ -65,8 +65,7 @@ final class ScreenshotArrowCluster: NSView {
             button.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
             button.setAccessibilityLabel("\(direction.glyph) \(action.title) — change assignment")
             button.setAccessibilityValue(action.title)
-            button.toolTip = "\(direction.glyph): \(action.title). Drag a toolbar tool here to replace this action, drag this assignment to another shortcut, or click to choose. Changes save immediately."
-            button.setAccessibilityHelp(button.toolTip)
+            button.toolTip = "\(direction.glyph) key: \(action.title) — click to choose another action or drag a toolbar tool here. Changes save immediately."
             let menu = NSMenu(title: "\(direction.glyph) arrow")
             menu.autoenablesItems = false
             for candidate in ScreenshotEditorAction.allCases {

@@ -37,23 +37,22 @@ final class ScreenshotToolbar: NSView {
         ])
         controls += [arrowCluster, separator()]
         for (tool, symbol, title, help) in [
-            (ScreenshotTool.arrow, "arrow.up.right", "", "Arrow · A — point to a detail"),
-            (.rectangle, "rectangle", "", "Shape · R / O — draw a rectangle or oval"),
-            (.pen, "pencil", "", "Pen · P — draw freehand"),
-            (.text, "textformat", "", "Text · T — click anywhere in the selection and type; drag a label’s handle to move it"),
-            (.blur, "", "Blur", "Blur · B — blur text and numbers or an entire area"),
-            (.counter, "number.circle", "", "Numbered steps · N — place consecutive step numbers")
+            (ScreenshotTool.arrow, "arrow.up.right", "", "Arrow · A — draw an arrow pointing to a detail"),
+            (.rectangle, "rectangle", "", "Shape · R / O — draw a rectangle or an oval"),
+            (.pen, "pencil", "", "Pen · P — draw freehand; hold Shift for a straight line"),
+            (.text, "textformat", "", "Text · T — click in the selection and type"),
+            (.blur, "", "Blur", "Blur · B — blur text and numbers or a whole area"),
+            (.counter, "number.circle", "", "Numbered steps · N — place numbers 1, 2, 3…")
         ] {
             let button = makeButton(symbol: symbol, title: title, help: help, action: #selector(chooseTool(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
             button.dragAction = ScreenshotEditorAction(rawValue: tool.rawValue)
-            button.toolTip = help + ". Click again to stop drawing and adjust the selection or annotations. Drag onto an arrow to assign."
             button.setButtonType(.toggle); controls.append(button); tools[tool] = button
         }
         controls.append(separator())
         for (command, symbol, help) in [
-            (ScreenshotCommand.copyText, "doc.text.viewfinder", "Copy text — recognize text and numbers on this Mac, copy and exit"),
-            (.share, "square.and.arrow.up", "Share — send the edited screenshot using macOS")
+            (ScreenshotCommand.copyText, "doc.text.viewfinder", "Copy text — recognize the text in the selection, copy it and close (OCR on this Mac)"),
+            (.share, "square.and.arrow.up", "Share — send the screenshot with macOS sharing")
         ] {
             let button = makeButton(symbol: symbol, help: help, action: #selector(command(_:)))
             button.identifier = NSUserInterfaceItemIdentifier("command.\(command)")
@@ -61,11 +60,11 @@ final class ScreenshotToolbar: NSView {
             controls.append(button); commands[command] = button
         }
         controls.append(separator())
-        undoButton = makeButton(symbol: "arrow.uturn.backward", help: "Undo · ⌘Z — undo the last screenshot edit", action: #selector(undo(_:)))
+        undoButton = makeButton(symbol: "arrow.uturn.backward", help: "Undo · ⌘Z — undo the last edit", action: #selector(undo(_:)))
         redoButton = makeButton(symbol: "arrow.uturn.forward", help: "Redo · ⇧⌘Z — restore the last undone edit", action: #selector(redo(_:)))
         undoButton.dragAction = .undo; redoButton.dragAction = .redo
         controls += [undoButton, redoButton, separator()]
-        let download = makeButton(symbol: "arrow.down.to.line", help: "Download to Downloads · ⌘S — save PNG and keep editing", action: #selector(command(_:)))
+        let download = makeButton(symbol: "arrow.down.to.line", help: "Download to Downloads · ⌘S — save a PNG and keep editing", action: #selector(command(_:)))
         download.dragAction = .download
         commands[.download] = download; controls.append(download)
         let copy = ScreenshotToolbarButton(title: "Copy & exit", target: self, action: #selector(command(_:)))
@@ -73,8 +72,7 @@ final class ScreenshotToolbar: NSView {
         copy.isPrimaryAction = true; copy.font = .systemFont(ofSize: 13, weight: .semibold)
         copy.showsReturnKeycap = true
         copy.dragAction = .copy
-        copy.setAccessibilityLabel("Copy screenshot and exit"); copy.toolTip = "Copy screenshot and close editor · Enter / Return / ⌘C"
-        copy.setAccessibilityHelp(copy.toolTip)
+        copy.setAccessibilityLabel("Copy screenshot and exit"); copy.toolTip = "Copy & exit · Return / ⌘C — copy the selected area and close"
         commands[.copy] = copy; controls.append(copy)
         let cancel = makeButton(symbol: "xmark", help: "Cancel capture · Esc — close without copying", action: #selector(command(_:)))
         cancel.dragAction = .cancel

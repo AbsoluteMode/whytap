@@ -19,7 +19,7 @@ The section goes after "## Tools". When a card changes, rename the file
 prefix: GitHub caches README images for several minutes under the same URL.
 """
 # WHY: .project-docs/decisions/2026-10-21-app-control-plugin.md
-import html, pathlib, re, sys
+import html, math, pathlib, re, sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LUCIDE = pathlib.Path(sys.argv[1])
@@ -39,13 +39,15 @@ CARDS = [
     ("models", "sliders-horizontal", "Models", ["Switch Drop Smart", "to a faster model"], "Checked like Settings"),
     ("case", "key-round", "Case", ["Deploy with", "my API key"], "Key names, never values"),
 ]
-# Coding harnesses: logo file in Resources/UsefulLinkIcons, name, lockup width
-# (logo + name, with room for wider Windows and Linux fonts), logo colour per theme
-# (None = the theme's ink), and the line that adds the application-control server.
+# Coding harnesses: logo file in Resources/UsefulLinkIcons, name, the name's width
+# in GitHub's 16 px semibold system font on macOS (the lockup is exactly logo + name,
+# so the README's own spaces separate it from the sentence; textLength fits the name
+# to that width in other fonts), logo colour per theme (None = the theme's ink), and
+# the line that adds the application-control server.
 HARNESSES = [
-    ("claude-code", "Claude Code", 118, {"dark": "#d97757", "light": "#d97757"},
+    ("claude-code", "Claude Code", 96.9, {"dark": "#d97757", "light": "#d97757"},
      f"claude mcp add --scope user whytap -- {HELPER} app mcp"),
-    ("codex", "Codex", 76, {"dark": None, "light": None},
+    ("codex", "Codex", 48.3, {"dark": None, "light": None},
      f"codex mcp add whytap -- {HELPER} app mcp"),
 ]
 ICONS = REPO / "Resources/UsefulLinkIcons"
@@ -98,19 +100,25 @@ def grid(theme, layout):
 '''
 
 
-def lockup(asset, name, w, colors, theme):
-    """The harness logo and its name, sized to sit in a line of README text."""
+def lockup(asset, name, tw, colors, theme):
+    """The harness logo and its name, set like the README text around it.
+
+    Shown with align="absmiddle", the image's middle sits half an x-height above
+    the line's baseline, so a baseline 10 px + half of a 16 px x-height (~4.2 px)
+    below the top matches the sentence's; the logo is centred on the capitals.
+    """
     c = THEMES[theme]
+    w = math.ceil(22 + tw)
     color = colors[theme] or c["ink"]
     svg = (ICONS / f"{asset}.svg").read_text()
     svg = re.sub(r"<title>.*?</title>", "", svg, flags=re.S)
     svg = re.sub(r"#(?:111111|000000)", color, svg)
     if 'fill="' not in svg.split(">", 1)[0]:
         svg = svg.replace("<svg ", f'<svg fill="{color}" ', 1)
-    svg = svg.replace("<svg ", '<svg x="0" y="2" width="16" height="16" ', 1)
+    svg = svg.replace("<svg ", '<svg x="0" y="0.6" width="16" height="16" ', 1)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" viewBox="0 0 {w} 20">
   {svg}
-  <text x="22" y="15" font-family="{FONT}" font-size="14.5" font-weight="600" fill="{c['ink']}">{html.escape(name)}</text>
+  <text x="22" y="14.2" textLength="{tw}" lengthAdjust="spacingAndGlyphs" font-family="{FONT}" font-size="16" font-weight="600" fill="{c['ink']}">{html.escape(name)}</text>
 </svg>
 '''
 

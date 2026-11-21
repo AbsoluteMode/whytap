@@ -176,6 +176,58 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(result.finalText, "To-do + Купить молоко\n\nДобавил.")
     }
 
+    // Regression (build queue ticket 368): todo_add reuses an active task with
+    // the same title and saves the new status on it as "existing".
+    func testTodoAddStatusOnReusedTaskShowsTheSavedChange() async throws {
+        let e = try env()
+        let seeded = await e.controller.handle(AppControlRequest("todo_add", arguments: ["tasks": .array([
+            .object(["title": .string("Review agent"), "status": .string("waiting")])
+        ])]))
+        XCTAssertTrue(seeded.ok)
+        let original = try XCTUnwrap(e.planner.archive.tasks.first?.node)
+        let result = try await turn(e, "Add Review agent with the status ready", [
+            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(),
+                                     "tasks": [["title": "Review agent", "status": "ready", "children": NSNull()]]], id: "t"),
+            final("Recorded.")
+        ])
+        e.planner.refreshFromDisk()
+        XCTAssertEqual(e.planner.archive.tasks.count, 1)
+        XCTAssertEqual(e.planner.archive.tasks.first?.node.id, original.id)
+        XCTAssertEqual(e.planner.archive.tasks.first?.node.status, "ready")
+        XCTAssertTrue(result.toolResults().first?.contains("\"result\":\"existing\"") == true)
+        XCTAssertTrue(result.labels.contains("To-do: Review agent — ready"), "\(result.labels)")
+        XCTAssertEqual(result.finalText, "To-do: Review agent — ready\n\nRecorded.")
+    }
+
+    func testRepeatedIdenticalTodoAddStaysQuiet() async throws {
+        let e = try env()
+        _ = await e.controller.handle(AppControlRequest("todo_add", arguments: ["tasks": .array([
+            .object(["title": .string("Review agent"), "status": .string("waiting")])])]))
+        _ = await e.controller.handle(AppControlRequest("todo_add", arguments: ["titles": .array([.string("Plain")])]))
+        let result = try await turn(e, "Add Review agent (waiting) and Plain again", [
+            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
+                ["title": "Review agent", "status": "waiting", "children": NSNull()],
+                ["title": "Plain", "status": NSNull(), "children": NSNull()]]], id: "t"),
+            final("Already there.")
+        ])
+        e.planner.refreshFromDisk()
+        XCTAssertEqual(e.planner.archive.tasks.count, 2)
+        XCTAssertFalse(result.labels.contains { $0.hasPrefix("To-do") }, "\(result.labels)")
+        XCTAssertEqual(result.finalText, "Already there.", "A retry that changes nothing adds no line")
+    }
+
+    func testTodoAddReportsNewAndUpdatedTasksTogether() async throws {
+        let e = try env()
+        _ = await e.controller.handle(AppControlRequest("todo_add", arguments: ["titles": .array([.string("Report")])]))
+        let result = try await turn(e, "Report is in review, add Send it", [
+            call("whytap_todo_add", ["titles": NSNull(), "parentID": NSNull(), "tasks": [
+                ["title": "Report", "status": "in review", "children": NSNull()],
+                ["title": "Send it", "status": NSNull(), "children": NSNull()]]], id: "t"),
+            final("Done.")
+        ])
+        XCTAssertEqual(result.finalText, "To-do + 1 added, 1 updated\n\nDone.")
+    }
+
     func testClearingStatusAndKeepingParentUseEmptyStringAndNull() async throws {
         let e = try env()
         let added = await e.controller.handle(AppControlRequest("todo_add", arguments: ["tasks": .array([

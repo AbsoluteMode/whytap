@@ -191,8 +191,16 @@ enum NativeAgentAppControl {
         }
         let defs = tool.schema.object?["$defs"]?.object ?? [:]
         let arguments = normalize(raw, schema: tool.schema, defs: defs).object ?? [:]
+        // todo_add reuses an active task with the same title and saves a new
+        // status on it ("existing"). Read the statuses first so that saved
+        // change is shown and a repeated identical request stays quiet.
+        var before: [String: AppControlValue]?
+        if tool.operation == "todo_add" {
+            let listing = await handler(AppControlRequest("todo_list", arguments: ["includeCompleted": .bool(true)]))
+            if listing.ok { before = statuses(listing.data) }
+        }
         let response = await handler(AppControlRequest(tool.operation, arguments: arguments))
-        let change = response.ok && tool.writes ? changeLine(tool.operation, response.data) : nil
+        let change = response.ok && tool.writes ? changeLine(tool.operation, response.data, before: before) : nil
         return .init(text: encode(response), change: change)
     }
 
@@ -208,7 +216,20 @@ enum NativeAgentAppControl {
 
     /// One app-owned line per confirmed change, built from the saved state the
     /// controller returned, never from the model's request.
-    static func changeLine(_ operation: String, _ data: AppControlValue) -> String? {
+    /// Task id -> saved status (null when none), from a todo_list reply.
+    static func statuses(_ data: AppControlValue) -> [String: AppControlValue] {
+        var result: [String: AppControlValue] = [:]
+        for task in data.object?["tasks"]?.array ?? [] {
+            guard let id = task.object?["id"]?.string else { continue }
+            result[id] = task.object?["status"] ?? .null
+        }
+        return result
+    }
+
+    /// `before` holds each task's status before a todo_add (nil: unknown, so
+    /// a reused task counts as changed only when it now has a status).
+    static func changeLine(_ operation: String, _ data: AppControlValue,
+                           before: [String: AppControlValue]? = nil) -> String? {
         let object = data.object ?? [:]
         let feature = object["feature"]?.string.flatMap(AIFeature.init(rawValue:))?.title
         switch operation {
@@ -228,12 +249,23 @@ enum NativeAgentAppControl {
             default: return nil
             }
         case "todo_add":
-            let added = object["tasks"]?.array?.compactMap { task -> String? in
-                guard task.object?["result"] == .string("added") else { return nil }
-                return task.object?["title"]?.string
-            } ?? []
-            guard !added.isEmpty else { return nil }
-            return added.count == 1 ? "To-do + \(added[0])" : "To-do + \(added.count) tasks"
+            var added: [String] = [], updated: [(title: String, status: String?)] = []
+            for task in object["tasks"]?.array ?? [] {
+                guard let row = task.object, let title = row["title"]?.string else { continue }
+                let status = row["status"] ?? .null
+                if row["result"] == .string("added") { added.append(title); continue }
+                guard row["result"] == .string("existing") else { continue }
+                let previous = row["id"]?.string.flatMap { before?[$0] } ?? .null
+                if status != previous { updated.append((title, status.string)) }
+            }
+            switch (added.count, updated.count) {
+            case (0, 0): return nil
+            case (1, 0): return "To-do + \(added[0])"
+            case (_, 0): return "To-do + \(added.count) tasks"
+            case (0, 1): return "To-do: \(updated[0].title) — " + (updated[0].status ?? "no status")
+            case (0, _): return "To-do: \(updated.count) tasks updated"
+            default: return "To-do + \(added.count) added, \(updated.count) updated"
+            }
         case "todo_update":
             guard let task = object["task"]?.object, let title = task["title"]?.string else { return nil }
             return "To-do: \(title)" + (task["completed"] == .bool(true) ? " ✓" : "")

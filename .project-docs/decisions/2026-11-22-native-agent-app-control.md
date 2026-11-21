@@ -58,7 +58,10 @@ Agent in Whytap's own island had none of these tools, so "switch Drop Smart to
 - **Visible changes.** A successful write produces one app-owned line built
   from the saved value the controller returned, never from the request:
   `Drop Smart cleanup → anthropic/claude-sonnet-5.5`, `Drop mode → Smart`,
-  `To-do + Send the report`. It replaces the step label at once and is placed
+  `To-do + Send the report`. `todo_add` reuses an active task with the same
+  title and saves a new status on it: the Agent reads the statuses first and
+  shows `To-do: Review agent — ready` for a changed one; a repeated identical
+  request adds no line (build queue review, ticket 368). It replaces the step label at once and is placed
   above the model's answer, which the prompt tells not to repeat it. Reads add
   no line; a conflict, failed check or invalid call adds none. Model lines show
   the exact model ID, as Settings' picker does.
@@ -98,7 +101,8 @@ OpenRouter model and the real controller on temporary stores:
 switching Drop Smart cleanup to a catalog model (route saved, the change line
 as label and first answer line, tools and instructions in the request, no key
 in tool results); adding a To-do task with strict nulls; clearing a status with
-`""` and closing a task; listing models (no line, no paid check); an unknown
+`""` and closing a task; a status saved on a reused task by `todo_add` shown,
+an identical repeat quiet, new and updated tasks together; listing models (no line, no paid check); an unknown
 model refused by the check with the route kept; a stale expected value as a
 conflict without a check; a key request (no such tool, `set_setting` refuses a
 key name, reads contain no key); broken arguments (wrong types, unknown keys,

@@ -67,7 +67,7 @@ THEMES = {
 }
 FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
 
-# Geometry per layout. Desktop is shown at 94% of the README column (~790 px; 95% wraps at 375 px; the disclosure marker takes the rest), phone at ~290 px.
+# Geometry per layout. Desktop is shown at 93% of the README column (~780 px; more wraps the disclosure marker on 320–375 px phones; the disclosure marker takes the rest), phone at ~290 px.
 LAYOUTS = {
     # wide: title and steps on the first line, the description on one line below
     "wide": dict(inline=True, W=860, H=54, rx=12, cx=30, r=17, isz=18, tx=60, ty=23, ts=16, gap=14, ps=12.5,
@@ -150,7 +150,7 @@ for slug, icon, title, sub, steps, desc, media in DEMOS:
         f'<source media="(max-width: 640px)" srcset="{src("phone","light")}">'
         f'<source media="(prefers-color-scheme: dark)" srcset="{src("wide","dark")}">'
         f'<source media="(prefers-color-scheme: light)" srcset="{src("wide","light")}">'
-        f'<img alt="{alt}" src="{src("wide","dark")}" width="94%" align="absmiddle">'
+        f'<img alt="{alt}" src="{src("wide","dark")}" width="93%" align="absmiddle">'
         "</picture></summary>",
         "",
         "<p></p>",

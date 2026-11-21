@@ -3,7 +3,7 @@
 <div align="center">
 
 <p align="center">
-  <b>The MacOS productivity app, built for your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16">.</b>
+  <b>The macOS productivity app, built for your&nbsp;<img alt="harness" src="docs/assets/readme/harness.svg" width="60" height="16">.</b>
 </p>
 
 <p align="center"><img alt="Dynamic Island preview" src="docs/assets/readme/island-hero.webp" width="640"></p>
@@ -13,7 +13,11 @@
 </p>
 
 <p align="center">
-  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <b>Developer ID Signed &amp; Notarized</b> &nbsp;·&nbsp; <b>No Account · Zero Telemetry</b> &nbsp;·&nbsp; <b>MIT License</b></sub>
+  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
+</p>
+
+<p align="center">
+  <sub>New here? <a href="docs/install.md#first-dictation">Your first dictation in two minutes →</a></sub>
 </p>
 
 </div>
@@ -121,13 +125,19 @@
 
 ```bash
 claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+claude mcp add --scope user case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 ```
 
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture></p>
 
 ```bash
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
+codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 ```
+
+<p align="center">Meeting search (the <b>Meetings</b> tile above) is in the next release; the latest release, 2.2.25, does not have it yet.</p>
+
+<p align="center">The second line in each block is Case: it lists key and project names, never values, and using a key still needs your approval. Connect in the Case drawer sets up the same entry for you.</p>
 
 <p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>
 
@@ -150,3 +160,5 @@ codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 </p>
 
 <p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+
+<p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

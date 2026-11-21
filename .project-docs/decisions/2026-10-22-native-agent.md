@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md]
 ---
 
 # Decision
@@ -84,6 +84,8 @@ function call. Its closed schema requires `status`, `answer`, `sources` and
 carry title/HTTP(S) URL; actions carry an absolute path or copyable text and a
 description. The renderer reuses the existing text and keyboard-action cards;
 there is no new UI-block or persisted conversation schema.
+The [structured answer decision](2026-11-21-structured-agent-answers.md) defines
+the Markdown format inside the existing `answer` string.
 
 Use strict schemas across the Agent tool catalog and require the terminal
 completion in application code. Optional inputs remain nullable with their existing defaults; numeric

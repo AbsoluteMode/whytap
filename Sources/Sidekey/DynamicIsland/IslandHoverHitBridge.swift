@@ -2,13 +2,16 @@ import AppKit
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure }
+    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
     /// Buttons of a question shown over a panel (Monitor's delete question).
     enum ModalAction: Hashable { case cancel, confirm }
-    private enum Control: Hashable { case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction), deliveryFailure(DeliveryFailureAction), modal(ModalAction) }
+    private enum Control: Hashable {
+        case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction)
+        case deliveryFailure(DeliveryFailureAction), tableDisclosure(UUID), modal(ModalAction)
+    }
     let surface: Surface
     private let control: Control
     var tool: HoverTool? { if case .tool(let tool) = control { return tool }; return nil }
@@ -16,6 +19,7 @@ struct IslandHoverHitTargetID: Hashable {
     init(surface: Surface, tool: HoverTool) { self.surface = surface; control = .tool(tool) }
     init(update action: UpdateAction) { surface = .update; control = .update(action) }
     init(deliveryFailure action: DeliveryFailureAction) { surface = .deliveryFailure; control = .deliveryFailure(action) }
+    init(tableDisclosure id: UUID) { surface = .agentAnswer; control = .tableDisclosure(id) }
     init(back destination: String) { surface = .navigation; control = .back(destination) }
     init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
     init(modal action: ModalAction) { surface = .navigation; control = .modal(action) }
@@ -92,7 +96,7 @@ final class IslandHoverHitBridge: ObservableObject {
 
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
-        if !enabled { cancelPress() }
+        if !enabled, tracking.captured?.id.surface != .agentAnswer { cancelPress() }
     }
 
     func cancelPress() {
@@ -155,7 +159,7 @@ final class IslandHoverHitBridge: ObservableObject {
     /// must also intersect its measured viewport, never the search/footer.
     /// While a modal question is shown in this window, targets under it
     /// (Back, tiles) are left out and only the question's buttons remain.
-    private func snapshots(in window: NSWindow) -> [IslandHoverHitSnapshot] {
+    private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool) -> [IslandHoverHitSnapshot] {
         targets = targets.filter { $0.value.view != nil }
         modals = modals.filter { $0.value.view != nil }
         let modalShown = modals.values.contains { entry in
@@ -165,10 +169,7 @@ final class IslandHoverHitBridge: ObservableObject {
         return targets.values.compactMap { entry in
             guard let view = entry.view,
                   !modalShown || view.targetID.isModal,
-                  enabled || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
-                  view.targetID.surface == activeSurface
-                    || view.targetID.surface == .update || view.targetID.surface == .deliveryFailure,
-                  view.targetContext == context,
+                  accepts(view, allowsHover: allowsHover, allowsAnswer: allowsAnswer),
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
                   let region = regions[view.targetID.surface]?.view, region.surface == view.targetID.surface,
                   region.window === window,
@@ -185,19 +186,29 @@ final class IslandHoverHitBridge: ObservableObject {
         .sorted { $0.owner.uuidString < $1.owner.uuidString }
     }
 
-    func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool) -> Bool {
-        let consumed = tracking.begin(at: point, targets: snapshots(in: window), enabled: allowed)
+    private func accepts(_ view: IslandHoverHitTargetView, allowsHover: Bool, allowsAnswer: Bool) -> Bool {
+        let surface = view.targetID.surface
+        if surface == .agentAnswer { return allowsAnswer }
+        return allowsHover && view.targetContext == context
+            && (surface == .update || surface == .deliveryFailure || (enabled && surface == activeSurface))
+    }
+
+    func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) -> Bool {
+        let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
+        let consumed = tracking.begin(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
         return consumed
     }
 
-    func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool) {
-        tracking.move(at: point, targets: snapshots(in: window), enabled: allowed)
+    func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
+        tracking.move(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
     }
 
-    func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool) {
-        let owner = tracking.end(at: point, targets: snapshots(in: window), enabled: allowed)
+    func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        let liveTargets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
+        let owner = tracking.end(at: point, targets: liveTargets, enabled: allowed || allowsAnswer)
         let action = owner.flatMap { targets[$0]?.view?.activate }
         pressedID = nil
         action?()
@@ -208,7 +219,16 @@ private struct IslandHoverNativePressedKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct IslandAnswerHitBridgeKey: EnvironmentKey {
+    static let defaultValue: IslandHoverHitBridge? = nil
+}
+
 extension EnvironmentValues {
+    var islandAnswerHitBridge: IslandHoverHitBridge? {
+        get { self[IslandAnswerHitBridgeKey.self] }
+        set { self[IslandAnswerHitBridgeKey.self] = newValue }
+    }
+
     var islandHoverNativePressed: Bool {
         get { self[IslandHoverNativePressedKey.self] }
         set { self[IslandHoverNativePressedKey.self] = newValue }

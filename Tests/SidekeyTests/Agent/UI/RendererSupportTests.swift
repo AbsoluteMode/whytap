@@ -51,6 +51,184 @@ final class RendererSupportTests: XCTestCase {
         XCTAssertEqual(hostingView.frame.width, 320)
     }
 
+    private static let structuredAnswer = """
+    Тарифы Claude указаны без налогов.
+
+    | Тариф | В месяц | При годовой |
+    | --- | --- | --- |
+    | Pro | $20 | $17 |
+    | Max | $100 / $200 | — |
+    | Team | $25 | $20 |
+
+    > [!NOTE]
+    > Источники расходятся в названии тарифа за $200.
+    """
+
+    func testCalloutsRecognizeStandaloneAndInlineMarkers() {
+        XCTAssertEqual(MarkdownBlockParser.parse("""
+        > [!NOTE]
+        > First line.
+        > **Second line.**
+
+        > [!WARNING] Inline warning.
+        > More detail.
+        """), [
+            .callout(kind: .note, text: "First line.\n**Second line.**"),
+            .callout(kind: .warning, text: "Inline warning.\nMore detail.")
+        ])
+    }
+
+    func testUnknownOrAttachedAlertMarkerRemainsAQuote() {
+        XCTAssertEqual(MarkdownBlockParser.parse("""
+        > [!TIP] Keep this quote.
+
+        > [!NOTE]attached
+        """), [
+            .blockquote("[!TIP] Keep this quote."),
+            .blockquote("[!NOTE]attached")
+        ])
+    }
+
+    func testTableStyleUsesGridOnlyWhenEveryColumnHas72Points() {
+        for columnCount in [2, 3] {
+            let headers = Array(repeating: "Title", count: columnCount)
+            let width = CGFloat(columnCount * 72)
+            XCTAssertEqual(MarkdownTableStyle.choose(headers: headers, rows: [], width: width - 1), .records)
+            XCTAssertEqual(MarkdownTableStyle.choose(headers: headers, rows: [], width: width),
+                           .grid(columnWidths: Array(repeating: 72, count: columnCount)))
+        }
+        for columnCount in [4, 6] {
+            let headers = Array(repeating: "Title", count: columnCount)
+            XCTAssertEqual(MarkdownTableStyle.choose(headers: headers, rows: [], width: 480), .records)
+        }
+
+        let headers = ["A", "B", "C"]
+        let rows = [["a", "b", String(repeating: "long cell ", count: 20)]]
+        XCTAssertEqual(MarkdownTableStyle.choose(headers: headers, rows: rows, width: 320), .records)
+        guard case .grid(let widths) = MarkdownTableStyle.choose(headers: headers, rows: rows, width: 900) else {
+            return XCTFail("A wide proposal can accommodate the longer third column.")
+        }
+        XCTAssertEqual(widths.reduce(0, +), 900, accuracy: 0.01)
+        XCTAssertTrue(widths.allSatisfy { $0 >= 72 })
+    }
+
+    func testRaggedRowsKeepTheirCellsAndDoNotSwallowTheFollowingCallout() {
+        let blocks = MarkdownBlockParser.parse(#"""
+        | A | B | C |
+        | --- | --- | --- |
+        | Only first |
+        | With \| pipe | | C | Surplus |
+        > [!NOTE] A pipe | here stays in the note.
+        """#)
+        let rows = [["Only first"], ["With | pipe", "", "C", "Surplus"]]
+        XCTAssertEqual(blocks, [
+            .table(headers: ["A", "B", "C"], rows: rows),
+            .callout(kind: .note, text: "A pipe | here stays in the note.")
+        ])
+        XCTAssertEqual(MarkdownTableStyle.choose(headers: ["A", "B", "C"], rows: rows, width: 320), .records)
+    }
+
+    func testEveryPrefixOfStructuredAnswerParses() {
+        let answer = Self.structuredAnswer
+        for end in answer.indices {
+            _ = MarkdownBlockParser.parse(String(answer[..<end]))
+        }
+        XCTAssertEqual(MarkdownBlockParser.parse(answer), [
+            .paragraph("Тарифы Claude указаны без налогов."),
+            .table(headers: ["Тариф", "В месяц", "При годовой"], rows: [
+                ["Pro", "$20", "$17"], ["Max", "$100 / $200", "—"], ["Team", "$25", "$20"]
+            ]),
+            .callout(kind: .note, text: "Источники расходятся в названии тарифа за $200.")
+        ])
+    }
+
+    func testOffscreenStructuredAnswersFit320PointsInBothTableStyles() {
+        let recordAnswer = """
+        Options share the same core features.
+
+        | Plan | Monthly | Annual | Notes |
+        | --- | --- | --- | --- |
+        | Pro | $20 | $17 | \(String(repeating: "long-unbroken-token", count: 10)) |
+        | Max | $100 | — | Higher limits |
+
+        > [!WARNING] Local availability varies.
+        """
+        for answer in [Self.structuredAnswer, recordAnswer] {
+            let root = MarkdownBodyText(text: answer).frame(width: 320, alignment: .leading)
+            let host = NSHostingView(rootView: root)
+            host.frame = NSRect(x: 0, y: 0, width: 320, height: 480)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(host.fittingSize.width, 320, accuracy: 1)
+            XCTAssertGreaterThan(host.fittingSize.height, 110, "Table rows and callout must acquire vertical space.")
+        }
+    }
+
+    func testOffscreenAnswerTableDisclosureExpandsThroughTheNonKeyWindowBridge() throws {
+        let bridge = IslandHoverHitBridge()
+        let rows = (1...12).map { ["Plan \($0)", "$20", "$17"] }
+        let root = MarkdownTableView(headers: ["Plan", "Monthly", "Annual"], rows: rows)
+            .environment(\.islandAnswerHitBridge, bridge)
+            .frame(width: 320)
+            .islandHoverHitRegion(bridge: bridge, surface: .agentAnswer)
+        let host = NSHostingView(rootView: root)
+        let bounds = CGRect(x: 0, y: 0, width: 320, height: 480)
+        let window = NSWindow(contentRect: bounds, styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.frame = bounds
+
+        func layoutHeight() -> CGFloat {
+            for _ in 0..<3 {
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            return host.fittingSize.height
+        }
+
+        let collapsedHeight = layoutHeight()
+        let point = try XCTUnwrap(stride(from: 0, to: Int(bounds.height), by: 4).lazy
+            .map { host.convert(NSPoint(x: 100, y: $0), to: nil) }
+            .first { bridge.mouseDown(at: $0, in: window, allowed: false, allowsAnswer: true) })
+        bridge.mouseUp(at: point, in: window, allowed: false, allowsAnswer: false)
+        XCTAssertEqual(layoutHeight(), collapsedHeight, accuracy: 1)
+
+        XCTAssertTrue(bridge.mouseDown(at: point, in: window, allowed: false, allowsAnswer: true))
+        bridge.mouseUp(at: point, in: window, allowed: false, allowsAnswer: true)
+        XCTAssertGreaterThan(layoutHeight(), collapsedHeight + 40)
+        XCTAssertFalse(window.isKeyWindow)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    func testOffscreenCompletedAnswerReservesRoomForActionCards() async {
+        let store = AskResponseStore()
+        store.showTitle("Compare the plans")
+        let reply = [Self.structuredAnswer] + Array(repeating: "More details about the plans.", count: 50)
+        let cards = (1...4).map { ActionItem.copy(text: "Copy \($0)", description: "Action \($0)") }
+        await store.consume(AsyncStream { stream in
+            stream.yield(.finalAnswer(text: reply.joined(separator: "\n\n")))
+            stream.yield(.blockComplete(.usefulActions(UsefulActionsBlock(items: cards))))
+            stream.yield(.done(sources: []))
+            stream.finish()
+        })
+        let panel = IslandAgentAnswerPanelView(responseStore: store, linksSelection: .init(), panelWidth: 320)
+        let host = NSHostingView(rootView: panel)
+        let bounds = CGRect(x: 0, y: 0, width: 320, height: 600)
+        let window = NSWindow(contentRect: bounds, styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.frame = bounds
+        for _ in 0..<3 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(15))
+        }
+
+        XCTAssertEqual(host.fittingSize.width, 320, accuracy: 1)
+        XCTAssertEqual(host.fittingSize.height, IslandFrameLayout.agentAnswerZoneHeight, accuracy: 1)
+        XCTAssertFalse(window.isVisible)
+    }
+
     // MARK: - Column-width layout (pure logic)
     //
     // The layout helper exists so every row in a table draws its cells at

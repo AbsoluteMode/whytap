@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security report
-    url: https://github.com/AbsoluteMode/whytap/blob/main/SECURITY.md
-    about: Please report vulnerabilities by email, not in a public issue.
+    url: https://github.com/AbsoluteMode/whytap/security/advisories/new
+    about: Report vulnerabilities privately here, not in a public issue. See SECURITY.md.
+  - name: Ask a question
+    url: https://whytap.ai
+    about: Ask anything about Whytap. It answers from the code and drafts the GitHub issue if a feature is missing.

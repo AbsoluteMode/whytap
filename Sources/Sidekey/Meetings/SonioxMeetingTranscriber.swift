@@ -2,7 +2,7 @@ import Foundation
 
 /// Finished recordings use Soniox's file API. A durable checkpoint survives
 /// network failures and note-generation retries without uploading audio again.
-actor SonioxMeetingTranscriber {
+actor SonioxMeetingTranscriber: MeetingRecordedTranscribing {
     /// Empty `segments` means the completed job recognised no speech.
     struct Result: Codable, Sendable, Equatable {
         let text: String
@@ -242,51 +242,13 @@ actor SonioxMeetingTranscriber {
         return id
     }
 
-    /// Recorder chunks are canonical 16 kHz mono PCM16 WAVs. Validate every
-    /// header and stream their bodies to disk; never concatenate WAV headers
-    /// or hold an hour of audio in RAM. Reject incompatible/corrupt recordings.
+    /// Recorder chunks are canonical 16 kHz mono PCM16 WAVs, sent as one
+    /// multipart `file` part (`MeetingAudioUpload`).
     static func writeUpload(chunkURLs: [URL], to url: URL, boundary: String) throws {
-        var total: UInt64 = 0
-        for chunk in chunkURLs {
-            try Task.checkCancellation()
-            total += UInt64(try pcmBody(chunk).count)
-        }
-        guard total > 0, total <= UInt32.max - 36 else { throw MeetingBYOKProcessingError.noAudio }
-        FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        let handle = try FileHandle(forWritingTo: url)
-        defer { try? handle.close() }
-        try handle.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"meeting.wav\"\r\nContent-Type: audio/wav\r\n\r\n".utf8))
-        var header = Data("RIFF".utf8)
-        func append(_ value: UInt32) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { header.append(contentsOf: $0) }
-        }
-        append(UInt32(total) + 36)
-        header.append(Data("WAVEfmt ".utf8)); append(16)
-        header.append(contentsOf: [1, 0, 1, 0]); append(16000); append(32000)
-        header.append(contentsOf: [2, 0, 16, 0]); header.append(Data("data".utf8)); append(UInt32(total))
-        try handle.write(contentsOf: header)
-        for chunk in chunkURLs {
-            try Task.checkCancellation()
-            try handle.write(contentsOf: pcmBody(chunk))
-        }
-        try handle.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
-    }
-
-    private static func pcmBody(_ url: URL) throws -> Data {
-        let data = try Data(contentsOf: url)
-        func uint(_ offset: Int, _ length: Int) -> UInt32 {
-            (0..<length).reduce(0) { $0 | UInt32(data[offset + $1]) << ($1 * 8) }
-        }
-        guard data.count >= 44,
-              data.prefix(4) == Data("RIFF".utf8), data[8..<16] == Data("WAVEfmt ".utf8),
-              uint(16, 4) == 16, uint(20, 2) == 1, uint(22, 2) == 1,
-              uint(24, 4) == 16000, uint(28, 4) == 32000,
-              uint(32, 2) == 2, uint(34, 2) == 16,
-              data[36..<40] == Data("data".utf8),
-              UInt64(uint(40, 4)) == data.count - 44, (data.count - 44).isMultiple(of: 2) else {
-            throw MeetingBYOKProcessingError.upstreamError("Unsupported or incomplete meeting WAV chunk.")
-        }
-        return Data(data.dropFirst(44))
+        try MeetingAudioUpload.write(
+            chunkURLs: chunkURLs, to: url,
+            prefix: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"meeting.wav\"\r\nContent-Type: audio/wav\r\n\r\n".utf8),
+            suffix: Data("\r\n--\(boundary)--\r\n".utf8)
+        )
     }
 }

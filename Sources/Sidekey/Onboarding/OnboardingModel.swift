@@ -10,7 +10,8 @@ import Foundation
 final class OnboardingModel: ObservableObject {
     @Published private(set) var pages: [OnboardingPage]
     @Published private(set) var page: OnboardingPage
-    @Published var keyProvider: AIProviderKind = .soniox
+    /// The speech provider clicked on the key card; `nil` until one is.
+    @Published var keyProvider: AIProviderKind?
     /// The dictation language; `nil` is Auto. The same value as the Input
     /// Lang tool and Settings.
     @Published private(set) var language: AppLanguage?

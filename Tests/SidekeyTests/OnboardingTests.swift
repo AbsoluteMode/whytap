@@ -424,6 +424,41 @@ final class OnboardingTests: XCTestCase {
         XCTAssertNil(preferences.selectedLanguage, "Back to Auto")
     }
 
+    func testLanguageSearchFindsEnglishAndNativeNames() {
+        let all = OnboardingLanguageSearch.results("")
+        XCTAssertNotNil(all.first)
+        XCTAssertNil(all.first ?? nil, "Any language leads the full list")
+        XCTAssertEqual(OnboardingLanguageSearch.results("").count, AppLanguage.all.count + 1)
+        XCTAssertEqual(OnboardingLanguageSearch.results("Russian").first??.code, "ru")
+        XCTAssertEqual(OnboardingLanguageSearch.results("рус").first??.code, "ru", "Native name, typed in Cyrillic")
+        XCTAssertEqual(OnboardingLanguageSearch.results("RUS").first??.code, "ru", "Case does not matter")
+        XCTAssertEqual(OnboardingLanguageSearch.results("deu").first??.code, "de", "Deutsch")
+        XCTAssertEqual(OnboardingLanguageSearch.results("espanol").first??.code, "es", "Accents do not matter")
+        XCTAssertEqual(OnboardingLanguageSearch.results("any").count, 1, "Any language itself")
+        XCTAssertTrue(OnboardingLanguageSearch.results("zzzz").isEmpty)
+        let ukr = OnboardingLanguageSearch.results("ukr")
+        XCTAssertEqual(ukr.first??.code, "uk", "A name that starts with the query comes first")
+    }
+
+    func testKeyCardOffersComeFromAPIHints() {
+        let offers = OnboardingSpeechOffer.all
+        XCTAssertEqual(offers.map(\.kind), OnboardingDropSpeech.keyProviders, "Every speech provider Drop can use")
+        let deepgram = offers.first { $0.kind == .deepgram }
+        XCTAssertEqual(deepgram?.short, "$200 credit")
+        XCTAssertEqual(deepgram?.url?.host, "deepgram.com")
+        XCTAssertEqual(offers.first { $0.kind == .elevenLabs }?.short, "10,000 credits/mo")
+        XCTAssertNil(offers.first { $0.kind == .soniox }?.short, "No offer is invented where API hints list none")
+        for hint in APIHintsView.hints where hint.category == .speech {
+            XCTAssertTrue(offers.contains { $0.kind.displayName == hint.provider }, "\(hint.provider) offer is missing")
+        }
+    }
+
+    func testNoProviderIsChosenUntilClicked() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        XCTAssertNil(model.keyProvider)
+    }
+
     // MARK: - Coding agents
 
     func testCodingAgentsConnectThroughTheCaseClientSetup() async throws {
@@ -571,22 +606,22 @@ final class OnboardingTests: XCTestCase {
             OnboardingClipStage.playsVideo = true
         }
 
-        enum Stop { case speech, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
+        enum Stop { case speech, speechProvider, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
                         customize, customizeHover, features, featuresConnected }
         let shots: [(Stop, String)] = [
-            (.speech, "1-speech"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
+            (.speech, "1-speech"), (.speechProvider, "1-speech-deepgram"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
             (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
             (.tryDownloading, "3-try-drop-downloading"), (.customize, "4-customize-shortcuts"),
             (.customizeHover, "4-customize-hover"), (.features, "5-more"), (.featuresConnected, "5-more-connected"),
         ]
-        let beforeCustomize: [Stop] = [.speech, .speechListening, .speechLanguage]
+        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechListening, .speechLanguage]
         let fromTry: [Stop] = [.tryEmpty, .tryDone, .tryDownloading, .customize, .customizeHover, .features, .featuresConnected]
         for (stop, name) in shots {
             // A new Mac: no model (downloading once asked; landed by the try
             // page), nothing granted.
             let status: OnDeviceSpeechModelStatus
             switch stop {
-            case .speech, .speechListening, .speechLanguage: status = .notDownloaded
+            case .speech, .speechProvider, .speechListening, .speechLanguage: status = .notDownloaded
             case .permissions, .tryDownloading: status = .downloading(0.42)
             default: status = .ready
             }
@@ -609,6 +644,7 @@ final class OnboardingTests: XCTestCase {
             defer { model.stop() }
             XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
             if stop == .speechLanguage { model.setLanguage(AppLanguage.find(code: "ru")) }
+            if stop == .speechProvider { model.keyProvider = .deepgram }
             if stop == .customizeHover { model.customizeVideo = .hover }
             if !beforeCustomize.contains(stop) {
                 model.startOnDevice()  // Download and use for Drop
@@ -633,7 +669,7 @@ final class OnboardingTests: XCTestCase {
             content.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(500))
             switch stop {
-            case .speech, .speechLanguage: model.demo.show(.done)
+            case .speech, .speechProvider, .speechLanguage: model.demo.show(.done)
             case .speechListening: model.demo.show(.recording, level: 0.62)
             case .tryDone:
                 let textView = try XCTUnwrap(Self.textView(in: content))
@@ -652,6 +688,27 @@ final class OnboardingTests: XCTestCase {
             try png.write(to: directory.appendingPathComponent("\(name).png"))
             XCTAssertFalse(window.isVisible)
             window.contentViewController = nil
+            window.close()
+        }
+
+        // The language list opens in a popover, which an offscreen window
+        // does not draw: render its content alone, searched in Russian.
+        for (query, name) in [("", "1-speech-language-list"), ("рус", "1-speech-language-search")] {
+            let list = OnboardingLanguageList(selected: nil, query: query, choose: { _ in })
+            let hosting = NSHostingView(rootView: list)
+            hosting.frame = NSRect(x: 0, y: 0, width: 260, height: 285)
+            let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.contentView = hosting
+            window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            hosting.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(300))
+            let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("\(name).png"))
+            window.contentView = nil
             window.close()
         }
     }

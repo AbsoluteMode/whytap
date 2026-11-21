@@ -51,6 +51,8 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
     let step: String
     let index: Int
     let count: Int
+    /// The speech page holds two cards and takes a little more height.
+    var top: CGFloat = 72
     @ViewBuilder var left: Left
     @ViewBuilder var footer: Footer
     @ViewBuilder var stage: Stage
@@ -71,7 +73,7 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
                 HStack(spacing: 10) { footer }
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(EdgeInsets(top: 72, leading: 40, bottom: 26, trailing: 32))
+            .padding(EdgeInsets(top: top, leading: 40, bottom: 26, trailing: 32))
             .frame(width: OnboardingTheme.leftPaneWidth, alignment: .topLeading)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(OnboardingTheme.bg)
@@ -210,7 +212,7 @@ struct OnboardingSpeechPage: View {
         let presentation = Presentation(onDevice.status)
         let copy = OnboardingTryPage.Copy(shortcut: configuration.dropVoiceShortcut.title,
                                           gesture: configuration.normalizedDropGesture)
-        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 52) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
                 OnboardingLede(text: copy.pitch)
@@ -260,9 +262,11 @@ struct OnboardingSpeechPage: View {
 }
 
 /// The language Drop listens for: Auto or one of the menu's languages, the
-/// same setting as the Input Lang tool.
+/// same setting as the Input Lang tool. A searchable list: typing filters by
+/// English or native name, arrows move, Return picks, Escape closes.
 struct OnboardingLanguageRow: View {
     @ObservedObject var model: OnboardingModel
+    @State private var open = false
 
     static let autoTitle = "Any language"
 
@@ -277,20 +281,173 @@ struct OnboardingLanguageRow: View {
             Text("I speak")
                 .font(OnboardingTheme.sans(13))
                 .foregroundColor(OnboardingTheme.muted)
-            OnboardingMenu(title: Self.title(model.language), minWidth: 140) {
-                Button(Self.autoTitle) { model.setLanguage(nil) }
-                Divider()
-                ForEach(AppLanguage.all.sorted { $0.englishName < $1.englishName }, id: \.code) { language in
-                    Button(Self.title(language)) { model.setLanguage(language) }
+            Button { open.toggle() } label: {
+                OnboardingMenuLabel(title: Self.title(model.language), minWidth: 140)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dictation language")
+            .accessibilityValue(Self.title(model.language))
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                OnboardingLanguageList(selected: model.language) { language in
+                    model.setLanguage(language)
+                    open = false
                 }
             }
-            .accessibilityLabel("Dictation language")
         }
     }
 }
 
-/// The person's own speech key: provider, key and Save on one card, with the
-/// providers that start without a card under it.
+/// Search over the dictation languages. Pure, so it is tested without a view.
+enum OnboardingLanguageSearch {
+    /// `nil` stands for Any language. An empty query lists everything in
+    /// English-name order; otherwise names that start with the query come
+    /// before names that only contain it.
+    static func results(_ query: String, in languages: [AppLanguage] = AppLanguage.all) -> [AppLanguage?] {
+        let sorted = languages.sorted { $0.englishName < $1.englishName }
+        let needle = fold(query)
+        guard !needle.isEmpty else { return [nil] + sorted }
+        func names(_ language: AppLanguage) -> [String] {
+            [language.englishName, language.displayName, language.code].map(fold)
+        }
+        let starts = sorted.filter { names($0).contains { $0.hasPrefix(needle) } }
+        let contains = sorted.filter { language in
+            !starts.contains(language) && names(language).contains { $0.contains(needle) }
+        }
+        let auto: [AppLanguage?] = fold(OnboardingLanguageRow.autoTitle).contains(needle) || fold("auto").hasPrefix(needle)
+            ? [nil] : []
+        return auto + starts + contains
+    }
+
+    static func fold(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+    }
+}
+
+struct OnboardingLanguageList: View {
+    let selected: AppLanguage?
+    let choose: (AppLanguage?) -> Void
+    @State private var query: String
+    @State private var highlighted = 0
+    @FocusState private var focused: Bool
+
+    init(selected: AppLanguage?, query: String = "", choose: @escaping (AppLanguage?) -> Void) {
+        self.selected = selected
+        self.choose = choose
+        _query = State(initialValue: query)
+    }
+
+    var body: some View {
+        let results = OnboardingLanguageSearch.results(query)
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.muted)
+                    .accessibilityHidden(true)
+                TextField("Search languages", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(OnboardingTheme.sans(13))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .focused($focused)
+                    .onSubmit { pick(results) }
+                    .accessibilityLabel("Search languages")
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            Rectangle().fill(OnboardingTheme.border).frame(height: 0.5)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(Array(results.enumerated()), id: \.offset) { index, language in
+                            row(language, highlighted: index == highlighted)
+                                .id(index)
+                                .onTapGesture { choose(language) }
+                                .onHover { if $0 { highlighted = index } }
+                        }
+                        if results.isEmpty {
+                            Text("No language matches")
+                                .font(OnboardingTheme.sans(12))
+                                .foregroundColor(OnboardingTheme.faint)
+                                .frame(maxWidth: .infinity, minHeight: 40)
+                        }
+                    }
+                    .padding(5)
+                }
+                .onChange(of: highlighted) { _, index in proxy.scrollTo(index) }
+            }
+            .frame(height: 248)
+        }
+        .frame(width: 260)
+        .background(OnboardingTheme.surface)
+        .environment(\.colorScheme, .dark)
+        .onAppear { focused = true }
+        .onChange(of: query) { _, _ in highlighted = 0 }
+        .onKeyPress(.downArrow) { highlighted = min(highlighted + 1, max(results.count - 1, 0)); return .handled }
+        .onKeyPress(.upArrow) { highlighted = max(highlighted - 1, 0); return .handled }
+    }
+
+    private func pick(_ results: [AppLanguage?]) {
+        guard results.indices.contains(highlighted) else { return }
+        choose(results[highlighted])
+    }
+
+    private func row(_ language: AppLanguage?, highlighted: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(language?.englishName ?? OnboardingLanguageRow.autoTitle)
+                .foregroundColor(OnboardingTheme.ink)
+            if let language, language.displayName != language.englishName {
+                Text(language.displayName).foregroundColor(OnboardingTheme.muted)
+            }
+            Spacer(minLength: 4)
+            if language?.code == selected?.code {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(OnboardingTheme.accent)
+                    .accessibilityLabel("Selected")
+            }
+        }
+        .font(OnboardingTheme.sans(13))
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(highlighted ? OnboardingTheme.accent.opacity(0.28) : .clear))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A speech provider on the onboarding's key card with its free offer from
+/// Settings -> API & Models -> API hints (the one source for offers).
+struct OnboardingSpeechOffer: Equatable {
+    let kind: AIProviderKind
+    let short: String?
+    let url: URL?
+    let detail: String?
+
+    static var all: [OnboardingSpeechOffer] {
+        OnboardingDropSpeech.keyProviders.map { kind in
+            let hint = APIHintsView.hints.first { $0.category == .speech && $0.provider == kind.displayName }
+            return OnboardingSpeechOffer(kind: kind, short: hint.map(short), url: hint?.url,
+                                         detail: hint.map { "\($0.allowance) \($0.cadence). \($0.detail)" })
+        }
+    }
+
+    /// "$200 credit", "10,000 credits/mo": the allowance and its period in a
+    /// tile's width.
+    static func short(_ hint: APIHintsView.Hint) -> String {
+        let cadence = hint.cadence.lowercased()
+        let unit = cadence.contains("credits") ? " credits" : cadence.contains("credit") ? " credit" : ""
+        if cadence.contains("month") { return "\(hint.allowance)\(unit)/mo" }
+        if cadence.contains("day") { return "\(hint.allowance)\(unit)/day" }
+        return hint.allowance + unit
+    }
+}
+
+/// The person's own speech key: every speech provider with its free offer;
+/// a click opens its key field and offer link.
 @MainActor
 struct OnboardingKeyCard: View {
     @ObservedObject var model: OnboardingModel
@@ -300,89 +457,114 @@ struct OnboardingKeyCard: View {
     @State private var failure: String?
     @FocusState private var focused: Bool
 
-    private var freeOffers: [APIHintsView.Hint] {
-        APIHintsView.hints.filter { $0.category == .speech && $0.access == .noCard }
-    }
-
     var body: some View {
-        let provider = model.keyProvider
+        let offers = OnboardingSpeechOffer.all
+        let selected = offers.first { $0.kind == model.keyProvider }
         OnboardingCard {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
-                    OnboardingIconTile(systemImage: "key")
-                    Text("Your API key")
-                        .font(OnboardingTheme.sans(13.5, weight: .semibold))
-                        .foregroundColor(OnboardingTheme.ink)
-                    Spacer(minLength: 4)
-                    OnboardingMenu(title: provider.displayName, minWidth: 104) {
-                        ForEach(OnboardingDropSpeech.keyProviders, id: \.self) { kind in
-                            Button(kind.displayName) { model.keyProvider = kind }
-                        }
-                    }
-                    .accessibilityLabel("Speech service")
-                }
-                if model.keyAvailable(provider) {
-                    HStack(spacing: 10) {
-                        Text("Saved on this Mac.")
-                            .font(OnboardingTheme.sans(12))
-                            .foregroundColor(OnboardingTheme.muted)
-                        Spacer(minLength: 0)
-                        OnboardingOutlineButton(title: "Use for Drop") { model.useKey(provider) }
-                    }
-                } else {
-                    HStack(spacing: 8) {
-                        SecureField("Paste your \(provider.displayName) key", text: $key)
-                            .textFieldStyle(.plain)
-                            .font(OnboardingTheme.sans(12.5))
-                            .foregroundColor(OnboardingTheme.ink)
-                            .focused($focused)
-                            .onSubmit(save)
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.bg))
-                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(focused ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.borderStrong,
-                                              lineWidth: focused ? 1.2 : 0.75))
-                            .disabled(saving)
-                        if saving {
-                            ProgressView().controlSize(.small).accessibilityLabel("Checking the key")
-                        } else {
-                            OnboardingOutlineButton(title: "Save", action: save)
-                                .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
+                Text("OR USE YOUR KEY")
+                    .font(OnboardingTheme.mono(10, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundColor(OnboardingTheme.faint)
+                HStack(spacing: 8) {
+                    ForEach(offers, id: \.kind) { offer in
+                        tile(offer, selected: offer.kind == model.keyProvider)
                     }
                 }
-                if let failure {
-                    OnboardingStageStatus(tone: .warning, text: failure)
-                } else if !freeOffers.isEmpty {
-                    HStack(spacing: 8) {
-                        Text("No key? Start free:")
-                            .foregroundColor(OnboardingTheme.faint)
-                        ForEach(freeOffers, id: \.provider) { hint in
-                            Link(destination: hint.url) {
-                                HStack(spacing: 3) {
-                                    Text(hint.provider)
-                                    Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .semibold))
-                                }
-                                .foregroundColor(OnboardingTheme.muted)
-                            }
-                            .buttonStyle(.plain)
-                            .help("\(hint.allowance) \(hint.cadence). \(hint.detail)")
-                        }
-                    }
-                    .font(OnboardingTheme.sans(11.5))
-                }
+                if let selected { actions(selected) }
             }
         }
         .onChange(of: model.keyProvider) { _, _ in failure = nil; key = "" }
+    }
+
+    private func tile(_ offer: OnboardingSpeechOffer, selected: Bool) -> some View {
+        Button {
+            model.keyProvider = selected ? nil : offer.kind
+        } label: {
+            VStack(spacing: 5) {
+                ProviderKindIcon(kind: offer.kind, size: 20)
+                    .foregroundColor(OnboardingTheme.ink)
+                Text(offer.kind.displayName)
+                    .font(OnboardingTheme.sans(12, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .lineLimit(1)
+                Text(offer.short ?? "Paid")
+                    .font(OnboardingTheme.sans(10.5, weight: offer.short == nil ? .regular : .medium))
+                    .foregroundColor(offer.short == nil ? OnboardingTheme.faint : OnboardingTheme.green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
+                              lineWidth: selected ? 1.2 : 0.75))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(offer.detail ?? offer.kind.displayName)
+        .accessibilityLabel(offer.short.map { "\(offer.kind.displayName), \($0)" } ?? offer.kind.displayName)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder private func actions(_ offer: OnboardingSpeechOffer) -> some View {
+        let provider = offer.kind
+        VStack(alignment: .leading, spacing: 8) {
+            if model.keyAvailable(provider) {
+                HStack(spacing: 10) {
+                    Text("Your \(provider.displayName) key is saved.")
+                        .font(OnboardingTheme.sans(12))
+                        .foregroundColor(OnboardingTheme.muted)
+                    Spacer(minLength: 0)
+                    OnboardingOutlineButton(title: "Use for Drop") { model.useKey(provider) }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    SecureField("Paste your \(provider.displayName) key", text: $key)
+                        .textFieldStyle(.plain)
+                        .font(OnboardingTheme.sans(12.5))
+                        .foregroundColor(OnboardingTheme.ink)
+                        .focused($focused)
+                        .onSubmit(save)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.bg))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(focused ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.borderStrong,
+                                          lineWidth: focused ? 1.2 : 0.75))
+                        .disabled(saving)
+                    if saving {
+                        ProgressView().controlSize(.small).accessibilityLabel("Checking the key")
+                    } else {
+                        OnboardingOutlineButton(title: "Save", action: save)
+                            .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            if let failure {
+                OnboardingStageStatus(tone: .warning, text: failure)
+            } else if let url = offer.url {
+                Link(destination: url) {
+                    HStack(spacing: 4) {
+                        Text("Get offer")
+                        Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .semibold))
+                    }
+                    .font(OnboardingTheme.sans(12, weight: .medium))
+                    .foregroundColor(OnboardingTheme.ink2)
+                }
+                .buttonStyle(.plain)
+                .help(offer.detail ?? "")
+            }
+        }
     }
 
     /// The same check and Keychain save as Settings -> API keys
     /// (`ProviderKeyForm.save` with the provider's account).
     private func save() {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty, !saving else { return }
-        let provider = model.keyProvider
+        guard !candidate.isEmpty, !saving, let provider = model.keyProvider else { return }
         saving = true
         failure = nil
         Task {

@@ -120,6 +120,14 @@ The provenance CLI defaults `--notarization` to `none` for existing local
 build-only verifiers; publishing always passes its explicit expectation.
 Keep the adjacent `<DMG>.manifest.json` with the archive;
 `--upload-only` requires both files from the same build.
+The upload publishes that manifest unchanged as a third release asset,
+`<Bundle>-latest.dmg.manifest.json`, after checking it and before the draft is
+published, so users can compare their download with it
+([Verify your download](install.md#verify-your-download)). When
+`RELEASE_NOTES_FILE` is set, the release body ends with the committed
+`scripts/release-notes-footer.md`, filled in with the asset names, signing
+identity and notarization; GitHub-generated notes are left as they are. WHY:
+`.project-docs/decisions/2026-11-21-published-release-manifest.md`.
 
 The publication gate must reject a missing or inconsistent manifest, changed
 source commit or changed archive bytes before loading signing keys or uploading.

@@ -159,6 +159,21 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
 
-<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+
+## What it replaces
+
+The paid Mac apps Whytap stands in for, at their individual prices on the official pricing pages, checked November 21, 2026:
+
+| Paid app | What it does | Price | In Whytap |
+|---|---|---|---|
+| [Wispr Flow](https://wisprflow.ai/pricing) Pro | Voice dictation in any app | $144 / yr ($15 / mo billed monthly) | **Drop** |
+| [Granola](https://www.granola.ai/pricing) Business | AI meeting notes without a call bot | $14 / mo ($168 / yr) | **Meeting notes** |
+| [Raycast](https://www.raycast.com/pricing) Pro | Quick AI from a hotkey | $96 / yr ($10 / mo billed monthly) | **Agent** |
+| [CleanShot X](https://cleanshot.com/pricing) | Screenshot editor with blur | $35 once, then $19 / yr for updates | **Shot** |
+| [Paste](https://pasteapp.io/pricing) | Clipboard history | $29.99 / yr ($3.99 / mo billed monthly) | **History** |
+| [Vivid](https://www.getvivid.app/) | Extra XDR / HDR brightness | €10 once | **Display Extra** |
+
+Together that is about **$485 a year** on annual plans, or about **$560** billed monthly. Whytap is **$0**: you pay providers directly for what you use, or nothing for dictation on this Mac.
 
 <p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

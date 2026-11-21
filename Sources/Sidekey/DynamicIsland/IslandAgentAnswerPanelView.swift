@@ -50,7 +50,7 @@ struct IslandAgentAnswerPanelView: View {
         // face), NOT over the card: the wing sits empty in the answer phase, so
         // it is the natural home for the dismiss control. The click is caught at
         // the window level (`IslandPanel.sendEvent` against `answerCloseHotspot`,
-        // now mapped onto the wing) — see docs/troubleshooting.md.
+        // now mapped onto the wing) — see docs/bugs/2026-09-04-island-answer-close-first-mouse.md.
         //
         // No detached-panel background: the answer's components (query pill,
         // text, blocks) read as separate elements floating on the wallpaper

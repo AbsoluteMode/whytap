@@ -1,14 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="421" height="136" viewBox="0 0 421 136">
-  <rect x="0.5" y="0.5" width="420" height="135" rx="14" fill="#151b23" stroke="#2d333b"/>
-  <circle cx="34" cy="34" r="17" fill="#2a2350"/>
-  <g transform="translate(25.0 25.0) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1" />
-  <rect width="7" height="7" x="14" y="3" rx="1" />
-  <rect width="7" height="7" x="14" y="14" rx="1" />
-  <rect width="7" height="7" x="3" y="14" rx="1" /></g>
-  <text x="62" y="40" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f0f6fc">Orchestrator</text>
-  <rect x="361" y="24.0" width="44" height="20" rx="10.0" fill="#6c5ce7"/>
-  <text x="383.0" y="38.1" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#ffffff">soon</text>
-  <text x="18" y="80" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#b8adff">Claude Code plugin</text>
-  <text x="18" y="103" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">Ten chats in one window: it keeps the task list, starts the</text>
-  <text x="18" y="121" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">sessions and writes to you only when it needs you.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="421" height="112" viewBox="0 0 421 112">
+  <rect x="0.5" y="0.5" width="420" height="111" rx="14" fill="#151b23" stroke="#2d333b"/>
+  <text x="18" y="34" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f0f6fc">Orchestrator</text>
+  <rect x="361" y="19.0" width="44" height="20" rx="10.0" fill="#6c5ce7"/>
+  <text x="383.0" y="33.1" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#ffffff">soon</text>
+  <text x="18" y="58" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#b8adff">Claude Code plugin</text>
+  <text x="18" y="80" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">Ten chats in one window: it keeps the task list, starts the</text>
+  <text x="18" y="98" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">sessions and writes to you only when it needs you.</text>
 </svg>

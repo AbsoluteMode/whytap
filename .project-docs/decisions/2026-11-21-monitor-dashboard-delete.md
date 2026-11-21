@@ -1,8 +1,8 @@
 ---
 id: monitor-dashboard-delete-2026-11-21
 type: decision
-title: Monitor dashboards can be deleted and stay deleted while their collector runs
-summary: The × on a custom Monitor dashboard row (Cancel-first confirmation) records its ID in Monitor/removed-dashboards.json and removes its snapshot files; collectors and their scripts are never touched, and installing the dashboard again lists it again.
+title: Every Monitor dashboard can be deleted and stays deleted while its collector runs
+summary: The × on any Monitor dashboard row, Server status included, (Cancel-first confirmation) records its ID in Monitor/removed-dashboards.json and removes its snapshot files; collectors and their scripts are never touched, and installing the dashboard again lists it again.
 status: confirmed
 tags: [monitor, hover, dashboards]
 canonical_for: [monitor-dashboard-delete]
@@ -29,6 +29,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-21 the user asked for an × on each row instead of right-click, no chevron and the scroller moved to the right.
     confirmed_at: 2026-11-21
+  - type: user-confirmed
+    reference: On 2026-11-21 the user asked for one uniform approach where every Monitor screen, Server status included, can be deleted, and chose the shared deleted list over moving server polling into a collector.
+    confirmed_at: 2026-11-21
 related: []
 ---
 
@@ -43,8 +46,10 @@ minutes), which Whytap neither installs nor owns.
 
 ## Decision
 
-- A custom dashboard's row in the picker has an **×** on its right. Server
-  status is built in and has none. There is no context menu: the island has
+- Every row in the picker, Server status included, has an **×** on its
+  right: one rule for every board (the user's correction on 2026-11-21: the
+  approach must be uniform and any screen the user no longer needs must be
+  deletable). There is no context menu: the island has
   no right-click interactions anywhere (the user's correction on 2026-11-21,
   after a first version put Delete… in the row and heading context menus).
   Rows have no chevron, since a click on a row plainly opens it, and the
@@ -59,6 +64,20 @@ minutes), which Whytap neither installs nor owns.
   (`{"removed": [...]}`, atomic, mode 0600) and then removes every snapshot
   file in `dashboards/` that decodes to that ID. Other dashboards, collectors,
   their scripts, launchd agents and `servers.json` are never touched.
+- Server status has no snapshot: its readings come from Whytap's own SSH
+  polling of `Monitor/servers.json`. Deleting it records `server-status` in
+  the same list; the store then reads no server configuration, so nothing
+  connects to the servers, and `servers.json` stays as it is. A poll already
+  in flight (it can wait seconds on a credential lookup) is cancelled at once
+  and the collector checks for cancellation right before starting SSH. The
+  island and Toolbox each have a store: Delete posts an in-process notice
+  for its Monitor folder, and every store over that folder reloads the list
+  at once, cancelling its own poll in flight.
+  Polling also pauses, with a notice on Server status, while the list is
+  unreadable, since it may hold a deletion; it resumes once the list reads.
+- `customize.py restore-dashboard <id>` takes any ID off the list under the
+  same lock (Server status reconnects; a custom board appears when its
+  collector next writes). `server-status` stays reserved as a snapshot ID.
 - `MonitorStore.reloadFiles` skips listed IDs, so a collector that rewrites
   the snapshot does not bring the board back, also after relaunch. A hidden
   board is not counted as a broken file.
@@ -117,6 +136,19 @@ minutes), which Whytap neither installs nor owns.
   pure table (`MonitorPickerControlAppearance`), tested for every
   combination, and a pixel test renders the × idle, hovered, disabled and
   disabled under the pointer (the last two must match).
+- Server status: deleting it stops SSH (counted collector calls), keeps
+  `servers.json` byte for byte and other boards, survives a relaunch and gives
+  a second surface `alreadyGone`; Cancel keeps it polling; taking the ID off
+  the list connects again. `restore-dashboard` (6 tests): relists Server
+  status and a custom board, keeps other deletions with mode 0600, changes
+  nothing for an ID that was not deleted, on `--dry-run`, for a broken list,
+  an invalid ID or a lock that stays busy.
+- The builder's review (queue ticket 315) found a poll paused before SSH
+  still connecting after Delete, and an unreadable list restarting polling in
+  the running store and after relaunch. Ticket 317 then found a poll on the
+  other surface (a second store) still connecting. All three reproducers are
+  now tests and pass, plus a check that a store over another folder (beta) is
+  not affected.
 - Not tested: the real × and alert over the live island panel.
 
 ## Rejected
@@ -127,5 +159,10 @@ minutes), which Whytap neither installs nor owns.
   between the check and the rename.
 - Stopping or deleting the collector: not Whytap's to touch.
 - Delete… in a context menu: the island has no right-click interactions.
+- Keeping Server status undeletable as built in: the user wants one rule for
+  every board.
+- Moving the server SSH polling into an external collector that writes a
+  snapshot: one kind of board, but live readings become periodic and the user
+  chose the shared list instead.
 
 2026-11-21 · PR: see the pull request that adds this file.

@@ -33,7 +33,12 @@ enum WhytapCustomizationContext {
         optional updatedAt (ISO 8601 with seconds and timezone), optional
         staleAfterSeconds (default 60), and widgets. Use a unique id containing letters,
         digits, dot, underscore or hyphen; start with a letter or digit. The id
-        server-status is reserved for the built-in dashboard. Window bounds are
+        server-status is reserved for the built-in dashboard. The user can delete any
+        dashboard in Monitor, Server status included; its id is then listed in
+        removed-dashboards.json in the Monitor data directory and hidden (Server status
+        stops polling its servers). To bring one back, run
+        `python3 scripts/customize.py restore-dashboard <id> --flavor prod` from the
+        Whytap source checkout. Window bounds are
         width 320...1200, height 360...1200, freshness 5...86400 seconds. A file is
         limited to 2 MB and 128 widgets, with unique widget ids.
         A widget has id, kind (metric/progress/status/text/chart), title and optional

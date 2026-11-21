@@ -8,6 +8,12 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var dashboardError: String?
     @Published private(set) var serverError: String?
     @Published private(set) var refreshSeconds: Double = 15
+    /// Server status was deleted like any other board: it is not listed and
+    /// Whytap does not connect to the servers in servers.json.
+    @Published private(set) var serverStatusRemoved = false
+
+    /// Server status's ID in the deleted list; never a snapshot's ID.
+    static let serverStatusID = "server-status"
 
     let root: URL
     private let collector: (MonitorServer) async throws -> MonitorServerMetrics
@@ -19,6 +25,14 @@ final class MonitorStore: ObservableObject {
     /// Every dashboard file by the ID it decodes to, duplicates included, so
     /// Delete removes each copy of the board it lists.
     private var dashboardFiles: [String: [URL]] = [:]
+    /// The server poll in flight; cancelled as soon as polling is no longer
+    /// allowed, so a poll still preparing its connection never reaches SSH.
+    private var refreshTask: Task<Void, Never>?
+    /// Island and Toolbox each have a store; a Delete on one reaches the
+    /// others at once through this notification (object: the Monitor root),
+    /// so their polls in flight are cancelled too, not on their next loop.
+    static let removedDashboardsChanged = Notification.Name("Whytap.Monitor.removedDashboardsChanged")
+    private var removedListObserver: AnyCancellable?
     /// How long Delete waits for an installer holding the deleted list.
     var removedListLockTimeout: TimeInterval = 2
 
@@ -28,6 +42,13 @@ final class MonitorStore: ObservableObject {
          }) {
         self.root = root
         self.collector = collector
+        let ownRoot = root.standardizedFileURL
+        // Posted synchronously on the main thread by deleteDashboard.
+        removedListObserver = NotificationCenter.default.publisher(for: Self.removedDashboardsChanged)
+            .filter { ($0.object as? URL)?.standardizedFileURL == ownRoot }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadFiles() }
+            }
     }
 
     var dashboardsDirectory: URL { root.appendingPathComponent("dashboards", isDirectory: true) }
@@ -105,11 +126,22 @@ final class MonitorStore: ObservableObject {
             dashboardError = rejected > 0 ? "\(rejected) dashboard file(s) could not be loaded. Ask your agent to validate them." : nil
         }
 
+        // WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+        serverStatusRemoved = removed?.contains(Self.serverStatusID) == true
+        // Servers are polled only while the list is readable and does not
+        // hold server-status: an unreadable list may hide a deletion, so it
+        // pauses polling instead of resuming it.
+        let pollingAllowed = removed != nil && !serverStatusRemoved
+        if !pollingAllowed { refreshTask?.cancel() }
         let configFile = root.appendingPathComponent("servers.json")
-        guard fm.fileExists(atPath: configFile.path) else {
+        // A deleted Server status reads no configuration, so refreshServers
+        // has nothing to connect to; servers.json itself stays as it is.
+        guard pollingAllowed, fm.fileExists(atPath: configFile.path) else {
             configuration = nil
             readings = []
-            serverError = nil
+            serverError = removed == nil
+                ? "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
+                : nil
             return
         }
         do {
@@ -141,15 +173,17 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    /// Deletes one custom dashboard: records its ID as removed first (so a
-    /// collector that rewrites the snapshot cannot bring it back), then
-    /// removes every snapshot file with that ID. Collectors and other files
-    /// in Monitor are never touched. Returns false when the board was no
-    /// longer listed (another surface deleted it); its ID is still recorded.
+    /// Deletes one dashboard: records its ID as removed first (so a collector
+    /// that rewrites the snapshot cannot bring it back), then removes every
+    /// snapshot file with that ID. Server status is deleted the same way; it
+    /// has no snapshot, and once listed Whytap stops polling its servers.
+    /// Collectors, servers.json and other files in Monitor are never touched.
+    /// Returns false when the board was no longer listed (another surface
+    /// deleted it); its ID is still recorded.
     /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     @discardableResult
     func deleteDashboard(id: String) throws -> Bool {
-        guard id != "server-status", MonitorDashboard.validID(id) else {
+        guard MonitorDashboard.validID(id) else {
             throw MonitorValidationError.invalidDashboard
         }
         // The whole change runs under the list's lock, which install-dashboard
@@ -157,7 +191,8 @@ final class MonitorStore: ObservableObject {
         // removing the files (and lose its fresh snapshot).
         let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
             reloadFiles()
-            let wasListed = dashboards.contains { $0.id == id }
+            let wasListed = id == Self.serverStatusID
+                ? !serverStatusRemoved : dashboards.contains { $0.id == id }
             var removed = try MonitorRemovedDashboards.load(root: root)
             if !removed.contains(id) {
                 removed.insert(id)
@@ -175,6 +210,8 @@ final class MonitorStore: ObservableObject {
             return wasListed
         }
         reloadFiles()
+        // Every other live Monitor surface over this folder reloads now.
+        NotificationCenter.default.post(name: Self.removedDashboardsChanged, object: root.standardizedFileURL)
         return wasListed
     }
 
@@ -185,6 +222,25 @@ final class MonitorStore: ObservableObject {
             pending.refreshing = true
             return pending
         }
+        // Its own task, so reloadFiles can cancel it the moment Server status
+        // is deleted (here or on another surface) or the list turns unreadable.
+        let poll = Task<Void, Never> { @MainActor [weak self] in
+            guard let self else { return }
+            await self.collect(configuration, generation: refreshGeneration)
+        }
+        refreshTask = poll
+        await withTaskCancellationHandler { await poll.value } onCancel: { poll.cancel() }
+        if refreshTask == poll { refreshTask = nil }
+        if poll.isCancelled {
+            readings = readings.map { reading in
+                var idle = reading
+                idle.refreshing = false
+                return idle
+            }
+        }
+    }
+
+    private func collect(_ configuration: MonitorServerConfiguration, generation refreshGeneration: UInt64?) async {
         let collector = self.collector
         await withTaskGroup(of: (MonitorServer, MonitorServerMetrics?).self) { group in
             for server in configuration.servers {

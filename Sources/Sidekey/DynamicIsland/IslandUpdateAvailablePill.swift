@@ -13,9 +13,9 @@ enum IslandUpdateAvailablePillStyle {
     static let readyToInstallSystemImage = "checkmark.circle.fill"
     /// Hover-expanded primary action — Download (for .available stage).
     static let downloadActionSystemImage = "arrow.down.circle.fill"
-    /// Hover-expanded secondary action — ✕ Skip this version (for .available
-    /// stage). Skips THIS build in Sparkle; future versions still prompt.
-    /// Replaces the old "Later" dismiss — `xmark` keeps the same icon family.
+    /// Hover-expanded secondary action — ✕ Not now (for .available stage).
+    /// Hides the pill until the next launch; Settings keeps an Update button.
+    /// Nothing is skipped in Sparkle.
     static let skipActionSystemImage = "xmark"
     static let restartActionSystemImage = "arrow.clockwise"
     static let actionSpacing: CGFloat = 5
@@ -35,7 +35,7 @@ enum IslandUpdateAvailablePillStyle {
 /// it directly.
 enum IslandUpdateAvailablePillStage: Equatable {
     /// Update discovered; download not yet started. Pill shows «Update»
-    /// with [Update ↓] [✕ Skip this version] in hover-expanded layout.
+    /// with [Update ↓] [✕ Not now] in hover-expanded layout.
     case available
     /// Download (and the brief auto-install that follows) in progress.
     /// Compact-only, ICON-ONLY (no text); no hover actions.
@@ -49,7 +49,7 @@ enum IslandUpdateAvailablePillStage: Equatable {
 ///
 /// Visual stages, driven by `stage`:
 ///   - `.available` — compact download icon + «Update» label. Hover-
-///     expanded layout shows [Update ↓] [✕ Skip this version].
+///     expanded layout shows [Update ↓] [✕ Not now].
 ///   - `.downloading` — compact-only, ICON-ONLY (no text — "Updating" breaks
 ///     ugly in the ~70pt right band). Covers the download AND the brief
 ///     auto-install that follows. Hover-expanded layout shows the same
@@ -59,7 +59,7 @@ enum IslandUpdateAvailablePillStage: Equatable {
 /// Callbacks are stored as plain closures so they can be invoked
 /// directly from `IslandUpdateAvailablePillTests` without ViewInspector.
 /// Wiring lives in `IslandView` — see the `IslandWrapRow` ZStack layer
-/// that pipes `PendingUpdate.startDownload` / `.skip` into
+/// that pipes `PendingUpdate.startDownload` / `.hide` into
 /// `onDownload` / `onSkip`.
 struct IslandUpdateAvailablePill: View {
     /// `SUAppcastItem.displayVersionString` (e.g. "1.2.3") forwarded
@@ -77,10 +77,9 @@ struct IslandUpdateAvailablePill: View {
     /// A single tap also installs and relaunches if the app stays idle.
     let onDownload: () -> Void
 
-    /// Invoked when the user taps ✕ ("Skip this version") in `.available`
-    /// stage. Wiring should call `PendingUpdate.skip()`, which routes to
-    /// `driver.invokeSkip()` so Sparkle records THIS build as skipped and
-    /// stops re-prompting for it; future versions still surface.
+    /// Invoked when the user taps ✕ ("Not now") in `.available` stage.
+    /// Wiring should call `PendingUpdate.hide()`: the pill hides until the
+    /// next launch and Settings keeps offering the update.
     let onSkip: () -> Void
 
     var onInstall: () -> Void = {}
@@ -197,7 +196,7 @@ struct IslandUpdateAvailablePill: View {
                 }
             )
             IslandUpdatePillAction(
-                label: "Skip this version",
+                label: "Not now",
                 systemImage: IslandUpdateAvailablePillStyle.skipActionSystemImage,
                 role: .secondary,
                 hitBridge: hitBridge, hitAction: .skip,

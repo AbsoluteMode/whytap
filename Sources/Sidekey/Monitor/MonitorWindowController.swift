@@ -51,7 +51,9 @@ private struct MonitorWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("DASHBOARDS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .padding(.top, 12)
-                dashboardButton(id: "server-status", title: "Server status")
+                if !store.serverStatusRemoved {
+                    dashboardButton(id: MonitorStore.serverStatusID, title: "Server status")
+                }
                 ForEach(store.dashboards) { dashboard in
                     dashboardButton(id: dashboard.id, title: dashboard.title)
                 }
@@ -73,7 +75,7 @@ private struct MonitorWindowView: View {
                 if let error = store.dashboardError {
                     Text(error).font(.caption).foregroundStyle(.orange).padding(16)
                 }
-                if selectedID == "server-status" {
+                if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved {
                     MonitorServersView(store: store)
                 } else if let dashboard = store.dashboards.first(where: { $0.id == selectedID }) {
                     MonitorCustomDashboardView(dashboard: dashboard)

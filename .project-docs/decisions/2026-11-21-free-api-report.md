@@ -66,6 +66,19 @@ paying.
   compact card on phones). Paid-plan credits
   (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
   starting without payment.
+- Under the cards, **My setup** (asked by Maxim on 2026-11-21) shows his own
+  routes from API & Models as "free* right now", in two panels: an Anthropic
+  key (Claude Sonnet 5.5 for Drop Smart and Meetings notes, Haiku 5.5 for
+  Agent, Translation and Subtitles) and an OpenAI key with the same price
+  class (GPT-6.1 Terra, GPT-6 Luna, his choice); speech is ElevenLabs Scribe
+  v3 Live in both. The asterisk explains it: the models are paid from a Claude
+  Max/Ultra or ChatGPT Pro plan's monthly API credit, speech from ElevenLabs'
+  free credits (non-commercial use). This is the one place the README names
+  paid-plan credits, labelled as such. Maxim updates the setup himself every
+  month (`SETUP_*` in the script, with its own check date). Moving Meetings to
+  a recorded-audio model was considered first and dropped: Meetings on
+  ElevenLabs and Deepgram stream the recording through the realtime socket,
+  so it would need an app change; the panel shows the setup as it is.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.
@@ -99,7 +112,8 @@ updates only after reading the official page keeps "Last checked" honest.
 - A private monthly report only: the README would still need manual updates.
 - A generated raster picture for the price comparison: an SVG banner follows
   GitHub's dark and light themes and stays sharp.
-- Listing paid-plan credits in the README: not "without payment".
+- Listing paid-plan credits among the free offers: not "without payment"
+  (they appear only in My setup, marked free*).
 - Letting the task add newly found offers itself: each row is a product
   decision (only offers whose key works in Whytap as it is).
 

@@ -220,6 +220,89 @@ def responsive(kind, alt, width):
     )
 
 
+# "My setup": the maintainer's own routes from Settings -> API & Models, free*
+# because the language models are paid from a subscription's monthly API credit
+# (the Claude Max & Ultra and ChatGPT Pro offers above in APIHintsView.hints)
+# and speech from ElevenLabs' free credits. One panel per key, with OpenAI's
+# models of the same price class in place of Claude's. Maxim reviews and updates
+# it every month together with the offers (2026-11-21).
+SETUP_CHECKED = "2026-11-21"
+SPEECH = "Scribe v3 Live"
+SETUP_ROWS = [  # feature, speech model, language model role ("smart", "fast" or None)
+    ("Drop Fast", SPEECH, None),
+    ("Drop Smart", SPEECH, "smart"),
+    ("Meetings", SPEECH, "smart"),
+    ("Agent", None, "fast"),
+    ("Agent voice", SPEECH, None),
+    ("Voice search", SPEECH, None),
+    ("Translation", None, "fast"),
+    ("Subtitles", SPEECH, "fast"),
+]
+SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), models
+    ("claude-code", "#d97757", "Anthropic key",
+     ("Claude Max or Ultra: $100–200 API credit a month", "Max or Ultra: $100–200 credit a month"),
+     {"smart": "Claude Sonnet 5.5", "fast": "Claude Haiku 5.5"}),
+    ("openai", None, "OpenAI key",
+     ("ChatGPT Pro: $100–500 API credit a month", "ChatGPT Pro: $100–500 credit a month"),
+     {"smart": "GPT-6.1 Terra", "fast": "GPT-6 Luna"}),
+]
+SETUP_FOOT = [
+    "* The models are paid from your plan’s monthly API credit; speech uses",
+    "ElevenLabs’ 10,000 free credits (non-commercial use).",
+]
+
+
+def setup_svg(theme, layout):
+    c = THEMES[theme]
+    wide = layout == "wide"
+    w = WIDTH[layout]
+    e = lambda t: html.escape(t, quote=False)
+    gap, ph = 20, (58 if wide else 50)        # gap between panels, panel header height (title, plan line)
+    pw = (w - gap) / 2 if wide else w          # panel width
+    rh = 30 if wide else 24                    # row height
+    fs, hs = (13.5, 15) if wide else (11, 12.5)
+    col = (18, 132, 268) if wide else (12, 96, 192)
+    top = 46 if wide else 40
+    panel_h = ph + 26 + rh * len(SETUP_ROWS) + 10
+    out = [
+        f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup'
+        f'<tspan dx="{10 if wide else 7}" font-size="{14 if wide else 11.5}" font-weight="600" fill="{c["accent"]}">free* right now</tspan></text>',
+    ]
+    for k, (asset, color, title, plan, models) in enumerate(SETUP_KEYS):
+        x = k * (pw + gap) if wide else 0
+        y = top if wide else top + k * (panel_h + 14)
+        out.append(f'  <rect x="{x + 0.5:.1f}" y="{y + 0.5:.1f}" width="{pw - 1:.1f}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>')
+        out.append("  " + logo(asset, color or c["ink"], round(x + col[0], 1), y + (13 if wide else 11), 18 if wide else 15))
+        out.append(f'  <text x="{x + col[0] + (26 if wide else 22):.1f}" y="{y + (27 if wide else 23)}" font-family="{FONT}" font-size="{hs}" font-weight="600" fill="{c["ink"]}">{e(title)}</text>')
+        out.append(f'  <text x="{x + col[0]:.1f}" y="{y + (48 if wide else 41)}" font-family="{FONT}" font-size="{fs - 1.5}" fill="{c["sub"]}">{e(plan[0] if wide else plan[1])}</text>')
+        hy = y + ph + 16
+        for cx, label in zip(col, ["Feature", "Speech · ElevenLabs", "Model"]):
+            out.append(f'  <text x="{x + cx:.1f}" y="{hy}" font-family="{FONT}" font-size="{fs - 2.5}" font-weight="600" fill="{c["accent"]}">{e(label)}</text>')
+        out.append(f'  <line x1="{x + col[0]:.1f}" y1="{hy + 8}" x2="{x + pw - col[0]:.1f}" y2="{hy + 8}" stroke="{c["border"]}"/>')
+        for i, (feature, speech, role) in enumerate(SETUP_ROWS):
+            ry = hy + 8 + rh * (i + 1) - rh * 0.32
+            cells = [(feature, c["ink"], "600"), (speech or "—", c["ink"] if speech else c["sub"], "400"),
+                     (models[role] if role else "—", c["ink"] if role else c["sub"], "400")]
+            for cx, (text, fill, weight) in zip(col, cells):
+                out.append(f'  <text x="{x + cx:.1f}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{fill}">{e(text)}</text>')
+    y = top + panel_h + 26 if wide else top + 2 * panel_h + 14 + 22
+    foot = [" ".join(SETUP_FOOT), f"Updated monthly · Last checked {display(SETUP_CHECKED)}"] if wide else [
+        "* The models are paid from your plan’s", "monthly API credit; speech uses ElevenLabs’",
+        "10,000 free credits (non-commercial use).", f"Updated monthly · Last checked {display(SETUP_CHECKED)}"]
+    for i, line in enumerate(foot):
+        out.append(f'  <text x="0" y="{y + i * (20 if wide else 15)}" font-family="{FONT}" font-size="{12.5 if wide else 10.5}" fill="{c["sub"]}">{e(line)}</text>')
+    h = y + (len(foot) - 1) * (20 if wide else 15) + 8
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h:.0f}" viewBox="0 0 {w} {h:.0f}">\n' + "\n".join(out) + "\n</svg>\n"
+
+
+def setup_alt():
+    parts = []
+    for _, _, title, plan, models in SETUP_KEYS:
+        rows = "; ".join(f"{f}: " + " + ".join(x for x in [s, models[r] if r else None] if x) for f, s, r in SETUP_ROWS)
+        parts.append(f"{title} ({plan[0]}): {rows}")
+    return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
+
+
 def section():
     rows = [o for o in offers() if o["access"] == "noCard"]
     order = list(CATEGORY)
@@ -254,6 +337,7 @@ def section():
     for lay in WIDTH:
         for t in THEMES:
             (OUT / f"free-api-summary-{lay}-{t}.svg").write_text(banner(t, lay, newest))
+            (OUT / f"free-api-setup-{lay}-{t}.svg").write_text(setup_svg(t, lay))
     alt = ("; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
            + ", ".join(facts(newest)) + f". Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0.")
     return "\n".join([
@@ -265,6 +349,8 @@ def section():
         "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),
         "</p>",
         *(["", *notes] if notes else []),
+        "",
+        f"<p align=\"center\">{responsive('setup', setup_alt(), '100%')}</p>",
     ]) + "\n"
 
 

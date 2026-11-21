@@ -106,6 +106,21 @@ not because they need separate processes.
 - The built helper outside an app bundle (no broker client, nothing launched):
   `whytap mcp` lists 16 tools and answers a bad line with a parse error;
   `app mcp` lists 14, `case mcp` 2; `whytap mcp extra` exits 64.
+- Builder review (queue run 7446) found that the line reader inherited from
+  the `case` connector missed a foreign Codex `whytap` written as
+  `[mcp_servers.whytap] # comment` or as an inline table under
+  `[mcp_servers]`, and `codex mcp add` replaces a server by name. The
+  connector now uses `CodexMCPConfigScanner`: comments and multi-line strings
+  are removed first, every header/dotted-key/inline form of the name is
+  found, and only the plain table `codex mcp add` writes can count as ours;
+  anything uncertain (inline or dotted definitions, arrays of tables,
+  repeated headers or keys, escapes, unterminated strings, unreadable files)
+  is refused before any CLI call. The older `case` entry is removed only in
+  that plain form. Claude Code and Cursor likewise refuse an unreadable
+  config, a non-object `mcpServers` and `args` that are not a list of
+  strings. `CodexMCPConfigScannerTests` holds the builder's two regressions
+  verbatim plus quoted keys, spaces, tabs, CRLF, multi-line arrays, sub-tables,
+  comments and multi-line strings mentioning the name.
 - Not tested: a live Claude Code / Codex / Cursor host against the installed
   app, and Connect against real client configurations. Those are acceptance
   steps after the builder installs the build.

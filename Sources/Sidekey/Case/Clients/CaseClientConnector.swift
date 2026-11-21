@@ -114,8 +114,8 @@ enum CaseMCPEntryOwnership {
     }
 
     static func isOurs(_ entry: Any?) -> Bool {
-        guard let entry = entry as? [String: Any] else { return false }
-        return isOurs(command: entry["command"] as? String, args: entry["args"] as? [String])
+        guard let entry = entry as? [String: Any], let args = readableArgs(entry) else { return false }
+        return isOurs(command: entry["command"] as? String, args: args)
     }
 
     static func isOurServer(command: String?, args: [String]?) -> Bool {
@@ -123,8 +123,28 @@ enum CaseMCPEntryOwnership {
     }
 
     static func isOurServer(_ entry: Any?) -> Bool {
-        guard let entry = entry as? [String: Any] else { return false }
-        return isOurServer(command: entry["command"] as? String, args: entry["args"] as? [String])
+        guard let entry = entry as? [String: Any], let args = readableArgs(entry) else { return false }
+        return isOurServer(command: entry["command"] as? String, args: args)
+    }
+
+    /// `.some(nil)`: no `args`; `.some(list)`: a list of strings; nil: `args`
+    /// is something else, which is never ours.
+    private static func readableArgs(_ entry: [String: Any]) -> [String]?? {
+        guard let raw = entry["args"] else { return .some(nil) }
+        guard let list = raw as? [String] else { return nil }
+        return .some(list)
+    }
+
+    /// A Codex entry is ours only in the plain form `codex mcp add` writes;
+    /// absent, unreadable or any other form is not.
+    static func isOurServer(_ entry: CodexMCPEntry) -> Bool {
+        guard case .table(let command, let args, let readable) = entry, readable else { return false }
+        return isOurServer(command: command, args: args)
+    }
+
+    static func isOurs(_ entry: CodexMCPEntry) -> Bool {
+        guard case .table(let command, let args, let readable) = entry, readable else { return false }
+        return isOurs(command: command, args: args)
     }
 
     private static func isOurHelper(_ command: String?) -> Bool {
@@ -208,18 +228,26 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
 
     func isInstalled() -> Bool { locate() != nil }
 
-    private func userEntry(_ name: String) -> Any? {
-        let file = CaseJSONConfigFile(home: home, relativePath: ".claude.json")
-        return ((try? file.read())??["mcpServers"] as? [String: Any])?[name]
+    private var userFile: CaseJSONConfigFile { CaseJSONConfigFile(home: home, relativePath: ".claude.json") }
+
+    /// The user-scope servers of `~/.claude.json`. A file that cannot be read
+    /// or whose `mcpServers` is not an object throws: Connect must not guess
+    /// that no `whytap` server exists there.
+    private func userServers() throws -> [String: Any] {
+        guard let root = try userFile.read(), let servers = root["mcpServers"] else { return [:] }
+        guard let object = servers as? [String: Any] else { throw CaseClientConnectorError.unreadableConfig(".claude.json") }
+        return object
     }
+
+    private func userEntry(_ name: String) -> Any? { (try? userServers())?[name] }
 
     /// A user-scope `whytap` entry exists in `~/.claude.json` (read only).
     func isConfigured() -> Bool { userEntry(WhytapMCPEntry.name) != nil }
 
     func install(helperPath: String) throws {
-        // Read settings first: a broken file stops before anything changes.
+        // Read both files first: a broken one stops before anything changes.
         let current = try settings.read()
-        let entry = userEntry(WhytapMCPEntry.name)
+        let entry = try userServers()[WhytapMCPEntry.name]
         if entry != nil, !CaseMCPEntryOwnership.isOurServer(entry) { throw CaseClientConnectorError.foreignEntry }
         let claude = try binary()
         if entry != nil {
@@ -295,55 +323,28 @@ struct CodexCaseConnector: CaseClientConnector {
 
     func isInstalled() -> Bool { locate() != nil }
 
-    func isConfigured() -> Bool { section(WhytapMCPEntry.name) != nil }
+    func isConfigured() -> Bool { ((try? entry(WhytapMCPEntry.name)) ?? .uncertain) != .absent }
 
-    /// The `[mcp_servers.<name>]` table's `command` and `args` (nil inside when
-    /// absent), or nil when there is no such table. A minimal line reader:
-    /// codex writes `command = "…"` as a basic or literal string.
-    private func section(_ name: String) -> (command: String?, args: [String]?)? {
+    /// What `config.toml` says about one server name (see CodexMCPConfigScanner).
+    /// A file that exists but cannot be read throws: no guessing.
+    private func entry(_ name: String) throws -> CodexMCPEntry {
         let url = home.appendingPathComponent(".codex/config.toml")
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        var inside = false
-        var found = false
-        var command: String?
-        var args: [String]?
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") {
-                inside = line == "[mcp_servers.\(name)]" || line == "[mcp_servers.\"\(name)\"]"
-                found = found || inside
-                continue
-            }
-            guard inside, let eq = line.firstIndex(of: "=") else { continue }
-            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            if key == "command" { command = Self.unquote(value) }
-            if key == "args" { args = Self.stringArray(value) }
+        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            throw CaseClientConnectorError.unreadableConfig(".codex/config.toml")
         }
-        return found ? (command, args) : nil
-    }
-
-    private static func unquote(_ value: String) -> String? {
-        guard value.count >= 2, let first = value.first, first == "\"" || first == "'",
-              value.last == first else { return nil }
-        return String(value.dropFirst().dropLast())
-    }
-
-    private static func stringArray(_ value: String) -> [String]? {
-        guard value.hasPrefix("["), value.hasSuffix("]") else { return nil }
-        let inner = value.dropFirst().dropLast()
-        let items = inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let strings = items.compactMap(unquote)
-        return strings.count == items.count ? strings : nil
+        return CodexMCPConfigScanner.entry(named: name, in: text)
     }
 
     func install(helperPath: String) throws {
-        let current = section(WhytapMCPEntry.name)
-        if let current, !CaseMCPEntryOwnership.isOurServer(command: current.command, args: current.args) {
+        // `codex mcp add` replaces a server by name: anything but nothing or
+        // our own plain entry is refused before the CLI runs.
+        let current = try entry(WhytapMCPEntry.name)
+        if current != .absent, !CaseMCPEntryOwnership.isOurServer(current) {
             throw CaseClientConnectorError.foreignEntry
         }
         guard let codex = locate() else { throw CaseClientConnectorError.clientNotFound }
-        if current != nil {
+        if current != .absent {
             try check(run(codex, ["mcp", "remove", WhytapMCPEntry.name]))
         }
         try check(run(codex, ["mcp", "add", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
@@ -359,8 +360,8 @@ struct CodexCaseConnector: CaseClientConnector {
     }
 
     private func hasOurLegacyEntry() -> Bool {
-        guard let legacy = section(WhytapMCPEntry.legacyName) else { return false }
-        return CaseMCPEntryOwnership.isOurs(command: legacy.command, args: legacy.args)
+        guard let legacy = try? entry(WhytapMCPEntry.legacyName) else { return false }
+        return CaseMCPEntryOwnership.isOurs(legacy)
     }
 
     private func run(_ binary: URL, _ arguments: [String]) throws -> CaseCommandResult {
@@ -401,6 +402,10 @@ struct CursorCaseConnector: CaseClientConnector {
 
     func install(helperPath: String) throws {
         var root = try file.read() ?? [:]
+        // A `mcpServers` that is not an object is never replaced wholesale.
+        if root["mcpServers"] != nil, !(root["mcpServers"] is [String: Any]) {
+            throw CaseClientConnectorError.unreadableConfig(file.relativePath)
+        }
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
         if let existing = servers[WhytapMCPEntry.name], !CaseMCPEntryOwnership.isOurServer(existing) {
             throw CaseClientConnectorError.foreignEntry

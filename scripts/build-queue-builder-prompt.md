@@ -85,6 +85,15 @@ holds it, leave the tickets queued and end your turn.
    or the maintainer, when tests fail because of the feature itself, when
    review evidence is missing, or when a destructive migration or access
    decision is involved. Say exactly what is needed.
+   Block once with everything: before `blocked`, finish every probe and
+   check across all paths the PR touches and put all problems into the note
+   as one numbered list; when a probe exposes a class of error, name the
+   whole class and check every instance. On a later attempt of the same PR
+   (earlier tickets and notes are in `status`), block only for a problem the
+   fix itself introduced or a listed item that is still not fixed. A problem
+   that was already there but missing from the previous list is yours to fix
+   when mechanical and safe; otherwise record it as a follow-up in the note
+   and continue.
 4. Validate the final combined candidate: documentation checks, and for
    runtime changes the build and the full `swift test`. Commands that run
    longer than a few minutes go to the background with output in a file.

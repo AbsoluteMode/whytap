@@ -60,12 +60,6 @@ struct MonitorHoverPanel: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        if let dashboard = selectedDashboard {
-                            Button("Delete…", role: .destructive) { delete(dashboard) }
-                        }
-                    }
                 Group {
                     if selectedID != nil {
                         Button { store.requestRefresh() } label: {
@@ -118,25 +112,33 @@ struct MonitorHoverPanel: View {
         .onDisappear { store.stop() }
     }
 
+    /// The scroller sits in the panel's right margin, beside the cards
+    /// instead of over their edge.
+    static let scrollerGutter: CGFloat = 10
+
     private var dashboardPicker: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 8) {
-                dashboardButton(id: "server-status", title: "Server status",
-                                image: "server.rack", subtitle: "CPU, memory and GPU readings")
+                dashboardRow(id: "server-status", title: "Server status",
+                             image: "server.rack", subtitle: "CPU, memory and GPU readings", onDelete: nil)
                 ForEach(store.dashboards) { dashboard in
-                    dashboardButton(id: dashboard.id, title: dashboard.title,
-                                    image: dashboard.systemImage, subtitle: dashboard.subtitle)
-                        .contextMenu {
-                            Button("Delete…", role: .destructive) { delete(dashboard) }
-                        }
+                    dashboardRow(id: dashboard.id, title: dashboard.title,
+                                 image: dashboard.systemImage, subtitle: dashboard.subtitle,
+                                 onDelete: { delete(dashboard) })
                 }
             }
             .frame(maxWidth: .infinity)
+            .padding(.trailing, Self.scrollerGutter)
         }
+        .padding(.trailing, -Self.scrollerGutter)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func dashboardButton(id: String, title: String, image: String, subtitle: String) -> some View {
+    /// A whole row opens its board; custom boards carry a separate × that
+    /// asks before deleting. No context menu: the island has no right-click
+    /// interactions. WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    private func dashboardRow(id: String, title: String, image: String, subtitle: String,
+                              onDelete: (() -> Void)?) -> some View {
         Button { selectedID = id } label: {
             HStack(spacing: 8) {
                 Image(systemName: image)
@@ -149,10 +151,10 @@ struct MonitorHoverPanel: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
             .padding(10)
+            // Room for the × so long titles never run under it.
+            .padding(.trailing, onDelete == nil ? 0 : MonitorDashboardDeleteButton.size)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(IslandInk.color.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
@@ -160,5 +162,37 @@ struct MonitorHoverPanel: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .overlay(alignment: .trailing) {
+            if let onDelete {
+                MonitorDashboardDeleteButton(title: title, disabled: deleting, action: onDelete)
+                    .padding(.trailing, 6)
+            }
+        }
+    }
+}
+
+/// The × on a custom dashboard row.
+struct MonitorDashboardDeleteButton: View {
+    static let size: CGFloat = 24
+
+    let title: String
+    let disabled: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(IslandInk.color.opacity(hovering ? 0.92 : 0.5))
+                .frame(width: Self.size, height: Self.size)
+                .background(Circle().fill(IslandInk.color.opacity(hovering ? 0.12 : 0)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { hovering = $0 }
+        .help("Delete dashboard")
+        .accessibilityLabel("Delete \(title)")
     }
 }

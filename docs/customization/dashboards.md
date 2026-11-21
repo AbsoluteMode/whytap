@@ -108,8 +108,8 @@ freshness; an old timestamp displays stale data.
 
 ## Delete a dashboard
 
-In Monitor, Control-click a custom dashboard in the picker (or the heading of
-the open dashboard) and choose **Delete…**. The confirmation's default button
+In Monitor's dashboard list, click the **×** on a custom dashboard's row. The
+confirmation's default button
 is Cancel. Confirming removes the board from Monitor on this Mac: its ID is
 recorded in `Monitor/removed-dashboards.json` (`{"removed": ["<id>"]}`) and the
 snapshot files with that ID are removed from `Monitor/dashboards/`. The board

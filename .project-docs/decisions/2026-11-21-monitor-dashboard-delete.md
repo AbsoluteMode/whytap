@@ -2,7 +2,7 @@
 id: monitor-dashboard-delete-2026-11-21
 type: decision
 title: Monitor dashboards can be deleted and stay deleted while their collector runs
-summary: Delete… on a custom Monitor dashboard (Cancel-first confirmation) records its ID in Monitor/removed-dashboards.json and removes its snapshot files; collectors and their scripts are never touched, and installing the dashboard again lists it again.
+summary: The × on a custom Monitor dashboard row (Cancel-first confirmation) records its ID in Monitor/removed-dashboards.json and removes its snapshot files; collectors and their scripts are never touched, and installing the dashboard again lists it again.
 status: confirmed
 tags: [monitor, hover, dashboards]
 canonical_for: [monitor-dashboard-delete]
@@ -26,6 +26,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-21 the user chose to delete the snapshot file and remember its ID (option A, "delete and remember").
     confirmed_at: 2026-11-21
+  - type: user-confirmed
+    reference: On 2026-11-21 the user asked for an × on each row instead of right-click, no chevron and the scroller moved to the right.
+    confirmed_at: 2026-11-21
 related: []
 ---
 
@@ -40,9 +43,12 @@ minutes), which Whytap neither installs nor owns.
 
 ## Decision
 
-- A custom dashboard's row in the picker, and the heading of an open custom
-  dashboard, have **Delete…** in their context menu. Server status is built in
-  and has none.
+- A custom dashboard's row in the picker has an **×** on its right. Server
+  status is built in and has none. There is no context menu: the island has
+  no right-click interactions anywhere (the user's correction on 2026-11-21,
+  after a first version put Delete… in the row and heading context menus).
+  Rows have no chevron, since a click on a row plainly opens it, and the
+  scroller sits in the panel's right margin instead of over the cards.
 - Delete asks first: Cancel is the first button and takes Escape, Delete has
   no key equivalent (the meeting and clipboard pattern).
 - Confirming records the dashboard ID in `Monitor/removed-dashboards.json`
@@ -102,7 +108,7 @@ minutes), which Whytap neither installs nor owns.
   before a list failure, a lost update between list writers and the list
   committed before a failed snapshot write; all three led to the transaction
   and lock above, and the builder's reproducers pass.
-- Not tested: the real context menu and alert over the live island panel.
+- Not tested: the real × and alert over the live island panel.
 
 ## Rejected
 
@@ -111,5 +117,6 @@ minutes), which Whytap neither installs nor owns.
 - Compare-before-rename without a lock: still loses an update in the window
   between the check and the rename.
 - Stopping or deleting the collector: not Whytap's to touch.
+- Delete… in a context menu: the island has no right-click interactions.
 
 2026-11-21 · PR: see the pull request that adds this file.

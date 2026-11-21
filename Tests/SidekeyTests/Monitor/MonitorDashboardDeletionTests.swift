@@ -221,6 +221,22 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(try MonitorRemovedDashboards.load(root: root).ids, ["anthropic-budget", "openai-usage"])
     }
 
+    // MARK: - Picker
+
+    /// The island has no right-click interactions: a custom board's row has an
+    /// ×, rows have no chevron, and the scroller sits beside the cards.
+    func testPickerDeletesWithACrossNotAContextMenu() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Sidekey/Monitor/MonitorHoverPanel.swift")
+        let source = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(source.contains(".contextMenu"))
+        XCTAssertFalse(source.contains("chevron.right"))
+        XCTAssertTrue(source.contains("MonitorDashboardDeleteButton(title:"))
+        XCTAssertTrue(source.contains("onDelete: nil"), "Server status gets no ×")
+        XCTAssertGreaterThan(MonitorHoverPanel.scrollerGutter, 0)
+    }
+
     // MARK: - Confirmation
 
     func testConfirmationPutsCancelFirstAndDeleteHasNoKey() {

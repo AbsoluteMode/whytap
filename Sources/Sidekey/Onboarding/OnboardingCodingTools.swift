@@ -2,9 +2,10 @@ import Foundation
 
 /// The coding agents on this Mac that the last onboarding page offers to
 /// connect to Whytap. Connect runs the same client setup as Case -> Connect
-/// (`CaseClientSetup.connect`: the `whytap` command and the agent's MCP entry
-/// pointing at the bundled helper). It registers nothing in Case: key access
-/// still needs Case -> Connect, and meetings still ask once in the island.
+/// (`CaseClientSetup.connect`: the `whytap` command and the agent's Whytap MCP
+/// entry for the bundled helper, as `CaseClientConnector` writes it). It
+/// registers nothing in Case, so Case key names stay refused until Case ->
+/// Connect; meeting tools still ask once in the island.
 // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 @MainActor
 final class OnboardingCodingTools: ObservableObject {

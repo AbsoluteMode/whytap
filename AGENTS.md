@@ -1176,7 +1176,8 @@ stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
 and Keyboard control on PermissionsSettingsViewModel, done at
 dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
 the shortcut is not installed), plus an optional Screen Recording row for Shot
-(one request, the Settings path; never holds Continue); hidden when ready.
+(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
+never holds Continue); hidden when ready.
 3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
 DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
 onboarding is visible a Drop press with no route says so on the page (no

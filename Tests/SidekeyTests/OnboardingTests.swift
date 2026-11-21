@@ -407,24 +407,42 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(OnboardingSpeechPage.Presentation(.downloading(0.42)).detail.contains("42%"))
     }
 
-    func testScreenRecordingIsOptionalAndAskedOnce() async throws {
-        AppState.shared.dropHotkeyStatus = .ready
+    func testScreenRecordingIsOptionalAndAskedOnceWithShot() async throws {
+        let env = try makeEnv()
+        let access = permissions(accessibility: true, microphone: .authorized, hotkey: .ready)
         var requests = 0
         var settingsOpened = 0
-        let access = PermissionsSettingsViewModel(
-            onComplete: {}, autoComplete: false,
-            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
-            screenRecordingAccessProvider: { false },
-            screenRecordingRequester: { requests += 1 },
-            accessibilityRequester: {}, openAccessibilitySettings: {},
-            openScreenRecordingSettings: { settingsOpened += 1 },
-            runtimeRefresh: { _, _ in })
+        let shared = ScreenRecordingAccess(isGranted: { false }, request: { requests += 1 })
+        let model = OnboardingModel(speech: env.speech, permissions: access, onDevice: env.controller(),
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
+                                    screenRecording: shared, openScreenRecordingSettings: { settingsOpened += 1 },
+                                    defaultsChanges: NotificationCenter())
+        addTeardownBlock { model.stop() }
         XCTAssertTrue(access.allRequiredGranted, "Continue does not wait for Screen Recording")
-        await access.requestScreenRecording()
-        XCTAssertEqual(requests, 1, "One request to macOS")
-        await access.requestScreenRecording()
-        XCTAssertEqual(requests, 1, "No second request")
+        XCTAssertFalse(model.screenRecordingAsked)
+        model.requestScreenRecording()
+        XCTAssertTrue(model.screenRecordingAsked)
+        XCTAssertEqual(settingsOpened, 0, "Nothing of ours beside macOS's dialog")
+        model.requestScreenRecording()
         XCTAssertEqual(settingsOpened, 1, "The next press opens System Settings")
+        guard case .alreadyRequested = shared.requestOnce() else {
+            return XCTFail("Shot shares the same launch's request")
+        }
+        try await eventually { requests == 1 }
+        XCTAssertEqual(requests, 1, "macOS is asked once")
+    }
+
+    func testAKeySavedAfterLeavingTheSpeechPageDoesNotMoveOn() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        model.setUpSpeechLater()
+        XCTAssertEqual(model.page, .permissions)
+        try env.keys.save("fixture", account: BYOKKeyStore.account(for: .soniox))
+        model.useKey(.soniox)  // the check finished late
+        XCTAssertTrue(model.dropReady, "The key still becomes Drop's speech")
+        XCTAssertEqual(model.page, .permissions, "and the person stays where they are")
     }
 
     // MARK: - Language
@@ -668,6 +686,7 @@ final class OnboardingTests: XCTestCase {
             let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,
                                         supportsOnDevice: true, models: try offlineModels(env),
                                         preferences: PrivacyPreferences(defaults: env.defaults), codingTools: tools,
+                                        screenRecording: ScreenRecordingAccess(isGranted: { false }, request: {}),
                                         defaultsChanges: NotificationCenter())
             defer { model.stop() }
             XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])

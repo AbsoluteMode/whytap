@@ -23,7 +23,9 @@ final class OnboardingDropDemo: ObservableObject {
         }
         task = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                await self?.cycle()
+                // A freed demo ends the loop instead of spinning.
+                guard let self else { return }
+                await self.cycle()
             }
         }
     }

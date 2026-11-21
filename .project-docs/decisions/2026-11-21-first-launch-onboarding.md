@@ -32,7 +32,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/OnboardingTests.swift
     confirmed_at: 2026-11-21
-related: [../project.md, 2026-10-26-first-launch-permissions.md, 2026-11-19-permission-request-before-settings.md, 2026-11-19-on-device-dictation.md, 2026-11-18-drop-into-whytap-editors.md, 2026-10-17-local-workspace.md, 2026-11-20-other-feature-videos.md, 2026-11-20-settings-sync.md, 2026-11-20-input-language-suggestion.md]
+related: [../project.md, 2026-10-26-first-launch-permissions.md, 2026-11-19-permission-request-before-settings.md, 2026-11-19-on-device-dictation.md, 2026-11-18-drop-into-whytap-editors.md, 2026-10-17-local-workspace.md, 2026-11-20-other-feature-videos.md, 2026-11-20-settings-sync.md, 2026-11-20-input-language-suggestion.md, 2026-11-22-shot-single-permission-prompt.md]
 ---
 
 # Context
@@ -79,9 +79,10 @@ the page is about.
    opens its pane. The page is done when `dropHotkeyStatus == .ready`, not when
    both checks are green; with both granted and no shortcut it shows
    `DropShortcutStatusSection`. A third, visually secondary row offers Screen
-   Recording as optional, for Shot: one request (the Settings path through
-   ScreenCaptureKit, never `CGRequestScreenCaptureAccess`), the next press
-   opens System Settings, and it never holds Continue. It polls for at most
+   Recording as optional, for Shot: `ScreenRecordingAccess.requestOnce()`, the
+   launch's one ScreenCaptureKit request shared with Shot (never
+   `CGRequestScreenCaptureAccess`); nothing of ours is shown beside macOS's
+   dialog, the next press opens System Settings, and it never holds Continue. It polls for at most
    two minutes and rereads on activation. Hidden when access is given and the
    shortcut is installed.
 3. **Try Drop.** The one page with numbered steps (Click, Hold, Let go): the

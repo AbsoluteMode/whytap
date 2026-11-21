@@ -179,7 +179,8 @@ struct OnboardingIconTile: View {
 struct OnboardingSpeechPage: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var onDevice: OnDeviceSpeechModelController
-    @ObservedObject var demo: OnboardingDropDemo
+    /// Observed by the stage only: the page does not redraw with the demo.
+    let demo: OnboardingDropDemo
     let configuration: HotkeyConfiguration
 
     /// The On this Mac card's copy for a model state. Pure, so it is tested
@@ -502,6 +503,8 @@ struct OnboardingKeyCard: View {
     @State private var key = ""
     @State private var saving = false
     @State private var failure: String?
+    /// The provider the failure belongs to; another tile hides it.
+    @State private var failureTarget: OnboardingKeyTarget?
     @State private var saved: Set<OnboardingKeyTarget> = []
     @FocusState private var focused: Bool
 
@@ -510,6 +513,7 @@ struct OnboardingKeyCard: View {
     var body: some View {
         let offers = OnboardingKeyOffer.all
         let selected = offers.first { $0.target == model.keyTarget }
+        let failure = failureTarget == model.keyTarget ? failure : nil
         OnboardingCard {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
@@ -540,7 +544,7 @@ struct OnboardingKeyCard: View {
                 if let selected { actions(selected) }
             }
         }
-        .onChange(of: model.keyTarget) { _, _ in failure = nil; key = "" }
+        .onChange(of: model.keyTarget) { _, _ in self.failure = nil; key = "" }
     }
 
     private func isSaved(_ target: OnboardingKeyTarget) -> Bool {
@@ -601,6 +605,7 @@ struct OnboardingKeyCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(saving)
         .help(offer.detail ?? offer.target.name)
         .accessibilityLabel("\(offer.target.name), \(offer.category.rawValue.lowercased())"
                             + (offer.short.map { ", \($0)" } ?? ""))
@@ -646,7 +651,7 @@ struct OnboardingKeyCard: View {
                     }
                 }
             }
-            if let failure { OnboardingStageStatus(tone: .warning, text: failure) }
+            if let failure, failureTarget == target { OnboardingStageStatus(tone: .warning, text: failure) }
         }
     }
 
@@ -674,8 +679,9 @@ struct OnboardingKeyCard: View {
             saving = false
             if let problem {
                 failure = problem
+                failureTarget = target
             } else {
-                key = ""
+                if model.keyTarget == target { key = "" }
                 saved.insert(target)
                 if let kind = target.speechKind { model.useKey(kind) }
             }
@@ -742,10 +748,9 @@ struct OnboardingPermissionsPage: View {
         }
     }
 
-    /// Optional, for Shot: never holds Continue. Allow is the same single
-    /// request as Settings -> Permissions (`requestScreenRecording`); a
+    /// Optional, for Shot: never holds Continue. Allow is the launch's one
+    /// request shared with Shot (`OnboardingModel.requestScreenRecording`); a
     /// second press opens System Settings.
-    // WHY: .project-docs/decisions/2026-11-19-permission-request-before-settings.md
     private var screenRecordingRow: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "rectangle.dashed.badge.record")
@@ -768,13 +773,10 @@ struct OnboardingPermissionsPage: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(OnboardingTheme.green)
                     .accessibilityLabel("Screen Recording: Allowed")
-            } else if permissions.isRequestingScreenRecording {
-                ProgressView().controlSize(.small).accessibilityLabel("Asking for Screen Recording")
             } else {
-                OnboardingOutlineButton(title: permissions.screenRecordingRequested ? "Open Settings" : "Allow") {
-                    Task { await permissions.requestScreenRecording() }
-                }
-                .accessibilityLabel(permissions.screenRecordingRequested
+                OnboardingOutlineButton(title: model.screenRecordingAsked ? "Open Settings" : "Allow",
+                                        action: model.requestScreenRecording)
+                .accessibilityLabel(model.screenRecordingAsked
                     ? "Open System Settings for Screen Recording" : "Allow Screen Recording, optional, for Shot")
             }
         }
@@ -1196,8 +1198,8 @@ struct OnboardingFeaturesPage: View {
     }
 }
 
-/// Claude Code and Codex, when present: Connect gives them the Whytap plugin's
-/// server, the same setup as Case -> Connect.
+/// Claude Code and Codex, when present: Connect writes the same Whytap MCP
+/// entry as Case -> Connect (`CaseClientConnector`).
 struct OnboardingCodingToolsRow: View {
     @ObservedObject var tools: OnboardingCodingTools
 

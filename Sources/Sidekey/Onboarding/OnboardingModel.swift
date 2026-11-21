@@ -33,9 +33,14 @@ final class OnboardingModel: ObservableObject {
     let speech: OnboardingDropSpeech
     let preferences: PrivacyPreferences
     let codingTools: OnboardingCodingTools
+    /// The launch's one Screen Recording request, shared with Shot.
+    let screenRecording: ScreenRecordingAccess
+    private let openScreenRecordingSettings: () -> Void
+    /// This launch already asked macOS for Screen Recording.
+    @Published private(set) var screenRecordingAsked: Bool
     /// The silent Drop demo on the speech page.
     let demo = OnboardingDropDemo()
-    /// The key form's store of keys and routes; built when the form opens.
+    /// The key card's store of keys and routes; built when the speech page shows.
     private(set) lazy var models: APIAndModelsViewModel = injectedModels ?? APIAndModelsViewModel()
     /// The Tavily search key, saved the way Settings -> API keys saves it.
     private(set) lazy var tavily: TavilySettings = models.makeTavilySettings()
@@ -56,8 +61,10 @@ final class OnboardingModel: ObservableObject {
         onDevice: OnDeviceSpeechModelController? = nil,
         supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
         models: APIAndModelsViewModel? = nil,
-        preferences: PrivacyPreferences = .shared,
+        preferences: PrivacyPreferences? = nil,
         codingTools: OnboardingCodingTools? = nil,
+        screenRecording: ScreenRecordingAccess? = nil,
+        openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         defaultsChanges: NotificationCenter = .default
     ) {
         injectedModels = models
@@ -70,8 +77,13 @@ final class OnboardingModel: ObservableObject {
         self.permissions = permissions
         self.onDevice = onDevice
         self.supportsOnDevice = supportsOnDevice
+        let preferences = preferences ?? .shared
+        let screenRecording = screenRecording ?? .shared
         self.preferences = preferences
         self.codingTools = codingTools ?? OnboardingCodingTools()
+        self.screenRecording = screenRecording
+        self.openScreenRecordingSettings = openScreenRecordingSettings
+        screenRecordingAsked = screenRecording.requested
         language = preferences.selectedLanguage
         let ready = speech.isReady
         dropReady = ready
@@ -153,10 +165,12 @@ final class OnboardingModel: ObservableObject {
     }
 
     /// A speech key was accepted and saved (or an existing one chosen).
+    /// A save that lands after the person moved on sets the route and stays
+    /// on the page they are on.
     func useKey(_ kind: AIProviderKind) {
         speech.use(provider: kind)
         routesChanged()
-        if dropReady { advance() }
+        if dropReady, page == .speech { advance() }
     }
 
     func keyAvailable(_ kind: AIProviderKind) -> Bool {
@@ -186,6 +200,20 @@ final class OnboardingModel: ObservableObject {
     func showPermissions() {
         pages = OnboardingFlow.addingPermissions(to: pages)
         show(.permissions)
+    }
+
+    /// Optional, for Shot. One request per launch, shared with Shot
+    /// (`ScreenRecordingAccess.requestOnce`); after it, a press opens System
+    /// Settings. On `.requested` nothing else is shown: macOS's dialog has its
+    /// own button to System Settings.
+    // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
+    func requestScreenRecording() {
+        switch screenRecording.requestOnce() {
+        case .granted: permissions.refresh(restartRecoveryPolling: false)
+        case .requested: break
+        case .alreadyRequested: openScreenRecordingSettings()
+        }
+        screenRecordingAsked = screenRecording.requested
     }
 
     private func permissionsCompleted() {

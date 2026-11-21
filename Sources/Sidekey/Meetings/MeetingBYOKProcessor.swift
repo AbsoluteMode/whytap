@@ -125,7 +125,6 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
     private let fileManager: FileManager
     private let sonioxSession: URLSession
     private let makeAdapter: (ResolvedRoute) throws -> BYOKTranscriptionAdapter
-    private let onDevice: OnDeviceSpeechReadiness
 
     convenience init() {
         self.init(
@@ -145,8 +144,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         checks: ModelCheckStore? = nil,
         fileManager: FileManager = .default,
         sonioxSession: URLSession = .shared,
-        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered,
-        onDevice: OnDeviceSpeechReadiness = .live
+        makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.makeMetered
     ) {
         self.routing = routing
         self.keys = keys
@@ -157,7 +155,6 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         self.fileManager = fileManager
         self.sonioxSession = sonioxSession
         self.makeAdapter = makeAdapter
-        self.onDevice = onDevice
     }
 
     func shouldProcessDirectly() -> Bool {
@@ -362,7 +359,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
     /// borrows another provider's.
     private func resolveMeetingsRoute() throws -> ResolvedRoute {
         do {
-            return try FeatureRouteResolver(routing: routing, keys: keys, onDevice: onDevice).resolve(.meetings)
+            return try FeatureRouteResolver(routing: routing, keys: keys).resolve(.meetings)
         } catch {
             throw Self.processingError(for: error)
         }

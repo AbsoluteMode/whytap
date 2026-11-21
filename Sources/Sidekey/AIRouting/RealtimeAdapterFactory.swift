@@ -4,11 +4,8 @@ import Foundation
 /// only builds: no socket opens until the adapter does.
 enum RealtimeAdapterFactory {
     /// Runtime only. Synthetic model probes deliberately use `make` below.
-    /// On this Mac costs nothing and records no Costs row.
     static func makeMetered(_ route: ResolvedRoute) throws -> BYOKTranscriptionAdapter {
-        let adapter = try make(route)
-        if route.account == .thisMac { return adapter }
-        return AIUsageMeteredAdapter(adapter: adapter, context: AIUsageContext(route))
+        AIUsageMeteredAdapter(adapter: try make(route), context: AIUsageContext(route))
     }
 
     static func make(_ route: ResolvedRoute) throws -> BYOKTranscriptionAdapter {
@@ -27,11 +24,8 @@ enum RealtimeAdapterFactory {
             }
             return OpenAIRealtimeAdapter(apiKey: route.apiKey ?? "", url: url, model: route.model)
         case .thisMac:
-            // Not a socket: the model on this Mac behind the adapter contract,
-            // for Subtitles audio and Meetings. Drop, Agent voice and Voice
-            // search get their own session from `TranscriptionSessionFactory`.
-            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
-            return OnDeviceStreamingAdapter(feature: route.feature, livePartials: route.feature != .meetings)
+            // Not a socket: `TranscriptionSessionFactory` builds its session.
+            throw FeatureRouteError.notSet(route.feature)
         case .openRouter, .openAI, .anthropic:
             // OpenRouter and Anthropic serve text models only.
             throw FeatureRouteError.notSet(route.feature)

@@ -126,15 +126,6 @@ Subtitles LLM независимы; восстановления через др
 Перевод Deepgram, ElevenLabs и своего сервера на пакетный API со спикерами — это
 отдельное предложение на потом, не v1.
 
-### On this Mac в Meetings и Subtitles audio
-
-С 2026-11-21 модель On this Mac выбирается в каждой строке с речью, включая
-Meetings и Subtitles audio. Обе идут через `OnDeviceStreamingAdapter`: поток
-режется на фразы по паузам (700 мс) или по 12 с, каждая фраза расшифровывается
-на этом Mac один раз. У Meetings на этом Mac нет спикеров: в выборе модели
-подпись «without speakers». Решение:
-`.project-docs/decisions/2026-11-21-on-device-everywhere.md`.
-
 ## API hints
 
 Внизу раздела, после блока Models, расположена ссылка **API hints**, доступная и без

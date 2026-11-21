@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/OnDevice/OnDeviceDictationTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md, 2026-11-21-on-device-everywhere.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md]
 ---
 
 ## Context
@@ -136,9 +136,6 @@ library's own progress.
   but separate UI; this change is the provider and its tile.
 - Routing a keyless new user to this Mac automatically: a route changes only
   by the user's choice.
-- On-device Meetings: no speaker labels without a diarizer. Revised on
-  2026-11-21 at the user's request: Meetings and Subtitles audio can choose
-  On this Mac, Meetings without speakers
-  ([on this Mac everywhere](2026-11-21-on-device-everywhere.md)).
+- On-device Meetings: no speaker labels without a diarizer.
 
 2026-11-19.

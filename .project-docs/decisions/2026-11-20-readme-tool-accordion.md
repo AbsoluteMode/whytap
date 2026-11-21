@@ -43,6 +43,15 @@ card shows only the motion video, 88% wide behind two em spaces so it sits
 under the card, after an empty paragraph that gives 16 px of space.
 `scripts/readme-tool-cards.py` generates the cards and the section.
 
+The rows end at the right edge of the Plugins cards and the code blocks
+(Maxim, 2026-11-21: the rows were narrower than the blocks below them). A row
+follows the summary's 17 px disclosure marker, so no single percentage fits
+every column: each `<source>` carries the widest `width` that still leaves
+about 3 px at the narrowest GitHub column of its viewport range (92% up to
+400 px, then 94%, 96%, 95% while the file sidebar narrows the column, 96.5%,
+97.5% from 1280 px). The img's 92% stays as the fallback for browsers that
+ignore `width` on `<source>`.
+
 ## Why
 
 It is the only GitHub-native control found that reacts to a click in place:
@@ -57,6 +66,10 @@ no page change, no reload, one open demo at a time.
   and light: one details open after clicking two cards in a row, card and
   video geometry measured, no wrap of the disclosure marker on a 375 px phone
   once the card image is 92% wide and the phone variant is 300 units wide.
+- 2026-11-21, live branch page in Chromium from 320 to 1600 px: GitHub keeps
+  `width` on `<source>`, every row ends 3–4 px (13 px at 600) before the
+  code block's edge and none wraps. WebKit and Firefox were not run; they
+  fall back to 92% if they ignore it.
 
 ## Rejected
 

@@ -2,7 +2,9 @@
 
 Connect GitHub once in **Settings → Integrations → GitHub**. Use an existing
 GitHub CLI login or an access token. Whytap checks or creates the private
-**Exodia-Backup** repository. The connection status is also shown in Backup.
+**Whytap-Backup** repository. If you already have an **Exodia-Backup**
+repository from earlier versions, Whytap keeps using it, so every earlier
+backup stays available. The connection status is also shown in Backup.
 Connecting does not upload user data.
 
 In **Settings → Backup**:

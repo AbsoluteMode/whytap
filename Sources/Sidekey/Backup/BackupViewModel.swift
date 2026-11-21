@@ -222,7 +222,8 @@ final class BackupViewModel: ObservableObject {
                 guard let token = try githubTokenStore.read(), let owner = defaults.string(forKey: "backup.github-owner.v1") else {
                     throw GitHubBackupTransport.Failure.authentication
                 }
-                github = try GitHubBackupTransport(token: token, owner: owner, session: githubSession)
+                github = try GitHubBackupTransport(token: token, owner: owner,
+                                                   repository: GitHubBackupTransport.savedRepository(defaults), session: githubSession)
                 await updateGitHubConnection()
             } catch {
                 githubRequiresReconnect = (error as? GitHubBackupTransport.Failure)?.requiresReconnect == true
@@ -524,7 +525,7 @@ final class BackupViewModel: ObservableObject {
             }
             if plan.kind == .deleteBackups {
                 try githubTokenStore.delete(); github = nil; githubConnectionState = .disconnected
-                for field in ["destination-kind", "destination-id", "destination-name", "github-owner", "folder-bookmark", "last-local", "last-copied", "source-stamp"] {
+                for field in ["destination-kind", "destination-id", "destination-name", "github-owner", "github-repository", "folder-bookmark", "last-local", "last-copied", "source-stamp"] {
                     defaults.removeObject(forKey: "backup.\(field).v1")
                 }
                 destinationName = "Not connected"; lastBackupAt = nil; lastRemoteBackupAt = nil
@@ -579,7 +580,8 @@ final class BackupViewModel: ObservableObject {
                     errorMessage = "Reconnect the same backup folder to continue this request."
                     return
                 }
-                let transport = try GitHubBackupTransport(token: token.trimmingCharacters(in: .whitespacesAndNewlines), owner: owner, session: githubSession)
+                let transport = try GitHubBackupTransport(token: token.trimmingCharacters(in: .whitespacesAndNewlines), owner: owner,
+                                                          repository: GitHubBackupTransport.savedRepository(defaults), session: githubSession)
                 _ = try await transport.versions()
                 try githubTokenStore.save(token.trimmingCharacters(in: .whitespacesAndNewlines))
                 github = transport; githubConnectionState = .connected; githubConnectionError = nil; isBusy = false
@@ -600,6 +602,7 @@ final class BackupViewModel: ObservableObject {
             selectDestination(id: "github:" + name.lowercased())
             defaults.set("github", forKey: "backup.destination-kind.v1")
             defaults.set(name.components(separatedBy: "/").first, forKey: "backup.github-owner.v1")
+            defaults.set(await transport.repositoryName, forKey: GitHubBackupTransport.repositoryDefaultsKey)
             defaults.set(destinationName, forKey: "backup.destination-name.v1")
             await refreshVersionsQuietly()
             statusText = "GitHub connected."
@@ -614,7 +617,7 @@ final class BackupViewModel: ObservableObject {
 
     var githubBackupURL: URL? {
         guard destinationKind == "github", let owner = defaults.string(forKey: "backup.github-owner.v1") else { return nil }
-        return GitHubBackupTransport.backupURL(owner: owner)
+        return GitHubBackupTransport.backupURL(owner: owner, repository: GitHubBackupTransport.savedRepository(defaults))
     }
 
     var syncState: BackupSyncState {
@@ -712,7 +715,7 @@ final class BackupViewModel: ObservableObject {
             github = nil; githubConnectionState = .disconnected; githubConnectionError = nil
             if destinationKind == "github" {
                 setEnabled(false)
-                for field in ["destination-kind", "destination-id", "destination-name", "github-owner"] {
+                for field in ["destination-kind", "destination-id", "destination-name", "github-owner", "github-repository"] {
                     defaults.removeObject(forKey: "backup.\(field).v1")
                 }
                 destinationRevision += 1; destinationName = "Not connected"

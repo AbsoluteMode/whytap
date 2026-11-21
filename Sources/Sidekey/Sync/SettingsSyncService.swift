@@ -76,7 +76,8 @@ final class SettingsSyncService: ObservableObject {
                     guard defaults.string(forKey: "backup.destination-kind.v1") == "github",
                           let owner = defaults.string(forKey: "backup.github-owner.v1"),
                           let token = try KeychainStore(account: "backup.github-token.v1").read() else { return nil }
-                    return try GitHubBackupTransport(token: token, owner: owner)
+                    return try GitHubBackupTransport(token: token, owner: owner,
+                                                     repository: GitHubBackupTransport.savedRepository(defaults))
                 },
                 ledgerURL: productionLedgerURL,
                 path: BuildConfig.flavor == .beta ? "whytap-sync/settings-beta.v1.json" : "whytap-sync/settings.v1.json",

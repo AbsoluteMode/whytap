@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Sync/SettingsSyncModel.swift
     confirmed_at: 2026-11-20
-related: [../project.md, 2026-10-20-backup-auto-sync.md, 2026-10-19-config-backup.md, 2026-10-19-api-and-models.md]
+related: [../project.md, 2026-10-20-backup-auto-sync.md, 2026-10-19-config-backup.md, 2026-10-19-api-and-models.md, 2026-11-21-whytap-backup-repository.md]
 ---
 
 # Settings sync between Macs
@@ -40,7 +40,8 @@ a recovery-code key and a Keychain token.
   clean restored Mac; a regression test follows that path.
 - One document, sealed with the backup key (AES-GCM; the key ID is readable),
   at `whytap-sync/settings.v1.json` (`settings-beta.v1.json` for beta) in the
-  existing private Exodia-Backup repository, through the Contents API.
+  existing private backup repository (Whytap-Backup, or Exodia-Backup on
+  older connections), through the Contents API.
 - Reads are conditional (ETag, 304). Writes carry the blob SHA; a write that
   lost a race (409/422) re-reads, merges and retries, at most three attempts.
 - Rounds run every minute and two seconds after a defaults change, only while

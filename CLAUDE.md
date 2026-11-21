@@ -119,8 +119,9 @@ Voice flow (Drop / dictation):
             .project-docs/decisions/2026-10-18-remove-local-models.md,
             .project-docs/decisions/2026-10-19-api-and-models.md
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
-            the same route mechanism, for Drop Fast, Drop Smart, Agent voice
-            and Voice search only (not Meetings, Subtitles or text). The API
+            the same route mechanism, for every speech feature (Drop Fast,
+            Drop Smart, Agent voice, Voice search, Meetings, Subtitles audio;
+            no text feature). The API
             keys tab has an On this Mac card above the key tiles
             (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
             button is in the card, with an animated progress bar and symbol
@@ -147,6 +148,15 @@ Voice flow (Drop / dictation):
             none for Cyrillic ones. The loaded model is released after five
             idle minutes. No Costs rows. WHY:
             .project-docs/decisions/2026-11-19-on-device-dictation.md
+            Meetings and Subtitles audio use OnDeviceStreamingAdapter (from
+            RealtimeAdapterFactory, unmetered): OnDevicePhraseSegmenter cuts
+            the stream at 700 ms pauses or 12 s (at the quietest frame), each
+            phrase is decoded once as a final, digital silence is skipped;
+            Subtitles also get a partial of the phrase in progress about once
+            a second. sendAudio waits while two phrases are queued. A meeting
+            on this Mac takes the adapter branch like a user's server: no
+            speaker labels ("without speakers" in the picker). WHY:
+            .project-docs/decisions/2026-11-21-on-device-everywhere.md
        Soniox Stop: drain all captured audio -> 200ms PCM silence -> explicit
        finalize + text EOF. A final <fin> acknowledgement completes the take;
        finished=true also completes it. The 10s watchdog remains the backstop.
@@ -454,7 +464,7 @@ Meeting Notes:
           turns and durable job/transcript checkpoint; other providers use
           their adapters, then the LLM route the user chose for notes).
           Speaker labels come from the provider; there is no on-device
-          diarizer. Without a route for Meetings and Meeting notes
+          diarizer, so On this Mac gives a meeting without speakers. Without a route for Meetings and Meeting notes
           (including the retired Local route) the meeting is marked failed
           with `MeetingsCoordinator.processorNotConfiguredMessage` and its
           audio stays staged; a `MeetingFinalizeManifest` re-dispatches it

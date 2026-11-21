@@ -51,10 +51,10 @@ final class AIFeatureTests: XCTestCase {
             case .openAI: return openRouter
             case .anthropic: return anthropic
             case .openAICompatible: return openAICompatible
-            // The microphone features only: not subtitles, meetings or text.
+            // Every speech feature, meetings and subtitles included; no text.
             case .onDevice:
-                let microphone: Set<AIFeature> = [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
-                return features.allSatisfy(microphone.contains) ? .realtimeSTT : nil
+                let speech: Set<AIFeature> = [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .meetings, .subtitlesAudio]
+                return features.allSatisfy(speech.contains) ? .realtimeSTT : nil
             }
         }
     }

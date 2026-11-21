@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="421" height="136" viewBox="0 0 421 136">
+  <rect x="0.5" y="0.5" width="420" height="135" rx="14" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <circle cx="34" cy="34" r="17" fill="#ece9ff"/>
+  <g transform="translate(25.0 25.0) scale(0.7500)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
+  <path d="m3 7 2 2 4-4" />
+  <path d="M13 6h8" />
+  <path d="M13 12h8" />
+  <path d="M13 18h8" /></g>
+  <text x="62" y="40" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">flora</text>
+  <g transform="translate(389 26.0) scale(0.6667)" fill="none" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10" />
+  <path d="M7 17 17 7" /></g>
+  <text x="18" y="80" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#5b4bd6">Workflow contracts for coding harnesses</text>
+  <text x="18" y="103" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e">Every step says what proves it is done, and an independent</text>
+  <text x="18" y="121" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e">verifier checks that before the next step starts.</text>
+</svg>

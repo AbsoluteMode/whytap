@@ -177,4 +177,6 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/project-orchestrator-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/project-orchestrator-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/project-orchestrator-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/project-orchestrator-wide-light.svg"><img alt="Orchestrator (soon): Claude Code plugin. Ten chats in one window: it keeps the task list, starts the sessions and writes to you only when it needs you." src="docs/assets/readme/project-orchestrator-wide-dark.svg" width="49%"></picture>
 </p>
 
+<p align="center"><sub>If you like Whytap, a ⭐ helps others find it.</sub></p>
+
 <p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

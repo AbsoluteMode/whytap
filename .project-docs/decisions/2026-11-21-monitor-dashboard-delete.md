@@ -56,15 +56,17 @@ minutes), which Whytap neither installs nor owns.
   surface (island and Toolbox each have a store) drops it on its next reload
   and shows its existing "no longer available" text if it had it open.
 - `customize.py install-dashboard` removes the ID from the list, so installing
-  a board again lists it again. It changes the list before writing the
-  snapshot: an unreadable list or a failed list save stops the install with
-  nothing written, so a reinstall keeps the previous snapshot and a first
-  install leaves no file behind that would block a retry.
-- Whytap and the installer change the list only while holding an exclusive
-  `flock` on `Monitor/removed-dashboards.lock`, re-reading the list inside the
-  lock, so neither overwrites a deletion or re-listing the other just saved.
-  Whytap waits at most 2 s, the installer 5 s; a busy lock fails without
-  changes.
+  a board again lists it again. Snapshot and list change as one step: both new
+  files are prepared first, the snapshot is committed, then the list; if the
+  list cannot be committed the previous snapshot is put back (a first install
+  removes its file). An unreadable list, an unwritable folder or any failed
+  write leaves both files as they were, so a deleted board's collector
+  snapshot never reappears and a retry works.
+- Whytap's Delete (hide the ID, remove the files) and the installer's change
+  both run entirely under an exclusive `flock` on
+  `Monitor/removed-dashboards.lock`, re-reading the list inside the lock, so
+  neither loses or undoes the other's change. Whytap waits at most 2 s, the
+  installer 5 s; a busy lock fails without changes.
 - An unreadable list shows every board with a notice and makes Delete fail
   with an alert instead of overwriting the list.
 
@@ -86,16 +88,20 @@ minutes), which Whytap neither installs nor owns.
   are all removed; an unreadable list fails without deleting; Server status and
   invalid IDs are refused; the list file is 0600 and round-trips; the alert
   orders Cancel first with Delete keyless.
-- `scripts/tests/test_monitor_dashboard_install.py`: an unreadable list keeps
-  the previous snapshot on `--replace` and creates nothing on a first install
-  (a retry after fixing the list installs); re-listing keeps other deletions
-  with mode 0600; `--dry-run` changes nothing; the installer waits for a held
-  lock and keeps the deletion saved meanwhile; a lock that stays busy fails
-  without changes. Swift: Delete fails cleanly while the installer holds the
+- `scripts/tests/test_monitor_dashboard_install.py` (10 tests): an unreadable
+  list keeps the previous snapshot on `--replace` and creates nothing on a
+  first install (a retry after fixing it installs); an unwritable snapshots
+  folder changes neither file; a failed list save puts the previous snapshot
+  back, or removes a first install's file; a failed snapshot write keeps the
+  list; re-listing keeps other deletions with mode 0600; `--dry-run` changes
+  nothing; the installer waits for a held lock and keeps the deletion saved
+  meanwhile; a lock that stays busy fails without changes. No temporary files
+  are left behind. Swift: Delete fails cleanly while the installer holds the
   lock and succeeds after; earlier saved deletions are kept.
-- The builder's first review (queue ticket 298) found the snapshot written
-  before a list failure and a lost update between list writers; both are the
-  reason for the order and the lock above.
+- The builder's reviews (queue tickets 298 and 299) found the snapshot written
+  before a list failure, a lost update between list writers and the list
+  committed before a failed snapshot write; all three led to the transaction
+  and lock above, and the builder's reproducers pass.
 - Not tested: the real context menu and alert over the live island panel.
 
 ## Rejected

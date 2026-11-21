@@ -300,28 +300,8 @@ def dashboard_command(args: argparse.Namespace) -> int:
         print(f"Would install {snapshot['id']} to {args.flavor} Monitor/dashboards/{destination.name}"
               + ("; it was deleted in Monitor earlier and would be listed again" if relist else ""))
         return 0
-    # The deleted list changes first: if it is unreadable or cannot be saved,
-    # nothing on disk changed and the previous snapshot stays as it was.
-    # WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
-    relisted = forget_removed_dashboard(monitor, snapshot["id"])
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=directory, prefix=".dashboard-", delete=False) as stream:
-            temporary_path = Path(stream.name)
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if args.replace:
-            os.replace(temporary_path, destination)
-        else:
-            # Hard-link installation refuses an existing destination atomically.
-            os.link(temporary_path, destination)
-            temporary_path.unlink()
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    relisted = install_dashboard_snapshot(monitor, destination, snapshot["id"], data, replace=args.replace)
     if relisted:
         print(f"{snapshot['id']} was deleted in Monitor earlier; it is listed again")
     print(f"Installed dashboard {snapshot['id']} for {args.flavor}; open Monitor to view it")
@@ -374,34 +354,75 @@ def removed_dashboards_lock(monitor: Path):
         os.close(descriptor)
 
 
-def forget_removed_dashboard(monitor: Path, dashboard_id: str) -> bool:
-    """Installing a board again takes its ID off Monitor's deleted list.
+def _private_temporary(directory: Path, prefix: str, data: bytes) -> Path:
+    """A fsynced mode-0600 file next to its destination, for an atomic rename."""
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=prefix, delete=False) as stream:
+            path = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(path, 0o600)
+        return path
+    except BaseException:
+        if path is not None:
+            path.unlink(missing_ok=True)
+        raise
 
-    Read, change and replace happen under the list's lock, so a deletion the
-    app saves meanwhile is never lost.
+
+def install_dashboard_snapshot(monitor: Path, destination: Path, dashboard_id: str, data: bytes,
+                               replace: bool) -> bool:
+    """Writes the snapshot and takes its ID off Monitor's deleted list as one change.
+
+    Everything happens under the list's lock, which Whytap's Delete also takes,
+    so neither loses the other's edit. Both new files are prepared before
+    anything is committed; if the list cannot be committed after the snapshot
+    was, the snapshot is put back as it was. On any failure the previous
+    snapshot and the list stay unchanged. Returns whether the ID was relisted.
     WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     """
-    if dashboard_id not in read_removed_dashboards(monitor):
-        return False
+    directory = destination.parent
     with removed_dashboards_lock(monitor):
         removed = read_removed_dashboards(monitor)
-        if dashboard_id not in removed:
-            return False
-        data = (json.dumps({"removed": sorted(set(removed) - {dashboard_id})}, indent=2) + "\n").encode("utf-8")
-        temporary_path = None
+        relisted = dashboard_id in removed
+        if destination.is_symlink():
+            raise ValueError("Refusing a symlink dashboard destination")
+        if destination.exists() and not replace:
+            raise ValueError("Dashboard already exists; inspect it before using --replace")
+        snapshot_temporary = list_temporary = backup = None
+        committed = False
         try:
-            with tempfile.NamedTemporaryFile(dir=monitor, prefix=".removed-dashboards-", delete=False) as stream:
-                temporary_path = Path(stream.name)
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.chmod(temporary_path, 0o600)
-            os.replace(temporary_path, monitor / REMOVED_DASHBOARDS)
-            temporary_path = None
+            snapshot_temporary = _private_temporary(directory, ".dashboard-", data)
+            if relisted:
+                document = {"removed": sorted(set(removed) - {dashboard_id})}
+                list_temporary = _private_temporary(
+                    monitor, ".removed-dashboards-", (json.dumps(document, indent=2) + "\n").encode("utf-8"))
+            if replace and destination.exists():
+                backup = directory / f".dashboard-backup-{os.getpid()}-{time.monotonic_ns()}"
+                os.link(destination, backup)
+            if replace:
+                os.replace(snapshot_temporary, destination)
+            else:
+                # Hard-link installation refuses an existing destination atomically.
+                os.link(snapshot_temporary, destination)
+            committed = True
+            if list_temporary is not None:
+                os.replace(list_temporary, monitor / REMOVED_DASHBOARDS)
+                list_temporary = None
+            committed = False
         finally:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
-    return True
+            if committed:
+                # The list could not be committed: put the snapshot back.
+                if backup is not None:
+                    os.replace(backup, destination)
+                    backup = None
+                else:
+                    destination.unlink(missing_ok=True)
+            for leftover in (snapshot_temporary, list_temporary, backup):
+                if leftover is not None:
+                    leftover.unlink(missing_ok=True)
+    return relisted
 
 
 def main(argv: list[str] | None = None) -> int:

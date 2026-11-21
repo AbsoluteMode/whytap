@@ -152,23 +152,27 @@ final class MonitorStore: ObservableObject {
         guard id != "server-status", MonitorDashboard.validID(id) else {
             throw MonitorValidationError.invalidDashboard
         }
-        reloadFiles()
-        let wasListed = dashboards.contains { $0.id == id }
-        try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
+        // The whole change runs under the list's lock, which install-dashboard
+        // also takes, so a reinstall cannot land between hiding the ID and
+        // removing the files (and lose its fresh snapshot).
+        let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
+            reloadFiles()
+            let wasListed = dashboards.contains { $0.id == id }
             var removed = try MonitorRemovedDashboards.load(root: root)
             if !removed.contains(id) {
                 removed.insert(id)
                 try removed.save(root: root)
             }
-        }
-        let fm = FileManager.default
-        for file in dashboardFiles[id] ?? [] {
-            // Only regular files inside dashboards/ that decoded to this ID.
-            guard file.deletingLastPathComponent().standardizedFileURL
-                    == dashboardsDirectory.standardizedFileURL else { continue }
-            // The ID is already hidden; a file that cannot be removed is
-            // simply rewritten or left by its collector.
-            try? fm.removeItem(at: file)
+            let fm = FileManager.default
+            for file in dashboardFiles[id] ?? [] {
+                // Only regular files inside dashboards/ that decoded to this ID.
+                guard file.deletingLastPathComponent().standardizedFileURL
+                        == dashboardsDirectory.standardizedFileURL else { continue }
+                // The ID is already hidden; a file that cannot be removed is
+                // simply rewritten or left by its collector.
+                try? fm.removeItem(at: file)
+            }
+            return wasListed
         }
         reloadFiles()
         return wasListed

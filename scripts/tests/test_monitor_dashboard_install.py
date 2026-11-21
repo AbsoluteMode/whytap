@@ -100,6 +100,7 @@ class MonitorDashboardInstallTests(unittest.TestCase):
     def test_installer_waits_for_whytaps_lock_and_keeps_its_deletion(self):
         """Whytap saves a new deletion while holding the lock; the installer must merge, not overwrite."""
         self.removed.write_text('{"removed": ["fixture-a"]}\n')
+        self.source.write_text(snapshot("fixture-a", "Back"))
         lock = os.open(self.monitor / customize.REMOVED_DASHBOARDS_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
 
@@ -110,9 +111,87 @@ class MonitorDashboardInstallTests(unittest.TestCase):
 
         writer = threading.Thread(target=whytap_deletes_meanwhile)
         writer.start()
-        self.assertTrue(customize.forget_removed_dashboard(self.monitor, "fixture-a"))
+        code, error = self.install()
         writer.join()
+        self.assertEqual(code, 0, error)
         self.assertEqual(self.removed_ids(), ["newly-deleted"])
+        self.assertTrue((self.dashboards / "fixture-a.json").is_file())
+
+    def leftovers(self):
+        return sorted(p.name for p in [*self.monitor.iterdir(), *self.dashboards.iterdir()]
+                      if p.name.startswith("."))
+
+    def test_unwritable_snapshots_folder_changes_neither_file(self):
+        """The collector's snapshot must not reappear when the reinstall fails."""
+        previous = self.dashboards / "fixture-a.json"
+        previous.write_text(snapshot("fixture-a", "Collector rewrote it"))
+        self.removed.write_text('{"removed": ["fixture-a", "other-deleted"]}\n')
+        list_before = self.removed.read_bytes()
+        self.source.write_text(snapshot("fixture-a", "Proposed"))
+        self.dashboards.chmod(0o500)
+        try:
+            code, error = self.install("--replace")
+        finally:
+            self.dashboards.chmod(0o700)
+        self.assertEqual(code, 2)
+        self.assertIn("Permission denied", error)
+        self.assertEqual(json.loads(previous.read_text())["title"], "Collector rewrote it")
+        self.assertEqual(self.removed.read_bytes(), list_before)
+        self.assertEqual(self.leftovers(), [])
+
+    def failing_replace(self, failing_name):
+        real = customize.os.replace
+
+        def replace(source, target):
+            if Path(target).name == failing_name:
+                raise OSError(28, "No space left on device")
+            return real(source, target)
+        return patch.object(customize.os, "replace", side_effect=replace)
+
+    def test_list_save_failure_puts_the_previous_snapshot_back(self):
+        previous = self.dashboards / "fixture-a.json"
+        previous.write_text(snapshot("fixture-a", "Previous"))
+        self.removed.write_text('{"removed": ["fixture-a"]}\n')
+        list_before = self.removed.read_bytes()
+        self.source.write_text(snapshot("fixture-a", "Proposed"))
+
+        with self.failing_replace("removed-dashboards.json"):
+            code, error = self.install("--replace")
+
+        self.assertEqual(code, 2)
+        self.assertIn("No space left", error)
+        self.assertEqual(json.loads(previous.read_text())["title"], "Previous")
+        self.assertEqual(self.removed.read_bytes(), list_before)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_list_save_failure_on_first_install_leaves_no_file(self):
+        self.removed.write_text('{"removed": ["fixture-a"]}\n')
+        self.source.write_text(snapshot("fixture-a", "Fresh"))
+
+        with self.failing_replace("removed-dashboards.json"):
+            code, _ = self.install()
+
+        self.assertEqual(code, 2)
+        self.assertFalse((self.dashboards / "fixture-a.json").exists())
+        self.assertEqual(self.removed_ids(), ["fixture-a"])
+        self.assertEqual(self.leftovers(), [])
+        code, error = self.install()
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.removed_ids(), [])
+
+    def test_snapshot_write_failure_keeps_the_list(self):
+        previous = self.dashboards / "fixture-a.json"
+        previous.write_text(snapshot("fixture-a", "Previous"))
+        self.removed.write_text('{"removed": ["fixture-a"]}\n')
+        self.source.write_text(snapshot("fixture-a", "Proposed"))
+
+        with self.failing_replace("fixture-a.json"):
+            code, _ = self.install("--replace")
+
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(previous.read_text())["title"], "Previous")
+        self.assertEqual(self.removed_ids(), ["fixture-a"])
+        self.assertEqual(self.leftovers(), [])
 
     def test_held_lock_times_out_without_changes(self):
         self.removed.write_text('{"removed": ["fixture-a"]}\n')

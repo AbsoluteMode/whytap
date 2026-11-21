@@ -117,10 +117,11 @@ stays deleted when its collector writes the snapshot again, including after a
 relaunch. Whytap never stops or deletes the collector, its scripts or its
 launchd agent: turn the collector off yourself if it should stop running.
 Server status is built in and cannot be deleted. `install-dashboard` takes the
-ID off the list, so installing the dashboard again brings it back; it edits
-the list before writing the snapshot, so an unreadable list stops the install
-with nothing changed. Whytap and the installer edit the list only while holding
-an exclusive `flock` on `Monitor/removed-dashboards.lock`. WHY:
+ID off the list, so installing the dashboard again brings it back. The
+snapshot and the list change together: if either cannot be written (or the list
+is unreadable), both stay as they were. Whytap's Delete and the installer run
+only while holding an exclusive `flock` on `Monitor/removed-dashboards.lock`.
+WHY:
 [decision](../../.project-docs/decisions/2026-11-21-monitor-dashboard-delete.md)
 
 The built-in Server status collector uses separate local `Monitor/servers.json`

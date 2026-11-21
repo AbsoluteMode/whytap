@@ -103,4 +103,4 @@ emulated click reaches it the same way a mouse click does and how the replay
 behaves on real hardware need the MacBook or Sidecar with macOS 27.3 and
 iPadOS 27 (island shown on the iPad display).
 
-2026-11-22, PR: island-touch-tap
+2026-11-22, PR: https://github.com/AbsoluteMode/whytap/pull/396

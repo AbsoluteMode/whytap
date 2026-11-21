@@ -58,9 +58,8 @@ paying.
   the block is scaled. Because the section edges did not line up with the
   Tools rows and code blocks, the block is shown at the column's full width
   and the offers are two wide linked cards per row, each 49% wide (the
-  compact card on phones). Paid-plan credits
-  (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
-  starting without payment.
+  compact card on phones). These cards show offers for getting started
+  without payment.
 - Under the cards, **My setup** (asked by Maxim on 2026-11-21) shows his own
   routes from API & Models as "free* right now", in two panels: an Anthropic
   key and an OpenAI key with a model of the same price class (his choice).
@@ -71,8 +70,7 @@ paying.
   Meetings, which go to ElevenLabs as recorded audio. The asterisk explains
   it: the models are paid from a Claude Max/Ultra or ChatGPT Pro plan's
   monthly API credit, speech from ElevenLabs' free credits (non-commercial
-  use). This is the one place the README names paid-plan credits, labelled as
-  such. Maxim updates the setup himself every month (`SETUP_*` in the script,
+  use). Maxim updates the setup himself every month (`SETUP_*` in the script,
   with its own check date).
 - Between the free cards and My setup, **Already paying for an OpenAI or
   Anthropic subscription?** (asked by Maxim on 2026-11-21: Whytap is the app

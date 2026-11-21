@@ -140,9 +140,8 @@ final class ScreenshotCoordinator: NSObject, NSSharingServicePickerDelegate {
         case .capture:
             break
         case .requestOnly:
+            // ScreenRecordingAccess.requestOnce() has already asked macOS.
             os_log("screenshot_permission request", log: Self.log, type: .info)
-            let gate = permissionGate
-            Task { await gate.performRequest() }
             return
         case .ignoreRepeat:
             os_log("screenshot_permission ignored_repeat", log: Self.log, type: .info)

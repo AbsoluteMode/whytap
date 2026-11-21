@@ -12,6 +12,9 @@ sources:
     reference: On 2026-11-21 the user tried Screenshot on a newly installed Whytap on a relative's Mac (macOS 14 or 15, judged by History without macOS 26 glass). Two different Screen Recording windows opened at once. Access was then granted, so the windows cannot be reproduced or captured.
     confirmed_at: 2026-11-21
   - type: repository
+    reference: Sources/Sidekey/Permissions/ScreenRecordingAccess.swift
+    confirmed_at: 2026-11-22
+  - type: repository
     reference: Sources/Sidekey/Screenshots/ScreenshotPermissionGate.swift
     confirmed_at: 2026-11-22
   - type: repository
@@ -47,12 +50,20 @@ The other candidates were checked in the code and ruled out for this press:
 
 # Decision
 
+Surfaces that ask at first use call one function,
+`ScreenRecordingAccess.shared.requestOnce()`: it makes the ScreenCaptureKit
+request that Settings → Permissions uses (`ScreenRecordingPermissionRequest`)
+at most once per launch, remembers that in memory, and returns `granted`,
+`requested` or `alreadyRequested`. After `requested` the caller shows nothing of
+its own; after `alreadyRequested` it shows its help or opens System Settings.
+Screenshot and the onboarding's optional Screen Recording row share this
+instance, so whichever asks first, the other never asks again.
+
 `ScreenshotPermissionGate` decides each press before a capture session starts:
 
 - Access granted: capture as before.
-- First press of a launch without access: make only the ScreenCaptureKit
-  request that Settings → Permissions uses (`ScreenRecordingPermissionRequest`)
-  and show nothing of Whytap's. No capture session, activity or Hover hold.
+- First press of a launch without access (`requestOnce()` returned
+  `requested`): show nothing of Whytap's. No capture session, activity or Hover hold.
 - A press within 1 s of that request: a repeat of the same press (held
   shortcut, double delivery) and does nothing.
 - Any later press without access: Whytap's help alert with Open System
@@ -77,7 +88,9 @@ press; it is not a guess about when the dialog closes.
   help, no session; granted → capture without a request; denied → help on the
   next press, one request in total; repeats within 1 s → nothing; later presses
   with the dialog unanswered → one request and one help; grant after the
-  request → capture on the next press; the gate forgets the request per launch.
+  request → capture on the next press; the gate forgets the request per launch;
+  another surface asking first makes Shot show help without a second request;
+  `requestOnce()` asks at most once.
 - `swift build`, focused permission/screenshot suites and the full `swift test`.
 - Not checked: the real dialogs on macOS 14/15. Whytap was not launched and
   permissions were not reset on the maintainer's Mac. Acceptance needs a Mac or

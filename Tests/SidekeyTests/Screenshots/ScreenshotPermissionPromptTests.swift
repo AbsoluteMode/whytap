@@ -19,10 +19,10 @@ final class ScreenshotPermissionPromptTests: XCTestCase {
     private func makeCoordinator(_ probe: Probe, requested: XCTestExpectation? = nil,
                                  helped: XCTestExpectation? = nil, captured: XCTestExpectation? = nil,
                                  holdHelp: (() async -> Void)? = nil) -> ScreenshotCoordinator {
-        let gate = ScreenshotPermissionGate(isGranted: { probe.granted }, request: {
+        let gate = ScreenshotPermissionGate(access: ScreenRecordingAccess(isGranted: { probe.granted }, request: {
             probe.requests += 1
             requested?.fulfill()
-        }, now: { probe.clock })
+        }, now: { probe.clock }))
         let environment = ScreenshotCaptureEnvironment(applicationNotifications: NotificationCenter(),
                                                        workspaceNotifications: NotificationCenter(),
                                                        frontmostApplication: { nil })
@@ -134,7 +134,7 @@ final class ScreenshotPermissionPromptTests: XCTestCase {
     func testGateRemembersTheRequestOnlyForThisLaunch() {
         var granted = false
         var clock = Date(timeIntervalSinceReferenceDate: 0)
-        let gate = ScreenshotPermissionGate(isGranted: { granted }, request: {}, now: { clock })
+        let gate = ScreenshotPermissionGate(access: ScreenRecordingAccess(isGranted: { granted }, request: {}, now: { clock }))
         XCTAssertEqual(gate.step(), .requestOnly)
         clock += 0.5
         XCTAssertEqual(gate.step(), .ignoreRepeat)
@@ -142,9 +142,49 @@ final class ScreenshotPermissionPromptTests: XCTestCase {
         XCTAssertEqual(gate.step(), .showHelp)
         granted = true
         XCTAssertEqual(gate.step(), .capture)
-        let nextLaunch = ScreenshotPermissionGate(isGranted: { false }, request: {})
+        let nextLaunch = ScreenRecordingAccess(isGranted: { false }, request: {})
         XCTAssertFalse(nextLaunch.requested)
-        XCTAssertEqual(nextLaunch.step(), .requestOnly)
+        XCTAssertEqual(ScreenshotPermissionGate(access: nextLaunch).step(), .requestOnly)
+    }
+
+    func testAnotherSurfaceAskingFirstMakesShotShowHelpWithoutAskingAgain() async {
+        // The onboarding and Shot share one ScreenRecordingAccess per launch.
+        let probe = Probe()
+        let requested = expectation(description: "System request"), helped = expectation(description: "Help")
+        let access = ScreenRecordingAccess(isGranted: { probe.granted }, request: {
+            probe.requests += 1
+            requested.fulfill()
+        }, now: { probe.clock })
+        XCTAssertEqual(access.requestOnce(), .requested)
+        await fulfillment(of: [requested], timeout: 2)
+        probe.clock += 30
+        let environment = ScreenshotCaptureEnvironment(applicationNotifications: NotificationCenter(),
+                                                       workspaceNotifications: NotificationCenter(),
+                                                       frontmostApplication: { nil })
+        let coordinator = ScreenshotCoordinator(activityChanged: { probe.activity.append($0) }, captureOverride: {
+            probe.captures += 1; throw CancellationError()
+        }, environment: environment, permissionGate: ScreenshotPermissionGate(access: access), permissionHelp: {
+            probe.helps += 1; helped.fulfill()
+        })
+        coordinator.start()
+        await fulfillment(of: [helped], timeout: 2)
+        XCTAssertEqual(probe.requests, 1)
+        XCTAssertEqual(probe.helps, 1)
+        XCTAssertEqual(access.requestOnce(), .alreadyRequested(secondsAgo: 30))
+    }
+
+    func testRequestOnceAsksAtMostOncePerLaunch() async {
+        var requests = 0, granted = false
+        let done = expectation(description: "Request")
+        let access = ScreenRecordingAccess(isGranted: { granted }, request: { requests += 1; done.fulfill() },
+                                           now: { Date(timeIntervalSinceReferenceDate: 0) })
+        XCTAssertEqual(access.requestOnce(), .requested)
+        XCTAssertEqual(access.requestOnce(), .alreadyRequested(secondsAgo: 0))
+        await fulfillment(of: [done], timeout: 2)
+        XCTAssertEqual(requests, 1)
+        granted = true
+        XCTAssertEqual(access.requestOnce(), .granted)
+        XCTAssertTrue(access.isGranted)
     }
 
     func testScreenshotSourceAsksThroughOneAPI() throws {

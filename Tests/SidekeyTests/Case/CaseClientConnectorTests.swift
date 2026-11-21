@@ -467,6 +467,37 @@ final class CaseClientConnectorTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
+    /// Builder review (queue run 93934): Disconnect removed our older `case`
+    /// entry even when it held the person's own settings. Like Connect, it now
+    /// removes only a plain one, in Claude Code and Cursor.
+    func test_disconnect_leaves_a_customized_case_entry() throws {
+        let customized = #"{"command":"\#(helper)","args":["case","mcp"],"env":{"TOKEN":"synthetic-value-4821"}}"#
+
+        let home = try temporaryHome()
+        let claudeFile = home.appendingPathComponent(".claude.json")
+        try write(#"{"mcpServers":{"case":\#(customized)}}"#, to: claudeFile)
+        let runner = FakeCommandRunner()
+        try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                    locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }).uninstall(helperPath: helper)
+        XCTAssertEqual(runner.calls, [], "no mcp remove for a customized case entry")
+
+        let cursorFile = home.appendingPathComponent(".cursor/mcp.json")
+        try write(#"{"mcpServers":{"case":\#(customized)}}"#, to: cursorFile)
+        let before = try Data(contentsOf: cursorFile)
+        try CursorCaseConnector(home: home, appInstalled: { true }).uninstall(helperPath: helper)
+        XCTAssertEqual(try Data(contentsOf: cursorFile), before)
+
+        // A plain one is still removed by both.
+        let plain = #"{"command":"\#(helper)","args":["case","mcp"],"env":{}}"#
+        try write(#"{"mcpServers":{"case":\#(plain)}}"#, to: claudeFile)
+        try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                    locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }).uninstall(helperPath: helper)
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "-s", "user", "case"]])
+        try write(#"{"mcpServers":{"case":\#(plain)}}"#, to: cursorFile)
+        try CursorCaseConnector(home: home, appInstalled: { true }).uninstall(helperPath: helper)
+        XCTAssertNil((try readJSON(cursorFile)["mcpServers"] as? [String: Any])?["case"])
+    }
+
     func test_cursor_keeps_the_persons_own_settings() throws {
         let home = try temporaryHome()
         let url = home.appendingPathComponent(".cursor/mcp.json")

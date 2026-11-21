@@ -400,7 +400,8 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
 
     func uninstall(helperPath: String?) throws {
         if let helperPath, let servers = try? userServers(),
-           CaseMCPEntryOwnership.isOurs(servers[WhytapMCPEntry.legacyName], helperPath: helperPath) {
+           CaseMCPEntryOwnership.isOurs(servers[WhytapMCPEntry.legacyName], helperPath: helperPath),
+           CaseMCPEntryOwnership.plainServer(servers[WhytapMCPEntry.legacyName]) != nil {
             try check(run(try binary(), ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName]))
         }
         try updateSandbox(try settings.read(), adding: false)
@@ -663,7 +664,8 @@ struct CursorCaseConnector: CaseClientConnector {
         guard let helperPath,
               var root = try file.read(),
               var servers = root["mcpServers"] as? [String: Any],
-              CaseMCPEntryOwnership.isOurs(servers[WhytapMCPEntry.legacyName], helperPath: helperPath)
+              CaseMCPEntryOwnership.isOurs(servers[WhytapMCPEntry.legacyName], helperPath: helperPath),
+              CaseMCPEntryOwnership.plainServer(servers[WhytapMCPEntry.legacyName]) != nil
         else { return }
         servers[WhytapMCPEntry.legacyName] = nil
         root["mcpServers"] = servers

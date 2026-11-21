@@ -88,7 +88,8 @@ not because they need separate processes.
   uncertain, which refuses. Claude Code's `.claude.json` (home folder) and Cursor's
   `mcp.json` are JSON read by the system parser (escaped keys included); an
   unreadable file or a non-object `mcpServers` refuses as well.
-- Disconnect removes only our older `case` entry. The `whytap` entry stays.
+- Disconnect removes only our older `case` entry, and only when plain (the
+  same rule as Connect). The `whytap` entry stays.
 
 ## Why
 
@@ -183,6 +184,9 @@ not because they need separate processes.
   a customized older entry refused with zero changes, and a customized
   `case` entry left alone; the real Codex CLI reads `startup_timeout_sec`,
   `enabled = false` and an env table as customized.
+- Builder review 6 (queue run 93934): Disconnect still removed a customized
+  older `case` entry in Claude Code and Cursor. It now applies the plain rule
+  too; a test covers both hosts, and a plain entry is still removed.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

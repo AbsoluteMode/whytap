@@ -340,6 +340,32 @@ final class ModelProbeTests: XCTestCase {
         let downOutcome = await down.probe(route(.soniox, feature: .meetings), use: .asyncSTT, catalog: nil)
         guard case .inconclusive = downOutcome else { return XCTFail("expected inconclusive, got \(downOutcome)") }
     }
+
+    /// Meetings on ElevenLabs and Deepgram check the picked model on the
+    /// provider's own pre-recorded endpoint, with that model.
+    // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
+    func test_async_probe_checks_elevenlabs_and_deepgram_on_their_recorded_endpoints() async {
+        var paths: [String] = []
+        let probe = httpProbe { request in
+            paths.append(request.url?.path ?? "")
+            if request.url?.host == "api.elevenlabs.io" { return (200, [:], Data(#"{"text":""}"#.utf8)) }
+            return (200, [:], Data(#"{"results":{"channels":[{"alternatives":[{"transcript":""}]}]}}"#.utf8))
+        }
+        let eleven = await probe.probe(route(.elevenLabs, feature: .meetings), use: .asyncSTT, catalog: nil)
+        let deepgram = await probe.probe(route(.deepgram, feature: .meetings), use: .asyncSTT, catalog: nil)
+        XCTAssertEqual(eleven, .passed)
+        XCTAssertEqual(deepgram, .passed)
+        XCTAssertEqual(paths, ["/v1/speech-to-text", "/v1/listen"])
+        let sent = zip(StubURLProtocol.capturedRequests, StubURLProtocol.capturedBodies).map {
+            ($0.url?.query ?? "") + String(decoding: $1, as: UTF8.self)
+        }
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertTrue(sent.allSatisfy { $0.contains("the-model") }, "the picked model is the one checked")
+
+        let refused = httpProbe { _ in (401, [:], Data(#"{"detail":{"status":"invalid_api_key"}}"#.utf8)) }
+        let keyOutcome = await refused.probe(route(.elevenLabs, feature: .meetings), use: .asyncSTT, catalog: nil)
+        XCTAssertEqual(keyOutcome, .inconclusive(reason: "Key problem"), "a key problem is no verdict on the model")
+    }
 }
 
 private extension Array {

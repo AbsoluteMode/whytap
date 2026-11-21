@@ -92,11 +92,14 @@ final class ModelStatusResolverTests: XCTestCase {
         let env = try makeEnv(snapshots: [.deepgram: fresh(models)], keyed: [.soniox, .deepgram, .elevenLabs])
         let sections = env.resolver.sections(for: .meetings)
         for (account, model, day) in [(ProviderAccount.soniox, "stt-async-v6", "2026-11-03"),
-                                      (.elevenLabs, "scribe_v3_live", "2026-11-10")] {
+                                      (.elevenLabs, "scribe_v3", "2026-11-10")] {
             let option = try XCTUnwrap(sections.first { $0.account == account }?.options.first { $0.model == model })
             XCTAssertTrue(try XCTUnwrap(option.dateLabel).hasPrefix("Released "))
             XCTAssertEqual(option.catalogDate, ModelCatalogFetcher.deepgramVersionDate(day))
         }
+        // Meetings offer the recorded Scribe model, never the streaming one.
+        let meetingScribe = try XCTUnwrap(sections.first { $0.account == .elevenLabs }?.options.map(\.model))
+        XCTAssertFalse(meetingScribe.contains("scribe_v3_live"), "\(meetingScribe)")
         let speechOptions = try XCTUnwrap(env.resolver.sections(for: .dropFast).first { $0.account == .soniox }?.options)
         XCTAssertEqual(speechOptions.first { $0.model == "stt-rt-v6" }?.catalogDate,
                        ModelCatalogFetcher.deepgramVersionDate("2026-11-03"))

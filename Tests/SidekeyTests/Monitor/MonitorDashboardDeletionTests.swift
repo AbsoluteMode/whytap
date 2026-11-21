@@ -524,22 +524,104 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         return changed
     }
 
-    // MARK: - Confirmation
+    // MARK: - Confirmation inside the panel
 
-    func testConfirmationPutsCancelFirstAndDeleteHasNoKey() {
-        let alert = MonitorDashboardDeletionAlerts.makeConfirmation(id: "anthropic-budget", title: "Anthropic")
+    /// A system alert opened under the island and could not be clicked; the
+    /// question now lives in the panel and only asks.
+    func testQuestionIsJustTheQuestion() {
+        XCTAssertEqual(MonitorDeletionConfirmation.question(title: "/try — reasoning:max"),
+                       "Are you sure you want to delete the “/try — reasoning:max” dashboard?")
+    }
 
-        XCTAssertEqual(alert.buttons.map(\.title), ["Cancel", "Delete"])
-        XCTAssertTrue(alert.buttons[1].hasDestructiveAction)
-        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\u{1b}")
-        XCTAssertEqual(alert.buttons[1].keyEquivalent, "")
-        XCTAssertTrue(alert.messageText.contains("Anthropic"))
-        XCTAssertTrue(alert.informativeText.contains("collector"))
+    func testConfirmationAnswersCancelOrDelete() async {
+        let confirmation = MonitorDeletionConfirmation()
+        let asked = Task { await confirmation.ask(id: "openai-usage", title: "OpenAI") }
+        await waitForRequest(confirmation)
+        XCTAssertEqual(confirmation.request, .init(id: "openai-usage", title: "OpenAI"))
+        confirmation.answer(delete: true)
+        let deleted = await asked.value
+        XCTAssertTrue(deleted)
+        XCTAssertNil(confirmation.request)
 
-        let servers = MonitorDashboardDeletionAlerts.makeConfirmation(id: "server-status", title: "Server status")
-        XCTAssertEqual(servers.buttons.map(\.title), ["Cancel", "Delete"])
-        XCTAssertTrue(servers.messageText.contains("Server status"))
-        XCTAssertTrue(servers.informativeText.contains("servers.json is not touched"))
-        XCTAssertFalse(servers.informativeText.contains("collector"))
+        let cancelled = Task { await confirmation.ask(id: "openai-usage", title: "OpenAI") }
+        await waitForRequest(confirmation)
+        confirmation.answer(delete: false)
+        let answer = await cancelled.value
+        XCTAssertFalse(answer)
+    }
+
+    func testANewQuestionOrClosingThePanelCancelsTheOpenOne() async {
+        let confirmation = MonitorDeletionConfirmation()
+        let first = Task { await confirmation.ask(id: "a", title: "A") }
+        await waitForRequest(confirmation)
+        let second = Task { await confirmation.ask(id: "b", title: "B") }
+        let firstAnswer = await first.value
+        XCTAssertFalse(firstAnswer, "the earlier question is cancelled, never deleted")
+        await waitForRequest(confirmation, id: "b")
+        // The panel disappearing answers Cancel.
+        confirmation.answer(delete: false)
+        let secondAnswer = await second.value
+        XCTAssertFalse(secondAnswer)
+        confirmation.answer(delete: true)   // nothing waiting: no effect, no crash
+        XCTAssertNil(confirmation.request)
+    }
+
+    func testPanelPromptsDeleteThroughTheStoreAndReportFailure() async throws {
+        try writeDashboard("openai-usage", title: "OpenAI")
+        let store = makeStore()
+        let confirmation = MonitorDeletionConfirmation()
+        let deletion = Task { await MonitorDashboardDeletion(store: store, prompts: confirmation.prompts)
+            .delete(id: "openai-usage", title: "OpenAI") }
+        await waitForRequest(confirmation)
+        confirmation.answer(delete: true)
+        let outcome = await deletion.value
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertFalse(exists("openai-usage.json"))
+
+        // A busy list fails: the panel shows its failure card instead of an alert.
+        try writeDashboard("try-usage", title: "Try")
+        store.reloadFiles()
+        store.removedListLockTimeout = 0.05
+        let lock = open(root.appendingPathComponent(MonitorRemovedDashboards.lockFileName).path, O_RDWR | O_CREAT, 0o600)
+        XCTAssertEqual(flock(lock, LOCK_EX | LOCK_NB), 0)
+        defer { close(lock) }
+        let failing = Task { await MonitorDashboardDeletion(store: store, prompts: confirmation.prompts)
+            .delete(id: "try-usage", title: "Try") }
+        await waitForRequest(confirmation)
+        confirmation.answer(delete: true)
+        let failed = await failing.value
+        XCTAssertEqual(failed, .failed)
+        XCTAssertTrue(confirmation.failed)
+        confirmation.dismissFailure()
+        XCTAssertFalse(confirmation.failed)
+    }
+
+    func testConfirmButtonsShowStatesOnlyWhileEnabled() {
+        typealias Look = MonitorPickerControlAppearance
+        let idle = Look.confirmButton(hovered: false, pressed: false, focused: false, enabled: true)
+        let hover = Look.confirmButton(hovered: true, pressed: false, focused: false, enabled: true)
+        let press = Look.confirmButton(hovered: true, pressed: true, focused: false, enabled: true)
+        XCTAssertGreaterThan(hover.fill, idle.fill)
+        XCTAssertGreaterThan(press.fill, hover.fill)
+        XCTAssertGreaterThan(Look.confirmButton(hovered: false, pressed: false, focused: true, enabled: true).focusRing, 0)
+        XCTAssertEqual(Look.confirmButton(hovered: true, pressed: true, focused: true, enabled: false),
+                       Look.confirmButton(hovered: false, pressed: false, focused: false, enabled: false))
+    }
+
+    func testRenderedCardShowsTheQuestionWithCancelAndDelete() throws {
+        let card = MonitorConfirmationCard(
+            message: MonitorDeletionConfirmation.question(title: "OpenAI"),
+            cancelTitle: "Cancel", confirmTitle: "Delete", onCancel: {}, onConfirm: {})
+        let empty = try render(Color.clear, size: 300)
+        let shown = try render(card.frame(width: 300, height: 200), size: 300)
+        XCTAssertGreaterThan(changedPixels(empty, shown), 1000)
+    }
+
+    private func waitForRequest(_ confirmation: MonitorDeletionConfirmation, id: String? = nil) async {
+        for _ in 0..<200 {
+            if let request = confirmation.request, id == nil || request.id == id { return }
+            await Task.yield()
+        }
+        XCTFail("no question was shown")
     }
 }

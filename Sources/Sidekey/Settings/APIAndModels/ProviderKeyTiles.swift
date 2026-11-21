@@ -230,6 +230,19 @@ struct ProviderKeyForm: View {
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !busy ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }
                 .onHover { keyHovered = $0 }
                 .onSubmit(save)
+            if let account, let kinds = viewModel.modelKinds(of: account) {
+                HStack(spacing: 10) {
+                    Text("Offer models for")
+                        .font(.system(size: 13))
+                    Spacer(minLength: 0)
+                    MacPopup(
+                        items: ServerModelKinds.allCases.map { .init(value: $0, label: $0.label) },
+                        selection: Binding(get: { kinds }, set: { viewModel.setModelKinds($0, for: account) }),
+                        minWidth: 170
+                    )
+                    .accessibilityLabel("Offer models for")
+                }
+            }
             HStack(spacing: 10) {
                 if showsRemove {
                     APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil) {

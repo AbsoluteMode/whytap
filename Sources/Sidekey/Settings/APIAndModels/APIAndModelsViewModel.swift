@@ -308,6 +308,20 @@ final class APIAndModelsViewModel: ObservableObject {
         await store(key, for: account, proposing: false)
     }
 
+    /// Which of a server's models the pickers offer; `nil` for any other account.
+    func modelKinds(of account: ProviderAccount) -> ServerModelKinds? {
+        guard case .server(let id) = account else { return nil }
+        return routing.server(id)?.modelKinds
+    }
+
+    /// Changes only what pickers offer: routes already on the server stay.
+    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+    func setModelKinds(_ kinds: ServerModelKinds, for account: ProviderAccount) {
+        guard case .server(let id) = account else { return }
+        routing.setModelKinds(kinds, forServer: id)
+        recompute()
+    }
+
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
         AIFeature.activeCases.filter { routing.route(for: $0)?.account == account }
     }

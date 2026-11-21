@@ -680,7 +680,8 @@ Monitor inside hover:
   with programmatic expansion; neither opens a window. The legacy window class
   is retained for compatibility only. A custom dashboard's picker row has an ×
   (no context menu: the island has no right-click actions; rows have no chevron
-  and the scroller sits in the right margin beside the cards). The × asks first
+  and the scroller sits in the right margin beside the cards; row and × show
+  hover/press/focus only while enabled). The × asks first
   (Cancel-first alert; Server status has none). It records the ID in Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.

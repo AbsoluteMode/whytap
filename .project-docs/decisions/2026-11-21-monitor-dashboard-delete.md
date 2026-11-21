@@ -49,6 +49,10 @@ minutes), which Whytap neither installs nor owns.
   after a first version put Delete… in the row and heading context menus).
   Rows have no chevron, since a click on a row plainly opens it, and the
   scroller sits in the panel's right margin instead of over the cards.
+  The row card itself shows hover, press and keyboard focus. The × has its
+  own hover, press and focus states, all shown only while it is enabled: a
+  delete in progress disables it, and a disabled × under the pointer looks
+  like any disabled ×.
 - Delete asks first: Cancel is the first button and takes Escape, Delete has
   no key equivalent (the meeting and clipboard pattern).
 - Confirming records the dashboard ID in `Monitor/removed-dashboards.json`
@@ -108,6 +112,11 @@ minutes), which Whytap neither installs nor owns.
   before a list failure, a lost update between list writers and the list
   committed before a failed snapshot write; all three led to the transaction
   and lock above, and the builder's reproducers pass.
+- The builder's offscreen probe (queue ticket 304) found the disabled × still
+  drawing its hover surface under the pointer. The states now come from one
+  pure table (`MonitorPickerControlAppearance`), tested for every
+  combination, and a pixel test renders the × idle, hovered, disabled and
+  disabled under the pointer (the last two must match).
 - Not tested: the real × and alert over the live island panel.
 
 ## Rejected

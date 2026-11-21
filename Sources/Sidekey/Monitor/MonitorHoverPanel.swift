@@ -139,7 +139,7 @@ struct MonitorHoverPanel: View {
     /// interactions. WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     private func dashboardRow(id: String, title: String, image: String, subtitle: String,
                               onDelete: (() -> Void)?) -> some View {
-        Button { selectedID = id } label: {
+        MonitorDashboardRowButton(title: title, action: { selectedID = id }) {
             HStack(spacing: 8) {
                 Image(systemName: image)
                     .font(.system(size: 18))
@@ -155,19 +155,84 @@ struct MonitorHoverPanel: View {
             .padding(10)
             // Room for the × so long titles never run under it.
             .padding(.trailing, onDelete == nil ? 0 : MonitorDashboardDeleteButton.size)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(IslandInk.color.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
         .overlay(alignment: .trailing) {
             if let onDelete {
-                MonitorDashboardDeleteButton(title: title, disabled: deleting, action: onDelete)
+                MonitorDashboardDeleteButton(title: title, action: onDelete)
+                    .disabled(deleting)
                     .padding(.trailing, 6)
             }
         }
+    }
+}
+
+/// How the picker's controls look in each state. Pure, so tests pin every
+/// state: hover, press and focus only show while the control is enabled, so
+/// a × disabled under the pointer looks like a disabled ×, not a hovered one.
+struct MonitorPickerControlAppearance: Equatable {
+    var fill: Double
+    var focusRing: Double
+    var symbol: Double
+
+    static func deleteCross(hovered: Bool, pressed: Bool, focused: Bool, enabled: Bool) -> Self {
+        guard enabled else { return Self(fill: 0, focusRing: 0, symbol: 0.25) }
+        return Self(fill: pressed ? 0.2 : hovered ? 0.12 : 0,
+                    focusRing: focused ? 0.85 : 0,
+                    symbol: pressed || hovered ? 0.95 : 0.5)
+    }
+
+    static func row(hovered: Bool, pressed: Bool, focused: Bool, enabled: Bool) -> Self {
+        guard enabled else { return Self(fill: 0.03, focusRing: 0, symbol: 0.42) }
+        return Self(fill: pressed ? 0.14 : hovered ? 0.09 : 0.05,
+                    focusRing: focused ? 0.85 : 0,
+                    symbol: 1)
+    }
+}
+
+/// A dashboard row: the whole card opens the board and shows hover, press and
+/// keyboard focus itself, since it has no chevron.
+struct MonitorDashboardRowButton<Label: View>: View {
+    let title: String
+    /// Starts as if the pointer were over it; offscreen render tests only.
+    var initiallyHovered = false
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action, label: label)
+            .buttonStyle(MonitorDashboardRowStyle(focused: focused, initiallyHovered: initiallyHovered))
+            .focused($focused)
+            .accessibilityLabel(title)
+    }
+}
+
+private struct MonitorDashboardRowStyle: ButtonStyle {
+    let focused: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandHoverNativePressed) private var nativePressed
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered: Bool
+
+    init(focused: Bool, initiallyHovered: Bool) {
+        self.focused = focused
+        self._hovered = State(initialValue: initiallyHovered)
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        let look = MonitorPickerControlAppearance.row(hovered: hovered,
+            pressed: configuration.isPressed || nativePressed, focused: focused, enabled: enabled)
+        let shape = RoundedRectangle(cornerRadius: 12)
+        return configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(look.symbol)
+            .background(IslandInk.color.opacity(look.fill), in: shape)
+            .overlay(shape.strokeBorder(IslandInk.color.opacity(0.14), lineWidth: 0.7))
+            .overlay(shape.strokeBorder(IslandInk.color.opacity(look.focusRing), lineWidth: 1.5)
+                .allowsHitTesting(false))
+            .contentShape(shape)
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: look)
     }
 }
 
@@ -176,23 +241,47 @@ struct MonitorDashboardDeleteButton: View {
     static let size: CGFloat = 24
 
     let title: String
-    let disabled: Bool
+    /// Starts as if the pointer were over it; offscreen render tests only.
+    var initiallyHovered = false
     let action: () -> Void
-    @State private var hovering = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(IslandInk.color.opacity(hovering ? 0.92 : 0.5))
                 .frame(width: Self.size, height: Self.size)
-                .background(Circle().fill(IslandInk.color.opacity(hovering ? 0.12 : 0)))
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .onHover { hovering = $0 }
+        .buttonStyle(MonitorDashboardDeleteStyle(focused: focused, initiallyHovered: initiallyHovered))
+        .focused($focused)
         .help("Delete dashboard")
         .accessibilityLabel("Delete \(title)")
+    }
+}
+
+private struct MonitorDashboardDeleteStyle: ButtonStyle {
+    let focused: Bool
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandHoverNativePressed) private var nativePressed
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered: Bool
+
+    init(focused: Bool, initiallyHovered: Bool) {
+        self.focused = focused
+        self._hovered = State(initialValue: initiallyHovered)
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        let look = MonitorPickerControlAppearance.deleteCross(hovered: hovered,
+            pressed: configuration.isPressed || nativePressed, focused: focused, enabled: enabled)
+        return configuration.label
+            .foregroundStyle(IslandInk.color.opacity(look.symbol))
+            .background(Circle().fill(IslandInk.color.opacity(look.fill)))
+            .overlay(Circle().strokeBorder(IslandInk.color.opacity(look.focusRing), lineWidth: 1.5)
+                .allowsHitTesting(false))
+            .contentShape(Circle())
+            // The pointer is still tracked while disabled; the look ignores it.
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: look)
     }
 }

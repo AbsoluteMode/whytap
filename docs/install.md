@@ -39,6 +39,30 @@ launch checks.
 
 Requirements: macOS 14.2 or newer, on Apple Silicon or Intel.
 
+## Install with Homebrew
+
+If you use [Homebrew](https://brew.sh), one command installs the same signed and
+notarized DMG from GitHub Releases:
+
+```bash
+brew install absolutemode/tap/whytap
+```
+
+The cask lives in the public tap
+[AbsoluteMode/homebrew-tap](https://github.com/AbsoluteMode/homebrew-tap). It pins
+the release tag and the SHA-256 of that release's `Whytap-latest.dmg`, requires
+macOS 14 or newer and is refreshed by Whytap's release process after each
+release, so it can trail the newest release by a short time (`brew upgrade --cask
+whytap` catches up). Whytap updates itself through Sparkle, so you do not need
+`brew upgrade` to stay current; the cask is marked `auto_updates`. Quit a running
+Whytap before `brew install` or `brew upgrade` replaces the app.
+
+`brew uninstall --cask whytap` removes the app only, like moving it to Trash
+(see [removal](#troubleshooting-and-removal)). `brew uninstall --cask --zap whytap`
+also deletes Whytap's data in your user Library folder, including meeting notes, history
+and the Case vault. Make a backup first (**Settings → Backup**). Keychain items are
+never touched.
+
 ## Moving from Exodia or an older Whytap
 
 Whytap is the restored product name. Quit the running app normally before

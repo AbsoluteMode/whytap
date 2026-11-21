@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <sub>or with Homebrew: <code>brew install absolutemode/tap/whytap</code></sub>
+</p>
+
+<p align="center">
   <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 
@@ -159,6 +163,4 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
 
-<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
-
-<p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>
+<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>

@@ -95,27 +95,31 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     /// Meetings send the finished recording to the provider's pre-recorded
     /// API with speaker labels: Soniox's file API, ElevenLabs speech-to-text
     /// and Deepgram pre-recorded, so they offer recorded (async) models. A
-    /// user's own server still runs the recording through its real-time
-    /// adapter in chunks (`docs/specs/api-and-models.md`, the recorded mode
-    /// of meetings).
+    /// user's own server and On this Mac still run the recording through a
+    /// real-time adapter in chunks, without speakers
+    /// (`docs/specs/api-and-models.md`, the recorded mode of meetings).
     // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
     func modelUse(on kind: AIProviderKind) -> ModelUse? {
         guard isActive else { return nil }
         switch mode {
         case .realtime:
             switch kind {
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
-            // The microphone features only: subtitles read system audio
-            // through a provider adapter, which the on-device model has none of.
-            case .onDevice: return self == .subtitlesAudio ? nil : .realtimeSTT
+            // On this Mac serves every speech feature: the microphone ones
+            // through their own session, Subtitles audio through
+            // `OnDeviceStreamingAdapter`.
+            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
+            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return .realtimeSTT
             case .openRouter, .openAI, .anthropic: return nil
             }
         case .recorded:
             switch kind {
             case .soniox, .deepgram, .elevenLabs: return .asyncSTT
             case .openAICompatible: return .realtimeSTT
-            // Meetings need speaker labels, which come from the provider.
-            case .openRouter, .openAI, .anthropic, .onDevice: return nil
+            // The recording fed through `OnDeviceStreamingAdapter` in phrases,
+            // like a user's own server: a transcript without speaker labels.
+            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
+            case .onDevice: return .realtimeSTT
+            case .openRouter, .openAI, .anthropic: return nil
             }
         case .llm:
             switch kind {

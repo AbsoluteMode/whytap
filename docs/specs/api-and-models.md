@@ -118,13 +118,22 @@ Subtitles LLM независимы; восстановления через др
 - Soniox — через файловый API: async-модель и спикеры (`SonioxMeetingTranscriber`);
 - ElevenLabs и Deepgram — через их pre-recorded API одним запросом со спикерами
   (`RecordedMeetingTranscriber`): ElevenLabs `scribe_v3`, Deepgram `nova-3`;
-- свой сервер — запись прогоняется через его real-time адаптер
-  (`MeetingBYOKTranscriber`), без спикеров.
+- свой сервер и On this Mac — запись прогоняется через real-time адаптер
+  (`MeetingBYOKTranscriber`), без спикеров (On this Mac — см. раздел ниже).
 
 Поэтому список моделей для `meetings` у Soniox, ElevenLabs и Deepgram — их
-recorded-модели, у своего сервера — real-time. Сохранённый маршрут Meetings на
+recorded-модели, у своего сервера и On this Mac — real-time. Сохранённый маршрут Meetings на
 ElevenLabs со стриминговой моделью при запуске переводится на `scribe_v3` (тот же
 аккаунт и ключ). Почему: `.project-docs/decisions/2026-11-21-recorded-meeting-models.md`.
+
+### On this Mac в Meetings и Subtitles audio
+
+С 2026-11-21 модель On this Mac выбирается в каждой строке с речью, включая
+Meetings и Subtitles audio. Обе идут через `OnDeviceStreamingAdapter`: поток
+режется на фразы по паузам (700 мс) или по 12 с, каждая фраза расшифровывается
+на этом Mac один раз. У Meetings на этом Mac нет спикеров: в выборе модели
+подпись «without speakers». Решение:
+`.project-docs/decisions/2026-11-21-on-device-everywhere.md`.
 
 ## API hints
 

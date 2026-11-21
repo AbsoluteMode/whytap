@@ -406,7 +406,9 @@ struct ModelStatusResolver {
             let registered = ModelRegistry.models.first {
                 $0.kind == account.kind && $0.id == model && $0.uses.contains(use)
             }
-            return registered?.diarization == true ? "with speakers" : nil
+            if registered?.diarization == true { return "with speakers" }
+            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
+            return account == .thisMac ? "without speakers" : nil
         case .dropFast, .dropSmart, .meetingNotes, .agent, .retiredMeetingText, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
             return nil
         }

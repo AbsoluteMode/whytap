@@ -76,7 +76,8 @@ final class ModelStatusResolverTests: XCTestCase {
             XCTAssertNil(options.first { $0.model == unknown.id }?.dateLabel)
             XCTAssertNil(ModelStatusResolver.catalogDateLabel(Date(timeIntervalSince1970: 0), account: account))
         }
-        XCTAssertNil(ModelStatusResolver.catalogDateLabel(date, account: .server(UUID())))
+        XCTAssertNil(ModelStatusResolver.catalogDateLabel(date, account: .thisMac))
+        XCTAssertEqual(ModelStatusResolver.catalogDateLabel(date, account: .server(UUID()))?.hasPrefix("Added "), true)
     }
 
     func test_speech_picker_uses_documented_releases_and_live_deepgram_updates() throws {
@@ -306,11 +307,111 @@ final class ModelStatusResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             env.resolver.sections(for: .dropSmartCleanup).map(\.account),
-            [.openRouter, .server(a.id), .server(b.id)]
+            [.server(a.id), .server(b.id), .openRouter]
         )
         XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.openRouter])
         XCTAssertEqual(env.resolver.sections(for: .dropFast).first?.title, "Soniox")
         XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "A-box")
+    }
+
+    func test_every_keyed_llm_provider_has_a_section_and_openrouter_comes_last() throws {
+        let env = try makeEnv(
+            snapshots: [
+                .openRouter: fresh((0..<400).map { CatalogModel(id: "vendor/model-\($0)", uses: [.chat, .chatWithTools]) }),
+                .anthropic: fresh([CatalogModel(id: "claude-sonnet-5-5", uses: [.chat, .chatWithTools])]),
+                .openAI: fresh([CatalogModel(id: "gpt-6.2-sol", uses: [.chat, .chatWithTools])]),
+            ],
+            keyed: [.anthropic, .openAI, .openRouter]
+        )
+        for key in [ProviderAccount.anthropic, .openAI, .openRouter] { env.keyStatuses.set(.valid, for: key, at: Date()) }
+        let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "vendor/model-7"), for: .dropSmartCleanup)
+
+        // A huge OpenRouter catalog never pushes the direct providers out of view.
+        for feature in [AIFeature.dropSmartCleanup, .meetingNotes, .translation] {
+            XCTAssertEqual(env.resolver.sections(for: feature).map(\.account),
+                           [.anthropic, .openAI, .server(server.id), .openRouter], "\(feature)")
+        }
+        XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.anthropic, .openAI, .openRouter])
+        let sections = env.resolver.sections(for: .dropSmartCleanup)
+        XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama", "OpenRouter"])
+        XCTAssertTrue(sections.allSatisfy { $0.keyProblem == nil })
+        // Search covers every section; the route itself is untouched.
+        XCTAssertEqual(Set(ModelPickerSearch.results(in: sections, query: "").map(\.account)),
+                       [.anthropic, .openAI, .openRouter])
+        let sonnet = ModelPickerSearch.results(in: sections, query: "sonnet")
+        XCTAssertEqual(sonnet.first?.account, .anthropic, "the direct section leads the search results too")
+        XCTAssertTrue(sonnet.contains { $0.account == .anthropic && $0.option.model == "claude-sonnet-5-5" })
+        XCTAssertEqual(env.routing.route(for: .dropSmartCleanup), FeatureRoute(account: .openRouter, model: "vendor/model-7"))
+
+        // A refused key keeps its section, named as such; the others are unchanged.
+        env.keyStatuses.set(.rejected(.invalidKey), for: .anthropic, at: Date())
+        let refused = env.resolver.sections(for: .dropSmartCleanup)
+        XCTAssertEqual(refused.map(\.account), [.anthropic, .openAI, .server(server.id), .openRouter])
+        XCTAssertEqual(refused.first?.keyProblem, "Key not accepted")
+        XCTAssertTrue(refused.dropFirst().allSatisfy { $0.keyProblem == nil })
+        XCTAssertEqual(ModelPickerSearch.header(title: "Anthropic", refreshFailed: true, keyProblem: "Key not accepted"),
+                       "Anthropic · Key not accepted")
+        XCTAssertEqual(ModelPickerSearch.header(title: "OpenAI", refreshFailed: true, keyProblem: nil),
+                       "OpenAI · Couldn't refresh")
+        XCTAssertEqual(ModelPickerSearch.header(title: "OpenAI", refreshFailed: false, keyProblem: nil), "OpenAI")
+
+        // A removed key removes its section and nothing else.
+        try env.keys.delete(account: XCTUnwrap(ProviderAccount.openAI.keychainAccount(in: env.routing)))
+        XCTAssertEqual(env.resolver.sections(for: .dropSmartCleanup).map(\.account),
+                       [.anthropic, .server(server.id), .openRouter])
+    }
+
+    func test_provider_bar_shows_one_section_or_all() {
+        let sections = [ProviderAccount.anthropic, .openAI, .openRouter].map {
+            PickerSection(account: $0, title: $0.kind.displayName,
+                          options: [PickerOption(model: "m-\($0.storageID)", state: .new, isSelected: false, hint: nil)],
+                          refreshFailed: false)
+        }
+        XCTAssertEqual(ModelPickerSearch.sections(sections, showing: nil).map(\.account), [.anthropic, .openAI, .openRouter])
+        XCTAssertEqual(ModelPickerSearch.sections(sections, showing: .openAI).map(\.account), [.openAI])
+        // A provider that disappeared (key removed while open) falls back to all.
+        XCTAssertEqual(ModelPickerSearch.sections(sections, showing: .soniox).map(\.account),
+                       [.anthropic, .openAI, .openRouter])
+        let filtered = ModelPickerSearch.results(in: ModelPickerSearch.sections(sections, showing: .anthropic), query: "m")
+        XCTAssertEqual(filtered.map(\.account), [.anthropic])
+    }
+
+    func test_server_rows_show_a_real_created_date_and_no_price() throws {
+        let fetched = Date(timeIntervalSince1970: 1_790_000_000)
+        let pulled = Date(timeIntervalSince1970: 1_762_000_000)
+        let env = try makeEnv(snapshots: [.openRouter: openRouterListing()], keyed: [.openRouter])
+        let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        var snapshot = CatalogSnapshot(models: [
+            CatalogModel(id: "qwen3:8b", catalogDate: pulled),
+            CatalogModel(id: "stamped", catalogDate: fetched.addingTimeInterval(-2)),
+            CatalogModel(id: "undated"),
+            CatalogModel(id: "gpt-5"),
+        ], fetchedAt: fetched)
+        snapshot.lastRefreshFailed = false
+        // Reload the store with the server's cached catalog.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        try JSONEncoder().encode([ProviderAccount.server(server.id).storageID: snapshot,
+                                  ProviderAccount.openRouter.storageID: openRouterListing()]).write(to: file)
+        let resolver = ModelStatusResolver(routing: env.routing, keys: env.keys, catalogs: ModelCatalogStore(fileURL: file),
+                                           checks: env.checks, keyStatuses: env.keyStatuses, adapterVersion: { _, _ in 1 })
+        let options = try XCTUnwrap(resolver.sections(for: .dropSmartCleanup).first { $0.account == .server(server.id) }).options
+        let qwen = try XCTUnwrap(options.first { $0.model == "qwen3:8b" })
+        XCTAssertEqual(qwen.dateLabel, ModelStatusResolver.catalogDateLabel(pulled, account: .server(server.id)))
+        XCTAssertEqual(qwen.dateLabel?.hasPrefix("Added "), true)
+        XCTAssertEqual(qwen.catalogDate, pulled)
+        // vLLM/llama.cpp stamp the request time: not a model date.
+        XCTAssertNil(options.first { $0.model == "stamped" }?.dateLabel)
+        XCTAssertNil(options.first { $0.model == "undated" }?.dateLabel)
+        // A server's model is never priced, even when its name matches an OpenAI one.
+        XCTAssertTrue(options.allSatisfy { $0.priceLabel == nil && $0.hint == nil })
+
+        XCTAssertNil(ModelStatusResolver.serverModelDate(pulled, fetchedAt: nil))
+        XCTAssertNil(ModelStatusResolver.serverModelDate(nil, fetchedAt: fetched))
+        XCTAssertNil(ModelStatusResolver.serverModelDate(fetched.addingTimeInterval(-3_599), fetchedAt: fetched))
+        XCTAssertEqual(ModelStatusResolver.serverModelDate(fetched.addingTimeInterval(-3_601), fetchedAt: fetched),
+                       fetched.addingTimeInterval(-3_601))
     }
 
     func test_missing_provider_hint_lists_providers_for_the_feature() throws {
@@ -383,7 +484,7 @@ final class ModelStatusResolverTests: XCTestCase {
 
     func test_price_label_formats_per_million_and_never_rounds_a_price_to_zero() throws {
         let label = { (input: Decimal, output: Decimal) in
-            ModelStatusResolver.catalogPriceLabel(self.price(input, output), account: .openRouter)
+            ModelStatusResolver.catalogPriceLabel(self.price(input, output))
         }
         XCTAssertEqual(label(1.25, 10), "$1.25 in / $10 out per 1M tokens")
         XCTAssertEqual(label(0.075, 0.3), "$0.075 in / $0.3 out per 1M tokens")
@@ -396,13 +497,139 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(label(0, 0), "Free")
     }
 
-    func test_price_label_is_absent_for_unknown_prices_and_other_providers() throws {
-        XCTAssertNil(ModelStatusResolver.catalogPriceLabel(nil, account: .openRouter))
+    func test_price_label_is_absent_for_unknown_prices() throws {
+        XCTAssertNil(ModelStatusResolver.catalogPriceLabel(nil))
         XCTAssertNil(CatalogTokenPrice(promptPerToken: nil, completionPerToken: 0))
         XCTAssertNil(CatalogTokenPrice(promptPerToken: 0, completionPerToken: nil))
         XCTAssertNil(CatalogTokenPrice(promptPerToken: -1, completionPerToken: -1))
-        for account in [ProviderAccount.openAI, .anthropic, .soniox, .deepgram, .elevenLabs, .server(UUID())] {
-            XCTAssertNil(ModelStatusResolver.catalogPriceLabel(price(1, 2), account: account))
+    }
+
+    // MARK: - Direct Anthropic / OpenAI rows priced from OpenRouter's catalog
+
+    func test_direct_model_ids_map_to_their_openrouter_counterparts() {
+        let ids = { ModelStatusResolver.openRouterCounterpartIDs(of: $0, account: $1) }
+        XCTAssertEqual(ids("gpt-5.4", .openAI), ["openai/gpt-5.4"])
+        XCTAssertEqual(ids("gpt-5.4-2026-03-05", .openAI), ["openai/gpt-5.4-2026-03-05"],
+                       "a dated OpenAI snapshot is priced only when OpenRouter lists that snapshot")
+        XCTAssertEqual(ids("claude-opus-4-5-20251101", .anthropic),
+                       ["anthropic/claude-opus-4-5-20251101", "anthropic/claude-opus-4.5"])
+        XCTAssertEqual(ids("claude-fable-5-2", .anthropic),
+                       ["anthropic/claude-fable-5-2", "anthropic/claude-fable-5.2"])
+        XCTAssertEqual(ids("claude-opus-5", .anthropic), ["anthropic/claude-opus-5"])
+        XCTAssertEqual(ids("claude-3-5-haiku-20241022", .anthropic),
+                       ["anthropic/claude-3-5-haiku-20241022", "anthropic/claude-3.5-haiku"])
+        XCTAssertEqual(ids("claude-sonnet-4-20250514", .anthropic),
+                       ["anthropic/claude-sonnet-4-20250514", "anthropic/claude-sonnet-4"])
+        XCTAssertEqual(ids("", .openAI), [])
+        XCTAssertEqual(ids("openai/gpt-5.4", .openAI), [], "an ID with a vendor prefix is not a direct OpenAI ID")
+        for account in [ProviderAccount.openRouter, .soniox, .deepgram, .elevenLabs, .thisMac, .server(UUID())] {
+            XCTAssertEqual(ids("gpt-5.4", account), [])
+        }
+    }
+
+    private func openRouterListing() -> CatalogSnapshot {
+        let always = OpenRouterReasoningCapabilities(mandatory: true, supportedEfforts: nil)
+        let optional = OpenRouterReasoningCapabilities(mandatory: false, supportedEfforts: nil)
+        return fresh([
+            CatalogModel(id: "anthropic/claude-opus-4.5", uses: [.chat, .chatWithTools], reasoning: optional,
+                         catalogDate: Date(timeIntervalSince1970: 1_700_000_000), tokenPrice: price(5, 25)),
+            CatalogModel(id: "anthropic/claude-fable-5.2", uses: [.chat, .chatWithTools], reasoning: always,
+                         tokenPrice: price(8, 40)),
+            CatalogModel(id: "openai/gpt-5.4", uses: [.chat, .chatWithTools], reasoning: optional,
+                         tokenPrice: price(2.5, 15)),
+            CatalogModel(id: "openai/gpt-5", uses: [.chat, .chatWithTools], reasoning: always,
+                         tokenPrice: price(1.25, 10)),
+        ])
+    }
+
+    private let anthropicReleased = Date(timeIntervalSince1970: 1_761_955_200) // 2025-11-01
+
+    private func directCatalogs() -> [ProviderAccount: CatalogSnapshot] {
+        [
+            .anthropic: fresh([
+                CatalogModel(id: "claude-opus-4-5-20251101", uses: [.chat, .chatWithTools], catalogDate: anthropicReleased),
+                CatalogModel(id: "claude-fable-5-2", uses: [.chat, .chatWithTools]),
+                CatalogModel(id: "claude-unlisted-9", uses: [.chat, .chatWithTools]),
+            ]),
+            .openAI: fresh([
+                CatalogModel(id: "gpt-5.4", uses: [.chat, .chatWithTools]),
+                CatalogModel(id: "gpt-5.4-2026-03-05", uses: [.chat, .chatWithTools]),
+                CatalogModel(id: "gpt-5", uses: [.chat, .chatWithTools]),
+            ]),
+        ]
+    }
+
+    func test_direct_anthropic_and_openai_rows_show_openrouter_price_and_reasoning() throws {
+        var snapshots = directCatalogs()
+        snapshots[.openRouter] = openRouterListing()
+        let env = try makeEnv(snapshots: snapshots, keyed: [.anthropic, .openAI, .openRouter])
+        let sections = env.resolver.sections(for: .dropSmartCleanup)
+        let anthropic = try XCTUnwrap(sections.first { $0.account == .anthropic }).options
+        let openAI = try XCTUnwrap(sections.first { $0.account == .openAI }).options
+        func option(_ id: String, _ options: [PickerOption]) throws -> PickerOption {
+            try XCTUnwrap(options.first { $0.model == id }, id)
+        }
+
+        let opus = try option("claude-opus-4-5-20251101", anthropic)
+        XCTAssertEqual(opus.priceLabel, "$5 in / $25 out per 1M tokens")
+        XCTAssertNil(opus.hint)
+        // The date stays Anthropic's release date, never OpenRouter's listing date.
+        XCTAssertEqual(opus.catalogDate, anthropicReleased)
+        XCTAssertEqual(opus.dateLabel?.hasPrefix("Released "), true)
+        XCTAssertEqual(opus.dateLabel, ModelStatusResolver.catalogDateLabel(anthropicReleased, account: .anthropic))
+
+        let fable = try option("claude-fable-5-2", anthropic)
+        XCTAssertEqual(fable.priceLabel, "$8 in / $40 out per 1M tokens")
+        XCTAssertEqual(fable.hint, "always reasons, slower")
+
+        let unlisted = try option("claude-unlisted-9", anthropic)
+        XCTAssertNil(unlisted.priceLabel, "no OpenRouter counterpart: no price line, not a guess")
+        XCTAssertNil(unlisted.hint)
+
+        XCTAssertEqual(try option("gpt-5.4", openAI).priceLabel, "$2.5 in / $15 out per 1M tokens")
+        XCTAssertNil(try option("gpt-5.4", openAI).hint)
+        XCTAssertNil(try option("gpt-5.4-2026-03-05", openAI).priceLabel)
+        XCTAssertEqual(try option("gpt-5", openAI).hint, "always reasons, slower")
+        XCTAssertEqual(try option("gpt-5", openAI).priceLabel, "$1.25 in / $10 out per 1M tokens")
+
+        // OpenRouter's own rows keep their price.
+        let openRouter = try XCTUnwrap(sections.first { $0.account == .openRouter }).options
+        XCTAssertEqual(try option("openai/gpt-5", openRouter).priceLabel, "$1.25 in / $10 out per 1M tokens")
+
+        // Other features keep their own hints: no reasoning note outside Smart cleanup.
+        let agent = env.resolver.sections(for: .agent).first { $0.account == .anthropic }?.options ?? []
+        XCTAssertNil(agent.first { $0.model == "claude-fable-5-2" }?.hint)
+        XCTAssertEqual(agent.first { $0.model == "claude-fable-5-2" }?.priceLabel, "$8 in / $40 out per 1M tokens")
+
+        // Display only: the extra lines change neither states nor search.
+        let plain = try makeEnv(snapshots: directCatalogs(), keyed: [.anthropic, .openAI])
+        let plainSections = plain.resolver.sections(for: .dropSmartCleanup)
+        for account in [ProviderAccount.anthropic, .openAI] {
+            let priced = try XCTUnwrap(sections.first { $0.account == account }).options
+            let bare = try XCTUnwrap(plainSections.first { $0.account == account }).options
+            XCTAssertEqual(bare.map(\.model), priced.map(\.model))
+            XCTAssertEqual(bare.map(\.state), priced.map(\.state))
+        }
+        XCTAssertFalse(ModelPickerSearch.results(in: sections, query: "25 out").contains { $0.option.model == opus.model })
+    }
+
+    func test_direct_rows_without_an_openrouter_catalog_show_no_extra_lines() throws {
+        // No OpenRouter key (no catalog), and a first OpenRouter fetch that failed offline.
+        var failed = CatalogSnapshot()
+        failed.lastRefreshFailed = true
+        for openRouter in [nil, failed] {
+            var snapshots = directCatalogs()
+            if let openRouter { snapshots[.openRouter] = openRouter }
+            let env = try makeEnv(snapshots: snapshots, keyed: [.anthropic, .openAI])
+            let sections = env.resolver.sections(for: .dropSmartCleanup)
+            let direct = sections.filter { $0.account == .anthropic || $0.account == .openAI }
+            XCTAssertEqual(direct.count, 2)
+            let options = direct.flatMap(\.options)
+            XCTAssertTrue(options.contains { $0.model == "claude-fable-5-2" })
+            XCTAssertTrue(options.contains { $0.model == "gpt-5.4" })
+            XCTAssertTrue(options.allSatisfy { $0.priceLabel == nil && $0.hint == nil })
+            // Anthropic's own release date still shows.
+            XCTAssertEqual(options.first { $0.model == "claude-opus-4-5-20251101" }?.catalogDate, anthropicReleased)
         }
     }
 

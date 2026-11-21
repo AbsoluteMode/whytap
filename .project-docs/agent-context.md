@@ -1097,9 +1097,24 @@ OpenRouter rows also show the catalog's list price on their own line
 (`$1.25 in / $10 out per 1M tokens`), read from the `pricing` field of the same
 free /models response; `Free` only when the catalog states zero for both sides.
 A missing, malformed or negative (router) amount shows nothing, never a zero.
-Display only: not searchable, no effect on routes, checks or Costs. Other
-providers show no price. Caches written before prices refresh once on opening.
-WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md
+Display only: not searchable, no effect on routes, checks or Costs. Direct
+Anthropic and OpenAI rows show the price, and in Drop Smart cleanup "always
+reasons, slower", of the same model in that cached OpenRouter catalog
+(`openai/<id>` exactly; `anthropic/<id>`, also without the date suffix and with
+dots between version digits) and keep their own date. No OpenRouter catalog or
+no match shows nothing; no new request. Other providers show no price. Sections
+come in this order: speech providers, Anthropic, OpenAI, the user's servers,
+OpenRouter last (its hundreds of models used to hide the direct sections below
+the visible rows); every keyed provider that can serve the feature has one,
+and a refused or unreadable key keeps its section with the reason in the
+header. With several sections a provider bar under the search field shows All
+or one provider (with model counts); search covers the shown sections and
+never changes a route. A user's server shows `created` from its /v1/models as
+Added only when it is over an hour older than the fetch (vLLM and llama.cpp
+stamp the request time); servers have no price. Caches
+written before prices refresh once on opening.
+WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
+.project-docs/decisions/2026-11-22-direct-model-list-prices.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which

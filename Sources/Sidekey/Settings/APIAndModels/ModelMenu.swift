@@ -60,12 +60,26 @@ enum ModelPickerSearch {
         let account: ProviderAccount
         let providerTitle: String
         let refreshFailed: Bool
+        var keyProblem: String? = nil
         let option: PickerOption
         var id: ID { ID(account: account, model: option.model) }
         var isEnabled: Bool {
             if case .notSupported = option.state { return false }
             return true
         }
+    }
+
+    /// The provider bar's choice: one account's section, or every section
+    /// when nothing (or an account no longer listed) is chosen.
+    static func sections(_ sections: [PickerSection], showing account: ProviderAccount?) -> [PickerSection] {
+        guard let account, sections.contains(where: { $0.account == account }) else { return sections }
+        return sections.filter { $0.account == account }
+    }
+
+    /// A section header: the provider, then why its list may be off.
+    static func header(title: String, refreshFailed: Bool, keyProblem: String?) -> String {
+        if let keyProblem { return "\(title) · \(keyProblem)" }
+        return refreshFailed ? "\(title) · Couldn't refresh" : title
     }
 
     static func results(in sections: [PickerSection], query: String) -> [Result] {
@@ -81,7 +95,8 @@ enum ModelPickerSearch {
                 guard terms.allSatisfy({ term in searchable.contains { $0.contains(term) } }) else { return nil }
                 let rank = phrase.isEmpty ? 2 : (model == phrase ? 0 : (model.contains(phrase) ? 1 : 2))
                 return (Result(account: section.account, providerTitle: section.title,
-                               refreshFailed: section.refreshFailed, option: option), rank)
+                               refreshFailed: section.refreshFailed, keyProblem: section.keyProblem,
+                               option: option), rank)
             }
             .enumerated()
             .sorted { lhs, rhs in

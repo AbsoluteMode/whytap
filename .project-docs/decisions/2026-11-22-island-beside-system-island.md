@@ -112,4 +112,4 @@ What macOS reports for the cutout, whether the system island draws above
 `.screenSaver` windows, how wide compact Live Activities grow and whether
 taps reach a window next to the island need the real MacBook.
 
-2026-11-22, PR: island-beside-system-island
+2026-11-22, PR https://github.com/AbsoluteMode/whytap/pull/395

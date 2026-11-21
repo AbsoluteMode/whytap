@@ -295,6 +295,94 @@ def setup_alt():
     return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
 
 
+# "Already paying?": the paid-plan offers in APIHintsView.hints (Claude Max &
+# Ultra, ChatGPT Pro) include monthly API credit that expires unused, and
+# Whytap spends exactly that credit with the user's own key. Maxim asked for
+# this argument on 2026-11-21, without naming competing apps. The tier amounts
+# come from the providers' official pages (linked from the hints) and must add
+# up to the hint's range, so the app, this block and My setup never disagree.
+# WHY: .project-docs/decisions/2026-11-21-free-api-report.md
+PLAN_TIERS = {
+    "Claude Max & Ultra": ("Max $100 · Ultra $200", [100, 200]),
+    "ChatGPT Pro": ("Pro $100, $200 or $500", [100, 200, 500]),
+}
+PLAN_USES = ["Smart dictation", "Meeting notes", "Agent", "Translation"]
+PLAN_FACTS = ["Included in the plan", "No API card needed", "Unused credit expires each month"]
+INSET = {"dark": "#0d1117", "light": "#ffffff"}
+PLAN_LOGO = {"claude-code": "#d97757"}  # Anthropic's mark in its colour, as in My setup
+
+
+def paid_plans():
+    plans = [o for o in offers() if o["access"] == "paidPlan" and o["category"] == "models"]
+    for o in plans:
+        tiers = PLAN_TIERS.get(o["provider"])
+        if not tiers:
+            sys.exit(f"No PLAN_TIERS for {o['provider']}: add its tiers from the official page")
+        lo, hi = min(tiers[1]), max(tiers[1])
+        if o["allowance"] != f"${lo}–{hi}":
+            sys.exit(f"{o['provider']} is {o['allowance']} in the app but PLAN_TIERS say ${lo}–{hi}")
+        if not any(o["allowance"] in plan[0] for _, _, _, plan, _ in SETUP_KEYS):
+            sys.exit(f"My setup does not show {o['provider']}'s {o['allowance']}")
+    return plans
+
+
+def plans_svg(theme, layout, plans):
+    c = THEMES[theme]
+    wide = layout == "wide"
+    w = WIDTH[layout]
+    e = lambda t: html.escape(t, quote=False)
+    mid = w / 2
+    rows = []
+    if wide:
+        rows.append(_text(mid, 42, 20, c["ink"], "Already paying for Claude Max or ChatGPT Pro?", "700"))
+        rows.append(_text(mid, 68, 14.5, c["sub"], "Whytap puts the API credit in your plan to work."))
+        y0, th, gap, m = 90, 84, 16, 24
+        tw = (w - 2 * m - gap) / 2
+        boxes = [(m + i * (tw + gap), y0) for i in range(len(plans))]
+    else:
+        rows.append(_text(mid, 30, 15, c["ink"], "Already paying for Claude Max", "700"))
+        rows.append(_text(mid, 50, 15, c["ink"], "or ChatGPT Pro?", "700"))
+        rows.append(_text(mid, 71, 11.5, c["sub"], "Whytap puts your plan’s API credit to work."))
+        y0, th, gap, m = 86, 60, 10, 16
+        tw = w - 2 * m
+        boxes = [(m, y0 + i * (th + gap)) for i in range(len(plans))]
+    for (x, y), o in zip(boxes, plans):
+        tiers = PLAN_TIERS[o["provider"]][0]
+        color = PLAN_LOGO.get(o["assetName"], c["ink"])
+        rows.append(f'  <rect x="{x:.1f}" y="{y}" width="{tw:.1f}" height="{th}" rx="12" fill="{INSET[theme]}" stroke="{c["border"]}"/>')
+        if wide:
+            rows.append("  " + logo(o["assetName"], color, round(x + 18, 1), y + 18, 20))
+            rows.append(f'  <text x="{x + 46:.1f}" y="{y + 34}" font-family="{FONT}" font-size="15" font-weight="600" fill="{c["ink"]}">{e(o["provider"])}</text>')
+            rows.append(f'  <text x="{x + 18:.1f}" y="{y + 66}" font-family="{FONT}" font-size="12.5" fill="{c["sub"]}">{e(tiers)}</text>')
+            rows.append(f'  <text x="{x + tw - 18:.1f}" y="{y + 44}" text-anchor="end" font-family="{FONT}" font-size="28" font-weight="700" fill="{c["ink"]}">{e(o["allowance"])}</text>')
+            rows.append(f'  <text x="{x + tw - 18:.1f}" y="{y + 66}" text-anchor="end" font-family="{FONT}" font-size="12" fill="{c["sub"]}">{e(o["cadence"])}</text>')
+        else:
+            rows.append("  " + logo(o["assetName"], color, round(x + 12, 1), y + 12, 16))
+            rows.append(f'  <text x="{x + 34:.1f}" y="{y + 25}" font-family="{FONT}" font-size="12" font-weight="600" fill="{c["ink"]}">{e(o["provider"])}</text>')
+            rows.append(f'  <text x="{x + 12:.1f}" y="{y + 47}" font-family="{FONT}" font-size="10.5" fill="{c["sub"]}">{e(tiers)}</text>')
+            rows.append(f'  <text x="{x + tw - 12:.1f}" y="{y + 27}" text-anchor="end" font-family="{FONT}" font-size="17" font-weight="700" fill="{c["ink"]}">{e(o["allowance"])}</text>')
+            rows.append(f'  <text x="{x + tw - 12:.1f}" y="{y + 47}" text-anchor="end" font-family="{FONT}" font-size="9.5" fill="{c["sub"]}">a month</text>')
+    y = boxes[-1][1] + th
+    if wide:
+        rows.append(_text(mid, y + 36, 15, c["accent"], "  ·  ".join(PLAN_USES), "600"))
+        rows.append(_text(mid, y + 62, 12.5, c["sub"], "  ·  ".join(PLAN_FACTS)))
+        h = y + 84
+    else:
+        half = len(PLAN_USES) // 2
+        rows.append(_text(mid, y + 28, 12, c["accent"], " · ".join(PLAN_USES[:half]), "600"))
+        rows.append(_text(mid, y + 46, 12, c["accent"], " · ".join(PLAN_USES[half:]), "600"))
+        rows.append(_text(mid, y + 70, 10, c["sub"], " · ".join(PLAN_FACTS[:2])))
+        rows.append(_text(mid, y + 85, 10, c["sub"], PLAN_FACTS[2]))
+        h = y + 102
+    return _box(w, h, c, "\n".join(rows))
+
+
+def plans_alt(plans):
+    tiers = "; ".join(f"{o['provider']}: {o['allowance']} {o['cadence']} ({PLAN_TIERS[o['provider']][0]})" for o in plans)
+    return (f"Already paying for Claude Max or ChatGPT Pro? Whytap puts the API credit in your plan to work. {tiers}. "
+            f"Spent on {', '.join(PLAN_USES[:-1])} and {PLAN_USES[-1]}. " + ", ".join(PLAN_FACTS) + ".")
+
+
 def section():
     rows = [o for o in offers() if o["access"] == "noCard"]
     order = list(CATEGORY)
@@ -319,8 +407,10 @@ def section():
             f'<source media="(prefers-color-scheme: light)" srcset="{wsrc("light")}">'
             f'<img alt="{alt}" src="{wsrc("dark")}" width="49%"></picture></a>'
         )
+    plans = paid_plans()
     for lay in WIDTH:
         for t in THEMES:
+            (OUT / f"free-api-plans-{lay}-{t}.svg").write_text(plans_svg(t, lay, plans))
             (OUT / f"free-api-summary-{lay}-{t}.svg").write_text(banner(t, lay, newest))
             (OUT / f"free-api-setup-{lay}-{t}.svg").write_text(setup_svg(t, lay))
     alt = ("; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
@@ -333,6 +423,8 @@ def section():
         "<p align=\"center\">",
         "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),
         "</p>",
+        "",
+        f"<p align=\"center\">{responsive('plans', plans_alt(plans), '100%')}</p>",
         "",
         f"<p align=\"center\">{responsive('setup', setup_alt(), '100%')}</p>",
     ]) + "\n"

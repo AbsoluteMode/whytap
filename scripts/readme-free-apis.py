@@ -305,6 +305,60 @@ def setup_alt():
     return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
 
 
+# "Already paying?": the paid-plan offers in APIHintsView.hints (Claude Max &
+# Ultra, ChatGPT Pro) include monthly API credit, and Whytap spends exactly that
+# credit with the user's own key. Maxim asked for it on 2026-11-21 and then for
+# the plain form: one line and two linked cards (logo, plan, credit), each to
+# the provider's own page about the offer, no other text and no competing apps.
+# The cards carry a fixed width so they sit side by side on a wide column and
+# wrap one under the other on a narrow one. My setup must show the same range.
+# WHY: .project-docs/decisions/2026-11-21-free-api-report.md
+PLANS_TITLE = "Already paying for an OpenAI or Anthropic subscription?"
+PLAN_ORDER = ["openai", "claude-code"]  # as the title names them
+PLAN_LOGO = {"claude-code": "#d97757"}  # Anthropic's mark in its colour, as in My setup
+PLAN_SIZE = {"wide": (410, 76), "phone": (300, 64)}
+
+
+def paid_plans():
+    plans = [o for o in offers() if o["access"] == "paidPlan" and o["category"] == "models"]
+    plans.sort(key=lambda o: PLAN_ORDER.index(o["assetName"]))
+    for o in plans:
+        if not any(o["allowance"] in plan[0] for _, _, _, plan, _, _ in SETUP_KEYS):
+            sys.exit(f"My setup does not show {o['provider']}'s {o['allowance']}")
+    return plans
+
+
+def plan_card(o, theme, layout):
+    c = THEMES[theme]
+    e = lambda t: html.escape(t, quote=False)
+    w, h = PLAN_SIZE[layout]
+    wide = layout == "wide"
+    pad, ls, ns, amt, cad = (18, 20, 15, 28, 12) if wide else (14, 17, 13, 21, 10.5)
+    color = PLAN_LOGO.get(o["assetName"], c["ink"])
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+  <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="14" fill="{c['bg']}" stroke="{c['border']}"/>
+  {logo(o["assetName"], color, pad, h / 2 - ls / 2, ls)}
+  <text x="{pad + ls + 10}" y="{h / 2 + ns * 0.36:.1f}" font-family="{FONT}" font-size="{ns}" font-weight="600" fill="{c['ink']}">{e(o['provider'])}</text>
+  <text x="{w - pad}" y="{h / 2 + (4 if wide else 3)}" text-anchor="end" font-family="{FONT}" font-size="{amt}" font-weight="700" fill="{c['ink']}">{e(o['allowance'])}</text>
+  <text x="{w - pad}" y="{h / 2 + (22 if wide else 18)}" text-anchor="end" font-family="{FONT}" font-size="{cad}" fill="{c['sub']}">{e(o['cadence'])}</text>
+</svg>
+'''
+
+
+def plan_html(o):
+    slug = re.sub(r"[^a-z0-9]+", "-", o["provider"].lower()).strip("-")
+    for lay in PLAN_SIZE:
+        for t in THEMES:
+            (OUT / f"free-api-plan-{slug}-{lay}-{t}.svg").write_text(plan_card(o, t, lay))
+    b = lambda lay, t: f"docs/assets/readme/free-api-plan-{slug}-{lay}-{t}.svg"
+    alt = html.escape(f"{o['provider']}: {o['allowance']} {o['cadence']}")
+    return (f'<a href="{o["url"]}"><picture>'
+            f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{b("phone", "dark")}">'
+            f'<source media="(max-width: 640px)" srcset="{b("phone", "light")}">'
+            f'<source media="(prefers-color-scheme: dark)" srcset="{b("wide", "dark")}">'
+            f'<source media="(prefers-color-scheme: light)" srcset="{b("wide", "light")}">'
+            f'<img alt="{alt}" src="{b("wide", "dark")}" width="{PLAN_SIZE["wide"][0]}"></picture></a>')
+
 def section():
     rows = [o for o in offers() if o["access"] == "noCard"]
     order = list(CATEGORY)
@@ -329,6 +383,7 @@ def section():
             f'<source media="(prefers-color-scheme: light)" srcset="{wsrc("light")}">'
             f'<img alt="{alt}" src="{wsrc("dark")}" width="49%"></picture></a>'
         )
+    plans = [plan_html(o) for o in paid_plans()]
     for lay in WIDTH:
         for t in THEMES:
             (OUT / f"free-api-summary-{lay}-{t}.svg").write_text(banner(t, lay, newest))
@@ -342,6 +397,12 @@ def section():
         "",
         "<p align=\"center\">",
         "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),
+        "</p>",
+        "",
+        f"<h3 align=\"center\">{PLANS_TITLE}</h3>",
+        "",
+        "<p align=\"center\">",
+        "\n".join(plans),
         "</p>",
         "",
         f"<p align=\"center\">{responsive('setup', setup_alt(), '100%')}</p>",

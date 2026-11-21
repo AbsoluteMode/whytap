@@ -175,9 +175,10 @@ enum HistoryKeyDecision {
     }
 }
 
-/// Runs the pastes of marked rows one after another into the remembered
-/// target. Collaborators are injected so the order and gaps are testable
-/// without a pasteboard or synthetic events.
+/// Runs the pastes of marked rows one after another into the target that
+/// was remembered when Enter was pressed. Collaborators are injected so the
+/// order, gaps and target checks are testable without a pasteboard or
+/// synthetic events.
 @MainActor
 struct HistoryMultiPaster {
     /// Time the target gets to read one paste before the pasteboard is
@@ -185,17 +186,24 @@ struct HistoryMultiPaster {
     /// Cmd+V; attachments can be read more slowly, so mixed pastes wait longer.
     static let gapBetweenPastesNs: UInt64 = 400_000_000
 
+    /// The series' target is still the one Enter was pressed for: running,
+    /// and not replaced by a later capture. Checked before the pasteboard is
+    /// replaced, so a stopped series leaves the last pasted content in place.
+    let targetIsCurrent: () -> Bool
     let write: (HistoryPasteGroup) -> Void
+    /// Posts Cmd+V only into the series' target (`pasteAlreadyOnPasteboard(into:)`).
     let paste: () async -> Bool
     let sleep: (UInt64) async -> Void
 
-    /// Returns how many pastes were posted. Stops at the first paste the
-    /// engine could not post, so later content never lands out of order.
+    /// Returns how many pastes were posted. Stops at the first paste whose
+    /// target is gone or that the engine could not post, so nothing lands in
+    /// another app or out of order.
     @discardableResult
     func run(_ groups: [HistoryPasteGroup]) async -> Int {
         var posted = 0
         for (index, group) in groups.enumerated() {
             if index > 0 { await sleep(Self.gapBetweenPastesNs) }
+            guard targetIsCurrent() else { break }
             write(group)
             guard await paste() else { break }
             posted += 1

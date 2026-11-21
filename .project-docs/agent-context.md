@@ -1476,7 +1476,11 @@ one row are unchanged; the footer says "⌘-click for several", then "Enter to
 paste N to <app>   Esc to clear". HistoryPastePlan keeps mark order and merges
 neighbouring rows of a kind: files and images go out as one multi-item paste
 (one Cmd+V), texts as one paste a line each; text, files, text is three pastes
-400 ms apart, stopping at the first that fails. Marks live only while the panel
+400 ms apart, stopping at the first that fails. The whole series is bound to
+the app Enter was pressed for: before each pasteboard write and again before
+Cmd+V (AutoPasteEngine.pasteAlreadyOnPasteboard(into:)) the target must still
+run, be the remembered target and be frontmost after the focus restore;
+otherwise the rest stops with no key event. Marks live only while the panel
 is open, survive the Agent/Drop/Clipboard tabs, and are off without a target
 and in Toolbox. Multi-row pastes stay out of clipboard history. WHY:
 .project-docs/decisions/2026-11-22-history-multi-paste.md

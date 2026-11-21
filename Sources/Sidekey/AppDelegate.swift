@@ -1885,13 +1885,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Several marked rows. Their combined pastes are not new copies:
         // keep them out of clipboard history like History's own Copy.
         // WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
-        let groups = HistoryPastePlan.groups(for: cards)
+        // Every paste of the series goes only to the app Enter was pressed
+        // for: a later capture or that app quitting stops the rest.
         let engine = autoPasteEngine
+        guard let target = engine.currentTarget() else { return }
+        let groups = HistoryPastePlan.groups(for: cards)
         let paster = HistoryMultiPaster(
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target) },
             write: { group in
                 historyInteraction.writeGroupToPasteboard(group, assetsDirectory: assets)
             },
-            paste: { await engine.pasteAlreadyOnPasteboard() },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target) },
             sleep: { ns in try? await Task.sleep(nanoseconds: ns) }
         )
         ClipboardSuppression.shared.setSuppressed(true)

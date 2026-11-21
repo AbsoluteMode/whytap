@@ -48,7 +48,14 @@ once rows are marked, "Enter to paste N to <app>   Esc to clear".
 files and images become one pasteboard write with one item each (one Cmd+V,
 as Finder copies several files), texts one paste with a line each. Text, files,
 text are three pastes. `HistoryMultiPaster` posts them 400 ms apart and stops at
-the first Cmd+V the engine could not post. Marks live while the panel is open,
+the first Cmd+V the engine could not post.
+
+The series is bound to the target remembered when Enter was pressed. Before
+each pasteboard write the paster checks that the app still runs and is still
+the engine's remembered target; `AutoPasteEngine.pasteAlreadyOnPasteboard(into:)`
+checks again, restores focus, and posts Cmd+V only if that app is frontmost.
+Otherwise the rest of the series stops with no key event and the pasteboard
+keeps the last pasted content. A single-row paste keeps its old behaviour. Marks live while the panel is open,
 survive switching the Agent, Drop and Clipboard tabs and are off without a paste
 target and in the Toolbox History pane, where ⌘-click copies as before.
 Multi-row pastes are suppressed from clipboard history like History's Copy.
@@ -69,7 +76,12 @@ write of three URLs and one Cmd+V; texts join with line breaks; text, two
 files, text are three pastes with the gap between them; a failed paste stops
 the rest; nothing marked and nothing hovered leaves Enter alone; ⌘-click again
 unmarks and renumbers; Escape clears marks and otherwise passes; the footer and
-the absence of marking without a target. Offscreen renders of the panel with
+the absence of marking without a target. The builder's review found that in
+the gap between pastes a new target capture (Drop, History reopened elsewhere)
+or the target app quitting sent the next Cmd+V to another app;
+`AutoPasteEngineTests` now run the series through the real engine with fake
+events for both cases, plus a replaced target after the series check and focus
+that cannot return, and none posts a key event outside the target. Offscreen renders of the panel with
 the hint, three marked files and mixed rows. Not verified in the installed app:
 real ⌘-click delivery on the island panel and how particular apps treat a paste
 that mixes several file items.

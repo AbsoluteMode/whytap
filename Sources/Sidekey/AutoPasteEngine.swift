@@ -480,6 +480,51 @@ final class AutoPasteEngine {
         return true
     }
 
+    // MARK: - Series bound to one target
+
+    /// Whether a paste series that started for `target` may continue: the
+    /// app is still running and no later capture (Drop, History reopened in
+    /// another app) replaced it as the remembered target.
+    /// WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+    func isSeriesTargetCurrent(_ target: RememberedTarget) -> Bool {
+        remembered?.pid == target.pid && !isTerminated(target.pid)
+    }
+
+    /// One paste of a series that must land only in `target`. Unlike
+    /// `pasteAlreadyOnPasteboard()`, which degrades to "wherever focus is",
+    /// this posts no Cmd+V unless the target is still current and frontmost
+    /// after the focus restore. Returns `false` without any key event then,
+    /// so the caller stops the rest of the series.
+    func pasteAlreadyOnPasteboard(into target: RememberedTarget) async -> Bool {
+        if !permissionGranted(false) {
+            logEmit(.info, "autopaste_post_event_preflight_false advisory=true")
+        }
+        guard await waitUntilModifiersReleased() != nil else {
+            logEmit(.error, "autopaste_failed step=modifiers reason=timeout context=series")
+            return false
+        }
+        guard isSeriesTargetCurrent(target) else {
+            logEmit(.info, "autopaste_series_stopped reason=target_changed")
+            return false
+        }
+        await restoreTargetFocusIfNeeded()
+        guard frontmostAppInfo()?.pid == target.pid else {
+            logEmit(.info, "autopaste_series_stopped reason=focus_not_restored")
+            return false
+        }
+        sleepUs(Self.postFocusSettleMs * 1000)
+        sleepUs(Self.postWriteSettleMs * 1000)
+        // The settle sleeps run on the main actor, but a terminated app is
+        // observed by polling: check once more right before the key events.
+        guard isSeriesTargetCurrent(target), frontmostAppInfo()?.pid == target.pid else {
+            logEmit(.info, "autopaste_series_stopped reason=target_changed_before_cmdv")
+            return false
+        }
+        postCmdV()
+        logEmit(.info, "autopaste_posted_cmdv context=series")
+        return true
+    }
+
     // MARK: - Pipeline steps
 
     /// Polls modifier flags every `modifierPollIntervalMs` up to

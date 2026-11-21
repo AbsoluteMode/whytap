@@ -38,6 +38,7 @@ final class HistoryMultiPasteTests: XCTestCase {
 
         func paster() -> HistoryMultiPaster {
             HistoryMultiPaster(
+                targetIsCurrent: { true },
                 write: { [unowned self] group in
                     switch group {
                     case .text(let t): events.append("write text \(t.debugDescription)")

@@ -87,7 +87,9 @@ final class APIHintsRenderTests: XCTestCase {
             root.deleteLastPathComponent()
         }
         let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
-        let section = try XCTUnwrap(readme.range(of: "## Free to use").map { String(readme[$0.lowerBound...]) })
+        // Only up to the next heading: later sections (You may also like) have linked cards too.
+        let rest = try XCTUnwrap(readme.range(of: "## Free to use").map { readme[$0.upperBound...] })
+        let section = String(rest[..<(rest.range(of: "\n## ")?.lowerBound ?? rest.endIndex)])
         let cards = section.split(separator: "\n").filter { line in
             line.hasPrefix("<a href=") && line.contains("<picture>")
         }

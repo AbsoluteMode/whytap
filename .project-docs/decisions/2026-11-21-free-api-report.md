@@ -45,14 +45,9 @@ paying.
   and "Self-hosted" (OpenAI-compatible servers). With them the section is no
   longer only about keys, so it is now **Free to run**; the generator replaces
   the old "Free API keys" heading in place. Later that day Maxim renamed it
-  **Free to use**, and asked for a line under the cards saying what
-  ElevenLabs' free credits mean for dictation. The ElevenLabs API pricing page
-  lists 2 h 30 min of Scribe v3 Live (realtime) for the Free plan, so the line
-  says "up to 2.5 hours", about five minutes of speech a day; Vocab terms are
-  billed as keyterm prompting on top and leave fewer hours. The numbers are not
-  in the app, so the script keeps them in `NOTES` with the allowance they were
-  written for and stops when that allowance changes; the monthly review
-  rechecks them on the same page.
+  **Free to use**. A line under the cards on what ElevenLabs' free credits
+  mean for dictation (up to 2.5 hours of Scribe v3 Live a month, from
+  ElevenLabs' API pricing) was added and removed the same day at his request.
   Maxim asked for no extra words: details and per-offer dates stay in the
   app. Above the cards a banner compares a struck-through $600 ("≈ paid apps
   per year") with $0 for Whytap. The figure is an estimate Maxim chose: the
@@ -66,6 +61,19 @@ paying.
   compact card on phones). Paid-plan credits
   (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
   starting without payment.
+- Under the cards, **My setup** (asked by Maxim on 2026-11-21) shows his own
+  routes from API & Models as "free* right now", in two panels: an Anthropic
+  key and an OpenAI key with a model of the same price class (his choice).
+  The same evening he moved every text feature to Claude Sonnet 5.5, so the
+  Anthropic panel has Sonnet 5.5 for Drop Smart, Meetings notes, Agent,
+  Translation and Subtitles, and the OpenAI panel GPT-6.2 Sol in the same
+  rows. Speech is ElevenLabs Scribe v3 Live in both, and Scribe v3 for
+  Meetings, which go to ElevenLabs as recorded audio. The asterisk explains
+  it: the models are paid from a Claude Max/Ultra or ChatGPT Pro plan's
+  monthly API credit, speech from ElevenLabs' free credits (non-commercial
+  use). This is the one place the README names paid-plan credits, labelled as
+  such. Maxim updates the setup himself every month (`SETUP_*` in the script,
+  with its own check date).
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.
@@ -99,7 +107,8 @@ updates only after reading the official page keeps "Last checked" honest.
 - A private monthly report only: the README would still need manual updates.
 - A generated raster picture for the price comparison: an SVG banner follows
   GitHub's dark and light themes and stays sharp.
-- Listing paid-plan credits in the README: not "without payment".
+- Listing paid-plan credits among the free offers: not "without payment"
+  (they appear only in My setup, marked free*).
 - Letting the task add newly found offers itself: each row is a product
   decision (only offers whose key works in Whytap as it is).
 

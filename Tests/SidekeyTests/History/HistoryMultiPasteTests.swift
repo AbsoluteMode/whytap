@@ -38,14 +38,14 @@ final class HistoryMultiPasteTests: XCTestCase {
 
         func paster() -> HistoryMultiPaster {
             HistoryMultiPaster(
-                targetIsCurrent: { true },
+                targetIsCurrent: { _ in true },
                 write: { [unowned self] group in
                     switch group {
                     case .text(let t): events.append("write text \(t.debugDescription)")
                     case .attachments(let items): events.append("write \(items.count) attachments")
                     }
                 },
-                paste: { [unowned self] in
+                paste: { [unowned self] _ in
                     events.append("cmd-v")
                     return pasteResults.isEmpty ? true : pasteResults.removeFirst()
                 },

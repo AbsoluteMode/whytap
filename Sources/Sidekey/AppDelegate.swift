@@ -1891,11 +1891,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let target = engine.currentTarget() else { return }
         let groups = HistoryPastePlan.groups(for: cards)
         let paster = HistoryMultiPaster(
-            targetIsCurrent: { engine.isSeriesTargetCurrent(target) },
+            targetIsCurrent: { isFirst in
+                engine.isSeriesTargetCurrent(target, requireFrontmost: !isFirst)
+            },
             write: { group in
                 historyInteraction.writeGroupToPasteboard(group, assetsDirectory: assets)
             },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target) },
+            paste: { isFirst in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: isFirst) },
             sleep: { ns in try? await Task.sleep(nanoseconds: ns) }
         )
         ClipboardSuppression.shared.setSuppressed(true)

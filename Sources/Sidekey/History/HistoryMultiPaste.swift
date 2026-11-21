@@ -187,12 +187,16 @@ struct HistoryMultiPaster {
     static let gapBetweenPastesNs: UInt64 = 400_000_000
 
     /// The series' target is still the one Enter was pressed for: running,
-    /// and not replaced by a later capture. Checked before the pasteboard is
-    /// replaced, so a stopped series leaves the last pasted content in place.
-    let targetIsCurrent: () -> Bool
+    /// not replaced by a later capture and, after the first paste, still
+    /// focused (the argument is `true` for the first paste). Checked before
+    /// the pasteboard is replaced, so a stopped series leaves the last pasted
+    /// content in place.
+    let targetIsCurrent: (_ isFirst: Bool) -> Bool
     let write: (HistoryPasteGroup) -> Void
-    /// Posts Cmd+V only into the series' target (`pasteAlreadyOnPasteboard(into:)`).
-    let paste: () async -> Bool
+    /// Posts Cmd+V only into the series' target
+    /// (`pasteAlreadyOnPasteboard(into:restoringFocus:)`); only the first
+    /// paste may bring the target back to the front.
+    let paste: (_ isFirst: Bool) async -> Bool
     let sleep: (UInt64) async -> Void
 
     /// Returns how many pastes were posted. Stops at the first paste whose
@@ -203,9 +207,9 @@ struct HistoryMultiPaster {
         var posted = 0
         for (index, group) in groups.enumerated() {
             if index > 0 { await sleep(Self.gapBetweenPastesNs) }
-            guard targetIsCurrent() else { break }
+            guard targetIsCurrent(index == 0) else { break }
             write(group)
-            guard await paste() else { break }
+            guard await paste(index == 0) else { break }
             posted += 1
         }
         return posted

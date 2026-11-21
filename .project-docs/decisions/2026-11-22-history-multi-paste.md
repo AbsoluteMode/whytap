@@ -51,11 +51,16 @@ text are three pastes. `HistoryMultiPaster` posts them 400 ms apart and stops at
 the first Cmd+V the engine could not post.
 
 The series is bound to the target remembered when Enter was pressed. Before
-each pasteboard write the paster checks that the app still runs and is still
-the engine's remembered target; `AutoPasteEngine.pasteAlreadyOnPasteboard(into:)`
-checks again, restores focus, and posts Cmd+V only if that app is frontmost.
-Otherwise the rest of the series stops with no key event and the pasteboard
-keeps the last pasted content. A single-row paste keeps its old behaviour. Marks live while the panel is open,
+each pasteboard write the paster checks that the app still runs, is still the
+engine's remembered target and, after the first paste, still has focus: only
+the first paste may bring the target back to the front, so a user who moved
+elsewhere is never pulled back. `AutoPasteEngine.pasteAlreadyOnPasteboard(into:restoringFocus:)`
+posts the four Cmd+V events to the target's process (`CGEvent.postToPid`)
+instead of the global HID stream and checks the recipient before each one. If
+the target quits or loses focus inside the sequence (the 12 ms gaps), Command
+is released in the target, the group does not count as sent and the rest
+stops; no event can reach another app. The pasteboard keeps the last pasted
+content. A single-row paste keeps its old global Cmd+V. Marks live while the panel is open,
 survive switching the Agent, Drop and Clipboard tabs and are off without a paste
 target and in the Toolbox History pane, where ⌘-click copies as before.
 Multi-row pastes are suppressed from clipboard history like History's Copy.
@@ -81,7 +86,13 @@ the gap between pastes a new target capture (Drop, History reopened elsewhere)
 or the target app quitting sent the next Cmd+V to another app;
 `AutoPasteEngineTests` now run the series through the real engine with fake
 events for both cases, plus a replaced target after the series check and focus
-that cannot return, and none posts a key event outside the target. Offscreen renders of the panel with
+that cannot return, and none posts a key event outside the target. A second
+review (builder event 1374) moved the same probes inside Cmd+V: focus moving,
+or the target quitting, between Command-down and V-down sent V-down to the new
+app through the global HID tap. Process-addressed events with a check before
+each one fix it; tests cover both cases inside Cmd+V, focus moving between
+groups, and the unchanged single-row path. Not verified live: that every
+target app accepts a process-addressed Cmd+V as it does a global one. Offscreen renders of the panel with
 the hint, three marked files and mixed rows. Not verified in the installed app:
 real ⌘-click delivery on the island panel and how particular apps treat a paste
 that mixes several file items.

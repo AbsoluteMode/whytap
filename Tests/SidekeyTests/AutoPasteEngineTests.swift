@@ -73,9 +73,9 @@ final class AutoPasteEngineTests: XCTestCase {
         let target = try XCTUnwrap(engine.currentTarget())
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
-            targetIsCurrent: { engine.isSeriesTargetCurrent(target) },
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
             sleep: { _ in }
         )
 
@@ -84,6 +84,110 @@ final class AutoPasteEngineTests: XCTestCase {
         XCTAssertEqual(posted, 3)
         XCTAssertEqual(writes, Self.mixedSeries)
         XCTAssertEqual(env.postedEvents.count, 12, "Three Cmd+V sequences")
+        XCTAssertTrue(env.postedEvents.allSatisfy { $0.pid == Self.targetA.pid },
+                      "Every series key event is addressed to the target, never the global HID stream")
+    }
+
+    /// Index in `postedEvents` of the second group's Command-down.
+    private static let secondGroupCommandDown = 4
+
+    func testHistorySeriesNeverRoutesVDownToAnAppThatTookFocusInsideCmdV() async throws {
+        // Focus moves to B in the 12 ms between the second group's
+        // Command-down and V-down. Nothing may reach B, the target gets its
+        // Command released, and the third group is never written.
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        let target = try XCTUnwrap(engine.currentTarget())
+        env.onSleep = { us in
+            if us == AutoPasteEngine.keyEventGapUs,
+               env.postedEvents.count == Self.secondGroupCommandDown + 1 {
+                env.frontmost = Self.targetB
+            }
+        }
+        var writes: [HistoryPasteGroup] = []
+        let paster = HistoryMultiPaster(
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
+            write: { writes.append($0) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            sleep: { _ in }
+        )
+
+        let posted = await paster.run(Self.mixedSeries)
+
+        XCTAssertEqual(posted, 1, "The interrupted group does not count as sent")
+        XCTAssertEqual(writes, Array(Self.mixedSeries.prefix(2)), "The third group is never written")
+        XCTAssertTrue(env.postedEvents.allSatisfy { $0.pid == Self.targetA.pid }, "Nothing reaches B")
+        XCTAssertEqual(Array(env.postedEvents.dropFirst(Self.secondGroupCommandDown)), [
+            .init(keyCode: Self.cmd, down: true, flags: [], pid: Self.targetA.pid),
+            .init(keyCode: Self.cmd, down: false, flags: [], pid: Self.targetA.pid),
+        ], "Command is released in the target; no V-down")
+        XCTAssertFalse(env.activatedPids.contains(Self.targetA.pid),
+                       "A later paste never takes focus back")
+    }
+
+    func testHistorySeriesStopsWhenTheTargetQuitsInsideCmdV() async throws {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        let target = try XCTUnwrap(engine.currentTarget())
+        env.onSleep = { us in
+            if us == AutoPasteEngine.keyEventGapUs,
+               env.postedEvents.count == Self.secondGroupCommandDown + 1 {
+                env.terminatedPids.insert(Self.targetA.pid)
+                env.frontmost = Self.targetB
+            }
+        }
+        var writes: [HistoryPasteGroup] = []
+        let paster = HistoryMultiPaster(
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
+            write: { writes.append($0) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            sleep: { _ in }
+        )
+
+        let posted = await paster.run(Self.mixedSeries)
+
+        XCTAssertEqual(posted, 1)
+        XCTAssertEqual(writes, Array(Self.mixedSeries.prefix(2)))
+        XCTAssertTrue(env.postedEvents.allSatisfy { $0.pid == Self.targetA.pid }, "Nothing reaches B")
+        XCTAssertFalse(env.postedEvents.dropFirst(Self.secondGroupCommandDown)
+            .contains { $0.keyCode == Self.v && $0.down }, "No V-down after the target quit")
+    }
+
+    func testHistorySeriesStopsWhenTheUserMovesFocusBetweenPastes() async throws {
+        // Focus alone moves to B in the pause between groups: the series
+        // does not activate A again and writes nothing more.
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        let target = try XCTUnwrap(engine.currentTarget())
+        var writes: [HistoryPasteGroup] = []
+        let paster = HistoryMultiPaster(
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
+            write: { writes.append($0) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            sleep: { _ in env.frontmost = Self.targetB }
+        )
+
+        let posted = await paster.run(Self.mixedSeries)
+
+        XCTAssertEqual(posted, 1)
+        XCTAssertEqual(writes, [.text("first")])
+        XCTAssertEqual(env.postedEvents.count, 4)
+        XCTAssertTrue(env.activatedPids.isEmpty)
+    }
+
+    func testSingleRowHistoryPasteStillUsesTheGlobalCmdV() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+
+        let posted = await engine.pasteAlreadyOnPasteboard()
+
+        XCTAssertTrue(posted)
+        XCTAssertEqual(env.postedEvents.count, 4)
+        XCTAssertTrue(env.postedEvents.allSatisfy { $0.pid == nil }, "Unchanged single-row Enter path")
     }
 
     func testHistorySeriesStopsWhenANewCaptureReplacesTheTargetDuringTheGap() async throws {
@@ -96,9 +200,9 @@ final class AutoPasteEngineTests: XCTestCase {
         let target = try XCTUnwrap(engine.currentTarget())
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
-            targetIsCurrent: { engine.isSeriesTargetCurrent(target) },
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
             sleep: { _ in
                 env.frontmost = Self.targetB
                 engine.rememberTargetBeforeRecording()
@@ -120,9 +224,9 @@ final class AutoPasteEngineTests: XCTestCase {
         let target = try XCTUnwrap(engine.currentTarget())
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
-            targetIsCurrent: { engine.isSeriesTargetCurrent(target) },
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target) },
+            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
             sleep: { _ in
                 env.terminatedPids.insert(Self.targetA.pid)
                 env.frontmost = Self.targetB   // macOS hands focus to another app
@@ -146,7 +250,7 @@ final class AutoPasteEngineTests: XCTestCase {
         env.frontmost = Self.targetB
         engine.rememberTargetBeforeRecording()
 
-        let posted = await engine.pasteAlreadyOnPasteboard(into: target)
+        let posted = await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: true)
 
         XCTAssertFalse(posted)
         XCTAssertTrue(env.postedEvents.isEmpty)
@@ -162,7 +266,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let target = try XCTUnwrap(engine.currentTarget())
         env.frontmost = Self.targetB   // activation will not bring A back
 
-        let posted = await engine.pasteAlreadyOnPasteboard(into: target)
+        let posted = await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: true)
 
         XCTAssertFalse(posted)
         XCTAssertEqual(env.activatedPids, [Self.targetA.pid])
@@ -727,7 +831,12 @@ private final class TestEnv {
         let keyCode: CGKeyCode
         let down: Bool
         let flags: CGEventFlags
+        /// The one process the event was addressed to; nil = global HID stream.
+        var pid: pid_t? = nil
     }
+    /// Runs on every engine sleep, before the clock advances: lets a test
+    /// change focus or quit an app inside the 12 ms gaps of a Cmd+V.
+    var onSleep: ((UInt32) -> Void)?
     struct LogLine: Equatable {
         let level: AutoPasteEngine.LogLevel
         let message: String
@@ -835,9 +944,13 @@ private final class TestEnv {
             postEvent: { [weak self] keyCode, down, flags in
                 self?.postedEvents.append(PostedEvent(keyCode: keyCode, down: down, flags: flags))
             },
+            postEventToPid: { [weak self] keyCode, down, flags, pid in
+                self?.postedEvents.append(PostedEvent(keyCode: keyCode, down: down, flags: flags, pid: pid))
+            },
             sleepUs: { [weak self] us in
                 guard let self else { return }
                 self.sleepCalls.append(us)
+                self.onSleep?(us)
                 // Advance the simulated clock by us / 1000 (ms). The poll
                 // loops in production use `nowMs` to detect timeout, so
                 // advancing here makes timeouts deterministic without

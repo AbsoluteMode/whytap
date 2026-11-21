@@ -40,12 +40,12 @@ CARDS = [
     ("case", "key-round", "Case", ["Deploy with", "my API key"], "Key names, never values"),
 ]
 # Coding harnesses: logo file in Resources/UsefulLinkIcons, name, lockup width
-# (logo + name, measured on GitHub), logo colour per theme
+# (logo + name, with room for wider Windows and Linux fonts), logo colour per theme
 # (None = the theme's ink), and the line that adds the application-control server.
 HARNESSES = [
-    ("claude-code", "Claude Code", 106, {"dark": "#d97757", "light": "#d97757"},
+    ("claude-code", "Claude Code", 118, {"dark": "#d97757", "light": "#d97757"},
      f"claude mcp add --scope user whytap -- {HELPER} app mcp"),
-    ("codex", "Codex", 70, {"dark": None, "light": None},
+    ("codex", "Codex", 76, {"dark": None, "light": None},
      f"codex mcp add whytap -- {HELPER} app mcp"),
 ]
 ICONS = REPO / "Resources/UsefulLinkIcons"

@@ -7,41 +7,22 @@ struct TranslationView: View {
     @ObservedObject var presentation: TranslationWindowController.Presentation
     let openSettings: (AIFeature) -> Void
     var embedded = false
+    /// Closes the floating window; the embedded Toolbox pane has no close control.
+    var close: () -> Void = {}
     @FocusState private var inputFocused: Bool
     @State private var inputHovered = false
-    @State private var copied = false
-    @State private var followsLatest = true
+    @State private var overlayHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isText: Bool { presentation.mode == .text }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: embedded ? 8 : 16) {
-            if !embedded && !isText {
-                HStack {
-                    Image(systemName: "character.bubble.fill")
-                        .font(.system(size: 22)).foregroundStyle(.blue)
-                        .accessibilityHidden(true)
-                    Text("Translate").font(.system(size: 22, weight: .semibold))
-                    Spacer()
-                    Picker("Mode", selection: $presentation.mode) {
-                        ForEach(TranslationWindowController.Mode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
-                }
-            }
-            if !isText {
-                audioControls
-                if let issue = subtitles.issue { errorCard(issue) }
-            }
+        Group {
             if isText { textContent } else { subtitleContent }
-            if !isText { footer }
         }
-        .padding(embedded || isText ? 0 : 22)
-        .padding(.top, embedded || isText ? 0 : 24)
-        .frame(minWidth: embedded ? 0 : (isText ? 320 : 440), maxWidth: .infinity,
-               minHeight: embedded ? 0 : (isText ? 80 : 270), maxHeight: .infinity)
-        .background { if !embedded { Rectangle().fill(.regularMaterial) } }
+        .frame(minWidth: embedded ? 0 : (isText ? 320 : 420), maxWidth: .infinity,
+               minHeight: embedded ? 0 : (isText ? 80 : 120), maxHeight: .infinity)
+        .background { if !embedded && isText { Rectangle().fill(.regularMaterial) } }
         .onAppear { if isText && embedded { inputFocused = true } }
         .onChange(of: presentation.mode) { _, mode in if mode == .text && embedded { inputFocused = true } }
         .onChange(of: presentation.isTextPresented) { _, visible in
@@ -58,68 +39,19 @@ struct TranslationView: View {
                   presentation.inputFocusRequest == request, isText else { return }
             inputFocused = true
         }
-        .onChange(of: text.result) { _, _ in copied = false }
-        .onChange(of: subtitles.lines) { _, _ in copied = false }
-    }
-
-    private var audioControls: some View {
-        VStack(alignment: .leading, spacing: embedded ? 6 : 10) {
-            if embedded {
-                HStack {
-                    Text("Speech").frame(width: 78, alignment: .leading)
-                    sourcePicker.labelsHidden().frame(maxWidth: .infinity)
-                }
-                HStack {
-                    Text("Translate to").frame(width: 78, alignment: .leading)
-                    targetPicker.labelsHidden().frame(maxWidth: .infinity)
-                }
-                .font(.system(size: 12))
-                audioStatus
-                    .font(.system(size: 11))
-                HStack {
-                    Toggle("Original", isOn: $subtitles.showsOriginal).toggleStyle(.checkbox)
-                    Toggle("Follow", isOn: $followsLatest).toggleStyle(.checkbox)
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 11))
-            } else {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Speech").font(.system(size: 11)).foregroundStyle(.secondary)
-                        sourcePicker
-                    }
-                    Image(systemName: "arrow.right").foregroundStyle(.tertiary)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Translate to").font(.system(size: 11)).foregroundStyle(.secondary)
-                        targetPicker
-                    }
-                }.font(.system(size: 12))
-                HStack {
-                    audioStatus
-                    Spacer()
-                    Toggle("Original", isOn: $subtitles.showsOriginal).toggleStyle(.checkbox)
-                    Toggle("Follow", isOn: $followsLatest).toggleStyle(.checkbox)
-                }.font(.system(size: 12))
-            }
-        }
     }
 
     private var sourcePicker: some View {
         MacPopup(items: [.init(value: "auto", label: "Auto-detect")] + languageItems,
-                 selection: $subtitles.sourceCode, maxWidth: 170, appearance: .adaptive)
+                 selection: $subtitles.sourceCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Speech")
             .disabled(subtitles.phase.isActive)
     }
 
     private var targetPicker: some View {
-        MacPopup(items: languageItems, selection: $subtitles.targetCode, maxWidth: 170, appearance: .adaptive)
+        MacPopup(items: languageItems, selection: $subtitles.targetCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Translate to")
             .disabled(subtitles.phase.isActive)
-    }
-
-    private var audioStatus: some View {
-        Label(status, systemImage: subtitles.phase.isActive ? "waveform" : "speaker.wave.2")
-            .foregroundStyle(subtitles.phase.isActive ? Color.blue : Color.secondary)
     }
 
     private var languageItems: [MacPopup<String>.Item] {
@@ -216,87 +148,162 @@ struct TranslationView: View {
         NSPasteboard.general.setString(text.result, forType: .string)
     }
 
-    private var subtitleContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    if subtitles.lines.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "captions.bubble").font(.system(size: 32, weight: .light)).foregroundStyle(.blue)
-                            Text(subtitles.phase.isActive ? "Waiting for speech…" : "Understand what you hear")
-                                .font(.system(size: 20, weight: .medium))
-                            Text(subtitles.phase.isActive
-                                 ? "Play audio on your Mac. If nothing arrives, check System Audio Recording in macOS Privacy & Security."
-                                 : "Translate videos and calls into live subtitles. Only your Mac’s system audio is captured.")
-                                .font(.system(size: 13)).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center).frame(maxWidth: embedded ? 260 : 360)
-                            if subtitles.phase.isActive, !subtitles.hasAudio {
-                                Button("Open audio permissions") {
-                                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-                                        NSWorkspace.shared.open(url)
-                                    }
-                                }.font(.caption)
-                            }
-                        }.frame(maxWidth: .infinity).padding(.vertical, embedded ? 12 : 40)
-                    }
-                    ForEach(subtitles.lines) { line in
-                        VStack(alignment: .leading, spacing: 6) {
-                            if subtitles.showsOriginal {
-                                Text(line.source).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
-                            Text(line.translation ?? (subtitles.phase.isActive ? "Translating…" : "Translation unavailable"))
-                                .font(.system(size: 21, weight: .medium))
-                                .foregroundStyle(line.translation == nil ? .secondary : .primary)
-                                .textSelection(.enabled)
-                        }.fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading).id(line.id)
-                    }
-                    if !subtitles.partial.isEmpty {
-                        Text(subtitles.partial).font(.system(size: 13)).foregroundStyle(.tertiary)
-                    }
-                    Color.clear.frame(height: 1).id("latest")
-                }.padding(18)
+    // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
+    // The original RealtimeTranslator overlay: a bottom-anchored dark caption
+    // box of at most five lines. Only the language pair and Start/Stop were added.
+    @ViewBuilder private var subtitleContent: some View {
+        if embedded {
+            VStack(alignment: .leading, spacing: 8) {
+                subtitleControls
+                if let issue = subtitles.issue {
+                    errorCard(issue)
+                } else if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase, issue: nil) {
+                    captionText(caption)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                        .contextMenu { subtitleMenu }
+                }
+                if waitingWithoutAudio { audioPermissionsButton }
             }
-            .defaultScrollAnchor(subtitles.lines.isEmpty ? .top : .bottom)
-            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
-            .onChange(of: subtitles.lines) { _, _ in if followsLatest { proxy.scrollTo("latest", anchor: .bottom) } }
-            .onChange(of: subtitles.partial) { _, _ in if followsLatest { proxy.scrollTo("latest", anchor: .bottom) } }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 10) {
+                    if showsOverlayControls { subtitleControls }
+                    if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase,
+                                                          issue: subtitles.issue) {
+                        captionText(caption)
+                    }
+                    if let feature = subtitles.issue?.feature {
+                        Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
+                    }
+                    if waitingWithoutAudio { audioPermissionsButton }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                .shadow(radius: 5)
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+                .onHover { overlayHovered = $0 }
+                .contextMenu { subtitleMenu }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsOverlayControls)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(10)
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                let value = subtitles.lines.compactMap(\.translation).joined(separator: "\n\n")
-                guard !value.isEmpty else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(value, forType: .string)
-                copied = true
-            }.disabled(!subtitles.lines.contains { $0.translation != nil })
-            if !subtitles.phase.isActive, !subtitles.lines.isEmpty {
-                Button("Clear") { subtitles.clear(); copied = false }
+    /// While subtitles run, the overlay shows only the caption; the controls
+    /// return on hover and whenever capture is not running.
+    private var showsOverlayControls: Bool { !subtitles.phase.isActive || overlayHovered }
+
+    private var waitingWithoutAudio: Bool {
+        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty
+    }
+
+    private func captionText(_ value: String) -> some View {
+        // At most five lines; the box hugs shorter text and older words leave
+        // at the top, so the newest line never moves.
+        Text(value)
+            .font(.system(size: embedded ? 15 : 20, weight: .medium, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.leading)
+            .lineSpacing(3)
+            .lineLimit(5)
+            .truncationMode(.head)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Subtitles")
+            .accessibilityValue(value)
+    }
+
+    private var subtitleControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                languagePair
+                Spacer(minLength: 6)
+                sessionButton
+                if !embedded { closeButton }
             }
-            Spacer()
-            if subtitles.phase == .finishing {
+            VStack(alignment: .leading, spacing: 6) {
+                languagePair
+                HStack {
+                    Spacer(minLength: 0)
+                    sessionButton
+                    if !embedded { closeButton }
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .environment(\.colorScheme, embedded ? colorScheme : .dark)
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var languagePair: some View {
+        HStack(spacing: 6) {
+            sourcePicker
+            Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary).accessibilityHidden(true)
+            targetPicker
+        }
+    }
+
+    @ViewBuilder private var sessionButton: some View {
+        switch subtitles.phase {
+        case .finishing:
+            HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Button("Cancel") { subtitles.cancel() }
-            } else if subtitles.phase.isActive {
-                Button(subtitles.phase == .connecting ? "Cancel" : "Stop") { subtitles.stop() }
-                    .buttonStyle(.borderedProminent)
-            } else {
-                Button("Start subtitles", systemImage: "play.fill") { subtitles.start() }
-                    .buttonStyle(.borderedProminent)
             }
+        case .connecting:
+            Button("Cancel") { subtitles.stop() }
+        case .listening:
+            Button("Stop", systemImage: "stop.fill") { subtitles.stop() }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Stop subtitles")
+        case .idle, .failed:
+            Button("Start", systemImage: "play.fill") { subtitles.start() }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Start subtitles")
         }
     }
 
-    private var status: String {
-        switch subtitles.phase {
-        case .idle: return "System audio only"
-        case .connecting: return "Connecting…"
-        case .listening: return "Listening to system audio"
-        case .finishing: return "Finishing…"
-        case .failed: return "Stopped"
+    private var closeButton: some View {
+        Button(action: close) {
+            Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Close")
+        .accessibilityLabel("Close subtitles")
+    }
+
+    private var audioPermissionsButton: some View {
+        Button("Open audio permissions") {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        .buttonStyle(.link)
+        .font(.caption)
+    }
+
+    @ViewBuilder private var subtitleMenu: some View {
+        Button("Copy translation") {
+            let value = subtitles.lines.compactMap(\.translation).joined(separator: "\n\n")
+            guard !value.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        }
+        .disabled(!subtitles.lines.contains { $0.translation != nil })
+        Button("Clear") { subtitles.clear() }
+            .disabled(subtitles.phase.isActive || subtitles.lines.isEmpty)
+        if !embedded {
+            Button("Translate text") { presentation.mode = .text }
         }
     }
 

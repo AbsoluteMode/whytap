@@ -408,6 +408,12 @@ Translation tools:
   Escape or a click outside the floating text palette closes/cancels it; pointer
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
+  Subtitles are the original translator's compact overlay: a borderless
+  transparent panel at the bottom of the screen with one dark caption box (the
+  newest translations, at most five lines, older words leave at the top) and,
+  when idle or hovered, one row of source/target language, Start/Stop and ×.
+  It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
+  .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the

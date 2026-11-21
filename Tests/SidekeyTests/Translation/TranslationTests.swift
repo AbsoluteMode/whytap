@@ -477,6 +477,52 @@ final class TranslationTests: XCTestCase {
         XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
+    func testSubtitleCaptionShowsNewestTranslationsAsOneRunningLine() {
+        func line(_ source: String, _ translation: String?) -> SubtitleLine {
+            var value = SubtitleLine(source: source); value.translation = translation; return value
+        }
+        XCTAssertNil(SubtitleCaption.text(lines: [], phase: .idle, issue: nil),
+                     "An idle overlay shows only its controls, no empty-state copy")
+        XCTAssertEqual(SubtitleCaption.text(lines: [], phase: .connecting, issue: nil), "Connecting…")
+        XCTAssertEqual(SubtitleCaption.text(lines: [], phase: .listening, issue: nil), "Waiting for speech…")
+        XCTAssertEqual(SubtitleCaption.text(lines: [line("hi", nil)], phase: .listening, issue: nil), "Translating…")
+        XCTAssertNil(SubtitleCaption.text(lines: [], phase: .failed, issue: nil))
+        XCTAssertEqual(SubtitleCaption.text(lines: [line("a", "Привет."), line("b", "  "), line("c", "Как дела?")],
+                                            phase: .listening, issue: nil), "Привет. Как дела?")
+        let many = (1...12).map { line("s\($0)", "t\($0)") }
+        XCTAssertEqual(SubtitleCaption.text(lines: many, phase: .idle, issue: nil),
+                       (5...12).map { "t\($0)" }.joined(separator: " "))
+        let issue = TranslationIssue(message: "Set up Subtitles in API & Models.", feature: .subtitlesAudio)
+        XCTAssertEqual(SubtitleCaption.text(lines: many, phase: .failed, issue: issue), issue.message)
+    }
+
+    func testSubtitlesUseTheCompactBottomOverlayAndTextKeepsItsPalette() throws {
+        let suite = "translation-overlay-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                             makeService: { FixtureTranslator() }),
+            defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+        let textWidth = panel.frame.width
+        controller.resize(for: .subtitles)
+        let screen = IslandScreenResolver.currentVisibleFrame()
+        XCTAssertFalse(panel.isVisible)
+        XCTAssertFalse(panel.styleMask.contains(.titled), "Subtitles have no title bar or window buttons")
+        XCTAssertFalse(panel.hasShadow, "The caption box draws its own shadow")
+        XCTAssertEqual(panel.frame.width, min(760, screen.width - 32), accuracy: 0.5)
+        XCTAssertEqual(panel.frame.height, min(190, screen.height - 48), accuracy: 0.5)
+        XCTAssertEqual(panel.frame.minY, screen.minY + 72, accuracy: 0.5)
+        XCTAssertEqual(panel.frame.midX, screen.midX, accuracy: 0.5)
+        controller.resize(for: .text)
+        XCTAssertEqual(panel.frame.width, textWidth, accuracy: 0.5, "The wide overlay must not widen the text palette")
+        XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
+        XCTAssertTrue(panel.hasShadow)
+        XCTAssertFalse(panel.styleMask.contains(.titled))
+    }
+
     func testOutsideClickDismissesOnlyTheVisibleTextPalette() {
         XCTAssertTrue(TranslationOutsideClickPolicy.shouldDismiss(isText: true, isVisible: true, clickInside: false,
                                                                  menuTracking: false, modalInteraction: false))

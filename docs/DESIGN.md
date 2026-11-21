@@ -1581,6 +1581,27 @@ Subtitles keep their separate Speech/LLM setup and explicit Start/Stop journey.
 Their two-stage pipeline is not evidence of the standalone audio model’s latency
 or translation quality. Fake-provider flow checks and offscreen renders do not
 prove live permissions, physical keyboard/focus or provider quality.
+## Subtitles: compact caption overlay — 2026-11-21
+
+The user called the titled 440×400 pt Subtitles window a huge application and
+asked for the neat overlay of their standalone RealtimeTranslator, allowing only
+languages to be added. Subtitles are glanced at over a video or call, so the
+caption is the whole surface: a transparent borderless panel (760×190 pt,
+clamped, 72 pt above the bottom of the island's display) holds one bottom-anchored
+box, black at 60 % with 14 pt corners and a soft shadow. The caption is 20 pt
+rounded medium white, the newest translated phrases as one paragraph, at most
+five lines with older words leaving at the top; the box hugs shorter text.
+Status (Connecting…, Waiting for speech…, Translating…, an error with Open API &
+Models) replaces the caption. One row inside the box holds source → target,
+Start/Stop (Cancel while connecting/finishing) and ×; it shows while idle and on
+hover while running, easing over 0.15 s (none with Reduce Motion). No title,
+mode switch, labels, audio status, Original/Follow, empty-state screen or
+footer. Copy translation, Clear and Translate text live in the context menu.
+Showing subtitles does not make the panel key. Toolbox shows the same row and
+box (15 pt caption) only when there is text. Offscreen renders cover idle,
+result and Toolbox listening; hover and live focus are unverified. WHY:
+`.project-docs/decisions/2026-11-21-compact-subtitle-overlay.md`.
+
 ## Display: brightness hold (2026-10-28)
 
 The user opens Display to keep a chosen brightness steady. The slider remains

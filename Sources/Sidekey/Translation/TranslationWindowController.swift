@@ -39,6 +39,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     private var globalMouseMonitor: Any?
     private var menuObservers: [NSObjectProtocol] = []
     private var trackingMenus = 0
+    /// The text palette keeps its own width; the subtitle overlay is wider.
+    private var textWidth: CGFloat = 560
+    private var laidOutMode: Mode = .text
 
     var window: NSWindow { panel }
 
@@ -78,8 +81,11 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             openSettings: { [weak self] feature in
                 self?.dismiss()
                 openSettings(feature)
-            }
+            },
+            close: { [weak self] in self?.dismiss() }
         ))
+        // An autosaved subtitle frame must not widen the text palette.
+        if panel.frame.width < Self.subtitleSize.width { textWidth = panel.frame.width }
         configureChrome(for: .text)
         let publish = { [weak self] in
             guard let self else { return }
@@ -102,7 +108,13 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             panel.setFrame(NSRect(x: frame.midX - width / 2, y: mode == .subtitles ? frame.minY + 72 : frame.midY - height / 2,
                                   width: width, height: height), display: false)
         }
-        panel.makeKeyAndOrderFront(nil)
+        if mode == .text {
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            // Like the original overlay, subtitles never take keyboard focus
+            // from the video or call; a click on a control still works.
+            panel.orderFrontRegardless()
+        }
         presentation.isTextPresented = mode == .text
         if mode == .text { presentation.requestInputFocus() }
         updateOutsideClickMonitors(for: mode)
@@ -124,19 +136,33 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func resize(for mode: Mode) {
+    // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
+    static let subtitleSize = NSSize(width: 760, height: 190)
+
+    /// Internal so tests can check the layout without putting the panel on screen.
+    func resize(for mode: Mode) {
         let isText = mode == .text
         configureChrome(for: mode)
-        panel.minSize = NSSize(width: isText ? 360 : 480, height: isText ? 120 : 340)
-        panel.titleVisibility = isText ? .hidden : .visible
-        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            panel.standardWindowButton(button)?.isHidden = isText
-        }
+        panel.minSize = NSSize(width: 360, height: isText ? 120 : 140)
+        let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
-        let height: CGFloat = isText ? 140 : 400
-        frame.origin.y += frame.height - height
-        frame.size.width = max(frame.width, panel.minSize.width)
-        frame.size.height = height
+        if laidOutMode == .text { textWidth = frame.width }
+        if isText {
+            let top = frame.maxY
+            frame.size = NSSize(width: max(textWidth, panel.minSize.width), height: 140)
+            if laidOutMode == .subtitles {
+                frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.midY - frame.height / 2)
+            } else {
+                frame.origin.y = top - frame.height
+            }
+        } else if laidOutMode == .text {
+            // Entering subtitles places the overlay at the bottom of the screen;
+            // a repeated show keeps where the user dragged it.
+            frame.size = NSSize(width: min(Self.subtitleSize.width, screen.width - 32),
+                                height: min(Self.subtitleSize.height, screen.height - 48))
+            frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.minY + 72)
+        }
+        laidOutMode = mode
         panel.setFrame(frame, display: panel.isVisible)
         presentation.isTextPresented = isText && panel.isVisible
         if presentation.isTextPresented { presentation.requestInputFocus() }
@@ -145,8 +171,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     private func configureChrome(for mode: Mode) {
         let isText = mode == .text
-        panel.styleMask = isText ? [.borderless, .resizable, .nonactivatingPanel]
-            : [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel]
+        panel.styleMask = [.borderless, .resizable, .nonactivatingPanel]
+        // The subtitle box draws its own soft shadow inside a transparent panel.
+        panel.hasShadow = isText
         panel.contentView?.wantsLayer = true
         panel.contentView?.layer?.cornerRadius = isText ? 16 : 0
         panel.contentView?.layer?.masksToBounds = isText

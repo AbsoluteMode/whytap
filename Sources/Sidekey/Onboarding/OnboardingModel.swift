@@ -10,8 +10,8 @@ import Foundation
 final class OnboardingModel: ObservableObject {
     @Published private(set) var pages: [OnboardingPage]
     @Published private(set) var page: OnboardingPage
-    /// The speech provider clicked on the key card; `nil` until one is.
-    @Published var keyProvider: AIProviderKind?
+    /// The provider clicked on the key card; `nil` until one is.
+    @Published var keyTarget: OnboardingKeyTarget?
     /// The dictation language; `nil` is Auto. The same value as the Input
     /// Lang tool and Settings.
     @Published private(set) var language: AppLanguage?
@@ -37,6 +37,8 @@ final class OnboardingModel: ObservableObject {
     let demo = OnboardingDropDemo()
     /// The key form's store of keys and routes; built when the form opens.
     private(set) lazy var models: APIAndModelsViewModel = injectedModels ?? APIAndModelsViewModel()
+    /// The Tavily search key, saved the way Settings -> API keys saves it.
+    private(set) lazy var tavily: TavilySettings = models.makeTavilySettings()
     private let injectedModels: APIAndModelsViewModel?
     /// The user chose Set up later on the speech page.
     private var speechSkipped = false

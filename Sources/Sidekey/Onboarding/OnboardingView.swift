@@ -210,18 +210,14 @@ struct OnboardingSpeechPage: View {
 
     var body: some View {
         let presentation = Presentation(onDevice.status)
-        let copy = OnboardingTryPage.Copy(shortcut: configuration.dropVoiceShortcut.title,
-                                          gesture: configuration.normalizedDropGesture)
-        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 52) {
+        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
-                OnboardingLede(text: copy.pitch)
-                    .padding(.top, 8)
                 OnboardingLanguageRow(model: model)
-                    .padding(.top, 20)
+                    .padding(.top, 12)
                 if model.supportsOnDevice {
                     OnboardingCard {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .center, spacing: 12) {
                                 OnboardingIconTile(systemImage: "laptopcomputer", tint: OnboardingTheme.accent)
                                 VStack(alignment: .leading, spacing: 2) {
@@ -241,9 +237,9 @@ struct OnboardingSpeechPage: View {
                             OnboardingPrimaryButton(title: presentation.action, chevron: false, action: model.startOnDevice)
                         }
                     }
-                    .padding(.top, 14)
+                    .padding(.top, 12)
                 }
-                OnboardingKeyCard(model: model, models: model.models)
+                OnboardingKeyCard(model: model, models: model.models, tavily: model.tavily)
                     .padding(.top, 10)
             }
         } footer: {
@@ -419,110 +415,217 @@ struct OnboardingLanguageList: View {
     }
 }
 
-/// A speech provider on the onboarding's key card with its free offer from
-/// Settings -> API & Models -> API hints (the one source for offers).
-struct OnboardingSpeechOffer: Equatable {
-    let kind: AIProviderKind
-    let short: String?
-    let url: URL?
-    let detail: String?
+/// A key the onboarding can save: a model provider's or Tavily's.
+enum OnboardingKeyTarget: Hashable {
+    case provider(AIProviderKind)
+    case tavily
 
-    static var all: [OnboardingSpeechOffer] {
-        OnboardingDropSpeech.keyProviders.map { kind in
-            let hint = APIHintsView.hints.first { $0.category == .speech && $0.provider == kind.displayName }
-            return OnboardingSpeechOffer(kind: kind, short: hint.map(short), url: hint?.url,
-                                         detail: hint.map { "\($0.allowance) \($0.cadence). \($0.detail)" })
+    var name: String {
+        switch self {
+        case .provider(let kind): return kind.displayName
+        case .tavily: return "Tavily"
         }
     }
 
-    /// "$200 credit", "10,000 credits/mo": the allowance and its period in a
-    /// tile's width.
-    static func short(_ hint: APIHintsView.Hint) -> String {
-        let cadence = hint.cadence.lowercased()
-        let unit = cadence.contains("credits") ? " credits" : cadence.contains("credit") ? " credit" : ""
-        if cadence.contains("month") { return "\(hint.allowance)\(unit)/mo" }
-        if cadence.contains("day") { return "\(hint.allowance)\(unit)/day" }
-        return hint.allowance + unit
+    /// Speech providers also become Drop's speech when their key is saved.
+    var speechKind: AIProviderKind? {
+        if case .provider(let kind) = self, OnboardingDropSpeech.keyProviders.contains(kind) { return kind }
+        return nil
     }
 }
 
-/// The person's own speech key: every speech provider with its free offer;
-/// a click opens its key field and offer link.
+/// One tile of the key card: every provider Whytap takes a key for, with its
+/// offer from Settings -> API & Models -> API hints (the one source for
+/// offers; a provider without one gets none).
+struct OnboardingKeyOffer: Equatable {
+    enum Category: String { case speech = "SPEECH", ai = "AI", search = "SEARCH" }
+
+    let target: OnboardingKeyTarget
+    let category: Category
+    let short: String?
+    /// The offer needs a paid plan (Claude Max, ChatGPT Pro), so it is not free.
+    let needsPlan: Bool
+    let url: URL?
+    let detail: String?
+
+    /// Speech first (Drop needs one), then language models, then search.
+    static let targets: [(OnboardingKeyTarget, Category)] =
+        OnboardingDropSpeech.keyProviders.map { (.provider($0), .speech) }
+        + [(.provider(.openRouter), .ai), (.provider(.openAI), .ai), (.provider(.anthropic), .ai),
+           (.tavily, .search)]
+
+    /// Which provider's key an API hints offer is spent with.
+    static func target(of hint: APIHintsView.Hint) -> OnboardingKeyTarget? {
+        switch hint.provider {
+        case "Claude Max & Ultra": return .provider(.anthropic)
+        case "ChatGPT Pro": return .provider(.openAI)
+        default: return targets.map(\.0).first { $0.name == hint.provider }
+        }
+    }
+
+    static var all: [OnboardingKeyOffer] {
+        targets.map { target, category in
+            let hint = APIHintsView.hints.first { Self.target(of: $0) == target }
+            return OnboardingKeyOffer(
+                target: target, category: category, short: hint.map(short), needsPlan: hint?.access == .paidPlan,
+                url: hint?.url, detail: hint.map { "\($0.provider): \($0.allowance) \($0.cadence). \($0.detail)" })
+        }
+    }
+
+    /// "$200 credit", "10,000 credits/mo", "50/day free": the allowance and
+    /// its period in a tile's width.
+    static func short(_ hint: APIHintsView.Hint) -> String {
+        let cadence = hint.cadence.lowercased()
+        if hint.allowance.contains("/") {
+            return hint.allowance.replacingOccurrences(of: " ", with: "") + " free"
+        }
+        let unit = cadence.contains("credits") ? " credits" : cadence.contains("credit") ? " credit" : ""
+        let amount = compact(hint.allowance)
+        if cadence.contains("month") { return "\(amount)\(unit)/mo" }
+        if cadence.contains("day") { return "\(amount)\(unit)/day" }
+        return amount + unit
+    }
+
+    /// "10,000" -> "10k", so the offer fits a tile.
+    static func compact(_ amount: String) -> String {
+        amount.hasSuffix(",000") ? String(amount.dropLast(4)) + "k" : amount
+    }
+}
+
+/// The person's own keys: every provider with its offer; a click opens its
+/// key field and offer link. A speech key also becomes Drop's speech.
 @MainActor
 struct OnboardingKeyCard: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var models: APIAndModelsViewModel
+    @ObservedObject var tavily: TavilySettings
     @State private var key = ""
     @State private var saving = false
     @State private var failure: String?
+    @State private var saved: Set<OnboardingKeyTarget> = []
     @FocusState private var focused: Bool
 
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 4)
+
     var body: some View {
-        let offers = OnboardingSpeechOffer.all
-        let selected = offers.first { $0.kind == model.keyProvider }
+        let offers = OnboardingKeyOffer.all
+        let selected = offers.first { $0.target == model.keyTarget }
         OnboardingCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("OR USE YOUR KEY")
-                    .font(OnboardingTheme.mono(10, weight: .medium))
-                    .tracking(1.2)
-                    .foregroundColor(OnboardingTheme.faint)
+            VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
-                    ForEach(offers, id: \.kind) { offer in
-                        tile(offer, selected: offer.kind == model.keyProvider)
+                    Text("OR USE YOUR KEYS")
+                        .font(OnboardingTheme.mono(10, weight: .medium))
+                        .tracking(1.2)
+                        .foregroundColor(OnboardingTheme.faint)
+                    Spacer(minLength: 0)
+                    if let selected, failure == nil, let url = selected.url {
+                        Link(destination: url) {
+                            HStack(spacing: 3) {
+                                Text("Get offer")
+                                Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .semibold))
+                            }
+                            .font(OnboardingTheme.sans(11.5, weight: .medium))
+                            .foregroundColor(OnboardingTheme.ink2)
+                        }
+                        .buttonStyle(.plain)
+                        .help(selected.detail ?? "")
+                        .accessibilityLabel("Get the \(selected.target.name) offer")
+                    }
+                }
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(offers, id: \.target) { offer in
+                        tile(offer, selected: offer.target == model.keyTarget)
                     }
                 }
                 if let selected { actions(selected) }
             }
         }
-        .onChange(of: model.keyProvider) { _, _ in failure = nil; key = "" }
+        .onChange(of: model.keyTarget) { _, _ in failure = nil; key = "" }
     }
 
-    private func tile(_ offer: OnboardingSpeechOffer, selected: Bool) -> some View {
-        Button {
-            model.keyProvider = selected ? nil : offer.kind
+    private func isSaved(_ target: OnboardingKeyTarget) -> Bool {
+        if saved.contains(target) { return true }
+        switch target {
+        case .tavily: return tavily.configured
+        case .provider(let kind):
+            return APIAndModelsViewModel.builtInAccount(for: kind).map(models.accountIsAvailableForSelection) ?? false
+        }
+    }
+
+    private func tile(_ offer: OnboardingKeyOffer, selected: Bool) -> some View {
+        let hasKey = isSaved(offer.target)
+        return Button {
+            model.keyTarget = selected ? nil : offer.target
         } label: {
-            VStack(spacing: 5) {
-                ProviderKindIcon(kind: offer.kind, size: 20)
-                    .foregroundColor(OnboardingTheme.ink)
-                Text(offer.kind.displayName)
-                    .font(OnboardingTheme.sans(12, weight: .semibold))
+            VStack(spacing: 2) {
+                Text(offer.category.rawValue)
+                    .font(OnboardingTheme.mono(7.5, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundColor(offer.category == .speech ? OnboardingTheme.accent : OnboardingTheme.faint)
+                Group {
+                    switch offer.target {
+                    case .provider(let kind): ProviderKindIcon(kind: kind, size: 17)
+                    case .tavily: ProviderKindIcon(assetName: "tavily", size: 17)
+                    }
+                }
+                .foregroundColor(OnboardingTheme.ink)
+                .frame(height: 18)
+                Text(offer.target.name)
+                    .font(OnboardingTheme.sans(10.5, weight: .semibold))
                     .foregroundColor(OnboardingTheme.ink)
                     .lineLimit(1)
-                Text(offer.short ?? "Paid")
-                    .font(OnboardingTheme.sans(10.5, weight: offer.short == nil ? .regular : .medium))
-                    .foregroundColor(offer.short == nil ? OnboardingTheme.faint : OnboardingTheme.green)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.75)
+                Group {
+                    if hasKey {
+                        Label("Saved", systemImage: "checkmark").labelStyle(.titleAndIcon)
+                            .foregroundColor(OnboardingTheme.green)
+                    } else if let short = offer.short {
+                        Text(offer.needsPlan ? "Plan credit" : short)
+                            .foregroundColor(offer.needsPlan ? OnboardingTheme.muted : OnboardingTheme.green)
+                    } else {
+                        Text("Paid").foregroundColor(OnboardingTheme.faint)
+                    }
+                }
+                .font(OnboardingTheme.sans(9.5, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 3)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(selected ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(selected ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
                               lineWidth: selected ? 1.2 : 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(offer.detail ?? offer.kind.displayName)
-        .accessibilityLabel(offer.short.map { "\(offer.kind.displayName), \($0)" } ?? offer.kind.displayName)
+        .help(offer.detail ?? offer.target.name)
+        .accessibilityLabel("\(offer.target.name), \(offer.category.rawValue.lowercased())"
+                            + (offer.short.map { ", \($0)" } ?? ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    @ViewBuilder private func actions(_ offer: OnboardingSpeechOffer) -> some View {
-        let provider = offer.kind
+    @ViewBuilder private func actions(_ offer: OnboardingKeyOffer) -> some View {
+        let target = offer.target
         VStack(alignment: .leading, spacing: 8) {
-            if model.keyAvailable(provider) {
+            if isSaved(target) {
                 HStack(spacing: 10) {
-                    Text("Your \(provider.displayName) key is saved.")
-                        .font(OnboardingTheme.sans(12))
+                    Text(target.speechKind == nil
+                         ? "Saved. Pick its models in Settings → API & Models."
+                         : "Your \(target.name) key is saved.")
+                        .font(OnboardingTheme.sans(11.5))
                         .foregroundColor(OnboardingTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    OnboardingOutlineButton(title: "Use for Drop") { model.useKey(provider) }
+                    if let kind = target.speechKind {
+                        OnboardingOutlineButton(title: "Use for Drop") { model.useKey(kind) }
+                    }
                 }
             } else {
                 HStack(spacing: 8) {
-                    SecureField("Paste your \(provider.displayName) key", text: $key)
+                    SecureField("Paste your \(target.name) key", text: $key)
                         .textFieldStyle(.plain)
                         .font(OnboardingTheme.sans(12.5))
                         .foregroundColor(OnboardingTheme.ink)
@@ -543,43 +646,38 @@ struct OnboardingKeyCard: View {
                     }
                 }
             }
-            if let failure {
-                OnboardingStageStatus(tone: .warning, text: failure)
-            } else if let url = offer.url {
-                Link(destination: url) {
-                    HStack(spacing: 4) {
-                        Text("Get offer")
-                        Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .semibold))
-                    }
-                    .font(OnboardingTheme.sans(12, weight: .medium))
-                    .foregroundColor(OnboardingTheme.ink2)
-                }
-                .buttonStyle(.plain)
-                .help(offer.detail ?? "")
-            }
+            if let failure { OnboardingStageStatus(tone: .warning, text: failure) }
         }
     }
 
-    /// The same check and Keychain save as Settings -> API keys
-    /// (`ProviderKeyForm.save` with the provider's account).
+    /// The same checks and Keychain saves as Settings -> API keys
+    /// (`ProviderKeyForm.save` with the provider's account, `TavilySettings.save`).
     private func save() {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty, !saving, let provider = model.keyProvider else { return }
+        guard !candidate.isEmpty, !saving, let target = model.keyTarget else { return }
         saving = true
         failure = nil
         Task {
             let problem: String?
-            if let account = OnboardingDropSpeech.account(for: provider) {
-                problem = await models.replaceKey(candidate, for: account)
-            } else {
-                problem = await models.addKey(candidate, kind: provider)
+            switch target {
+            case .tavily:
+                tavily.draftKey = candidate
+                await tavily.save()
+                problem = tavily.messageIsError ? (tavily.message ?? "Key not accepted") : nil
+            case .provider(let kind):
+                if let account = APIAndModelsViewModel.builtInAccount(for: kind) {
+                    problem = await models.replaceKey(candidate, for: account)
+                } else {
+                    problem = await models.addKey(candidate, kind: kind)
+                }
             }
             saving = false
             if let problem {
                 failure = problem
             } else {
                 key = ""
-                model.useKey(provider)
+                saved.insert(target)
+                if let kind = target.speechKind { model.useKey(kind) }
             }
         }
     }
@@ -825,8 +923,6 @@ struct OnboardingTryPage: View {
 
     /// Copy for the user's own Drop shortcut and gesture. Pure for tests.
     struct Copy: Equatable {
-        /// The first page's promise.
-        let pitch: String
         let pressVerb: String
         let pressDetail: String
         let releaseVerb: String
@@ -836,14 +932,12 @@ struct OnboardingTryPage: View {
         init(shortcut: String, gesture: HotkeyGesture) {
             switch gesture {
             case .hold:
-                pitch = "Hold \(shortcut), speak, let go."
                 pressVerb = "Hold"
                 pressDetail = "Speak while you hold it."
                 releaseVerb = "Let go"
                 releaseDetail = "The text appears at the cursor."
                 placeholder = "Click here, hold \(shortcut) and say a sentence"
             case .tap:
-                pitch = "Press \(shortcut), speak, press again."
                 pressVerb = "Press"
                 pressDetail = "Then speak."
                 releaseVerb = "Press again"

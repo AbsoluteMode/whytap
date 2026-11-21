@@ -389,12 +389,11 @@ final class OnboardingTests: XCTestCase {
 
     func testTryCopyNamesTheUsersOwnShortcutAndGesture() {
         let hold = OnboardingTryPage.Copy(shortcut: "Space", gesture: .hold)
-        XCTAssertTrue(hold.pitch.hasPrefix("Hold Space"))
         XCTAssertEqual(hold.pressVerb, "Hold")
         XCTAssertEqual(hold.releaseVerb, "Let go")
         XCTAssertTrue(hold.placeholder.contains("hold Space"))
         let tap = OnboardingTryPage.Copy(shortcut: "⌥D", gesture: .tap)
-        XCTAssertTrue(tap.pitch.hasPrefix("Press ⌥D"))
+        XCTAssertEqual(tap.pressVerb, "Press")
         XCTAssertEqual(tap.releaseVerb, "Press again")
         XCTAssertTrue(tap.placeholder.contains("press ⌥D"))
     }
@@ -460,23 +459,31 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(ukr.first??.code, "uk", "A name that starts with the query comes first")
     }
 
-    func testKeyCardOffersComeFromAPIHints() {
-        let offers = OnboardingSpeechOffer.all
-        XCTAssertEqual(offers.map(\.kind), OnboardingDropSpeech.keyProviders, "Every speech provider Drop can use")
-        let deepgram = offers.first { $0.kind == .deepgram }
-        XCTAssertEqual(deepgram?.short, "$200 credit")
-        XCTAssertEqual(deepgram?.url?.host, "deepgram.com")
-        XCTAssertEqual(offers.first { $0.kind == .elevenLabs }?.short, "10,000 credits/mo")
-        XCTAssertNil(offers.first { $0.kind == .soniox }?.short, "No offer is invented where API hints list none")
-        for hint in APIHintsView.hints where hint.category == .speech {
-            XCTAssertTrue(offers.contains { $0.kind.displayName == hint.provider }, "\(hint.provider) offer is missing")
+    func testKeyCardOffersEveryProviderWithItsAPIHintsOffer() {
+        let offers = OnboardingKeyOffer.all
+        XCTAssertEqual(offers.map(\.target), [.provider(.soniox), .provider(.deepgram), .provider(.elevenLabs),
+                                               .provider(.openRouter), .provider(.openAI), .provider(.anthropic), .tavily],
+                       "Speech first, then language models, then search")
+        func offer(_ target: OnboardingKeyTarget) -> OnboardingKeyOffer? { offers.first { $0.target == target } }
+        XCTAssertEqual(offer(.provider(.deepgram))?.short, "$200 credit")
+        XCTAssertEqual(offer(.provider(.deepgram))?.url?.host, "deepgram.com")
+        XCTAssertEqual(offer(.provider(.elevenLabs))?.short, "10k credits/mo")
+        XCTAssertEqual(offer(.provider(.openRouter))?.short, "50/day free")
+        XCTAssertEqual(offer(.tavily)?.short, "1k credits/mo")
+        XCTAssertEqual(offer(.provider(.anthropic))?.needsPlan, true, "Claude Max credit needs the plan")
+        XCTAssertEqual(offer(.provider(.openAI))?.needsPlan, true, "ChatGPT Pro credit needs the plan")
+        XCTAssertNil(offer(.provider(.soniox))?.short, "No offer is invented where API hints list none")
+        for hint in APIHintsView.hints {
+            XCTAssertNotNil(OnboardingKeyOffer.target(of: hint), "\(hint.provider) offer has no tile")
         }
+        XCTAssertEqual(offers.filter { $0.target.speechKind != nil }.count, OnboardingDropSpeech.keyProviders.count,
+                       "Only speech keys become Drop's speech")
     }
 
     func testNoProviderIsChosenUntilClicked() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        XCTAssertNil(model.keyProvider)
+        XCTAssertNil(model.keyTarget)
     }
 
     // MARK: - Coding agents
@@ -626,22 +633,22 @@ final class OnboardingTests: XCTestCase {
             OnboardingClipStage.playsVideo = true
         }
 
-        enum Stop { case speech, speechProvider, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
+        enum Stop { case speech, speechProvider, speechModelProvider, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
                         customize, customizeHover, features, featuresConnected }
         let shots: [(Stop, String)] = [
-            (.speech, "1-speech"), (.speechProvider, "1-speech-deepgram"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
+            (.speech, "1-speech"), (.speechProvider, "1-speech-deepgram"), (.speechModelProvider, "1-speech-anthropic"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
             (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
             (.tryDownloading, "3-try-drop-downloading"), (.customize, "4-customize-shortcuts"),
             (.customizeHover, "4-customize-hover"), (.features, "5-more"), (.featuresConnected, "5-more-connected"),
         ]
-        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechListening, .speechLanguage]
+        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage]
         let fromTry: [Stop] = [.tryEmpty, .tryDone, .tryDownloading, .customize, .customizeHover, .features, .featuresConnected]
         for (stop, name) in shots {
             // A new Mac: no model (downloading once asked; landed by the try
             // page), nothing granted.
             let status: OnDeviceSpeechModelStatus
             switch stop {
-            case .speech, .speechProvider, .speechListening, .speechLanguage: status = .notDownloaded
+            case .speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage: status = .notDownloaded
             case .permissions, .tryDownloading: status = .downloading(0.42)
             default: status = .ready
             }
@@ -665,7 +672,8 @@ final class OnboardingTests: XCTestCase {
             defer { model.stop() }
             XCTAssertEqual(model.pages, [.speech, .permissions, .tryDrop, .customize, .features])
             if stop == .speechLanguage { model.setLanguage(AppLanguage.find(code: "ru")) }
-            if stop == .speechProvider { model.keyProvider = .deepgram }
+            if stop == .speechProvider { model.keyTarget = .provider(.deepgram) }
+            if stop == .speechModelProvider { model.keyTarget = .provider(.anthropic) }
             if stop == .customizeHover { model.customizeVideo = .hover }
             if !beforeCustomize.contains(stop) {
                 model.startOnDevice()  // Download and use for Drop
@@ -690,7 +698,7 @@ final class OnboardingTests: XCTestCase {
             content.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(500))
             switch stop {
-            case .speech, .speechProvider, .speechLanguage: model.demo.show(.done)
+            case .speech, .speechProvider, .speechModelProvider, .speechLanguage: model.demo.show(.done)
             case .speechListening: model.demo.show(.recording, level: 0.62)
             case .tryDone:
                 let textView = try XCTUnwrap(Self.textView(in: content))

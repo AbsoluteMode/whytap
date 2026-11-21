@@ -163,9 +163,9 @@ for slug, icon, title, sub, steps, desc, media in DEMOS:
     alt = html.escape(f"{title}: {sub}")
     src = lambda lay, t: f"{A}/tool-line-{slug}-{lay}-{t}.svg"
     sources = ""
-    for media, lay, width in WIDTHS:
-        dark = f"{media} and (prefers-color-scheme: dark)" if media else "(prefers-color-scheme: dark)"
-        light = media or "(prefers-color-scheme: light)"
+    for viewport, lay, width in WIDTHS:
+        dark = f"{viewport} and (prefers-color-scheme: dark)" if viewport else "(prefers-color-scheme: dark)"
+        light = viewport or "(prefers-color-scheme: light)"
         sources += (f'<source media="{dark}" srcset="{src(lay, "dark")}" width="{width}">'
                     f'<source media="{light}" srcset="{src(lay, "light")}" width="{width}">')
     section += [

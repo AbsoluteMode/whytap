@@ -49,7 +49,13 @@ paying.
   app. Above the cards a banner compares a struck-through $600 ("≈ paid apps
   per year") with $0 for Whytap. The figure is an estimate Maxim chose: the
   README's earlier per-tool prices (dictation, meeting notes, AI launcher,
-  secrets vault) add up to about $636 a year. Paid-plan credits
+  secrets vault) add up to about $636 a year. Later that day Maxim asked
+  for the $600 → $0 comparison at the bottom of the same block, under the
+  quota lines, with a drawn arrow: the "→" glyph looked thin and uneven when
+  the block is scaled. Because the section edges did not line up with the
+  Tools rows and code blocks, the block is shown at the column's full width
+  and the offers are two wide linked cards per row, each 49% wide (the
+  compact card on phones). Paid-plan credits
   (Claude Max/Ultra, ChatGPT Pro) stay in the app only: the section is about
   starting without payment.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale

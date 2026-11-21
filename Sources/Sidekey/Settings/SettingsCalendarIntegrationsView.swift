@@ -18,6 +18,10 @@ struct SettingsCalendarIntegrationsView: View {
     }
 
     var body: some View {
+        if CalendarAvailability.isOpen { openBody } else { CalendarComingSoonCard() }
+    }
+
+    private var openBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Calendars").font(.system(size: 15, weight: .semibold))
             Text("Connect the feature you need. Each connection requests its own permissions.")
@@ -167,5 +171,54 @@ private struct CalendarIntegrationCard: View {
 
     private func confirmAppleDisconnect() {
         removing = ConnectedCalendarAccount(id: UUID(), provider: .apple, label: provider.title)
+    }
+}
+
+/// Calendar is closed: the section stays visible with a "Soon" plaque and an
+/// inactive Connect button. Nothing here signs in, asks macOS for access or
+/// reads a calendar. Stored connections are kept and work again when the
+/// switch in `CalendarAvailability` is opened.
+// WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
+struct CalendarComingSoonCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Calendars").font(.system(size: 15, weight: .semibold))
+                SettingsSoonBadge(text: CalendarAvailability.badge)
+            }
+            MacCard {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Google, Outlook, Apple and Zoom calendars").font(.system(size: 13, weight: .semibold))
+                        Text(CalendarAvailability.message)
+                            .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    IntegrationAction(title: "Connect", enabled: false) {}
+                        .accessibilityHint(CalendarAvailability.message)
+                }.padding(14)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The "Soon" plaque in Settings, in the Toolbox badge's capsule style.
+struct SettingsSoonBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .padding(.horizontal, 7)
+            .frame(minHeight: 16)
+            .background(
+                Capsule()
+                    .fill(MacSettingsTheme.hover)
+                    .overlay(Capsule().strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.5))
+            )
+            .accessibilityLabel(text)
     }
 }

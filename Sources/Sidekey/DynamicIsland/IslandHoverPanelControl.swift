@@ -28,6 +28,8 @@ struct IslandHoverPanelControl: View {
     /// When `true`, a small red unread dot sits on the tile's top-trailing
     /// edge. Used only by the Notify tile to flag unread notifications.
     var showsDot: Bool = false
+    /// A "Soon" plaque on the tile's top-trailing edge for a tool that cannot be used yet.
+    var badge: String? = nil
     /// Hide the title while preserving the capsule footprint.
     var showsLabel: Bool = true
     /// The grid supplies its exact available cell width, including fractional
@@ -71,6 +73,11 @@ struct IslandHoverPanelControl: View {
         return "\(accessibilityLabel), \(statusText)"
     }
 
+    private var spokenLabel: String {
+        guard let badge else { return spokenAccessibilityLabel }
+        return "\(spokenAccessibilityLabel), \(badge)"
+    }
+
     /// Less travel than an orb: keep the visible pill within the column gap.
     private var visualScale: CGFloat {
         1 + (IslandGraphiteHoverControlStyle.feedbackScale(
@@ -88,6 +95,14 @@ struct IslandHoverPanelControl: View {
         .buttonStyle(.plain)
             .frame(width: width, height: Self.tileHeight, alignment: .center)
             .contentShape(Rectangle())
+            .overlay(alignment: .topTrailing) {
+                if let badge {
+                    IslandSoonBadge(text: badge)
+                        .padding(.trailing, 4)
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
+                }
+            }
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
@@ -114,7 +129,7 @@ struct IslandHoverPanelControl: View {
             .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.70), value: isPressed)
             .animation(.easeOut(duration: 0.22), value: hovering)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(spokenAccessibilityLabel)
+            .accessibilityLabel(spokenLabel)
             .accessibilityValue(showsDot ? "New notifications" : "")
             .accessibilityAddTraits(.isButton)
     }
@@ -278,5 +293,26 @@ struct IslandHoverPanelControl: View {
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(isRecording ? Color.red : Color.blue)
             .symbolRenderingMode(.monochrome)
+    }
+}
+
+/// The small "Soon" plaque on a tool that is listed but cannot be used yet.
+/// Always readable on the island's dark glass, also on a dimmed tile.
+struct IslandSoonBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .tracking(0.3)
+            .foregroundStyle(.white.opacity(0.92))
+            .padding(.horizontal, 6)
+            .frame(minHeight: 14)
+            .background(
+                Capsule()
+                    .fill(.white.opacity(0.16))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
+            )
+            .accessibilityHidden(true)
     }
 }

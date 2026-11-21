@@ -18,6 +18,7 @@ final class BackupViewModelTests: XCTestCase {
     private var key: Data!
     private var keyStore: MemoryKey!
     override func setUp() {
+        openCalendarForThisTest()
         super.setUp()
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         suite = "BackupViewModelTests." + UUID().uuidString

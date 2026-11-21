@@ -1135,7 +1135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             },
             openCalendar: { [weak self] in
-                guard let self else { return }
+                // Closed Calendar ("Soon"): nothing opens.
+                guard let self, CalendarAvailability.isOpen else { return }
                 self.registerIslandHotkeyActivity()
                 AppState.shared.programmaticHoverExpansion = true
                 self.hoverPanelRequestToken += 1
@@ -1664,6 +1665,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // invisible and reads as "the hotkey does nothing".
             let newMode = IslandPanel.shared.actions.toggleDropMode()
             AppState.shared.publishDropModeHotkeyToggle(newMode)
+        case .comingSoon:
+            // A tool listed with a "Soon" badge has no effect.
+            break
         case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty

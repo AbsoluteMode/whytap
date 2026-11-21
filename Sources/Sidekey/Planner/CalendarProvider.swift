@@ -130,7 +130,7 @@ enum CalendarEventMerger {
 }
 
 enum CalendarConnectionError: Error, LocalizedError {
-    case invalidResponse, signInRequired, denied, cancelled, timeout, keychain, configuration, unavailable, publicReviewPending
+    case invalidResponse, signInRequired, denied, cancelled, timeout, keychain, configuration, unavailable, publicReviewPending, comingSoon
     case http(Int)
 
     var errorDescription: String? {
@@ -143,6 +143,7 @@ enum CalendarConnectionError: Error, LocalizedError {
         case .keychain: return "Couldn’t access Keychain. Unlock it and retry."
         case .configuration: return "Check the OAuth client configuration and registered redirect address."
         case .publicReviewPending: return "Public calendar sign-in is awaiting provider approval."
+        case .comingSoon: return CalendarAvailability.message
         case .unavailable: return "Couldn’t reach the calendar service. Check your connection and retry."
         case .http(403): return "Access denied. Check calendar permissions and your organization’s policy."
         case .http(429): return "The calendar service is busy. Wait a little before refreshing."

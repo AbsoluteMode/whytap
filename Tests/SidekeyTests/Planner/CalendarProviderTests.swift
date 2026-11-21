@@ -2,6 +2,8 @@ import XCTest
 @testable import Sidekey
 
 final class CalendarProviderTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     func testAllDayInclusiveAndExclusiveEndsMergeAcrossTimeZones() throws {
         var origin = Calendar(identifier: .gregorian)
         origin.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))

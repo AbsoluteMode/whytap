@@ -146,7 +146,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 
 <p align="center">Ask <a href="https://whytap.ai">whytap.ai</a> anything about Whytap. It answers from the code, and when Whytap can't do it yet, it drafts the GitHub issue for you.</p>
 
-<p align="center"><a href="https://whytap.ai"><img alt="whytap.ai Ask: the question “Add support for the Qwen provider”, an answer from the code, follow-up questions and a drafted issue with a Suggest it on GitHub button" src="docs/assets/readme/ask-issue.webp" width="100%"></a></p>
+<p align="center"><a href="https://whytap.ai"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-ask-still.webp"><img alt="whytap.ai Ask: typing the question “Add support for the Qwen provider”, then an answer from the code, Ask next questions and a drafted issue with a Suggest it on GitHub button" src="docs/assets/readme/demo-ask.webp" width="100%" loading="lazy"></picture></a></p>
 
 ## Free to use
 

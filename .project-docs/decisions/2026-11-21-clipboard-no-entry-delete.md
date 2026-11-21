@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/History/SQLiteHistoryStore.swift
     confirmed_at: 2026-11-21
-related: [2026-10-22-clipboard-entry-delete.md]
+related: [2026-10-22-clipboard-entry-delete.md, 2026-11-22-history-multi-paste.md]
 ---
 
 # No per-entry Delete in clipboard history

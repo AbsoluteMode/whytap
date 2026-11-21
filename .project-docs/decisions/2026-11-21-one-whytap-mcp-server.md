@@ -59,8 +59,14 @@ not because they need separate processes.
   helper or a bare `whytap` on PATH are someone else's. Such an existing
   `whytap` entry of ours is replaced; any other, or one that cannot be read
   for certain, stops Connect with a message naming it and no changing CLI
-  call. After adding, our older `case` entry is removed, best effort; any
-  other `case` entry is never touched.
+  call. Replacing never leaves the person without the entry that worked:
+  `codex mcp add` replaces a name in one write, so Codex is never asked to
+  remove it first; `claude mcp add` refuses an existing name, so ours is
+  removed, and a refused add puts the previous entry back exactly as it was
+  (`claude mcp add-json`), reporting the add's failure (or that the restore
+  failed too). An entry already `<helper> mcp` is left untouched. After
+  adding, our older `case` entry is removed, best effort; any other `case`
+  entry is never touched.
 - **Codex is read through Codex.** `codex mcp add` replaces a server by name,
   so Connect first runs the read-only `codex mcp get <name> --json` (Codex's
   own TOML parser decides escapes, inline tables, comments) through a
@@ -148,6 +154,12 @@ not because they need separate processes.
 - The built helper outside an app bundle (no broker client, nothing launched):
   `whytap mcp` lists 16 tools and answers a bad line with a parse error;
   `app mcp` lists 14, `case mcp` 2; `whytap mcp extra` exits 64.
+- Builder review 3 (queue run 16213): a successful remove followed by a
+  refused add lost the working entry in both Codex and Claude Code. Codex now
+  adds without removing (a test runs the real `codex mcp add` over our
+  `app mcp` entry and reads it back replaced); Claude Code tests cover the
+  restore of the exact previous JSON, a failed restore reported as such, and
+  an already-current entry left untouched.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

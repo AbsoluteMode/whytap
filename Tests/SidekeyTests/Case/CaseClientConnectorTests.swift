@@ -70,6 +70,53 @@ final class CaseClientConnectorTests: XCTestCase {
         ])
     }
 
+    /// An entry that is already `<helper> mcp` is left as it is.
+    func test_claude_current_entry_is_not_rewritten() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"whytap":{"type":"stdio","command":"\#(helper)","args":["mcp"],"env":{}}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                    locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }).install(helperPath: helper)
+        XCTAssertEqual(runner.calls, [])
+    }
+
+    /// Builder review (queue run 16213): `claude mcp add` refuses an existing
+    /// name, so ours is removed first; a refused add then puts the previous
+    /// entry back exactly as it was and reports the add's failure.
+    func test_claude_refused_replacement_restores_the_working_entry() throws {
+        let home = try temporaryHome()
+        let previous = #"{"type":"stdio","command":"\#(helper)","args":["app","mcp"],"env":{}}"#
+        try write(#"{"mcpServers":{"whytap":\#(previous)}}"#, to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        runner.failingPrefixes = [["mcp", "add", "-s"]]
+        let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+        XCTAssertThrowsError(try connector.install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .commandFailed(status: 1))
+        }
+        XCTAssertEqual(runner.calls.count, 3)
+        XCTAssertEqual(runner.calls[0].arguments, ["mcp", "remove", "-s", "user", "whytap"])
+        XCTAssertEqual(runner.calls[1].arguments, ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"])
+        XCTAssertEqual(Array(runner.calls[2].arguments.prefix(5)), ["mcp", "add-json", "-s", "user", "whytap"])
+        let restored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(runner.calls[2].arguments[5].utf8)) as? NSDictionary)
+        XCTAssertEqual(restored, try XCTUnwrap(JSONSerialization.jsonObject(with: Data(previous.utf8)) as? NSDictionary))
+    }
+
+    func test_claude_failed_restore_is_reported_as_such() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"whytap":{"command":"\#(helper)","args":["app","mcp"]}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        runner.failingPrefixes = [["mcp", "add"], ["mcp", "add-json"]]
+        XCTAssertThrowsError(try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                         locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+            .install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .restoreFailed)
+        }
+        XCTAssertEqual(runner.calls.map { $0.arguments[1] }, ["remove", "add", "add-json"])
+    }
+
     /// A failed cleanup of the old entry does not fail Connect: that entry
     /// still works (`case mcp` is kept) and only repeats the Case tools.
     func test_claude_failed_cleanup_of_the_old_entry_keeps_the_connection() throws {
@@ -226,8 +273,8 @@ final class CaseClientConnectorTests: XCTestCase {
             let connector = codexConnector(try temporaryHome(), runner)
             XCTAssertTrue(connector.isConfigured())
             try connector.install(helperPath: helper)
-            XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "whytap"],
-                                                          ["mcp", "add", "whytap", "--", helper, "mcp"]], "\(args)")
+            // `codex mcp add` replaces by name in one write: nothing is removed first.
+            XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]], "\(args)")
         }
     }
 
@@ -243,7 +290,20 @@ final class CaseClientConnectorTests: XCTestCase {
         let runner = FakeCommandRunner()
         runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: link.path, args: ["app", "mcp"])
         try codexConnector(home, runner).install(helperPath: real.path)
-        XCTAssertEqual(runner.calls.first?.arguments, ["mcp", "remove", "whytap"])
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", real.path, "mcp"]])
+    }
+
+    /// Builder review (queue run 16213): a refused add must not leave the
+    /// person without the `whytap` entry that worked before. Codex is never
+    /// asked to remove it, so a refused add changes nothing.
+    func test_codex_refused_replacement_keeps_the_working_entry() throws {
+        let runner = FakeCommandRunner()
+        runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: helper, args: ["app", "mcp"])
+        runner.failingPrefixes = [["mcp", "add"]]
+        XCTAssertThrowsError(try codexConnector(try temporaryHome(), runner).install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .commandFailed(status: 1))
+        }
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]], "no remove of the working entry")
     }
 
     func test_codex_disconnect_removes_only_our_older_case_entry() throws {
@@ -646,11 +706,15 @@ final class FakeCommandRunner: CaseCommandRunning, CaseCommandReading {
     var error: Error?
     /// This one command exits with status 1; every other uses `status`.
     var failingArguments: [String]?
+    /// Commands starting with any of these exit with status 1.
+    var failingPrefixes: [[String]] = []
 
     func run(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandResult {
         calls.append(Call(executable: executable, arguments: arguments, environment: environment))
         if let error { throw error }
-        if arguments == failingArguments { return CaseCommandResult(status: 1) }
+        if arguments == failingArguments || failingPrefixes.contains(where: { arguments.starts(with: $0) }) {
+            return CaseCommandResult(status: 1)
+        }
         return CaseCommandResult(status: status)
     }
 

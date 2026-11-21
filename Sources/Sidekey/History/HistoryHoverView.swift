@@ -49,6 +49,8 @@ enum HistoryHoverVisualStyle {
     static let rowIdleOpacity = 0.82
     static let rowHoverOpacity = 0.90
     static let hintOpacity = 0.82
+    /// Marked rows use the island's switch blue.
+    static let selectionColor = Color(red: 0.04, green: 0.52, blue: 1.0)
 }
 
 /// Enter→paste for the hover History panel, mirroring the bottom strip's
@@ -56,10 +58,14 @@ enum HistoryHoverVisualStyle {
 /// 76) that fires while a row is hovered and swallows the event so AppKit
 /// does not beep. SwiftUI key-press handlers + programmatic focus never
 /// received Return reliably on the non-activating island panel.
+/// Rows marked with ⌘-click win over the hovered row, and Escape clears
+/// the marks (`HistoryKeyDecision`).
 @MainActor
 final class HistoryHoverKeyMonitor: ObservableObject {
     var hoveredCard: HistoryStripCard?
-    var onPaste: (HistoryStripCard) -> Void = { _ in }
+    var selectedCards: () -> [HistoryStripCard] = { [] }
+    var onClearSelection: () -> Void = {}
+    var onPaste: ([HistoryStripCard]) -> Void = { _ in }
     private var monitor: Any?
 
     func start() {
@@ -69,15 +75,21 @@ final class HistoryHoverKeyMonitor: ObservableObject {
             // A modal alert owns the keyboard: Return there must never paste
             // the row still under the pointer.
             guard NSApp.modalWindow == nil else { return event }
-            if event.keyCode == 36 || event.keyCode == 76 {
-                if let card = self.hoveredCard {
-                    let paste = self.onPaste
-                    DispatchQueue.main.async { paste(card) }
-                    return nil
-                }
-                return event  // no hover → not our event
+            switch HistoryKeyDecision.action(
+                keyCode: event.keyCode,
+                hovered: self.hoveredCard,
+                selection: self.selectedCards()
+            ) {
+            case .paste(let cards):
+                let paste = self.onPaste
+                DispatchQueue.main.async { paste(cards) }
+                return nil
+            case .clearSelection:
+                self.onClearSelection()
+                return nil
+            case .pass:
+                return event
             }
-            return event
         }
     }
 
@@ -127,24 +139,44 @@ struct HistoryHoverView: View {
     /// space) when that row's content deserves a preview bubble; reports a
     /// `nil` frame on hover exit so the owner can clear matching state.
     let onPreviewAnchorChange: (HistoryStripCard, CGRect?) -> Void
-    let onPaste: (HistoryStripCard) -> Void
+    /// Pastes the hovered row, or every ⌘-click-marked row in mark order.
+    let onPaste: ([HistoryStripCard]) -> Void
     var allowsKeyboardPaste = true
+    /// Rows already marked when the panel appears (offscreen review renders).
+    var initialSelection: [HistoryStripCard] = []
 
     @State private var hoveredCard: HistoryStripCard?
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
+    @StateObject private var selection = HistoryPasteSelection()
 
-    static func hintText(targetAppName: String?) -> String {
+    static func hintText(targetAppName: String?, selectedCount: Int = 0) -> String {
         guard let targetAppName, !targetAppName.isEmpty else {
             return "Click for copy"
         }
-        return "Click for copy   Enter to paste to \(targetAppName)"
+        if selectedCount > 0 {
+            return "Enter to paste \(selectedCount) to \(targetAppName)   Esc to clear"
+        }
+        return "Click for copy   ⌘-click for several   Enter to paste to \(targetAppName)"
+    }
+
+    /// ⌘-click marks rows only where Enter can paste them.
+    static func allowsMultiSelect(allowsKeyboardPaste: Bool, targetAppName: String?) -> Bool {
+        allowsKeyboardPaste && !(targetAppName ?? "").isEmpty
+    }
+
+    private var multiSelectEnabled: Bool {
+        Self.allowsMultiSelect(allowsKeyboardPaste: allowsKeyboardPaste, targetAppName: targetAppName)
     }
 
     var body: some View {
         VStack(spacing: Self.rowSpacing) {
             modeRow
-            if cards.isEmpty {
+            if cards.isEmpty && selection.isEmpty {
                 emptyStateRow
+            } else if cards.isEmpty {
+                // Another tab may hold marked rows: keep Enter's promise visible.
+                emptyStateRow
+                hintRow
             } else {
                 results
                 hintRow
@@ -155,9 +187,15 @@ struct HistoryHoverView: View {
         .padding(.top, Self.topPadding)
         .onAppear {
             keyMonitor.onPaste = onPaste
+            keyMonitor.selectedCards = { [selection] in selection.cards }
+            keyMonitor.onClearSelection = { [selection] in selection.clear() }
+            if multiSelectEnabled { initialSelection.forEach(selection.toggle) }
             if allowsKeyboardPaste { keyMonitor.start() }
         }
-        .onDisappear { keyMonitor.stop() }
+        .onDisappear {
+            keyMonitor.stop()
+            selection.clear()
+        }
         .onChange(of: hoveredCard) { _, newValue in
             keyMonitor.hoveredCard = newValue
         }
@@ -208,7 +246,15 @@ struct HistoryHoverView: View {
                         HistoryHoverRow(
                             card: card,
                             isHovered: hoveredCard == card,
-                            onCopy: { onCopy(card) },
+                            selectionPosition: selection.position(of: card),
+                            onCopy: {
+                                if multiSelectEnabled,
+                                   NSEvent.modifierFlags.contains(.command) {
+                                    selection.toggle(card)
+                                } else {
+                                    onCopy(card)
+                                }
+                            },
                             onAnchorChange: { frame in
                                 if let frame,
                                    HistoryHoverPreviewPolicy.needsPreview(
@@ -271,11 +317,15 @@ struct HistoryHoverView: View {
     }
 
     private var hintRow: some View {
-        Text(Self.hintText(targetAppName: targetAppName))
+        Text(Self.hintText(
+            targetAppName: targetAppName,
+            selectedCount: multiSelectEnabled ? selection.count : 0
+        ))
             .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(IslandInk.color.opacity(0.55))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .frame(height: Self.hintHeight)
             .background {
@@ -304,6 +354,8 @@ struct HistoryHoverView: View {
 private struct HistoryHoverRow: View {
     let card: HistoryStripCard
     let isHovered: Bool
+    /// 1-based paste order when the row is marked with ⌘-click.
+    let selectionPosition: Int?
     let onCopy: () -> Void
     /// Reports this row's frame (hover-zone space) on hover enter, `nil`
     /// on exit — drives the preview bubble anchored to the row.
@@ -320,10 +372,14 @@ private struct HistoryHoverRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if let selectionPosition {
+                HistorySelectionBadge(position: selectionPosition)
+            }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, selectionPosition == nil ? 12 : 8)
         .frame(height: HistoryHoverView.rowHeight)
-        .background(rowBackground(isHovered: isHovered))
+        .background(rowBackground(isHovered: isHovered, isSelected: selectionPosition != nil))
         .contentShape(Rectangle())
         .onTapGesture(perform: onCopy)
         .onGeometryChange(for: CGRect.self) { proxy in
@@ -339,12 +395,36 @@ private struct HistoryHoverRow: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: selectionPosition)
+        .accessibilityAddTraits(selectionPosition == nil ? [] : .isSelected)
+    }
+}
+
+/// Paste order of a marked row: a small blue disk with its number.
+private struct HistorySelectionBadge: View {
+    let position: Int
+
+    var body: some View {
+        Text("\(position)")
+            .font(.system(size: 10, weight: .bold).monospacedDigit())
+            // The system's text colour on a selected (accent) fill.
+            .foregroundStyle(Color(nsColor: .alternateSelectedControlTextColor))
+            .frame(minWidth: 18, minHeight: 18)
+            .padding(.horizontal, position > 9 ? 3 : 0)
+            .background(Capsule().fill(HistoryHoverVisualStyle.selectionColor))
+            .accessibilityLabel("Paste \(position)")
     }
 }
 
 @ViewBuilder
-private func rowBackground(isHovered: Bool) -> some View {
-    if IslandHoverGlass.usesNativeLiquidGlass {
+private func rowBackground(isHovered: Bool, isSelected: Bool = false) -> some View {
+    if isSelected {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        shape
+            .fill(HistoryHoverVisualStyle.selectionColor.opacity(isHovered ? 0.34 : 0.26))
+            .overlay(shape.strokeBorder(HistoryHoverVisualStyle.selectionColor.opacity(0.75), lineWidth: 1))
+            .allowsHitTesting(false)
+    } else if IslandHoverGlass.usesNativeLiquidGlass {
         historyForegroundLens(cornerRadius: 11, isHovered: isHovered)
     } else {
         RoundedRectangle(cornerRadius: 11, style: .continuous)

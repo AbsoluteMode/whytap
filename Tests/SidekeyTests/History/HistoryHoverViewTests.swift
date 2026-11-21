@@ -44,7 +44,7 @@ final class HistoryHoverViewTests: XCTestCase {
     func testHintNamesCapturedTarget() {
         XCTAssertEqual(
             HistoryHoverView.hintText(targetAppName: "Telegram"),
-            "Click for copy   Enter to paste to Telegram"
+            "Click for copy   ⌘-click for several   Enter to paste to Telegram"
         )
         XCTAssertEqual(
             HistoryHoverView.hintText(targetAppName: nil),
@@ -148,7 +148,9 @@ final class HistoryHoverViewTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(source.contains("addLocalMonitorForEvents(matching: .keyDown)"))
-        XCTAssertTrue(source.contains("event.keyCode == 36 || event.keyCode == 76"))
+        XCTAssertTrue(source.contains("HistoryKeyDecision.action("))
+        XCTAssertEqual(HistoryKeyDecision.returnKeyCode, 36)
+        XCTAssertEqual(HistoryKeyDecision.keypadEnterKeyCode, 76)
         XCTAssertFalse(
             source.contains("onKeyPress"),
             "Replaced by the local key monitor — keep one Enter path only."

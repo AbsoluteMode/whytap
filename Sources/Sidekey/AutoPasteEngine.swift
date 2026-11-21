@@ -69,6 +69,8 @@ final class AutoPasteEngine {
     typealias PasteboardWriteFn = (String) -> (before: Int, after: Int)?
     typealias RichPasteboardWriteFn = (SmartRichTextPaste) -> (before: Int, after: Int)?
     typealias PostEventFn = (CGKeyCode, Bool, CGEventFlags) -> Void
+    /// Posts one key event to one process only (`CGEvent.postToPid`).
+    typealias PostEventToPidFn = (CGKeyCode, Bool, CGEventFlags, pid_t) -> Void
     typealias SleepUsFn = (UInt32) -> Void
     typealias NowMsFn = () -> UInt64
     typealias PasteboardSnapshotFn = () -> PasteboardSnapshot
@@ -129,6 +131,7 @@ final class AutoPasteEngine {
     private let pasteboardWrite: PasteboardWriteFn
     private let richPasteboardWrite: RichPasteboardWriteFn?
     private let postEvent: PostEventFn
+    private let postEventToPid: PostEventToPidFn
     private let sleepUs: SleepUsFn
     private let nowMs: NowMsFn
     private let logEmit: LogFn
@@ -161,6 +164,7 @@ final class AutoPasteEngine {
             pasteboardWrite: AutoPasteEngine.defaultPasteboardWrite,
             richPasteboardWrite: AutoPasteEngine.defaultRichPasteboardWrite,
             postEvent: AutoPasteEngine.defaultPostEvent,
+            postEventToPid: AutoPasteEngine.defaultPostEventToPid,
             sleepUs: { usleep($0) },
             nowMs: { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
             logEmit: { level, message in
@@ -189,6 +193,7 @@ final class AutoPasteEngine {
         pasteboardWrite: @escaping PasteboardWriteFn,
         richPasteboardWrite: RichPasteboardWriteFn? = nil,
         postEvent: @escaping PostEventFn,
+        postEventToPid: @escaping PostEventToPidFn = { _, _, _, _ in },
         sleepUs: @escaping SleepUsFn,
         nowMs: @escaping NowMsFn,
         logEmit: @escaping LogFn,
@@ -207,6 +212,7 @@ final class AutoPasteEngine {
         self.pasteboardWrite = pasteboardWrite
         self.richPasteboardWrite = richPasteboardWrite
         self.postEvent = postEvent
+        self.postEventToPid = postEventToPid
         self.sleepUs = sleepUs
         self.nowMs = nowMs
         self.logEmit = logEmit
@@ -480,6 +486,90 @@ final class AutoPasteEngine {
         return true
     }
 
+    // MARK: - Series bound to one target
+
+    /// Whether a paste series that started for `target` may continue: the
+    /// app is still running and no later capture (Drop, History reopened in
+    /// another app) replaced it as the remembered target.
+    /// WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+    /// With `requireFrontmost`, the target must also still have focus: a
+    /// later paste of the series never takes focus back from where the user
+    /// moved it.
+    func isSeriesTargetCurrent(_ target: RememberedTarget, requireFrontmost: Bool = false) -> Bool {
+        guard remembered?.pid == target.pid, !isTerminated(target.pid) else { return false }
+        return !requireFrontmost || frontmostAppInfo()?.pid == target.pid
+    }
+
+    /// One paste of a series that must land only in `target`. Unlike
+    /// `pasteAlreadyOnPasteboard()`, which degrades to "wherever focus is",
+    /// this posts no Cmd+V unless the target is still current and frontmost
+    /// after the focus restore. Returns `false` without any key event then,
+    /// so the caller stops the rest of the series. Only the series' first
+    /// paste restores focus to the target (`restoringFocus`); later ones need
+    /// it to have kept focus.
+    func pasteAlreadyOnPasteboard(into target: RememberedTarget, restoringFocus: Bool) async -> Bool {
+        if !permissionGranted(false) {
+            logEmit(.info, "autopaste_post_event_preflight_false advisory=true")
+        }
+        guard await waitUntilModifiersReleased() != nil else {
+            logEmit(.error, "autopaste_failed step=modifiers reason=timeout context=series")
+            return false
+        }
+        guard isSeriesTargetCurrent(target) else {
+            logEmit(.info, "autopaste_series_stopped reason=target_changed")
+            return false
+        }
+        if restoringFocus { await restoreTargetFocusIfNeeded() }
+        guard frontmostAppInfo()?.pid == target.pid else {
+            logEmit(.info, "autopaste_series_stopped reason=focus_not_restored")
+            return false
+        }
+        sleepUs(Self.postFocusSettleMs * 1000)
+        sleepUs(Self.postWriteSettleMs * 1000)
+        guard postCmdV(to: target) else { return false }
+        logEmit(.info, "autopaste_posted_cmdv context=series")
+        return true
+    }
+
+    /// Whether the series' target can take the next key event right now.
+    private func seriesRecipientReady(_ target: RememberedTarget) -> Bool {
+        isSeriesTargetCurrent(target) && frontmostAppInfo()?.pid == target.pid
+    }
+
+    /// The same four-event Cmd+V as `postCmdV()`, but addressed to the
+    /// target process instead of the global HID stream, with the recipient
+    /// checked before every event. Focus moving to another app between two
+    /// events (the 12 ms gaps) can then never route a V-down there. A check
+    /// that fails before V-down releases Command in the target and stops; a
+    /// target that quit by the end does not count as delivered.
+    /// WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+    private func postCmdV(to target: RememberedTarget) -> Bool {
+        let steps: [(CGKeyCode, Bool, CGEventFlags)] = [
+            (Self.commandKeyCode, true, []),
+            (Self.vKeyCode, true, .maskCommand),
+            (Self.vKeyCode, false, .maskCommand),
+            (Self.commandKeyCode, false, []),
+        ]
+        for (index, step) in steps.enumerated() {
+            if index > 0 { sleepUs(Self.keyEventGapUs) }
+            guard seriesRecipientReady(target) else {
+                // Release what this sequence pressed, in the target only.
+                if index == 2 { postEventToPid(Self.vKeyCode, false, .maskCommand, target.pid) }
+                if index >= 1 && index <= 3 { postEventToPid(Self.commandKeyCode, false, [], target.pid) }
+                let pasted = index >= 2
+                logEmit(.info, "autopaste_series_stopped reason=recipient_lost_during_cmdv step=\(index)")
+                // A V-down already went to the target; anything else is undelivered.
+                return pasted && !isTerminated(target.pid)
+            }
+            postEventToPid(step.0, step.1, step.2, target.pid)
+        }
+        guard !isTerminated(target.pid) else {
+            logEmit(.info, "autopaste_series_stopped reason=target_quit_after_cmdv")
+            return false
+        }
+        return true
+    }
+
     // MARK: - Pipeline steps
 
     /// Polls modifier flags every `modifierPollIntervalMs` up to
@@ -604,6 +694,17 @@ final class AutoPasteEngine {
         pasteboard.clearContents()
         guard pasteboard.writeObjects([item]) else { return nil }
         return (before, pasteboard.changeCount)
+    }
+
+    private static func defaultPostEventToPid(_ keyCode: CGKeyCode, _ down: Bool, _ flags: CGEventFlags, _ pid: pid_t) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: down) else {
+            return
+        }
+        if !flags.isEmpty {
+            event.flags = flags
+        }
+        event.postToPid(pid)
     }
 
     private static func defaultPostEvent(_ keyCode: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {

@@ -47,8 +47,9 @@ struct IslandActions {
     /// Root of the clipboard image sidecar store — the hover preview
     /// bubble resolves full-size images from it (thumbnail fallback).
     var historyAssetsDirectory: () -> URL? = { nil }
-    /// User pressed Enter on a hovered hover History row.
-    var pasteHistoryCard: (HistoryStripCard) -> Void = { _ in }
+    /// User pressed Enter in hover History: the hovered row, or every
+    /// ⌘-click-marked row in mark order.
+    var pasteHistoryCards: ([HistoryStripCard]) -> Void = { _ in }
     /// Current validated paste target name captured before History opened.
     var historyPasteTargetName: () -> String? = { nil }
     /// Useful Links nav hotkey — surface Useful Links in the agent response panel.

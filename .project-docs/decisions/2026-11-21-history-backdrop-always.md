@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryBackdropTests.swift
     confirmed_at: 2026-11-21
-related: [2026-10-17-native-hover-glass.md]
+related: [2026-10-17-native-hover-glass.md, 2026-11-22-history-multi-paste.md]
 ---
 
 # History always has a readable backdrop

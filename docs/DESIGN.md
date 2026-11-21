@@ -1,5 +1,19 @@
 # Interface decisions
 
+## History: several rows in one paste — 2026-11-22
+
+- ⌘-click marks a History row; a blue badge at its right edge shows its paste
+  number and the row gets a blue tint and border. ⌘-click again unmarks and the
+  others renumber. Marking is offered only when Enter can paste (a captured
+  target); in Toolbox ⌘-click still copies.
+- The footer teaches the gesture in one line ("⌘-click for several") and,
+  once rows are marked, states the outcome: "Enter to paste N to <app>   Esc
+  to clear". Plain click and plain Enter keep their meaning.
+- Marked rows stay marked while switching Agent, Drop and Clipboard, so text
+  and files from different tabs can go out together in mark order.
+
+See the [History multi-paste decision](../.project-docs/decisions/2026-11-22-history-multi-paste.md).
+
 ## Structured agent answers — 2026-11-21
 
 - The first line of the answer stays in view when the turn completes so the

@@ -1681,29 +1681,32 @@ text/gap exclusion, drag cancellation, removed/disabled controls, content width 
 rest/pressed/disabled images. Physical pointer, keyboard and VoiceOver behavior
 remain shared-app acceptance.
 
-## First-launch onboarding — 2026-11-21
+## First-launch onboarding — 2026-11-21, redesigned 2026-11-22
 
-One fixed 600 × 540 pt window beside the island, one column, built from the
-Settings components (MacCard, MacRow, MacButton, MacSwitch, MacSegmented) so it
-follows light and dark appearance like Settings. Each page has a 38 pt
-Instrument Serif heading (bundled font, system fallback), one 14 pt sentence,
-its controls, and a footer with the way on aligned right: quiet text actions
-(Set up later, Skip) beside one primary button. Progress is a row of dots, the
-current one a wider accent capsule. Pages slide 24 pt with a fade (0.25 s);
-Reduce Motion keeps only the fade. Hidden pages leave no dot.
+The former paid onboarding's look, with today's content. One always-dark
+960 × 600 pt window (OnboardingTheme tokens: near-black background, three
+surface steps, purple accent, green for success and free offers). Left pane
+380 pt: a mono step caption ("SPEECH · 1 / 5"), a 44 pt Instrument Serif
+headline with one italic word, at most one short line, the page's controls,
+and a footer aligned right (quiet text actions beside one white capsule).
+Right: a stage with a soft purple wash (green on the try page after success)
+showing mock windows with traffic lights, the real island orb, or a 16:9 clip
+with the person's own keycaps under it. Pages fade (0.28 s); the left pane
+slides 10 pt in; Reduce Motion keeps the fade and shows clip posters.
 
-Speech is one card (On this Mac, size, the primary button and, beside it, the
-sentence that it sets Drop only), with two quiet links under it. The key form
-reuses ProviderKeyForm without Remove, a provider segment and the no-card offers
-as links. Permissions reuse the Settings rows and the Drop shortcut repair
-section. The try page shows the shortcut with HotkeyHintView ("Hold Space"),
-a native text field with a placeholder, and one status line (download progress,
-a missing model or shortcut with its one action, or the green success line;
-the field's outline turns green with it). The features page is one card of
-three rows, each with its ▶ video and its switch or "Add a model".
+Speech: the language picker (a dark label opening a searchable list), the On
+this Mac card with its white button, and a card of seven provider tiles in a
+4-column grid (muted badge, logo, name, offer). Selected tiles get the accent
+outline; the key field and Save appear under the grid and Get offer beside the
+card title. Permissions: two cards with Allow / Open Settings / a green check,
+and a dashed secondary row for Screen Recording ("Optional · for Shot").
+Try: three numbered italic verbs, the real field in a note window. Make it
+yours and Turn on more: selectable cards (accent outline) that pick the stage's
+clip, with switches, "Add a model" or Connect at the end of the row.
 
-Why: the first success is the person's own sentence; everything else is one
-line and one action. Offscreen renders of every page in both appearances were
-reviewed (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the native TCC
-dialogs and the real island remain acceptance in the installed app. See
+Why: the first contact should impress and read in seconds; the stage explains
+so the left side can stay short. Offscreen renders of every page were reviewed
+by the maintainer (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the
+native TCC dialogs, playing clips and the real island remain acceptance in the
+installed app. See
 `.project-docs/decisions/2026-11-21-first-launch-onboarding.md`.

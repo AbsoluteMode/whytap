@@ -115,6 +115,11 @@ These are command templates: replace the key and command with the intended
 operation. Add `-p <project>` when the same key name exists in several projects.
 Case injects values into the child environment and masks recognized values in
 output on a best-effort basis. MCP has no command-execution or value-read tool.
+Both Case tools are marked read-only in their MCP annotations, so a host may
+run them without asking; the broker still decides what each client may list.
+Case keys are for the agent's own commands and are separate from the provider
+keys Whytap itself uses for dictation, models and meetings (Settings -> API &
+Models).
 
 Installing the plugin or adding the server does not register the agent or
 broaden its Case rights. Each Case tool call is the same broker request
@@ -125,7 +130,8 @@ Whytap -> Case -> Connect; the application tools of the same server work as
 before. Connect adds this same `whytap` server to Claude Code, Codex or Cursor
 and removes the older `case` entry it wrote; Disconnect removes only that older
 entry and leaves `whytap`. Connect replaces an existing `whytap` entry only
-when its command is exactly this app's helper; any other `whytap` server
+when its command is exactly this app's helper, and a refused replacement
+keeps the previous entry; any other `whytap` server
 (including a moved or beta Whytap) stops Connect until you remove it. An older `case` entry left in a host still works,
 but shows the Case tools twice next to `whytap`; remove it once `whytap` is
 connected (`claude mcp remove -s user case`, `codex mcp remove case`).

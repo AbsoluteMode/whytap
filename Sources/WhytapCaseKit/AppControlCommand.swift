@@ -15,7 +15,7 @@ public final class AppControlCommand {
     }
 
     public func call(_ request: AppControlRequest, cancellation: AppControlCancellation?) -> AppControlResponse {
-        guard let client else { return .failure("unavailable", "Use the helper inside the installed Whytap app.") }
+        guard let client else { return .failure("unavailable", "This whytap command is outside the Whytap app. Use Whytap.app/Contents/Helpers/whytap of the installed app; an MCP entry must point there.") }
         do {
             let answer: CaseBrokerResponse
             if let client = client as? CancellableCaseBrokerCalling {

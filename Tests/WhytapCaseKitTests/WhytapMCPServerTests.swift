@@ -69,6 +69,29 @@ final class WhytapMCPServerTests: XCTestCase {
                        caseListing.object?["result"]?.object?["tools"]?.array)
     }
 
+    /// Stress test 2026-11-22: without annotations MCP's defaults read as
+    /// destructive and open-world, and Codex refused `case_list_keys` without
+    /// an approval it could not ask for. Every tool now says what it does;
+    /// only writes and model probes are not read-only.
+    func test_every_tool_declares_its_effects_and_case_reads_are_read_only() throws {
+        let tools = try XCTUnwrap(try decode(unified(Broker(caseAnswer: .projects([])))
+            .handle(line: #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)).object?["result"]?.object?["tools"]?.array)
+        var readOnly: [String] = []
+        for tool in tools {
+            let name = try XCTUnwrap(tool.object?["name"]?.string)
+            let hints = try XCTUnwrap(tool.object?["annotations"]?.object, "\(name) has annotations")
+            XCTAssertEqual(hints["destructiveHint"], .bool(false), name)
+            if hints["readOnlyHint"] == .bool(true) { readOnly.append(name) }
+        }
+        for name in ["case_list_projects", "case_list_keys"] {
+            let hints = tools.first { $0.object?["name"]?.string == name }?.object?["annotations"]?.object
+            XCTAssertEqual(hints?["readOnlyHint"], .bool(true), name)
+            XCTAssertEqual(hints?["openWorldHint"], .bool(false), name)
+        }
+        XCTAssertFalse(readOnly.contains { ["whytap_set_model", "whytap_set_provider", "whytap_set_setting",
+                                             "whytap_todo_add", "whytap_todo_update", "whytap_meeting_open"].contains($0) })
+    }
+
     func test_initialize_names_one_server_and_carries_both_guides() throws {
         let reply = try decode(unified(Broker(caseAnswer: .projects([])))
             .handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#))
@@ -146,6 +169,7 @@ final class WhytapMCPServerTests: XCTestCase {
         let reply = try XCTUnwrap(server.handle(line:
             #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"case_list_projects"}}"#))
         XCTAssertTrue(reply.contains("Whytap is not available"))
+        XCTAssertTrue(reply.contains("an MCP entry must point there"), "opening Whytap would not help")
         XCTAssertEqual(try decode(reply).object?["result"]?.object?["isError"], .bool(true))
     }
 

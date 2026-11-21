@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Sources/WhytapCaseKit/AppControlMCPServer.swift
     confirmed_at: 2026-10-22
-related: [2026-10-22-native-agent.md, 2026-10-21-app-control-plugin.md, 2026-10-21-opencode-v2.md]
+related: [2026-10-22-native-agent.md, 2026-10-21-app-control-plugin.md, 2026-10-21-opencode-v2.md, 2026-11-21-structured-agent-answers.md]
 ---
 
 # Decision
@@ -68,8 +68,8 @@ actions and completion together. Ordinary code fences remain intact. Invalid
 action JSON retains the existing plain-text fallback.
 
 Repeat the compact-answer and action contract every turn so resumed sessions
-also receive it after an app update. Simple answers normally use one or two
-short sentences with essential caveats; a location answer provides the best
+also receive it after an app update. The [structured answer decision](2026-11-21-structured-agent-answers.md)
+owns the current Markdown guidance. A location answer provides the best
 verified absolute path in a copyable code fence plus its open/insert action.
 Do not dump weaker matches, backups or search narration into a simple answer.
 This changes instructions, not model selection or destructive text truncation.

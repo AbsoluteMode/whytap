@@ -888,6 +888,7 @@ struct IslandView: View {
             linksSelection: agentLinksSelection,
             panelWidth: compactWidth
         )
+        .environment(\.islandAnswerHitBridge, hoverHitBridge)
         // Measure the rendered card height (before the layout paddings) and
         // report it so the answer hit-zone tracks the visible card — a fixed
         // reservation left a tall click-eating band below short answers.

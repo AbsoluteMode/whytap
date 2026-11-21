@@ -1,5 +1,22 @@
 # Interface decisions
 
+## Structured agent answers — 2026-11-21
+
+- The first line of the answer stays in view when the turn completes so the
+  reader sees the conclusion immediately. The Markdown viewport scrolls in the
+  space left by the title and action cards.
+- Comparisons use a header and horizontal row separators when up to three
+  columns each have at least 72 pt. Record cards keep the name and its labeled
+  values together when a grid is too narrow. VoiceOver reads each row as one
+  item, beginning with its name.
+- After eight rows, a full-width button reveals the remaining rows beneath it.
+  The button stays in place and has visible hover, press and keyboard focus.
+- Note and Warning use a tinted surface, a text label and an icon so their
+  meaning is available without color. Code and source cards retain their
+  existing controls.
+
+See the [structured answer decision](../.project-docs/decisions/2026-11-21-structured-agent-answers.md).
+
 ## Recording wing width — 2026-11-16
 
 Drop and agent voice open a compact wing fitted to `listening…` and the

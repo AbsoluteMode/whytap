@@ -13,16 +13,9 @@ struct AgentAnswerBodyView: View {
     /// historical response-panel content width (336pt) so the pills keep
     /// their established proportions regardless of the host's own frame.
     static let panelWidth: CGFloat = 336
-    /// Cap on Pill 2's markdown answer body — ≈25 lines of streamed text.
-    /// `MarkdownBodyText` renders with a 12pt system font + `lineSpacing(2)`
-    /// (≈16pt per line) and 7pt of inter-block spacing for headings/lists.
-    /// 420pt fits roughly 25 plain wrapped lines; once the stream exceeds
-    /// that, the pill's shape freezes and content scrolls inside the
-    /// capsule, leaving Pill 1 glued to the top. Static constant on
-    /// purpose — a rendered-glyph measurement would be exact but is
-    /// over-engineering for a ceiling that only needs to be in the right
-    /// neighbourhood.
-    static let pill2AnswerMaxBodyHeight: CGFloat = 420
+    private static let pillSpacing: CGFloat = 6
+    private static let topPadding: CGFloat = 2
+    private static let bottomPadding: CGFloat = 8
 
     @ObservedObject var store: AskResponseStore
     /// Selection state for the visible useful_links block, injected by the
@@ -34,13 +27,51 @@ struct AgentAnswerBodyView: View {
     /// fixed 336pt left desktop showing at the sides on wide-notch MacBooks
     /// (compactWidth > 336). Defaults to the legacy 336 for any other host.
     var contentMaxWidth: CGFloat = AgentAnswerBodyView.panelWidth
+    let contentMaxHeight: CGFloat
+    @State private var headerHeight: CGFloat = 0
+    @State private var blocksHeight: CGFloat = 0
 
     var body: some View {
-        // Subtask A: VStack inter-pill spacing 10 → 6pt so Pill 1 and
-        // Pill 2 sit closer together after the chrome shrink. With the
-        // tighter pill paddings (9/5 vs 12/8) a 10pt gap reads as a
-        // gulf; 6pt restores the visual rhythm.
-        VStack(alignment: .leading, spacing: 6) {
+        let blocks = displayBlocks
+        VStack(alignment: .leading, spacing: Self.pillSpacing) {
+            if hasHeader {
+                header
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+            }
+            if let pillText = toolLabelPillText {
+                ToolLabelPill(
+                    text: pillText,
+                    shimmer: toolLabelPillShimmer,
+                    isAnswerMode: isAnswerMode,
+                    isCompleted: store.streamCompleted,
+                    maxBodyHeight: maxAnswerHeight(hasBlocks: !blocks.isEmpty)
+                )
+            }
+            if !blocks.isEmpty {
+                renderedBlocks(blocks)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { blocksHeight = $0 }
+            }
+        }
+        .padding(.top, Self.topPadding)
+        .padding(.bottom, Self.bottomPadding)
+    }
+
+    private var hasHeader: Bool {
+        store.pendingPermission != nil || shouldShowChatTitlePill
+    }
+
+    // WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
+    private func maxAnswerHeight(hasBlocks: Bool) -> CGFloat {
+        let headerSpace = hasHeader ? headerHeight + Self.pillSpacing : 0
+        let blockSpace = hasBlocks ? blocksHeight + Self.pillSpacing : 0
+        return max(1, contentMaxHeight - Self.topPadding - Self.bottomPadding
+                   - headerSpace - blockSpace - 2 * ToolLabelPill.verticalPadding)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Self.pillSpacing) {
             // Permission prompt card: shown when Claude Code asks to use a
             // gated tool (Bash / network / MCP-write). Rendered at the top
             // of the stack so it is prominent. Allow/Deny resolve the
@@ -69,33 +100,12 @@ struct AgentAnswerBodyView: View {
                     contentMaxWidth: contentMaxWidth
                 )
             }
+        }
+    }
 
-            // Pill 2: tool action label from Nano (e.g. "ищу в
-            // интернете", "смотрю в Notion"). Visible only while
-            // Sonnet is executing actions; replaced in place every
-            // time `tool.executing` re-emits. Hidden after the
-            // stream completes — the final answer is owned by
-            // BlockRendererRegistry below.
-            // Pill 2 carries the live label from Nano during tool
-            // execution and then transitions in place to Sonnet's
-            // streaming answer once `summary.delta` events start
-            // flowing. Single capsule, multi-line, grows as text
-            // arrives.
-            //
-            // Sits just under Pill 1 so it ends up CLOSEST to the orb
-            // (bottom-anchored layout). As Pill 2's body grows during
-            // a Sonnet stream, the VStack grows upward, which pushes
-            // Pill 1 toward the top of the panel — exactly the visual
-            // effect spec'd as "Pill 2 vytesnyaet Pill 1 naverkh".
-            if let pillText = toolLabelPillText {
-                ToolLabelPill(
-                    text: pillText,
-                    shimmer: toolLabelPillShimmer,
-                    isAnswerMode: isAnswerMode
-                )
-            }
-
-            ForEach(Array(displayBlocks.enumerated()), id: \.offset) { _, block in
+    private func renderedBlocks(_ blocks: [UIBlock]) -> some View {
+        VStack(alignment: .leading, spacing: Self.pillSpacing) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 // useful_actions (and legacy useful_links) are special-cased so
                 // the selection-marker chip + chip-click hooks wire through the
                 // same `UsefulLinksSelectionState` the hotkey controller drives.
@@ -115,13 +125,6 @@ struct AgentAnswerBodyView: View {
                 }
             }
         }
-        // Subtask A: outer paddings 4/12 → 2/8 so the pill stack rides
-        // closer to its surrounding window edges. Combined with the
-        // tighter inter-pill spacing the overall stack height drops
-        // by ~12pt, which is what Maxim wanted ("ллм блоки меньше").
-        .padding(.top, 2)
-        .padding(.horizontal, 0)
-        .padding(.bottom, 8)
     }
 
     /// Pill 1 is the "request artifact". It surfaces the moment a turn
@@ -269,20 +272,15 @@ private struct ChatTitlePill: View {
     }
 }
 
-/// Pill 2 — carries either Nano's tool action label (single line) or
-/// Sonnet's streaming answer (plain text, multi-line, grows in height as
-/// text arrives). The border stays stable when the content transitions.
-///
-/// In answer mode the markdown body is capped at
-/// `pill2AnswerMaxBodyHeight` (≈25 lines) and overflow scrolls inside
-/// the capsule with `.defaultScrollAnchor(.bottom)`. Pill 1 stays glued
-/// to the top of the panel regardless of how long Sonnet's answer gets.
+/// The in-flight tool label becomes a vertically scrolling Markdown answer.
 private struct ToolLabelPill: View {
     let text: String
     let shimmer: Bool
     let isAnswerMode: Bool
+    let isCompleted: Bool
+    let maxBodyHeight: CGFloat
+    static let verticalPadding: CGFloat = 5
     private static let labelFont: Font = .system(size: 13, weight: .medium)
-    private static let answerFont: Font = .system(size: 14, weight: .regular)
     private static let cornerRadius: CGFloat = 16
     /// Measured height of the streamed markdown body. A bare ScrollView is
     /// GREEDY: without an external constraint `.frame(maxHeight:)` resolves
@@ -291,38 +289,17 @@ private struct ToolLabelPill: View {
     /// the frame to the measured content keeps the capsule as small as the
     /// answer until the cap kicks in.
     @State private var answerBodyHeight: CGFloat = 0
+    @Environment(\.islandAnswerHitBridge) private var answerHitBridge
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Group {
                 if isAnswerMode {
-                    // Sonnet streams markdown. Below the cap the capsule
-                    // grows with the measured content height; once the
-                    // body hits the cap the frame freezes and overflow
-                    // stays INSIDE the pill instead of pushing Pill 1 off
-                    // screen. `defaultScrollAnchor(.bottom)` keeps the
-                    // user looking at the freshest streamed text.
-                    // `MarkdownBodyText` is the same renderer used by
-                    // the canonical `text.answer` block.
-                    ScrollView(.vertical, showsIndicators: false) {
-                        MarkdownBodyText(text: text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                GeometryReader { proxy in
-                                    Color.clear.preference(
-                                        key: AnswerBodyHeightKey.self,
-                                        value: proxy.size.height
-                                    )
-                                }
-                            )
+                    if let answerHitBridge {
+                        answerViewport.islandHoverHitRegion(bridge: answerHitBridge, surface: .agentAnswer)
+                    } else {
+                        answerViewport
                     }
-                    .onPreferenceChange(AnswerBodyHeightKey.self) { answerBodyHeight = $0 }
-                    .frame(height: min(
-                        max(answerBodyHeight, 1),
-                        AgentAnswerBodyView.pill2AnswerMaxBodyHeight
-                    ))
-                    .defaultScrollAnchor(.bottom)
-                    .scrollContentBackground(.hidden)
                 } else {
                     Text(text)
                         .font(Self.labelFont)
@@ -337,7 +314,7 @@ private struct ToolLabelPill: View {
         // 12pt with lineSpacing 2pt) is unchanged so the streamed
         // answer stays legible.
         .padding(.horizontal, 9)
-        .padding(.vertical, 5)
+        .padding(.vertical, Self.verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             // Same frosted-glass treatment as Pill 1 — `.thickMaterial`
@@ -353,13 +330,16 @@ private struct ToolLabelPill: View {
             )
         )
     }
-}
 
-/// Preference carrying the measured height of the streamed answer body up
-/// to the ScrollView's sizing frame in `ToolLabelPill`.
-private struct AnswerBodyHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    private var answerViewport: some View {
+        ScrollView(.vertical) {
+            MarkdownBodyText(text: text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { answerBodyHeight = $0 }
+        }
+        .frame(height: min(max(answerBodyHeight, 1), maxBodyHeight))
+        .defaultScrollAnchor(isCompleted ? .top : .bottom)
+        .id(isCompleted)
+        .scrollContentBackground(.hidden)
     }
 }

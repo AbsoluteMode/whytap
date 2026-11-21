@@ -8,6 +8,8 @@ import SwiftUI
 /// placeholder are rendered THERE, not duplicated here.
 @MainActor
 struct IslandAgentAnswerPanelView: View {
+    private static let verticalPadding: CGFloat = 12
+
     @ObservedObject var responseStore: AskResponseStore
     @ObservedObject var linksSelection: UsefulLinksSelectionState
     /// Card width. Driven from the island's `compactWidth` so the answer sits in
@@ -58,11 +60,12 @@ struct IslandAgentAnswerPanelView: View {
         AgentAnswerBodyView(
             store: responseStore,
             usefulLinksSelectionState: linksSelection,
-            contentMaxWidth: panelWidth
+            contentMaxWidth: panelWidth,
+            contentMaxHeight: IslandFrameLayout.agentAnswerZoneHeight - 2 * Self.verticalPadding
         )
         // Vertical padding only: horizontal inset is dropped so the pills reach
         // the island's edges (they were ~24pt narrower than the Dynamic Island).
-        .padding(.vertical, 12)
+        .padding(.vertical, Self.verticalPadding)
         .frame(width: panelWidth, alignment: .topLeading)
     }
 }

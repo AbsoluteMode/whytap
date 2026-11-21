@@ -56,15 +56,9 @@ final class IslandUpdateUserDriver: NSObject, SPUUserDriver {
         reply?(.install)
     }
 
-    /// Invoked by the host when the user clicks ✕ ("Skip this version") in the
-    /// island. Replies `.skip` to the held `showUpdateFound` reply — Sparkle
-    /// records this build as skipped and stops re-prompting for it, while
-    /// FUTURE versions still surface normally.
-    func invokeSkip() {
-        let reply = updateFoundReply
-        updateFoundReply = nil
-        reply?(.skip)
-    }
+    // ✕ on the island pill deliberately sends no reply: the held reply lets
+    // Settings start the same update later, and Sparkle never records a skip.
+    // WHY: .project-docs/decisions/2026-11-21-settings-update-button.md
 
     func discardPendingReplies() {
         updateFoundReply = nil

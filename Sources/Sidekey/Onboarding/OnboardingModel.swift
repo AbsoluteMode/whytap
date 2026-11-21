@@ -15,8 +15,8 @@ final class OnboardingModel: ObservableObject {
     @Published var keyProvider: AIProviderKind = .soniox
     /// Drop's speech route runs. Rechecked on every route change.
     @Published private(set) var dropReady: Bool
-    /// A Drop press on the try page found Drop not set up yet.
-    @Published private(set) var dropNotReadyNotice = false
+    /// The speech route the transcription session could not start.
+    @Published private(set) var dropSetupFailure: AIFeature?
     /// A Drop take was inserted into the try field (not merely typed).
     @Published private(set) var dictated = false
     /// Bumped when routes or capability flags change, so the features page
@@ -107,7 +107,7 @@ final class OnboardingModel: ObservableObject {
 
     private func show(_ next: OnboardingPage) {
         page = next
-        dropNotReadyNotice = false
+        dropSetupFailure = nil
         if next == .permissions {
             permissions.refresh()
             startPermissionPolling()
@@ -194,13 +194,17 @@ final class OnboardingModel: ObservableObject {
 
     /// Drop was pressed before its speech was set up. The onboarding says so
     /// in place instead of opening Settings over itself.
-    func noteDropNotReady() {
-        dropNotReadyNotice = true
+    func noteDropSetupFailure(_ feature: AIFeature) {
+        dropSetupFailure = feature
+    }
+
+    func openDropSpeechSettings() {
+        addModel(dropSetupFailure ?? .drop(speech.mode()))
     }
 
     func noteDictated() {
         dictated = true
-        dropNotReadyNotice = false
+        dropSetupFailure = nil
     }
 
     // MARK: - Features
@@ -265,7 +269,6 @@ final class OnboardingModel: ObservableObject {
 
     private func routesChanged() {
         dropReady = speech.isReady
-        if dropReady { dropNotReadyNotice = false }
         revision &+= 1
     }
 }

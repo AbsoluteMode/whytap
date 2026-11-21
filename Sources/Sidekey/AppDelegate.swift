@@ -2846,7 +2846,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if let onboarding = visibleOnboarding {
                         // The try page says Drop is not set up yet (or still
                         // downloading) instead of Settings opening over it.
-                        onboarding.model.noteDropNotReady()
+                        onboarding.model.noteDropSetupFailure(routeError.feature)
                     } else {
                         openSettingsWindow(tab: .apiAndModels, feature: routeError.feature)
                     }

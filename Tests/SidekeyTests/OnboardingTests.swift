@@ -183,6 +183,27 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(model.pages, [.speech, .tryDrop, .features])
     }
 
+    func testRejectedConfiguredSpeechRouteKeepsItsSettingsActionUntilDictationSucceeds() throws {
+        let env = try makeEnv(mode: .smart)
+        try env.keys.save("fixture", account: BYOKKeyStore.account(for: .deepgram))
+        env.routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .dropSmart)
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        XCTAssertEqual(model.page, .tryDrop)
+        XCTAssertTrue(model.dropReady)
+
+        model.noteDropSetupFailure(.dropSmart)
+        XCTAssertEqual(model.dropSetupFailure, .dropSmart)
+        var settingsFeature: AIFeature?
+        model.openSettings = { tab, feature in
+            XCTAssertEqual(tab, .apiAndModels)
+            settingsFeature = feature
+        }
+        model.openDropSpeechSettings()
+        XCTAssertEqual(settingsFeature, .dropSmart)
+        model.noteDictated()
+        XCTAssertNil(model.dropSetupFailure)
+    }
+
     func testAShortcutThatDidNotInstallKeepsThePermissionsPageAndItsRepair() throws {
         let env = try makeEnv()
         let access = permissions(accessibility: true, microphone: .authorized, hotkey: .shortcutInUse)
@@ -328,10 +349,10 @@ final class OnboardingTests: XCTestCase {
     func testDropNotSetUpIsSaidOnTheTryPage() throws {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
-        model.noteDropNotReady()
-        XCTAssertTrue(model.dropNotReadyNotice)
+        model.noteDropSetupFailure(.dropFast)
+        XCTAssertEqual(model.dropSetupFailure, .dropFast)
         model.noteDictated()
-        XCTAssertFalse(model.dropNotReadyNotice)
+        XCTAssertNil(model.dropSetupFailure)
         XCTAssertTrue(model.dictated)
     }
 
@@ -477,6 +498,7 @@ final class OnboardingTests: XCTestCase {
             let accessibility: Bool
             let microphone: AVAuthorizationStatus
             var supportsOnDevice = true
+            var dropReady = false
             let setUp: @MainActor (OnboardingModel) -> Void
         }
         let cases: [Case] = [
@@ -492,12 +514,15 @@ final class OnboardingTests: XCTestCase {
                  microphone: .authorized, setUp: { $0.startOnDevice() }),
             Case(name: "3b-try-dictated", status: .downloading(0.42), hotkey: .ready, accessibility: true,
                  microphone: .authorized, setUp: { $0.startOnDevice(); $0.noteDictated() }),
+            Case(name: "3c-try-route-error", status: .ready, hotkey: .ready, accessibility: true,
+                 microphone: .authorized, dropReady: true, setUp: { $0.noteDropSetupFailure(.dropFast) }),
             Case(name: "4-features", status: .ready, hotkey: .ready, accessibility: true,
                  microphone: .authorized, setUp: { $0.setUpSpeechLater() }),
         ]
         for dark in [false, true] {
             for item in cases {
-                let env = try makeEnv()
+                let env = try makeEnv(modelPresent: item.dropReady)
+                if item.dropReady { env.speech.useOnDevice() }
                 let controller = OnDeviceSpeechModelController(store: FixedStore(item.status))
                 await controller.refresh()
                 let model = OnboardingModel(

@@ -66,9 +66,9 @@ four pages, in this order:
    only when Drop reports an insertion into this field
    (`sidekeyDropInsertedIntoLocalEditor`, sent by `DropLocalEditor` with the
    editor, never the text), not for typing. While the model downloads the page
-   shows its progress; a press before Drop can run says so on the page instead
-   of opening Settings over it, and a press with a permission missing returns
-   to the permissions page instead of a second repair window.
+   shows its progress. A press before Drop can run says so on the page. If the
+   recorder rejects a configured route, the page offers the affected row in
+   API & Models. A press with a permission missing returns to the permissions page.
 4. **More on the same keyboard.** Google search, Meeting Notes and Agent, each
    with its video and its switch. Meeting Notes needs a running speech and
    notes model, Agent its model; otherwise the row offers "Add a model", which

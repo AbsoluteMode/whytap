@@ -458,10 +458,13 @@ struct OnboardingTryPage: View {
                 OnDeviceDownloadBar(fraction: fraction, starting: OnDeviceSpeechCard.Presentation.isStarting(fraction))
                     .frame(maxWidth: 260)
             }
-        } else if !model.dropReady {
+        } else if !model.dropReady || model.dropSetupFailure != nil {
             HStack(spacing: 10) {
-                OnboardingStatusLine(tone: .warning, text: "Drop has no speech model yet.")
-                MacButton(title: "Choose a model", style: .default) { model.addModel(.dropFast) }
+                OnboardingStatusLine(tone: .warning, text: model.dropReady
+                    ? "Drop couldn’t start with these speech settings."
+                    : "Drop has no speech model yet.")
+                MacButton(title: model.dropReady ? "Check settings" : "Choose a model",
+                          style: .default, action: model.openDropSpeechSettings)
             }
         } else if permissions.dropHotkeyStatus != .ready {
             HStack(spacing: 10) {

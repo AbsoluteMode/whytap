@@ -619,7 +619,7 @@ Case secrets manager:
   Schema 2 migrates without changing existing access; older apps refuse schema 3.
   WHY: docs/decisions/2026-10-20-case-connect-and-scope.md. `Contents/Helpers/whytap`
   exposes `case ls`, `case run [-p project] [--only A,B] '<command>'` and
-  names-only `case mcp` (`WhytapCaseKit` / `WhytapCLI`). `case_list_keys(query:)`
+  names-only `case mcp` (also served by `whytap mcp`; `WhytapCaseKit` / `WhytapCLI`). `case_list_keys(query:)`
   searches authorized key names/descriptions and project names directly; a known
   key uses `case run --only KEY` without listing projects first. The app's local Unix
   socket broker accepts only its bundled helper by audit-token cdhash and
@@ -1317,7 +1317,7 @@ WHY: .project-docs/decisions/2026-10-21-calendar-hover.md
 Agents add tasks with `Contents/Helpers/whytap todo add "<task>" …` (or `add -`
 from stdin) and read them with `todo list [--all]`: JSON confirmation over the
 authenticated helper socket while Whytap runs (todo_add/todo_list app-control
-operations, also whytap_todo_add/list in `whytap app mcp`); with nothing listening the helper edits the
+operations, also whytap_todo_add/list in `whytap mcp` / `whytap app mcp`); with nothing listening the helper edits the
 file itself, never launching the app. Both sides hold planner-v1.json.lock; the
 store adopts newer file contents before each save and watches the folder.
 Batches of 1–100 are validated whole; matching active titles are not duplicated.
@@ -1379,11 +1379,16 @@ are drafts. Guide: docs/customization/README.md. Update the capability map
 when moving its source entry points. Do not publish private monitoring
 configuration, project contents or credentials with the source.
 
-Application control: `plugins/whytap` bundles separate local stdio MCP servers:
-`Contents/Helpers/whytap app mcp` for app controls and `whytap case mcp` for
-authorized Case project/key names and descriptions, never values. Case retains
-its existing registrations, project scope and approvals; secret use stays in
-`whytap case run` through the agent's own terminal. The app-control server reads
+Application control: `plugins/whytap` runs one local stdio MCP server,
+`Contents/Helpers/whytap mcp`: the app controls of `whytap app mcp` plus the
+authorized Case project/key names and descriptions (never values) of
+`whytap case mcp`; both older commands keep working for existing setups. Each
+Case tool call is the same broker request as before, so Case keeps its
+registrations, project scope and approvals; an unregistered client gets only
+the app tools. Case -> Connect writes this `whytap` entry and removes its older
+`case` entry; Disconnect removes only that older entry. Secret use stays in
+`whytap case run` through the agent's own terminal. WHY:
+.project-docs/decisions/2026-11-21-one-whytap-mcp-server.md The app-control server reads
 live build/activity/route metadata and changes allowlisted models, provider pins,
 Drop mode, languages and idle
 auto-hide through existing app stores. Every write requires the current value;

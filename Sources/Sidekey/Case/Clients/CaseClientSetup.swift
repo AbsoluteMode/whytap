@@ -139,9 +139,10 @@ final class CaseClientSetup: CaseClientConfiguring {
         guard let client = CaseKnownClient(identity: identity), let connector = connectors[client] else {
             return CaseClientSetupReport()
         }
+        let helperPath = helperURL?.path
         return await Task.detached {
             do {
-                try connector.uninstall()
+                try connector.uninstall(helperPath: helperPath)
                 return CaseClientSetupReport()
             } catch {
                 return CaseClientSetupReport(problems: ["\(connector.displayName): \(Self.message(error))"])

@@ -540,7 +540,8 @@ final class CaseViewModel: ObservableObject {
         scheduleIdleLock()
     }
 
-    /// No Touch ID: access closes at once, then the client entry is removed.
+    /// No Touch ID: access closes at once, then the client's older Case-only
+    /// entry is removed (its `whytap` server stays; see CaseClientConnector).
     @discardableResult
     func unregisterApp(_ appID: UUID) async throws -> CaseClientSetupReport {
         let current = try unlockedPayload()

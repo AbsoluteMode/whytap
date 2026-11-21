@@ -146,7 +146,7 @@ public final class TodoCommand {
                 return Self.oversized.response
             }
         }
-        guard let client else { return .failure("unavailable", "Use the helper inside the installed Whytap app.") }
+        guard let client else { return .failure("unavailable", "This whytap command is outside the Whytap app. Use Whytap.app/Contents/Helpers/whytap of the installed app; an MCP entry must point there.") }
         do {
             guard case .appControl(let answer) = try client.send(.appControl(AppControlRequest(operation, arguments: request.arguments))) else {
                 throw CaseBrokerClientError.protocolFailure

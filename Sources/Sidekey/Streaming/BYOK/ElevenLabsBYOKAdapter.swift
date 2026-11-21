@@ -8,18 +8,40 @@ import os
 /// `keyterms` param are confirmed against the official ElevenLabs realtime docs.
 /// `no_verbatim=true` asks Scribe to remove fillers, false starts and
 /// disfluencies. Remaining end-to-end behavior is verified once a live key exists.
+/// When Scribe commits a segment. Dictation takes commit once, by hand, at
+/// the end. Subtitles listen to a continuous stream that nobody ends, so the
+/// provider commits each phrase at a pause; manual there meant one commit per
+/// ~36 s segment cap, cut mid-word.
+enum ElevenLabsCommitStrategy: Equatable {
+    case manual
+    case vad(silenceSeconds: Double)
+
+    /// Subtitles: commit after half a second of silence (documented range
+    /// 0.192–3.0 s), a speaker's pause between phrases.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+    static let subtitles = ElevenLabsCommitStrategy.vad(silenceSeconds: 0.5)
+}
+
 enum ElevenLabsRealtimeURL {
-    /// Always a manual commit, auto-stop takes included: a provider commit
-    /// cannot be told from Scribe's ~36 s segment cap, so it never ends a take.
+    /// Always a manual commit for takes, auto-stop takes included: a provider
+    /// commit cannot be told from Scribe's ~36 s segment cap, so it never ends
+    /// a take. Only Subtitles, which have no take, ask for VAD commits.
     /// WHY: .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md
-    static func make(model: String, language: String?, terms: [String]) -> URL {
+    static func make(model: String, language: String?, terms: [String],
+                     commit: ElevenLabsCommitStrategy = .manual) -> URL {
         var comps = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         var items: [URLQueryItem] = [
             URLQueryItem(name: "model_id", value: model),
             URLQueryItem(name: "audio_format", value: "pcm_16000"),
-            URLQueryItem(name: "commit_strategy", value: "manual"),
-            URLQueryItem(name: "no_verbatim", value: "true"),
         ]
+        switch commit {
+        case .manual:
+            items.append(URLQueryItem(name: "commit_strategy", value: "manual"))
+        case .vad(let seconds):
+            items.append(URLQueryItem(name: "commit_strategy", value: "vad"))
+            items.append(URLQueryItem(name: "vad_silence_threshold_secs", value: String(seconds)))
+        }
+        items.append(URLQueryItem(name: "no_verbatim", value: "true"))
         if let language, !language.isEmpty { items.append(URLQueryItem(name: "language_code", value: language)) }
         // ElevenLabs expects one `keyterms` query param per term (repeated), not
         // a comma-joined string — same shape as Deepgram's `keyterm`.
@@ -41,13 +63,16 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
     /// `ELEVENLABS_REALTIME_PREVIOUS_TEXT="."`).
     private let prerollSilenceMs: Int
     private let previousText: String?
+    let commit: ElevenLabsCommitStrategy
 
     /// Production: authenticated `URLSessionWebSocketTask` with the URL query.
-    init(apiKey: String, model: String, prerollSilenceMs: Int = 150, previousText: String? = ".") {
+    init(apiKey: String, model: String, prerollSilenceMs: Int = 150, previousText: String? = ".",
+         commit: ElevenLabsCommitStrategy = .manual) {
         self.prerollSilenceMs = prerollSilenceMs
         self.previousText = previousText
+        self.commit = commit
         self.makeTransport = { language, terms in
-            let url = ElevenLabsRealtimeURL.make(model: model, language: language, terms: terms)
+            let url = ElevenLabsRealtimeURL.make(model: model, language: language, terms: terms, commit: commit)
             var request = URLRequest(url: url)
             request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
             return URLSessionWebSocketTransport(task: URLSession.shared.webSocketTask(with: request))
@@ -57,10 +82,12 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
     /// Test: inject a transport.
     init(
         model: String, prerollSilenceMs: Int = 150, previousText: String? = ".",
+        commit: ElevenLabsCommitStrategy = .manual,
         transport: @escaping TransportFactory
     ) {
         self.prerollSilenceMs = prerollSilenceMs
         self.previousText = previousText
+        self.commit = commit
         self.makeTransport = transport
     }
 
@@ -68,7 +95,8 @@ struct ElevenLabsBYOKAdapter: BYOKTranscriptionAdapter {
         let transport = makeTransport(language, terms)
         transport.resume()
         let session = ElevenLabsBYOKSession(
-            transport: transport, prerollSilenceMs: prerollSilenceMs, previousText: previousText
+            transport: transport, prerollSilenceMs: prerollSilenceMs, previousText: previousText,
+            commit: commit
         )
         session.start()
         return session
@@ -96,9 +124,15 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
     private static let sampleRate = 16_000
 
     let events: AsyncStream<BYOKStreamEvent>
+    /// `partial_transcript` is the whole segment since the last commit.
+    var partialsSpanSegment: Bool { true }
 
-    init(transport: StreamingTransporting, prerollSilenceMs: Int = 0, previousText: String? = nil) {
+    private let commit: ElevenLabsCommitStrategy
+
+    init(transport: StreamingTransporting, prerollSilenceMs: Int = 0, previousText: String? = nil,
+         commit: ElevenLabsCommitStrategy = .manual) {
         self.transport = transport
+        self.commit = commit
         self.prerollSilence = prerollSilenceMs > 0
             ? Data(count: Self.sampleRate * 2 * prerollSilenceMs / 1000)
             : Data()
@@ -199,6 +233,13 @@ final class ElevenLabsBYOKSession: BYOKUpstreamSession, @unchecked Sendable {
         // Mark BEFORE the commit send so the receive loop treats the NEXT
         // committed_transcript as the true terminal, not a mid-hold auto-commit.
         lock.lock(); _endInputSent = true; lock.unlock()
+        // Under VAD the documentation does not say a manual commit is honoured:
+        // a pause longer than the threshold lets the provider commit the tail
+        // itself, and the commit below covers the manual case.
+        if case .vad(let seconds) = commit {
+            let silence = Data(count: Self.sampleRate * 2 * Int((seconds + 0.2) * 1000) / 1000)
+            await sendChunk(audio: silence, commit: false)
+        }
         await sendChunk(audio: Data(), commit: true)  // single manual commit → terminal committed_transcript
     }
 

@@ -151,14 +151,17 @@ struct TranslationView: View {
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
     // The original RealtimeTranslator overlay: a bottom-anchored dark caption
     // box of at most five lines. Only the language pair and Start/Stop were added.
+    // Its content is phrase pairs, original beside translation.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
     @ViewBuilder private var subtitleContent: some View {
+        let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
                 if let issue = subtitles.issue {
                     errorCard(issue)
-                } else if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase, issue: nil) {
-                    captionText(caption)
+                } else if !rows.isEmpty || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
+                    caption(rows)
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
                         .contextMenu { subtitleMenu }
@@ -171,9 +174,9 @@ struct TranslationView: View {
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 10) {
                     if showsOverlayControls { subtitleControls }
-                    if let caption = SubtitleCaption.text(lines: subtitles.lines, phase: subtitles.phase,
-                                                          issue: subtitles.issue) {
-                        captionText(caption)
+                    if subtitles.issue != nil || !rows.isEmpty
+                        || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
+                        caption(rows)
                     }
                     if let feature = subtitles.issue?.feature {
                         Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
@@ -200,7 +203,73 @@ struct TranslationView: View {
     private var showsOverlayControls: Bool { !subtitles.phase.isActive || overlayHovered }
 
     private var waitingWithoutAudio: Bool {
-        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty
+        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
+    }
+
+    /// Pairs when there are phrases, otherwise one status line. The box keeps
+    /// the overlay panel's height: pairs are bottom-anchored and only whole
+    /// pairs show, so the newest pair never moves and the oldest leaves at the
+    /// top in one piece; a new pair fades and slides in from the bottom. The
+    /// controls row, shown on hover, takes its height from the pairs.
+    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
+        if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
+            captionText(status)
+        } else {
+            NewestRowsLayout(spacing: embedded ? 6 : 8,
+                             maxHeight: embedded ? 150 : (showsOverlayControls ? 108 : 146)) {
+                ForEach(rows) { row in
+                    pairRow(row)
+                        .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .bottomLeading)
+            .clipped()
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Subtitles")
+        }
+    }
+
+    @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
+        let source = Text(row.source)
+            .font(.system(size: embedded ? 12 : 15, weight: .regular, design: .rounded))
+            .foregroundStyle(.white.opacity(row.isLive ? 0.42 : 0.6))
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        if embedded {
+            // The Toolbox pane is too narrow for two columns: original above.
+            VStack(alignment: .leading, spacing: 2) {
+                source
+                translationText(row).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            // Russian runs about a fifth longer than English and is the line
+            // being read, so the translation column is the wider one.
+            PairColumnsLayout(sourceFraction: 0.4, spacing: 18) {
+                source
+                translationText(row).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder private func translationText(_ row: SubtitleCaption.Row) -> some View {
+        switch row.translation {
+        case .text(let value):
+            Text(value)
+                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
+                .foregroundStyle(.white)
+                .lineSpacing(2)
+        case .pending:
+            Image(systemName: "ellipsis")
+                .font(.system(size: embedded ? 12 : 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.35))
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion && !row.isLive)
+                .accessibilityLabel(row.isLive ? "Listening" : "Translating")
+        case .failed:
+            Text("Not translated")
+                .font(.system(size: embedded ? 11 : 13, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.35))
+        }
     }
 
     private func captionText(_ value: String) -> some View {

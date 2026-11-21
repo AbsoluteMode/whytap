@@ -18,7 +18,11 @@ enum RealtimeAdapterFactory {
         case .deepgram:
             return DeepgramBYOKAdapter(apiKey: try requiredKey(route), model: route.model)
         case .elevenLabs:
-            return ElevenLabsBYOKAdapter(apiKey: try requiredKey(route), model: route.model)
+            // Subtitles have no take to end: Scribe commits each phrase at a
+            // pause. Every take-based feature keeps its manual commit.
+            // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+            return ElevenLabsBYOKAdapter(apiKey: try requiredKey(route), model: route.model,
+                                         commit: route.feature == .subtitlesAudio ? .subtitles : .manual)
         case .server:
             // No default host: a server without a usable address fails here
             // instead of reaching any other host.

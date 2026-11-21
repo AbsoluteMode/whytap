@@ -65,10 +65,14 @@ budget; failures retain the input for another attempt.
 ## Subtitles
 
 Choose the spoken language (or Auto-detect), a target, then **Start subtitles**.
-Play a video or join a call. The window floats over other apps and full-screen
-content; you can move or resize it. **Original** shows source phrases above the
-translation. **Follow** follows the latest line; turn it off to read older lines.
-Copy copies the completed translations retained in this window.
+Play a video or join a call. A compact dark box floats at the bottom of the
+screen over other apps and full-screen content. Each phrase is a pair: the
+original on the left and its translation on the right, newest at the bottom;
+older pairs leave at the top. The phrase still being heard appears dimmed as
+the last row before it is translated. A phrase whose translation timed out or
+failed keeps its original and says **Not translated**; later phrases go on.
+In the Toolbox pane the original sits above its translation. **Copy
+translation** in the box's context menu copies the completed translations.
 
 Only system audio is captured. The microphone is not opened, no recording is
 saved, and no meeting note is created. Starting may request macOS **System
@@ -76,11 +80,17 @@ Audio Recording** permission. If the Mac is playing audio but no signal arrives,
 check that permission in **System Settings → Privacy & Security**. Silence and
 a denied grant cannot be reliably distinguished by the capture API.
 
-The selected speech provider receives system audio. Its committed phrases go
-to the selected Subtitles LLM model. Interim speech is shown but never translated
-or billed as an LLM request. This is a speech-to-text → LLM pipeline; latency
-depends on phrase finalization, the network and the chosen model. It does not
-use the standalone app's OpenAI translation endpoint or its credential files.
+The selected speech provider receives system audio. Its text is cut into whole
+phrases (at sentence ends, pauses, or a clause or word boundary in long
+phrases, never inside a word) and up to three phrases go to the selected
+Subtitles LLM model at once, each with the previous pair as context. With
+ElevenLabs, Subtitles ask Scribe to commit at half-second pauses and translate
+the start of its live text once it has stayed unchanged for 0.6 s, instead of
+waiting for Scribe's 36-second segments. Other interim speech is shown but never
+translated or billed as an LLM request. This is a speech-to-text → LLM
+pipeline; latency depends on the provider, the network and the chosen model (a
+faster LLM is the largest remaining gain). It does not use the standalone app's
+OpenAI translation endpoint or its credential files.
 
 **Stop** stops capture, drains queued audio, waits up to ten seconds for speech
 finals and completes queued translations. Audio already captured at Stop is sent
@@ -90,7 +100,7 @@ the Subtitles tool or the palette’s context menu reopens them. Updates defer a
 restart while this window is open or a translation session is active, preserving
 unsent text as well. Close the window before choosing Restart.
 
-At most eight phrases wait for translation and forty recent lines remain in
+At most nine phrases wait for translation and forty recent pairs remain in
 memory. Audio also crosses a bounded queue. If the connection or model cannot
 keep up, capture stops with an actionable error instead of accumulating delay
 or silently dropping speech. Choose a faster model and start again. Starting a

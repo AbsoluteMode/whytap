@@ -51,6 +51,7 @@ final class AIUsageMeteredSession: BYOKUpstreamSession {
     }
     var events: AsyncStream<BYOKStreamEvent> { upstream.events }
     var finalsJoin: BYOKTranscriptJoin { upstream.finalsJoin }
+    var partialsSpanSegment: Bool { upstream.partialsSpanSegment }
     var emitsPartialAfterFrameFinals: Bool { upstream.emitsPartialAfterFrameFinals }
     func sendAudio(_ pcm: Data) async {
         lock.withLock { if !recorded { bytes += pcm.count } }

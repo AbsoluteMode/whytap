@@ -1,10 +1,15 @@
 import Foundation
 
+/// One phrase of speech and its translation, shown as a pair. The source is
+/// fixed when the phrase is committed; only its own translation fills it in.
 struct SubtitleLine: Identifiable, Equatable {
     let id: UUID
     let source: String
     var translation: String?
+    /// The translation failed or timed out: the pair keeps its original.
+    var failed = false
     init(source: String) { id = UUID(); self.source = source }
+    var isSettled: Bool { translation != nil || failed }
 }
 
 enum SubtitlePhase: Equatable {
@@ -55,6 +60,9 @@ final class LiveSubtitleModel: ObservableObject {
     @Published private(set) var phase: SubtitlePhase = .idle
     @Published private(set) var lines: [SubtitleLine] = []
     @Published private(set) var partial = ""
+    /// The phrase being heard: committed text not yet cut into a phrase plus
+    /// the provider's partial. Display only; never sent for translation.
+    @Published private(set) var live = ""
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
     var onActivityChange: (() -> Void)?
@@ -62,6 +70,7 @@ final class LiveSubtitleModel: ObservableObject {
     private let connectionTimeout: Duration
     private var connectionWatchdog: Task<Void, Never>?
     private let flushInterval: Duration
+    private let phraseDeadline: Duration
     private let makeAudio: () -> TerminalSystemAudioSourceStreaming
     private let open: (String?) async throws -> BYOKUpstreamSession
     private let makeService: () async throws -> TextTranslating
@@ -69,20 +78,33 @@ final class LiveSubtitleModel: ObservableObject {
     private var cleanupTask: Task<Void, Never>?
     private var runTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
-    private var translationTask: Task<Void, Never>?
+    private var waiting: [UUID] = []
+    private var inFlight: [UUID: (work: Task<Void, Never>, timer: Task<Void, Never>)] = [:]
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
     private var timer: Task<Void, Never>?
     private var stopWatchdog: Task<Void, Never>?
     private var source: TerminalSystemAudioSourceStreaming?
     private var upstream: BYOKUpstreamSession?
     private var relay: SubtitleAudioRelay?
     private var segmenter = SubtitleSegmenter()
-    private var queue: [UUID] = []
+    private var finalsJoin: BYOKTranscriptJoin = .verbatim
+    private var partialLock = SubtitlePartialLock()
+    private var spansSegment = false
     private var service: TextTranslating?
     private var target: TranslationTarget = .language("ru")
     private var sawFinal = false
 
+    /// Phrases translated at the same time. One slow answer no longer holds
+    /// every later phrase behind it.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+    static let maxConcurrentTranslations = 3
+    /// Untranslated phrases (waiting and in flight) before the session stops
+    /// visibly instead of falling ever further behind the speech.
+    static let backlogLimit = 9
+
     init(
-        flushInterval: Duration = .milliseconds(250),
+        flushInterval: Duration = .milliseconds(100),
+        phraseDeadline: Duration = .seconds(8),
         connectionTimeout: Duration = .seconds(15),
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = { CoreAudioSystemAudioSource() },
         open: @escaping (String?) async throws -> BYOKUpstreamSession = { language in
@@ -99,6 +121,7 @@ final class LiveSubtitleModel: ObservableObject {
     ) {
         self.connectionTimeout = connectionTimeout
         self.flushInterval = flushInterval
+        self.phraseDeadline = phraseDeadline
         self.makeAudio = makeAudio
         self.open = open
         self.makeService = makeService
@@ -111,8 +134,9 @@ final class LiveSubtitleModel: ObservableObject {
         let token = generation
         let language = sourceCode == "auto" ? nil : sourceCode
         target = .language(targetCode)
-        lines = []; partial = ""; issue = nil; queue = []
-        segmenter = SubtitleSegmenter(); sawFinal = false; hasAudio = false
+        lines = []; partial = ""; live = ""; issue = nil; waiting = []
+        segmenter = SubtitleSegmenter(); partialLock.reset(); spansSegment = false
+        sawFinal = false; hasAudio = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
             try? await Task.sleep(for: self?.connectionTimeout ?? .seconds(15))
@@ -131,6 +155,8 @@ final class LiveSubtitleModel: ObservableObject {
                 let upstream = try await self.open(language)
                 guard self.generation == token, !Task.isCancelled else { await upstream.close(); return }
                 self.upstream = upstream
+                self.finalsJoin = upstream.finalsJoin
+                self.spansSegment = upstream.partialsSpanSegment
                 let source = self.makeAudio()
                 self.source = source
                 let relay = SubtitleAudioRelay(source: source) { [weak self] in
@@ -168,17 +194,35 @@ final class LiveSubtitleModel: ObservableObject {
                 for await event in upstream.events {
                     guard self.generation == token, !Task.isCancelled else { return }
                     switch event {
-                    case .partial(let text): self.partial = String(text.suffix(800))
+                    case .partial(let text):
+                        self.partial = String(text.suffix(800))
+                        if self.spansSegment {
+                            self.partialLock.update(partial: text, now: ProcessInfo.processInfo.systemUptime)
+                        }
+                        self.updateLive()
                     case .final(let text):
                         self.sawFinal = true
-                        self.segmenter.append(text, join: upstream.finalsJoin, now: ProcessInfo.processInfo.systemUptime)
-                        self.partial = ""
+                        let now = ProcessInfo.processInfo.systemUptime
+                        if self.spansSegment {
+                            // A commit closes the segment (a pause): its words not
+                            // yet cut from the partial form the last phrase(s).
+                            self.segmenter.append(self.partialLock.commit(text), join: upstream.finalsJoin, now: now)
+                            self.partial = ""
+                            self.flush(token: token, force: true)
+                        } else {
+                            self.segmenter.append(text, join: upstream.finalsJoin, now: now)
+                            self.partial = ""
+                            self.flush(token: token)
+                        }
                         if self.segmenter.pending.count > 4_000 {
                             self.fail(.init(message: "The speech stream is too far behind. Choose a faster model and start again."), token: token)
                             return
                         }
                     case .done(let text):
-                        if !self.sawFinal { self.segmenter.append(text, join: upstream.finalsJoin, now: ProcessInfo.processInfo.systemUptime) }
+                        if !self.sawFinal {
+                            let rest = self.spansSegment ? self.partialLock.commit(text) : text
+                            self.segmenter.append(rest, join: upstream.finalsJoin, now: ProcessInfo.processInfo.systemUptime)
+                        }
                         guard self.phase == .finishing else {
                             self.fail(.init(message: "The audio connection ended. Start again to continue subtitles."), token: token)
                             return
@@ -195,12 +239,13 @@ final class LiveSubtitleModel: ObservableObject {
                 }
                 self.stopWatchdog?.cancel(); self.stopWatchdog = nil
                 self.timer?.cancel(); self.timer = nil
+                self.partial = ""
                 self.flush(token: token, force: true)
-                await self.translationTask?.value
+                await self.translationsDrained()
                 guard self.generation == token else { return }
                 await self.releaseCapture()
                 guard self.generation == token else { return }
-                self.partial = ""; self.service = nil; self.runTask = nil
+                self.partial = ""; self.live = ""; self.service = nil; self.runTask = nil
                 self.setPhase(.idle)
             } catch {
                 guard self.generation == token, !Task.isCancelled else { return }
@@ -234,11 +279,13 @@ final class LiveSubtitleModel: ObservableObject {
         generation = UUID()
         let token = generation
         runTask?.cancel(); runTask = nil
-        translationTask?.cancel(); translationTask = nil
+        for task in inFlight.values { task.work.cancel(); task.timer.cancel() }
+        inFlight = [:]
+        resumeDrainWaiters()
         timer?.cancel(); timer = nil
         stopWatchdog?.cancel(); stopWatchdog = nil
         connectionWatchdog?.cancel(); connectionWatchdog = nil
-        queue = []; service = nil; partial = ""
+        waiting = []; service = nil; partial = ""; live = ""
         setPhase(.finishing)
         let task = Task { [weak self] in
             guard let self else { return }
@@ -270,41 +317,116 @@ final class LiveSubtitleModel: ObservableObject {
         await upstream?.close()
     }
 
+    private func updateLive() {
+        let committed = segmenter.pending.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heard = (spansSegment ? partialLock.unlockedText : partial).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heard.isEmpty else { live = committed; return }
+        guard !committed.isEmpty else { live = heard; return }
+        // Soniox partials carry their own leading space; word providers need one.
+        let glue = finalsJoin == .verbatim && partial.first?.isWhitespace == false ? "" : " "
+        live = committed + glue + heard
+    }
+
+    /// Cuts every phrase that is ready and starts its translation. Each phrase
+    /// becomes its own pair at once, so the original is on screen while the
+    /// translation is still on its way.
     private func flush(token: UUID, force: Bool = false) {
-        while let text = segmenter.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
-            guard queue.count < 8 else {
-                fail(.init(message: "Translation cannot keep up with speech. Choose a faster Subtitles LLM model, then start again.", feature: .subtitlesTranslation), token: token)
-                return
-            }
-            let line = SubtitleLine(source: text)
-            lines.append(line); queue.append(line.id)
-            // Do not evict any queued/in-flight line. The queue itself is bounded.
-            if lines.count > 40, !queue.contains(lines[0].id), lines[0].translation != nil { lines.removeFirst() }
-            startTranslationWorker(token: token)
-            if !force { break }
+        defer { updateLive() }
+        let now = ProcessInfo.processInfo.systemUptime
+        while let text = segmenter.take(now: now, force: force) {
+            guard addPhrase(text, token: token) else { return }
+        }
+        // Committed text always comes first: the stable partial is later speech.
+        guard spansSegment, segmenter.pending.isEmpty else { return }
+        while let text = partialLock.take(now: now) {
+            guard addPhrase(text, token: token) else { return }
         }
     }
 
-    private func startTranslationWorker(token: UUID) {
-        guard translationTask == nil, let service else { return }
-        let target = self.target
-        translationTask = Task { [weak self] in
-            guard let self else { return }
-            while self.generation == token, !Task.isCancelled, !self.queue.isEmpty {
-                let id = self.queue.removeFirst()
-                guard let line = self.lines.first(where: { $0.id == id }) else { continue }
-                do {
-                    let value = try await service.translate(line.source, target: target)
-                    guard self.generation == token, !Task.isCancelled else { return }
-                    if let index = self.lines.firstIndex(where: { $0.id == id }) { self.lines[index].translation = value }
-                } catch {
-                    guard self.generation == token, !Task.isCancelled else { return }
-                    self.fail(.from(error, feature: .subtitlesTranslation), token: token)
-                    return
-                }
+    private func addPhrase(_ text: String, token: UUID) -> Bool {
+        guard waiting.count + inFlight.count < Self.backlogLimit else {
+            fail(.init(message: "Translation cannot keep up with speech. Choose a faster Subtitles LLM model, then start again.", feature: .subtitlesTranslation), token: token)
+            return false
+        }
+        let line = SubtitleLine(source: text)
+        lines.append(line); waiting.append(line.id)
+        // Never evict a pair that is still waiting for its translation.
+        if lines.count > 40, lines[0].isSettled { lines.removeFirst() }
+        startTranslations(token: token)
+        return true
+    }
+
+    private func startTranslations(token: UUID) {
+        guard let service, generation == token else { return }
+        while inFlight.count < Self.maxConcurrentTranslations, !waiting.isEmpty {
+            let id = waiting.removeFirst()
+            guard let line = lines.first(where: { $0.id == id }) else { continue }
+            let previous = context(before: id)
+            let target = self.target
+            let deadline = phraseDeadline
+            let work = Task { [weak self] in
+                let result: Result<String, Error>
+                do { result = .success(try await service.translatePhrase(line.source, previous: previous, target: target)) }
+                catch { result = .failure(error) }
+                self?.finishTranslation(id, result, token: token)
             }
-            guard self.generation == token else { return }
-            self.translationTask = nil
+            let timer = Task { [weak self] in
+                try? await Task.sleep(for: deadline)
+                guard !Task.isCancelled else { return }
+                self?.finishTranslation(id, .failure(PhraseTimeout()), token: token)
+            }
+            inFlight[id] = (work, timer)
+        }
+        if waiting.isEmpty, inFlight.isEmpty { resumeDrainWaiters() }
+    }
+
+    /// The first outcome of a phrase wins: its answer or its deadline. A late
+    /// answer of an older phrase only ever fills that phrase's own pair.
+    private func finishTranslation(_ id: UUID, _ result: Result<String, Error>, token: UUID) {
+        guard generation == token, let task = inFlight.removeValue(forKey: id) else { return }
+        task.work.cancel(); task.timer.cancel()
+        switch result {
+        case .success(let value):
+            if let index = lines.firstIndex(where: { $0.id == id }) { lines[index].translation = value }
+        case .failure(let error):
+            if Self.stopsSession(error) {
+                fail(.from(error, feature: .subtitlesTranslation), token: token)
+                return
+            }
+            // A slow or failed phrase keeps its original; later phrases go on.
+            if let index = lines.firstIndex(where: { $0.id == id }) { lines[index].failed = true }
+        }
+        startTranslations(token: token)
+    }
+
+    /// Setup and key problems repeat for every phrase: stop with the fix.
+    /// Timeouts, busy providers and network blips affect one phrase only.
+    static func stopsSession(_ error: Error) -> Bool {
+        if error is FeatureRouteError { return true }
+        guard let llm = error as? OpenRouterLLMError else { return false }
+        switch llm {
+        case .notConfigured, .missingKey, .missingBaseURL, .invalidBaseURL, .missingModel: return true
+        case .unexpectedStatus(let status, _): return [401, 402, 403, 404].contains(status)
+        default: return false
         }
     }
+
+    private func context(before id: UUID) -> SubtitlePair? {
+        guard let index = lines.firstIndex(where: { $0.id == id }) else { return nil }
+        return lines[..<index].last(where: { $0.translation != nil }).map {
+            SubtitlePair(source: $0.source, translation: $0.translation ?? "")
+        }
+    }
+
+    private func translationsDrained() async {
+        guard !waiting.isEmpty || !inFlight.isEmpty else { return }
+        await withCheckedContinuation { drainWaiters.append($0) }
+    }
+
+    private func resumeDrainWaiters() {
+        let waiters = drainWaiters; drainWaiters = []
+        waiters.forEach { $0.resume() }
+    }
 }
+
+struct PhraseTimeout: Error {}

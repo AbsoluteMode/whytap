@@ -90,8 +90,18 @@ final class APIHintsRenderTests: XCTestCase {
         // Only up to the next heading: later sections (You may also like) have linked cards too.
         let rest = try XCTUnwrap(readme.range(of: "## Free to use").map { readme[$0.upperBound...] })
         let section = String(rest[..<(rest.range(of: "\n## ")?.lowerBound ?? rest.endIndex)])
-        let cards = section.split(separator: "\n").filter { line in
+        let linked = section.split(separator: "\n").filter { line in
             line.hasPrefix("<a href=") && line.contains("<picture>")
+        }
+        // The paid-plan cards ("Already paying…?") are their own row and must match the paid-plan offers.
+        let planCards = linked.filter { $0.contains("free-api-plan-") }
+        let cards = linked.filter { !$0.contains("free-api-plan-") }
+        let plans = APIHintsView.hints.filter { $0.access == .paidPlan && $0.category == .models }
+        XCTAssertEqual(planCards.count, plans.count)
+        for hint in plans {
+            let card = try XCTUnwrap(planCards.first { $0.hasPrefix("<a href=\"\(hint.url.absoluteString)\">") }, hint.provider)
+            let provider = hint.provider.replacingOccurrences(of: "&", with: "&amp;")  // HTML-escaped in alt
+            XCTAssertTrue(card.contains("alt=\"\(provider): \(hint.allowance) \(hint.cadence)\""), hint.provider)
         }
         let free = APIHintsView.hints.filter { $0.access == .noCard }
         XCTAssertEqual(cards.count, free.count)

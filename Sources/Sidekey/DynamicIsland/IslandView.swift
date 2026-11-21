@@ -1244,9 +1244,9 @@ struct IslandView: View {
                                 && !(hoverPanelMode == .calendar && appState.calendarHoverConnectionActive),
                             onDismiss: dismissHoverMenu
                         ))
-                        .islandHoverGlassSurface(
-                            showGlass: hoverPanelMode != .history || IslandHoverGlass.usesNativeLiquidGlass
-                        )
+                        // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
+                        // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+                        .islandHoverGlassSurface()
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.
@@ -3526,12 +3526,15 @@ struct IslandDetachedHoverPanelBackground: View {
             .clipShape(shape)
     }
 
-    /// Keep the historical dark wash only on the legacy fallback.
-    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md
+    /// Keep the dark wash only on the legacy fallback. It sits over the
+    /// material at legacyDarkLayerOpacity so the window underneath never
+    /// reads through, blurred or not.
+    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md,
+    // .project-docs/decisions/2026-11-21-history-backdrop-always.md
     private func glassBase(in shape: RoundedRectangle) -> some View {
         shape
             .fill(.ultraThinMaterial)
-            .overlay(shape.fill(.black.opacity(0.25)))
+            .overlay(shape.fill(.black.opacity(IslandDetachedHoverPanelGlassStyle.legacyDarkLayerOpacity)))
     }
 
     /// Vertical darkening: the slab reads thicker toward the bottom.

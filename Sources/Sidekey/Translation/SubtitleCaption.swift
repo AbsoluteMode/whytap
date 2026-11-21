@@ -23,13 +23,16 @@ enum SubtitleCaption {
         let translation: Translation
         /// The phrase still being heard (display only, not yet translated).
         let isLive: Bool
+        /// Position in the session, stable while older pairs leave, so an
+        /// alternating mark never moves from one pair to another.
+        var ordinal = 0
     }
 
     /// The live row keeps one identity, so it updates in place while growing.
     static let liveID = UUID(uuidString: "00000000-0000-0000-0000-00000000117E")!
 
     static func rows(lines: [SubtitleLine], live: String) -> [Row] {
-        var rows = lines.compactMap { line -> Row? in
+        var rows = lines.enumerated().compactMap { ordinal, line -> Row? in
             let source = line.source.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !source.isEmpty else { return nil }
             let translation: Row.Translation
@@ -41,11 +44,11 @@ enum SubtitleCaption {
             } else {
                 translation = .pending
             }
-            return Row(id: line.id, source: source, translation: translation, isLive: false)
+            return Row(id: line.id, source: source, translation: translation, isLive: false, ordinal: ordinal)
         }
         let heard = live.trimmingCharacters(in: .whitespacesAndNewlines)
         if !heard.isEmpty {
-            rows.append(Row(id: liveID, source: heard, translation: .pending, isLive: true))
+            rows.append(Row(id: liveID, source: heard, translation: .pending, isLive: true, ordinal: lines.count))
         }
         return Array(rows.suffix(maxPairs))
     }

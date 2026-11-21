@@ -197,6 +197,10 @@ final class SubtitlePairRenderTests: XCTestCase {
                                      live: "Every layer takes the numbers")
         try renderOverlay(live, name: "subtitles-pairs-live.png")
         try renderToolbox(live, name: "toolbox-subtitles-pairs.png")
+        // Chunk-boundary marks for the user to choose from.
+        for marker in SubtitlePairMarker.allCases where marker != .none {
+            try renderOverlay(all, name: "markers/subtitles-pairs-\(marker.rawValue).png", marker: marker)
+        }
         // Stopped: the language row and Start return above the newest pairs.
         all.model.stop()
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
@@ -244,7 +248,7 @@ final class SubtitlePairRenderTests: XCTestCase {
     }
 
     /// The overlay panel is 760 x 190 pt; it floats over whatever plays.
-    private func renderOverlay(_ session: Session, name: String) throws {
+    private func renderOverlay(_ session: Session, name: String, marker: SubtitlePairMarker = .none) throws {
         let frame = ZStack {
             LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.20), Color(red: 0.20, green: 0.16, blue: 0.22)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -255,6 +259,7 @@ final class SubtitlePairRenderTests: XCTestCase {
             VStack {
                 Spacer()
                 view(session, embedded: false).frame(width: 760, height: 190)
+                    .environment(\.subtitlePairMarker, marker)
             }
         }
         .frame(width: 860, height: 300)
@@ -276,6 +281,7 @@ final class SubtitlePairRenderTests: XCTestCase {
     }
 
     private func write<V: View>(_ content: V, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.nsImage)

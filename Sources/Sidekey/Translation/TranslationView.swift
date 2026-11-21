@@ -230,11 +230,40 @@ struct TranslationView: View {
         }
     }
 
+    @Environment(\.subtitlePairMarker) private var pairMarker
+
+    /// The phrase's text with the chosen pair mark: an accent first letter or
+    /// a leading accent dot.
+    private func marked(_ value: String, font: Font, color: Color) -> some View {
+        var body = Text(value)
+        if pairMarker == .initial, let first = value.first {
+            body = Text(String(first)).foregroundColor(SubtitlePairMarker.accent).fontWeight(.semibold)
+                + Text(value.dropFirst())
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if pairMarker == .dot {
+                Text("•").foregroundStyle(SubtitlePairMarker.accent).accessibilityHidden(true)
+            }
+            body.foregroundStyle(color).lineSpacing(2)
+        }
+        .font(font)
+    }
+
     @ViewBuilder private func pairRow(_ row: SubtitleCaption.Row) -> some View {
-        let source = Text(row.source)
-            .font(.system(size: embedded ? 12 : 15, weight: .regular, design: .rounded))
-            .foregroundStyle(.white.opacity(row.isLive ? 0.42 : 0.6))
-            .lineSpacing(2)
+        let isBand = pairMarker == .band
+        pairColumns(row)
+            .padding(.horizontal, isBand ? 8 : 0)
+            .padding(.vertical, isBand ? 3 : 0)
+            .background {
+                if isBand, row.ordinal.isMultiple(of: 2) {
+                    RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.07))
+                }
+            }
+    }
+
+    @ViewBuilder private func pairColumns(_ row: SubtitleCaption.Row) -> some View {
+        let source = marked(row.source, font: .system(size: embedded ? 12 : 15, weight: .regular, design: .rounded),
+                            color: .white.opacity(row.isLive ? 0.42 : 0.6))
             .frame(maxWidth: .infinity, alignment: .leading)
         if embedded {
             // The Toolbox pane is too narrow for two columns: original above.
@@ -255,10 +284,7 @@ struct TranslationView: View {
     @ViewBuilder private func translationText(_ row: SubtitleCaption.Row) -> some View {
         switch row.translation {
         case .text(let value):
-            Text(value)
-                .font(.system(size: embedded ? 14 : 18, weight: .medium, design: .rounded))
-                .foregroundStyle(.white)
-                .lineSpacing(2)
+            marked(value, font: .system(size: embedded ? 14 : 18, weight: .medium, design: .rounded), color: .white)
         case .pending:
             Image(systemName: "ellipsis")
                 .font(.system(size: embedded ? 12 : 15, weight: .semibold))

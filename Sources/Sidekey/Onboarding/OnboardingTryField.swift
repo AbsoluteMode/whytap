@@ -100,10 +100,11 @@ final class OnboardingTryTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? .systemFont(ofSize: 15),
+            // The onboarding's italic serif, as in the pictured note.
+            .font: NSFont(name: "InstrumentSerif-Italic", size: 18) ?? font ?? .systemFont(ofSize: 15),
             .foregroundColor: NSColor.placeholderTextColor,
         ]
-        let origin = NSPoint(x: textContainerInset.width, y: textContainerInset.height)
+        let origin = NSPoint(x: textContainerInset.width + 4, y: textContainerInset.height - 1)
         (placeholder as NSString).draw(at: origin, withAttributes: attributes)
     }
 }

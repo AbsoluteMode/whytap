@@ -81,6 +81,7 @@ final class NativeAgentTests: XCTestCase {
         let expected: [String: Any] = [
             "name": "finish_answer", "strict": true, "parameters": object([
                 "answer": string,
+                "insert_text": string,
                 "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"]],
                 "sources": ["type": "array", "items": object(["title": string, "url": string])],
                 "actions": ["type": "array", "items": ["anyOf": [

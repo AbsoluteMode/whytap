@@ -167,7 +167,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 
 <p align="center"><a href="https://github.com/AbsoluteMode/flora"><b>flora</b></a><br>Workflow contracts for coding harnesses: every step says what proves it is done, and an independent verifier checks that before the next step starts.</p>
 
-<p align="center"><a href="https://github.com/AbsoluteMode/harness-link"><b>Harness Link</b></a><br>One conversation between Codex, Claude Code and Antigravity, plus addressed messages to sessions that are already running.</p>
+<p align="center"><a href="https://github.com/AbsoluteMode/harness-link"><b>Harness Link</b></a><br>Connects Claude Code, Codex and Antigravity (Gemini) sessions: shared rooms for one conversation between them, addressed messages to sessions that are already running, and persistent Claude consultations.</p>
 
 <p align="center"><b>Orchestrator</b> <sup>soon</sup><br>A Claude Code plugin that puts ten chats into one window: it keeps the task list, starts the sessions and writes to you only when it needs you, when work is ready to check or when the plan changes.</p>
 

@@ -7,8 +7,8 @@ light), show one request per thing a coding agent can do with Whytap: the
 bundled plugin's meetings, To-do, models and Case key names, and the
 agent-installed Notify sources and Monitor dashboards
 (docs/customization/notifications.md, dashboards.md). Claude Code and Codex
-appear as logos; each has its own code block that adds the
-application-control server, so each copies on its own. Details and limits
+appear as logos; each has its own code block that adds Whytap's one MCP
+server (application tools and Case key names), so each copies on its own. Details and limits
 stay in docs/customization/app-control.md.
 
 Usage (icons come from Lucide, ISC, see docs/assets/readme/tool-icons.LICENSE.txt):
@@ -43,12 +43,12 @@ CARDS = [
 # in GitHub's 16 px semibold system font on macOS (the lockup is exactly logo + name,
 # so the README's own spaces separate it from the sentence; textLength fits the name
 # to that width in other fonts), logo colour per theme (None = the theme's ink), and
-# the line that adds the application-control server.
+# the line that adds Whytap's one MCP server (`whytap mcp`).
 HARNESSES = [
     ("claude-code", "Claude Code", 96.9, {"dark": "#d97757", "light": "#d97757"},
-     f"claude mcp add --scope user whytap -- {HELPER} app mcp"),
+     f"claude mcp add --scope user whytap -- {HELPER} mcp"),
     ("codex", "Codex", 48.3, {"dark": None, "light": None},
-     f"codex mcp add whytap -- {HELPER} app mcp"),
+     f"codex mcp add whytap -- {HELPER} mcp"),
 ]
 ICONS = REPO / "Resources/UsefulLinkIcons"
 # The section's last line: what to do when setup is confusing. Only what the

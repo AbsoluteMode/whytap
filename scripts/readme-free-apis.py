@@ -97,17 +97,37 @@ def card(o, theme):
 # README's earlier per-tool comparison), about $636 a year. An estimate, shown
 # as approximate; Maxim chose the figure on 2026-11-21.
 PAID_YEARLY = "$600"  # shown struck through; the caption and alt say it is approximate
-BANNER = {"wide": (640, 116), "phone": (300, 96)}
+BANNER = {"wide": (640, 158), "phone": (300, 150)}
+QUOTAS = "Everyday use fits in the free quotas."
 
 
-def banner(theme, layout):
+def facts(checked):
+    """The banner's footer: what the free tier covers and how fresh the offers are."""
+    return ["No card needed", "Reviewed monthly", f"Last checked {display(checked)}"]
+
+
+def banner(theme, layout, checked):
+    # WHY: .project-docs/decisions/2026-11-21-free-api-report.md (2026-11-21
+    # follow-up: the footer lines moved into the banner so it is not empty).
     c = THEMES[theme]
     w, h = BANNER[layout]
-    big, cap = (44, 13) if layout == "wide" else (30, 10.5)
+    wide = layout == "wide"
+    big, cap = (44, 13) if wide else (30, 10.5)
     left, right, mid = w * 0.27, w * 0.73, w / 2
-    y_num, y_cap = h * 0.52, h * 0.52 + cap * 1.9
+    y_num = 56 if wide else 44
+    y_cap = y_num + cap * 1.9
+    y_rule = y_cap + (18 if wide else 14)
     strike = c["sub"]
     green = "#3fb950" if theme == "dark" else "#1a7f37"
+    e = lambda t: html.escape(t, quote=False)
+    items = facts(checked)
+    # One footer line on the wide banner; the phone banner splits it in two.
+    lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
+    y_quota = y_rule + (24 if wide else 20)
+    footer = "\n".join(
+        f'  <text x="{mid}" y="{y_quota + (20 if wide else 16) * (i + 1)}" text-anchor="middle" font-family="{FONT}" '
+        f'font-size="{12 if wide else 10.5}" fill="{c["sub"]}">{e(line)}</text>'
+        for i, line in enumerate(lines))
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
   <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="16" fill="{c['bg']}" stroke="{c['border']}"/>
   <text x="{left}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{c['sub']}">{html.escape(PAID_YEARLY)}</text>
@@ -116,6 +136,9 @@ def banner(theme, layout):
   <text x="{mid}" y="{y_num - big * 0.2}" text-anchor="middle" font-family="{FONT}" font-size="{big * 0.6}" fill="{c['sub']}">→</text>
   <text x="{right}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{green}">$0</text>
   <text x="{right}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" font-weight="600" fill="{c['ink']}">Whytap</text>
+  <line x1="24" y1="{y_rule}" x2="{w - 24}" y2="{y_rule}" stroke="{c['border']}"/>
+  <text x="{mid}" y="{y_quota}" text-anchor="middle" font-family="{FONT}" font-size="{14 if wide else 12}" font-weight="600" fill="{c['ink']}">{e(QUOTAS)}</text>
+{footer}
 </svg>
 '''
 
@@ -142,15 +165,17 @@ def section():
         )
     for lay in BANNER:
         for t in THEMES:
-            (OUT / f"free-api-banner-{lay}-{t}.svg").write_text(banner(t, lay))
+            (OUT / f"free-api-banner-{lay}-{t}.svg").write_text(banner(t, lay, newest))
     b = lambda lay, t: f"docs/assets/readme/free-api-banner-{lay}-{t}.svg"
+    alt_text = (f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0. {QUOTAS} "
+                + ", ".join(facts(newest)) + ".")
     banner_html = (
         "<picture>"
         f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{b("phone", "dark")}">'
         f'<source media="(max-width: 640px)" srcset="{b("phone", "light")}">'
         f'<source media="(prefers-color-scheme: dark)" srcset="{b("wide", "dark")}">'
         f'<source media="(prefers-color-scheme: light)" srcset="{b("wide", "light")}">'
-        f'<img alt="Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0" src="{b("wide", "dark")}" width="{BANNER["wide"][0]}">'
+        f'<img alt="{html.escape(alt_text)}" src="{b("wide", "dark")}" width="{BANNER["wide"][0]}">'
         "</picture>"
     )
     return "\n".join([
@@ -161,9 +186,6 @@ def section():
         "<p align=\"center\">",
         "\n".join(cards),
         "</p>",
-        "",
-        "<p align=\"center\">Everyday use fits in the free quotas.<br>",
-        f"<sub>No card needed · Reviewed monthly · Last checked {display(newest)}</sub></p>",
     ]) + "\n"
 
 

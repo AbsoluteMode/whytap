@@ -35,8 +35,11 @@ paying.
 - `APIHintsView.hints` stays the only source of offers. README's
   **Free API keys** section shows the offers with `access: .noCard` as small
   linked cards (logo, provider, allowance, period, purpose; dark and light
-  SVGs) under the caption "Everyday use fits in the free quotas." and one line
-  "No card needed · Reviewed monthly · Last checked".
+  SVGs). The caption "Everyday use fits in the free quotas." and the line
+  "No card needed · Reviewed monthly · Last checked" sit at the bottom of the
+  banner, below a thin rule (Maxim found the banner empty on 2026-11-21 and
+  asked to move them there); the generator writes the date into the banner
+  and its alt text, the phone banner splits the line in two.
   Maxim asked for no extra words: details and per-offer dates stay in the
   app. Above the cards a banner compares a struck-through $600 ("≈ paid apps
   per year") with $0 for Whytap. The figure is an estimate Maxim chose: the

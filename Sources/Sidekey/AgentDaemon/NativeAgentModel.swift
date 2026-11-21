@@ -11,6 +11,8 @@ struct NativeAgentToolResult {
     var image: String? = nil
     var mimeType: String = "image/jpeg"
     var actions: UsefulActionsBlock? = nil
+    /// App-owned line for a confirmed Whytap change ("Drop Smart → model").
+    var change: String? = nil
 }
 
 /// Keeps provider-native assistant items intact within a turn, including

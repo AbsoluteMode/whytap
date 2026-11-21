@@ -3942,6 +3942,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source: { [weak self] in self?.meetingsStore },
             open: { [weak self] id in self?.showMeetingNote(id: id) ?? .unavailable }))
         appControlController = controls
+        // The built-in agent uses this same controller in process: one
+        // allowlist, one write lock. Its user is at this Mac, so meetings
+        // need no harness prompt. WHY:
+        // .project-docs/decisions/2026-11-22-native-agent-app-control.md
+        NativeAgentAppControl.installed = { [controls] request in await controls.handle(request) }
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)

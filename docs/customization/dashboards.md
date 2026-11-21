@@ -106,6 +106,20 @@ The native loader rereads snapshots, so an external collector can keep replacing
 the same file without rebuilding the app. A missing timestamp displays unknown
 freshness; an old timestamp displays stale data.
 
+## Delete a dashboard
+
+In Monitor, Control-click a custom dashboard in the picker (or the heading of
+the open dashboard) and choose **Delete…**. The confirmation's default button
+is Cancel. Confirming removes the board from Monitor on this Mac: its ID is
+recorded in `Monitor/removed-dashboards.json` (`{"removed": ["<id>"]}`) and the
+snapshot files with that ID are removed from `Monitor/dashboards/`. The board
+stays deleted when its collector writes the snapshot again, including after a
+relaunch. Whytap never stops or deletes the collector, its scripts or its
+launchd agent: turn the collector off yourself if it should stop running.
+Server status is built in and cannot be deleted. `install-dashboard` takes the
+ID off the list, so installing the dashboard again brings it back. WHY:
+[decision](../../.project-docs/decisions/2026-11-21-monitor-dashboard-delete.md)
+
 The built-in Server status collector uses separate local `Monitor/servers.json`
 configuration with existing SSH aliases or credential-store references. See
 `Sources/Sidekey/Monitor/MonitorServer.swift` for that contract. Custom collectors

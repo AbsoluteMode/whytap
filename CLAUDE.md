@@ -678,7 +678,15 @@ Monitor inside hover:
   Refresh calls requestRefresh and reuses existing collectors/snapshot rendering.
   Hover launch and the legacy openMonitor callback both request inline .monitor
   with programmatic expansion; neither opens a window. The legacy window class
-  is retained for compatibility only. Historical 2.2.6 Monitor/search proof:
+  is retained for compatibility only. A custom dashboard's picker row and the
+  open board's heading have Delete… in their context menu (Cancel-first alert;
+  Server status has none). It records the ID in Monitor/removed-dashboards.json,
+  removes that ID's snapshot files and returns an open board to the picker; the
+  store hides listed IDs, so a collector rewriting the file cannot bring it back.
+  Collectors, their scripts and servers.json are never touched; install-dashboard
+  lists the ID again. WHY:
+  .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+  Historical 2.2.6 Monitor/search proof:
   2,949 tests, 8 skipped, 0 failures (45.711 s); search-focused 9/0 (3.901 s).
   Source-matched offscreen checks cover 16 Monitor fixtures/20 current PNGs and
   40 search PNGs with no visible/key windows. Synthetic no-op stores avoid real

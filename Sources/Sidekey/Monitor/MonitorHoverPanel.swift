@@ -6,11 +6,34 @@ import SwiftUI
 struct MonitorHoverPanel: View {
     @StateObject private var store: MonitorStore
     @State private var selectedID: String?
+    @State private var deleting = false
     let onBack: () -> Void
+    private let deletionPrompts: MonitorDashboardDeletionPrompts
 
-    init(store: MonitorStore? = nil, onBack: @escaping () -> Void) {
+    init(store: MonitorStore? = nil,
+         deletionPrompts: MonitorDashboardDeletionPrompts = .system,
+         onBack: @escaping () -> Void) {
         self._store = StateObject(wrappedValue: store ?? MonitorStore())
+        self.deletionPrompts = deletionPrompts
         self.onBack = onBack
+    }
+
+    /// Where the panel goes after a delete: an open board that is gone
+    /// returns to the picker; any other selection stays.
+    static func selection(afterDeleting deletedID: String, outcome: MonitorDashboardDeletion.Outcome,
+                          selectedID: String?) -> String? {
+        outcome.removesDashboard && selectedID == deletedID ? nil : selectedID
+    }
+
+    /// WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    private func delete(_ dashboard: MonitorDashboard) {
+        guard !deleting else { return }
+        deleting = true
+        Task { @MainActor in
+            let outcome = await MonitorDashboardDeletion(store: store, prompts: deletionPrompts).delete(dashboard)
+            selectedID = Self.selection(afterDeleting: dashboard.id, outcome: outcome, selectedID: selectedID)
+            deleting = false
+        }
     }
 
     private var selectedDashboard: MonitorDashboard? {
@@ -37,6 +60,12 @@ struct MonitorHoverPanel: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        if let dashboard = selectedDashboard {
+                            Button("Delete…", role: .destructive) { delete(dashboard) }
+                        }
+                    }
                 Group {
                     if selectedID != nil {
                         Button { store.requestRefresh() } label: {
@@ -97,6 +126,9 @@ struct MonitorHoverPanel: View {
                 ForEach(store.dashboards) { dashboard in
                     dashboardButton(id: dashboard.id, title: dashboard.title,
                                     image: dashboard.systemImage, subtitle: dashboard.subtitle)
+                        .contextMenu {
+                            Button("Delete…", role: .destructive) { delete(dashboard) }
+                        }
                 }
             }
             .frame(maxWidth: .infinity)

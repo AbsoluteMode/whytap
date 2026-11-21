@@ -312,8 +312,43 @@ def dashboard_command(args: argparse.Namespace) -> int:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+    if forget_removed_dashboard(directory.parent, snapshot["id"]):
+        print(f"{snapshot['id']} was deleted in Monitor earlier; it is listed again")
     print(f"Installed dashboard {snapshot['id']} for {args.flavor}; open Monitor to view it")
     return 0
+
+
+def forget_removed_dashboard(monitor: Path, dashboard_id: str) -> bool:
+    """Installing a board again takes its ID off Monitor's deleted list.
+
+    WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    """
+    path = monitor / "removed-dashboards.json"
+    if not path.exists():
+        return False
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Refusing an unexpected removed-dashboards.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    removed = document.get("removed") if isinstance(document, dict) else None
+    if not isinstance(removed, list) or not all(isinstance(item, str) for item in removed):
+        raise ValueError("removed-dashboards.json is invalid; fix it before installing")
+    if dashboard_id not in removed:
+        return False
+    data = (json.dumps({"removed": sorted(set(removed) - {dashboard_id})}, indent=2) + "\n").encode("utf-8")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=monitor, prefix=".removed-dashboards-", delete=False) as stream:
+            temporary_path = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:

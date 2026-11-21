@@ -36,30 +36,13 @@ final class HistoryInteractionState {
 
     /// Copies a history card for the island and Toolbox. Callers own clipboard suppression.
     func writeCardToPasteboard(_ card: HistoryStripCard, assetsDirectory: URL) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        switch card {
-        case .agent(let c):
-            pb.setString(c.responseMarkdown, forType: .string)
-        case .drop(let c):
-            pb.setString(c.formattedText, forType: .string)
-        case .clipboard(let c):
-            switch c.payload {
-            case .text(let s):
-                pb.setString(s, forType: .string)
-            case .image(let img):
-                let url = img.sidecarURL(in: assetsDirectory)
-                if let data = try? Data(contentsOf: url),
-                   let image = NSImage(data: data) {
-                    pb.writeObjects([image])
-                } else if let thumbImage = NSImage(data: img.thumbnailData) {
-                    // Sidecar evicted — fall back to the thumbnail
-                    // bytes so the user still gets something pastable.
-                    pb.writeObjects([thumbImage])
-                }
-            case .fileURLs(let urls):
-                pb.writeObjects(urls as [NSURL])
-            }
+        for group in HistoryPastePlan.groups(for: [card]) {
+            writeGroupToPasteboard(group, assetsDirectory: assetsDirectory)
         }
+    }
+
+    /// Puts one paste of marked History rows on the general pasteboard.
+    func writeGroupToPasteboard(_ group: HistoryPasteGroup, assetsDirectory: URL) {
+        HistoryPasteboardWriter.write(group, to: .general, assetsDirectory: assetsDirectory)
     }
 }

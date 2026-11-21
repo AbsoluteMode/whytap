@@ -32,6 +32,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-21 the user asked for one uniform approach where every Monitor screen, Server status included, can be deleted, and chose the shared deleted list over moving server polling into a collector.
     confirmed_at: 2026-11-21
+  - type: user-confirmed
+    reference: On 2026-11-21 the user reported the delete confirmation alert could not be clicked under the island and asked for only the question "are you sure you want to delete the dashboard".
+    confirmed_at: 2026-11-21
 related: []
 ---
 
@@ -58,8 +61,12 @@ minutes), which Whytap neither installs nor owns.
   own hover, press and focus states, all shown only while it is enabled: a
   delete in progress disables it, and a disabled × under the pointer looks
   like any disabled ×.
-- Delete asks first: Cancel is the first button and takes Escape, Delete has
-  no key equivalent (the meeting and clipboard pattern).
+- Delete asks first, inside the Monitor panel: a card over the panel with
+  only the question ("Are you sure you want to delete the “X” dashboard?"),
+  Cancel first (Escape) and a red Delete without a key. A system alert opened
+  under the island's panel and could not be clicked (the user's report on
+  2026-11-21), and the user asked for just the question. Closing the panel
+  answers Cancel; a failed delete shows its message in the same card.
 - Confirming records the dashboard ID in `Monitor/removed-dashboards.json`
   (`{"removed": [...]}`, atomic, mode 0600) and then removes every snapshot
   file in `dashboards/` that decodes to that ID. Other dashboards, collectors,
@@ -97,7 +104,7 @@ minutes), which Whytap neither installs nor owns.
   neither loses or undoes the other's change. Whytap waits at most 2 s, the
   installer 5 s; a busy lock fails without changes.
 - An unreadable list shows every board with a notice and makes Delete fail
-  with an alert instead of overwriting the list.
+  with a message in the panel instead of overwriting the list.
 
 ## Why
 
@@ -115,8 +122,10 @@ minutes), which Whytap neither installs nor owns.
   rewrites it; deleting the open board returns to the picker while Cancel and
   failures keep it open; a second surface gets `alreadyGone`; duplicate copies
   are all removed; an unreadable list fails without deleting; Server status and
-  invalid IDs are refused; the list file is 0600 and round-trips; the alert
-  orders Cancel first with Delete keyless.
+  invalid IDs are refused; the list file is 0600 and round-trips. The in-panel
+  question: its exact text; Cancel and Delete answers; a new question or
+  closing the panel cancels an open one; a failed delete shows the failure
+  card; button hover/press/focus only while enabled; a render of the card.
 - `scripts/tests/test_monitor_dashboard_install.py` (10 tests): an unreadable
   list keeps the previous snapshot on `--replace` and creates nothing on a
   first install (a retry after fixing it installs); an unwritable snapshots
@@ -149,7 +158,7 @@ minutes), which Whytap neither installs nor owns.
   other surface (a second store) still connecting. All three reproducers are
   now tests and pass, plus a check that a store over another folder (beta) is
   not affected.
-- Not tested: the real × and alert over the live island panel.
+- Not tested: the real × and the in-panel question over the live island.
 
 ## Rejected
 
@@ -159,6 +168,8 @@ minutes), which Whytap neither installs nor owns.
   between the check and the rename.
 - Stopping or deleting the collector: not Whytap's to touch.
 - Delete… in a context menu: the island has no right-click interactions.
+- A system alert (NSAlert, as for meetings and clipboard): it opened under
+  the island's panel and could not be clicked.
 - Keeping Server status undeletable as built in: the user wants one rule for
   every board.
 - Moving the server SSH polling into an external collector that writes a

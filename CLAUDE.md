@@ -683,7 +683,9 @@ Monitor inside hover:
   (no context menu: the island has no right-click actions; rows have no chevron
   and the scroller sits in the right margin beside the cards; row and × show
   hover/press/focus only while enabled). The × asks first
-  (Cancel-first alert). One rule for every board: it records the ID in
+  inside the panel (a card with only the question, Cancel first, red Delete;
+  a system alert opened under the island and could not be clicked). One rule
+  for every board: it records the ID in
   Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.

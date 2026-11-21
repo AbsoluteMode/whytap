@@ -99,7 +99,9 @@ the page is about.
    and switch, or "Add a model" when its model does not run. When Claude Code
    or Codex is installed, a Coding agents row connects them to Whytap with the
    same client setup as Case -> Connect (`CaseClientSetup.connect`: the
-   `whytap` command and the agent's MCP entry), without a Case registration.
+   `whytap` command and the agent's one `whytap` MCP entry, `<helper> mcp`,
+   which retires the older Case-only `case` entry), without a Case
+   registration.
    Done closes the window. Calendar is not offered.
 
 Every page can be skipped. Set up later on the speech page also passes over the

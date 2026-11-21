@@ -518,6 +518,62 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(connected, [.claudeCode, .codex])
     }
 
+    /// The page's Connect through the real `CaseClientSetup` and host
+    /// connectors: Claude Code and Codex get the one `whytap` server
+    /// (`<helper> mcp`, app tools and Case key names), and our older Case-only
+    /// `case` entry is retired, never written. No configured value reaches a
+    /// command line.
+    // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
+    func testCodingAgentsConnectWritesTheOneWhytapServer() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-connect-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let binDir = root.appendingPathComponent("bin")
+        let helper = root.appendingPathComponent("Whytap.app/Contents/Helpers/whytap")
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let legacyCase = #"{"command":"\#(helper.path)","args":["case","mcp"]}"#
+        try Data(#"{"mcpServers":{"case":\#(legacyCase)}}"#.utf8).write(to: home.appendingPathComponent(".claude.json"))
+
+        let claudeRunner = FakeCommandRunner()
+        let codexRunner = FakeCommandRunner()
+        codexRunner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper.path, args: ["case", "mcp"])
+        let setup = CaseClientSetup(
+            helperURL: helper, binDir: binDir, flavorName: BuildFlavor.prod.rawValue,
+            connectors: [
+                .claudeCode: ClaudeCodeCaseConnector(home: home, socketPath: root.appendingPathComponent("broker.sock").path,
+                                                     runner: claudeRunner,
+                                                     locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }),
+                .codex: CodexCaseConnector(home: home, runner: codexRunner, reader: codexRunner,
+                                           locate: { URL(fileURLWithPath: "/usr/local/bin/codex") }),
+            ],
+            builtInAgentAvailable: { true })
+        let tools = OnboardingCodingTools(detect: { await setup.installed(among: OnboardingCodingTools.offered) },
+                                          connect: { await setup.connect($0.identity) })
+
+        await tools.refreshIfNeeded()
+        XCTAssertEqual(tools.installed, [.claudeCode, .codex])
+        tools.connect()
+        try await eventually { tools.state != .connecting && tools.state != .idle }
+        XCTAssertEqual(tools.state, .connected)
+
+        XCTAssertEqual(claudeRunner.calls.map(\.arguments), [
+            ["mcp", "add", "-s", "user", "whytap", "--", helper.path, "mcp"],
+            ["mcp", "remove", "-s", "user", "case"],
+        ])
+        XCTAssertEqual(codexRunner.calls.map(\.arguments), [
+            ["mcp", "add", "whytap", "--", helper.path, "mcp"],
+            ["mcp", "remove", "case"],
+        ])
+        let added = (claudeRunner.calls + codexRunner.calls).filter { $0.arguments.starts(with: ["mcp", "add"]) }
+        XCTAssertFalse(added.contains { $0.arguments.contains("case") }, "Never a Case-only server")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: binDir.appendingPathComponent("whytap").path),
+                       helper.path, "The whytap command points at the bundled helper")
+    }
+
     func testACodingAgentThatCouldNotBeSetUpSaysWhy() async throws {
         let tools = OnboardingCodingTools(detect: { [.claudeCode] },
                                           connect: { _ in CaseClientSetupReport(problems: ["Claude Code: setup failed"]) })

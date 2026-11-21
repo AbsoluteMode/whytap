@@ -9,7 +9,9 @@ enum OnboardingPage: String, CaseIterable, Equatable {
     case permissions
     /// Hold the Drop shortcut and dictate into a real field.
     case tryDrop
-    /// Google, Meetings and Agent: one switch each, then Done.
+    /// Shortcuts for any tool and the tools hovering the island shows.
+    case customize
+    /// Google, Meetings, Agent and the coding-agent plugin, then Done.
     case features
 }
 
@@ -28,7 +30,7 @@ enum OnboardingFlow {
         var pages: [OnboardingPage] = []
         if !conditions.dropSpeechReady { pages.append(.speech) }
         if !conditions.permissionsReady { pages.append(.permissions) }
-        pages.append(contentsOf: [.tryDrop, .features])
+        pages.append(contentsOf: [.tryDrop, .customize, .features])
         return pages
     }
 

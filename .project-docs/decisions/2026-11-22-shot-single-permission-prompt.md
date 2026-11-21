@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Screenshots/ScreenshotPermissionPromptTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-19-permission-request-before-settings.md, 2026-10-26-first-launch-permissions.md, 2026-10-20-screenshot-toolbar.md]
+related: [2026-11-19-permission-request-before-settings.md, 2026-10-26-first-launch-permissions.md, 2026-10-20-screenshot-toolbar.md, 2026-11-21-first-launch-onboarding.md]
 ---
 
 # Context

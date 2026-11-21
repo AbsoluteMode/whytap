@@ -29,9 +29,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.hidesOnDeactivate = false
         window.level = .normal
         window.collectionBehavior = [.managed, .fullScreenNone]
+        // The onboarding is dark in every appearance, like the island.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.047, green: 0.047, blue: 0.063, alpha: 1)
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.contentViewController = NSHostingController(rootView: OnboardingView(model: model))
+        let hosting = NSHostingController(rootView: OnboardingView(model: model))
+        // The page fills the whole window, title bar included.
+        hosting.sizingOptions = []
+        window.contentViewController = hosting
         window.setContentSize(size)
         super.init(window: window)
         window.delegate = self

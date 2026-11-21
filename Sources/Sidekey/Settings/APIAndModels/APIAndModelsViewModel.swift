@@ -748,7 +748,7 @@ final class APIAndModelsViewModel: ObservableObject {
         return account.kind.displayName
     }
 
-    private static func builtInAccount(for kind: AIProviderKind) -> ProviderAccount? {
+    static func builtInAccount(for kind: AIProviderKind) -> ProviderAccount? {
         switch kind {
         case .soniox: return .soniox
         case .deepgram: return .deepgram

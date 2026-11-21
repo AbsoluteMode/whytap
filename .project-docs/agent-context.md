@@ -1208,29 +1208,43 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
 OnboardingWindowController, accessory app, no Dock icon) in place of the former
-Settings -> Permissions screen: up to four pages, each hidden when already done
-and each skippable, closing = Done. 1 Speech: On this Mac card ("Download and use
-for Drop", about 470 MB, download continues in the background; when it lands
-OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that cannot
-run, nothing else), "I have an API key" (Soniox/Deepgram/ElevenLabs, saving sets
-that provider for Drop), "Restore from another Mac"; Intel opens on the key form;
-hidden when Drop's speech route runs. 2 Two permissions: Microphone and Keyboard
-control on PermissionsSettingsViewModel, done at dropHotkeyStatus == .ready
-(DropShortcutStatusSection when both are granted but the shortcut is not
-installed); hidden when ready. 3 Hold Space and speak: the user's own shortcut,
-a native field, "That's Drop" only on DropLocalEditor's
-sidekeyDropInsertedIntoLocalEditor for that field; while the onboarding is
-visible a Drop press with no route says so on the page (no Settings over it)
-and one with a missing permission returns to page 2 (no repair window).
-4 Google search / Meeting Notes / Agent: switch and video each, "Add a model"
-when the feature's model does not run; Done. No Calendar. Screen Recording,
-System Audio Recording, Input Monitoring, Automation and Calendar are asked at
-first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
-or the former onboarding's key = ran before, never shown on update;
-sidekey.onboarding.pending.v1 brings it back after a quit until Done; neither key
-is in backups or sync. A first Drop press with the microphone never asked asks
-it and records nothing (DropHotkeyRecovery.startGate); Now Playing's Automation
-prompt waits while the onboarding is visible. To see it again on a Mac:
+Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
+onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
+word, a short left pane with the page's controls, a stage on the right), up to
+five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
+Lang setting; searchable list, English or native name, arrows and Return), On
+this Mac card ("Download and use for Drop", about 470 MB; when the download
+lands OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that
+cannot run, nothing else; hidden on Intel), and one tile per keyed provider
+(OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
+Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
+badge; a click opens the key field (the Settings save path) and Get offer, a
+speech key also sets that provider for Drop; "Restore from another Mac"; the
+stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
+and Keyboard control on PermissionsSettingsViewModel, done at
+dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
+the shortcut is not installed), plus an optional Screen Recording row for Shot
+(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
+never holds Continue); hidden when ready.
+3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
+DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
+onboarding is visible a Drop press with no route says so on the page (no
+Settings over it) and one with a missing permission returns to page 2.
+4 Make it yours: tool shortcuts and hover tools, each with a bundled clip
+(Resources/FeatureVideos/onboarding-hotkeys.mp4, onboarding-hover.mp4) and Open
+for Settings -> Hotkeys or Toolbox. 5 Turn on more: Google search / Meeting
+Notes / Agent with switch and clip, "Add a model" when the feature's model does
+not run, and Coding agents (OnboardingCodingTools: Claude Code and Codex when
+installed; Connect runs CaseClientSetup.connect, the Case -> Connect setup,
+without a Case registration); Done. No Calendar. System Audio Recording, Input
+Monitoring, Automation and Calendar are asked at first use. OnboardingLaunch:
+firstLaunchPresented (any launch since 2026-10-26) or the former onboarding's
+key = ran before, never shown on update; sidekey.onboarding.pending.v1 brings
+it back after a quit until Done; neither key is in backups or sync. A first
+Drop press with the microphone never asked asks it and records nothing
+(DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
+onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
 and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in

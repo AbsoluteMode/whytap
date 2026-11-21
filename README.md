@@ -161,19 +161,14 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 
 <p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
 
-## What it replaces
+## You may also like
 
-The paid Mac apps Whytap stands in for, at their individual prices on the official pricing pages, checked November 21, 2026:
+<p align="center"><a href="https://github.com/AbsoluteMode/session-recall"><b>Session Recall</b></a><br>Shared memory for Claude Code, Codex and Cursor: find an old decision by meaning across all your agents' chats, with links back to the original turns.</p>
 
-| Paid app | What it does | Price | In Whytap |
-|---|---|---|---|
-| [Wispr Flow](https://wisprflow.ai/pricing) Pro | Voice dictation in any app | $144 / yr ($15 / mo billed monthly) | **Drop** |
-| [Granola](https://www.granola.ai/pricing) Business | AI meeting notes without a call bot | $14 / mo ($168 / yr) | **Meeting notes** |
-| [Raycast](https://www.raycast.com/pricing) Pro | Quick AI from a hotkey | $96 / yr ($10 / mo billed monthly) | **Agent** |
-| [CleanShot X](https://cleanshot.com/pricing) | Screenshot editor with blur | $35 once, then $19 / yr for updates | **Shot** |
-| [Paste](https://pasteapp.io/pricing) | Clipboard history | $29.99 / yr ($3.99 / mo billed monthly) | **History** |
-| [Vivid](https://www.getvivid.app/) | Extra XDR / HDR brightness | €10 once | **Display Extra** |
+<p align="center"><a href="https://github.com/AbsoluteMode/flora"><b>flora</b></a><br>Workflow contracts for coding harnesses: every step says what proves it is done, and an independent verifier checks that before the next step starts.</p>
 
-Together that is about **$485 a year** on annual plans, or about **$560** billed monthly. Whytap is **$0**: you pay providers directly for what you use, or nothing for dictation on this Mac.
+<p align="center"><a href="https://github.com/AbsoluteMode/harness-link"><b>Harness Link</b></a><br>One conversation between Codex, Claude Code and Antigravity, plus addressed messages to sessions that are already running.</p>
+
+<p align="center"><b>Orchestrator</b> <sup>soon</sup><br>A Claude Code plugin that puts ten chats into one window: it keeps the task list, starts the sessions and writes to you only when it needs you, when work is ready to check or when the plan changes.</p>
 
 <p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

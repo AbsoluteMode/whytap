@@ -19,17 +19,6 @@ final class IslandUpdateUserDriverTests: XCTestCase {
         XCTAssertEqual(replied, .install)
     }
 
-    func test_updateFound_skip_invokes_reply_skip() {
-        let driver = IslandUpdateUserDriver(onStage: { _ in })
-
-        var replied: SPUUserUpdateChoice?
-        driver.handleUpdateFound(reply: { replied = $0 })
-
-        XCTAssertNil(replied, "nothing fires until the user acts")
-        driver.invokeSkip()
-        XCTAssertEqual(replied, .skip, "✕ skips THIS version — Sparkle records it and stops re-prompting for the same build")
-    }
-
     func test_download_progress_emits_increasing_fraction() {
         var emitted: [IslandUpdateUserDriver.DriverStage] = []
         let driver = IslandUpdateUserDriver(onStage: { emitted.append($0) })
@@ -118,7 +107,6 @@ final class IslandUpdateUserDriverTests: XCTestCase {
         driver.handleUpdateFound(reply: { _ in downloads += 1 })
         driver.invokeDownload()
         driver.invokeDownload()
-        driver.invokeSkip()
         driver.handleReadyToInstall(reply: { _ in installs += 1 })
         driver.invokeInstall()
         driver.invokeInstall()

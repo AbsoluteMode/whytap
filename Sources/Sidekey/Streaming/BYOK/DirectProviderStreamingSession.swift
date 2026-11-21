@@ -461,7 +461,7 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
         appendingLiveTranscriptSegment(partial, to: committed, join: join)
     }
 
-    private static func appendingLiveTranscriptSegment(
+    static func appendingLiveTranscriptSegment(
         _ segment: String, to base: String, join: BYOKTranscriptJoin
     ) -> String {
         guard !segment.isEmpty else { return base }

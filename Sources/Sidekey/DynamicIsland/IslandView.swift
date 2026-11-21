@@ -2028,7 +2028,7 @@ private struct IslandWrapRow: View {
                         stage: pillStage,
                         hoverExpanded: showsUpdateActions,
                         onDownload: { updateAvailable.startDownload() },
-                        onSkip: { updateAvailable.skip() },
+                        onSkip: { updateAvailable.hide() },
                         onInstall: { updateAvailable.install() },
                         onLater: { updateAvailable.dismiss() },
                         restartDeferralReason: updateAvailable.restartDeferralReason,

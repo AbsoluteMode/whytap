@@ -43,6 +43,9 @@ struct MonitorServerCollector {
         arguments += ["-T", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5",
                       "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=1"]
         arguments += authentication + [target, Self.remoteReadCommand]
+        // A credential lookup can take seconds; a poll cancelled meanwhile
+        // (Server status deleted) must not go on to connect.
+        try Task.checkCancellation()
         let data = try await runner.run(executable: executable, arguments: arguments, environment: environment)
         try Task.checkCancellation()
         let metrics = try JSONDecoder().decode(MonitorServerMetrics.self, from: data)

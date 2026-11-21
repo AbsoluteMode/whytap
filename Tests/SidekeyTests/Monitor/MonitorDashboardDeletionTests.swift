@@ -38,7 +38,7 @@ final class MonitorDashboardDeletionTests: XCTestCase {
     private func prompts(answer: Bool, failures: Counter? = nil,
                          asked: ((String) -> Void)? = nil) -> MonitorDashboardDeletionPrompts {
         MonitorDashboardDeletionPrompts(
-            confirm: { title in asked?(title); return answer },
+            confirm: { _, title in asked?(title); return answer },
             reportFailure: { failures?.value += 1 })
     }
 
@@ -168,11 +168,204 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: MonitorRemovedDashboards.url(root: root), encoding: .utf8), "not json")
     }
 
-    func testServerStatusAndInvalidIDsCannotBeDeleted() {
+    func testInvalidIDsCannotBeDeleted() {
         let store = makeStore()
-        XCTAssertThrowsError(try store.deleteDashboard(id: "server-status"))
         XCTAssertThrowsError(try store.deleteDashboard(id: "../servers"))
+        XCTAssertThrowsError(try store.deleteDashboard(id: ""))
         XCTAssertFalse(FileManager.default.fileExists(atPath: MonitorRemovedDashboards.url(root: root).path))
+    }
+
+    // MARK: - Server status, deleted like every other board
+
+    private final class SSHCalls { var servers: [String] = [] }
+
+    private func writeServers() throws -> Data {
+        let json = #"{"refreshSeconds":15,"servers":[{"id":"sferyx","name":"Sferyx server","group":"Sferyx","sshTarget":"sferyx"}]}"#
+        let data = Data(json.utf8)
+        try data.write(to: root.appendingPathComponent("servers.json"))
+        return data
+    }
+
+    private func serverStore(_ calls: SSHCalls) -> MonitorStore {
+        let store = MonitorStore(root: root, collector: { server in
+            await MainActor.run { calls.servers.append(server.id) }
+            throw CancellationError()
+        })
+        store.reloadFiles()
+        return store
+    }
+
+    func testDeletingServerStatusStopsConnectingAndKeepsServersJSON() async throws {
+        let servers = try writeServers()
+        try writeDashboard("openai-usage", title: "OpenAI")
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"], "listed Server status polls its servers")
+        XCTAssertFalse(store.serverStatusRemoved)
+
+        var askedTitle: String?
+        let outcome = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true, asked: { askedTitle = $0 }))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertEqual(askedTitle, "Server status")
+        XCTAssertTrue(store.serverStatusRemoved)
+        XCTAssertTrue(store.readings.isEmpty)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"], "no SSH after delete")
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("servers.json")), servers)
+        XCTAssertEqual(store.dashboards.map(\.id), ["openai-usage"], "other boards stay")
+        XCTAssertEqual(try MonitorRemovedDashboards.load(root: root).ids, ["server-status"])
+
+        // Relaunch: still deleted, still no SSH.
+        let relaunched = serverStore(calls)
+        XCTAssertTrue(relaunched.serverStatusRemoved)
+        await relaunched.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"])
+
+        // A second surface that still listed it gets alreadyGone.
+        let second = await MonitorDashboardDeletion(store: relaunched, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(second, .alreadyGone)
+    }
+
+    func testCancelKeepsServerStatus() async throws {
+        _ = try writeServers()
+        let store = serverStore(SSHCalls())
+        let outcome = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: false))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertFalse(store.serverStatusRemoved)
+        XCTAssertEqual(store.readings.map(\.server.id), ["sferyx"])
+    }
+
+    func testRestoredServerStatusConnectsAgain() async throws {
+        _ = try writeServers()
+        try MonitorRemovedDashboards(ids: ["server-status", "openai-usage"]).save(root: root)
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, [])
+
+        // customize.py restore-dashboard server-status takes the ID off the list.
+        try MonitorRemovedDashboards(ids: ["openai-usage"]).save(root: root)
+        store.reloadFiles()
+        XCTAssertFalse(store.serverStatusRemoved)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"])
+    }
+
+    /// The builder's reproducer (queue ticket 315): a poll paused before SSH,
+    /// as during a credential lookup, must not connect after Delete.
+    func testDeletionCancelsAPollStillPreparingItsConnection() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "poll reached authentication before SSH")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = Counter()
+        let store = MonitorStore(root: root) { _ in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.value += 1 }
+            throw CancellationError()
+        }
+        store.reloadFiles()
+        let poll = Task { await store.refreshServers() }
+        await fulfillment(of: [began], timeout: 2)
+
+        let outcome = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(outcome, .deleted)
+        release.continuation.yield(())
+        release.continuation.finish()
+        await poll.value
+
+        XCTAssertEqual(contacted.value, 0, "confirmed deletion must stop a poll still preparing its connection")
+        XCTAssertTrue(store.readings.isEmpty)
+    }
+
+    /// Builder's reproducer (queue ticket 317): island and Toolbox have their
+    /// own stores; Delete on one stops the other's poll before SSH as well.
+    func testDeletionOnOneSurfaceStopsAnotherSurfacePreparingItsConnection() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "second surface reached authentication")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = Counter()
+        let island = serverStore(SSHCalls())
+        let toolbox = MonitorStore(root: root) { _ in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.value += 1 }
+            throw CancellationError()
+        }
+        toolbox.start()
+        defer { toolbox.stop() }
+        await fulfillment(of: [began], timeout: 2)
+
+        let outcome = await MonitorDashboardDeletion(store: island, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertTrue(toolbox.serverStatusRemoved, "the other surface learns at once, not on its next loop")
+
+        release.continuation.yield(())
+        release.continuation.finish()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(contacted.value, 0, "a confirmed delete must stop another live surface from starting SSH")
+    }
+
+    func testDeletionNoticeReachesOnlyStoresOfTheSameFolder() async throws {
+        _ = try writeServers()
+        let otherRoot = root.appendingPathComponent("other-flavor", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherRoot, withIntermediateDirectories: true)
+        try Data(contentsOf: root.appendingPathComponent("servers.json"))
+            .write(to: otherRoot.appendingPathComponent("servers.json"))
+        let other = MonitorStore(root: otherRoot, collector: { _ in throw CancellationError() })
+        other.reloadFiles()
+        let store = serverStore(SSHCalls())
+
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+
+        XCTAssertTrue(store.serverStatusRemoved)
+        XCTAssertFalse(other.serverStatusRemoved)
+        XCTAssertEqual(other.readings.map(\.server.id), ["sferyx"])
+    }
+
+    /// Builder's reproducer: an unreadable list may hide a deletion, so it
+    /// pauses polling, in the running store and after relaunch.
+    func testUnreadableListPausesServerPollingUntilItCanBeRead() async throws {
+        _ = try writeServers()
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        try Data("invalid".utf8).write(to: MonitorRemovedDashboards.url(root: root), options: .atomic)
+
+        store.reloadFiles()
+        XCTAssertNotNil(store.dashboardError)
+        XCTAssertNotNil(store.serverError, "Server status says it is paused")
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, [])
+
+        let relaunched = serverStore(calls)
+        XCTAssertNotNil(relaunched.dashboardError)
+        XCTAssertNotNil(relaunched.serverError)
+        await relaunched.refreshServers()
+        XCTAssertEqual(calls.servers, [], "a fresh store does not poll while removal state is unknown")
+
+        // Fixed list without server-status: polling resumes.
+        try MonitorRemovedDashboards().save(root: root)
+        relaunched.reloadFiles()
+        XCTAssertNil(relaunched.serverError)
+        await relaunched.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"])
+    }
+
+    func testDeletingOpenServerStatusReturnsToThePicker() {
+        XCTAssertNil(MonitorHoverPanel.selection(afterDeleting: MonitorStore.serverStatusID, outcome: .deleted,
+                                                 selectedID: MonitorStore.serverStatusID))
     }
 
     func testRemovedListIsPrivateAndRoundTrips() throws {
@@ -235,7 +428,8 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertFalse(source.contains(".contextMenu"))
         XCTAssertFalse(source.contains("chevron.right"))
         XCTAssertTrue(source.contains("MonitorDashboardDeleteButton(title:"))
-        XCTAssertTrue(source.contains("onDelete: nil"), "Server status gets no ×")
+        XCTAssertFalse(source.contains("onDelete: nil"), "every board, Server status included, has an ×")
+        XCTAssertTrue(source.contains("delete(id: MonitorStore.serverStatusID"))
         XCTAssertGreaterThan(MonitorHoverPanel.scrollerGutter, 0)
     }
 
@@ -333,7 +527,7 @@ final class MonitorDashboardDeletionTests: XCTestCase {
     // MARK: - Confirmation
 
     func testConfirmationPutsCancelFirstAndDeleteHasNoKey() {
-        let alert = MonitorDashboardDeletionAlerts.makeConfirmation(title: "Anthropic")
+        let alert = MonitorDashboardDeletionAlerts.makeConfirmation(id: "anthropic-budget", title: "Anthropic")
 
         XCTAssertEqual(alert.buttons.map(\.title), ["Cancel", "Delete"])
         XCTAssertTrue(alert.buttons[1].hasDestructiveAction)
@@ -341,5 +535,11 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(alert.buttons[1].keyEquivalent, "")
         XCTAssertTrue(alert.messageText.contains("Anthropic"))
         XCTAssertTrue(alert.informativeText.contains("collector"))
+
+        let servers = MonitorDashboardDeletionAlerts.makeConfirmation(id: "server-status", title: "Server status")
+        XCTAssertEqual(servers.buttons.map(\.title), ["Cancel", "Delete"])
+        XCTAssertTrue(servers.messageText.contains("Server status"))
+        XCTAssertTrue(servers.informativeText.contains("servers.json is not touched"))
+        XCTAssertFalse(servers.informativeText.contains("collector"))
     }
 }

@@ -20,10 +20,6 @@
   <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 
-<p align="center">
-  <sub>New here? <a href="docs/install.md#first-dictation">Your first dictation in two minutes →</a></sub>
-</p>
-
 </div>
 
 ## Tools
@@ -163,6 +159,16 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
 
-<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+
+## You may also like
+
+<p align="center"><a href="https://github.com/AbsoluteMode/session-recall"><b>Session Recall</b></a><br>Shared semantic memory for Claude Code, Codex, Cursor, and Antigravity: find an old decision by meaning across all your agents' chats, with links back to the original turns.</p>
+
+<p align="center"><a href="https://github.com/AbsoluteMode/flora"><b>flora</b></a><br>Workflow contracts for coding harnesses: every step says what proves it is done, and an independent verifier checks that before the next step starts.</p>
+
+<p align="center"><a href="https://github.com/AbsoluteMode/harness-link"><b>Harness Link</b></a><br>Connects Claude Code, Codex and Antigravity (Gemini) sessions: shared rooms for one conversation between them, addressed messages to sessions that are already running, and persistent Claude consultations.</p>
+
+<p align="center"><b>Orchestrator</b> <sup>soon</sup><br>A Claude Code plugin that puts ten chats into one window: it keeps the task list, starts the sessions and writes to you only when it needs you, when work is ready to check or when the plan changes.</p>
 
 <p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

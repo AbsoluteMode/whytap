@@ -39,6 +39,50 @@ launch checks.
 
 Requirements: macOS 14.2 or newer, on Apple Silicon or Intel.
 
+## Verify your download
+
+Optional: check that the download is Whytap's notarized build and see which
+source commit it came from. Whytap's Apple Team ID is **`UVBKCN5PPV`**. Open
+Terminal and go to the folder with the download first, for example
+`cd Downloads`.
+
+1. Gatekeeper's verdict on the disk image, before opening it:
+
+   ```bash
+   spctl -a -vv -t open --context context:primary-signature Whytap-latest.dmg
+   ```
+
+   Expect `accepted`, `source=Notarized Developer ID` and an `origin` line
+   ending in `(UVBKCN5PPV)`.
+2. The installed app's identity and verdict:
+
+   ```bash
+   codesign -dv --verbose=2 /Applications/Whytap.app 2>&1 | grep -E '^(Identifier|TeamIdentifier)='
+   spctl -a -vv /Applications/Whytap.app
+   ```
+
+   Expect `Identifier=com.rootwise.sidekey`, `TeamIdentifier=UVBKCN5PPV`,
+   `accepted` and `source=Notarized Developer ID`.
+3. The source it was built from: newer releases also attach
+   `Whytap-latest.dmg.manifest.json`, written when the DMG was built. Compare
+   its `archive_sha256` with
+
+   ```bash
+   shasum -a 256 Whytap-latest.dmg
+   ```
+
+   `source_revision` is the commit the release was built from
+   (`https://github.com/AbsoluteMode/whytap/commit/<source_revision>`), and
+   `code_signing` and `notarization` should read `team:UVBKCN5PPV` and
+   `notarized`. The manifest's `archive` field keeps the versioned build name
+   (for example `Whytap-2.2.26-build1500.dmg`); it is the same file as
+   `Whytap-latest.dmg`. Releases published before the manifest was attached
+   have only the DMG and `appcast.xml`.
+
+Sparkle checks each in-app update separately with Whytap's Ed25519 key before
+installing it. A build you made yourself from source is ad-hoc or locally
+signed and does not pass these checks; that is expected.
+
 ## Install with Homebrew
 
 If you use [Homebrew](https://brew.sh), one command installs the same signed and

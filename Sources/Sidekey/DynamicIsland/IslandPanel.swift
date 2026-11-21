@@ -1032,7 +1032,7 @@ final class IslandPanel: NSPanel {
         // NSView overlay — sees it. `sendEvent` is the one layer that always
         // runs (live-traced), so the window intercepts the click
         // geometrically against the ✕ hotspot and dismisses directly.
-        // See docs/troubleshooting.md ("Island answer ✕ does nothing").
+        // See docs/bugs/2026-09-04-island-answer-close-first-mouse.md.
         if event.type == .leftMouseDown,
            let host, host.agentActive, host.agentAnswerSize != .zero {
             let zones = IslandAgentHitZones(

@@ -16,7 +16,7 @@ enum IslandHoverToolSearch {
         return HoverTool.allCases.enumerated().compactMap { index, tool -> (HoverTool, Int, Int)? in
             let info = HoverToolRegistry.info(for: tool)
             let title = normalized(info.title)
-            let aliases = normalized(aliases(for: tool))
+            let aliases = normalized(aliases(for: tool) + (tool == .screenshot ? " " + copyTextAliases : ""))
             let searchable = title + " " + aliases + " " + normalized(info.description)
             guard terms.allSatisfy({ searchable.contains($0) }) else { return nil }
             let rank: Int
@@ -29,6 +29,28 @@ enum IslandHoverToolSearch {
         }
         .sorted { ($0.1, $0.2) < ($1.1, $1.2) }
         .map(\.0)
+    }
+
+    /// Copy text is a command inside Shot's editor, not a tool of its own: it is
+    /// found through Shot, and a query that only the OCR words explain labels
+    /// the Shot result as Copy text so the user knows where to click.
+    // WHY: .project-docs/decisions/2026-11-22-shot-hover-hints.md
+    static let copyTextAliases = "copy text from screen ocr recognize recognition extract скопировать скопируй копировать текст текста с экрана распознать распознай распознавание"
+
+    static func resultLabel(for tool: HoverTool, query: String) -> (title: String, description: String) {
+        let info = HoverToolRegistry.info(for: tool)
+        guard tool == .screenshot, isCopyTextQuery(query) else { return (info.title, info.description) }
+        return ("\(info.title) — Copy text", "Select an area, then click Copy text (OCR)")
+    }
+
+    static func isCopyTextQuery(_ query: String) -> Bool {
+        let terms = tokens(query)
+        guard !terms.isEmpty else { return false }
+        let info = HoverToolRegistry.info(for: .screenshot)
+        let shot = normalized(info.title + " " + aliases(for: .screenshot) + " " + info.description)
+        let copyText = normalized(copyTextAliases)
+        return terms.allSatisfy { shot.contains($0) || copyText.contains($0) }
+            && terms.contains { !shot.contains($0) && copyText.contains($0) }
     }
 
     static func nextSelection(current: Int, direction: Int, count: Int) -> Int? {

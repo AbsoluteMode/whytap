@@ -30,8 +30,19 @@ The main toolbar exposes Arrow, Shape, Pen, Text, **Blur**, Numbered steps,
 menu or separate Select/crop control. Initial region selection is still a drag;
 Highlighter, Spotlight, Pin above windows and Output size are removed.
 Copy & exit shows Return in a separate centered keycap within the same button.
-Blur is text-only; Download is the downward arrow with a tooltip. On narrower
+Blur is text-only; Download is the downward arrow. On narrower
 displays the toolbar wraps onto more rows.
+
+Hover over any toolbar button or tool setting to see what it does and its key,
+for example **Copy text — recognize the text in the selection, copy it and
+close (OCR on this Mac)**. The first hint appears after about half a second;
+moving to the next button shows its hint at once. A click, a key press or
+leaving the button hides it. The same text is the control's VoiceOver help.
+
+Copy text can also be found from the island: type **OCR**, **распознать**,
+**copy text**, **recognize text** or **text from screen** in **Search all
+tools**. The result reads **Shot — Copy text**: it opens Shot; select an area,
+then click Copy text.
 
 Hold Shift while drawing with Pen to draw one straight line from the point
 where the drag started. It snaps to the nearest 45 degrees (horizontal,

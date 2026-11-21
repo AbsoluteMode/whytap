@@ -1,82 +1,14 @@
 import Foundation
 
-/// Cuts committed provider text into whole phrases for translation. Partials
-/// are shown separately (the live original row) and are never billed.
-///
-/// A phrase ends at a sentence end inside the text (at once), a sentence end at
-/// the tail (after a short settle), a pause in the provider's finals, or, for a
-/// long phrase without punctuation, at its last clause mark or word boundary.
-/// It never cuts inside a word: a text that is still growing keeps its last
-/// word until a space, a sentence end or a pause shows the word is complete.
-// WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-struct SubtitleSegmenter {
-    /// Finals that stop for this long close the phrase (a speaker pause).
-    static let pause: TimeInterval = 0.6
-    /// A sentence end at the tail waits this long for the next word.
-    static let sentenceSettle: TimeInterval = 0.15
-    /// A phrase without punctuation is cut at its last clause mark or word
-    /// boundary once it is this long (characters) or this old (seconds).
-    static let longPhraseCharacters = 60
-    static let longPhraseSeconds: TimeInterval = 2.5
+/// Sentence and clause boundaries of subtitle text, for `SubtitleSpeechPairer`
+/// (which cuts pairs at the translation's sentences), and the PCM16 framing
+/// of captured system audio. The phrase segmenter of the former Speech + LLM
+/// path is gone with it.
+// WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md,
+// .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+enum SubtitleSegmenter {
     /// A clause cut keeps at least this many characters before the mark.
     static let minimumClause = 20
-    /// One bad or very large provider event cannot create an unbounded request.
-    static let hardLimit = 300
-
-    private(set) var pending = ""
-    private var firstAt: TimeInterval?
-    private var lastAt: TimeInterval = 0
-
-    mutating func append(_ text: String, join: BYOKTranscriptJoin, now: TimeInterval) {
-        guard !text.isEmpty else { return }
-        if pending.isEmpty { firstAt = now }
-        if join == .wordBoundary, !pending.isEmpty,
-           pending.last?.isWhitespace == false, text.first?.isWhitespace == false {
-            pending += " "
-        }
-        pending += text
-        lastAt = now
-    }
-
-    /// The next whole phrase, if one is ready. `force` (Stop) takes the rest.
-    mutating func take(now: TimeInterval, force: Bool = false) -> String? {
-        // A phrase of only punctuation or noise marks ("...", "—") is not
-        // speech: drop it and look at what follows.
-        while let phrase = takeAny(now: now, force: force) {
-            if phrase.contains(where: { $0.isLetter || $0.isNumber }) { return phrase }
-        }
-        return nil
-    }
-
-    private mutating func takeAny(now: TimeInterval, force: Bool) -> String? {
-        let text = pending.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { pending = ""; firstAt = nil; return nil }
-        let quiet = now - lastAt
-        var cut: String.Index?
-        if let end = Self.firstSentenceEnd(in: text) {
-            cut = end
-        } else if Self.endsSentence(text) {
-            // A whole sentence: never split it by length, only wait briefly.
-            if force || quiet >= Self.sentenceSettle { cut = text.endIndex }
-        } else if force || quiet >= Self.pause {
-            cut = text.endIndex
-        } else if text.count >= Self.longPhraseCharacters || now - (firstAt ?? now) >= Self.longPhraseSeconds {
-            cut = Self.clauseCut(in: text) ?? Self.lastWordBoundary(in: text)
-        }
-        if let current = cut, text.distance(from: text.startIndex, to: current) > Self.hardLimit {
-            cut = nil
-        }
-        if cut == nil, text.count > Self.hardLimit {
-            let limit = text.index(text.startIndex, offsetBy: Self.hardLimit)
-            let prefix = text[..<limit]
-            cut = prefix.lastIndex(where: \.isWhitespace) ?? limit
-        }
-        guard let split = cut, split > text.startIndex else { return nil }
-        let phrase = String(text[..<split]).trimmingCharacters(in: .whitespacesAndNewlines)
-        pending = String(text[split...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        firstAt = pending.isEmpty ? nil : now
-        return phrase.isEmpty ? nil : phrase
-    }
 
     // MARK: - Boundaries
 
@@ -138,37 +70,6 @@ struct SubtitleSegmenter {
         }
         return best
     }
-
-    /// Before the last word, which may still be growing, and before up to
-    /// three short function words ("every weight | a little bit"), so a
-    /// phrase cut by length still reads as a phrase.
-    static func lastWordBoundary(in text: String) -> String.Index? {
-        guard var space = text.lastIndex(where: \.isWhitespace) else { return nil }
-        for _ in 0..<3 {
-            let before = text[..<space]
-            guard let previous = before.lastIndex(where: \.isWhitespace) else { break }
-            let word = before[before.index(after: previous)...]
-            guard isFunctionWord(String(word)),
-                  text[..<previous].split(whereSeparator: \.isWhitespace).count >= 3 else { break }
-            space = previous
-        }
-        let before = text[..<space].trimmingCharacters(in: .whitespaces)
-        return before.isEmpty ? nil : space
-    }
-
-    /// Articles, prepositions, conjunctions and pronouns a phrase should not
-    /// end on (English and Russian, the common pair).
-    static func isFunctionWord(_ word: String) -> Bool {
-        functionWords.contains(word.lowercased().filter(\.isLetter))
-    }
-
-    private static let functionWords: Set<String> = [
-        "a", "an", "the", "and", "or", "but", "so", "to", "of", "in", "on", "at", "by", "for", "with", "from",
-        "as", "that", "which", "who", "if", "than", "then", "is", "are", "was", "were", "be", "we", "you", "i",
-        "it", "they", "he", "she", "this", "these", "those", "my", "our", "your", "their", "its", "not", "very",
-        "и", "а", "но", "или", "в", "во", "на", "с", "со", "к", "ко", "по", "о", "об", "у", "за", "из", "от",
-        "до", "для", "что", "чтобы", "как", "не", "это", "мы", "вы", "я", "он", "она", "они", "его", "её", "их",
-    ]
 
     private static func isAbbreviation(_ text: String, terminatorAt index: String.Index) -> Bool {
         guard text[index] == "." else { return false }

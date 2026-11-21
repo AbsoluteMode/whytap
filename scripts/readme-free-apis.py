@@ -211,41 +211,31 @@ def responsive(kind, alt, width):
     )
 
 
-# "My setup": the maintainer's own routes from Settings -> API & Models, free*
-# because the language models are paid from a subscription's monthly API credit
-# (the Claude Max & Ultra and ChatGPT Pro offers above in APIHintsView.hints)
-# and speech from ElevenLabs' free credits. One panel per key, with OpenAI's
-# model of the same price class in place of Claude's: on 2026-11-21 Maxim moved
-# every text feature to Claude Sonnet 5.5, so each key has one model. He reviews
-# and updates it every month together with the offers. Subtitles on the OpenAI
-# key run on GPT-Realtime-Translate, which hears and translates in one model, so
-# that row spans the speech and model columns. Anthropic has no such model: the
-# Anthropic panel keeps its ElevenLabs + Claude pair rather than show a model
-# its key cannot run (.project-docs/decisions/2026-11-21-subtitle-speech-translation.md).
-SETUP_CHECKED = "2026-11-21"
+# "My setup": the maintainer's own routes from Settings -> API & Models, as
+# they are, one column (Maxim asked on 2026-11-22: "just my setup, as it
+# actually is"). Speech runs on ElevenLabs and every text feature on Claude
+# Sonnet 5.5 through OpenRouter. Agent stands for the Agent and its voice;
+# Google is the voice search, which needs speech only. Subtitles run only on
+# GPT-Realtime-Translate, which hears and translates in one model, so that row
+# spans the speech and model columns and needs the OpenAI key
+# (.project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md). The
+# keys line names only the keys this set uses; no plan or free claim, because
+# OpenRouter is not paid from a subscription's API credit. Reviewed monthly
+# together with the offers.
+SETUP_CHECKED = "2026-11-22"
 SPEECH = "Scribe v3 Live"
-SETUP_ROWS = [  # feature, speech model, uses the key's language model
-    ("Drop Fast", SPEECH, False),
-    ("Drop Smart", SPEECH, True),
-    ("Meetings", "Scribe v3", True),  # recorded audio, not the live model
-    ("Agent", None, True),
-    ("Agent voice", SPEECH, False),
-    ("Voice search", SPEECH, False),
-    ("Translation", None, True),
-    ("Subtitles", SPEECH, True),
+MODEL = "Claude Sonnet 5.5"
+SETUP_KEYS = [("elevenlabs", "ElevenLabs"), ("openrouter", "OpenRouter"), ("openai", "OpenAI")]  # logo, key
+SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (feature, text)
+    ("Drop Fast", SPEECH, None),
+    ("Drop Smart", SPEECH, MODEL),
+    ("Meetings", "Scribe v3", MODEL),  # recorded audio, not the live model
+    ("Agent", SPEECH, MODEL),           # voice requests and the Agent itself
+    ("Google", SPEECH, None),           # voice search: speech only
+    ("Translation", None, MODEL),
+    ("Subtitles", "GPT-Realtime-Translate · OpenAI"),
 ]
-SETUP_KEYS = [  # logo, logo colour (None = ink), title, plan line (wide, phone), model, one-model rows
-    ("claude-code", "#d97757", "Anthropic key",
-     ("Claude Max or Ultra: $100–200 API credit a month", "Max or Ultra: $100–200 credit a month"),
-     "Claude Sonnet 5.5", {}),
-    ("openai", None, "OpenAI key",
-     ("ChatGPT Pro: $100–500 API credit a month", "ChatGPT Pro: $100–500 credit a month"),
-     "GPT-6.2 Sol", {"Subtitles": "GPT-Realtime-Translate"}),
-]
-SETUP_FOOT = [
-    "* The models are paid from your plan’s monthly API credit; speech uses",
-    "ElevenLabs’ 10,000 free credits (non-commercial use).",
-]
+SETUP_COLUMNS = ["Feature", "Speech · ElevenLabs", "Model · OpenRouter"]
 
 
 def setup_svg(theme, layout):
@@ -253,56 +243,44 @@ def setup_svg(theme, layout):
     wide = layout == "wide"
     w = WIDTH[layout]
     e = lambda t: html.escape(t, quote=False)
-    gap, ph = 20, (58 if wide else 50)        # gap between panels, panel header height (title, plan line)
-    pw = (w - gap) / 2 if wide else w          # panel width
     rh = 30 if wide else 24                    # row height
     fs, hs = (13.5, 15) if wide else (11, 12.5)
-    col = (18, 132, 268) if wide else (12, 96, 192)
-    top = 46 if wide else 40
+    col = (18, 200, 430) if wide else (12, 86, 186)
+    top = 36 if wide else 30
+    ph = 46 if wide else 40                    # panel header: the keys
     panel_h = ph + 26 + rh * len(SETUP_ROWS) + 10
-    out = [
-        f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup'
-        f'<tspan dx="{10 if wide else 7}" font-size="{14 if wide else 11.5}" font-weight="600" fill="{c["accent"]}">free* right now</tspan></text>',
-    ]
-    for k, (asset, color, title, plan, model, single) in enumerate(SETUP_KEYS):
-        x = k * (pw + gap) if wide else 0
-        y = top if wide else top + k * (panel_h + 14)
-        out.append(f'  <rect x="{x + 0.5:.1f}" y="{y + 0.5:.1f}" width="{pw - 1:.1f}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>')
-        out.append("  " + logo(asset, color or c["ink"], round(x + col[0], 1), y + (13 if wide else 11), 18 if wide else 15))
-        out.append(f'  <text x="{x + col[0] + (26 if wide else 22):.1f}" y="{y + (27 if wide else 23)}" font-family="{FONT}" font-size="{hs}" font-weight="600" fill="{c["ink"]}">{e(title)}</text>')
-        out.append(f'  <text x="{x + col[0]:.1f}" y="{y + (48 if wide else 41)}" font-family="{FONT}" font-size="{fs - 1.5}" fill="{c["sub"]}">{e(plan[0] if wide else plan[1])}</text>')
-        hy = y + ph + 16
-        for cx, label in zip(col, ["Feature", "Speech · ElevenLabs", "Model"]):
-            out.append(f'  <text x="{x + cx:.1f}" y="{hy}" font-family="{FONT}" font-size="{fs - 2.5}" font-weight="600" fill="{c["accent"]}">{e(label)}</text>')
-        out.append(f'  <line x1="{x + col[0]:.1f}" y1="{hy + 8}" x2="{x + pw - col[0]:.1f}" y2="{hy + 8}" stroke="{c["border"]}"/>')
-        for i, (feature, speech, uses_model) in enumerate(SETUP_ROWS):
-            ry = hy + 8 + rh * (i + 1) - rh * 0.32
-            if feature in single:  # one model hears and translates: it spans both columns
-                for cx, (text, weight) in zip(col, [(feature, "600"), (single[feature], "400")]):
-                    out.append(f'  <text x="{x + cx:.1f}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{c["ink"]}">{e(text)}</text>')
-                continue
-            cells = [(feature, c["ink"], "600"), (speech or "—", c["ink"] if speech else c["sub"], "400"),
-                     (model if uses_model else "—", c["ink"] if uses_model else c["sub"], "400")]
-            for cx, (text, fill, weight) in zip(col, cells):
-                out.append(f'  <text x="{x + cx:.1f}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{fill}">{e(text)}</text>')
-    y = top + panel_h + 26 if wide else top + 2 * panel_h + 14 + 22
-    foot = [" ".join(SETUP_FOOT), f"Updated monthly · Last checked {display(SETUP_CHECKED)}"] if wide else [
-        "* The models are paid from your plan’s", "monthly API credit; speech uses ElevenLabs’",
-        "10,000 free credits (non-commercial use).", f"Updated monthly · Last checked {display(SETUP_CHECKED)}"]
-    for i, line in enumerate(foot):
-        out.append(f'  <text x="0" y="{y + i * (20 if wide else 15)}" font-family="{FONT}" font-size="{12.5 if wide else 10.5}" fill="{c["sub"]}">{e(line)}</text>')
-    h = y + (len(foot) - 1) * (20 if wide else 15) + 8
+    out = [f'  <text x="0" y="{22 if wide else 18}" font-family="{FONT}" font-size="{19 if wide else 15}" font-weight="700" fill="{c["ink"]}">My setup</text>',
+           f'  <rect x="0.5" y="{top + 0.5}" width="{w - 1}" height="{panel_h - 1}" rx="14" fill="{c["bg"]}" stroke="{c["border"]}"/>']
+    x, size = col[0], (18 if wide else 14)
+    for asset, name in SETUP_KEYS:  # logo and key name, in a row
+        out.append("  " + logo(asset, c["ink"], x, top + (14 if wide else 13), size))
+        out.append(f'  <text x="{x + size + 6}" y="{top + (28 if wide else 24.5)}" font-family="{FONT}" font-size="{hs}" font-weight="600" fill="{c["ink"]}">{e(name)}</text>')
+        x += size + 6 + len(name) * hs * 0.6 + (22 if wide else 12)
+    hy = top + ph + 16
+    for cx, label in zip(col, SETUP_COLUMNS):
+        out.append(f'  <text x="{cx}" y="{hy}" font-family="{FONT}" font-size="{fs - 2.5}" font-weight="600" fill="{c["accent"]}">{e(label)}</text>')
+    out.append(f'  <line x1="{col[0]}" y1="{hy + 8}" x2="{w - col[0]}" y2="{hy + 8}" stroke="{c["border"]}"/>')
+    for i, row in enumerate(SETUP_ROWS):
+        ry = hy + 8 + rh * (i + 1) - rh * 0.32
+        cells = [(row[0], c["ink"], "600")]
+        if len(row) == 2:  # one model hears and translates: it spans both columns
+            cells.append((row[1], c["ink"], "400"))
+        else:
+            cells += [(t or "—", c["ink"] if t else c["sub"], "400") for t in row[1:]]
+        for cx, (text, fill, weight) in zip(col, cells):
+            out.append(f'  <text x="{cx}" y="{ry:.1f}" font-family="{FONT}" font-size="{fs}" font-weight="{weight}" fill="{fill}">{e(text)}</text>')
+    y = top + panel_h + (24 if wide else 20)
+    out.append(f'  <text x="0" y="{y}" font-family="{FONT}" font-size="{12.5 if wide else 10.5}" fill="{c["sub"]}">Updated monthly · Last checked {e(display(SETUP_CHECKED))}</text>')
+    h = y + 8
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h:.0f}" viewBox="0 0 {w} {h:.0f}">\n' + "\n".join(out) + "\n</svg>\n"
 
 
 def setup_alt():
-    parts = []
-    for _, _, title, plan, model, single in SETUP_KEYS:
-        rows = "; ".join(f"{f}: " + (f"{single[f]} (speech and translation in one model)" if f in single
-                                     else " + ".join(x for x in [s, model if m else None] if x))
-                         for f, s, m in SETUP_ROWS)
-        parts.append(f"{title} ({plan[0]}): {rows}")
-    return "My setup, free* right now. " + ". ".join(parts) + ". " + " ".join(SETUP_FOOT)
+    rows = "; ".join(f"{r[0]}: {r[1]} (speech and translation in one model)" if len(r) == 2
+                     else f"{r[0]}: " + " + ".join(t for t in r[1:] if t) for r in SETUP_ROWS)
+    keys = ", ".join(name for _, name in SETUP_KEYS)
+    return (f"My setup. Keys: {keys}. Speech on ElevenLabs, language model through OpenRouter. {rows}. "
+            f"Updated monthly, last checked {display(SETUP_CHECKED)}.")
 
 
 # "Already paying?": the paid-plan offers in APIHintsView.hints (Claude Max &
@@ -311,7 +289,7 @@ def setup_alt():
 # the plain form: one line and two linked cards (logo, plan, credit), each to
 # the provider's own page about the offer, no other text and no competing apps.
 # The cards carry a fixed width so they sit side by side on a wide column and
-# wrap one under the other on a narrow one. My setup must show the same range.
+# wrap one under the other on a narrow one.
 # WHY: .project-docs/decisions/2026-11-21-free-api-report.md
 PLANS_TITLE = "Already paying for an OpenAI or Anthropic subscription?"
 PLAN_ORDER = ["openai", "claude-code"]  # as the title names them
@@ -322,9 +300,6 @@ PLAN_SIZE = {"wide": (410, 76), "phone": (300, 64)}
 def paid_plans():
     plans = [o for o in offers() if o["access"] == "paidPlan" and o["category"] == "models"]
     plans.sort(key=lambda o: PLAN_ORDER.index(o["assetName"]))
-    for o in plans:
-        if not any(o["allowance"] in plan[0] for _, _, _, plan, _, _ in SETUP_KEYS):
-            sys.exit(f"My setup does not show {o['provider']}'s {o['allowance']}")
     return plans
 
 

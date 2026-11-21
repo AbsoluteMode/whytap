@@ -287,8 +287,7 @@ final class DropLocalEditorTests: XCTestCase {
             controller = TranslationWindowController(
                 textModel: model,
                 subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
-                                                 open: { _ in FixtureSubtitleUpstream() },
-                                                 makeService: { FixtureTranslator() }),
+                                                 openTranslator: { _, _ in FixtureSubtitleUpstream() }),
                 defaults: defaults, openSettings: { _ in }, activityChanged: { _ in }
             )
             let content = try XCTUnwrap(controller.window.contentView)

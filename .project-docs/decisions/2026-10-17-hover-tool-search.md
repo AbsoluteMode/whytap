@@ -38,7 +38,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandView.swift
     confirmed_at: 2026-10-17
-related: [../project.md, 2026-10-17-native-hover-glass.md, 2026-10-18-brightness-tool.md, 2026-10-20-whytap-links.md]
+related: [../project.md, 2026-10-17-native-hover-glass.md, 2026-10-18-brightness-tool.md, 2026-10-20-whytap-links.md, 2026-11-22-shot-hover-hints.md]
 ---
 
 # Hover catalog search

@@ -86,8 +86,9 @@ file under its lock when Whytap is closed. They never launch Whytap; see
 notes so "split this call into tasks" works without extra setup.
 
 Feature IDs are `dropFast`, `dropSmart`, `dropSmartCleanup`, `meetings`,
-`meetingNotes`, `agent`, `agentVoice`, `voiceSearch`, `translation`,
-`subtitlesAudio` and `subtitlesTranslation`. Accounts use the exact ID returned
+`meetingNotes`, `agent`, `agentVoice`, `voiceSearch` and `translation`.
+Subtitles have no route: they run on OpenAI Audio translate with the OpenAI
+key. Accounts use the exact ID returned
 by `list_models`: built-in provider IDs or an already configured server ID.
 The application-control server cannot add a provider, change an endpoint URL
 or read a key.

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/APIHintsRenderTests.swift
     confirmed_at: 2026-11-21
-related: [2026-10-19-api-hints.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-10-19-api-hints.md]
 ---
 
 ## Context
@@ -72,6 +72,16 @@ paying.
   monthly API credit, speech from ElevenLabs' free credits (non-commercial
   use). Maxim updates the setup himself every month (`SETUP_*` in the script,
   with its own check date).
+  On 2026-11-22 Maxim replaced the two panels with one column, "just my
+  setup, as it actually is", read from his API & Models routes: ElevenLabs
+  speech (Scribe v3 Live, Scribe v3 for Meetings) and Claude Sonnet 5.5
+  through OpenRouter for every text feature. Agent and Agent voice became one
+  Agent row; Voice search became Google, speech only. Subtitles span both
+  columns as GPT-Realtime-Translate with the OpenAI key
+  (2026-11-22-subtitle-audio-translate-slot.md). The keys line names only
+  ElevenLabs, OpenRouter and OpenAI. The plan lines, "free* right now" and the
+  asterisk are gone: OpenRouter is not paid from a subscription's API credit,
+  so the claim would be false for this setup.
 - Between the free cards and My setup, **Already paying for an OpenAI or
   Anthropic subscription?** (asked by Maxim on 2026-11-21: Whytap is the app
   that puts a paid plan's API quota to work). After a first version with
@@ -83,9 +93,9 @@ paying.
   come from the app's paid-plan hints, checked on 2026-11-21 against the
   official pages: [Anthropic, Max $100 and Ultra $200 a month](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans),
   [OpenAI, Pro $100, $200 or $500 a month](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
-  The script stops when My setup shows another range, and
-  `APIHintsRenderTests` checks the cards against the hints. The block leads
-  into My setup, which shows the same credit at work.
+  The script stopped when My setup showed another range until My setup
+  stopped showing plans on 2026-11-22; `APIHintsRenderTests` checks the cards against the hints. The block leads
+  into My setup.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.
@@ -120,7 +130,7 @@ updates only after reading the official page keeps "Last checked" honest.
 - A generated raster picture for the price comparison: an SVG banner follows
   GitHub's dark and light themes and stays sharp.
 - Listing paid-plan credits among the free offers: not "without payment"
-  (they appear only in My setup, marked free*).
+  (they appear only in their own block).
 - Letting the task add newly found offers itself: each row is a product
   decision (only offers whose key works in Whytap as it is).
 

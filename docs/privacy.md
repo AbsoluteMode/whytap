@@ -184,8 +184,9 @@ other applications are not silently copied. [Coverage and recovery](backup.md).
 ## Translation and subtitles
 
 Translate sends submitted text to the chosen Translation LLM route. Subtitles
-sends system audio to the chosen Subtitles audio speech provider and committed
-phrases to the Translation route. It never opens the microphone or creates a
+send system audio to OpenAI (`gpt-realtime-translate`, Audio translate) with
+the OpenAI key from API & Models; OpenAI returns the translation and the
+transcript of what it heard. Without that key Subtitles do not start. A session ends by itself after one hour, like Stop. It never opens the microphone or creates a
 recording/meeting note. Forty recent lines stay in memory, with no automatic
 history saved. Copy writes translations only after a click. Window close,
 Cancel and sleep stop capture and cancel requests. See [translation](translation.md).

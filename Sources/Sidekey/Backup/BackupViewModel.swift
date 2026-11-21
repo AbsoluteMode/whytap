@@ -590,7 +590,11 @@ final class BackupViewModel: ObservableObject {
                 statusText = "Reconnected. Choose Finish backup management to continue."
                 return
             }
-            let transport = try await GitHubBackupTransport.connect(token: token.trimmingCharacters(in: .whitespacesAndNewlines), session: githubSession)
+            let saved = destinationKind == "github"
+                ? defaults.string(forKey: "backup.github-owner.v1").map { (owner: $0, repository: GitHubBackupTransport.savedRepository(defaults)) }
+                : nil
+            let transport = try await GitHubBackupTransport.connect(token: token.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                                    saved: saved, session: githubSession)
             try Task.checkCancellation()
             let name = await transport.destinationName
             try githubTokenStore.save(token.trimmingCharacters(in: .whitespacesAndNewlines))

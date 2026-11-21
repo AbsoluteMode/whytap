@@ -1454,7 +1454,7 @@ GitHub connection checks are read-only; Connect is the only action that can
 create the private backup repository. Connect keeps an existing Exodia-Backup
 (under the name GitHub reports after a rename), otherwise uses or creates
 Whytap-Backup, and saves the name per Mac (backup.github-repository.v1; absent
-means Exodia-Backup). Release tags and formats are unchanged. WHY:
+means Exodia-Backup); reconnecting the same account keeps the saved one. Release tags and formats are unchanged. WHY:
 .project-docs/decisions/2026-11-21-whytap-backup-repository.md
 Connection alone never backs up data.
 API & Models routes, server registrations and their provider keys are included.

@@ -130,6 +130,21 @@ final class GitHubBackupTransportTests: XCTestCase {
         XCTAssertTrue(StubURLProtocol.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    func testReconnectKeepsTheSavedRepositoryOnlyForTheSameAccount() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
+            return (200, [:], self.repository(name: request.url!.lastPathComponent))   // both names exist
+        }
+        let same = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                           saved: (owner: "Developer", repository: "Whytap-Backup"), session: session)
+        let kept = await same.destinationName
+        XCTAssertEqual(kept, "developer/Whytap-Backup")
+        let other = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                            saved: (owner: "someone-else", repository: "Whytap-Backup"), session: session)
+        let found = await other.destinationName
+        XCTAssertEqual(found, "developer/Exodia-Backup", "another account's choice does not carry over")
+    }
+
     func testConnectFollowsAnExodiaBackupRenamedOnGitHub() async throws {
         StubURLProtocol.handler = { request in
             if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }

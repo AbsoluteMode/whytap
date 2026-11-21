@@ -100,7 +100,10 @@ actor GitHubBackupTransport {
     }
 
     /// Creating a destination is invoked only by an explicit Connect action.
-    static func connect(token: String, session: URLSession = GitHubBackupNetwork.session) async throws -> GitHubBackupTransport {
+    /// `saved` is this Mac's existing connection: reconnecting the same account
+    /// keeps its repository even when the other backup name also exists.
+    static func connect(token: String, saved: (owner: String, repository: String)? = nil,
+                        session: URLSession = GitHubBackupNetwork.session) async throws -> GitHubBackupTransport {
         guard validToken(token) else { throw Failure.authentication }
         var request = URLRequest(url: URL(string: "https://api.github.com/user")!)
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -112,8 +115,16 @@ actor GitHubBackupTransport {
         guard let user = try? JSONDecoder().decode(User.self, from: data) else { throw Failure.invalidResponse }
         // An existing Exodia-Backup (or the repository it was renamed to) keeps
         // every earlier backup reachable; only a new user gets Whytap-Backup.
-        let legacy = try GitHubBackupTransport(token: token, owner: user.login, repository: legacyRepository, session: session)
-        let name = try await legacy.existingRepositoryName() ?? repository
+        var found: String?
+        if let saved, saved.owner.caseInsensitiveCompare(user.login) == .orderedSame, isBackupRepository(saved.repository) {
+            let previous = try GitHubBackupTransport(token: token, owner: user.login, repository: saved.repository, session: session)
+            found = try await previous.existingRepositoryName()
+        }
+        if found == nil {
+            let legacy = try GitHubBackupTransport(token: token, owner: user.login, repository: legacyRepository, session: session)
+            found = try await legacy.existingRepositoryName()
+        }
+        let name = found ?? repository
         let transport = try GitHubBackupTransport(token: token, owner: user.login, repository: name, session: session)
         try await transport.ensureRepository()
         return transport

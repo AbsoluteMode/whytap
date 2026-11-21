@@ -113,17 +113,17 @@
 
 ## Plugins
 
-<p align="center">Ask <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="125" align="absmiddle"></picture> or <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture> to work with Whytap for you.</p>
+<p align="center">Ask <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="106" align="absmiddle"></picture> or <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="70" align="absmiddle"></picture> to work with Whytap for you.</p>
 
 <p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-grid-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/plugin-grid-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-grid-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-grid-wide-light.svg"><img alt="Meetings: “Where did we discuss pricing?” (Asks you once); To-do: “Turn my last call into tasks” (Saved to To-do); Notify: “Tell me when CI fails” (A local script); Monitor: “Build a dashboard for my server” (Shown in Monitor); Models: “Switch Drop Smart to a faster model” (Checked like Settings); Case: “Deploy with my API key” (Key names, never values)" src="docs/assets/readme/plugin-grid-wide-dark.svg" width="100%"></picture></p>
 
-<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="125" align="absmiddle"></picture></p>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="106" align="absmiddle"></picture></p>
 
 ```bash
 claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 ```
 
-<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture></p>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="70" align="absmiddle"></picture></p>
 
 ```bash
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp

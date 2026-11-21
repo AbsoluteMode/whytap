@@ -39,12 +39,13 @@ CARDS = [
     ("models", "sliders-horizontal", "Models", ["Switch Drop Smart", "to a faster model"], "Checked like Settings"),
     ("case", "key-round", "Case", ["Deploy with", "my API key"], "Key names, never values"),
 ]
-# Coding harnesses: logo file in Resources/UsefulLinkIcons, name, logo colour per theme
+# Coding harnesses: logo file in Resources/UsefulLinkIcons, name, lockup width
+# (logo + name, measured on GitHub), logo colour per theme
 # (None = the theme's ink), and the line that adds the application-control server.
 HARNESSES = [
-    ("claude-code", "Claude Code", {"dark": "#d97757", "light": "#d97757"},
+    ("claude-code", "Claude Code", 106, {"dark": "#d97757", "light": "#d97757"},
      f"claude mcp add --scope user whytap -- {HELPER} app mcp"),
-    ("codex", "Codex", {"dark": None, "light": None},
+    ("codex", "Codex", 70, {"dark": None, "light": None},
      f"codex mcp add whytap -- {HELPER} app mcp"),
 ]
 ICONS = REPO / "Resources/UsefulLinkIcons"
@@ -58,7 +59,7 @@ FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, A
 # below it), so its edges line up with them: three columns on wide screens,
 # two on phones.
 GRID = {
-    "wide": dict(W=860, cols=3, gap=20, ch=104, pad=16, isz=18, ts=14, ty=27, qs=15, q0=56, ql=19, gs=12, gy=93),
+    "wide": dict(W=860, cols=3, gap=20, ch=112, pad=16, isz=18, ts=14, ty=28, qs=15, q0=57, ql=19, gs=12, gy=99),
     "phone": dict(W=300, cols=2, gap=10, ch=96, pad=11, isz=14, ts=12, ty=21, qs=11.5, q0=47, ql=15, gs=9.5, gy=85),
 }
 
@@ -97,7 +98,7 @@ def grid(theme, layout):
 '''
 
 
-def lockup(asset, name, colors, theme):
+def lockup(asset, name, w, colors, theme):
     """The harness logo and its name, sized to sit in a line of README text."""
     c = THEMES[theme]
     color = colors[theme] or c["ink"]
@@ -107,7 +108,6 @@ def lockup(asset, name, colors, theme):
     if 'fill="' not in svg.split(">", 1)[0]:
         svg = svg.replace("<svg ", f'<svg fill="{color}" ', 1)
     svg = svg.replace("<svg ", '<svg x="0" y="2" width="16" height="16" ', 1)
-    w = 26 + round(len(name) * 9)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" viewBox="0 0 {w} 20">
   {svg}
   <text x="22" y="15" font-family="{FONT}" font-size="14.5" font-weight="600" fill="{c['ink']}">{html.escape(name)}</text>
@@ -137,9 +137,9 @@ def section():
              f'<source media="(prefers-color-scheme: light)" srcset="{src("wide", "light")}">'
              f'<img alt="{alt}" src="{src("wide", "dark")}" width="100%"></picture>')
     logos, install = {}, []
-    for asset, name, colors, command in HARNESSES:
+    for asset, name, width, colors, command in HARNESSES:
         for t in THEMES:
-            svg = lockup(asset, name, colors, t)
+            svg = lockup(asset, name, width, colors, t)
             (OUT / f"plugin-harness-{asset}-{t}.svg").write_text(svg)
         w = re.search(r'width="(\d+)"', svg).group(1)
         logos[asset] = themed(lambda t: f"{A}/plugin-harness-{asset}-{t}.svg", name, w, ' align="absmiddle"')

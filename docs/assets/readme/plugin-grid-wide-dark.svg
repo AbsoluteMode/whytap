@@ -1,41 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="228" viewBox="0 0 860 228">
-  <rect x="0.5" y="0.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(16.0 12.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" />
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="244" viewBox="0 0 860 244">
+  <rect x="0.5" y="0.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(16.0 13.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" />
   <path d="M2 6h4" />
   <path d="M2 10h4" />
   <path d="M2 14h4" />
   <path d="M2 18h4" />
   <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" /></g>
-  <text x="42.0" y="27.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Meetings</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="16.0" y="56.0">“Where did we</tspan><tspan x="16.0" y="75.0">discuss pricing?”</tspan></text>
-  <text x="16.0" y="93.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Asks you once</text>
-  <rect x="293.8" y="0.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(309.3 12.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
+  <text x="42.0" y="28.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Meetings</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="16.0" y="57.0">“Where did we</tspan><tspan x="16.0" y="76.0">discuss pricing?”</tspan></text>
+  <text x="16.0" y="99.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Asks you once</text>
+  <rect x="293.8" y="0.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(309.3 13.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4" />
   <path d="m3 7 2 2 4-4" />
   <path d="M13 6h8" />
   <path d="M13 12h8" />
   <path d="M13 18h8" /></g>
-  <text x="335.3" y="27.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">To-do</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="309.3" y="56.0">“Turn my last call</tspan><tspan x="309.3" y="75.0">into tasks”</tspan></text>
-  <text x="309.3" y="93.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Saved to To-do</text>
-  <rect x="587.2" y="0.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(602.7 12.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+  <text x="335.3" y="28.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">To-do</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="309.3" y="57.0">“Turn my last call</tspan><tspan x="309.3" y="76.0">into tasks”</tspan></text>
+  <text x="309.3" y="99.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Saved to To-do</text>
+  <rect x="587.2" y="0.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(602.7 13.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
   <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
   <path d="M4 2C2.8 3.7 2 5.7 2 8" />
   <path d="M22 8c0-2.3-.8-4.3-2-6" /></g>
-  <text x="628.7" y="27.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Notify</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="602.7" y="56.0">“Tell me when</tspan><tspan x="602.7" y="75.0">CI fails”</tspan></text>
-  <text x="602.7" y="93.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">A local script</text>
-  <rect x="0.5" y="124.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(16.0 136.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1" />
+  <text x="628.7" y="28.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Notify</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="602.7" y="57.0">“Tell me when</tspan><tspan x="602.7" y="76.0">CI fails”</tspan></text>
+  <text x="602.7" y="99.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">A local script</text>
+  <rect x="0.5" y="132.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(16.0 145.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1" />
   <rect width="7" height="5" x="14" y="3" rx="1" />
   <rect width="7" height="9" x="14" y="12" rx="1" />
   <rect width="7" height="5" x="3" y="16" rx="1" /></g>
-  <text x="42.0" y="151.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Monitor</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="16.0" y="180.0">“Build a dashboard</tspan><tspan x="16.0" y="199.0">for my server”</tspan></text>
-  <text x="16.0" y="217.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Shown in Monitor</text>
-  <rect x="293.8" y="124.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(309.3 136.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4" />
+  <text x="42.0" y="160.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Monitor</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="16.0" y="189.0">“Build a dashboard</tspan><tspan x="16.0" y="208.0">for my server”</tspan></text>
+  <text x="16.0" y="231.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Shown in Monitor</text>
+  <rect x="293.8" y="132.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(309.3 145.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4" />
   <line x1="10" x2="3" y1="4" y2="4" />
   <line x1="21" x2="12" y1="12" y2="12" />
   <line x1="8" x2="3" y1="12" y2="12" />
@@ -44,13 +44,13 @@
   <line x1="14" x2="14" y1="2" y2="6" />
   <line x1="8" x2="8" y1="10" y2="14" />
   <line x1="16" x2="16" y1="18" y2="22" /></g>
-  <text x="335.3" y="151.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Models</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="309.3" y="180.0">“Switch Drop Smart</tspan><tspan x="309.3" y="199.0">to a faster model”</tspan></text>
-  <text x="309.3" y="217.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Checked like Settings</text>
-  <rect x="587.2" y="124.5" width="272.3" height="103" rx="12" fill="#151b23" stroke="#2d333b"/>
-  <g transform="translate(602.7 136.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+  <text x="335.3" y="160.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Models</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="309.3" y="189.0">“Switch Drop Smart</tspan><tspan x="309.3" y="208.0">to a faster model”</tspan></text>
+  <text x="309.3" y="231.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Checked like Settings</text>
+  <rect x="587.2" y="132.5" width="272.3" height="111" rx="12" fill="#151b23" stroke="#2d333b"/>
+  <g transform="translate(602.7 145.6) scale(0.7500)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
   <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></g>
-  <text x="628.7" y="151.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Case</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="602.7" y="180.0">“Deploy with</tspan><tspan x="602.7" y="199.0">my API key”</tspan></text>
-  <text x="602.7" y="217.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Key names, never values</text>
+  <text x="628.7" y="160.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc">Case</text>
+  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="500" fill="#f0f6fc"><tspan x="602.7" y="189.0">“Deploy with</tspan><tspan x="602.7" y="208.0">my API key”</tspan></text>
+  <text x="602.7" y="231.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#b8adff">Key names, never values</text>
 </svg>

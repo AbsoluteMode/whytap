@@ -143,15 +143,25 @@ def _box(w, h, c, body):
 '''
 
 
-def ways_banner(theme, layout, checked):
+def arrow(x, y, length, color, width):
+    """A drawn arrow: a text "→" looked thin and uneven when the banner is scaled."""
+    head = length * 0.32
+    x0, x1 = x - length / 2, x + length / 2
+    return (f'  <path d="M{x0:.1f} {y:.1f} H{x1:.1f} M{x1 - head:.1f} {y - head:.1f} L{x1:.1f} {y:.1f} L{x1 - head:.1f} {y + head:.1f}" '
+            f'fill="none" stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/>')
+
+
+def banner(theme, layout, checked):
     # WHY: .project-docs/decisions/2026-11-21-free-api-report.md (2026-11-21
-    # follow-ups: the ways to run free and the quota lines in one block, the
-    # price comparison in its own block under it).
+    # follow-ups: the ways to run free, the quota lines and the $600 → $0
+    # comparison in one block, the comparison at its bottom).
     c = THEMES[theme]
     w = WIDTH[layout]
     wide = layout == "wide"
     mid = w / 2
     col = (w - 48) / 3
+    rule = lambda y: f'  <line x1="24" y1="{y}" x2="{w - 24}" y2="{y}" stroke="{c["border"]}"/>'
+    # Three ways to run free, in columns.
     y_way = 38 if wide else 28
     rows = []
     for i, way in enumerate(WAYS):
@@ -159,37 +169,33 @@ def ways_banner(theme, layout, checked):
         rows.append(_text(x, y_way, 15 if wide else 11, c["ink"], way["title"] if wide else way["phone_title"], "600"))
         rows.append(_text(x, y_way + (21 if wide else 15), 13 if wide else 9.5, c["sub"], way["sub"] if wide else way["phone_sub"]))
     y_rule = y_way + (42 if wide else 31)
-    rows.append(f'  <line x1="24" y1="{y_rule}" x2="{w - 24}" y2="{y_rule}" stroke="{c["border"]}"/>')
-    # One footer line on the wide banner; the phone banner splits it in two.
+    rows.append(rule(y_rule))
+    # The quota line, then one footer line (two on phones).
     items = facts(checked)
     lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
     y_quota = y_rule + (34 if wide else 24)
     rows.append(_text(mid, y_quota, 16 if wide else 12, c["ink"], QUOTAS, "600"))
     step = 23 if wide else 16
     rows += [_text(mid, y_quota + step * (i + 1), 13.5 if wide else 10.5, c["sub"], line) for i, line in enumerate(lines)]
-    h = round(y_quota + step * len(lines) + (24 if wide else 16))
-    return _box(w, h, c, "\n".join(rows))
-
-
-def price_banner(theme, layout):
-    c = THEMES[theme]
-    w = WIDTH[layout]
-    wide = layout == "wide"
-    h = 128 if wide else 96
-    big, cap = (50, 14) if wide else (30, 10.5)
-    left, right, mid = w * 0.3, w * 0.7, w / 2
-    y_num, y_cap = h * 0.52, h * 0.52 + cap * 1.9
+    y_rule2 = y_quota + step * len(lines) + (22 if wide else 16)
+    rows.append(rule(y_rule2))
+    # Similar paid apps a year, struck through, against $0 for Whytap.
+    big, cap = (46, 14) if wide else (28, 10.5)
+    left, right = w * 0.3, w * 0.7
+    y_num = y_rule2 + (64 if wide else 44)
+    y_cap = y_num + cap * 1.8
     green = "#3fb950" if theme == "dark" else "#1a7f37"
-    body = "\n".join([
+    rows += [
         _text(left, y_num, big, c["sub"], PAID_YEARLY, "700"),
-        f'  <line x1="{left - big * 1.22}" y1="{y_num - big * 0.33}" x2="{left + big * 1.22}" y2="{y_num - big * 0.33}" '
+        f'  <line x1="{left - big * 1.2:.1f}" y1="{y_num - big * 0.33:.1f}" x2="{left + big * 1.2:.1f}" y2="{y_num - big * 0.33:.1f}" '
         f'stroke="{c["sub"]}" stroke-width="{2.5 if wide else 2}" stroke-linecap="round"/>',
         _text(left, y_cap, cap, c["sub"], "≈ paid apps per year"),
-        _text(mid, y_num - big * 0.2, big * 0.6, c["sub"], "→"),
+        arrow(mid, y_num - big * 0.33, 44 if wide else 26, c["sub"], 2.5 if wide else 2),
         _text(right, y_num, big, green, "$0", "700"),
         _text(right, y_cap, cap, c["ink"], "Whytap", "600"),
-    ])
-    return _box(w, h, c, body)
+    ]
+    h = round(y_cap + (26 if wide else 18))
+    return _box(w, h, c, "\n".join(rows))
 
 
 def responsive(kind, alt, width):
@@ -231,17 +237,13 @@ def section():
         )
     for lay in WIDTH:
         for t in THEMES:
-            (OUT / f"free-api-ways-{lay}-{t}.svg").write_text(ways_banner(t, lay, newest))
-            (OUT / f"free-api-price-{lay}-{t}.svg").write_text(price_banner(t, lay))
-    ways_alt = ("; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
-                + ", ".join(facts(newest)) + ".")
-    price_alt = f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0."
+            (OUT / f"free-api-summary-{lay}-{t}.svg").write_text(banner(t, lay, newest))
+    alt = ("; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
+           + ", ".join(facts(newest)) + f". Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0.")
     return "\n".join([
         HEADING,
         "",
-        f"<p align=\"center\">{responsive('ways', ways_alt, '100%')}</p>",
-        "",
-        f"<p align=\"center\">{responsive('price', price_alt, '100%')}</p>",
+        f"<p align=\"center\">{responsive('summary', alt, '100%')}</p>",
         "",
         "<p align=\"center\">",
         "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),

@@ -129,11 +129,15 @@ claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
 ```
 
+## File an issue in one request
+
+<p align="center">Ask <a href="https://whytap.ai">whytap.ai</a> anything about Whytap. It answers from the code, and when Whytap can't do it yet, it drafts the GitHub issue for you.</p>
+
+<p align="center"><a href="https://whytap.ai"><img alt="whytap.ai Ask: the question “Add support for the Qwen provider”, an answer from the code, follow-up questions and a drafted issue with a Suggest it on GitHub button" src="docs/assets/readme/ask-issue.webp" width="100%"></a></p>
+
 ## Free to run
 
-<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-ways-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-ways-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-ways-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-ways-wide-light.svg"><img alt="Your own keys (BYOK, billed by the provider); Local speech-to-text (on this Mac, Apple Silicon); Self-hosted (OpenAI-compatible servers). Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026." src="docs/assets/readme/free-api-ways-wide-dark.svg" width="100%"></picture></p>
-
-<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-price-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-price-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-price-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-price-wide-light.svg"><img alt="Similar paid apps cost about $600 a year; Whytap is $0." src="docs/assets/readme/free-api-price-wide-dark.svg" width="100%"></picture></p>
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-summary-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-summary-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-summary-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-summary-wide-light.svg"><img alt="Your own keys (BYOK, billed by the provider); Local speech-to-text (on this Mac, Apple Silicon); Self-hosted (OpenAI-compatible servers). Everyday use fits in the free quotas. No card needed, Reviewed monthly, Last checked November 21, 2026. Similar paid apps cost about $600 a year; Whytap is $0." src="docs/assets/readme/free-api-summary-wide-dark.svg" width="100%"></picture></p>
 
 <p align="center">
 <a href="https://deepgram.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-deepgram-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-deepgram-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-deepgram-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-deepgram-wide-light.svg"><img alt="Deepgram: $200 one-time starter credit (Speech to text)" src="docs/assets/readme/free-api-deepgram-wide-dark.svg" width="49%"></picture></a>

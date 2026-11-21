@@ -1,5 +1,16 @@
 # Interface decisions
 
+## Island by touch — 2026-11-22
+
+- On a touch display a tap on the capsule opens the drawer, the way hovering
+  does; the drawer then answers taps until a tap lands outside the island,
+  the pointer moves, or eight seconds pass without a tap.
+- A tap on the agent wing or answer card acts on what it touches.
+- A long press does nothing on the island (it has no context menu).
+- An idle-hidden island is not tappable; a hotkey or the pointer wakes it.
+- Verified with routing tests and target windows that were never shown. See
+  the [decision](../.project-docs/decisions/2026-11-22-island-touch-tap.md).
+
 ## Island beside the system Dynamic Island — 2026-11-22
 
 - On a touch MacBook Pro macOS draws its own Dynamic Island around the camera

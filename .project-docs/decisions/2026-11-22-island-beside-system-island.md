@@ -32,7 +32,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandSystemIslandTests.swift
     confirmed_at: 2026-11-22
-related: []
+related: [2026-11-22-island-touch-tap.md]
 ---
 
 # The island moves beside the system Dynamic Island on a touch MacBook Pro

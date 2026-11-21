@@ -973,6 +973,22 @@ Island beside the system Dynamic Island (touch MacBook Pro, macOS 27):
   other Mac keeps every island frame. WHY:
   .project-docs/decisions/2026-11-22-island-beside-system-island.md
 
+Island touch (touch display, macOS 27):
+  A finger has no hover and no mouseMoved, and event monitors get no
+  touches, so the pointer-gated island window never saw a tap. On a screen
+  that reports touch, while the island ignores the mouse, transparent
+  IslandTouchTargetPanels cover each visible surface (capsule unless
+  idle-hidden, agent wing, answer card); AppKit emulates the tap as their
+  mouseDown. A tap starts an IslandTouchSession: the island takes every event
+  in its frame; the collapsed capsule opens the drawer (programmatic
+  expansion without the 4 s collapse), other surfaces get the tap replayed
+  through IslandPanel.sendEvent. The session ends on a tap over the
+  transparent area (consumed), real mouseMoved, the drawer closing, hide, or
+  8 s without a tap; a drawer it opened closes with it. A pointer reaching a
+  target hands the island back at once. Long press (right click) does
+  nothing. Screens without touch never get a target. WHY:
+  .project-docs/decisions/2026-11-22-island-touch-tap.md
+
 Now Playing:
   MediaRemoteNowPlayingSource runs the vendored adapter as a long-lived child
   (`perl run.pl <framework> stream --no-diff --micros`). The AppleScript

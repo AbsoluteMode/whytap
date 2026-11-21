@@ -913,7 +913,7 @@ Island idle-hide:
 Update flow (download-on-action):
   SPUUpdater (hourly, automaticallyDownloadsUpdates = FALSE) + custom
   IslandUpdateUserDriver: no Sparkle windows, everything in the island.
-  Scheduled check -> "Update" pill -> hover: Download | Skip -> download
+  Scheduled check -> "Update" pill -> hover: Download | ✕ Not now -> download
   with a CALayer spinner (IslandUpdateSpinner; SwiftUI .repeatForever would
   freeze during main-thread stalls) -> requested install + relaunch while idle
   -> "Updated" indicator for 5s on the next launch (JustUpdatedIndicator,
@@ -927,7 +927,13 @@ Update flow (download-on-action):
   crashes, process kills or power loss. A final Sparkle delegate guard rechecks
   activity before an app-initiated relaunch. Feed = GitHub Releases
   (`BuildConfig.appcastURL`).
-  Update/Skip and Restart/Later use measured NSWindow down/up dispatch for
+  ✕ only hides the Update pill until the next launch: Sparkle records no
+  skipped version and the driver keeps its held reply. The Settings footer
+  shows Update (or Updating… / Restart) beside the version whenever an update
+  is known this session, also after ✕ or a Later; its click is the pill's own
+  action, a hidden update returning as the downloading pill. WHY:
+  .project-docs/decisions/2026-11-21-settings-update-button.md
+  Update/Not now and Restart/Later use measured NSWindow down/up dispatch for
   first mouse, including alongside a different open hover tool. Native buttons
   retain keyboard/accessibility activation and hover/pressed/focus feedback.
   A download click publishes the spinner immediately, before Sparkle reports
@@ -1376,7 +1382,8 @@ ApplicationInstanceCoordinator then acquires one common prod/beta/worktree lease
 before constructing AppDelegate. A second copy offers to activate the owner and
 quits without starting permissions, providers or hotkeys. Legacy binaries launched
 later cannot honor the lease. The Settings footer shows only the actual app name
-and display version, separated from website and GitHub links by a thin rule.
+and display version (plus the Update button while an update is known, see
+Update flow), separated from the Whytap website and GitHub links by a thin rule.
 All footer text uses the same size; the links have icons, a pointing-hand cursor,
 hover/press highlights and destination tooltips. Detailed build identity stays
 in bundle metadata, outside this compact footer.

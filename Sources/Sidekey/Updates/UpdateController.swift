@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os.log
 import Sparkle
@@ -22,9 +23,10 @@ import Sparkle
 ///      this session's user requested the download. Otherwise publish Ready
 ///      with Restart / Later actions. Returning to idle never triggers a restart.
 ///
-/// The `.available` pill also exposes ✕ "Skip this version" (`skip` closure →
-/// `driver.invokeSkip()`), which tells Sparkle to skip THIS build; future
-/// versions still prompt.
+/// The `.available` pill also exposes ✕ (`hide` closure), which only hides
+/// the pill until the next launch. Sparkle never records a skipped version:
+/// the driver keeps the held reply and Settings keeps an Update button.
+/// WHY: .project-docs/decisions/2026-11-21-settings-update-button.md
 ///
 /// `Equatable` compares version, build, stage tag and deferral explanation
 /// so SwiftUI diffing stays stable across closure captures.
@@ -75,13 +77,10 @@ struct PendingUpdate: Equatable {
     /// decision).
     let dismiss: () -> Void
 
-    /// Skips THIS version permanently (Sparkle records the skipped build).
-    /// Implemented by `UpdateController` as `driver.invokeSkip()` →
-    /// `reply(.skip)`. Unlike `dismiss` (in-memory, this session only), a
-    /// skip persists in Sparkle and stops re-prompting for the same build;
-    /// future versions still surface. Wired to the ✕ affordance on the
-    /// `.available` pill.
-    let skip: () -> Void
+    /// Hides the `.available` pill until the next launch (the ✕ affordance).
+    /// Nothing is recorded in Sparkle: the driver keeps the held reply, so
+    /// Settings can still start the same update from its footer.
+    let hide: () -> Void
 
     /// Explains why a downloaded update needs an explicit restart later.
     var restartDeferralReason: String? = nil
@@ -102,7 +101,7 @@ struct PendingUpdate: Equatable {
     }
 
     /// Returns a copy of this update with a new stage, preserving
-    /// `displayVersion`, `buildVersion`, `dismiss`, and `skip`. Used by
+    /// `displayVersion`, `buildVersion`, `dismiss`, and `hide`. Used by
     /// `UpdateController.applyDriverStage(_:)` to transition the pill
     /// state as Sparkle progresses through download.
     func with(stage newStage: Stage, restartDeferralReason: String? = nil) -> PendingUpdate {
@@ -111,7 +110,7 @@ struct PendingUpdate: Equatable {
             buildVersion: buildVersion,
             stage: newStage,
             dismiss: dismiss,
-            skip: skip,
+            hide: hide,
             restartDeferralReason: restartDeferralReason
         )
     }
@@ -122,6 +121,22 @@ struct PendingUpdate: Equatable {
             && lhs.stage == rhs.stage
             && lhs.restartDeferralReason == rhs.restartDeferralReason
     }
+}
+
+/// What the Settings footer offers beside the app version. Derived from the
+/// island pill's stage, or from an update whose pill ✕ hid this session.
+struct SettingsUpdateOffer: Equatable {
+    enum Action: Equatable {
+        /// Start the download (the pill's «Update»).
+        case update
+        /// Download or install in progress; nothing to click.
+        case downloading
+        /// Downloaded and waiting for Restart.
+        case restart
+    }
+
+    let displayVersion: String
+    let action: Action
 }
 
 /// Owns Sparkle's `SPUUpdater` + a custom `IslandUpdateUserDriver` and turns
@@ -182,11 +197,6 @@ final class UpdateController: NSObject, ObservableObject {
     /// explicit Restart click. Tests replace it with a counter.
     private var installAction: () -> Void = {}
 
-    /// Injectable override for the ✕ "Skip this version" trigger. In production
-    /// this calls `driver.invokeSkip()` (Sparkle records the skipped build). In
-    /// tests it is replaced with a counter to verify the trigger fires.
-    private var skipAction: () -> Void = {}
-
     /// Each discovery owns its closures. Captured actions from an old pill must
     /// not download, dismiss or install a newer update, even if its build repeats.
     private var pendingGeneration = UUID()
@@ -197,6 +207,17 @@ final class UpdateController: NSObject, ObservableObject {
     /// design. NOT persisted to UserDefaults so a Later click never silently
     /// suppresses the update forever — the next launch always re-evaluates.
     private(set) var dismissedBuildVersionString: String?
+
+    /// An update whose pill the user hid this session. Settings keeps offering
+    /// it; the driver still holds Sparkle's reply for it. In memory only.
+    private var hiddenUpdate: (version: String, build: String)? {
+        didSet { refreshSettingsOffer(pending: appState?.updateAvailable) }
+    }
+
+    /// What the Settings footer shows beside the app version. Present while an
+    /// update is known this session, including after ✕ hid the island pill.
+    @Published private(set) var settingsOffer: SettingsUpdateOffer?
+    private var updateAvailableObservation: AnyCancellable?
 
     /// Persists the build/version we are about to install so the NEW
     /// binary can show a post-relaunch "Updated" indicator (variant A). Only
@@ -219,13 +240,18 @@ final class UpdateController: NSObject, ObservableObject {
         updatesEnabled: Bool = true,
         downloadAction: (() -> Void)? = nil,
         installAction: (() -> Void)? = nil,
-        skipAction: (() -> Void)? = nil,
         justUpdatedIndicator: JustUpdatedIndicator? = nil
     ) {
         self.appState = appState
         self.justUpdatedIndicator = justUpdatedIndicator
             ?? JustUpdatedIndicator(appState: appState)
         super.init()
+
+        // `@Published` delivers the new value before the property changes, so
+        // the offer is derived from the delivered value, not a re-read.
+        updateAvailableObservation = appState.$updateAvailable.sink { [weak self] pending in
+            MainActor.assumeIsolated { self?.refreshSettingsOffer(pending: pending) }
+        }
 
         // Build the custom driver first so it is ready before the updater
         // begins its first scheduled tick.
@@ -273,23 +299,13 @@ final class UpdateController: NSObject, ObservableObject {
             }
         }
 
-        // Install + skip triggers. Defaults route to the driver's held
-        // replies; tests inject counters. invokeInstall() fires the held
-        // readyToInstall reply (install + relaunch); invokeSkip() fires the
-        // held updateFound reply with .skip (Sparkle records the skipped build).
+        // Install trigger. The default routes to the driver's held
+        // readyToInstall reply (install + relaunch); tests inject a counter.
         if let installAction {
             self.installAction = installAction
         } else {
             self.installAction = { [weak self] in
                 self?.driver.invokeInstall()
-            }
-        }
-
-        if let skipAction {
-            self.skipAction = skipAction
-        } else {
-            self.skipAction = { [weak self] in
-                self?.driver.invokeSkip()
             }
         }
 
@@ -344,6 +360,10 @@ final class UpdateController: NSObject, ObservableObject {
     /// chose "Later"; Sparkle will not auto-install because download-on-action
     /// means the install cycle only runs when the user explicitly triggers it.
     func dismissPendingUpdate() {
+        if case .available = appState?.updateAvailable?.stage {
+            hidePendingUpdate()
+            return
+        }
         let version = appState?.updateAvailable?.displayVersion
         let build = appState?.updateAvailable?.buildVersion
         if let build {
@@ -365,6 +385,69 @@ final class UpdateController: NSObject, ObservableObject {
         if wasReady { driver.invokeLater() }
     }
 
+    /// ✕ on the `.available` pill: hide it until the next launch. Sparkle's
+    /// reply stays held (no skip is recorded), so `updateFromSettings()` can
+    /// still start this download.
+    func hidePendingUpdate() {
+        guard let pending = appState?.updateAvailable,
+              case .available = pending.stage else { return }
+        dismissedBuildVersionString = pending.buildVersion
+        os_log(
+            "pendingUpdate.hide version=%{public}@ build=%{public}@",
+            log: Self.log,
+            type: .info,
+            pending.displayVersion,
+            pending.buildVersion
+        )
+        appState?.updateAvailable = nil
+        invalidatePendingActions()
+        hiddenUpdate = (pending.displayVersion, pending.buildVersion)
+    }
+
+    /// The Settings footer button: the same action the island pill offers for
+    /// the current stage. A hidden update becomes the island pill again,
+    /// already downloading, and then follows the ordinary flow.
+    func updateFromSettings() {
+        if let pending = appState?.updateAvailable {
+            switch pending.stage {
+            case .available: pending.startDownload()
+            case .readyToInstall: pending.install()
+            case .downloading: break
+            }
+            return
+        }
+        guard let hidden = hiddenUpdate else { return }
+        os_log(
+            "pendingUpdate.settingsUpdate version=%{public}@ build=%{public}@",
+            log: Self.log,
+            type: .info,
+            hidden.version,
+            hidden.build
+        )
+        dismissedBuildVersionString = nil
+        hiddenUpdate = nil
+        publishAvailable(version: hidden.version, build: hidden.build)
+        appState?.updateAvailable?.startDownload()
+    }
+
+    private func refreshSettingsOffer(pending: PendingUpdate?) {
+        let offer: SettingsUpdateOffer?
+        if let pending {
+            let action: SettingsUpdateOffer.Action
+            switch pending.stage {
+            case .available: action = .update
+            case .downloading: action = .downloading
+            case .readyToInstall: action = .restart
+            }
+            offer = SettingsUpdateOffer(displayVersion: pending.displayVersion, action: action)
+        } else if let hiddenUpdate {
+            offer = SettingsUpdateOffer(displayVersion: hiddenUpdate.version, action: .update)
+        } else {
+            offer = nil
+        }
+        if settingsOffer != offer { settingsOffer = offer }
+    }
+
     // MARK: - Internal entry points
 
     /// Internal entry point for `didFindValidUpdate`. Publishes a `.available`
@@ -374,6 +457,8 @@ final class UpdateController: NSObject, ObservableObject {
     /// constructing an `SPUUserUpdateState` is not possible in pure Swift.
     func handleDiscovered(version: String, build: String) {
         if dismissedBuildVersionString == build {
+            // The pill stays hidden, but Settings keeps offering the update.
+            hiddenUpdate = (version, build)
             os_log(
                 "discovery.noop reason=%{public}@ version=%{public}@ build=%{public}@",
                 log: Self.log,
@@ -400,6 +485,11 @@ final class UpdateController: NSObject, ObservableObject {
             return
         }
 
+        hiddenUpdate = nil
+        publishAvailable(version: version, build: build)
+    }
+
+    private func publishAvailable(version: String, build: String) {
         invalidatePendingActions()
         let generation = pendingGeneration
         appState?.updateAvailable = PendingUpdate(
@@ -420,14 +510,10 @@ final class UpdateController: NSObject, ObservableObject {
                 guard let self, self.isCurrent(build: build, generation: generation) else { return }
                 self.dismissPendingUpdate()
             },
-            skip: { [weak self] in
+            hide: { [weak self] in
                 guard let self, self.isCurrent(build: build, generation: generation),
-                      case .available = self.appState?.updateAvailable?.stage,
                       !self.downloadRequested else { return }
-                self.skipAction()
-                if self.isCurrent(build: build, generation: generation) {
-                    self.dismissPendingUpdate()
-                }
+                self.hidePendingUpdate()
             }
         )
         os_log(
@@ -444,6 +530,8 @@ final class UpdateController: NSObject, ObservableObject {
     /// update's stage, preserving `displayVersion`, `buildVersion`, and
     /// `dismiss`. Called on every driver emit.
     func applyDriverStage(_ stage: IslandUpdateUserDriver.DriverStage) {
+        // A cleared session has no held reply left to start a hidden update.
+        if case .cleared = stage { hiddenUpdate = nil }
         guard let current = appState?.updateAvailable else { return }
         switch stage {
         case .available:
@@ -559,6 +647,7 @@ final class UpdateController: NSObject, ObservableObject {
             appState?.updateAvailable = nil
             invalidatePendingActions()
             driver.discardPendingReplies()
+            hiddenUpdate = nil
         }
     }
 
@@ -584,7 +673,7 @@ final class UpdateController: NSObject, ObservableObject {
             buildVersion: "demo",
             stage: .downloading(fractionCompleted: 0.4),
             dismiss: {},
-            skip: {}
+            hide: {}
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + spinnerSeconds) { [weak self, weak appState] in

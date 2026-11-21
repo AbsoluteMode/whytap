@@ -144,14 +144,107 @@ final class UpdateControllerTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func test_available_skip_invokes_the_skip_action() {
-        AppState.shared.updateAvailable = nil
-        var skips = 0
-        let controller = UpdateController(appState: .shared, skipAction: { skips += 1 })
-        controller.handleDiscovered(version: "1.9.1", build: "1356")
-        AppState.shared.updateAvailable?.skip()
-        XCTAssertEqual(skips, 1, "clicking ✕ skips this version (driver.invokeSkip)")
+    // MARK: - ✕ and the Settings footer button
+
+    func test_hide_keepsSparkleReplyAndSettingsOffer_thenSettingsStartsDownload() {
+        let controller = UpdateController(appState: .shared, updatesEnabled: false)
+        var replied: [SPUUserUpdateChoice] = []
+        controller.driver.handleUpdateFound(reply: { replied.append($0) })
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        XCTAssertEqual(controller.settingsOffer, SettingsUpdateOffer(displayVersion: "2.2.26", action: .update))
+
+        AppState.shared.updateAvailable?.hide()
+
+        XCTAssertNil(AppState.shared.updateAvailable, "✕ hides the island pill")
+        XCTAssertEqual(replied, [], "✕ must not reply .skip: Sparkle would stop offering this build")
+        XCTAssertEqual(controller.settingsOffer, SettingsUpdateOffer(displayVersion: "2.2.26", action: .update),
+                       "Settings keeps an Update button after ✕")
+
+        controller.updateFromSettings()
+
+        XCTAssertEqual(replied, [.install], "Settings starts the download through the held reply")
+        XCTAssertEqual(AppState.shared.updateAvailable?.buildVersion, "1480")
+        XCTAssertEqual(AppState.shared.updateAvailable?.stage, .downloading(fractionCompleted: 0))
+        XCTAssertEqual(controller.settingsOffer?.action, .downloading)
+        XCTAssertNil(controller.dismissedBuildVersionString)
+    }
+
+    func test_settingsDownloadStillInstallsWhenIdle() {
+        var installs = 0
+        let controller = UpdateController(appState: .shared, updatesEnabled: false,
+            downloadAction: {}, installAction: { installs += 1 })
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        AppState.shared.updateAvailable?.hide()
+        controller.updateFromSettings()
+        controller.applyDriverStage(.readyToInstall)
+        XCTAssertEqual(installs, 1, "a Settings click is a user-requested download, like the pill")
+    }
+
+    func test_settingsOfferMirrorsPillStages() {
+        var downloads = 0
+        var installs = 0
+        let controller = UpdateController(appState: .shared, updatesEnabled: false,
+            downloadAction: { downloads += 1 }, installAction: { installs += 1 })
+        XCTAssertNil(controller.settingsOffer)
+
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        controller.updateFromSettings()
+        XCTAssertEqual(downloads, 1, "Settings Update acts like the pill's Update")
+        controller.updateFromSettings()
+        XCTAssertEqual(downloads, 1, "no second download while one is running")
+        XCTAssertEqual(controller.settingsOffer?.action, .downloading)
+
+        AppState.shared.screenshotActive = true
+        controller.applyDriverStage(.readyToInstall)
+        XCTAssertEqual(controller.settingsOffer, SettingsUpdateOffer(displayVersion: "2.2.26", action: .restart))
+        AppState.shared.screenshotActive = false
+        controller.updateFromSettings()
+        XCTAssertEqual(installs, 1, "Settings Restart acts like the pill's Restart")
+    }
+
+    func test_rediscoveryAfterLaterKeepsPillHiddenButOffersUpdateInSettings() {
+        var downloads = 0
+        let controller = UpdateController(appState: .shared, updatesEnabled: false,
+            downloadAction: { downloads += 1 }, installAction: {})
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        AppState.shared.screenshotActive = true
+        controller.applyDriverStage(.readyToInstall)
+        AppState.shared.updateAvailable?.dismiss()
+        AppState.shared.screenshotActive = false
+        XCTAssertNil(controller.settingsOffer, "Later consumed the reply; nothing to start yet")
+
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+
+        XCTAssertNil(AppState.shared.updateAvailable, "the pill stays dismissed this session")
+        XCTAssertEqual(controller.settingsOffer?.action, .update)
+        controller.updateFromSettings()
+        XCTAssertEqual(downloads, 1)
+        XCTAssertEqual(AppState.shared.updateAvailable?.stage, .downloading(fractionCompleted: 0))
+    }
+
+    func test_clearedSessionDropsHiddenSettingsOffer() {
+        var downloads = 0
+        let controller = UpdateController(appState: .shared, updatesEnabled: false,
+            downloadAction: { downloads += 1 })
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        AppState.shared.updateAvailable?.hide()
+
+        controller.applyDriverStage(.cleared)
+
+        XCTAssertNil(controller.settingsOffer, "a cleared session has no reply left to download with")
+        controller.updateFromSettings()
+        XCTAssertEqual(downloads, 0)
+        XCTAssertNil(AppState.shared.updateAvailable)
+    }
+
+    func test_newDiscoveryReplacesHiddenOffer() {
+        let controller = UpdateController(appState: .shared, updatesEnabled: false, downloadAction: {})
+        controller.handleDiscovered(version: "2.2.26", build: "1480")
+        AppState.shared.updateAvailable?.hide()
+        controller.applyDriverStage(.cleared)
+        controller.handleDiscovered(version: "2.2.27", build: "1490")
+        XCTAssertEqual(AppState.shared.updateAvailable?.displayVersion, "2.2.27")
+        XCTAssertEqual(controller.settingsOffer, SettingsUpdateOffer(displayVersion: "2.2.27", action: .update))
     }
 
     func test_didFindValidUpdate_setsAvailableStage() {
@@ -383,9 +476,8 @@ final class UpdateControllerTests: XCTestCase {
     func test_oldPillActionsCannotAffectNewDiscoveryEvenIfBuildRepeats() {
         var downloads = 0
         var installs = 0
-        var skips = 0
         let controller = UpdateController(appState: .shared, updatesEnabled: false,
-            downloadAction: { downloads += 1 }, installAction: { installs += 1 }, skipAction: { skips += 1 })
+            downloadAction: { downloads += 1 }, installAction: { installs += 1 })
         controller.handleDiscovered(version: "2.2", build: "2200")
         let oldAvailable = AppState.shared.updateAvailable
         controller.applyDriverStage(.readyToInstall)
@@ -393,12 +485,11 @@ final class UpdateControllerTests: XCTestCase {
         controller.applyDriverStage(.cleared)
         controller.handleDiscovered(version: "2.2", build: "2200")
         oldAvailable?.startDownload()
-        oldAvailable?.skip()
+        oldAvailable?.hide()
         oldReady?.install()
         oldReady?.dismiss()
         XCTAssertEqual(downloads, 0)
         XCTAssertEqual(installs, 0)
-        XCTAssertEqual(skips, 0)
         XCTAssertEqual(AppState.shared.updateAvailable?.buildVersion, "2200")
     }
 
@@ -431,7 +522,7 @@ final class UpdateControllerTests: XCTestCase {
             buildVersion: "1230",
             stage: .available(download: {}),
             dismiss: {},
-            skip: {}
+            hide: {}
         )
         let updated = original.with(stage: .downloading(fractionCompleted: 0.3))
 
@@ -440,18 +531,18 @@ final class UpdateControllerTests: XCTestCase {
         XCTAssertEqual(updated.stage, .downloading(fractionCompleted: 0.3))
     }
 
-    func test_pendingUpdate_withStage_preservesSkipClosure() {
-        var skipped = false
+    func test_pendingUpdate_withStage_preservesHideClosure() {
+        var hidden = false
         let original = PendingUpdate(
             displayVersion: "1.2.3",
             buildVersion: "1230",
             stage: .available(download: {}),
             dismiss: {},
-            skip: { skipped = true }
+            hide: { hidden = true }
         )
         let updated = original.with(stage: .downloading(fractionCompleted: 0.3))
-        updated.skip()
-        XCTAssertTrue(skipped, "with(stage:) must thread the skip closure through")
+        updated.hide()
+        XCTAssertTrue(hidden, "with(stage:) must thread the hide closure through")
     }
 
     // MARK: - Idempotency / build dedup

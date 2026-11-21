@@ -256,6 +256,65 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(calls.servers, ["sferyx"])
     }
 
+    /// The builder's reproducer (queue ticket 315): a poll paused before SSH,
+    /// as during a credential lookup, must not connect after Delete.
+    func testDeletionCancelsAPollStillPreparingItsConnection() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "poll reached authentication before SSH")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = Counter()
+        let store = MonitorStore(root: root) { _ in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.value += 1 }
+            throw CancellationError()
+        }
+        store.reloadFiles()
+        let poll = Task { await store.refreshServers() }
+        await fulfillment(of: [began], timeout: 2)
+
+        let outcome = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertEqual(outcome, .deleted)
+        release.continuation.yield(())
+        release.continuation.finish()
+        await poll.value
+
+        XCTAssertEqual(contacted.value, 0, "confirmed deletion must stop a poll still preparing its connection")
+        XCTAssertTrue(store.readings.isEmpty)
+    }
+
+    /// Builder's reproducer: an unreadable list may hide a deletion, so it
+    /// pauses polling, in the running store and after relaunch.
+    func testUnreadableListPausesServerPollingUntilItCanBeRead() async throws {
+        _ = try writeServers()
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        try Data("invalid".utf8).write(to: MonitorRemovedDashboards.url(root: root), options: .atomic)
+
+        store.reloadFiles()
+        XCTAssertNotNil(store.dashboardError)
+        XCTAssertNotNil(store.serverError, "Server status says it is paused")
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, [])
+
+        let relaunched = serverStore(calls)
+        XCTAssertNotNil(relaunched.dashboardError)
+        XCTAssertNotNil(relaunched.serverError)
+        await relaunched.refreshServers()
+        XCTAssertEqual(calls.servers, [], "a fresh store does not poll while removal state is unknown")
+
+        // Fixed list without server-status: polling resumes.
+        try MonitorRemovedDashboards().save(root: root)
+        relaunched.reloadFiles()
+        XCTAssertNil(relaunched.serverError)
+        await relaunched.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"])
+    }
+
     func testDeletingOpenServerStatusReturnsToThePicker() {
         XCTAssertNil(MonitorHoverPanel.selection(afterDeleting: MonitorStore.serverStatusID, outcome: .deleted,
                                                  selectedID: MonitorStore.serverStatusID))

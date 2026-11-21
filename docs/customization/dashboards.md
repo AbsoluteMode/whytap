@@ -118,7 +118,9 @@ stays deleted when its collector writes the snapshot again, including after a
 relaunch. Whytap never stops or deletes the collector, its scripts or its
 launchd agent: turn the collector off yourself if it should stop running.
 Deleting Server status records `server-status` in the same list: Whytap stops
-connecting to the servers in `servers.json` and leaves that file as it is.
+connecting to the servers in `servers.json` (a check already under way is
+cancelled) and leaves that file as it is. While `removed-dashboards.json` cannot
+be read, Server status pauses with a notice instead of connecting.
 
 To bring a deleted dashboard back, run
 `python3 scripts/customize.py restore-dashboard <id> --flavor prod` (for example

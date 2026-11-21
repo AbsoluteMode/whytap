@@ -67,7 +67,11 @@ minutes), which Whytap neither installs nor owns.
 - Server status has no snapshot: its readings come from Whytap's own SSH
   polling of `Monitor/servers.json`. Deleting it records `server-status` in
   the same list; the store then reads no server configuration, so nothing
-  connects to the servers, and `servers.json` stays as it is.
+  connects to the servers, and `servers.json` stays as it is. A poll already
+  in flight (it can wait seconds on a credential lookup) is cancelled at once
+  and the collector checks for cancellation right before starting SSH.
+  Polling also pauses, with a notice on Server status, while the list is
+  unreadable, since it may hold a deletion; it resumes once the list reads.
 - `customize.py restore-dashboard <id>` takes any ID off the list under the
   same lock (Server status reconnects; a custom board appears when its
   collector next writes). `server-status` stays reserved as a snapshot ID.
@@ -136,6 +140,9 @@ minutes), which Whytap neither installs nor owns.
   status and a custom board, keeps other deletions with mode 0600, changes
   nothing for an ID that was not deleted, on `--dry-run`, for a broken list,
   an invalid ID or a lock that stays busy.
+- The builder's review (queue ticket 315) found a poll paused before SSH
+  still connecting after Delete, and an unreadable list restarting polling in
+  the running store and after relaunch. Both reproducers are now tests and pass.
 - Not tested: the real × and alert over the live island panel.
 
 ## Rejected

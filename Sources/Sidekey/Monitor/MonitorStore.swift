@@ -25,6 +25,9 @@ final class MonitorStore: ObservableObject {
     /// Every dashboard file by the ID it decodes to, duplicates included, so
     /// Delete removes each copy of the board it lists.
     private var dashboardFiles: [String: [URL]] = [:]
+    /// The server poll in flight; cancelled as soon as polling is no longer
+    /// allowed, so a poll still preparing its connection never reaches SSH.
+    private var refreshTask: Task<Void, Never>?
     /// How long Delete waits for an installer holding the deleted list.
     var removedListLockTimeout: TimeInterval = 2
 
@@ -113,13 +116,20 @@ final class MonitorStore: ObservableObject {
 
         // WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
         serverStatusRemoved = removed?.contains(Self.serverStatusID) == true
+        // Servers are polled only while the list is readable and does not
+        // hold server-status: an unreadable list may hide a deletion, so it
+        // pauses polling instead of resuming it.
+        let pollingAllowed = removed != nil && !serverStatusRemoved
+        if !pollingAllowed { refreshTask?.cancel() }
         let configFile = root.appendingPathComponent("servers.json")
         // A deleted Server status reads no configuration, so refreshServers
         // has nothing to connect to; servers.json itself stays as it is.
-        guard !serverStatusRemoved, fm.fileExists(atPath: configFile.path) else {
+        guard pollingAllowed, fm.fileExists(atPath: configFile.path) else {
             configuration = nil
             readings = []
-            serverError = nil
+            serverError = removed == nil
+                ? "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
+                : nil
             return
         }
         do {
@@ -198,6 +208,25 @@ final class MonitorStore: ObservableObject {
             pending.refreshing = true
             return pending
         }
+        // Its own task, so reloadFiles can cancel it the moment Server status
+        // is deleted (here or on another surface) or the list turns unreadable.
+        let poll = Task<Void, Never> { @MainActor [weak self] in
+            guard let self else { return }
+            await self.collect(configuration, generation: refreshGeneration)
+        }
+        refreshTask = poll
+        await withTaskCancellationHandler { await poll.value } onCancel: { poll.cancel() }
+        if refreshTask == poll { refreshTask = nil }
+        if poll.isCancelled {
+            readings = readings.map { reading in
+                var idle = reading
+                idle.refreshing = false
+                return idle
+            }
+        }
+    }
+
+    private func collect(_ configuration: MonitorServerConfiguration, generation refreshGeneration: UInt64?) async {
         let collector = self.collector
         await withTaskGroup(of: (MonitorServer, MonitorServerMetrics?).self) { group in
             for server in configuration.servers {

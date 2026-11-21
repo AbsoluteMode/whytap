@@ -35,7 +35,11 @@ compatibility contract so existing backups stay reachable.
   does not exist.
 - Reconnecting the same GitHub account keeps this Mac's saved repository when
   it still exists, even if the other name exists too; another account starts
-  from the order above (builder review of PR #344).
+  from the order above (builder review of PR #344). A saved repository the
+  new token cannot see (GitHub answers 404 for a private repository outside a
+  fine-grained token) is an access error: the destination and the previous
+  token stay, nothing moves to the other name. A rename GitHub reports is
+  followed. To choose another repository, Disconnect, then Connect.
 - The chosen name is saved per Mac in `backup.github-repository.v1`. A
   connection saved before this key existed reads as Exodia-Backup, so existing
   Macs keep their destination without reconnecting. Disconnecting removes it.
@@ -55,7 +59,10 @@ order: user, old name, new name, create, recheck); an existing Exodia-Backup is
 kept with only GET requests; reconnecting the same account keeps a saved
 Whytap-Backup while Exodia-Backup also exists (also through BackupViewModel,
 the builder's scenario, which fails without the fix), another account's choice
-does not carry over; a repository renamed on GitHub is followed; only
+does not carry over; a replacement token that cannot see the saved
+repository gets an access error and keeps the destination and token (the
+builder's second scenario, which fails without the fix); a rename of the saved
+repository is followed; a repository renamed on GitHub is followed; only
 the two names are accepted, and a missing saved name means Exodia-Backup. All
 backup and settings sync tests pass.
 

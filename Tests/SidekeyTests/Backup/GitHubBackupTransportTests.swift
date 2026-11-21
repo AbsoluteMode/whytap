@@ -145,6 +145,33 @@ final class GitHubBackupTransportTests: XCTestCase {
         XCTAssertEqual(found, "developer/Exodia-Backup", "another account's choice does not carry over")
     }
 
+    func testReconnectRefusesASavedRepositoryTheTokenCannotSee() async throws {
+        StubURLProtocol.handler = { request in
+            switch request.url!.path {
+            case "/user": return (200, [:], self.json(["login": "developer"]))
+            case "/repos/developer/Exodia-Backup": return (200, [:], self.repository())
+            default: return (404, [:], Data())                     // the saved Whytap-Backup is hidden
+            }
+        }
+        do {
+            _ = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                        saved: (owner: "developer", repository: "Whytap-Backup"), session: session)
+            XCTFail("a hidden saved repository must not switch the destination")
+        } catch { XCTAssertEqual(error as? GitHubBackupTransport.Failure, .permission) }
+        XCTAssertFalse(StubURLProtocol.capturedRequests.contains { $0.url!.path == "/repos/developer/Exodia-Backup" })
+    }
+
+    func testReconnectFollowsARenameOfTheSavedRepository() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }
+            return (200, [:], self.repository(name: "Whytap-Backup"))  // GitHub answers the old name with the new one
+        }
+        let connection = try await GitHubBackupTransport.connect(token: "synthetic-token",
+                                                                 saved: (owner: "developer", repository: "Exodia-Backup"), session: session)
+        let name = await connection.destinationName
+        XCTAssertEqual(name, "developer/Whytap-Backup")
+    }
+
     func testConnectFollowsAnExodiaBackupRenamedOnGitHub() async throws {
         StubURLProtocol.handler = { request in
             if request.url!.path == "/user" { return (200, [:], self.json(["login": "developer"])) }

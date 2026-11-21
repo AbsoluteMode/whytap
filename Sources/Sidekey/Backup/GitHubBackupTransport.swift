@@ -101,7 +101,10 @@ actor GitHubBackupTransport {
 
     /// Creating a destination is invoked only by an explicit Connect action.
     /// `saved` is this Mac's existing connection: reconnecting the same account
-    /// keeps its repository even when the other backup name also exists.
+    /// keeps its repository even when the other backup name also exists. A
+    /// saved repository the token cannot see (GitHub answers 404 for a private
+    /// repository outside a fine-grained token) is an access failure, never a
+    /// reason to move to the other name; a rename GitHub reports is followed.
     static func connect(token: String, saved: (owner: String, repository: String)? = nil,
                         session: URLSession = GitHubBackupNetwork.session) async throws -> GitHubBackupTransport {
         guard validToken(token) else { throw Failure.authentication }
@@ -118,7 +121,8 @@ actor GitHubBackupTransport {
         var found: String?
         if let saved, saved.owner.caseInsensitiveCompare(user.login) == .orderedSame, isBackupRepository(saved.repository) {
             let previous = try GitHubBackupTransport(token: token, owner: user.login, repository: saved.repository, session: session)
-            found = try await previous.existingRepositoryName()
+            guard let kept = try await previous.existingRepositoryName() else { throw Failure.permission }
+            found = kept
         }
         if found == nil {
             let legacy = try GitHubBackupTransport(token: token, owner: user.login, repository: legacyRepository, session: session)

@@ -189,6 +189,49 @@ final class BackupSimpleFlowTests: XCTestCase {
         XCTAssertEqual(installed.githubBackupURL?.path, "/developer/Whytap-Backup/releases")
     }
 
+    func testReconnectPreservesSavedDestinationWhenReplacementTokenCannotSeeIt() async throws {
+        let profile = try profile()
+        let tokens = MemoryTokenStore()
+        try tokens.save("synthetic-old-token")
+        profile.defaults.set("github", forKey: "backup.destination-kind.v1")
+        profile.defaults.set("github:developer/whytap-backup", forKey: "backup.destination-id.v1")
+        profile.defaults.set("developer/Whytap-Backup", forKey: "backup.destination-name.v1")
+        profile.defaults.set("developer", forKey: "backup.github-owner.v1")
+        profile.defaults.set("Whytap-Backup", forKey: "backup.github-repository.v1")
+        StubURLProtocol.handler = { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-old-token" {
+                return (401, [:], Data())
+            }
+            let payload: Any
+            switch request.url?.path {
+            case "/user":
+                payload = ["login": "developer"]
+            case "/repos/developer/Whytap-Backup":
+                // The private saved repository still exists, but the replacement
+                // fine-grained PAT grants access only to the other repository.
+                return (404, [:], Data())
+            case "/repos/developer/Exodia-Backup":
+                payload = ["name": request.url!.lastPathComponent, "private": true, "permissions": ["push": true]]
+            case "/repos/developer/Exodia-Backup/releases":
+                payload = []
+            default:
+                return (404, [:], Data())
+            }
+            return (200, [:], try JSONSerialization.data(withJSONObject: payload))
+        }
+
+        let installed = model(profile, githubTokenStore: tokens)
+        await installed.start()?.value
+        XCTAssertEqual(installed.githubConnectionState, .needsAttention)
+        await installed.connectGitHub(token: "synthetic-new-token")
+
+        XCTAssertEqual(installed.githubConnectionState, .needsAttention)
+        XCTAssertEqual(try tokens.read(), "synthetic-old-token")
+        XCTAssertEqual(profile.defaults.string(forKey: "backup.github-repository.v1"), "Whytap-Backup")
+        XCTAssertEqual(profile.defaults.string(forKey: "backup.destination-id.v1"), "github:developer/whytap-backup")
+        XCTAssertEqual(installed.githubBackupURL?.path, "/developer/Whytap-Backup/releases")
+    }
+
     func testUploadStatusCountsPartsAndEndsWithTheCheckedResult() async throws {
         let backup = model(try profile())
         await backup.connectGitHub(token: "synthetic-token")

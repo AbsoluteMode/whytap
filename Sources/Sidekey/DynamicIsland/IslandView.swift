@@ -2795,6 +2795,7 @@ private struct IslandDropModeHoverPanel: View {
                                         context: hitTargetContext,
                                         action: { activateTool(tool) }
                                     )
+                                    .disabled(tool.isComingSoon)
                                     .overlay(alignment: .top) {
                                         toolHotkeyHint(for: tool)
                                             .opacity(hoveredTool == tool ? 1 : 0)
@@ -2804,7 +2805,7 @@ private struct IslandDropModeHoverPanel: View {
                                     }
                                     .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
                                     .onHover { isHovering in
-                                        if isHovering { hoveredTool = tool }
+                                        if isHovering, !tool.isComingSoon { hoveredTool = tool }
                                         else if hoveredTool == tool { hoveredTool = nil }
                                     }
                             }
@@ -2968,6 +2969,8 @@ private struct IslandDropModeHoverPanel: View {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
                             let info = HoverToolRegistry.info(for: tool)
+                            let isPressed = hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
+                            let highlight = isPressed ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
                             Button { activateSearchTool(tool) } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: info.sfSymbol)
@@ -2995,10 +2998,7 @@ private struct IslandDropModeHoverPanel: View {
                                 .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
                                 .background(
                                     RoundedRectangle(cornerRadius: 9)
-                                        .fill(.white.opacity(
-                                            hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
-                                                ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
-                                        ))
+                                        .fill(.white.opacity(tool.isComingSoon ? 0 : highlight))
                                 )
                                 .contentShape(Rectangle())
                             }
@@ -3009,6 +3009,7 @@ private struct IslandDropModeHoverPanel: View {
                                 context: hitTargetContext,
                                 action: { activateSearchTool(tool) }
                             )
+                            .disabled(tool.isComingSoon)
                             .accessibilityLabel(info.title)
                             .accessibilityHint(info.description)
                             .accessibilityValue(tool.comingSoonBadge
@@ -3017,7 +3018,7 @@ private struct IslandDropModeHoverPanel: View {
                             .opacity(tool.isComingSoon ? 0.6 : 1)
                             .id(index)
                             .onHover { inside in
-                                if inside {
+                                if inside, !tool.isComingSoon {
                                     hoveredTool = tool
                                     selectedSearchIndex = index
                                 } else if hoveredTool == tool { hoveredTool = nil }

@@ -37,8 +37,9 @@ is the single switch. It is `false`, so Calendar is "Soon":
 
 - **Visible, inert.** The Calendar tile (Hover, Toolbox catalog), its hover-search
   row and Toolbox pane carry a "Soon" badge. The Settings -> Integrations Calendars
-  section is one card with a "Soon" plaque and a disabled Connect button. Nothing
-  opens on click.
+  section is one card with a "Soon" plaque and a disabled Connect button.
+  Calendar's Hover controls give no active hover or press feedback and do not
+  claim first mouse.
 - **One router gate.** `HoverSlotRouter.effect(for:)` returns `.comingSoon` for a
   closed tool. The tile, search, Toolbox and tool-hotkey paths all end there; the
   island also refuses a programmatic `.calendar` panel request.

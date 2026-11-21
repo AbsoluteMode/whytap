@@ -51,12 +51,14 @@ struct IslandHoverPanelControl: View {
             .joined(separator: " ")
     }
 
-    @State private var hovering = false
+    @State private var pointerInside = false
     @State private var pull: CGSize = .zero
     @GestureState private var pressed = false
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.islandHoverNativePressed) private var nativePressed
-    private var isPressed: Bool { pressed || nativePressed }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var hovering: Bool { isEnabled && pointerInside }
+    private var isPressed: Bool { isEnabled && (pressed || nativePressed) }
 
     private var statusText: String? {
         guard let label else { return nil }
@@ -88,7 +90,7 @@ struct IslandHoverPanelControl: View {
     var body: some View {
         Button(action: action) {
             content
-                .offset(pull)
+                .offset(isEnabled ? pull : .zero)
                 .scaleEffect(visualScale)
                 .animation(reduceMotion ? nil : .spring(response: 0.26, dampingFraction: 0.76), value: hovering)
         }
@@ -106,7 +108,7 @@ struct IslandHoverPanelControl: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
-                    hovering = true
+                    pointerInside = true
                     let rawPull = IslandGraphiteHoverControlStyle.magneticPull(
                             location: location,
                             bounds: CGSize(width: width, height: Self.tileHeight),
@@ -114,7 +116,7 @@ struct IslandHoverPanelControl: View {
                         )
                     pull = reduceMotion ? .zero : CGSize(width: rawPull.width * 0.35, height: rawPull.height * 0.35)
                 case .ended:
-                    hovering = false
+                    pointerInside = false
                     pull = .zero
                 }
             }

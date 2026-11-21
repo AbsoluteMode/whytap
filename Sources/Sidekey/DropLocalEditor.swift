@@ -63,6 +63,17 @@ struct DropLocalEditor {
         }
         defer { center.removeObserver(observation) }
         editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        // The onboarding's try field says "it worked" only on this signal: a
+        // finished take landed in that editor, not text the user typed. The
+        // notification carries the editor, never the text.
+        // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+        if changed { NotificationCenter.default.post(name: .sidekeyDropInsertedIntoLocalEditor, object: editor) }
         return changed
     }
+}
+
+extension Notification.Name {
+    /// Posted with the receiving `NSTextView` after Drop inserted a take into
+    /// one of Whytap's own editors.
+    static let sidekeyDropInsertedIntoLocalEditor = Notification.Name("sidekey.drop.insertedIntoLocalEditor")
 }

@@ -1122,13 +1122,34 @@ API & Models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and
 recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
-First run: no sign-in and no onboarding wizard. Launch and reopen show the
-island immediately. The first GUI launch on each Mac also opens Settings ->
-Permissions once if any listed permission is missing. Already authorized Macs
-skip this presentation; a dismissed screen is not reopened at every launch.
-The local presentation marker is excluded from settings backups. Showing the
-screen requests no permission automatically. WHY:
-.project-docs/decisions/2026-10-26-first-launch-permissions.md.
+First run: no sign-in. Launch and reopen show the island immediately. The
+first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
+OnboardingWindowController, accessory app, no Dock icon) in place of the former
+Settings -> Permissions screen: up to four pages, each hidden when already done
+and each skippable, closing = Done. 1 Speech: On this Mac card ("Download and use
+for Drop", about 470 MB, download continues in the background; when it lands
+OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that cannot
+run, nothing else), "I have an API key" (Soniox/Deepgram/ElevenLabs, saving sets
+that provider for Drop), "Restore from another Mac"; Intel opens on the key form;
+hidden when Drop's speech route runs. 2 Two permissions: Microphone and Keyboard
+control on PermissionsSettingsViewModel, done at dropHotkeyStatus == .ready
+(DropShortcutStatusSection when both are granted but the shortcut is not
+installed); hidden when ready. 3 Hold Space and speak: the user's own shortcut,
+a native field, "That's Drop" only on DropLocalEditor's
+sidekeyDropInsertedIntoLocalEditor for that field; while the onboarding is
+visible a Drop press with no route says so on the page (no Settings over it)
+and one with a missing permission returns to page 2 (no repair window).
+4 Google search / Meeting Notes / Agent: switch and video each, "Add a model"
+when the feature's model does not run; Done. No Calendar. Screen Recording,
+System Audio Recording, Input Monitoring, Automation and Calendar are asked at
+first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
+or the former onboarding's key = ran before, never shown on update;
+sidekey.onboarding.pending.v1 brings it back after a quit until Done; neither key
+is in backups or sync. A first Drop press with the microphone never asked asks
+it and records nothing (DropHotkeyRecovery.startGate); Now Playing's Automation
+prompt waits while the onboarding is visible. To see it again on a Mac:
+`defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
+and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow

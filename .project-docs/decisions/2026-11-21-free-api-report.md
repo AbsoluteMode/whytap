@@ -64,9 +64,9 @@ updates only after reading the official page keeps "Last checked" honest.
 
 - The first review on 2026-11-21 (official pages, no accounts): Deepgram,
   OpenRouter, Claude Max/Ultra, ChatGPT Pro and Tavily unchanged; ElevenLabs'
-  Free plan confirmed for 10,000 credits a month with Speech to Text, but its
-  pages no longer state API access or separate realtime and batch quotas for
-  Free, so that wording was replaced. No new no-card offer at Soniox, OpenAI or
+  Free plan lists 10,000 credits a month and Speech to Text. The API pricing
+  table groups Free and Pay as you go in one column, so the app quotes the
+  monthly Free credit allowance. No new no-card offer at Soniox, OpenAI or
   Anthropic.
 - The generator reproduces its section byte for byte; `--check` passes.
 

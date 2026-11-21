@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Translation/TranslationService.swift
     confirmed_at: 2026-10-20
-related: [../project.md, 2026-10-20-toolbox-mini-apps.md, 2026-11-18-drop-into-whytap-editors.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-subtitle-speech-translation.md]
+related: [../project.md, 2026-10-20-toolbox-mini-apps.md, 2026-11-18-drop-into-whytap-editors.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-subtitle-speech-translation.md, 2026-11-22-subtitle-audio-translate-slot.md]
 ---
 
 # Translation tools

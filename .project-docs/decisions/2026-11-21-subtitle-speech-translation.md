@@ -41,7 +41,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/OpenAITranslateRecordedSession.swift
     confirmed_at: 2026-11-21
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md, 2026-11-22-subtitle-audio-translate-slot.md]
 ---
 
 # Subtitles on OpenAI live speech translation
@@ -62,6 +62,10 @@ their own OpenAI quota, with Whytap's pairs and look kept.
   `speechTranslation`, served only by OpenAI and only for Subtitles audio).
   Nothing is changed for anyone: the user picks it. While it is selected,
   the Subtitles LLM row keeps its choice and says it is not used.
+  Replaced on 2026-11-22: Subtitles run only on this model, as the single
+  Audio translate row with no Speech or LLM choice; see
+  2026-11-22-subtitle-audio-translate-slot.md. The rest of this decision
+  (session, pairs, errors, costs) is unchanged.
 - **One session.** `OpenAIRealtimeTranslateAdapter` opens
   `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate`
   with the OpenAI key from API & Models, sets the target language and input

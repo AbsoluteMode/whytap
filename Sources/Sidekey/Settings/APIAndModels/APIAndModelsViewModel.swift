@@ -37,17 +37,50 @@ struct FeatureRow: Equatable, Identifiable {
     var id: AIFeature { feature }
 }
 
+/// Subtitles' row: OpenAI gpt-realtime-translate, preselected; it runs only
+/// with the OpenAI key.
+// WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+struct AudioTranslateSlot: Equatable {
+    let key: SubtitleAudioTranslate.KeyState
+
+    /// Subtitles can run: the key can be read.
+    var isActive: Bool { key == .present }
+    var label: String { "OpenAI · \(SubtitleAudioTranslate.model)" }
+}
+
 /// One line of the Models card: what the user turns on (Drop Smart, Meetings)
 /// with every route it runs on, speech first, then its LLM.
 struct FeatureGroup: Equatable, Identifiable {
     let title: String
     let rows: [FeatureRow]
+    /// Subtitles only.
+    var audioTranslate: AudioTranslateSlot? = nil
     var id: String { title }
 
-    var summary: String { rows.map(\.modelSummary).joined(separator: " · ") }
+    /// What the collapsed line names: Subtitles' one model, otherwise every
+    /// route's model.
+    var summaryParts: [String] {
+        if audioTranslate != nil { return [SubtitleAudioTranslate.model] }
+        return rows.map(\.modelSummary)
+    }
+    var summary: String { summaryParts.joined(separator: " · ") }
+    /// A link or an error naming `feature` opens this card. Subtitles'
+    /// retired features lead to the Audio translate slot.
+    func covers(_ feature: AIFeature) -> Bool {
+        rows.contains { $0.feature == feature }
+            || (audioTranslate != nil && [.subtitlesAudio, .subtitlesTranslation].contains(feature))
+    }
+    /// Subtitles ask for setup without the OpenAI key, other groups for an
+    /// unset route.
+    var needsSetup: Bool {
+        if let slot = audioTranslate { return !slot.isActive }
+        return rows.contains { $0.status == .notSet }
+    }
 
-    /// Every feature exactly once. Paired functions keep their speech route
-    /// beside the LLM route that processes its text.
+    /// Every feature exactly once (Costs groups usage by it too). Paired
+    /// functions keep their speech route beside the LLM route that processes
+    /// its text. Subtitles' features are retired: the card shows the Audio
+    /// translate slot instead of rows.
     static let layout: [(title: String, features: [AIFeature])] = [
         ("Drop Fast", [.dropFast]),
         ("Drop Smart", [.dropSmart, .dropSmartCleanup]),
@@ -98,13 +131,16 @@ struct AssignProposal: Equatable {
 final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var chips: [KeyChip] = []
     @Published private(set) var rows: [FeatureRow] = []
+    @Published private(set) var audioTranslate = AudioTranslateSlot(key: .missing)
 
     /// `rows` as the Models card shows them.
     var groups: [FeatureGroup] {
         FeatureGroup.layout.map { entry in
-            FeatureGroup(title: entry.title, rows: entry.features.compactMap { feature in
-                rows.first { $0.feature == feature }
-            })
+            FeatureGroup(
+                title: entry.title,
+                rows: entry.features.compactMap { feature in rows.first { $0.feature == feature } },
+                audioTranslate: entry.features.contains(.subtitlesAudio) ? audioTranslate : nil
+            )
         }
     }
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
@@ -578,9 +614,12 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private func recompute() {
         let chips = keyedAccounts().map(chip(for:))
+        let slot = AudioTranslateSlot(key: .init(lookup(SubtitleAudioTranslate.account)))
+        if audioTranslate != slot { audioTranslate = slot }
         let rows = AIFeature.activeCases.map(row(for:))
         let groups = resolver.aliasGroups()
-        let unset = rows.filter { $0.status == .notSet }.count
+        // Subtitles without the OpenAI key count as a feature without a model.
+        let unset = rows.filter { $0.status == .notSet }.count + (slot.isActive ? 0 : 1)
         let banner: String?
         if chips.isEmpty || unset == 0 {
             banner = nil
@@ -601,7 +640,7 @@ final class APIAndModelsViewModel: ObservableObject {
             selectionLabel: label,
             status: resolver.status(for: feature),
             isChecking: checking.contains(feature),
-            message: messages[feature] ?? route.flatMap(languageWarning(for:)) ?? speechTranslationNote(for: feature),
+            message: messages[feature] ?? route.flatMap(languageWarning(for:)),
             provider: route.flatMap(providerChoice(for:)),
             modelSummary: route?.model ?? "Choose a model"
         )
@@ -618,15 +657,6 @@ final class APIAndModelsViewModel: ObservableObject {
             label = endpoint.title
         }
         return ProviderChoice(model: route.model, pinned: pinned, label: label)
-    }
-
-    /// OpenAI live speech translation on Subtitles audio translates by itself:
-    /// the Subtitles LLM row keeps its choice but is not used meanwhile.
-    // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
-    private func speechTranslationNote(for feature: AIFeature) -> String? {
-        guard feature == .subtitlesTranslation, let audio = routing.route(for: .subtitlesAudio),
-              AIFeature.subtitlesAudio.modelUse(on: audio.account.kind) == .speechTranslation else { return nil }
-        return "Not used: \(audio.model) translates Subtitles itself"
     }
 
     /// PR #35: a Deepgram model that cannot take the current input language.

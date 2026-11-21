@@ -40,25 +40,15 @@ final class FakeSpeechTranslation: SpeechTranslationSession, @unchecked Sendable
     }
 }
 
-private struct UnusedTranslator: TextTranslating {
-    func translate(_ text: String, target: TranslationTarget) async throws -> String {
-        XCTFail("The Subtitles LLM must not be used with a speech translator")
-        return text
-    }
-}
-
 @MainActor
 final class SpeechTranslationModelTests: XCTestCase {
     private func makeModel(
-        translator: @escaping () async throws -> SpeechTranslationSession?,
-        audio: FixtureSubtitleAudio = FixtureSubtitleAudio(),
-        llmUsed: (() -> Void)? = nil
+        translator: @escaping () async throws -> SpeechTranslationSession,
+        audio: FixtureSubtitleAudio = FixtureSubtitleAudio()
     ) -> LiveSubtitleModel {
         let model = LiveSubtitleModel(
             flushInterval: .milliseconds(5), connectionTimeout: .seconds(5),
             makeAudio: { audio },
-            open: { _ in XCTFail("No speech-to-text session with a speech translator"); return FixtureSubtitleUpstream() },
-            makeService: { llmUsed?(); return UnusedTranslator() },
             openTranslator: { _, _ in try await translator() }
         )
         model.sourceCode = "en"
@@ -74,8 +64,7 @@ final class SpeechTranslationModelTests: XCTestCase {
     func testRecordedSessionBecomesPairsAndStopWaitsForTheProviderClose() async throws {
         let session = FakeSpeechTranslation()
         let audio = FixtureSubtitleAudio()
-        var llmUsed = false
-        let model = makeModel(translator: { session }, audio: audio, llmUsed: { llmUsed = true })
+        let model = makeModel(translator: { session }, audio: audio)
         model.start()
         try await wait(model.phase == .listening)
         audio.pair.continuation.yield([0.1, 0.2, -0.1])
@@ -94,7 +83,6 @@ final class SpeechTranslationModelTests: XCTestCase {
         XCTAssertEqual(model.lines.map(\.ordinal), Array(0..<8))
         XCTAssertTrue(model.lines.allSatisfy { $0.translation != nil && !$0.failed })
         XCTAssertEqual(model.live, ""); XCTAssertEqual(model.liveTranslation, "")
-        XCTAssertFalse(llmUsed)
         XCTAssertEqual(audio.finished, 1)
     }
 
@@ -142,7 +130,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(model.phase == .failed)
         XCTAssertEqual(model.issue?.feature, .subtitlesAudio)
         XCTAssertEqual(model.issue?.message,
-                       "Your OpenAI account is out of credit. Add credit or choose another Subtitles audio model.")
+                       "Your OpenAI account is out of credit. Add credit to use Subtitles.")
     }
 
     func testAnUnsupportedTargetLanguageIsNamed() async throws {
@@ -373,13 +361,12 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
 }
 
 final class SpeechTranslationRoutingTests: XCTestCase {
-    func testOnlySubtitlesAudioOffersOpenAISpeechTranslation() {
-        XCTAssertEqual(AIFeature.subtitlesAudio.modelUse(on: .openAI), .speechTranslation)
-        for feature in AIFeature.activeCases where feature != .subtitlesAudio {
-            XCTAssertNotEqual(feature.modelUse(on: .openAI), .speechTranslation, feature.rawValue)
-        }
+    /// It is the Audio translate slot's fixed model, never a picked route
+    /// (`SubtitleAudioTranslateTests`); the registry still knows it.
+    func testTheTranslateModelStaysKnownButIsNoPickerModel() {
+        XCTAssertNil(AIFeature.subtitlesAudio.modelUse(on: .openAI))
         XCTAssertNil(AIFeature.dropFast.modelUse(on: .openAI))
-        XCTAssertEqual(ModelRegistry.recommended(for: .subtitlesAudio, kind: .openAI), "gpt-realtime-translate")
+        XCTAssertEqual(SubtitleAudioTranslate.model, "gpt-realtime-translate")
         XCTAssertTrue(ModelRegistry.isVerified("gpt-realtime-translate", kind: .openAI, use: .speechTranslation))
     }
 

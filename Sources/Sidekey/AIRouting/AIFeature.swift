@@ -39,12 +39,18 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
     case retiredMeetingAudio = "meetingAssistantAudio"
     case voiceSearch
     case translation
+    // Historical usage IDs and Costs rows (Subtitles' Audio translate
+    // sessions record under subtitlesAudio). Subtitles run only on
+    // `SubtitleAudioTranslate`: no Speech or LLM route; saved ones are ignored
+    // and kept for a rollback build.
+    // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
     case subtitlesAudio
     case subtitlesTranslation
 
     var isActive: Bool {
         switch self {
-        case .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio: return false
+        case .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio,
+             .subtitlesAudio, .subtitlesTranslation: return false
         default: return true
         }
     }
@@ -109,11 +115,10 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             // `OnDeviceStreamingAdapter`.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return .realtimeSTT
-            // OpenAI's live speech translation serves Subtitles only: it
-            // returns the translation itself, so the Subtitles LLM is unused.
-            // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
-            case .openAI: return self == .subtitlesAudio ? .speechTranslation : nil
-            case .openRouter, .anthropic: return nil
+            // OpenAI's live speech translation is Subtitles' own Audio
+            // translate slot (`SubtitleAudioTranslate`), not a Speech model.
+            // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+            case .openAI, .openRouter, .anthropic: return nil
             }
         case .recorded:
             switch kind {

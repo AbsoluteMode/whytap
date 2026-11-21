@@ -23,21 +23,22 @@ In **Settings → API & Models**, choose:
 
 - **Translation**: an OpenRouter text model or your own OpenAI-compatible text
   endpoint for typed text.
-- **Subtitles** opens two independent selectors: **Speech** uses Soniox,
-  Deepgram, ElevenLabs or a compatible realtime speech endpoint to transcribe
-  system audio; **LLM** uses OpenRouter or a compatible text endpoint to
-  translate the recognized phrases. Both model names remain in its summary.
-  **Speech** can also be OpenAI `gpt-realtime-translate` with your OpenAI key:
-  it hears and translates in one step, so the **LLM** row is not used while
-  it is selected (about $3.06 per hour of audio: $0.034 a minute for the
-  translation and $0.017 for the transcript of the original).
+- **Subtitles** is an ordinary row with its model already chosen: **OpenAI ·
+  gpt-realtime-translate**. It hears and translates in one step (about $3.06
+  per hour of audio: $0.034 a minute for the translation and $0.017 for the
+  transcript of the original). There is nothing to choose: it works when your
+  OpenAI key is saved in **API keys**. Without the key the row looks like any
+  other row that cannot run yet, its menu offers **Add an OpenAI key…**, and
+  **Start** says "Subtitles need an OpenAI key" with a button to **API &
+  Models**. Subtitles models chosen in earlier versions (Speech and LLM) are no
+  longer used.
+- A Subtitles session ends by itself after one hour, exactly as if you had
+  pressed **Stop**: nothing is shown and **Start** begins a new hour. This
+  keeps a forgotten session from spending your OpenAI credit.
 
 Keys stay in Whytap's existing Keychain store. New routes start **Not set**.
-When upgrading already configured subtitles, their previous shared Translation
-model (including provider selection) is copied once into the separate LLM
-setting. Later changes to Translation do not affect subtitles; clearing their
-LLM stays cleared across relaunches. The app never borrows another feature's
-model or chooses a replacement provider after a failure.
+The app never borrows another feature's model or chooses a replacement
+provider after a failure.
 
 ## Text
 
@@ -72,9 +73,8 @@ Choose the spoken language (or Auto-detect), a target, then **Start subtitles**.
 Play a video or join a call. A compact dark box floats at the bottom of the
 screen over other apps and full-screen content. Each phrase is a pair: the
 original on the left and its translation on the right, newest at the bottom;
-older pairs leave at the top. The phrase still being heard appears dimmed as
-the last row before it is translated. A phrase whose translation timed out or
-failed keeps its original and says **Not translated**; later phrases go on.
+older pairs leave at the top. The sentence still being heard appears as the
+last row, with its translation so far dimmed.
 In the Toolbox pane the original sits above its translation. **Copy
 translation** in the box's context menu copies the completed translations.
 
@@ -84,20 +84,7 @@ Audio Recording** permission. If the Mac is playing audio but no signal arrives,
 check that permission in **System Settings → Privacy & Security**. Silence and
 a denied grant cannot be reliably distinguished by the capture API.
 
-The selected speech provider receives system audio. Its text is cut into whole
-phrases (at sentence ends, pauses, or a clause or word boundary in long
-phrases, never inside a word) and up to three phrases go to the selected
-Subtitles LLM model at once, each with the speech around it as context: up to
-three earlier pairs with their translations and the phrases said since. With
-ElevenLabs, Subtitles ask Scribe to commit at half-second pauses and translate
-the start of its live text once it has stayed unchanged for 0.6 s, instead of
-waiting for Scribe's 36-second segments. Other interim speech is shown but never
-translated or billed as an LLM request. This is a speech-to-text → LLM
-pipeline; latency depends on the provider, the network and the chosen model (a
-faster LLM is the largest remaining gain).
-
-With OpenAI `gpt-realtime-translate` as Subtitles audio there is no separate
-speech model or LLM request: one OpenAI session receives the system audio and
+There is no separate speech model or LLM request: one OpenAI session receives the system audio and
 returns the translation together with the transcript of what it heard. Each
 translated sentence becomes a pair with the sentence of the original it
 translates; the sentence still being heard shows its original and the

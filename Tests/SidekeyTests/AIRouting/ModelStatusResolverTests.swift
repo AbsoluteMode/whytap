@@ -221,7 +221,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(Set(ids), ["nova-3", "nova-2-meeting"], "the saved model stays selectable on its own feature")
         XCTAssertNotEqual(env.resolver.status(for: .dropFast), .removedByProvider, "a hidden model is not removed")
         XCTAssertEqual(env.routing.route(for: .dropFast)?.model, "nova-2-meeting", "the route is not rewritten")
-        for feature in [AIFeature.voiceSearch, .agentVoice, .subtitlesAudio, .meetings] {
+        for feature in [AIFeature.voiceSearch, .agentVoice, .meetings] {
             let offered = try XCTUnwrap(env.resolver.sections(for: feature).first).options.map(\.model)
             XCTAssertEqual(offered, ["nova-3"], "\(feature)")
         }

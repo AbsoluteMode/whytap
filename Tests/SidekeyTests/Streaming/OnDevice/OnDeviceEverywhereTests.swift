@@ -57,10 +57,12 @@ final class OnDeviceEverywhereTests: XCTestCase {
     // MARK: - Which features offer the model
 
     func test_every_speech_feature_offers_the_model_and_no_text_feature_does() {
-        for feature in [AIFeature.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio] {
+        for feature in [AIFeature.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch] {
             XCTAssertEqual(feature.modelUse(on: .onDevice), .realtimeSTT, "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .onDevice), model, "\(feature)")
         }
+        // Subtitles run only on Audio translate: no On this Mac route either.
+        XCTAssertNil(AIFeature.subtitlesAudio.modelUse(on: .onDevice))
         for feature in [AIFeature.dropSmartCleanup, .meetingNotes, .agent, .translation, .subtitlesTranslation] {
             XCTAssertNil(feature.modelUse(on: .onDevice), "\(feature) is text, not speech")
         }
@@ -80,12 +82,12 @@ final class OnDeviceEverywhereTests: XCTestCase {
         return (vm, routing, keys, defaults)
     }
 
-    func test_user_picks_this_mac_for_meetings_and_subtitles_and_the_choice_survives_a_relaunch() async {
+    func test_user_picks_this_mac_for_meetings_and_the_choice_survives_a_relaunch() async {
         let flag = ModelFlag()
         flag.set(true)
         let (vm, routing, _, defaults) = makeSettings(flag)
 
-        for feature in [AIFeature.meetings, .subtitlesAudio] {
+        for feature in [AIFeature.meetings] {
             let section = vm.sections(for: feature).first { $0.account == .thisMac }
             XCTAssertEqual(section?.title, "On this Mac", "\(feature)")
             XCTAssertEqual(section?.options.map(\.model), [model], "\(feature)")
@@ -102,11 +104,10 @@ final class OnDeviceEverywhereTests: XCTestCase {
         // A relaunch reads the same defaults afresh.
         let relaunched = AIRoutingStore(defaults: defaults)
         XCTAssertEqual(relaunched.route(for: .meetings), FeatureRoute(account: .thisMac, model: model))
-        XCTAssertEqual(relaunched.route(for: .subtitlesAudio), FeatureRoute(account: .thisMac, model: model))
         _ = routing
     }
 
-    func test_download_offers_the_model_to_meetings_and_subtitles_too() {
+    func test_download_offers_the_model_to_meetings_too() {
         let flag = ModelFlag()
         let (vm, routing, _, _) = makeSettings(flag)
 
@@ -114,27 +115,25 @@ final class OnDeviceEverywhereTests: XCTestCase {
         vm.onDeviceModelChanged()
 
         XCTAssertEqual(vm.proposal?.items.map(\.feature),
-                       [.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio])
+                       [.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch])
         XCTAssertNil(routing.route(for: .meetings), "offered, not assigned")
     }
 
-    func test_removing_the_model_unsets_meetings_and_subtitles_and_switching_back_to_a_provider_works() throws {
+    func test_removing_the_model_unsets_meetings_and_switching_back_to_a_provider_works() throws {
         let flag = ModelFlag()
         flag.set(true)
         let (vm, routing, keys, _) = makeSettings(flag)
         routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: .meetings)
-        routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: .subtitlesAudio)
         try keys.save("dg-key", account: XCTUnwrap(ProviderAccount.deepgram.keychainAccount(in: routing)))
 
         flag.set(false)
         vm.onDeviceModelChanged()
 
         XCTAssertNil(routing.route(for: .meetings), "Not set, never moved to Deepgram on its own")
-        XCTAssertNil(routing.route(for: .subtitlesAudio))
 
         // The user chooses Deepgram again: the provider's adapter, with its key.
-        routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .subtitlesAudio)
-        let resolved = try FeatureRouteResolver(routing: routing, keys: keys, onDevice: flag.readiness).resolve(.subtitlesAudio)
+        routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .agentVoice)
+        let resolved = try FeatureRouteResolver(routing: routing, keys: keys, onDevice: flag.readiness).resolve(.agentVoice)
         XCTAssertEqual(resolved.apiKey, "dg-key")
         XCTAssertTrue(try RealtimeAdapterFactory.make(resolved) is DeepgramBYOKAdapter)
     }
@@ -155,12 +154,12 @@ final class OnDeviceEverywhereTests: XCTestCase {
 
     func test_without_the_model_nothing_opens_and_the_route_is_not_set() async throws {
         let (routing, keys, _) = makeStores()
-        routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: .subtitlesAudio)
+        routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: .meetings)
         try keys.save("soniox-key", account: XCTUnwrap(ProviderAccount.soniox.keychainAccount(in: routing)))
 
         XCTAssertThrowsError(
-            try FeatureRouteResolver(routing: routing, keys: keys, onDevice: .unavailable).resolve(.subtitlesAudio)
-        ) { XCTAssertEqual($0 as? FeatureRouteError, .missingKey(.subtitlesAudio)) }
+            try FeatureRouteResolver(routing: routing, keys: keys, onDevice: .unavailable).resolve(.meetings)
+        ) { XCTAssertEqual($0 as? FeatureRouteError, .missingKey(.meetings)) }
 
         let adapter = OnDeviceStreamingAdapter(feature: .subtitlesAudio, livePartials: true,
                                                readiness: .unavailable, decoder: NumberingDecoder())
@@ -307,47 +306,6 @@ final class OnDeviceEverywhereTests: XCTestCase {
         await session.endInput()
         let finals = await collect(session).filter { if case .final = $0 { return true }; return false }
         XCTAssertEqual(finals.count, 8)
-    }
-
-    // MARK: - Subtitles
-
-    func test_subtitles_on_this_mac_show_and_translate_each_phrase_without_a_provider() async throws {
-        let audio = FixtureSubtitleAudio()
-        let decoder = NumberingDecoder()
-        let adapter = OnDeviceStreamingAdapter(feature: .subtitlesAudio, livePartials: true, readiness: .ready, decoder: decoder)
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { audio },
-                                      open: { try await adapter.open(language: $0, terms: []) },
-                                      makeService: { FixtureTranslator() })
-        model.sourceCode = "en"
-        let task = try XCTUnwrap(model.start())
-        await waitUntil { model.phase == .listening }
-
-        for chunk in [Self.speech(seconds: 1), Self.silence(seconds: 1), Self.speech(seconds: 1), Self.silence(seconds: 0.2)] {
-            audio.pair.continuation.yield(chunk)
-        }
-        await waitUntil { await decoder.calls.count >= 1 }
-        model.stop()
-        await task.value
-
-        XCTAssertEqual(model.phase, .idle)
-        XCTAssertNil(model.issue)
-        let sources = model.lines.map(\.source).joined(separator: " ")
-        XCTAssertTrue(sources.contains("phrase"), "decoded phrases became subtitle lines: \(sources)")
-        XCTAssertTrue(model.lines.allSatisfy { $0.translation?.hasPrefix("Перевод: ") == true })
-    }
-
-    func test_subtitles_without_the_model_point_to_the_subtitles_audio_row() async throws {
-        let audio = FixtureSubtitleAudio()
-        let adapter = OnDeviceStreamingAdapter(feature: .subtitlesAudio, livePartials: true,
-                                               readiness: .unavailable, decoder: NumberingDecoder())
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { try await adapter.open(language: $0, terms: []) },
-                                      makeService: { FixtureTranslator() })
-        let task = try XCTUnwrap(model.start())
-        await task.value
-
-        XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.issue?.feature, .subtitlesAudio)
-        XCTAssertEqual(audio.started, 0, "system audio is never captured without the model")
     }
 
     // MARK: - Meetings

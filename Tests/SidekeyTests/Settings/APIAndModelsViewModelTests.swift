@@ -340,7 +340,6 @@ final class APIAndModelsViewModelTests: XCTestCase {
             AssignItem(feature: .meetings, account: .soniox, model: "stt-async-v6"),
             AssignItem(feature: .agentVoice, account: .soniox, model: "stt-rt-v6"),
             AssignItem(feature: .voiceSearch, account: .soniox, model: "stt-rt-v6"),
-            AssignItem(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v6"),
         ])
     }
 
@@ -645,14 +644,18 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertNil(env.makeViewModel().unsetBanner)
 
         env.addKey(.soniox)
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "11 features have no model")
+        // Nine routes plus Subtitles, which waits for an OpenAI key.
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "10 features have no model")
 
         for feature in AIFeature.allCases where feature != .dropFast {
             env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: feature)
         }
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "1 feature has no model")
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "2 features have no model")
 
         env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "1 feature has no model")
+
+        env.addKey(.openAI)
         XCTAssertNil(env.makeViewModel().unsetBanner)
     }
 
@@ -732,9 +735,10 @@ final class APIAndModelsProviderTests: XCTestCase {
         XCTAssertEqual(vm.groups.first { $0.title == "Drop Smart" }?.rows.map(\.feature), [.dropSmart, .dropSmartCleanup])
         XCTAssertEqual(vm.groups.first { $0.title == "Meetings" }?.rows.map(\.feature), [.meetings, .meetingNotes])
         XCTAssertEqual(vm.groups.first { $0.title == "Translation" }?.rows.map(\.feature), [.translation])
+        // Subtitles have one slot, Audio translate, and no routes.
         let subtitles = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })
-        XCTAssertEqual(subtitles.rows.map(\.feature), [.subtitlesAudio, .subtitlesTranslation])
-        XCTAssertEqual(subtitles.rows.map(\.fieldLabel), ["Speech", "LLM"])
+        XCTAssertEqual(subtitles.rows, [])
+        XCTAssertNotNil(subtitles.audioTranslate)
     }
 
     func test_only_openrouter_rows_offer_a_provider_and_auto_is_the_default() throws {

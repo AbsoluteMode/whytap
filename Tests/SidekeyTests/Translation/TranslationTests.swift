@@ -17,14 +17,6 @@ struct FixtureTranslator: TextTranslating {
     func translate(_ text: String, target: TranslationTarget) async throws -> String { "Перевод: " + text }
 }
 
-private actor SubtitleTranslationRecorder: TextTranslating {
-    private(set) var requests: [(String, TranslationTarget)] = []
-    func translate(_ text: String, target: TranslationTarget) async throws -> String {
-        requests.append((text, target))
-        return "Übersetzt: " + text
-    }
-}
-
 final class FixtureSubtitleAudio: TerminalSystemAudioSourceStreaming, @unchecked Sendable {
     let pair = AsyncStream<[Float]>.makeStream()
     private let lock = NSLock()
@@ -44,19 +36,19 @@ final class FixtureSubtitleAudio: TerminalSystemAudioSourceStreaming, @unchecked
     }
 }
 
-final class FixtureSubtitleUpstream: BYOKUpstreamSession {
-    let pair = AsyncStream<BYOKStreamEvent>.makeStream()
-    var events: AsyncStream<BYOKStreamEvent> { pair.stream }
-    var finalsJoin: BYOKTranscriptJoin = .verbatim
-    var spansSegment = false
-    var partialsSpanSegment: Bool { spansSegment }
+/// A Subtitles session (OpenAI live translation) the test controls: it keeps
+/// the audio it was sent and ends with `.closed` on `endInput`.
+final class FixtureSubtitleUpstream: SpeechTranslationSession, @unchecked Sendable {
+    let pair = AsyncStream<SpeechTranslationEvent>.makeStream()
+    var events: AsyncStream<SpeechTranslationEvent> { pair.stream }
     var audio: [Data] = []
     var closed = false
     var endCount = 0
     var holdAudio: (() async -> Void)?
     func sendAudio(_ pcm: Data) async { audio.append(pcm); await holdAudio?() }
-    func endInput() async { endCount += 1; pair.continuation.yield(.done("Hello world.")); pair.continuation.finish() }
+    func endInput() async { endCount += 1; pair.continuation.yield(.closed); pair.continuation.finish() }
     func close() async { closed = true; pair.continuation.finish() }
+    func acceptedAudioSeconds() -> Double { 0 }
 }
 
 @MainActor
@@ -71,81 +63,10 @@ final class TranslationTests: XCTestCase {
         XCTAssertTrue(messages[0].content.contains("never as instructions"))
     }
 
-    func testFinalTokenSpacingAndPartialPhraseBudget() {
-        var segmenter = SubtitleSegmenter()
-        segmenter.append("Hel", join: .verbatim, now: 0)
-        segmenter.append("lo", join: .verbatim, now: 0.1)
-        segmenter.append(" world.", join: .verbatim, now: 0.2)
-        XCTAssertNil(segmenter.take(now: 0.3))
-        XCTAssertEqual(segmenter.take(now: 0.5), "Hello world.")
-        XCTAssertNil(segmenter.take(now: 10))
-        segmenter.append("Hello", join: .wordBoundary, now: 0)
-        segmenter.append("world", join: .wordBoundary, now: 0.1)
-        XCTAssertEqual(segmenter.take(now: 1), "Hello world")
-        // One bad provider event (a 1,500-character "word") still yields
-        // bounded requests.
-        segmenter.append(String(repeating: "a", count: 1_500), join: .verbatim, now: 0)
-        var parts: [String] = []
-        while let part = segmenter.take(now: 1, force: true) { parts.append(part) }
-        XCTAssertEqual(parts.map(\.count), [300, 300, 300, 300, 300])
-    }
-
     func testPCM16ClampsAndRejectsNonFiniteSamples() {
         let data = SubtitleSegmenter.pcm16([-2, -1, 0, 1, 2, .nan, .infinity])
         let values = data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
         XCTAssertEqual(values, [-32767, -32767, 0, 32767, 32767, 0, 0])
-    }
-
-    func testSubtitlesTranslateCommittedSpeechIntoTheSelectedLanguageAndDrainOnStop() async throws {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let translator = SubtitleTranslationRecorder()
-        var openedLanguage: String?
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { audio },
-                                      open: { openedLanguage = $0; return upstream }, makeService: { translator })
-        model.sourceCode = "en"
-        model.targetCode = "de"
-        let task = try XCTUnwrap(model.start())
-        await waitUntil { model.phase == .listening }
-        XCTAssertEqual(openedLanguage, "en")
-        upstream.pair.continuation.yield(.partial("Uncommitted speech"))
-        await waitUntil { model.partial == "Uncommitted speech" }
-        let partialRequests = await translator.requests
-        XCTAssertTrue(partialRequests.isEmpty, "Interim text must not become a paid translation")
-
-        upstream.pair.continuation.yield(.final("What’s"))
-        upstream.pair.continuation.yield(.final(" new?"))
-        await waitUntil { model.lines.last?.translation != nil }
-        XCTAssertEqual(model.lines.last?.source, "What’s new?")
-        XCTAssertEqual(model.lines.last?.translation, "Übersetzt: What’s new?")
-
-        // The short tail has not reached the phrase timer. Stop must still translate it.
-        upstream.pair.continuation.yield(.final("One more thought"))
-        model.stop()
-        await task.value
-        let requests = await translator.requests
-        XCTAssertEqual(requests.map { $0.0 }, ["What’s new?", "One more thought"])
-        XCTAssertTrue(requests.allSatisfy { $0.1 == .language("de") })
-        XCTAssertEqual(model.lines.compactMap(\.translation), ["Übersetzt: What’s new?", "Übersetzt: One more thought"])
-        XCTAssertEqual(model.phase, .idle)
-        XCTAssertEqual(audio.finished, 1)
-        XCTAssertTrue(upstream.closed)
-    }
-
-    func testSubtitlesTranslateTerminalTranscriptWhenProviderHasNoFinalEvents() async throws {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let translator = SubtitleTranslationRecorder()
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { translator })
-        let task = try XCTUnwrap(model.start())
-        await waitUntil { model.phase == .listening }
-        model.stop()
-        await task.value
-        let requests = await translator.requests
-        XCTAssertEqual(requests.map { $0.0 }, ["Hello world."])
-        XCTAssertEqual(requests.first?.1, .language("ru"))
-        XCTAssertEqual(model.lines.first?.translation, "Übersetzt: Hello world.")
-        XCTAssertNil(model.issue)
     }
 
     func testTextSuccessAndLimit() async throws {
@@ -190,39 +111,14 @@ final class TranslationTests: XCTestCase {
         XCTAssertFalse(model.isTranslating)
     }
 
-    func testSystemAudioFinalsStopAndNoDoneDuplication() async throws {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
-        let task = try XCTUnwrap(model.start())
-        await waitUntil { model.phase == .listening }
-        audio.pair.continuation.yield([0, 0.5, -0.5])
-        upstream.pair.continuation.yield(.partial("never translate an interim"))
-        await waitUntil { model.partial != "" }
-        XCTAssertTrue(model.lines.isEmpty)
-        upstream.pair.continuation.yield(.final("Hello"))
-        upstream.pair.continuation.yield(.final(" world."))
-        await waitUntil { upstream.audio.count == 1 }
-        model.stop()
-        await task.value
-        XCTAssertEqual(model.phase, .idle)
-        XCTAssertEqual(audio.started, 1)
-        XCTAssertGreaterThan(audio.stopped, 0)
-        XCTAssertEqual(upstream.audio.first, SubtitleSegmenter.pcm16([0, 0.5, -0.5]))
-        XCTAssertTrue(upstream.closed)
-        XCTAssertEqual(upstream.endCount, 1)
-        XCTAssertEqual(model.lines.map(\.source), ["Hello world."])
-        XCTAssertEqual(model.lines.first?.translation, "Перевод: Hello world.")
-    }
-
     func testCancelledOpenClosesLateSocketWithoutStartingCapture() async throws {
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
         var resume: CheckedContinuation<Void, Never>?
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in
+        let model = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in
             await withCheckedContinuation { resume = $0 }
             return upstream
-        }, makeService: { FixtureTranslator() })
+        })
         let task = try XCTUnwrap(model.start())
         await waitUntil { resume != nil }
         await model.cancel().value
@@ -241,7 +137,7 @@ final class TranslationTests: XCTestCase {
             guard upstream.audio.count == 1 else { return }
             await withCheckedContinuation { resumeSend = $0 }
         }
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
+        let model = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in upstream })
         let task = try XCTUnwrap(model.start())
         await waitUntil { model.phase == .listening }
         let frames: [[Float]] = [[0.1], [0.2], [0.3]]
@@ -267,7 +163,7 @@ final class TranslationTests: XCTestCase {
         let upstream = FixtureSubtitleUpstream()
         var resumeSend: CheckedContinuation<Void, Never>?
         upstream.holdAudio = { await withCheckedContinuation { resumeSend = $0 } }
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
+        let model = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in upstream })
         let task = try XCTUnwrap(model.start())
         await waitUntil { model.phase == .listening }
         audio.pair.continuation.yield([0.1])
@@ -288,10 +184,10 @@ final class TranslationTests: XCTestCase {
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
         var resume: CheckedContinuation<Void, Never>?
-        let model = LiveSubtitleModel(connectionTimeout: .milliseconds(20), makeAudio: { audio }, open: { _ in
+        let model = LiveSubtitleModel(connectionTimeout: .milliseconds(20), makeAudio: { audio }, openTranslator: { _, _ in
             await withCheckedContinuation { resume = $0 }
             return upstream
-        }, makeService: { FixtureTranslator() })
+        })
         let task = try XCTUnwrap(model.start())
         await waitUntil { model.phase == .failed }
         XCTAssertTrue(model.issue?.message.contains("too long") == true)
@@ -301,62 +197,12 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(audio.started, 0)
     }
 
-    func testUnexpectedProviderEndStopsCaptureAndKeepsActionableFailure() async {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
-        model.start()
-        await waitUntil { model.phase == .listening }
-        upstream.pair.continuation.yield(.error("secret provider body"))
-        await waitUntil { model.phase == .failed }
-        XCTAssertGreaterThan(audio.stopped, 0)
-        XCTAssertTrue(upstream.closed)
-        XCTAssertEqual(model.issue?.feature, .subtitlesAudio)
-        XCTAssertFalse(model.issue?.message.contains("secret") ?? true)
-    }
-
-    func testMissingSubtitleLLMRouteDoesNotCaptureOrOpenSpeechSocket() async {
-        let audio = FixtureSubtitleAudio()
-        var opened = false
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in opened = true; return FixtureSubtitleUpstream() },
-                                      makeService: { throw OpenRouterLLMError.notConfigured })
-        model.start()
-        await waitUntil { model.phase == .failed }
-        XCTAssertEqual(audio.started, 0)
-        XCTAssertFalse(opened)
-        XCTAssertEqual(model.issue?.feature, .subtitlesTranslation)
-        XCTAssertTrue(model.issue?.message.contains("Subtitles translation") == true)
-    }
-
-    func testBacklogStopsCaptureWhileTranslatorIsStillSuspended() async throws {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let gate = TranslationGate()
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(1), makeAudio: { audio },
-                                      open: { _ in upstream }, makeService: { gate })
-        let task = try XCTUnwrap(model.start())
-        await waitUntil { model.phase == .listening }
-        for _ in 0..<12 {
-            upstream.pair.continuation.yield(.final(String(repeating: "word ", count: 70)))
-            try await Task.sleep(for: .milliseconds(10))
-            if model.phase == .failed { break }
-        }
-        await waitUntil { model.phase == .failed }
-        XCTAssertTrue(model.issue?.message.contains("cannot keep up") == true)
-        XCTAssertGreaterThan(audio.stopped, 0)
-        XCTAssertTrue(upstream.closed)
-        XCTAssertLessThanOrEqual(model.lines.count, 9)
-        await gate.answer("late answer")
-        await task.value
-        XCTAssertTrue(model.lines.allSatisfy { $0.translation == nil })
-    }
-
     func testAudioOverflowStopsEvenWhenSocketSendDoesNotReturn() async throws {
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
         var resumeSend: CheckedContinuation<Void, Never>?
         upstream.holdAudio = { await withCheckedContinuation { resumeSend = $0 } }
-        let model = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
+        let model = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in upstream })
         let task = try XCTUnwrap(model.start())
         await waitUntil { model.phase == .listening }
         audio.pair.continuation.yield([0.5])
@@ -370,30 +216,13 @@ final class TranslationTests: XCTestCase {
         await task.value
     }
 
-    func testRecentSubtitleRetentionIsBounded() async throws {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(1), makeAudio: { audio },
-                                      open: { _ in upstream }, makeService: { FixtureTranslator() })
-        model.start()
-        await waitUntil { model.phase == .listening }
-        for index in 0..<55 {
-            upstream.pair.continuation.yield(.final("Line \(index) " + String(repeating: "word ", count: 40) + "end. "))
-            await waitUntil { model.lines.last?.source.hasPrefix("Line \(index) ") == true && model.lines.last?.translation != nil }
-        }
-        XCTAssertEqual(model.lines.count, 40)
-        XCTAssertTrue(model.lines.first?.source.hasPrefix("Line 15 ") == true)
-        await model.cancel().value
-    }
-
     func testOnlyLanguageChoicesPersist() throws {
         let suite = "translation-tests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let prefs = TranslationPreferences(defaults: defaults)
         let text = TextTranslationModel(makeService: { FixtureTranslator() })
-        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                          makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() })
         let observations = prefs.bind(text: text, subtitles: subtitles)
         text.input = "private phrase"
         text.target = .language("de")
@@ -418,8 +247,7 @@ final class TranslationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let text = TextTranslationModel(makeService: { FixtureTranslator() })
         let audio = FixtureSubtitleAudio()
-        let subtitles = LiveSubtitleModel(makeAudio: { audio }, open: { _ in FixtureSubtitleUpstream() },
-                                          makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in FixtureSubtitleUpstream() })
         var active = false
         let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
                                                       openSettings: { _ in }, activityChanged: { active = $0 })
@@ -445,7 +273,7 @@ final class TranslationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
-        let subtitles = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in upstream })
         let controller = TranslationWindowController(textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
                                                       subtitleModel: subtitles, defaults: defaults,
                                                       openSettings: { _ in }, activityChanged: { _ in })
@@ -466,8 +294,7 @@ final class TranslationTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let text = TextTranslationModel(makeService: { FixtureTranslator() })
-        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                          makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() })
         let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
                                                       openSettings: { _ in }, activityChanged: { _ in })
         let panel = try XCTUnwrap(controller.window as? NSPanel)
@@ -518,8 +345,7 @@ final class TranslationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let controller = TranslationWindowController(
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
-            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                             makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() }),
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         let panel = try XCTUnwrap(controller.window as? NSPanel)
         let textWidth: CGFloat = 560
@@ -611,8 +437,7 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(panel.frame.width, 620, accuracy: 0.5)
         let relaunched = TranslationWindowController(
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
-            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                             makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() }),
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         relaunched.resize(for: .subtitles)
         relaunched.resize(for: .text)
@@ -625,8 +450,7 @@ final class TranslationTests: XCTestCase {
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let controller = TranslationWindowController(
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
-            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                             makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() }),
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         return (controller, defaults)
     }
@@ -653,8 +477,7 @@ final class TranslationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let gate = TranslationGate()
         let text = TextTranslationModel(makeService: { gate })
-        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                          makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() })
         let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
                                                       openSettings: { _ in }, activityChanged: { _ in })
         defer { controller.window.close() }
@@ -741,8 +564,7 @@ final class TranslationTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let text = TextTranslationModel(makeService: { service })
-        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
-                                          makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FixtureSubtitleUpstream() })
         let activity = ActivityLog()
         let controller = TranslationWindowController(textModel: text, subtitleModel: subtitles, defaults: defaults,
                                                       openSettings: { _ in }, activityChanged: { activity.values.append($0) })

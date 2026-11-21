@@ -14,7 +14,7 @@ final class TranslationRenderTests: XCTestCase {
         let text = TextTranslationModel(makeService: { TranslationPreviewService() })
         let audio = FixtureSubtitleAudio()
         let upstream = FixtureSubtitleUpstream()
-        let subtitles = LiveSubtitleModel(makeAudio: { audio }, open: { _ in upstream }, makeService: { FixtureTranslator() })
+        let subtitles = LiveSubtitleModel(makeAudio: { audio }, openTranslator: { _, _ in upstream })
         let presentation = TranslationWindowController.Presentation()
         let view = TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in })
             .environment(\.colorScheme, .dark)
@@ -62,7 +62,10 @@ final class TranslationRenderTests: XCTestCase {
         try render(TranslationView(text: text, subtitles: subtitles, presentation: presentation, openSettings: { _ in }, embedded: true)
             .padding(16).background(Color(white: 0.13)), size: NSSize(width: 320, height: 330),
             to: directory.appendingPathComponent("toolbox-subtitles-listening.png"))
-        upstream.pair.continuation.yield(.final("Let’s go through the changes together. Everything is ready for the next release."))
+        upstream.pair.continuation.yield(.source("Let’s go through the changes together.", elapsedMs: 2_000))
+        upstream.pair.continuation.yield(.translation("Давайте вместе пройдёмся по изменениям.", elapsedMs: 2_400))
+        upstream.pair.continuation.yield(.source(" Everything is ready for the next release.", elapsedMs: 4_000))
+        upstream.pair.continuation.yield(.translation(" Всё готово к следующему релизу.", elapsedMs: 4_400))
         for _ in 0..<100 where subtitles.lines.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         subtitles.stop()
         await task?.value
@@ -161,36 +164,11 @@ private struct TranslationPreviewService: TextTranslating {
     }
 }
 
-/// Fixed EN -> RU answers for the phrase-pair renders; a phrase in `holds`
-/// never answers, so its pair shows the pending mark.
-private struct PairPreviewService: TextTranslating {
-    static let answers = [
-        "Welcome back everyone.": "С возвращением, друзья.",
-        "Today we have a special guest,": "Сегодня у нас особый гость,",
-        "who has spent ten years building speech systems.": "который десять лет создаёт системы распознавания речи.",
-        "Before we start, let me explain": "Прежде чем начать, позвольте объяснить,",
-        "how a neural network is structured.": "как устроена нейронная сеть.",
-        SubtitlePairRenderTests.longPhrase:
-            "И самое главное: каждый слой передаёт свои числа следующему, и тот постепенно превращает сырой звук в слова, которые мы можем прочитать.",
-    ]
-    var holds: Set<String> = []
-    func translate(_ text: String, target: TranslationTarget) async throws -> String {
-        if holds.contains(text) { try await Task.sleep(for: .seconds(3600)) }
-        return Self.answers[text] ?? text
-    }
-}
-
 @MainActor
 final class SubtitlePairRenderTests: XCTestCase {
-    /// One sentence longer than the segmenter's length cut: it stays whole.
-    nonisolated static let longPhrase =
-        "And the most important part is that every layer passes its numbers to the next one, which slowly turns raw sound into words we can read."
-    private static let script = ["Welcome back everyone.", "Today we have a special guest,",
-                                 "who has spent ten years building speech systems.", "Before we start, let me explain",
-                                 "how a neural network is structured."]
-
-    /// Offscreen @2x renders of the subtitle overlay with phrase pairs over a
-    /// dark video-like frame. Nothing is put on screen.
+    /// Offscreen @2x renders of the subtitle overlay with phrase pairs from
+    /// the recorded OpenAI session over a dark video-like frame. Nothing is
+    /// put on screen.
     func testOffscreenSubtitlePairs() async throws {
         guard let output = ProcessInfo.processInfo.environment["WHYTAP_TRANSLATION_RENDER_DIR"] else {
             throw XCTSkip("Set WHYTAP_TRANSLATION_RENDER_DIR for offscreen visual checks.")
@@ -198,65 +176,38 @@ final class SubtitlePairRenderTests: XCTestCase {
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let all = try await session(phrases: Self.script, holds: [], live: nil)
-        try renderOverlay(all, name: "subtitles-pairs.png")
-        let live = try await session(phrases: Self.script,
-                                     holds: ["how a neural network is structured."],
-                                     live: "Every layer takes the numbers")
-        try renderOverlay(live, name: "subtitles-pairs-live.png")
-        try renderToolbox(live, name: "toolbox-subtitles-pairs.png")
-        // A long sentence wraps only at the box's right edge; two short pairs
-        // make a narrow box.
-        let long = try await session(phrases: Self.script + [Self.longPhrase], holds: [], live: nil)
-        let short = try await session(phrases: Array(Self.script.prefix(2)), holds: [], live: nil)
-        try renderOverlay(long, name: "subtitles-pairs-long.png")
-        try renderOverlay(short, name: "subtitles-pairs-short.png")
-        await long.model.cancel().value
-        await short.model.cancel().value
-        // OpenAI speech translation: the recorded session, the last sentence
-        // still being heard and translated.
-        let speech = FakeSpeechTranslation()
-        let openAI = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { FixtureSubtitleAudio() },
-                                       makeService: { PairPreviewService() }, openTranslator: { _, _ in speech })
-        openAI.start()
-        for _ in 0..<200 where openAI.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
-        speech.yieldRecorded(until: 31_600)
-        for _ in 0..<200 where openAI.lines.count < 5 { try await Task.sleep(for: .milliseconds(5)) }
-        try renderOverlay(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "subtitles-openai-live.png")
-        try renderToolbox(Session(model: openAI, upstream: FixtureSubtitleUpstream()), name: "toolbox-subtitles-openai.png")
-        await openAI.cancel().value
+        // The last sentence still being heard and translated.
+        let live = try await session(until: 31_600, pairs: 5)
+        try renderOverlay(live, name: "subtitles-openai-live.png")
+        try renderToolbox(live, name: "toolbox-subtitles-openai.png")
+        await live.model.cancel().value
         // Stopped: the language row and Start return above the newest pairs.
+        let all = try await session(until: .max, pairs: 8)
         all.model.stop()
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
         try renderOverlay(all, name: "subtitles-pairs-stopped.png")
         await all.model.cancel().value
-        await live.model.cancel().value
+        // No OpenAI key: Start names the fix instead of refusing quietly.
+        let noKey = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
+                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
+        await noKey.start()?.value
+        try renderOverlay(Session(model: noKey), name: "subtitles-no-key.png")
+        try renderToolbox(Session(model: noKey), name: "toolbox-subtitles-no-key.png")
     }
 
-    private struct Session { let model: LiveSubtitleModel; let upstream: FixtureSubtitleUpstream }
+    private struct Session { let model: LiveSubtitleModel }
 
-    private func session(phrases: [String], holds: Set<String>, live: String?) async throws -> Session {
-        let audio = FixtureSubtitleAudio()
-        let upstream = FixtureSubtitleUpstream()
-        upstream.finalsJoin = .wordBoundary
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { audio }, open: { _ in upstream },
-                                      makeService: { PairPreviewService(holds: holds) })
+    private func session(until millis: Int, pairs: Int) async throws -> Session {
+        let speech = FakeSpeechTranslation()
+        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { FixtureSubtitleAudio() },
+                                      openTranslator: { _, _ in speech })
         model.sourceCode = "en"
         model.targetCode = "ru"
         model.start()
         for _ in 0..<200 where model.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
-        for phrase in phrases {
-            upstream.pair.continuation.yield(.final(phrase))
-            for _ in 0..<200 where model.lines.last?.source != phrase { try await Task.sleep(for: .milliseconds(5)) }
-        }
-        for _ in 0..<200 where model.lines.contains(where: { !$0.isSettled && !holds.contains($0.source) }) {
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        if let live {
-            upstream.pair.continuation.yield(.partial(live))
-            for _ in 0..<200 where model.live != live { try await Task.sleep(for: .milliseconds(5)) }
-        }
-        return Session(model: model, upstream: upstream)
+        speech.yieldRecorded(until: millis)
+        for _ in 0..<200 where model.lines.count < pairs { try await Task.sleep(for: .milliseconds(5)) }
+        return Session(model: model)
     }
 
     private func view(_ session: Session, embedded: Bool) -> TranslationView {

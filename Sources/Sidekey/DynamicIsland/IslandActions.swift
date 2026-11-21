@@ -43,7 +43,8 @@ struct IslandActions {
     /// Persists the user's last selected hover History mode.
     var selectHistoryMode: (HistoryStripMode) -> Void = { _ in }
     /// User clicked a hover History row body.
-    var copyHistoryCard: (HistoryStripCard) -> Void = { _ in }
+    /// The clicked row, or every ⌘-click-marked row in mark order.
+    var copyHistoryCards: ([HistoryStripCard]) -> Void = { _ in }
     /// Root of the clipboard image sidecar store — the hover preview
     /// bubble resolves full-size images from it (thumbnail fallback).
     var historyAssetsDirectory: () -> URL? = { nil }

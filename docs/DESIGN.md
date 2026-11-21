@@ -4,11 +4,15 @@
 
 - ⌘-click marks a History row; a blue badge at its right edge shows its paste
   number and the row gets a blue tint and border. ⌘-click again unmarks and the
-  others renumber. Marking is offered only when Enter can paste (a captured
-  target); in Toolbox ⌘-click still copies.
+  others renumber. Marking works everywhere, also without a paste target and
+  in Toolbox (2026-11-22, after the user marked three rows, clicked and got
+  nothing copied).
+- With marks, a plain click on any row copies all marked rows in mark order
+  and clears the marks; Enter pastes them where there is a target.
 - The footer teaches the gesture in one line ("⌘-click for several") and,
-  once rows are marked, states the outcome: "Enter to paste N to <app>   Esc
-  to clear". Plain click and plain Enter keep their meaning.
+  once rows are marked, states the outcome: "Click to copy N   Enter to paste
+  N to <app>   Esc to clear" (no Enter part without a target; Toolbox says
+  "⌘-click to unmark"). Without marks plain click and Enter keep their meaning.
 - Marked rows stay marked while switching Agent, Drop and Clipboard, so text
   and files from different tabs can go out together in mark order.
 

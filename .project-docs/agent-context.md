@@ -1503,9 +1503,17 @@ the target's process (CGEvent.postToPid), never the global HID stream, with the
 recipient checked before each of the four events; a lost recipient releases
 Command in the target and stops the rest. Single-row Enter keeps the global
 Cmd+V. Marks live only while the panel
-is open, survive the Agent/Drop/Clipboard tabs, and are off without a target
-and in Toolbox. Multi-row pastes stay out of clipboard history. WHY:
-.project-docs/decisions/2026-11-22-history-multi-paste.md
+is open and survive the Agent/Drop/Clipboard tabs. Marks work everywhere
+(island with or without a paste target, Toolbox): a plain click while rows
+are marked copies all of them in mark order as one pasteboard
+(HistoryPasteboardWriter.writeAll: texts one string a line each, files and
+images one item each, mixed rows one item per group in order) and clears the
+marks; without a target Enter leaves the marks alone. Footer with marks:
+"Click to copy N   Enter to paste N to <app>   Esc to clear" (Toolbox:
+"⌘-click to unmark", it has no key monitor). Multi-row pastes and copies stay
+out of clipboard history. WHY:
+.project-docs/decisions/2026-11-22-history-multi-paste.md,
+.project-docs/decisions/2026-11-22-history-multi-copy.md
 The History connection sets secure_delete=ON, so cap evictions and agent
 trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in

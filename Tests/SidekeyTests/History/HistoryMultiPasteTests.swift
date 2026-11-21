@@ -247,16 +247,126 @@ final class HistoryMultiPasteTests: XCTestCase {
         )
         XCTAssertEqual(
             HistoryHoverView.hintText(targetAppName: "Telegram", selectedCount: 3),
-            "Enter to paste 3 to Telegram   Esc to clear"
+            "Click to copy 3   Enter to paste 3 to Telegram   Esc to clear"
         )
-        XCTAssertEqual(HistoryHoverView.hintText(targetAppName: nil, selectedCount: 2), "Click for copy")
+        XCTAssertEqual(
+            HistoryHoverView.hintText(targetAppName: nil, selectedCount: 2),
+            "Click to copy 2   Esc to clear",
+            "Without a target the marks are for copying"
+        )
+        XCTAssertEqual(
+            HistoryHoverView.hintText(targetAppName: nil, selectedCount: 2, escapeClears: false),
+            "Click to copy 2   ⌘-click to unmark",
+            "Toolbox has no key monitor: ⌘-click unmarks there"
+        )
+        XCTAssertEqual(HistoryHoverView.hintText(targetAppName: nil), "Click for copy   ⌘-click for several")
     }
 
-    func testMarkingNeedsSomewhereToPaste() {
-        XCTAssertTrue(HistoryHoverView.allowsMultiSelect(allowsKeyboardPaste: true, targetAppName: "Notes"))
-        XCTAssertFalse(HistoryHoverView.allowsMultiSelect(allowsKeyboardPaste: true, targetAppName: nil))
-        XCTAssertFalse(HistoryHoverView.allowsMultiSelect(allowsKeyboardPaste: true, targetAppName: ""))
-        XCTAssertFalse(HistoryHoverView.allowsMultiSelect(allowsKeyboardPaste: false, targetAppName: "Notes"),
-                       "Toolbox History has no paste target: ⌘-click copies as before")
+    func testEnterPastesOnlyWhereThereIsATarget() {
+        XCTAssertTrue(HistoryHoverView.canPaste(allowsKeyboardPaste: true, targetAppName: "Notes"))
+        XCTAssertFalse(HistoryHoverView.canPaste(allowsKeyboardPaste: true, targetAppName: nil))
+        XCTAssertFalse(HistoryHoverView.canPaste(allowsKeyboardPaste: true, targetAppName: ""))
+        XCTAssertFalse(HistoryHoverView.canPaste(allowsKeyboardPaste: false, targetAppName: "Notes"))
+    }
+
+    func testEnterWithoutATargetKeepsTheMarksForACopy() {
+        let a = textCard(1, "a"), b = textCard(2, "b")
+        XCTAssertEqual(
+            HistoryKeyDecision.action(keyCode: 36, hovered: a, selection: [a, b], canPaste: false),
+            .pass,
+            "Enter must not close History and drop the marks when it cannot paste"
+        )
+        XCTAssertEqual(
+            HistoryKeyDecision.action(keyCode: 53, hovered: a, selection: [a, b], canPaste: false),
+            .clearSelection
+        )
+    }
+
+    // MARK: - Click with marks copies them all
+
+    func testPlainClickWithMarksCopiesEveryMarkedRowInMarkOrder() {
+        let a = fileCard(1, "/tmp/a.pdf"), b = fileCard(2, "/tmp/b.png"), c = textCard(3, "c")
+        let selection = HistoryPasteSelection()
+        selection.toggle(b)
+        selection.toggle(a)
+        XCTAssertEqual(HistoryHoverView.cardsToCopy(clicked: b, marked: selection.cards), [b, a],
+                       "Clicking a marked row copies all marks, not just that row")
+        XCTAssertEqual(HistoryHoverView.cardsToCopy(clicked: c, marked: selection.cards), [b, a],
+                       "Clicking an unmarked row with marks also copies the marks")
+        XCTAssertEqual(HistoryHoverView.cardsToCopy(clicked: c, marked: []), [c],
+                       "No marks: the click copies its own row as before")
+    }
+
+    private func scratchPasteboard() -> NSPasteboard {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("HistoryMultiCopy.\(UUID())"))
+        addTeardownBlock { pasteboard.releaseGlobally() }
+        return pasteboard
+    }
+
+    func testThreeMarkedFilesCopyAsOneMultiItemPasteboard() {
+        let pasteboard = scratchPasteboard()
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [fileCard(3, "/tmp/c.zip"), fileCard(1, "/tmp/a.pdf"), fileCard(2, "/tmp/b.png")]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory
+        )
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL]
+        XCTAssertEqual(urls?.map(\.path), ["/tmp/c.zip", "/tmp/a.pdf", "/tmp/b.png"])
+    }
+
+    func testMarkedTextsCopyAsOneStringALineEach() {
+        let pasteboard = scratchPasteboard()
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [textCard(1, "first"), dropCard(2, "second")]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory
+        )
+        XCTAssertEqual(pasteboard.string(forType: .string), "first\nsecond")
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+    }
+
+    func testMixedMarksCopyAsOnePasteboardWithItemsInMarkOrder() {
+        let pasteboard = scratchPasteboard()
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [
+                textCard(1, "Invoice:"), fileCard(2, "/tmp/invoice.pdf"), textCard(3, "Thanks"),
+            ]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory
+        )
+        let items = pasteboard.pasteboardItems ?? []
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items[0].string(forType: .string), "Invoice:")
+        XCTAssertEqual(items[1].string(forType: .fileURL).flatMap { URL(string: $0)?.path }, "/tmp/invoice.pdf")
+        XCTAssertEqual(items[2].string(forType: .string), "Thanks")
+        XCTAssertEqual(pasteboard.string(forType: .string), "Invoice:\nThanks",
+                       "A plain text read joins every text item with line breaks (AppKit)")
+    }
+
+    func testCopyingOneRowIsUnchanged() {
+        let pasteboard = scratchPasteboard()
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [textCard(1, "only")]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory
+        )
+        XCTAssertEqual(pasteboard.string(forType: .string), "only")
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+    }
+
+    func testPlainClickCopiesThenClearsAndCommandClickOnlyMarks() throws {
+        // The row's click closure: ⌘ toggles a mark; a plain click copies
+        // (all marks or the row) and then clears the marks, everywhere —
+        // island with or without a target, and Toolbox.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/Sidekey/History/HistoryHoverView.swift"),
+            encoding: .utf8
+        )
+        let click = try XCTUnwrap(source.range(of: "if NSEvent.modifierFlags.contains(.command) {"))
+        let tail = String(source[click.lowerBound...].prefix(500))
+        XCTAssertTrue(tail.contains("selection.toggle(card)"))
+        let copy = try XCTUnwrap(tail.range(of: "onCopy(Self.cardsToCopy(clicked: card, marked: selection.cards))"))
+        let clear = try XCTUnwrap(tail.range(of: "selection.clear()"))
+        XCTAssertLessThan(copy.lowerBound, clear.lowerBound, "Copy first, then drop the marks")
+        XCTAssertFalse(source.contains("multiSelectEnabled"), "Marks are no longer limited to a paste target")
     }
 }

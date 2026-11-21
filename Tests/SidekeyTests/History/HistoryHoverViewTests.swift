@@ -48,7 +48,7 @@ final class HistoryHoverViewTests: XCTestCase {
         )
         XCTAssertEqual(
             HistoryHoverView.hintText(targetAppName: nil),
-            "Click for copy"
+            "Click for copy   ⌘-click for several"
         )
     }
 

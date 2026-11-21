@@ -817,7 +817,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleDropMode: actions.toggleDropMode,
             currentDropMode: actions.currentDropMode,
             historyCards: actions.historyCards,
-            copyHistoryCard: actions.copyHistoryCard,
+            copyHistoryCards: actions.copyHistoryCards,
             toggleMeetingRecord: actions.toggleMeetingRecord,
             openScreenshot: actions.openScreenshot,
             openHoverPanel: { [weak self] panel in self?.show(.hoverPanel(panel)) },
@@ -1127,8 +1127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectHistoryMode: { [weak self] mode in
                 self?.historyInteraction?.rememberFilter(mode)
             },
-            copyHistoryCard: { [weak self] card in
-                self?.copyHistoryCardFromIsland(card)
+            copyHistoryCards: { [weak self] cards in
+                self?.copyHistoryCardsFromIsland(cards)
             },
             historyAssetsDirectory: { [weak self] in
                 self?.assetsDirectory
@@ -1848,9 +1848,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return historyInteraction?.rememberedFilter() ?? .clipboard
     }
 
-    private func copyHistoryCardFromIsland(_ card: HistoryStripCard) {
+    /// Copies the clicked row, or every marked row as one pasteboard. Either
+    /// way the copy is suppressed from clipboard history: it is History's own.
+    private func copyHistoryCardsFromIsland(_ cards: [HistoryStripCard]) {
         guard let historyInteraction,
-              let assets = assetsDirectory
+              let assets = assetsDirectory,
+              !cards.isEmpty
         else {
             return
         }
@@ -1861,7 +1864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipboardSuppression.shared.setSuppressed(false)
         }
 
-        historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
+        historyInteraction.writeCardsToPasteboard(cards, assetsDirectory: assets)
         copiedToastController?.show()
     }
 

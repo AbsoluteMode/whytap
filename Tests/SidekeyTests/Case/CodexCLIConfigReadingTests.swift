@@ -76,6 +76,38 @@ final class CodexCLIConfigReadingTests: XCTestCase {
         XCTAssertEqual(connector.entry("whytap", codex: codex), .stdio(command: helper, args: ["mcp"]))
     }
 
+    /// Builder review (queue run 66143), on the real CLI: settings of the
+    /// person's own are read as such, so Connect neither rewrites a current
+    /// entry nor migrates a customized older one.
+    func test_real_codex_settings_are_kept() throws {
+        var (home, helper) = try sandbox(nil)
+        let fixtures: [(String, String)] = [
+            ("current, startup timeout", "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"mcp\"]\nstartup_timeout_sec = 45\n"),
+            ("current, disabled", "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"mcp\"]\nenabled = false\n"),
+        ]
+        for (label, toml) in fixtures {
+            try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+            let runner = FakeCommandRunner()
+            let connector = CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(), locate: { self.codex })
+            if case .customized = connector.entry("whytap", codex: codex) {} else { XCTFail("\(label): read as customized") }
+            try connector.install(helperPath: helper)
+            XCTAssertEqual(runner.calls, [], label)
+        }
+        for (label, extra) in [("timeout", "startup_timeout_sec = 45\n"), ("disabled", "enabled = false\n"),
+                               ("env", "[mcp_servers.whytap.env]\nTOKEN = \"synthetic-value-4821\"\n")] {
+            (home, helper) = try sandbox(nil)
+            let toml = "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n" + extra
+            try toml.write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+            let runner = FakeCommandRunner()
+            XCTAssertThrowsError(try CodexCaseConnector(home: home, runner: runner, reader: SystemCaseCommandRunner(),
+                                                        locate: { self.codex }).install(helperPath: helper), label) { error in
+                XCTAssertEqual(error as? CaseClientConnectorError, .customizedEntry, label)
+            }
+            XCTAssertEqual(runner.calls, [], label)
+            XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml, label)
+        }
+    }
+
     /// A temporary HOME with `.codex/config.toml` and a stand-in helper file,
     /// so the helper path resolves like a real one.
     private func sandbox(_ toml: String?) throws -> (URL, String) {

@@ -48,9 +48,13 @@ not because they need separate processes.
 - `whytap app mcp` and `whytap case mcp` stay unchanged for hosts already set
   up with them. `whytap mcp <anything>` prints usage and exits 64.
 - `plugins/whytap/mcp.json` has one server, `whytap` -> `mcp` (plugin 0.3.0).
-- Case -> Connect writes `whytap` -> `<helper> mcp` for Claude Code
-  (`claude mcp add -s user`), Codex (`codex mcp add`) and Cursor
-  (`.cursor/mcp.json` in the home folder).
+- Case -> Connect writes `whytap` -> `<helper> mcp` for the clients it
+  offers: Claude Code (`claude mcp add -s user`) and Cursor
+  (`.cursor/mcp.json` in the home folder). Codex stays out of the Connect
+  list (2026-10-21 Case Connect decision): it is set up with the README's
+  `codex mcp add whytap -- <helper> mcp`, and its Case tools answer only for
+  a registration kept from an earlier build. The Codex connector below serves
+  such a kept registration (Disconnect) and follows the same rules.
 - **Ours means one thing:** a stdio entry whose command is an absolute path
   equal to this app's helper path once both are standardized and their
   symlinks resolved, with arguments `mcp`, `app mcp` or `case mcp` (the
@@ -64,11 +68,14 @@ not because they need separate processes.
   remove it first; `claude mcp add` refuses an existing name, so ours is
   removed, and a refused add puts the previous command and arguments back
   with `claude mcp add`, reporting the add's failure (or that the restore
-  failed too). Only a plain entry (stdio, command, args, empty env) is
-  replaced: one with env values or other fields is refused before anything
-  is removed, because putting it back would pass those values on a command
-  line where other processes can read them. An entry already `<helper> mcp`
-  is left untouched. After
+  failed too). An entry already `<helper> mcp` (exact path) is left as it
+  is, whatever else it sets. An older entry of ours is replaced only when it
+  is plain: nothing but stdio, command, args and an empty env (for Codex: no
+  env, env_vars, cwd, disabled state, timeouts, tool lists or unknown set
+  fields, as `codex mcp get --json` reports them). Anything more is the
+  person's own setting: a rewrite would drop it and a restore would have to
+  pass it on a command line, so Connect refuses before any change. Our older
+  `case` entry is removed only when plain. After
   adding, our older `case` entry is removed, best effort; any other `case`
   entry is never touched.
 - **Codex is read through Codex.** `codex mcp add` replaces a server by name,
@@ -137,7 +144,7 @@ not because they need separate processes.
   asks for harness access once; `app mcp` and `case mcp` still serve only
   their own tools; `screen-mcp` never lists Case tools.
 - `CaseClientConnectorTests`: Connect writes `whytap` -> `mcp` for Claude
-  Code, Codex and Cursor; migrates our older `case` entry; replaces our own
+  Code and Cursor (and the kept Codex path); migrates our older `case` entry; replaces our own
   `whytap` (`mcp`, `app mcp`, `case mcp`, also through a symlink); refuses
   with zero changing CLI calls and the file unchanged: look-alike helpers
   (`whytap-metrics`, a Downloads copy, a beta helper, bare `whytap`,
@@ -169,6 +176,13 @@ not because they need separate processes.
   process's arguments. Restore now passes only command and arguments, and an
   entry with env values, a non-object env or any other field is refused
   before removal; the test asserts no command carries a synthetic value.
+- Builder review 5 (queue run 66143): Codex Connect rewrote an already
+  current entry and an older `app mcp` one, re-enabling a disabled server
+  and dropping its 45-second startup timeout; Cursor dropped env. Tests now
+  cover, for all three clients, a current entry with settings left untouched,
+  a customized older entry refused with zero changes, and a customized
+  `case` entry left alone; the real Codex CLI reads `startup_timeout_sec`,
+  `enabled = false` and an env table as customized.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

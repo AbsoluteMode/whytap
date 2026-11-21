@@ -128,15 +128,24 @@ broaden its Case rights. Each Case tool call is the same broker request
 Accept/Bypass policy and approval flow still apply. An unregistered client
 gets "Access denied" from the Case tools and must first be connected in
 Whytap -> Case -> Connect; the application tools of the same server work as
-before. Connect adds this same `whytap` server to Claude Code, Codex or Cursor
-and removes the older `case` entry it wrote; Disconnect removes only that older
-entry and leaves `whytap`. Connect replaces an existing `whytap` entry only
-when its command is exactly this app's helper and it has no settings of its
-own (such as env), and a refused replacement keeps the previous entry; any
-other `whytap` server
-(including a moved or beta Whytap) stops Connect until you remove it. An older `case` entry left in a host still works,
+before. Connect is offered for Claude Code and Cursor and adds this same
+`whytap` server there; Disconnect removes only the older `case` entry it wrote
+and leaves `whytap`. An entry that already runs `<helper> mcp` stays as it is,
+whatever else it sets. An older entry of ours (`app mcp`, `case mcp`, another
+spelling of the helper path) is replaced only when it holds nothing of your
+own (env values, disabled, timeouts, tool lists, other fields); otherwise
+Connect stops and asks you to remove it, and a refused replacement keeps the
+previous entry. Any other `whytap` server (including a moved or beta Whytap)
+stops Connect until you remove it. Our older `case` entry is removed only when
+it holds nothing of your own. An older `case` entry left in a host still works,
 but shows the Case tools twice next to `whytap`; remove it once `whytap` is
 connected (`claude mcp remove -s user case`, `codex mcp remove case`).
+
+Codex is not in the Connect list (see the 2026-10-21 Case Connect decision).
+Add the server with the `codex mcp add whytap -- … mcp` line above. Its
+application tools work as for any harness; its Case tools answer only if
+Codex already has a registration from an earlier Whytap build (kept and
+editable in Case), and otherwise return "Access denied".
 
 ## Read, change, verify
 

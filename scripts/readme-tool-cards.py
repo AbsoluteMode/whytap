@@ -77,6 +77,25 @@ LAYOUTS = {
 }
 
 
+# A row sits after the summary's 17 px disclosure marker, so the widest row that
+# still fits on the marker's line is (column - 17 px) / column. One percentage
+# cannot reach the right edge of the cards and code blocks at every column width
+# (93% already wrapped at a 320 px phone), so each GitHub column range gets the
+# largest percentage that leaves about 3 px at its narrowest column. GitHub's
+# column: viewport - 66 px up to 543 px, - 98 px to 767 px; from 768 px the file
+# sidebar shrinks it to 406 px, and it stops growing at 838 px from 1280 px. The
+# width on <source> sizes the row where the browser supports it; elsewhere the
+# img's 92% is the fallback that fits everywhere.
+WIDTHS = [  # viewport media, card layout, row width
+    ("(max-width: 400px)", "phone", "92%"),
+    ("(max-width: 640px)", "phone", "94%"),
+    ("(max-width: 767px)", "wide", "96%"),
+    ("(max-width: 1011px)", "wide", "95%"),
+    ("(max-width: 1279px)", "wide", "96.5%"),
+    ("", "wide", "97.5%"),
+]
+
+
 def icon_inner(name):
     svg = (LUCIDE / f"{name}.svg").read_text()
     svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
@@ -143,13 +162,15 @@ for slug, icon, title, sub, steps, desc, media in DEMOS:
             (OUT / f"tool-line-{slug}-{lay}-{t}.svg").write_text(card(title, sub, steps, desc, icon, t, lay))
     alt = html.escape(f"{title}: {sub}")
     src = lambda lay, t: f"{A}/tool-line-{slug}-{lay}-{t}.svg"
+    sources = ""
+    for media, lay, width in WIDTHS:
+        dark = f"{media} and (prefers-color-scheme: dark)" if media else "(prefers-color-scheme: dark)"
+        light = media or "(prefers-color-scheme: light)"
+        sources += (f'<source media="{dark}" srcset="{src(lay, "dark")}" width="{width}">'
+                    f'<source media="{light}" srcset="{src(lay, "light")}" width="{width}">')
     section += [
         '<details name="tool-demo">',
-        "<summary><picture>"
-        f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{src("phone","dark")}">'
-        f'<source media="(max-width: 640px)" srcset="{src("phone","light")}">'
-        f'<source media="(prefers-color-scheme: dark)" srcset="{src("wide","dark")}">'
-        f'<source media="(prefers-color-scheme: light)" srcset="{src("wide","light")}">'
+        "<summary><picture>" + sources +
         f'<img alt="{alt}" src="{src("wide","dark")}" width="92%" align="absmiddle">'
         "</picture></summary>",
         "",

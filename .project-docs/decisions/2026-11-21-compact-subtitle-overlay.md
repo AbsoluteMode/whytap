@@ -78,6 +78,9 @@ the reading position stable, which is why it was kept exactly.
 - Window layout test: subtitles are borderless, without window shadow, sized
   and placed at the bottom centre; switching back restores the text palette's
   width, height and shadow. The panel is never put on screen.
+- Relaunch test: both modes share one autosaved frame, so a quit during
+  subtitles restores the 760 pt overlay frame; the first text layout still
+  uses the 560 pt palette. The builder found this case on ticket #320.
 - Offscreen renders (`WHYTAP_TRANSLATION_RENDER_DIR`) of the idle overlay, a
   result and the Toolbox pane while listening. They do not prove hover,
   physical focus or live provider behavior.

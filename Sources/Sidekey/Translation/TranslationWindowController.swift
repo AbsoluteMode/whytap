@@ -84,8 +84,14 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             },
             close: { [weak self] in self?.dismiss() }
         ))
-        // An autosaved subtitle frame must not widen the text palette.
-        if panel.frame.width < Self.subtitleSize.width { textWidth = panel.frame.width }
+        // Both modes share one autosaved frame. A frame saved by the subtitle
+        // overlay is laid out as subtitles, so the next text layout uses the
+        // palette width instead of adopting the wide overlay.
+        if panel.frame.width < Self.subtitleSize.width {
+            textWidth = panel.frame.width
+        } else {
+            laidOutMode = .subtitles
+        }
         configureChrome(for: .text)
         let publish = { [weak self] in
             guard let self else { return }
@@ -155,9 +161,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             } else {
                 frame.origin.y = top - frame.height
             }
-        } else if laidOutMode == .text {
+        } else if laidOutMode == .text || !panel.isVisible {
             // Entering subtitles places the overlay at the bottom of the screen;
-            // a repeated show keeps where the user dragged it.
+            // a repeated show of the visible overlay keeps where it was dragged.
             frame.size = NSSize(width: min(Self.subtitleSize.width, screen.width - 32),
                                 height: min(Self.subtitleSize.height, screen.height - 48))
             frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.minY + 72)

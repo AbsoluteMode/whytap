@@ -497,6 +497,13 @@ final class TranslationTests: XCTestCase {
     }
 
     func testSubtitlesUseTheCompactBottomOverlayAndTextKeepsItsPalette() throws {
+        let savedKey = "NSWindow Frame WhytapTranslationCompact"
+        let previous = UserDefaults.standard.object(forKey: savedKey)
+        UserDefaults.standard.removeObject(forKey: savedKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: savedKey) }
+            else { UserDefaults.standard.removeObject(forKey: savedKey) }
+        }
         let suite = "translation-overlay-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -507,6 +514,7 @@ final class TranslationTests: XCTestCase {
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         let panel = try XCTUnwrap(controller.window as? NSPanel)
         let textWidth = panel.frame.width
+        XCTAssertEqual(textWidth, 560, accuracy: 0.5)
         controller.resize(for: .subtitles)
         let screen = IslandScreenResolver.currentVisibleFrame()
         XCTAssertFalse(panel.isVisible)
@@ -521,6 +529,38 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
         XCTAssertTrue(panel.hasShadow)
         XCTAssertFalse(panel.styleMask.contains(.titled))
+    }
+
+    func testTextPaletteKeepsItsWidthAfterRelaunchFromSavedSubtitleFrame() throws {
+        // Both modes share this autosave name; a quit while subtitles were
+        // shown leaves the wide overlay frame for the next launch.
+        let autosaveName = "WhytapTranslationCompact"
+        let savedKey = "NSWindow Frame " + autosaveName
+        let previous = UserDefaults.standard.object(forKey: savedKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: savedKey) }
+            else { UserDefaults.standard.removeObject(forKey: savedKey) }
+        }
+        let screen = IslandScreenResolver.currentVisibleFrame()
+        let saved = NSWindow(contentRect: NSRect(x: screen.midX - 380, y: screen.minY + 72, width: 760, height: 190),
+                             styleMask: [.borderless], backing: .buffered, defer: true)
+        saved.saveFrame(usingName: autosaveName)
+        let suite = "translation-relaunch-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
+            subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, open: { _ in FixtureSubtitleUpstream() },
+                                             makeService: { FixtureTranslator() }),
+            defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+        XCTAssertGreaterThanOrEqual(panel.frame.width, 759, "Fixture must restore the wide subtitle frame")
+        controller.resize(for: .text)
+        XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5)
+        XCTAssertEqual(panel.frame.height, 140, accuracy: 0.5)
+        controller.resize(for: .subtitles)
+        controller.resize(for: .text)
+        XCTAssertEqual(panel.frame.width, 560, accuracy: 0.5)
     }
 
     func testOutsideClickDismissesOnlyTheVisibleTextPalette() {

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: scripts/build-dmg.sh
     confirmed_at: 2026-10-19
-related: [../project.md, ../processes/shared-app-development.md, 2026-10-19-shared-working-app.md, 2026-10-17-exodia-name.md]
+related: [../project.md, ../processes/shared-app-development.md, 2026-10-19-shared-working-app.md, 2026-10-17-exodia-name.md, 2026-11-21-whytap-backup-repository.md]
 ---
 
 # Restore Whytap
@@ -59,7 +59,9 @@ The domain is a product address, not a new application backend or update host.
   designated requirement and Sparkle keys. Never create a replacement identity
   for this rename. Existing permissions and credentials must remain usable.
 - Preserve encrypted backup formats, extensions, authenticated strings and
-  established `Exodia-Backup` destinations. New folder setup uses Whytap Backups;
+  established `Exodia-Backup` destinations (new GitHub connections create
+  Whytap-Backup since 2026-11-21: 2026-11-21-whytap-backup-repository.md).
+  New folder setup uses Whytap Backups;
   selecting an existing Exodia Backups folder reuses it.
 - Keep `EXODIA_*` release credentials/options and bundle metadata keys compatible
   with existing tools. Notify exposes WHYTAP_NOTIFY_SOURCE and

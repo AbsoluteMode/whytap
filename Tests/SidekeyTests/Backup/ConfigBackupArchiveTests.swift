@@ -63,7 +63,9 @@ final class ConfigBackupArchiveTests: XCTestCase {
         let snapshot = try ConfigBackupArchive.open(XCTUnwrap(Data(base64Encoded: fixture)), key: Data(repeating: 7, count: 32))
         XCTAssertEqual(snapshot.schemaVersion, 1)
         XCTAssertEqual(snapshot.preferences["sidekey.models.byokProvider"], .string("soniox"))
-        XCTAssertEqual(GitHubBackupTransport.repository, "Exodia-Backup")
+        XCTAssertEqual(GitHubBackupTransport.legacyRepository, "Exodia-Backup")
+        XCTAssertEqual(GitHubBackupTransport.savedRepository(UserDefaults(suiteName: "legacy-" + UUID().uuidString)!),
+                       "Exodia-Backup", "a connection saved before the new name existed stays on Exodia-Backup")
     }
 
 }

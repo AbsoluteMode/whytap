@@ -1453,7 +1453,13 @@ New parts and the index are still read back before publishing. Settings shows
 "Uploading backup part N of M…". WHY:
 `.project-docs/decisions/2026-10-21-backup-resume-digest.md`.
 GitHub connection checks are read-only; Connect is the only action that can
-create the private Exodia-Backup repository. Connection alone never backs up data.
+create the private backup repository. Connect keeps an existing Exodia-Backup
+(under the name GitHub reports after a rename), otherwise uses or creates
+Whytap-Backup, and saves the name per Mac (backup.github-repository.v1; absent
+means Exodia-Backup); reconnecting the same account keeps the saved one, and a
+token that cannot see it gets an access error without moving the destination. Release tags and formats are unchanged. WHY:
+.project-docs/decisions/2026-11-21-whytap-backup-repository.md
+Connection alone never backs up data.
 API & Models routes, server registrations and their provider keys are included.
 Costs history is exported by the live AIUsageStore actor and verified with a
 strict schema/row validator. Restore retains target-only spending and the best
@@ -1471,7 +1477,7 @@ Settings sync (Settings -> Backup -> Sync settings between Macs, off by
 default) keeps preferences and provider keys the same on Macs sharing one
 recovery code. SettingsSyncService keeps one document sealed with the backup
 key (AES-GCM, readable key ID) at whytap-sync/settings.v1.json
-(settings-beta.v1.json for beta) in the same private Exodia-Backup repository,
+(settings-beta.v1.json for beta) in the same private backup repository,
 through the Contents API: conditional GET with ETag, PUT with the blob SHA, so
 a write that lost a race re-reads, merges and retries (three attempts). Rounds
 run every minute and 2 s after a defaults change. Items are the backup

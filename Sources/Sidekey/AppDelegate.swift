@@ -818,7 +818,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentDropMode: actions.currentDropMode,
             historyCards: actions.historyCards,
             copyHistoryCard: actions.copyHistoryCard,
-            deleteHistoryCard: actions.deleteHistoryCard,
             toggleMeetingRecord: actions.toggleMeetingRecord,
             openScreenshot: actions.openScreenshot,
             openHoverPanel: { [weak self] panel in self?.show(.hoverPanel(panel)) },
@@ -1136,9 +1135,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             pasteHistoryCard: { [weak self] card in
                 self?.pasteHistoryCardFromIsland(card)
-            },
-            deleteHistoryCard: { [weak self] card in
-                await self?.deleteHistoryCard(card) ?? false
             },
             historyPasteTargetName: { [weak self] in
                 self?.historyInteraction?.targetAppName
@@ -1867,14 +1863,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         historyInteraction.writeCardToPasteboard(card, assetsDirectory: assets)
         copiedToastController?.show()
-    }
-
-    /// Delete a clipboard row so the requesting History view can reload its feed.
-    /// WHY: .project-docs/decisions/2026-10-22-clipboard-entry-delete.md
-    private func deleteHistoryCard(_ card: HistoryStripCard) async -> Bool {
-        guard let store = historyStore, let assets = assetsDirectory else { return false }
-        let outcome = await ClipboardEntryDeletion(store: store, assetsDirectory: assets).delete(card)
-        return outcome.removesEntry
     }
 
     private func pasteHistoryCardFromIsland(_ card: HistoryStripCard) {

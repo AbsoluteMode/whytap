@@ -48,8 +48,8 @@ final class HistoryHoverKeyMonitor: ObservableObject {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            // A modal alert (Delete confirmation) owns the keyboard: Return
-            // there must never paste the row still under the pointer.
+            // A modal alert owns the keyboard: Return there must never paste
+            // the row still under the pointer.
             guard NSApp.modalWindow == nil else { return event }
             if event.keyCode == 36 || event.keyCode == 76 {
                 if let card = self.hoveredCard {
@@ -111,9 +111,6 @@ struct HistoryHoverView: View {
     let onPreviewAnchorChange: (HistoryStripCard, CGRect?) -> Void
     let onPaste: (HistoryStripCard) -> Void
     var allowsKeyboardPaste = true
-    /// Clipboard rows offer "Delete…" in their context menu when set; the
-    /// owner confirms, deletes and reloads `cards`.
-    var onDelete: ((HistoryStripCard) -> Void)? = nil
 
     @State private var hoveredCard: HistoryStripCard?
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
@@ -211,8 +208,7 @@ struct HistoryHoverView: View {
                                 } else if hoveredCard == card {
                                     hoveredCard = nil
                                 }
-                            },
-                            onDelete: deleteAction(for: card)
+                            }
                         )
                         .id(card.id)
                     }
@@ -236,19 +232,6 @@ struct HistoryHoverView: View {
                     }
                 }
             }
-        }
-    }
-
-    /// Only clipboard rows can be deleted. The row is released from hover
-    /// and preview first, so neither Return nor the bubble acts on it while
-    /// the confirmation is open.
-    private func deleteAction(for card: HistoryStripCard) -> (() -> Void)? {
-        guard let onDelete, case .clipboard = card else { return nil }
-        return {
-            if hoveredCard == card { hoveredCard = nil }
-            keyMonitor.hoveredCard = nil
-            onPreviewAnchorChange(card, nil)
-            onDelete(card)
         }
     }
 
@@ -308,8 +291,6 @@ private struct HistoryHoverRow: View {
     /// on exit — drives the preview bubble anchored to the row.
     let onAnchorChange: (CGRect?) -> Void
     let onHover: (Bool) -> Void
-    /// `nil` hides the context menu (Agent/Drop rows, read-only hosts).
-    var onDelete: (() -> Void)? = nil
 
     @State private var rowFrame: CGRect = .zero
 
@@ -327,11 +308,6 @@ private struct HistoryHoverRow: View {
         .background(rowBackground(isHovered: isHovered))
         .contentShape(Rectangle())
         .onTapGesture(perform: onCopy)
-        .contextMenu {
-            if let onDelete {
-                Button("Delete…", role: .destructive, action: onDelete)
-            }
-        }
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named(HistoryHoverView.hoverZoneSpaceName))
         } action: { rowFrame = $0 }

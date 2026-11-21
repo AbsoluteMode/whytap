@@ -1215,7 +1215,6 @@ struct IslandView: View {
                                 }
                             },
                             onPasteHistoryCard: actions.pasteHistoryCard,
-                            onDeleteHistoryCard: actions.deleteHistoryCard,
                             historyPasteTargetName: actions.historyPasteTargetName,
                             onOpenNotes: actions.openMeetings,
                             onOpenMonitor: actions.openMonitor,
@@ -2553,8 +2552,6 @@ private struct IslandDropModeHoverPanel: View {
     let onCopyHistoryCard: (HistoryStripCard) -> Void
     let onHistoryPreviewAnchorChange: (HistoryStripCard, CGRect?) -> Void
     let onPasteHistoryCard: (HistoryStripCard) -> Void
-    /// Confirms and deletes a clipboard row; `true` when the list must reload.
-    let onDeleteHistoryCard: (HistoryStripCard) async -> Bool
     let historyPasteTargetName: () -> String?
     let onOpenNotes: () -> Void
     var onOpenMonitor: () -> Void = {}
@@ -2619,14 +2616,6 @@ private struct IslandDropModeHoverPanel: View {
                     onPaste: { card in
                         onPasteHistoryCard(card)
                         panelMode = .controls  // release key before synth Cmd+V
-                    },
-                    onDelete: { card in
-                        Task { @MainActor in
-                            guard await onDeleteHistoryCard(card),
-                                  panelMode == .history
-                            else { return }
-                            historyCardsCache = await historyCards(historyMode)
-                        }
                     }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))

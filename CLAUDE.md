@@ -1417,16 +1417,13 @@ Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
-without deleting other retained rows. A clipboard row's context menu offers
-Delete… in hover History and Toolbox History; ClipboardEntryDeletion
-asks Cancel-first like meeting delete and never quotes the copy. deleteClipboardEntry
-removes the image sidecar, then the row with secure_delete and a truncating WAL
-checkpoint, in one store-queue hop; a sidecar that cannot be removed keeps the
-row listed. History key monitors ignore keys while a modal alert is open.
-Uploaded backups are unchanged (pre-2026-10-21 archives restore History). WHY:
-.project-docs/decisions/2026-10-22-clipboard-entry-delete.md
-The History connection sets secure_delete=ON, so cap evictions, agent trimming
-and Delete… zero freed bytes and pages. After store setup,
+without deleting other retained rows. Clipboard rows have no Delete and no
+context menu (the island has no right-click actions; the user removed the
+per-entry Delete on 2026-11-21); only the 50-entry cap removes them. History
+key monitors ignore keys while a modal alert is open. WHY:
+.project-docs/decisions/2026-11-21-clipboard-no-entry-delete.md
+The History connection sets secure_delete=ON, so cap evictions and agent
+trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in
 its own history_maintenance table, so a restored older copy is scrubbed again),
 keeping every row and id, then truncates the WAL. Too little space (2x live rows

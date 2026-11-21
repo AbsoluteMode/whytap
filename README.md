@@ -112,23 +112,11 @@
 
 </details>
 
-## Homebrew
-
-<p align="center"><a href="https://brew.sh"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/homebrew-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/homebrew-light.svg"><img alt="Homebrew" src="docs/assets/readme/homebrew-dark.svg" width="48" height="48"></picture></a></p>
-
-### Install
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/homebrew-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/homebrew-light.svg"><img alt="" src="docs/assets/readme/homebrew-dark.svg" width="26" height="26" align="absmiddle"></picture> Homebrew
 
 ```bash
 brew install absolutemode/tap/whytap
 ```
-
-### Update
-
-```bash
-brew upgrade --cask whytap
-```
-
-<p align="center"><sub>Whytap also updates itself from the island.</sub></p>
 
 ## Plugins
 

@@ -131,8 +131,9 @@ Whytap -> Case -> Connect; the application tools of the same server work as
 before. Connect adds this same `whytap` server to Claude Code, Codex or Cursor
 and removes the older `case` entry it wrote; Disconnect removes only that older
 entry and leaves `whytap`. Connect replaces an existing `whytap` entry only
-when its command is exactly this app's helper, and a refused replacement
-keeps the previous entry; any other `whytap` server
+when its command is exactly this app's helper and it has no settings of its
+own (such as env), and a refused replacement keeps the previous entry; any
+other `whytap` server
 (including a moved or beta Whytap) stops Connect until you remove it. An older `case` entry left in a host still works,
 but shows the Case tools twice next to `whytap`; remove it once `whytap` is
 connected (`claude mcp remove -s user case`, `codex mcp remove case`).

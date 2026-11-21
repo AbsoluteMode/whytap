@@ -62,9 +62,13 @@ not because they need separate processes.
   call. Replacing never leaves the person without the entry that worked:
   `codex mcp add` replaces a name in one write, so Codex is never asked to
   remove it first; `claude mcp add` refuses an existing name, so ours is
-  removed, and a refused add puts the previous entry back exactly as it was
-  (`claude mcp add-json`), reporting the add's failure (or that the restore
-  failed too). An entry already `<helper> mcp` is left untouched. After
+  removed, and a refused add puts the previous command and arguments back
+  with `claude mcp add`, reporting the add's failure (or that the restore
+  failed too). Only a plain entry (stdio, command, args, empty env) is
+  replaced: one with env values or other fields is refused before anything
+  is removed, because putting it back would pass those values on a command
+  line where other processes can read them. An entry already `<helper> mcp`
+  is left untouched. After
   adding, our older `case` entry is removed, best effort; any other `case`
   entry is never touched.
 - **Codex is read through Codex.** `codex mcp add` replaces a server by name,
@@ -158,8 +162,13 @@ not because they need separate processes.
   refused add lost the working entry in both Codex and Claude Code. Codex now
   adds without removing (a test runs the real `codex mcp add` over our
   `app mcp` entry and reads it back replaced); Claude Code tests cover the
-  restore of the exact previous JSON, a failed restore reported as such, and
+  restore of the previous command, a failed restore reported as such, and
   an already-current entry left untouched.
+- Builder review 4 (queue run 44836): the first restore used `claude mcp
+  add-json` with the whole previous entry, putting its env values in a
+  process's arguments. Restore now passes only command and arguments, and an
+  entry with env values, a non-object env or any other field is refused
+  before removal; the test asserts no command carries a synthetic value.
 - Builder reviews (queue runs 7446, 44301) found the earlier hand-written
   TOML reader missing a commented header, an inline table and a `\u`
   escaped key, and a basename rule accepting `whytap-metrics`. Both were

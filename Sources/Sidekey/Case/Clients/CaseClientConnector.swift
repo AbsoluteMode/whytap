@@ -42,6 +42,9 @@ enum CaseClientConnectorError: Error, Equatable {
     case foreignEntry
     /// Replacing our `whytap` entry failed and the previous one could not be put back.
     case restoreFailed
+    /// Our `whytap` entry carries its own settings (env and the like) that a
+    /// replacement could not put back without passing them on a command line.
+    case customizedEntry
 
     var userMessage: String {
         switch self {
@@ -54,6 +57,8 @@ enum CaseClientConnectorError: Error, Equatable {
             return "another MCP server named “whytap” already exists; rename or remove it, then connect again"
         case .restoreFailed:
             return "the new “whytap” entry was refused and the previous one couldn’t be put back; connect again"
+        case .customizedEntry:
+            return "the “whytap” entry has its own settings (such as env); remove it, then connect again"
         }
     }
 }
@@ -336,10 +341,14 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
         if entry != nil, !CaseMCPEntryOwnership.isOurServer(entry, helperPath: helperPath) {
             throw CaseClientConnectorError.foreignEntry
         }
+        if let existing = entry as? [String: Any], !Self.isCurrent(existing, helperPath: helperPath),
+           Self.plainServer(existing) == nil {
+            throw CaseClientConnectorError.customizedEntry
+        }
         let claude = try binary()
         if let existing = entry as? [String: Any] {
-            if !Self.isCurrent(existing, helperPath: helperPath) {
-                try replace(existing, claude: claude, helperPath: helperPath)
+            if !Self.isCurrent(existing, helperPath: helperPath), let previous = Self.plainServer(existing) {
+                try replace(previous, claude: claude, helperPath: helperPath)
             }
         } else {
             try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
@@ -356,19 +365,33 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
             && (entry["env"] as? [String: Any] ?? [:]).isEmpty
     }
 
+    /// Command and arguments of an entry that holds nothing else (stdio, no
+    /// env values, no other fields), or nil. Only such an entry can be put
+    /// back by `claude mcp add` without passing configured values on a command
+    /// line, where other processes could read them.
+    static func plainServer(_ entry: [String: Any]) -> (command: String, args: [String])? {
+        guard let command = entry["command"] as? String else { return nil }
+        let args = entry["args"] as? [String] ?? []
+        if entry["args"] != nil, entry["args"] as? [String] == nil { return nil }
+        if let type = entry["type"], type as? String != "stdio" { return nil }
+        if let env = entry["env"], (env as? [String: Any])?.isEmpty != true { return nil }
+        guard Set(entry.keys).isSubset(of: ["type", "command", "args", "env"]) else { return nil }
+        return (command, args)
+    }
+
     /// `claude mcp add` refuses a name that exists, so our older entry is
-    /// removed first. A refused add puts the previous entry back exactly as it
-    /// was (`claude mcp add-json`), so a failed Connect never leaves the person
-    /// without the server that worked before.
+    /// removed first. A refused add puts the previous command and arguments
+    /// back with `claude mcp add` (plain entries only, see `plainServer`), so a
+    /// failed Connect never leaves the person without the server that worked
+    /// before and never puts configured values in a process's arguments.
     // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
-    private func replace(_ previous: [String: Any], claude: URL, helperPath: String) throws {
-        let previousJSON = try JSONSerialization.data(withJSONObject: previous, options: [.sortedKeys])
+    private func replace(_ previous: (command: String, args: [String]), claude: URL, helperPath: String) throws {
         try check(run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.name]))
         do {
             try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
         } catch {
-            let restored = (try? run(claude, ["mcp", "add-json", "-s", "user", WhytapMCPEntry.name,
-                                              String(decoding: previousJSON, as: UTF8.self)]))?.status == 0
+            let restored = (try? run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", previous.command]
+                                                  + previous.args))?.status == 0
             throw restored ? error : CaseClientConnectorError.restoreFailed
         }
     }

@@ -89,18 +89,45 @@ final class CaseClientConnectorTests: XCTestCase {
         let previous = #"{"type":"stdio","command":"\#(helper)","args":["app","mcp"],"env":{}}"#
         try write(#"{"mcpServers":{"whytap":\#(previous)}}"#, to: home.appendingPathComponent(".claude.json"))
         let runner = FakeCommandRunner()
-        runner.failingPrefixes = [["mcp", "add", "-s"]]
+        runner.failingArguments = ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"]
         let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
                                                 locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
         XCTAssertThrowsError(try connector.install(helperPath: helper)) { error in
             XCTAssertEqual(error as? CaseClientConnectorError, .commandFailed(status: 1))
         }
-        XCTAssertEqual(runner.calls.count, 3)
-        XCTAssertEqual(runner.calls[0].arguments, ["mcp", "remove", "-s", "user", "whytap"])
-        XCTAssertEqual(runner.calls[1].arguments, ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"])
-        XCTAssertEqual(Array(runner.calls[2].arguments.prefix(5)), ["mcp", "add-json", "-s", "user", "whytap"])
-        let restored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(runner.calls[2].arguments[5].utf8)) as? NSDictionary)
-        XCTAssertEqual(restored, try XCTUnwrap(JSONSerialization.jsonObject(with: Data(previous.utf8)) as? NSDictionary))
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["mcp", "remove", "-s", "user", "whytap"],
+            ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"],
+            ["mcp", "add", "-s", "user", "whytap", "--", helper, "app", "mcp"],
+        ])
+    }
+
+    /// Builder review (queue run 44836): putting back an entry with env values
+    /// would pass them on a command line, where other processes can read them.
+    /// Such an entry (or any field beyond type/command/args) is refused before
+    /// anything is removed, and no command carries its values.
+    func test_claude_entry_with_its_own_settings_is_refused_before_any_change() throws {
+        let entries = [
+            #"{"type":"stdio","command":"\#(helper)","args":["app","mcp"],"env":{"TOKEN":"synthetic-value-4821"}}"#,
+            #"{"command":"\#(helper)","args":["app","mcp"],"headers":{"X":"synthetic-value-4821"}}"#,
+            #"{"command":"\#(helper)","args":["app","mcp"],"env":"synthetic-value-4821"}"#,
+        ]
+        for entry in entries {
+            let home = try temporaryHome()
+            let file = home.appendingPathComponent(".claude.json")
+            try write(#"{"mcpServers":{"whytap":\#(entry)}}"#, to: file)
+            let before = try Data(contentsOf: file)
+            let runner = FakeCommandRunner()
+            runner.failingPrefixes = [["mcp", "add"]]
+            XCTAssertThrowsError(try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                             locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+                .install(helperPath: helper), entry) { error in
+                XCTAssertEqual(error as? CaseClientConnectorError, .customizedEntry, entry)
+            }
+            XCTAssertEqual(runner.calls, [], "nothing removed or added: \(entry)")
+            XCTAssertFalse(runner.calls.flatMap(\.arguments).joined().contains("synthetic-value-4821"))
+            XCTAssertEqual(try Data(contentsOf: file), before)
+        }
     }
 
     func test_claude_failed_restore_is_reported_as_such() throws {
@@ -108,13 +135,13 @@ final class CaseClientConnectorTests: XCTestCase {
         try write(#"{"mcpServers":{"whytap":{"command":"\#(helper)","args":["app","mcp"]}}}"#,
                   to: home.appendingPathComponent(".claude.json"))
         let runner = FakeCommandRunner()
-        runner.failingPrefixes = [["mcp", "add"], ["mcp", "add-json"]]
+        runner.failingPrefixes = [["mcp", "add"]]
         XCTAssertThrowsError(try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
                                                          locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
             .install(helperPath: helper)) { error in
             XCTAssertEqual(error as? CaseClientConnectorError, .restoreFailed)
         }
-        XCTAssertEqual(runner.calls.map { $0.arguments[1] }, ["remove", "add", "add-json"])
+        XCTAssertEqual(runner.calls.map { $0.arguments[1] }, ["remove", "add", "add"])
     }
 
     /// A failed cleanup of the old entry does not fail Connect: that entry

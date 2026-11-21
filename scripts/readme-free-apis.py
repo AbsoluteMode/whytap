@@ -222,7 +222,7 @@ SPEECH = "Scribe v3 Live"
 SETUP_ROWS = [  # feature, speech model, language model role ("smart", "fast" or None)
     ("Drop Fast", SPEECH, None),
     ("Drop Smart", SPEECH, "smart"),
-    ("Meetings", SPEECH, "smart"),
+    ("Meetings", "Scribe v3", "smart"),  # recorded audio, not the live model
     ("Agent", None, "fast"),
     ("Agent voice", SPEECH, None),
     ("Voice search", SPEECH, None),

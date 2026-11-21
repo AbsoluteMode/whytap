@@ -66,14 +66,14 @@ paying.
   key (Claude Sonnet 5.5 for Drop Smart and Meetings notes, Haiku 5.5 for
   Agent, Translation and Subtitles) and an OpenAI key with the same price
   class (GPT-6.2 Sol, GPT-6 Luna, his choice); speech is ElevenLabs Scribe
-  v3 Live in both. The asterisk explains it: the models are paid from a Claude
+  v3 Live in both, and Scribe v3 (recorded audio) for Meetings. The asterisk explains it: the models are paid from a Claude
   Max/Ultra or ChatGPT Pro plan's monthly API credit, speech from ElevenLabs'
   free credits (non-commercial use). This is the one place the README names
   paid-plan credits, labelled as such. Maxim updates the setup himself every
-  month (`SETUP_*` in the script, with its own check date). Moving Meetings to
-  a recorded-audio model was considered first and dropped: Meetings on
-  ElevenLabs and Deepgram stream the recording through the realtime socket,
-  so it would need an app change; the panel shows the setup as it is.
+  month (`SETUP_*` in the script, with its own check date). Meetings shows Scribe v3, the recorded-audio
+  model: Meetings on ElevenLabs used to stream the recording through the
+  realtime socket, and a separate change moves them to the recorded model,
+  so this README waits for it.
 - `scripts/readme-free-apis.py` writes the section; `--check` reports a stale
   one. `APIHintsRenderTests.testReadmeFreeAPICardsMatchNoCardOffers` fails
   when the README no longer matches the app.

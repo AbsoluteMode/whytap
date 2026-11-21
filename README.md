@@ -13,11 +13,7 @@
 </p>
 
 <p align="center">
-  <sub>or with Homebrew: <code>brew install absolutemode/tap/whytap</code></sub>
-</p>
-
-<p align="center">
-  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account · Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
+  <sub><b>macOS 14.2+</b> &nbsp;·&nbsp; <b>Apple Silicon &amp; Intel</b> &nbsp;·&nbsp; <a href="docs/install.md#download-and-open"><b>Developer ID Signed &amp; Notarized</b></a> &nbsp;·&nbsp; <a href="docs/privacy.md"><b>No Account &amp; Zero Telemetry</b></a> &nbsp;·&nbsp; <a href="LICENSE"><b>MIT License</b></a></sub>
 </p>
 
 </div>
@@ -116,6 +112,12 @@
 
 </details>
 
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/homebrew-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/homebrew-light.svg"><img alt="" src="docs/assets/readme/homebrew-dark.svg" width="26" height="26" align="absmiddle"></picture> Homebrew
+
+```bash
+brew install absolutemode/tap/whytap
+```
+
 ## Plugins
 
 <p align="center">Ask <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="119" align="absmiddle"></picture> or <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture> to work with Whytap for you.</p>
@@ -156,7 +158,14 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://www.tavily.com/pricing"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-tavily-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-tavily-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-tavily-wide-light.svg"><img alt="Tavily: 1,000 free search credits each month (Web search)" src="docs/assets/readme/free-api-tavily-wide-dark.svg" width="49%"></picture></a>
 </p>
 
-<p align="center">ElevenLabs' 10,000 free credits a month cover up to 2.5 hours of live dictation on Scribe v3 Live, its most accurate realtime model: about five minutes of speech every day, enough to dictate all month.</p>
+<h3 align="center">Already paying for an OpenAI or Anthropic subscription?</h3>
+
+<p align="center">
+<a href="https://developers.openai.com/api/docs/guides/chatgpt-api-credits"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-chatgpt-pro-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-plan-chatgpt-pro-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-chatgpt-pro-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-plan-chatgpt-pro-wide-light.svg"><img alt="ChatGPT Pro: $100–500 API credit each month" src="docs/assets/readme/free-api-plan-chatgpt-pro-wide-dark.svg" width="410"></picture></a>
+<a href="https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-wide-light.svg"><img alt="Claude Max &amp; Ultra: $100–200 API credit each month" src="docs/assets/readme/free-api-plan-claude-max-ultra-wide-dark.svg" width="410"></picture></a>
+</p>
+
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-setup-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-setup-wide-light.svg"><img alt="My setup, free* right now. Anthropic key (Claude Max or Ultra: $100–200 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + Claude Sonnet 5.5; Meetings: Scribe v3 + Claude Sonnet 5.5; Agent: Claude Sonnet 5.5; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: Claude Sonnet 5.5; Subtitles: Scribe v3 Live + Claude Sonnet 5.5. OpenAI key (ChatGPT Pro: $100–500 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + GPT-6.2 Sol; Meetings: Scribe v3 + GPT-6.2 Sol; Agent: GPT-6.2 Sol; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: GPT-6.2 Sol; Subtitles: GPT-Realtime-Translate (speech and translation in one model). * The models are paid from your plan’s monthly API credit; speech uses ElevenLabs’ 10,000 free credits (non-commercial use)." src="docs/assets/readme/free-api-setup-wide-dark.svg" width="100%"></picture></p>
 
 ## You may also like
 
@@ -167,5 +176,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://github.com/AbsoluteMode/harness-link"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/project-harness-link-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/project-harness-link-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/project-harness-link-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/project-harness-link-wide-light.svg"><img alt="Harness Link: Claude Code · Codex · Antigravity. Connects their sessions: shared rooms, addressed messages to running sessions and persistent Claude consultations." src="docs/assets/readme/project-harness-link-wide-dark.svg" width="49%"></picture></a>
 <picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/project-orchestrator-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/project-orchestrator-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/project-orchestrator-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/project-orchestrator-wide-light.svg"><img alt="Orchestrator (soon): Claude Code plugin. Ten chats in one window: it keeps the task list, starts the sessions and writes to you only when it needs you." src="docs/assets/readme/project-orchestrator-wide-dark.svg" width="49%"></picture>
 </p>
+
+<p align="center"><sub>If you like Whytap, a ⭐ helps others find it.</sub></p>
 
 <p align="center"><sub><a href="docs/install.md">Install</a> &nbsp;·&nbsp; <a href="docs/privacy.md">Privacy</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md#building">Build from source</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contributing</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a></sub></p>

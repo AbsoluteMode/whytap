@@ -209,6 +209,10 @@ enum IslandDropModeControl {
 /// Native hover surfaces use IslandHoverGlass on supported runtimes.
 /// WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md
 enum IslandDetachedHoverPanelGlassStyle {
+    /// Dark layer over the macOS 14/15 material. Small text under the panel
+    /// must not read through even where the material does not blur.
+    // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+    static let legacyDarkLayerOpacity: Double = 0.80
     /// Vertical darkening — glass reads thicker toward the bottom.
     static let depthWashTopOpacity: Double = 0.05
     static let depthWashBottomOpacity: Double = 0.16

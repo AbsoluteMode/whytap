@@ -389,6 +389,8 @@ struct IslandView: View {
     /// Hovered History row whose content earned a preview bubble.
     @State private var historyPreviewAnchor: HistoryHoverPreviewAnchor?
     @ObservedObject private var todoPreview = TodoHoverPreviewState.shared
+    @ObservedObject private var calendarPreview = CalendarEventPreviewState.shared
+    @State private var calendarPreviewHeight: CGFloat = 0
     @State private var targetLanguage: AppLanguage?
     @StateObject private var vocabularyViewModel: IslandVocabularyViewModel
     @StateObject private var fillerViewModel: IslandFillerViewModel
@@ -1242,9 +1244,9 @@ struct IslandView: View {
                                 && !(hoverPanelMode == .calendar && appState.calendarHoverConnectionActive),
                             onDismiss: dismissHoverMenu
                         ))
-                        .islandHoverGlassSurface(
-                            showGlass: hoverPanelMode != .history || IslandHoverGlass.usesNativeLiquidGlass
-                        )
+                        // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
+                        // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+                        .islandHoverGlassSurface()
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.
@@ -1331,8 +1333,28 @@ struct IslandView: View {
                 .transition(.opacity)
             }
         }
+        // Calendar's event details, same zone; lifted to stay inside the island area.
+        .overlay(alignment: .topLeading) {
+            if let anchor = calendarPreview.anchor, isHoverExpanded, hoverPanelMode == .calendar,
+               CalendarAvailability.isOpen {
+                let area = compactHeight + activeHoverPanelHeight
+                CalendarEventPreviewBubble(content: anchor.content)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { calendarPreviewHeight = $0 }
+                    // The window ends with the island area; a taller bubble would be cut
+                    // off, so it gets at most that height and its description gives way.
+                    .frame(width: CalendarEventPreviewPolicy.bubbleWidth, height: area, alignment: .top)
+                    .offset(
+                        x: -(CalendarEventPreviewPolicy.bubbleWidth + 8
+                            + IslandHoverPanelHitZone.leftOverhang(compactWidth: compactWidth)),
+                        y: CalendarEventPreviewPolicy.bubbleTop(eventTop: anchor.rowFrame.minY,
+                            bubbleHeight: calendarPreviewHeight, areaHeight: area))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.12), value: historyPreviewAnchor)
         .animation(.easeOut(duration: 0.12), value: todoPreview.anchor)
+        .animation(.easeOut(duration: 0.12), value: calendarPreview.anchor)
         .animation(
             Self.hoverExpansionAnimation(programmatic: appState.programmaticHoverExpansion),
             value: isHoverExpanded
@@ -1427,6 +1449,7 @@ struct IslandView: View {
                 historyPreviewAnchor = nil
             }
             if newValue != .tasks { todoPreview.anchor = nil }
+            if newValue != .calendar { calendarPreview.clear() }
         }
     }
 
@@ -3503,12 +3526,15 @@ struct IslandDetachedHoverPanelBackground: View {
             .clipShape(shape)
     }
 
-    /// Keep the historical dark wash only on the legacy fallback.
-    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md
+    /// Keep the dark wash only on the legacy fallback. It sits over the
+    /// material at legacyDarkLayerOpacity so the window underneath never
+    /// reads through, blurred or not.
+    // WHY: .project-docs/decisions/2026-10-17-native-hover-glass.md,
+    // .project-docs/decisions/2026-11-21-history-backdrop-always.md
     private func glassBase(in shape: RoundedRectangle) -> some View {
         shape
             .fill(.ultraThinMaterial)
-            .overlay(shape.fill(.black.opacity(0.25)))
+            .overlay(shape.fill(.black.opacity(IslandDetachedHoverPanelGlassStyle.legacyDarkLayerOpacity)))
     }
 
     /// Vertical darkening: the slab reads thicker toward the bottom.

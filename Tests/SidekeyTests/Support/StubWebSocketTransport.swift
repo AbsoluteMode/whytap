@@ -24,6 +24,9 @@ final class StubWebSocketTransport: StreamingTransporting, @unchecked Sendable {
     /// fail-fast-on-eof-send-error contract.
     var sendError: Error?
 
+    /// The handshake's HTTP status a refused upgrade reports.
+    var responseStatusCode: Int?
+
     var sent: [Sent] {
         lock.lock(); defer { lock.unlock() }
         return _sent

@@ -427,11 +427,38 @@ Translation tools:
   observers are scoped to visible text mode, pass the click through and suspend
   during native menu/modal interaction. Subtitles retain floating persistence.
   Subtitles are the original translator's compact overlay: a borderless
-  transparent panel at the bottom of the screen with one dark caption box (the
-  newest translations, at most five lines, older words leave at the top) and,
+  transparent panel at the bottom of the screen with one dark caption box and,
   when idle or hovered, one row of source/target language, Start/Stop and ×.
   It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
   .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
+  The box shows phrase pairs: original (left, at most 45 %) and its
+  translation running to the box's edge (PairGridLayout); the box hugs its
+  widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
+  still being heard last as a dim live original; Toolbox stacks original over
+  translation. SubtitleSegmenter cuts committed text into whole phrases
+  (sentence end at once, 0.6 s pause, 60 chars/2.5 s at a clause mark or word
+  boundary, never inside a word or after a function word). Up to three
+  phrases translate at once; each request carries up to three finished pairs
+  as answered turns and the phrases still in flight as quoted context; an 8 s
+  deadline or a transient error marks only that pair Not translated, key and
+  setup errors stop the session. ElevenLabs Subtitles audio commits by VAD
+  (0.5 s) and SubtitlePartialLock translates the stable start of its
+  segment-long partials (0.6 s unchanged, no hyphenated unfinished word),
+  aligning the commit by words; Drop and other takes keep manual commits.
+  Every other pair sits on a faint band that follows the pair's position in
+  the session. WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  Subtitles audio can instead be OpenAI gpt-realtime-translate (model use
+  speechTranslation, OpenAI and Subtitles audio only; the user picks it):
+  OpenAIRealtimeTranslateAdapter streams the capture (24 kHz, 200 ms frames)
+  to one session that returns the translation and, with gpt-realtime-whisper
+  input transcription, the heard original; the Subtitles LLM row is unused
+  and says so. SubtitleSpeechPairer cuts the translation at sentence ends,
+  1.2 s pauses or a clause past 160 characters and matches the original's
+  sentence that ended (elapsed_ms) before it; the live pair shows whole
+  words only. Refused key, no credit, busy, unsupported language and a
+  dropped socket end the session with a named message; Costs estimates
+  $3.06 per audio hour. WHY:
+  .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
   Saved targets and secondary actions stay in the
@@ -439,15 +466,16 @@ Translation tools:
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never
-  the microphone, on the subtitlesAudio real-time route; final-only phrases
-  go to its independent subtitlesTranslation LLM route. API & Models groups
+  the microphone, on the subtitlesAudio real-time route; committed (and, for
+  ElevenLabs, stable partial) phrases go to its independent
+  subtitlesTranslation LLM route. API & Models groups
   Subtitles Speech/LLM selectors; typed text uses only translation. New routes
   start unset. Migration v2 copies the previous shared text route once only
   for configured subtitles; later edits, clears and launches stay independent.
   Partial v1 documents expose this split in memory without rewriting raw bytes;
   their first real edit retains a backup and persists the split before the edit.
   Never borrow other routes at runtime or migrate standalone credentials.
-  Eight queued phrases, forty retained lines and a bounded audio relay stop
+  Nine untranslated phrases, forty retained lines and a bounded audio relay stop
   visibly on backlog. Stop uses opt-in CoreAudio terminal EOF after capture
   quiescence and an IO queue barrier, then naturally drains the relay before
   provider endInput. Ordinary meeting/VAD stop keeps streams reusable; hardware
@@ -863,7 +891,13 @@ Hover tool search and pointer routing:
   checks passed. Do not claim a proved compositor cause.
   A translucent input lens/rim supplies the foreground surface without child
   native glass. History shares the drawer's Regular backdrop, uses translucent
-  rows/hints and a separate preview backdrop. macOS 14/15 fallback is unchanged;
+  rows/hints and a separate preview backdrop. On macOS 14/15 History and its
+  preview use the drawer's legacy material like every other panel (History
+  used to opt out and showed other windows between its rows); Reduce
+  transparency gives every drawer card an opaque dark backdrop
+  (IslandHoverBackdropPolicy); the macOS 14/15 backdrop has an 80% dark
+  layer over its material (legacyDarkLayerOpacity). WHY:
+  .project-docs/decisions/2026-11-21-history-backdrop-always.md
   Case/Vocab/Filler retain their existing transparent panels.
   Internal endEditing does not resign the key window between button down/up;
   captured activation or actual window resignation releases text-entry focus.
@@ -1240,9 +1274,21 @@ Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range a
 calendar name. Every connected calendar is shown: Hover has no calendar hiding
 or Refresh button (open, day change, account change and a 60 s poll refresh).
 WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+Calendar on this Mac feeds keep provider `apple`; `CalendarFeed.displayService`
+(Exchange, or a CalDAV account titled Google/Outlook or with such an address)
+only picks the Google or Outlook logo. Blocks add, as height allows, the title's
+second line, description lines, an attendee line and more description; a block
+that cuts anything shows a non-interactive History-style bubble with every
+detail (`CalendarEventPreviewState`, hidden 120 ms late to avoid flicker), at
+most the island area's height; it cannot scroll (outside the mouse area).
+Descriptions drop separator lines and `<https://…>` link targets.
+`PlannerEvent.attendees` come from EventKit and Microsoft Graph only, never
+Google direct; they are excluded from `CodingKeys`, so never saved or backed up.
+WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md
 Overlaps share the width and all-day events are chips above the grid. A click
 joins the meeting link, else opens the event in its own calendar (Google/Outlook
-web, ical://ekevent on this Mac). There is no details page. WHY:
+web, ical://ekevent on this Mac). There is no details page; details are in the
+hover bubble. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
 A compact day switcher and Connect stay in Hover; Connect rows carry the
 provider logos, and connection errors and Retry are listed there.

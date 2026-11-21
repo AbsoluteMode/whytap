@@ -40,6 +40,15 @@ struct PlannerEvent: Codable, Identifiable, Equatable, Sendable {
     var notes = ""
     var meetingURL: URL?
     var timeZoneIdentifier = TimeZone.current.identifier
+    // WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md
+    /// External events only, in memory only: left out of `CodingKeys`, so the
+    /// Planner archive and backups never contain attendees and older files
+    /// without the field still decode.
+    var attendees: [PlannerEventAttendee] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, start, end, allDay, location, notes, meetingURL, timeZoneIdentifier
+    }
 
     func displayBounds(calendar: Calendar = .current) -> DateInterval {
         guard allDay, let zone = TimeZone(identifier: timeZoneIdentifier) else { return DateInterval(start: start, end: end) }

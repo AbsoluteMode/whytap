@@ -42,6 +42,11 @@ struct AIUsageEvent: Equatable, Sendable {
             rate = 0.12
         } else if context.account == .soniox, ["stt-async-v5", "stt-async-v6"].contains(context.model) {
             rate = 0.10
+        } else if context.account == .openAI, context.model == OpenAIRealtimeTranslateAdapter.model {
+            // $0.034/min translation + $0.017/min input transcript (OpenAI
+            // pricing, 2026-11-21): $3.06 per hour of audio.
+            rate = (OpenAIRealtimeTranslateAdapter.usdPerMinute
+                + OpenAIRealtimeTranslateAdapter.inputTranscriptionUSDPerMinute) * 60
         } else { rate = nil }
         let duration = seconds.isFinite ? max(0, seconds) : 0
         return Self(id: id, createdAt: date, context: context, currency: context.currency,

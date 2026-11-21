@@ -62,11 +62,33 @@ struct ModelProbe: ModelProbing {
         case .chatWithTools: outcome = await probeChat(route, withTools: true, catalog: catalog)
         case .decision:
             outcome = .failed(reason: "Separate Decision processing is retired")
+        case .speechTranslation:
+            outcome = await withTimeout { await Self.runSpeechTranslation(route) }
+                ?? .inconclusive(reason: "No answer from the provider")
         }
         os_log("model probe provider=%{public}@ use=%{public}@ outcome=%{public}@ ms=%{public}d",
                log: Self.log, type: .info,
                route.account.kind.rawValue, use.rawValue, Self.label(outcome), Self.milliseconds(since: started))
         return outcome
+    }
+
+    // MARK: - Speech translation
+
+    /// Opens a session and has the provider accept a target language, then
+    /// closes it: no audio is sent, so nothing is billed.
+    private static func runSpeechTranslation(_ route: ResolvedRoute) async -> ProbeOutcome {
+        guard let key = route.apiKey, !key.isEmpty else { return .inconclusive(reason: "Key problem") }
+        do {
+            let session = try await OpenAIRealtimeTranslateAdapter(apiKey: key, model: route.model).open(target: "ru")
+            await session.close()
+            return .passed
+        } catch SpeechTranslationFailure.refusedKey, SpeechTranslationFailure.noCredit {
+            return .inconclusive(reason: "Key problem")
+        } catch SpeechTranslationFailure.provider {
+            return .failed(reason: "The provider refused this model")
+        } catch {
+            return .inconclusive(reason: "Could not open the connection")
+        }
     }
 
     // MARK: - Real-time

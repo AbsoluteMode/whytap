@@ -30,9 +30,10 @@ final class CalendarHoverModel: ObservableObject {
 
     func begin() {
         guard CalendarAvailability.isOpen, !visible else { return }
+        CalendarEventPreviewState.shared.clear()
         visible = true; openToday(); activityChanged(true)
     }
-    func end() { visible = false; activityChanged(false) }
+    func end() { visible = false; CalendarEventPreviewState.shared.clear(); activityChanged(false) }
     func openToday() {
         guard CalendarAvailability.isOpen, !connectionFlow.working else { return }
         page = .agenda; today()
@@ -73,10 +74,48 @@ final class CalendarHoverModel: ObservableObject {
         id == "local" ? "Whytap · On this Mac" : connections.feeds.first(where: { $0.id == id })?.title ?? "Connected calendar"
     }
 
-    /// The service a calendar belongs to, for the event's logo.
+    /// The service a calendar belongs to, for the event's logo: a Google or
+    /// Exchange account synced by Calendar on this Mac shows its own service.
     func source(_ feedID: String) -> CalendarEventSource? {
         if feedID == "local" { return .whytap }
-        return connections.feeds.first(where: { $0.id == feedID })?.provider.map(CalendarEventSource.provider)
+        return connections.feeds.first(where: { $0.id == feedID }).flatMap(CalendarEventSource.of)
+    }
+
+    /// The second line of a block: "11:00 – 11:45 AM · Work".
+    func blockMeta(_ item: CalendarFeedEvent) -> String {
+        [CalendarEventBlockLabel.timeRange(item.event), sourceTitle(item.feedID)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md
+    /// Which fields a day-grid block of this size shows, and whether hovering it previews.
+    func blockPlan(_ item: CalendarFeedEvent, height: CGFloat, textWidth: CGFloat) -> CalendarEventBlockPlan {
+        let event = item.event
+        return CalendarEventBlockPlan.make(height: height, textWidth: textWidth, title: event.title, meta: blockMeta(item),
+            notes: CalendarEventText.plain(event.notes), attendeeSummary: PlannerEventAttendee.compactSummary(event.attendees),
+            hasAttendees: !event.attendees.isEmpty,
+            hasLocation: !event.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    /// An all-day chip previews when its line is cut or the event has more to say.
+    func chipNeedsPreview(_ item: CalendarFeedEvent) -> Bool {
+        let event = item.event
+        let details = !CalendarEventText.plain(event.notes).isEmpty || !event.attendees.isEmpty
+            || !event.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return CalendarEventBlockPlan.chipNeedsPreview(title: event.title, source: sourceTitle(item.feedID), hasDetails: details)
+    }
+
+    /// Every detail of an event for the hover preview.
+    func previewContent(_ item: CalendarFeedEvent) -> CalendarEventPreviewContent {
+        let event = item.event
+        let location = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = CalendarEventText.plain(event.notes)
+        let day = event.displayBounds().start.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        return CalendarEventPreviewContent(id: item.id, title: event.title,
+            when: day + " · " + (CalendarEventBlockLabel.timeRange(event) ?? "All day"),
+            calendar: sourceTitle(item.feedID), source: source(item.feedID),
+            location: location.isEmpty ? nil : location, action: actionTitle(item),
+            link: event.meetingURL.map(CalendarEventPreviewContent.linkText),
+            notes: notes.isEmpty ? nil : notes, attendees: event.attendees)
     }
 
     /// Whether the provider already has a connection, for the Connect list.
@@ -143,6 +182,8 @@ struct CalendarHoverView: View {
     private let liveUpdates: Bool
     private let configurationInfo: [String: Any]?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The day grid's visible rect in the island hover zone; previews start inside it.
+    @State private var gridViewport: CGRect?
 
     init(model: CalendarHoverModel, liveUpdates: Bool = true,
          configurationInfo: [String: Any]? = Bundle.main.infoDictionary, onBack: @escaping () -> Void) {
@@ -271,7 +312,7 @@ struct CalendarHoverView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 4) {
                 ForEach(items) { item in
-                    CalendarEventButton(model: model, item: item) { _ in
+                    CalendarEventButton(model: model, item: item, showsPreview: model.chipNeedsPreview(item)) { _ in
                         HStack(spacing: 5) {
                             CalendarSourceLogoView(source: model.source(item.feedID), size: 15)
                             Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
@@ -314,9 +355,11 @@ struct CalendarHoverView: View {
                         let width = geometry.size.width - CalendarDayGrid.gutter - 2
                         ForEach(blocks, id: \.item.id) { block in
                             let columnWidth = width / CGFloat(block.columns)
-                            CalendarEventButton(model: model, item: block.item) { hovering in
-                                CalendarEventBlockLabel(model: model, item: block.item,
-                                                        height: block.height * unit - 2, hovering: hovering)
+                            let plan = model.blockPlan(block.item, height: block.height * unit - 2,
+                                                       textWidth: columnWidth - 2 - CalendarDayGrid.blockTextInset)
+                            CalendarEventButton(model: model, item: block.item, showsPreview: plan.needsPreview,
+                                                viewport: gridViewport) { _ in
+                                CalendarEventBlockLabel(model: model, item: block.item, plan: plan)
                             }
                             .frame(width: max(0, columnWidth - 2), height: max(0, block.height * unit - 2))
                             .offset(x: CalendarDayGrid.gutter + CGFloat(block.column) * columnWidth, y: block.top * unit + 1)
@@ -340,6 +383,9 @@ struct CalendarHoverView: View {
                 .padding(.top, 6).padding(.trailing, 2)
             }
             .scrollIndicators(.visible)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(HistoryHoverView.hoverZoneSpaceName)) } action: {
+                gridViewport = $0
+            }
             // Another day opens at its first event, which may arrive after the fetch.
             .task(id: model.isToday ? "\(day.start)" : "\(day.start):\(blocks.map(\.top).min() ?? -1)") {
                 let hour = CalendarDayLayout.initialHour(events: blocks, isToday: model.isToday, now: model.dayNow, day: day)
@@ -452,6 +498,8 @@ enum CalendarDayGrid {
     static let gutter: CGFloat = 38
     /// A short event still fits one line of text.
     static let minimumBlockHeight: CGFloat = 18
+    /// Block width that is not text: leading and trailing padding, logo and gap.
+    static let blockTextInset: CGFloat = 7 + 4 + 15 + 5
 }
 
 /// An event block, one colour for every calendar; its logo names the service.
@@ -460,8 +508,13 @@ enum CalendarDayGrid {
 struct CalendarEventButton<Label: View>: View {
     @ObservedObject var model: CalendarHoverModel
     let item: CalendarFeedEvent
+    /// The block cuts or leaves out details, so hovering shows the preview bubble.
+    var showsPreview = false
+    /// Visible part of the scrolling day; nil outside it (all-day chips).
+    var viewport: CGRect?
     @ViewBuilder let label: (Bool) -> Label
     @State private var hovering = false
+    @State private var frame: CGRect = .zero
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -474,21 +527,54 @@ struct CalendarEventButton<Label: View>: View {
                 Button { model.perform(item) } label: { label(hovering).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
                     .buttonStyle(CalendarEventBlockStyle(color: color, hovering: hovering, focused: focused))
                     .focused($focused)
-                    .onHover { hovering = $0 }
             } else {
                 label(false).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(CalendarEventBlockStyle.surface(color: color, fill: 0.3))
             }
         }
-        .help(help)
+        // The preview already shows everything; a tooltip would cover it.
+        .modifier(CalendarEventHelp(text: showsPreview ? title : help))
+        .onHover { hovering = $0; reportPreview() }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(HistoryHoverView.hoverZoneSpaceName)) } action: {
+            frame = $0
+            if hovering { reportPreview() }
+        }
+        .onChange(of: item) { if hovering { reportPreview() } }
+        .onChange(of: showsPreview) { reportPreview() }
+        .onDisappear { CalendarEventPreviewState.shared.hide(item.id) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([item.event.title, CalendarEventBlockLabel.timeRange(item.event), model.sourceTitle(item.feedID)]
             .compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(accessibilityDetails)
         .accessibilityHint(title ?? "")
         .accessibilityAddTraits(title != nil ? .isButton : [])
         // children: .ignore hides the Button's own action; only an actionable
         // event gets one back, so an event with nowhere to go is not activatable.
         .modifier(CalendarEventActivation(enabled: title != nil) { model.perform(item) })
+    }
+
+    /// Location and attendees, which the block itself may not show.
+    private var accessibilityDetails: String {
+        let event = item.event
+        let location = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let people = event.attendees.isEmpty ? nil
+            : event.attendees.count == 1 ? "1 attendee" : "\(event.attendees.count) attendees"
+        return [location.isEmpty ? nil : location, people].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private func reportPreview() {
+        let state = CalendarEventPreviewState.shared
+        guard hovering, showsPreview else { state.hide(item.id); return }
+        let visible = viewport.map { frame.intersection($0) }
+        state.show(model.previewContent(item), frame: visible.flatMap { $0.isEmpty ? nil : $0 } ?? frame)
+    }
+}
+
+/// A native tooltip only when there is something to say.
+private struct CalendarEventHelp: ViewModifier {
+    let text: String?
+    func body(content: Content) -> some View {
+        if let text { content.help(text) } else { content }
     }
 }
 
@@ -518,13 +604,13 @@ struct CalendarEventBlockStyle: ButtonStyle {
     }
 }
 
-/// The service's logo, the title, then "11:00 – 11:45 AM · Work" when the block
-/// is tall enough; a short block keeps logo, title and start time on one line.
+/// The service's logo and the event's fields by priority for the block's
+/// height: title, "11:00 – 11:45 AM · Work", description lines, attendees.
+/// A short block keeps logo, title and start time on one line.
 struct CalendarEventBlockLabel: View {
     @ObservedObject var model: CalendarHoverModel
     let item: CalendarFeedEvent
-    let height: CGFloat
-    let hovering: Bool
+    let plan: CalendarEventBlockPlan
 
     static func timeRange(_ event: PlannerEvent) -> String? {
         event.allDay ? nil : (event.start..<max(event.end, event.start)).formatted(.interval.hour().minute())
@@ -532,23 +618,29 @@ struct CalendarEventBlockLabel: View {
 
     var body: some View {
         Group {
-            if height >= 30 {
-                HStack(alignment: .top, spacing: 5) {
-                    CalendarSourceLogoView(source: model.source(item.feedID), size: 15).padding(.top, 1)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.event.title).font(.system(size: 11, weight: .semibold))
-                            .lineLimit(height >= 46 ? 2 : 1)
-                        Text([Self.timeRange(item.event), model.sourceTitle(item.feedID)].compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 10)).lineLimit(1).opacity(0.85)
-                    }
-                }.padding(.vertical, 3)
-            } else {
+            if plan.oneLine {
                 HStack(spacing: 4) {
                     CalendarSourceLogoView(source: model.source(item.feedID), size: 13)
                     Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Text(item.event.start.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: 10)).lineLimit(1).opacity(0.85).layoutPriority(-1)
                 }.frame(maxHeight: .infinity)
+            } else {
+                HStack(alignment: .top, spacing: 5) {
+                    CalendarSourceLogoView(source: model.source(item.feedID), size: 15).padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(item.event.title).font(.system(size: 11, weight: .semibold)).lineLimit(plan.titleLines)
+                        Text(model.blockMeta(item)).font(.system(size: 10)).lineLimit(1).opacity(0.85)
+                        if plan.noteLines > 0 {
+                            Text(CalendarEventText.plain(item.event.notes)).font(.system(size: 10))
+                                .lineLimit(plan.noteLines).opacity(0.8)
+                        }
+                        if plan.showsAttendees, let people = PlannerEventAttendee.compactSummary(item.event.attendees) {
+                            (Text(Image(systemName: "person.2")) + Text(" " + people))
+                                .font(.system(size: 10)).lineLimit(1).opacity(0.8)
+                        }
+                    }
+                }.padding(.vertical, CalendarEventBlockPlan.verticalPadding)
             }
         }
         .foregroundStyle(.white)

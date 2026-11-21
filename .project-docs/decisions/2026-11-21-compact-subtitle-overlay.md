@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/TranslationTests.swift
     confirmed_at: 2026-11-21
-related: [2026-10-20-translation-tools.md]
+related: [2026-10-20-translation-tools.md, 2026-11-21-subtitle-phrase-pairs.md]
 ---
 
 # Compact subtitle overlay
@@ -44,7 +44,10 @@ that back. Languages may be added to it; nothing else.
   clamped to the screen, 72 pt above the bottom of the island's display) with
   one dark rounded box (black 60 %, 14 pt corners, soft shadow) anchored to its
   bottom, as in the original `SubtitleView`.
-- The caption is the newest translated phrases as one paragraph in 20 pt
+- (Superseded for the caption's content by
+  [subtitle phrase pairs](2026-11-21-subtitle-phrase-pairs.md): the box now
+  shows original/translation pairs; size, placement and controls are kept.)
+  The caption is the newest translated phrases as one paragraph in 20 pt
   rounded medium white, at most five lines; older words leave at the top
   (`SubtitleCaption`, head truncation), so the newest line never moves and the
   box height hugs shorter text while its width spans the panel, exactly as

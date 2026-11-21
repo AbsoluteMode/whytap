@@ -601,7 +601,7 @@ final class APIAndModelsViewModel: ObservableObject {
             selectionLabel: label,
             status: resolver.status(for: feature),
             isChecking: checking.contains(feature),
-            message: messages[feature] ?? route.flatMap(languageWarning(for:)),
+            message: messages[feature] ?? route.flatMap(languageWarning(for:)) ?? speechTranslationNote(for: feature),
             provider: route.flatMap(providerChoice(for:)),
             modelSummary: route?.model ?? "Choose a model"
         )
@@ -618,6 +618,15 @@ final class APIAndModelsViewModel: ObservableObject {
             label = endpoint.title
         }
         return ProviderChoice(model: route.model, pinned: pinned, label: label)
+    }
+
+    /// OpenAI live speech translation on Subtitles audio translates by itself:
+    /// the Subtitles LLM row keeps its choice but is not used meanwhile.
+    // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
+    private func speechTranslationNote(for feature: AIFeature) -> String? {
+        guard feature == .subtitlesTranslation, let audio = routing.route(for: .subtitlesAudio),
+              AIFeature.subtitlesAudio.modelUse(on: audio.account.kind) == .speechTranslation else { return nil }
+        return "Not used: \(audio.model) translates Subtitles itself"
     }
 
     /// PR #35: a Deepgram model that cannot take the current input language.

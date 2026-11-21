@@ -102,6 +102,18 @@ final class PackagingRebrandTests: XCTestCase {
         )
     }
 
+    /// Under the hardened runtime, EventKit denies Apple Calendar access (no
+    /// TCC prompt) unless the signature carries the calendars entitlement;
+    /// `NSCalendarsFullAccessUsageDescription` alone is not enough. Both
+    /// build-dmg.sh and dev-run.sh sign the app with this file.
+    func test_entitlementsGrantCalendarAccessForAppleCalendar() throws {
+        let url = try projectRoot().appendingPathComponent("Resources/Sidekey.entitlements")
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
+
+        XCTAssertEqual(plist["com.apple.security.personal-information.calendars"] as? Bool, true)
+    }
+
     func test_releaseBuildDoesNotClaimRestrictedKeychainEntitlementsWithoutProvisioningProfile() throws {
         let source = try readProjectFile("scripts/build-dmg.sh")
 

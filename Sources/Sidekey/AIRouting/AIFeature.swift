@@ -109,7 +109,11 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             // `OnDeviceStreamingAdapter`.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return .realtimeSTT
-            case .openRouter, .openAI, .anthropic: return nil
+            // OpenAI's live speech translation serves Subtitles only: it
+            // returns the translation itself, so the Subtitles LLM is unused.
+            // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
+            case .openAI: return self == .subtitlesAudio ? .speechTranslation : nil
+            case .openRouter, .anthropic: return nil
             }
         case .recorded:
             switch kind {
@@ -152,6 +156,8 @@ enum ModelUse: String, Codable, Sendable {
     case chatWithTools
     /// Typed decisions and probabilities, with no generated text.
     case decision
+    /// Live speech in, its translation (and the heard original) out.
+    case speechTranslation
 }
 
 /// What a provider can do. Which key it runs on is the account's business

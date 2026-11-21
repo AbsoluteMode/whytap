@@ -68,6 +68,7 @@ OUT = REPO / "docs/assets/readme"
 def logo(asset, color, x, y, size):
     svg = (ICONS / f"{asset}.svg").read_text()
     svg = re.sub(r"<title>.*?</title>", "", svg, flags=re.S)
+    svg = re.sub(r"[ \t]+(?=\n)", "", svg)
     svg = re.sub(r"#(?:111111|000000)", color, svg)
     if 'fill="' not in svg.split(">", 1)[0]:
         svg = svg.replace("<svg ", f'<svg fill="{color}" ', 1)

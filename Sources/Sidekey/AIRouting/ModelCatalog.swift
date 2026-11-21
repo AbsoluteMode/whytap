@@ -42,7 +42,8 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// Deepgram: the date of the model's newest version (`version` is
     /// `YYYY-MM-DD.N`). Pickers hide a model not updated for a year.
     var updatedAt: Date?
-    /// Anthropic: released; OpenAI: created; OpenRouter: added to its catalog.
+    /// Anthropic: released; OpenAI: created; OpenRouter: added to its catalog;
+    /// a user's server: its `created`, when it is a real date.
     /// These meanings are deliberately kept distinct in the picker label.
     var catalogDate: Date?
     /// OpenRouter `pricing.prompt` / `pricing.completion`. Display only.
@@ -487,12 +488,17 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
     }
 
     private struct ServerResponse: Decodable {
-        struct Model: Decodable { let id: String }
+        struct Model: Decodable {
+            let id: String
+            /// Optional: Ollama sends when the model was pulled or changed;
+            /// others the request time (`ModelStatusResolver.serverModelDate`).
+            let created: ModelDateTimestamp?
+        }
         let data: [Model]
     }
 
     static func parseServer(_ data: Data) throws -> [CatalogModel] {
-        try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id) }
+        try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id, catalogDate: $0.created?.date) }
     }
 
     /// OpenAI's list has IDs, not endpoint capabilities. Offer text families;

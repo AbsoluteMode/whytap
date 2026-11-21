@@ -127,15 +127,13 @@ brew install absolutemode/tap/whytap
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="119" align="absmiddle"></picture></p>
 
 ```bash
-claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
-claude mcp add --scope user case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
+claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture></p>
 
 ```bash
-codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
-codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
 <p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>
@@ -165,7 +163,7 @@ codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
 <a href="https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-plan-claude-max-ultra-wide-light.svg"><img alt="Claude Max &amp; Ultra: $100–200 API credit each month" src="docs/assets/readme/free-api-plan-claude-max-ultra-wide-dark.svg" width="410"></picture></a>
 </p>
 
-<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-setup-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-setup-wide-light.svg"><img alt="My setup, free* right now. Anthropic key (Claude Max or Ultra: $100–200 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + Claude Sonnet 5.5; Meetings: Scribe v3 + Claude Sonnet 5.5; Agent: Claude Sonnet 5.5; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: Claude Sonnet 5.5; Subtitles: Scribe v3 Live + Claude Sonnet 5.5. OpenAI key (ChatGPT Pro: $100–500 API credit a month): Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + GPT-6.2 Sol; Meetings: Scribe v3 + GPT-6.2 Sol; Agent: GPT-6.2 Sol; Agent voice: Scribe v3 Live; Voice search: Scribe v3 Live; Translation: GPT-6.2 Sol; Subtitles: GPT-Realtime-Translate (speech and translation in one model). * The models are paid from your plan’s monthly API credit; speech uses ElevenLabs’ 10,000 free credits (non-commercial use)." src="docs/assets/readme/free-api-setup-wide-dark.svg" width="100%"></picture></p>
+<p align="center"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/free-api-setup-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/free-api-setup-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/free-api-setup-wide-light.svg"><img alt="My setup. Keys: ElevenLabs, OpenRouter, OpenAI. Speech on ElevenLabs, language model through OpenRouter. Drop Fast: Scribe v3 Live; Drop Smart: Scribe v3 Live + Claude Sonnet 5.5; Meetings: Scribe v3 + Claude Sonnet 5.5; Agent: Scribe v3 Live + Claude Sonnet 5.5; Google: Scribe v3 Live; Translation: Claude Sonnet 5.5; Subtitles: GPT-Realtime-Translate · OpenAI (speech and translation in one model). Updated monthly, last checked November 22, 2026." src="docs/assets/readme/free-api-setup-wide-dark.svg" width="100%"></picture></p>
 
 ## You may also like
 

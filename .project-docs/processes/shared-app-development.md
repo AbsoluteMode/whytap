@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-21
+verified_at: 2026-11-22
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-22, after the builder blocked one PR seven times in a row for one or two edge cases each time that had been in the code from the start, the maintainer asked the builder to validate everything and report all findings at once, re-blocking only for errors the fix itself introduces, and to remember that rule.
+    confirmed_at: 2026-11-22
   - type: user-confirmed
     reference: On 2026-11-21 the maintainer's disk filled up (about 30 GB of leftover `.build` folders in finished feature worktrees) and asked that agents remove their own build output after the merge.
     confirmed_at: 2026-11-21
@@ -62,7 +65,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md]
+related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md]
 ---
 
 # Parallel development, one working Whytap
@@ -312,6 +315,19 @@ queue survives downtime.
    tests failing because of the feature itself, missing review evidence, or a
    destructive migration or access decision. Preserve every other session's
    work. Do not automatically merge unrelated open PRs.
+   Block a PR once with everything. Before setting `blocked`, finish the whole
+   inspection: every probe and check across all paths the PR touches. Write
+   **all** problems found into the ticket note as one numbered list. When a
+   probe exposes a class of error (for example parsing other tools'
+   configuration files), name the whole class and check every instance, not
+   only the one that failed. On a later attempt of the same PR (its earlier
+   tickets and notes are in `status`), a new block is allowed only for (a) a
+   problem the fix itself introduced or (b) an item of the previous list that
+   is still not fixed. A problem that was already in the code at the previous
+   attempt but missing from its list never blocks: fix it yourself when the
+   fix is mechanical and safe, otherwise record it in the ticket note as a
+   follow-up and continue with the PR (see the
+   [builder blocks once decision](../decisions/2026-11-22-builder-blocks-once.md)).
 5. Record the result with `set --ticket <id> --status <state> --note <evidence>`.
    `done` requires either a verified running build with source/version/smoke
    evidence, or an explicit tooling/documentation-only result requiring no app
@@ -324,7 +340,9 @@ queue survives downtime.
    handoff can finish it later, or a newer verified candidate can supersede it
    after proving the earlier feature is included. Neither case silently drops
    acceptance steps. `blocked` records missing evidence, failures or a decision
-   needed from the worker/user. Pending/blocked tickets do not stop later work.
+   needed from the worker/user, all of them in one numbered list (step 4); a
+   re-block names the list item it repeats or the fix that caused it.
+   Pending/blocked tickets do not stop later work.
 6. Deliver new status events and acknowledge successful sends. Messages include
    the event ID, result, what is actually running, acceptance checks and any
    pending action. Worker replies use the same builder chat; avoid reply loops

@@ -45,7 +45,7 @@ final class DirectLLMRouteResolverTests: XCTestCase {
         try keys.save("openai-key", account: ProviderAccount.openAIKeychainAccount)
         try keys.save("anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
         try keys.save("unrelated-key", account: OpenRouterLLMKeyStore.account)
-        for feature in AIFeature.allCases where feature.mode == .llm {
+        for feature in AIFeature.activeCases where feature.mode == .llm {
             for (account, host, key) in [(ProviderAccount.openAI, "api.openai.com", "openai-key"),
                                          (.anthropic, "api.anthropic.com", "anthropic-key")] {
                 routing.setRoute(FeatureRoute(account: account, model: "chosen-model"), for: feature)

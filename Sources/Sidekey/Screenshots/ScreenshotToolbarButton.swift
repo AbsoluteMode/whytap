@@ -42,11 +42,21 @@ final class ScreenshotToolbarButton: NSButton, NSDraggingSource {
     }
     private var hoverTracking: NSTrackingArea?
     private var hovered = false
+    private var hoverHelp: String?
+    /// Shown by ScreenshotHoverHint, never registered as an AppKit tool tip
+    /// (invisible in this inactive screen-saver-level editor); also the
+    /// control's accessibility help.
+    // WHY: .project-docs/decisions/2026-11-22-shot-hover-hints.md
+    override var toolTip: String? {
+        get { hoverHelp }
+        set { hoverHelp = newValue; setAccessibilityHelp(newValue) }
+    }
     override var acceptsFirstResponder: Bool { isEnabled }
 
     // Track the native down/drag/up sequence so a drag never also clicks the
     // source tool or opens an assignment menu on release.
     override func mouseDown(with event: NSEvent) {
+        ScreenshotHoverHint.shared.hide()
         guard isEnabled, let dragAction, let window else { super.mouseDown(with: event); return }
         trackMousePress(event, in: window, dragAction: dragAction, nextEvent: {
             window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .keyDown], until: .distantFuture,
@@ -139,8 +149,14 @@ final class ScreenshotToolbarButton: NSButton, NSDraggingSource {
         let area = NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self)
         addTrackingArea(area); hoverTracking = area
     }
-    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true; needsDisplay = true
+        ScreenshotHoverHint.shared.hover(self, text: toolTip)
+    }
+    override func mouseExited(with event: NSEvent) {
+        hovered = false; needsDisplay = true
+        ScreenshotHoverHint.shared.leave(self)
+    }
     override func draw(_ dirtyRect: NSRect) {
         if assignmentArrow != nil {
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)

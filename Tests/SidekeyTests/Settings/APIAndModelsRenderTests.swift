@@ -89,6 +89,46 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
+    /// Subtitles' only slot, Audio translate: with the OpenAI key (lit) and
+    /// without it (dimmed, Add key). Old Speech and LLM routes are saved but
+    /// shown nowhere.
+    func test_render_audio_translate_slot() async throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
+        }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for state in ["with-key", "no-key"] {
+            let suite = UUID().uuidString
+            let defaults = UserDefaults(suiteName: suite)!
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
+            try Data("{}".utf8).write(to: file)
+            defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
+            let routing = AIRoutingStore(defaults: defaults)
+            let box = InMemoryTokenStore.Box()
+            let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
+            var accounts: [ProviderAccount] = [.elevenLabs, .anthropic]
+            if state != "no-key" { accounts.append(.openAI) }
+            for account in accounts {
+                try keys.save("synthetic-key", account: XCTUnwrap(account.keychainAccount(in: routing)))
+            }
+            routing.setRoute(FeatureRoute(account: .elevenLabs, model: ModelRegistry.elevenLabsRealtimeModel), for: .dropFast)
+            let stub = NoNetwork(list: [])
+            let vm = APIAndModelsViewModel(routing: routing, keys: keys,
+                catalogs: ModelCatalogStore(fileURL: file, fetcher: stub), checks: ModelCheckStore(defaults: defaults),
+                keyStatuses: KeyStatusStore(defaults: defaults), keyChecker: stub, probe: stub, endpoints: stub,
+                inputLanguage: { nil }, onDevice: OnDeviceSpeechReadiness(isReady: { false }))
+            let group = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })
+            XCTAssertEqual(group.audioTranslate?.isActive, state == "with-key")
+            for dark in [false, true] {
+                try await render(
+                    APIAndModelsView(viewModel: vm, focusedFeature: .constant(nil), initiallyExpandedGroup: "Subtitles"),
+                    size: NSSize(width: 720, height: 1_250), dark: dark,
+                    to: directory.appendingPathComponent("audio-translate-\(state)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     private struct NoNetwork: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching {
         let list: [OpenRouterEndpoint]
         func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {

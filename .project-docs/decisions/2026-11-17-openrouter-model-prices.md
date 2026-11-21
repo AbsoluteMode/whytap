@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AIRouting/ModelStatusResolver.swift
     confirmed_at: 2026-11-17
-related: [2026-10-20-model-search.md, 2026-10-19-api-and-models.md, 2026-10-20-feature-costs.md]
+related: [2026-10-20-model-search.md, 2026-10-19-api-and-models.md, 2026-10-20-feature-costs.md, 2026-11-22-direct-model-list-prices.md]
 ---
 
 ## Context
@@ -74,6 +74,8 @@ show, so the numbers can be compared without conversion.
   and reasoning tokens; a guess presented as a number.
 - Prices for direct OpenAI/Anthropic routes: their model lists carry none; a
   built-in table would go stale (Costs keeps its own for Anthropic estimates).
+  Revisited on 2026-11-22: they now show the OpenRouter catalog's price for the
+  same model (2026-11-22-direct-model-list-prices.md).
 - Price in the selected-model row or a price sort: not requested.
 - Cache-read, image or per-request prices: noise for choosing a text model.
 - A separate version for OpenRouter only: one more field for saving two free

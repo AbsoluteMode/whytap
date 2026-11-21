@@ -24,6 +24,30 @@ final class IslandHoverToolSearchTests: XCTestCase {
         XCTAssertEqual(IslandHoverToolSearch.results(for: "vault"), [.caseVault])
     }
 
+    /// Copy text lives inside Shot's editor; people search for it by what it does.
+    func testFindsShotCopyTextByOCRWords() {
+        for query in ["OCR", "распознать", "распознавание текста", "скопировать текст", "скопируй текст с экрана",
+                      "text from screen", "recognize text", "Copy text"] {
+            XCTAssertEqual(IslandHoverToolSearch.results(for: query).first, .screenshot, query)
+            let label = IslandHoverToolSearch.resultLabel(for: .screenshot, query: query)
+            XCTAssertEqual(label.title, "Shot — Copy text", query)
+            XCTAssertEqual(label.description, "Select an area, then click Copy text (OCR)", query)
+        }
+        XCTAssertEqual(IslandHoverToolSearch.results(for: "распознать"), [.screenshot])
+        XCTAssertEqual(IslandHoverToolSearch.results(for: "ocr"), [.screenshot])
+    }
+
+    func testOrdinaryShotQueriesKeepShotLabelAndClipboardStaysFindable() {
+        for query in ["shot", "скриншот", "blur text numbers", "текст"] {
+            XCTAssertEqual(IslandHoverToolSearch.resultLabel(for: .screenshot, query: query).title, "Shot", query)
+        }
+        XCTAssertEqual(IslandHoverToolSearch.resultLabel(for: .clipboard, query: "copy").title,
+                       HoverToolRegistry.info(for: .clipboard).title)
+        XCTAssertTrue(IslandHoverToolSearch.results(for: "copy").contains(.clipboard))
+        XCTAssertEqual(IslandHoverToolSearch.results(for: "clipboard"), [.clipboard])
+        XCTAssertFalse(IslandHoverToolSearch.isCopyTextQuery(""))
+    }
+
     func testEmptyAndUnknownQueriesHaveNoResults() {
         XCTAssertFalse(IslandHoverToolSearch.isFiltering("  \n"))
         XCTAssertFalse(IslandHoverToolSearch.isFiltering("!"))

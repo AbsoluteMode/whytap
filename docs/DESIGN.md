@@ -333,9 +333,24 @@ The closed control retains the shared 30 pt popup label and existing widths.
   both sides. Why: the cost of a model was invisible at the moment of choosing
   it. Per-million units match provider price pages; two decimals from $1, three
   significant digits below, so a small price never reads as zero. An unknown,
-  malformed or router (-1) price has no line and no placeholder. Other providers
-  show none: their catalogs carry no prices. The line joins the search
-  announcement but is not searchable text.
+  malformed or router (-1) price has no line and no placeholder. Direct
+  Anthropic and OpenAI rows take the line (and Smart cleanup's "always reasons,
+  slower") from the same model in OpenRouter's cached catalog, keeping their
+  own date label; without that catalog or a matching ID they show nothing.
+  Other providers show none: their catalogs carry no prices. The line joins
+  the search announcement but is not searchable text.
+- Sections run speech providers, Anthropic, OpenAI, the user's servers, then
+  OpenRouter. Why: OpenRouter's catalog of several hundred models came first
+  and pushed the direct providers below a 300 pt list, so a valid Anthropic or
+  OpenAI key looked unavailable. With more than one section, a row of capsule
+  buttons under the search field (All, then each provider with its model
+  count, horizontally scrollable) shows one provider at a time; the selected
+  one is accent-tinted and carries the selected trait. A refused or unreadable
+  key keeps its section, with `· Key not accepted` / `· Couldn't read the key`
+  in the header. A provider with that problem (or a failed first catalog)
+  and no rows still shows its header, a one-line reason and, for a key, an
+  Open API keys action, never the anonymous "No matching models". Server rows
+  use `Added` for a real `created` date.
   Sources: [Anthropic](https://platform.claude.com/docs/en/api/models/list),
   [OpenAI](https://developers.openai.com/api/reference/resources/models),
   [OpenRouter](https://openrouter.ai/docs/guides/overview/models#model-object-schema).

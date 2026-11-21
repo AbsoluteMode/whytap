@@ -1,18 +1,39 @@
 import Foundation
 
-/// Adds or removes the Case MCP server in one AI client's own settings.
+/// Adds Whytap's one MCP server to an AI client's own settings when it is
+/// connected in Case, and cleans up the older Case-only entry.
 /// Only the helper path goes into a client config: never a value or token.
+///
+/// One rule for every client: Whytap changes an entry only when it is exactly
+/// what Whytap itself writes (`CaseMCPEntryOwnership.isCanonical`). Any other
+/// `whytap` entry, whatever it holds, is the person's own and stays as it is,
+/// with "Configured manually — Whytap left it as is" shown; nothing is
+/// migrated.
+// WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
 protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
-    /// Points the client's `case` MCP entry at `helperPath case mcp`;
-    /// replaces an existing entry of ours so a moved app is picked up. Another
-    /// server named `case` is never replaced: `.foreignEntry` is thrown.
+    /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
+    /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
+    /// read for certain, throws `.configuredManually` or `.unreadableConfig`
+    /// before anything changes, and our older `case` entry stays. With the
+    /// canonical `whytap` in place, our older `case` entry is removed when it
+    /// too is exactly what an earlier Whytap wrote, best effort.
     func install(helperPath: String) throws
-    /// Removes our entry; nothing to remove (or only another server named
-    /// `case`) is not an error and changes nothing.
-    func uninstall() throws
+    /// Removes our older `case` entry when it is exactly what an earlier
+    /// Whytap wrote for `helperPath`. The `whytap` entry stays: it is the
+    /// general Whytap server (also added by the plugin and the README line),
+    /// and without a registration the broker already refuses its Case tools.
+    func uninstall(helperPath: String?) throws
+}
+
+/// The entry Connect writes, and the Case-only entry earlier builds wrote.
+enum WhytapMCPEntry {
+    static let name = "whytap"
+    static let arguments = ["mcp"]
+    static let legacyName = "case"
+    static let legacyArguments = ["case", "mcp"]
 }
 
 enum CaseClientConnectorError: Error, Equatable {
@@ -22,8 +43,8 @@ enum CaseClientConnectorError: Error, Equatable {
     /// Path relative to HOME; the file is left as it was.
     case unreadableConfig(String)
     case writeFailed(String)
-    /// The client already has an MCP server named `case` that is not Whytap's.
-    case foreignEntry
+    /// A `whytap` entry that is not exactly what Whytap writes: left as it is.
+    case configuredManually
 
     var userMessage: String {
         switch self {
@@ -32,36 +53,91 @@ enum CaseClientConnectorError: Error, Equatable {
         case .timedOut: return "command timed out"
         case .unreadableConfig(let path): return "couldn’t read ~/\(path)"
         case .writeFailed(let path): return "couldn’t write ~/\(path)"
-        case .foreignEntry:
-            return "another MCP server named “case” already exists; rename or remove it, then connect again"
+        case .configuredManually: return "Configured manually — Whytap left it as is"
         }
     }
 }
 
+// MARK: Running client CLIs
 // MARK: Running client CLIs
 
 struct CaseCommandResult: Equatable {
     let status: Int32
 }
 
-/// Seam for the client CLIs (`claude`, `codex`). Output is discarded: it is
-/// never shown, stored or logged.
+/// Seam for the client CLIs (`claude`, `codex`) that change their settings.
+/// Output is discarded: it is never shown, stored or logged.
 protocol CaseCommandRunning {
     func run(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandResult
 }
 
-struct SystemCaseCommandRunner: CaseCommandRunning {
+/// What a read-only client command printed. Used once to decide, in memory,
+/// then dropped: never shown, stored or logged.
+struct CaseCommandOutput: Equatable {
+    let status: Int32
+    let stdout: Data
+    let stderr: Data
+    /// Either stream exceeded the read limit; the output is not trusted.
+    var truncated = false
+}
+
+/// Seam for read-only client commands (`codex mcp get`), kept apart from
+/// `CaseCommandRunning` so a refusal provably changes nothing.
+protocol CaseCommandReading {
+    func read(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandOutput
+}
+
+struct SystemCaseCommandRunner: CaseCommandRunning, CaseCommandReading {
     var timeout: TimeInterval = 30
+    /// Per stream. A server entry is a few hundred bytes.
+    var readLimit = 256 * 1024
 
     func run(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandResult {
+        let process = makeProcess(executable, arguments, environment)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return CaseCommandResult(status: try wait(for: process))
+    }
+
+    func read(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandOutput {
+        let process = makeProcess(executable, arguments, environment)
+        let out = Pipe(), err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        let stdout = BoundedSink(limit: readLimit), stderr = BoundedSink(limit: readLimit)
+        let drained = DispatchGroup()
+        for (pipe, sink) in [(out, stdout), (err, stderr)] {
+            drained.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                sink.drain(pipe.fileHandleForReading)
+                drained.leave()
+            }
+        }
+        let status: Int32
+        do {
+            status = try wait(for: process)
+        } catch {
+            try? out.fileHandleForWriting.close()
+            try? err.fileHandleForWriting.close()
+            throw error
+        }
+        // A child that left the pipes open (a grandchild) cannot hold us.
+        guard drained.wait(timeout: .now() + 2) == .success else { throw CaseClientConnectorError.timedOut }
+        return CaseCommandOutput(status: status, stdout: stdout.data, stderr: stderr.data,
+                                 truncated: stdout.overflowed || stderr.overflowed)
+    }
+
+    private func makeProcess(_ executable: URL, _ arguments: [String], _ environment: [String: String]) -> Process {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.environment = environment
         process.currentDirectoryURL = environment["HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        return process
+    }
+
+    private func wait(for process: Process) throws -> Int32 {
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }
         do {
@@ -74,7 +150,29 @@ struct SystemCaseCommandRunner: CaseCommandRunning {
             _ = finished.wait(timeout: .now() + 2)
             throw CaseClientConnectorError.timedOut
         }
-        return CaseCommandResult(status: process.terminationStatus)
+        return process.terminationStatus
+    }
+}
+
+/// Keeps at most `limit` bytes of a stream and drains the rest.
+private final class BoundedSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private var bytes = Data()
+    private var over = false
+    init(limit: Int) { self.limit = limit }
+    var data: Data { lock.withLock { bytes } }
+    var overflowed: Bool { lock.withLock { over } }
+    func drain(_ handle: FileHandle) {
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { return }
+            lock.withLock {
+                let room = limit - bytes.count
+                if chunk.count > room { over = true }
+                if room > 0 { bytes.append(chunk.prefix(room)) }
+            }
+        }
     }
 }
 
@@ -89,20 +187,19 @@ enum CaseClientEnvironment {
     }
 }
 
-/// Whether an existing `case` MCP entry is Whytap's: the `whytap` helper of
-/// any install or flavor (`whytap`, `whytap-beta`, `whytap-dev`) serving
-/// `case mcp`. Anything else belongs to someone else and is left alone.
+/// The one test for touching an entry: it is exactly what Whytap writes.
+/// JSON hosts: `{command: <helper>, args}` with nothing else, apart from
+/// `type: "stdio"` and an empty `env`, which Claude Code adds itself. The
+/// helper path is compared as written (no symlink or spelling variants).
 enum CaseMCPEntryOwnership {
-    static func isOurs(command: String?, args: [String]?) -> Bool {
-        guard let command, !command.isEmpty else { return false }
-        let name = URL(fileURLWithPath: command).lastPathComponent
-        guard name == "whytap" || name.hasPrefix("whytap-") else { return false }
-        return args == nil || args == ["case", "mcp"]
-    }
-
-    static func isOurs(_ entry: Any?) -> Bool {
-        guard let entry = entry as? [String: Any] else { return false }
-        return isOurs(command: entry["command"] as? String, args: entry["args"] as? [String])
+    static func isCanonical(_ entry: Any?, helperPath: String, arguments: [String]) -> Bool {
+        guard let entry = entry as? [String: Any],
+              Set(entry.keys).isSubset(of: ["type", "command", "args", "env"]),
+              entry["command"] as? String == helperPath,
+              entry["args"] as? [String] == arguments else { return false }
+        if let type = entry["type"], type as? String != "stdio" { return false }
+        if let env = entry["env"], (env as? [String: Any])?.isEmpty != true { return false }
+        return true
     }
 }
 
@@ -158,8 +255,12 @@ struct CaseJSONConfigFile {
 
 // MARK: Claude Code
 
-/// `claude mcp add -s user case -- <helper> case mcp`. When Claude's sandbox is
-/// on, the broker socket is added to `sandbox.network.allowUnixSockets`.
+/// `claude mcp add -s user whytap -- <helper> mcp` when there is no `whytap`
+/// entry, then removes our older user-scope `case` entry via `claude mcp
+/// remove`. When Claude's sandbox is on, the broker socket is
+/// added to `sandbox.network.allowUnixSockets`. `~/.claude.json` is read with
+/// the system JSON parser (escapes in keys included); it is written only by
+/// `claude` itself.
 struct ClaudeCodeCaseConnector: CaseClientConnector {
     let displayName = "Claude Code"
     let home: URL
@@ -176,33 +277,47 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
     }
 
     private var settings: CaseJSONConfigFile { CaseJSONConfigFile(home: home, relativePath: ".claude/settings.json") }
+    private var userFile: CaseJSONConfigFile { CaseJSONConfigFile(home: home, relativePath: ".claude.json") }
 
     func isInstalled() -> Bool { locate() != nil }
 
-    private var userEntry: Any? {
-        let file = CaseJSONConfigFile(home: home, relativePath: ".claude.json")
-        return ((try? file.read())??["mcpServers"] as? [String: Any])?["case"]
+    /// The user-scope servers of `~/.claude.json`. A file that cannot be read
+    /// or whose `mcpServers` is not an object throws: Connect never guesses
+    /// that no `whytap` server exists there.
+    private func userServers() throws -> [String: Any] {
+        guard let root = try userFile.read(), let servers = root["mcpServers"] else { return [:] }
+        guard let object = servers as? [String: Any] else { throw CaseClientConnectorError.unreadableConfig(".claude.json") }
+        return object
     }
 
-    /// A user-scope `case` entry exists in `~/.claude.json` (read only).
-    func isConfigured() -> Bool { userEntry != nil }
+    /// A user-scope `whytap` entry exists in `~/.claude.json` (read only).
+    func isConfigured() -> Bool { (try? userServers())?[WhytapMCPEntry.name] != nil }
 
     func install(helperPath: String) throws {
-        // Read settings first: a broken file stops before anything changes.
+        // Read both files first: a broken one stops before anything changes.
         let current = try settings.read()
-        let entry = userEntry
-        if entry != nil, !CaseMCPEntryOwnership.isOurs(entry) { throw CaseClientConnectorError.foreignEntry }
-        let claude = try binary()
-        if entry != nil {
-            try check(run(claude, ["mcp", "remove", "-s", "user", "case"]))
+        let servers = try userServers()
+        let entry = servers[WhytapMCPEntry.name]
+        if entry != nil,
+           !CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments) {
+            throw CaseClientConnectorError.configuredManually
         }
-        try check(run(claude, ["mcp", "add", "-s", "user", "case", "--", helperPath, "case", "mcp"]))
+        let claude = try binary()
+        if entry == nil {
+            try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
+        }
+        if CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
+                                             arguments: WhytapMCPEntry.legacyArguments) {
+            _ = try? run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName])
+        }
         try updateSandbox(current, adding: true)
     }
 
-    func uninstall() throws {
-        if CaseMCPEntryOwnership.isOurs(userEntry) {
-            try check(run(try binary(), ["mcp", "remove", "-s", "user", "case"]))
+    func uninstall(helperPath: String?) throws {
+        if let helperPath, let servers = try? userServers(),
+           CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
+                                             arguments: WhytapMCPEntry.legacyArguments) {
+            try check(run(try binary(), ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName]))
         }
         try updateSandbox(try settings.read(), adding: false)
     }
@@ -245,83 +360,135 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
 
 // MARK: Codex
 
-/// `codex mcp add case -- <helper> case mcp`. Codex's sandbox settings are
-/// never changed; `config.toml` is written only by codex itself.
+/// What Codex itself says about one server name. Read with `codex mcp get
+/// <name> --json`, so Codex's own TOML parser decides (escapes, inline
+/// tables, comments, profiles); Whytap never parses `config.toml`.
+enum CodexMCPEntry: Equatable {
+    case absent
+    /// A stdio command with nothing else set.
+    case stdio(command: String, args: [String])
+    /// A stdio command with settings of its own (env, cwd, disabled, timeouts,
+    /// tool lists or a field this parser does not know).
+    case customized(command: String, args: [String])
+    /// Present, but not a plain stdio command (a URL server, odd fields).
+    case other
+    /// The read failed or its answer could not be understood.
+    case uncertain
+
+    /// Codex's answer for a name that is not configured (codex-cli 0.170),
+    /// as the last line of stderr (warnings may come before it). Any other
+    /// failure, including a newer wording, reads as `.uncertain`.
+    static func notFoundMessage(_ name: String) -> String { "Error: No MCP server named '\(name)' found." }
+
+    static func parse(_ output: CaseCommandOutput, name: String) -> CodexMCPEntry {
+        guard !output.truncated else { return .uncertain }
+        guard output.status == 0 else {
+            let lastLine = String(decoding: output.stderr, as: UTF8.self)
+                .split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) }
+            return lastLine == notFoundMessage(name) && output.stdout.isEmpty ? .absent : .uncertain
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
+              object["name"] as? String == name,
+              let transport = object["transport"] as? [String: Any] else { return .uncertain }
+        guard transport["type"] as? String == "stdio", let command = transport["command"] as? String else { return .other }
+        let args: [String]
+        switch transport["args"] {
+        case nil, is NSNull: args = []
+        case let list as [String]: args = list
+        default: return .other
+        }
+        let envVars = transport["env_vars"]
+        let envVarsUnset = envVars == nil || envVars is NSNull || (envVars as? [Any])?.isEmpty == true
+        let plain = isNeutral(object, except: ["name", "enabled", "transport"])
+            && (object["enabled"] == nil || isTrue(object["enabled"]))
+            && isNeutral(transport, except: ["type", "command", "args", "env_vars"])
+            && envVarsUnset
+        return plain ? .stdio(command: command, args: args) : .customized(command: command, args: args)
+    }
+
+    /// Every other field is unset: null or false. An empty list or table is a
+    /// setting (`enabled_tools = []` allows no tool), except `env_vars`, which
+    /// Codex reports as `[]` when absent and which passes no value when empty.
+    private static func isNeutral(_ object: [String: Any], except: Set<String>) -> Bool {
+        object.allSatisfy { key, value in
+            if except.contains(key) || value is NSNull { return true }
+            return isBoolean(value) && !isTrue(value)
+        }
+    }
+
+    private static func isBoolean(_ value: Any?) -> Bool {
+        guard let value = value as AnyObject? else { return false }
+        return CFGetTypeID(value) == CFBooleanGetTypeID()
+    }
+
+    private static func isTrue(_ value: Any?) -> Bool { isBoolean(value) && (value as? Bool) == true }
+}
+
+/// `codex mcp add whytap -- <helper> mcp` when Codex has no `whytap`, then
+/// `codex mcp remove case` for our older entry. `codex mcp add` would replace
+/// any entry of that name, so each name is first read with `codex mcp get
+/// --json` through `reader` (read-only); a changing command runs only for an
+/// absent name or the exact canonical entry. Codex's sandbox settings are
+/// never changed; `config.toml` is written only by codex.
+// WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
 struct CodexCaseConnector: CaseClientConnector {
     let displayName = "Codex"
     let home: URL
     let runner: CaseCommandRunning
+    let reader: CaseCommandReading
     let locate: () -> URL?
 
     init(home: URL, runner: CaseCommandRunning = SystemCaseCommandRunner(),
+         reader: CaseCommandReading = SystemCaseCommandRunner(),
          locate: @escaping () -> URL? = { CodexBinaryLocator().locate() }) {
         self.home = home
         self.runner = runner
+        self.reader = reader
         self.locate = locate
     }
 
     func isInstalled() -> Bool { locate() != nil }
 
-    func isConfigured() -> Bool { caseSection() != nil }
-
-    /// The `[mcp_servers.case]` table's `command` (nil inside when absent), or
-    /// nil when there is no such table. A minimal line reader: codex writes
-    /// `command = "…"` as a basic or literal string.
-    private func caseSection() -> (command: String?, args: [String]?)? {
-        let url = home.appendingPathComponent(".codex/config.toml")
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        var inside = false
-        var found = false
-        var command: String?
-        var args: [String]?
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") {
-                inside = line == "[mcp_servers.case]" || line == "[mcp_servers.\"case\"]"
-                found = found || inside
-                continue
-            }
-            guard inside, let eq = line.firstIndex(of: "=") else { continue }
-            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            if key == "command" { command = Self.unquote(value) }
-            if key == "args" { args = Self.stringArray(value) }
-        }
-        return found ? (command, args) : nil
+    func isConfigured() -> Bool {
+        guard let codex = locate() else { return false }
+        let current = entry(WhytapMCPEntry.name, codex: codex)
+        return current != .absent && current != .uncertain
     }
 
-    private static func unquote(_ value: String) -> String? {
-        guard value.count >= 2, let first = value.first, first == "\"" || first == "'",
-              value.last == first else { return nil }
-        return String(value.dropFirst().dropLast())
-    }
-
-    private static func stringArray(_ value: String) -> [String]? {
-        guard value.hasPrefix("["), value.hasSuffix("]") else { return nil }
-        let inner = value.dropFirst().dropLast()
-        let items = inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let strings = items.compactMap(unquote)
-        return strings.count == items.count ? strings : nil
+    func entry(_ name: String, codex: URL) -> CodexMCPEntry {
+        guard let output = try? reader.read(executable: codex, arguments: ["mcp", "get", name, "--json"],
+                                            environment: CaseClientEnvironment.make(home: home, executable: codex))
+        else { return .uncertain }
+        return CodexMCPEntry.parse(output, name: name)
     }
 
     func install(helperPath: String) throws {
-        let section = caseSection()
-        if let section, !CaseMCPEntryOwnership.isOurs(command: section.command, args: section.args) {
-            throw CaseClientConnectorError.foreignEntry
-        }
         guard let codex = locate() else { throw CaseClientConnectorError.clientNotFound }
-        if section != nil {
-            try check(run(codex, ["mcp", "remove", "case"]))
+        switch entry(WhytapMCPEntry.name, codex: codex) {
+        case .absent:
+            try check(run(codex, ["mcp", "add", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
+        case .stdio(helperPath, WhytapMCPEntry.arguments):
+            break
+        case .uncertain:
+            throw CaseClientConnectorError.unreadableConfig(".codex/config.toml")
+        case .stdio, .customized, .other:
+            // Disabled, filtered, other settings, another path or subcommand:
+            // the person's own, and it may not serve Case, so `case` stays too.
+            throw CaseClientConnectorError.configuredManually
         }
-        try check(run(codex, ["mcp", "add", "case", "--", helperPath, "case", "mcp"]))
+        if hasOurLegacyEntry(codex: codex, helperPath: helperPath) {
+            _ = try? run(codex, ["mcp", "remove", WhytapMCPEntry.legacyName])
+        }
     }
 
-    func uninstall() throws {
-        guard let section = caseSection(),
-              CaseMCPEntryOwnership.isOurs(command: section.command, args: section.args)
-        else { return }
-        guard let codex = locate() else { throw CaseClientConnectorError.clientNotFound }
-        try check(run(codex, ["mcp", "remove", "case"]))
+    func uninstall(helperPath: String?) throws {
+        guard let helperPath, let codex = locate(), hasOurLegacyEntry(codex: codex, helperPath: helperPath) else { return }
+        try check(run(codex, ["mcp", "remove", WhytapMCPEntry.legacyName]))
+    }
+
+    /// Our older `case` entry exactly as an earlier Whytap wrote it.
+    private func hasOurLegacyEntry(codex: URL, helperPath: String) -> Bool {
+        entry(WhytapMCPEntry.legacyName, codex: codex) == .stdio(command: helperPath, args: WhytapMCPEntry.legacyArguments)
     }
 
     private func run(_ binary: URL, _ arguments: [String]) throws -> CaseCommandResult {
@@ -336,7 +503,10 @@ struct CodexCaseConnector: CaseClientConnector {
 
 // MARK: Cursor
 
-/// `~/.cursor/mcp.json` → `mcpServers.case = {command, args}`.
+/// `~/.cursor/mcp.json` → `mcpServers.whytap = {command, args: ["mcp"]}`
+/// when there is no `whytap`; our older `mcpServers.case` entry is removed in
+/// the same write when it is exactly what an earlier Whytap wrote. Cursor has
+/// no CLI for this, so its JSON file is written directly (other keys kept).
 struct CursorCaseConnector: CaseClientConnector {
     static let appPath = "/Applications/Cursor.app"
 
@@ -356,26 +526,44 @@ struct CursorCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { appInstalled() }
 
     func isConfigured() -> Bool {
-        ((try? file.read())??["mcpServers"] as? [String: Any])?["case"] != nil
+        ((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name] != nil
     }
 
     func install(helperPath: String) throws {
         var root = try file.read() ?? [:]
-        var servers = root["mcpServers"] as? [String: Any] ?? [:]
-        if let existing = servers["case"], !CaseMCPEntryOwnership.isOurs(existing) {
-            throw CaseClientConnectorError.foreignEntry
+        // A `mcpServers` that is not an object is never replaced wholesale.
+        if root["mcpServers"] != nil, !(root["mcpServers"] is [String: Any]) {
+            throw CaseClientConnectorError.unreadableConfig(file.relativePath)
         }
-        servers["case"] = ["command": helperPath, "args": ["case", "mcp"]]
+        var servers = root["mcpServers"] as? [String: Any] ?? [:]
+        let entry = servers[WhytapMCPEntry.name]
+        if entry != nil,
+           !CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments) {
+            throw CaseClientConnectorError.configuredManually
+        }
+        var changed = false
+        if entry == nil {
+            servers[WhytapMCPEntry.name] = ["command": helperPath, "args": WhytapMCPEntry.arguments]
+            changed = true
+        }
+        if CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
+                                             arguments: WhytapMCPEntry.legacyArguments) {
+            servers[WhytapMCPEntry.legacyName] = nil
+            changed = true
+        }
+        guard changed else { return }
         root["mcpServers"] = servers
         try file.write(root)
     }
 
-    func uninstall() throws {
-        guard var root = try file.read(),
+    func uninstall(helperPath: String?) throws {
+        guard let helperPath,
+              var root = try file.read(),
               var servers = root["mcpServers"] as? [String: Any],
-              CaseMCPEntryOwnership.isOurs(servers["case"])
+              CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
+                                                arguments: WhytapMCPEntry.legacyArguments)
         else { return }
-        servers["case"] = nil
+        servers[WhytapMCPEntry.legacyName] = nil
         root["mcpServers"] = servers
         try file.write(root)
     }

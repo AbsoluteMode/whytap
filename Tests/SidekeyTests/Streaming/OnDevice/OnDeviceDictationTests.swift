@@ -80,7 +80,7 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertThrowsError(try resolver.resolve(FeatureRoute(account: .thisMac, model: "whisper-large"), for: .dropFast)) {
             XCTAssertEqual($0 as? FeatureRouteError, .notSet(.dropFast))
         }
-        for feature in [AIFeature.meetings, .subtitlesAudio, .agent, .dropSmartCleanup] {
+        for feature in [AIFeature.agent, .dropSmartCleanup, .meetingNotes, .subtitlesTranslation] {
             XCTAssertNil(feature.modelUse(on: .onDevice), "\(feature)")
             XCTAssertThrowsError(try resolver.resolve(FeatureRoute(account: .thisMac, model: model), for: feature)) {
                 XCTAssertEqual($0 as? FeatureRouteError, .notSet(feature))
@@ -88,13 +88,12 @@ final class OnDeviceDictationTests: XCTestCase {
         }
     }
 
-    func test_microphone_features_are_offered_the_model() {
-        for feature in [AIFeature.dropFast, .dropSmart, .agentVoice, .voiceSearch] {
+    func test_speech_features_are_offered_the_model() {
+        for feature in [AIFeature.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio] {
             XCTAssertEqual(feature.modelUse(on: .onDevice), .realtimeSTT, "\(feature)")
             XCTAssertEqual(ModelRegistry.recommended(for: feature, kind: .onDevice), model)
             XCTAssertTrue(ModelRegistry.isVerified(model, kind: .onDevice, use: .realtimeSTT))
         }
-        XCTAssertNil(ModelRegistry.recommended(for: .meetings, kind: .onDevice))
     }
 
     func test_account_survives_storage_and_has_no_keychain_account() {
@@ -133,7 +132,7 @@ final class OnDeviceDictationTests: XCTestCase {
         return (vm, env)
     }
 
-    func test_fresh_user_downloads_the_model_and_is_offered_it_for_every_microphone_feature() {
+    func test_fresh_user_downloads_the_model_and_is_offered_it_for_every_speech_feature() {
         let flag = ModelFlag()
         let (vm, env) = makeSettings(flag)
         XCTAssertTrue(vm.chips.isEmpty)
@@ -146,7 +145,7 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertEqual(vm.chips.map(\.account), [.thisMac])
         XCTAssertEqual(vm.chips.first?.statusText, "Model downloaded")
         XCTAssertEqual(vm.proposal?.title, "Use On this Mac for")
-        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropFast, .dropSmart, .agentVoice, .voiceSearch])
+        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio])
         XCTAssertNil(env.routing.route(for: .dropFast), "offered, not assigned")
 
         vm.applyProposal(selected: [.dropFast])
@@ -168,12 +167,12 @@ final class OnDeviceDictationTests: XCTestCase {
         vm.onDeviceModelChanged()
 
         XCTAssertEqual(env.routing.route(for: .dropFast), soniox)
-        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropSmart, .agentVoice, .voiceSearch])
+        XCTAssertEqual(vm.proposal?.items.map(\.feature), [.dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio])
         let section = vm.sections(for: .dropFast).first { $0.account == .thisMac }
         XCTAssertEqual(section?.title, "On this Mac")
         XCTAssertEqual(section?.options.map(\.model), [model])
         XCTAssertEqual(section?.options.first?.state, .verified)
-        XCTAssertNil(vm.sections(for: .meetings).first { $0.account == .thisMac }, "not offered to Meetings")
+        XCTAssertNotNil(vm.sections(for: .meetings).first { $0.account == .thisMac }, "offered to Meetings too")
     }
 
     func test_download_finishing_does_not_replace_another_providers_open_offer() {
@@ -283,9 +282,9 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertEqual(built, 0)
     }
 
-    func test_realtime_adapter_factory_never_builds_a_socket_for_this_mac() {
-        let route = ResolvedRoute(feature: .dropFast, account: .thisMac, model: model, apiKey: nil, server: nil)
-        XCTAssertThrowsError(try RealtimeAdapterFactory.make(route))
+    func test_realtime_adapter_factory_never_builds_a_socket_for_this_mac() throws {
+        let route = ResolvedRoute(feature: .subtitlesAudio, account: .thisMac, model: model, apiKey: nil, server: nil)
+        XCTAssertTrue(try RealtimeAdapterFactory.make(route) is OnDeviceStreamingAdapter)
     }
 
     // MARK: - Session

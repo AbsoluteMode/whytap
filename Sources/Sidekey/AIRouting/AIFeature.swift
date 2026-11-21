@@ -102,18 +102,22 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         switch mode {
         case .realtime:
             switch kind {
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
-            // The microphone features only: subtitles read system audio
-            // through a provider adapter, which the on-device model has none of.
-            case .onDevice: return self == .subtitlesAudio ? nil : .realtimeSTT
+            // On this Mac serves every speech feature: the microphone ones
+            // through their own session, Subtitles audio through
+            // `OnDeviceStreamingAdapter`.
+            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
+            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return .realtimeSTT
             case .openRouter, .openAI, .anthropic: return nil
             }
         case .recorded:
             switch kind {
             case .soniox: return .asyncSTT
             case .deepgram, .elevenLabs, .openAICompatible: return .realtimeSTT
-            // Meetings need speaker labels, which come from the provider.
-            case .openRouter, .openAI, .anthropic, .onDevice: return nil
+            // The recording fed through `OnDeviceStreamingAdapter` in phrases,
+            // like a user's own server: a transcript without speaker labels.
+            // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
+            case .onDevice: return .realtimeSTT
+            case .openRouter, .openAI, .anthropic: return nil
             }
         case .llm:
             switch kind {

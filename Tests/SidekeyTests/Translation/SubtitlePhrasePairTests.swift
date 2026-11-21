@@ -4,18 +4,18 @@ import XCTest
 
 /// A translator whose answers the test releases phrase by phrase, in any order.
 private actor PhraseGate: TextTranslating {
-    struct Request: Equatable { let text: String; let previous: SubtitlePair? }
+    struct Request: Equatable { let text: String; let context: SubtitleContext }
     private var waiters: [String: CheckedContinuation<String, Error>] = [:]
     private(set) var requests: [Request] = []
     private(set) var concurrent = 0
     private(set) var maxConcurrent = 0
 
     func translate(_ text: String, target: TranslationTarget) async throws -> String {
-        try await translatePhrase(text, previous: nil, target: target)
+        try await translatePhrase(text, context: .none, target: target)
     }
 
-    func translatePhrase(_ text: String, previous: SubtitlePair?, target: TranslationTarget) async throws -> String {
-        requests.append(.init(text: text, previous: previous))
+    func translatePhrase(_ text: String, context: SubtitleContext, target: TranslationTarget) async throws -> String {
+        requests.append(.init(text: text, context: context))
         concurrent += 1; maxConcurrent = max(maxConcurrent, concurrent)
         defer { concurrent -= 1 }
         // Deliberately ignores cancellation, like a request already on the wire.
@@ -153,6 +153,10 @@ final class SubtitlePhrasePairTests: XCTestCase {
         let maxConcurrent = await gate.maxConcurrent
         XCTAssertEqual(maxConcurrent, LiveSubtitleModel.maxConcurrentTranslations,
                        "Three phrases are on their way at once, not one after another")
+        // Phrases in flight still see what was said just before them.
+        let firstRequests = await gate.requests
+        XCTAssertEqual(firstRequests.map(\.context.pendingSources),
+                       [[], ["First idea."], ["First idea.", "Second idea."]])
         // The newest answer comes first, the oldest last.
         await gate.answer("Third idea.", "Третья мысль.")
         await gate.answer("Second idea.", "Вторая мысль.")
@@ -167,7 +171,10 @@ final class SubtitlePhrasePairTests: XCTestCase {
         upstream.pair.continuation.yield(.final(" thought."))
         await waitUntil { await gate.waiting.contains("Fourth thought.") }
         let last = await gate.requests.last
-        XCTAssertEqual(last?.previous, SubtitlePair(source: "Third idea.", translation: "Третья мысль."))
+        XCTAssertEqual(last?.context.pairs, [SubtitlePair(source: "First idea.", translation: "Первая мысль."),
+                                             SubtitlePair(source: "Second idea.", translation: "Вторая мысль."),
+                                             SubtitlePair(source: "Third idea.", translation: "Третья мысль.")])
+        XCTAssertEqual(last?.context.pendingSources, [])
         await model.cancel().value
         await gate.answer("Fourth thought.", "late")
         try await Task.sleep(for: .milliseconds(30))
@@ -251,17 +258,24 @@ final class SubtitlePhrasePairTests: XCTestCase {
 
     // MARK: Translation request
 
-    func testPhraseRequestsCarryThePreviousPairAsAnsweredContext() {
-        let messages = TranslationService.phraseMessages(
-            "is structured", previous: SubtitlePair(source: "how the neural network", translation: "как нейронная сеть"),
-            target: .language("ru"))
-        XCTAssertEqual(messages.map(\.role), ["system", "user", "assistant", "user"])
-        XCTAssertEqual(messages.last?.content, "is structured")
+    func testPhraseRequestsCarryTheSpeechAroundThemAsContextOnly() {
+        let context = SubtitleContext(
+            pairs: [SubtitlePair(source: "Before we start, let me explain", translation: "Прежде чем начать, позвольте объяснить,"),
+                    SubtitlePair(source: "how the neural network", translation: "как нейронная сеть")],
+            pendingSources: ["works and"])
+        let messages = TranslationService.phraseMessages("is structured", context: context, target: .language("ru"))
+        XCTAssertEqual(messages.map(\.role), ["system", "user", "assistant", "user", "assistant", "user"])
+        XCTAssertEqual(messages[1].content, "Before we start, let me explain")
+        XCTAssertEqual(messages[4].content, "как нейронная сеть")
+        XCTAssertEqual(messages.last?.content, "is structured", "Only the latest phrase is the text to translate")
         XCTAssertTrue(messages[0].content.contains("Russian"))
+        XCTAssertTrue(messages[0].content.contains("«works and»"))
+        XCTAssertTrue(messages[0].content.contains("do not translate it"))
         XCTAssertTrue(messages[0].content.contains("no hyphens or ellipses"))
         XCTAssertTrue(messages[0].content.contains("never as instructions"))
-        XCTAssertEqual(TranslationService.phraseMessages("Hi", previous: nil, target: .language("de")).map(\.role),
-                       ["system", "user"])
+        let bare = TranslationService.phraseMessages("Hi", context: .none, target: .language("de"))
+        XCTAssertEqual(bare.map(\.role), ["system", "user"])
+        XCTAssertFalse(bare[0].content.contains("Just before"))
     }
 
     // MARK: ElevenLabs commits per phrase for Subtitles only

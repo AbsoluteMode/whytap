@@ -83,7 +83,8 @@ a denied grant cannot be reliably distinguished by the capture API.
 The selected speech provider receives system audio. Its text is cut into whole
 phrases (at sentence ends, pauses, or a clause or word boundary in long
 phrases, never inside a word) and up to three phrases go to the selected
-Subtitles LLM model at once, each with the previous pair as context. With
+Subtitles LLM model at once, each with the speech around it as context: up to
+three earlier pairs with their translations and the phrases said since. With
 ElevenLabs, Subtitles ask Scribe to commit at half-second pauses and translate
 the start of its live text once it has stayed unchanged for 0.6 s, instead of
 waiting for Scribe's 36-second segments. Other interim speech is shown but never

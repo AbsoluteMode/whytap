@@ -361,12 +361,12 @@ final class LiveSubtitleModel: ObservableObject {
         while inFlight.count < Self.maxConcurrentTranslations, !waiting.isEmpty {
             let id = waiting.removeFirst()
             guard let line = lines.first(where: { $0.id == id }) else { continue }
-            let previous = context(before: id)
+            let context = context(before: id)
             let target = self.target
             let deadline = phraseDeadline
             let work = Task { [weak self] in
                 let result: Result<String, Error>
-                do { result = .success(try await service.translatePhrase(line.source, previous: previous, target: target)) }
+                do { result = .success(try await service.translatePhrase(line.source, context: context, target: target)) }
                 catch { result = .failure(error) }
                 self?.finishTranslation(id, result, token: token)
             }
@@ -411,11 +411,28 @@ final class LiveSubtitleModel: ObservableObject {
         }
     }
 
-    private func context(before id: UUID) -> SubtitlePair? {
-        guard let index = lines.firstIndex(where: { $0.id == id }) else { return nil }
-        return lines[..<index].last(where: { $0.translation != nil }).map {
-            SubtitlePair(source: $0.source, translation: $0.translation ?? "")
+    /// The newest finished pairs before this phrase, then the phrases after
+    /// them still waiting for their translation, within a character budget.
+    private func context(before id: UUID) -> SubtitleContext {
+        guard let index = lines.firstIndex(where: { $0.id == id }) else { return .none }
+        let earlier = lines[..<index].filter { !$0.failed }
+        let lastDone = earlier.lastIndex { $0.translation != nil }
+        var context = SubtitleContext()
+        var budget = SubtitleContext.maxCharacters
+        if let lastDone {
+            for line in earlier[..<(lastDone + 1)].reversed() where line.translation != nil {
+                guard context.pairs.count < SubtitleContext.maxPairs,
+                      let translation = line.translation, line.source.count + translation.count <= budget else { break }
+                budget -= line.source.count + translation.count
+                context.pairs.insert(SubtitlePair(source: line.source, translation: translation), at: 0)
+            }
         }
+        let after = lastDone.map { earlier[($0 + 1)...] } ?? earlier[...]
+        for line in after.suffix(SubtitleContext.maxPending) where line.source.count <= budget {
+            budget -= line.source.count
+            context.pendingSources.append(line.source)
+        }
+        return context
     }
 
     private func translationsDrained() async {

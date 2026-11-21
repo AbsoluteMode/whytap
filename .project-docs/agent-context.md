@@ -437,7 +437,8 @@ Translation tools:
   translation. SubtitleSegmenter cuts committed text into whole phrases
   (sentence end at once, 0.6 s pause, 60 chars/2.5 s at a clause mark or word
   boundary, never inside a word or after a function word). Up to three
-  phrases translate at once with the previous pair as context; an 8 s
+  phrases translate at once; each request carries up to three finished pairs
+  as answered turns and the phrases still in flight as quoted context; an 8 s
   deadline or a transient error marks only that pair Not translated, key and
   setup errors stop the session. ElevenLabs Subtitles audio commits by VAD
   (0.5 s) and SubtitlePartialLock translates the stable start of its

@@ -2,7 +2,7 @@
 id: subtitle-phrase-pairs-2026-11-21
 type: decision
 title: Subtitles show phrase pairs and translate whole phrases sooner
-summary: The subtitle box shows each phrase as a pair, original on the left and translation on the right. Speech is cut into whole phrases, never inside a word, and up to three phrases translate at once. ElevenLabs Subtitles commit at pauses and translate the stable start of the partial instead of waiting for Scribe's ~36 s segment cap, which is what made subtitles slow and cut words in half.
+summary: The subtitle box keeps Whytap's compact style and shows each phrase as a pair, original on the left and translation on the right. Each phrase is translated with the speech around it as context, the closest a per-phrase request gets to the continuous view of a one-hop speech translator. Speech is cut into whole phrases, never inside a word, and up to three phrases translate at once. ElevenLabs Subtitles commit at pauses and translate the stable start of the partial instead of waiting for Scribe's ~36 s segment cap, which is what made subtitles slow and cut words in half.
 status: confirmed
 tags: [translation, subtitles, elevenlabs, latency, design]
 canonical_for: [subtitle-phrase-pairs, subtitle-phrase-segmentation, subtitle-elevenlabs-commit]
@@ -13,6 +13,12 @@ sources:
     confirmed_at: 2026-11-21
   - type: user-confirmed
     reference: The standalone RealtimeTranslator (a local example project outside this repository, last commit 6938a3e, and its installed build) was read on 2026-11-21. It streams system audio to one OpenAI gpt-realtime-translate WebSocket and shows only the translated text as one running caption, throttled to about 14 updates a second. It has no source/translation pairs.
+    confirmed_at: 2026-11-21
+  - type: user-confirmed
+    reference: Later on 2026-11-21, relayed by the orchestrating session, the user said they like Whytap's subtitle interface even more than the standalone app's, but the standalone app's translation quality is much better. Keep Whytap's look; bring over the quality.
+    confirmed_at: 2026-11-21
+  - type: url
+    reference: https://developers.openai.com/api/docs/guides/realtime-translation, https://developers.openai.com/api/docs/models/gpt-realtime-translate and the realtime translation client/server event references (read 2026-11-21) document 24 kHz PCM16 input in 200 ms frames, append-only session.output_transcript.delta and, only with input transcription configured, session.input_transcript.delta, alignment by elapsed_ms without segment ids, no prompt, glossary or turn settings, a 16,000-token context window and a price of $0.034 per audio minute.
     confirmed_at: 2026-11-21
   - type: url
     reference: https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies and https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime (read 2026-11-21) document commit_strategy manual or vad, vad_silence_threshold_secs from 0.192 to 3.0 s, committed_transcript messages and the automatic commit after about 36 s of audio under manual commit.
@@ -119,12 +125,15 @@ Where the time went:
   three words, then the words before a corrected or removed last word), so
   each spoken word lands in one pair. Committed text always goes before newer
   partial text.
-- **Parallel translation.** Up to three phrases are translated at once, each
-  with the previous finished pair as an earlier user/assistant turn, so terms
-  and grammatical gender stay consistent across short phrases. The subtitle
-  prompt asks for a complete phrase without hyphens or ellipses for
-  unfinished words. A late answer only fills its own pair; a cancelled
-  session ignores it.
+- **Parallel translation with the speech around it.** Up to three phrases are
+  translated at once. Each request carries up to three finished pairs
+  (900 characters) as earlier user/assistant turns and up to two phrases said
+  since, whose translations are still on their way, quoted in the system
+  message as context not to translate. The subtitle prompt describes
+  continuous speech: keep terms, names, pronouns and grammatical gender, let
+  a phrase that starts mid-sentence read as a continuation, return a complete
+  phrase without hyphens or ellipses and never repeat earlier text. A late
+  answer only fills its own pair; a cancelled session ignores it.
 - **Failures stay local.** Each phrase has an 8 s deadline. A timeout, a busy
   or failing provider or an empty answer marks only that pair; subtitles go
   on. Missing setup, a refused key (401/403), no credit (402) or a missing
@@ -133,6 +142,30 @@ Where the time went:
   behind.
 - The flush timer runs every 100 ms (was 250 ms) and releases every ready
   phrase, not one per tick. No route, model or provider is changed.
+
+## RealtimeTranslator compared
+
+The user likes Whytap's interface more and finds the standalone app's
+translation quality much better. Item by item:
+
+| | RealtimeTranslator | Whytap before | Whytap now |
+|---|---|---|---|
+| Model | One speech-to-translation model, OpenAI `gpt-realtime-translate`: it hears the audio itself. | Speech route (ElevenLabs `scribe_v3_live`), then a separate LLM route (Claude Sonnet 5.5 via OpenRouter). | Same routes; no model changed. |
+| Cutting speech | None on the client: 24 kHz audio streams continuously and the model decides where translation flows. | Provider commit (ElevenLabs: ~36 s cap, mid-word), then a 2 s budget at any character. | VAD commit at 0.5 s pauses, stable partial start, whole phrases at sentence, clause or word boundaries. |
+| Context | The model's own 16,000-token window over the continuous stream: every word is translated knowing what came before. | Each chunk alone, no context. | Up to three finished pairs and the phrases in flight around each phrase. |
+| Prompt and parameters | No prompt, no glossary, no turn settings: only the output language (`ru`). | Generic text-translation prompt, lowest reasoning, throughput-sorted provider. | Live-subtitle prompt for continuous speech; same reasoning and provider settings. |
+| Partial and final results | Append-only translated deltas, never revised; only translated text shown (about 14 updates a second). | Partials ignored; finals only, translated chunk by chunk. | Finals and stable partials become phrases; the live original shows from partials; translations never rewrite. |
+
+What gives the standalone app its quality is the model, not a setting: one
+model hears the speech and translates it in one continuous context, so
+there is no recognition error to inherit, no chunk boundary to translate
+across and no lost antecedent. Whytap's two-hop route can only approach this
+with whole phrases and the surrounding context, which is what this change
+does. The same model is available to Whytap users with an OpenAI key as a
+separate Subtitles engine; it is a product choice for the user (its price is
+$0.034 per audio minute, about $2 per hour of video), and pairs would rest on
+approximate `elapsed_ms` alignment of a separately billed source transcript,
+so it is proposed, not built here.
 
 ## Why
 
@@ -144,8 +177,9 @@ Where the time went:
   without changing the provider or model the user chose.
 - Cutting at word and phrase boundaries removes the fragments for every
   provider; parallel requests keep one slow answer from delaying the rest.
-- Short phrases translate worse in isolation; the previous pair as context
-  is a cheap fix that does not resend text for translation.
+- Short phrases translate worse in isolation; the surrounding pairs and the
+  phrases in flight give each request most of what a continuous translator
+  sees, without asking the model to translate any of it again.
 
 ## What was tested
 
@@ -168,7 +202,8 @@ Where the time went:
 - Scenario tests: phrase cutting of continuous subword finals, long phrases
   without punctuation, abbreviations; revised partials never change a
   committed pair; three phrases in flight and answers out of order fill only
-  their own pairs; the previous pair is sent as context; empty and
+  their own pairs; phrases in flight see the phrases said before them, and a
+  later phrase gets the three finished pairs as context; empty and
   punctuation-only recognition make no pairs and no requests; a timed-out
   and a failed phrase keep their originals while later phrases translate; a
   refused key stops the session; Stop waits for every phrase in flight; the
@@ -182,11 +217,13 @@ Where the time went:
 
 ## Rejected
 
-- Switching Subtitles to OpenAI `gpt-realtime-translate` like the reference:
-  one hop is the fastest path, but it would replace the user's chosen
-  speech and LLM routes, OpenAI is not offered as a speech provider in
-  Whytap, and it returns no original text for pairs. It can be proposed as a
-  separate route.
+- Switching Subtitles to OpenAI `gpt-realtime-translate` in this change: it
+  is the source of the reference's quality and speed, but it would replace
+  the user's chosen speech and LLM routes, and its original text for pairs
+  is a separate transcription aligned only by elapsed time. Proposed to the
+  user as an opt-in Subtitles engine instead.
+- A larger context (whole session history): more tokens on every request for
+  little gain once the neighbouring phrases are present.
 - Translating every partial: paid requests for text that is still changing,
   and pairs that would rewrite themselves.
 - ElevenLabs `turn_prediction`: available only for `scribe_v3_live`, and turn

@@ -1245,7 +1245,9 @@ Calendar on this Mac feeds keep provider `apple`; `CalendarFeed.displayService`
 only picks the Google or Outlook logo. Blocks add, as height allows, the title's
 second line, description lines, an attendee line and more description; a block
 that cuts anything shows a non-interactive History-style bubble with every
-detail (`CalendarEventPreviewState`, hidden 120 ms late to avoid flicker).
+detail (`CalendarEventPreviewState`, hidden 120 ms late to avoid flicker), at
+most the island area's height; it cannot scroll (outside the mouse area).
+Descriptions drop separator lines and `<https://…>` link targets.
 `PlannerEvent.attendees` come from EventKit and Microsoft Graph only, never
 Google direct; they are excluded from `CodingKeys`, so never saved or backed up.
 WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md

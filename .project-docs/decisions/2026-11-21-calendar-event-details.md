@@ -63,8 +63,9 @@ the only way to read more.
   non-interactive bubble left of the drawer with title, date and time (or All
   day), calendar and account with the service logo, location, the click action
   and meeting link (without its query, which can hold a passcode), the
-  description (ten lines) and attendees (twelve by name with organizer, you and
-  their response; the rest counted). All-day chips preview when their line is
+  description (as much as the island area allows, see Follow-up) and attendees
+  (twelve by name, six beside a description, with organizer, you and their
+  response; the rest counted). All-day chips preview when their line is
   cut or the event has a description, location or attendees. A block that
   shows everything has no bubble. The block keeps its native tooltip only when
   there is no bubble; with a bubble the tooltip names just the click action.
@@ -87,6 +88,30 @@ the only way to read more.
   refuse the bubble while Calendar is closed.
 - **Google direct access is unchanged.** Its scopes and requests are as
   declared for Google verification, and its responses' attendees are not read.
+
+## Follow-up: readable descriptions in the bubble (2026-11-21)
+
+In the Beta the user hovered a Microsoft Teams meeting. The description began
+and ended with lines of underscores, shown as thick rules, and stopped with
+"…" after a few lines; the bubble looked cut off. Changes:
+
+- Descriptions, in blocks and the bubble, drop decorative separator lines:
+  any line made only of `_ - = ─ ━ * ~ :` (and spaces), at least three marks,
+  which covers Teams' underscores and Google Meet's `-::~:~::-`. Blank lines
+  left behind collapse and are trimmed. Outlook's `text<https://…>` link
+  targets are dropped too; the meeting link is shown above.
+- The ten-line description limit is gone. The bubble may be as tall as the
+  island area (the window ends there, so anything taller was cut off). The
+  description is laid out last: it shows whole when it fits, else as many
+  lines as remain with "…" on the last one. Beside a description the bubble
+  lists six attendees by name instead of twelve.
+- The bubble cannot scroll. It lies outside the panel's mouse area, where the
+  window passes clicks and the scroll wheel to the app behind it, and leaving
+  the event hides it. A scrollable bubble would need the panel's hit area and
+  hover tracking to include it; not done without a product decision.
+- Offscreen renders at the island's real geometry (300 pt left zone, 400 pt
+  area) showed the bubble 280 pt wide, opaque, inside the area, with long
+  URLs wrapping and a short event's bubble hugging its content.
 
 ## Why
 
@@ -117,6 +142,8 @@ the website.
   encoded and old archives decoding; merged copies keeping attendees; block
   plans for 15 minutes to 4 hours, title priority, spare room, cut lines,
   location and attendees opening the preview, all-day chips; preview content;
-  HTML descriptions; bubble placement; no empty frame between events.
+  HTML descriptions; Teams and Google invitation separators and bracketed
+  links; description line limits; bubble placement; no empty frame between
+  events.
 - Not verified: pointer behaviour, the bubble's look and VoiceOver in the
   installed app; real Google/Exchange account titles on other Macs.

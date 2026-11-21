@@ -56,6 +56,9 @@ struct SettingsOtherView: View {
     /// `islandIdlePreferences` on init and re-read on appear; written back on
     /// every toggle.
     @State private var islandAutoHideEnabled: Bool
+    /// Settings → Other → Display → "Island position". WHY:
+    /// .project-docs/decisions/2026-11-22-island-beside-system-island.md
+    @State private var systemIslandPlacement = IslandSystemIslandPlacement.current()
 
     /// Local mirror of the meetings capability flag. Seeded from
     /// `meetingsEnabledProvider()` on init and re-read on appear; live changes
@@ -228,6 +231,26 @@ struct SettingsOtherView: View {
                             )
                             .accessibilityLabel("Show island on")
                         }
+
+                        MacRowSeparator()
+                        MacRow(
+                            title: "Island position",
+                            subtitle: "Automatic keeps the camera area free for the system Dynamic Island on a touch MacBook Pro."
+                        ) {
+                            MacPopup(
+                                items: IslandSystemIslandPlacement.allCases.map {
+                                    .init(value: $0, label: $0.title)
+                                },
+                                selection: Binding(
+                                    get: { systemIslandPlacement },
+                                    set: { newValue in
+                                        systemIslandPlacement = newValue
+                                        IslandSystemIslandPlacement.set(newValue)
+                                    }
+                                )
+                            )
+                            .accessibilityLabel("Island position")
+                        }
                     }
                 }
             }
@@ -241,6 +264,7 @@ struct SettingsOtherView: View {
             volumeDuckEnabled = volumeDuckConfig.isEnabled
             dropAutoStopEnabled = DropAutoStopPreferences.shared.isEnabled
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
+            systemIslandPlacement = IslandSystemIslandPlacement.current()
             meetingsEnabled = meetingsEnabledProvider()
             googleEnabled = googleEnabledProvider()
             screenshotProtectionEnabled = privacyPreferences.screenshotProtectionEnabled

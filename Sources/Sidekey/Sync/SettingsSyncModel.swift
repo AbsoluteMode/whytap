@@ -125,12 +125,13 @@ enum SettingsSyncItem {
         item.hasPrefix("key:") ? String(item.dropFirst(4)) : nil
     }
 
-    /// Preferences that belong to one Mac only. The island's display is a
-    /// screen of this Mac; calendar accounts rotate their own refresh tokens
+    /// Preferences that belong to one Mac only. The island's display and its
+    /// position beside the system Dynamic Island depend on this Mac's screen; calendar accounts rotate their own refresh tokens
     /// per Mac, and sharing one token would sign the other Mac out; the
     /// routing repair copy is local evidence, not a choice.
     static let excludedPreferences: Set<String> = [
         "sidekey.dynamicIsland.preferredDisplayUUID",
+        IslandSystemIslandPlacement.defaultsKey,
         CalendarAccountSettings.accountsKey,
         CalendarAccountSettings.hiddenFeedsKey,
         CalendarAccountSettings.appleEnabledKey,

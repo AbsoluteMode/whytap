@@ -59,7 +59,7 @@ enum ConfigBackupRegistry {
             "sidekey.preferences.googleEnabled", "com.sidekey.meetings.enabled", "com.sidekey.volumeduck.enabled",
             "com.sidekey.nowplaying.enabled", "com.sidekey.island.idleHideEnabled", "notifications.meetingReady.enabled",
             "com.sidekey.drop.autoStop.enabled"])
-        add(.other, .string, ["sidekey.dynamicIsland.preferredDisplayUUID"])
+        add(.other, .string, ["sidekey.dynamicIsland.preferredDisplayUUID", "sidekey.dynamicIsland.systemIslandPlacement"])
         add(.other, .calendarAccounts, [CalendarAccountSettings.accountsKey])
         add(.other, .strings, [CalendarAccountSettings.hiddenFeedsKey])
         add(.other, .bool, [CalendarAccountSettings.appleEnabledKey])

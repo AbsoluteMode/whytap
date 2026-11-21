@@ -1354,7 +1354,6 @@ final class IslandPanel: NSPanel {
             agentActive: true
         )
         let leftNotificationFrame = IslandFrameLayout.leftNotificationFrame(on: screen, expanded: true)
-        let metrics = IslandFrameLayout.notchMetrics(on: screen)
         return Layout(
             compactFrame: compactFrame,
             expandedHostFrame: expandedHostFrame,
@@ -1362,7 +1361,7 @@ final class IslandPanel: NSPanel {
             leftNotificationFrame: leftNotificationFrame,
             compactHeight: compactFrame.height,
             compactSize: compactFrame.size,
-            notchWidth: metrics.width
+            notchWidth: IslandFrameLayout.capsuleGapWidth(on: screen)
         )
     }
 

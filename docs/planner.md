@@ -4,7 +4,11 @@ Open **Search all tools → To-do** for a compact list inside hover.
 **Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
-range and the calendar name. Every connected calendar is shown. Clicking one joins its meeting link, or opens it in its
+range and the calendar name. A Google or Outlook account synced through Calendar
+on this Mac shows the Google or Outlook logo. Taller blocks also show the
+description and attendees as they fit; hovering a block that cuts anything shows
+a bubble beside Hover with every detail (time, calendar, location, meeting link,
+description, attendees). Every connected calendar is shown. Clicking one joins its meeting link, or opens it in its
 own calendar (Google or Outlook on the web, Calendar on this Mac).
 The tools can also be added from Settings → Toolbox; adding this
 feature does not change existing saved tool layouts or positional shortcuts.
@@ -106,8 +110,11 @@ Planner support preserve connections already configured on the target Mac.
 Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
 selection and the same connection flow used by Settings → Integrations. It does
 not create a Whytap account. Previous/next day and Today stay in the panel;
-opening Calendar again always returns to today. Click an event for full details
-inside Hover. A meeting/original link opens only when explicitly clicked.
+opening Calendar again always returns to today. Hover an event whose block cuts
+something for its full details; clicking it joins the meeting or opens the
+original. A meeting/original link opens only when explicitly clicked.
+Attendees come from Calendar on this Mac and Microsoft, stay in memory and are
+never saved; direct Google connections do not read them.
 
 **Calendars** chooses which local/connected feeds are shown. Account removal is
 in Settings → Integrations. Event times use the Mac’s current time zone. Matching

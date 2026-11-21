@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Planner/CalendarIntegrationFeature.swift
     confirmed_at: 2026-10-21
-related: [2026-10-19-planner.md, 2026-10-21-calendar-hover.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-soon.md]
+related: [2026-10-19-planner.md, 2026-10-21-calendar-hover.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-soon.md, 2026-11-21-calendar-event-details.md]
 ---
 
 ## Decision

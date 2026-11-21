@@ -1240,9 +1240,19 @@ Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range a
 calendar name. Every connected calendar is shown: Hover has no calendar hiding
 or Refresh button (open, day change, account change and a 60 s poll refresh).
 WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+Calendar on this Mac feeds keep provider `apple`; `CalendarFeed.displayService`
+(Exchange, or a CalDAV account titled Google/Outlook or with such an address)
+only picks the Google or Outlook logo. Blocks add, as height allows, the title's
+second line, description lines, an attendee line and more description; a block
+that cuts anything shows a non-interactive History-style bubble with every
+detail (`CalendarEventPreviewState`, hidden 120 ms late to avoid flicker).
+`PlannerEvent.attendees` come from EventKit and Microsoft Graph only, never
+Google direct; they are excluded from `CodingKeys`, so never saved or backed up.
+WHY: .project-docs/decisions/2026-11-21-calendar-event-details.md
 Overlaps share the width and all-day events are chips above the grid. A click
 joins the meeting link, else opens the event in its own calendar (Google/Outlook
-web, ical://ekevent on this Mac). There is no details page. WHY:
+web, ical://ekevent on this Mac). There is no details page; details are in the
+hover bubble. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
 A compact day switcher and Connect stay in Hover; Connect rows carry the
 provider logos, and connection errors and Retry are listed there.

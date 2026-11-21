@@ -64,6 +64,8 @@ is a verifiable claim rather than a slogan.
 - Planner tasks and local Whytap events stay in a private atomic JSON archive
   under Application Support/Sidekey/Planner. External calendar events are held
   in memory while using the unified calendar, without a persistent event cache.
+  Their attendees (names, addresses, responses), read from Calendar on this Mac
+  and Microsoft only, are never written to the archive, backups or logs.
   Calendar account credentials are stored in Keychain and are not logged.
   Public native OAuth client configuration can be bundled for normal sign-in.
   Planner content, calendar settings and saved account credentials are included

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 from datetime import datetime
 import hashlib
 import json
@@ -16,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -291,29 +294,135 @@ def dashboard_command(args: argparse.Namespace) -> int:
         raise ValueError("Refusing a symlink dashboard destination")
     if destination.exists() and not args.replace:
         raise ValueError("Dashboard already exists; inspect it before using --replace")
+    monitor = directory.parent
     if args.dry_run:
-        print(f"Would install {snapshot['id']} to {args.flavor} Monitor/dashboards/{destination.name}")
+        relist = snapshot["id"] in read_removed_dashboards(monitor)
+        print(f"Would install {snapshot['id']} to {args.flavor} Monitor/dashboards/{destination.name}"
+              + ("; it was deleted in Monitor earlier and would be listed again" if relist else ""))
         return 0
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    temporary_path = None
+    relisted = install_dashboard_snapshot(monitor, destination, snapshot["id"], data, replace=args.replace)
+    if relisted:
+        print(f"{snapshot['id']} was deleted in Monitor earlier; it is listed again")
+    print(f"Installed dashboard {snapshot['id']} for {args.flavor}; open Monitor to view it")
+    return 0
+
+
+REMOVED_DASHBOARDS = "removed-dashboards.json"
+REMOVED_DASHBOARDS_LOCK = "removed-dashboards.lock"
+REMOVED_DASHBOARDS_LOCK_SECONDS = 5.0
+
+
+def read_removed_dashboards(monitor: Path) -> list[str]:
+    """IDs deleted in Monitor; a missing list is empty, a broken one is an error."""
+    path = monitor / REMOVED_DASHBOARDS
+    if not path.exists() and not path.is_symlink():
+        return []
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Refusing an unexpected removed-dashboards.json")
     try:
-        with tempfile.NamedTemporaryFile(dir=directory, prefix=".dashboard-", delete=False) as stream:
-            temporary_path = Path(stream.name)
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"removed-dashboards.json is unreadable ({error}); fix it before installing") from None
+    removed = document.get("removed") if isinstance(document, dict) else None
+    id_pattern = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+    if not isinstance(removed, list) or not all(
+            isinstance(item, str) and len(item) <= 120 and re.fullmatch(id_pattern, item) for item in removed):
+        raise ValueError("removed-dashboards.json is invalid; fix it before installing")
+    return removed
+
+
+@contextlib.contextmanager
+def removed_dashboards_lock(monitor: Path):
+    """The same exclusive flock Whytap takes before changing the list."""
+    lock_path = monitor / REMOVED_DASHBOARDS_LOCK
+    if lock_path.is_symlink():
+        raise ValueError("Refusing a symlink removed-dashboards.lock")
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        deadline = time.monotonic() + REMOVED_DASHBOARDS_LOCK_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError("Monitor is changing its deleted dashboards; try again in a moment") from None
+                time.sleep(0.02)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def _private_temporary(directory: Path, prefix: str, data: bytes) -> Path:
+    """A fsynced mode-0600 file next to its destination, for an atomic rename."""
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=prefix, delete=False) as stream:
+            path = Path(stream.name)
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        if args.replace:
-            os.replace(temporary_path, destination)
-        else:
-            # Hard-link installation refuses an existing destination atomically.
-            os.link(temporary_path, destination)
-            temporary_path.unlink()
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-    print(f"Installed dashboard {snapshot['id']} for {args.flavor}; open Monitor to view it")
-    return 0
+        os.chmod(path, 0o600)
+        return path
+    except BaseException:
+        if path is not None:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def install_dashboard_snapshot(monitor: Path, destination: Path, dashboard_id: str, data: bytes,
+                               replace: bool) -> bool:
+    """Writes the snapshot and takes its ID off Monitor's deleted list as one change.
+
+    Everything happens under the list's lock, which Whytap's Delete also takes,
+    so neither loses the other's edit. Both new files are prepared before
+    anything is committed; if the list cannot be committed after the snapshot
+    was, the snapshot is put back as it was. On any failure the previous
+    snapshot and the list stay unchanged. Returns whether the ID was relisted.
+    WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
+    """
+    directory = destination.parent
+    with removed_dashboards_lock(monitor):
+        removed = read_removed_dashboards(monitor)
+        relisted = dashboard_id in removed
+        if destination.is_symlink():
+            raise ValueError("Refusing a symlink dashboard destination")
+        if destination.exists() and not replace:
+            raise ValueError("Dashboard already exists; inspect it before using --replace")
+        snapshot_temporary = list_temporary = backup = None
+        committed = False
+        try:
+            snapshot_temporary = _private_temporary(directory, ".dashboard-", data)
+            if relisted:
+                document = {"removed": sorted(set(removed) - {dashboard_id})}
+                list_temporary = _private_temporary(
+                    monitor, ".removed-dashboards-", (json.dumps(document, indent=2) + "\n").encode("utf-8"))
+            if replace and destination.exists():
+                backup = directory / f".dashboard-backup-{os.getpid()}-{time.monotonic_ns()}"
+                os.link(destination, backup)
+            if replace:
+                os.replace(snapshot_temporary, destination)
+            else:
+                # Hard-link installation refuses an existing destination atomically.
+                os.link(snapshot_temporary, destination)
+            committed = True
+            if list_temporary is not None:
+                os.replace(list_temporary, monitor / REMOVED_DASHBOARDS)
+                list_temporary = None
+            committed = False
+        finally:
+            if committed:
+                # The list could not be committed: put the snapshot back.
+                if backup is not None:
+                    os.replace(backup, destination)
+                    backup = None
+                else:
+                    destination.unlink(missing_ok=True)
+            for leftover in (snapshot_temporary, list_temporary, backup):
+                if leftover is not None:
+                    leftover.unlink(missing_ok=True)
+    return relisted
 
 
 def main(argv: list[str] | None = None) -> int:

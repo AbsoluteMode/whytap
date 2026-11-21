@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="421" height="92" viewBox="0 0 421 92">
+  <rect x="0.5" y="0.5" width="420" height="91" rx="14" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <svg x="18" y="20" width="20" height="20" fill="#1f2328" role="img" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+
+  <path d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945" fill="none" stroke="#1f2328" stroke-width="90"/>
+  <path d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z" fill="#1f2328"/>
+  <path d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377" fill="none" stroke="#1f2328" stroke-width="90"/>
+  <path d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z" fill="#1f2328"/>
+</svg>
+
+  <text x="47" y="36" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#1f2328">OpenRouter</text>
+  <text x="18" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b4bd6">Language models</text>
+  <text x="403" y="46" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="30" font-weight="700" fill="#1f2328">50 / day</text>
+  <text x="403" y="70" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#59636e">model requests</text>
+</svg>

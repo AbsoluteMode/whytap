@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="172" height="104" viewBox="0 0 172 104">
-  <rect x="0.5" y="0.5" width="171" height="103" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
-  <g transform="translate(14 12) scale(0.6667)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
-  <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></g>
-  <text x="36" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1f2328">Case</text>
-  <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#1f2328"><tspan x="14" y="52">“Deploy with</tspan><tspan x="14" y="69">my API key”</tspan></text>
-  <text x="14" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#5b4bd6">Key names, never values</text>
-</svg>

@@ -61,7 +61,8 @@ THEMES = {
     "light": dict(bg="#f6f8fa", border="#d1d9e0", ink="#1f2328", sub="#59636e", accent="#5b4bd6"),
 }
 FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
-W, H = 196, 124
+W, H = 196, 124  # phone card
+WW, WH = 421, 92  # wide card: two per row, each 49% of the README column
 ICONS = REPO / "Resources/UsefulLinkIcons"
 OUT = REPO / "docs/assets/readme"
 
@@ -78,6 +79,20 @@ def logo(asset, color, x, y, size):
 
 def short(cadence):
     return cadence[5:] if cadence.startswith("free ") else cadence
+
+
+def wide_card(o, theme):
+    c = THEMES[theme]
+    e = lambda t: html.escape(t, quote=False)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{WW}" height="{WH}" viewBox="0 0 {WW} {WH}">
+  <rect x="0.5" y="0.5" width="{WW-1}" height="{WH-1}" rx="14" fill="{c['bg']}" stroke="{c['border']}"/>
+  {logo(o["assetName"], c["ink"], 18, 20, 20)}
+  <text x="47" y="36" font-family="{FONT}" font-size="15" font-weight="600" fill="{c['ink']}">{e(o['provider'])}</text>
+  <text x="18" y="70" font-family="{FONT}" font-size="12" font-weight="600" fill="{c['accent']}">{e(CATEGORY[o['category']])}</text>
+  <text x="{WW-18}" y="46" text-anchor="end" font-family="{FONT}" font-size="30" font-weight="700" fill="{c['ink']}">{e(o['allowance'])}</text>
+  <text x="{WW-18}" y="70" text-anchor="end" font-family="{FONT}" font-size="12" fill="{c['sub']}">{e(short(o['cadence']))}</text>
+</svg>
+'''
 
 
 def card(o, theme):
@@ -98,7 +113,7 @@ def card(o, theme):
 # README's earlier per-tool comparison), about $636 a year. An estimate, shown
 # as approximate; Maxim chose the figure on 2026-11-21.
 PAID_YEARLY = "$600"  # shown struck through; the caption and alt say it is approximate
-BANNER = {"wide": (640, 232), "phone": (300, 222)}
+WIDTH = {"wide": 860, "phone": 300}  # shown 100% wide, like the code blocks
 QUOTAS = "Everyday use fits in the free quotas."
 # Ways to run Whytap without paying for a subscription (CLAUDE.md: BYOK, the
 # On this Mac speech model on Apple Silicon, OpenAI-compatible self-hosted
@@ -115,53 +130,79 @@ def facts(checked):
     return ["No card needed", "Reviewed monthly", f"Last checked {display(checked)}"]
 
 
-def banner(theme, layout, checked):
-    # WHY: .project-docs/decisions/2026-11-21-free-api-report.md (2026-11-21
-    # follow-up: the banner also names the ways to run free and holds the
-    # quota lines, so it is not empty).
-    c = THEMES[theme]
-    w, h = BANNER[layout]
-    wide = layout == "wide"
-    big, cap = (44, 13) if wide else (30, 10.5)
-    left, right, mid = w * 0.27, w * 0.73, w / 2
-    y_num = 56 if wide else 44
-    y_cap = y_num + cap * 1.9
-    y_rule = y_cap + (18 if wide else 14)
-    strike = c["sub"]
-    green = "#3fb950" if theme == "dark" else "#1a7f37"
-    e = lambda t: html.escape(t, quote=False)
-    text = lambda x, y, size, fill, body, weight="400": (
-        f'  <text x="{x}" y="{y}" text-anchor="middle" font-family="{FONT}" font-size="{size}" '
-        f'font-weight="{weight}" fill="{fill}">{e(body)}</text>')
-    # Three ways to run free, in columns.
-    col = (w - 48) / 3
-    y_way = y_rule + (28 if wide else 24)
-    ways = []
-    for i, way in enumerate(WAYS):
-        x = 24 + col * (i + 0.5)
-        ways.append(text(x, y_way, 13 if wide else 11, c["ink"], way["title"] if wide else way["phone_title"], "600"))
-        ways.append(text(x, y_way + (18 if wide else 15), 11.5 if wide else 9.5, c["sub"], way["sub"] if wide else way["phone_sub"]))
-    y_rule2 = y_way + (36 if wide else 31)
-    # One footer line on the wide banner; the phone banner splits it in two.
-    items = facts(checked)
-    lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
-    y_quota = y_rule2 + (26 if wide else 22)
-    footer = [text(mid, y_quota, 14 if wide else 12, c["ink"], QUOTAS, "600")] + [
-        text(mid, y_quota + (20 if wide else 16) * (i + 1), 12 if wide else 10.5, c["sub"], line)
-        for i, line in enumerate(lines)]
-    body = "\n".join(ways + [f'  <line x1="24" y1="{y_rule2}" x2="{w - 24}" y2="{y_rule2}" stroke="{c["border"]}"/>'] + footer)
+def _text(x, y, size, fill, body, weight="400"):
+    return (f'  <text x="{x}" y="{y}" text-anchor="middle" font-family="{FONT}" font-size="{size}" '
+            f'font-weight="{weight}" fill="{fill}">{html.escape(body, quote=False)}</text>')
+
+
+def _box(w, h, c, body):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
   <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="16" fill="{c['bg']}" stroke="{c['border']}"/>
-  <text x="{left}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{c['sub']}">{html.escape(PAID_YEARLY)}</text>
-  <line x1="{left - big * 1.22}" y1="{y_num - big * 0.33}" x2="{left + big * 1.22}" y2="{y_num - big * 0.33}" stroke="{strike}" stroke-width="{2.5 if layout == 'wide' else 2}" stroke-linecap="round"/>
-  <text x="{left}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" fill="{c['sub']}">≈ paid apps per year</text>
-  <text x="{mid}" y="{y_num - big * 0.2}" text-anchor="middle" font-family="{FONT}" font-size="{big * 0.6}" fill="{c['sub']}">→</text>
-  <text x="{right}" y="{y_num}" text-anchor="middle" font-family="{FONT}" font-size="{big}" font-weight="700" fill="{green}">$0</text>
-  <text x="{right}" y="{y_cap}" text-anchor="middle" font-family="{FONT}" font-size="{cap}" font-weight="600" fill="{c['ink']}">Whytap</text>
-  <line x1="24" y1="{y_rule}" x2="{w - 24}" y2="{y_rule}" stroke="{c['border']}"/>
 {body}
 </svg>
 '''
+
+
+def ways_banner(theme, layout, checked):
+    # WHY: .project-docs/decisions/2026-11-21-free-api-report.md (2026-11-21
+    # follow-ups: the ways to run free and the quota lines in one block, the
+    # price comparison in its own block under it).
+    c = THEMES[theme]
+    w = WIDTH[layout]
+    wide = layout == "wide"
+    mid = w / 2
+    col = (w - 48) / 3
+    y_way = 38 if wide else 28
+    rows = []
+    for i, way in enumerate(WAYS):
+        x = 24 + col * (i + 0.5)
+        rows.append(_text(x, y_way, 15 if wide else 11, c["ink"], way["title"] if wide else way["phone_title"], "600"))
+        rows.append(_text(x, y_way + (21 if wide else 15), 13 if wide else 9.5, c["sub"], way["sub"] if wide else way["phone_sub"]))
+    y_rule = y_way + (42 if wide else 31)
+    rows.append(f'  <line x1="24" y1="{y_rule}" x2="{w - 24}" y2="{y_rule}" stroke="{c["border"]}"/>')
+    # One footer line on the wide banner; the phone banner splits it in two.
+    items = facts(checked)
+    lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
+    y_quota = y_rule + (34 if wide else 24)
+    rows.append(_text(mid, y_quota, 16 if wide else 12, c["ink"], QUOTAS, "600"))
+    step = 23 if wide else 16
+    rows += [_text(mid, y_quota + step * (i + 1), 13.5 if wide else 10.5, c["sub"], line) for i, line in enumerate(lines)]
+    h = round(y_quota + step * len(lines) + (24 if wide else 16))
+    return _box(w, h, c, "\n".join(rows))
+
+
+def price_banner(theme, layout):
+    c = THEMES[theme]
+    w = WIDTH[layout]
+    wide = layout == "wide"
+    h = 128 if wide else 96
+    big, cap = (50, 14) if wide else (30, 10.5)
+    left, right, mid = w * 0.3, w * 0.7, w / 2
+    y_num, y_cap = h * 0.52, h * 0.52 + cap * 1.9
+    green = "#3fb950" if theme == "dark" else "#1a7f37"
+    body = "\n".join([
+        _text(left, y_num, big, c["sub"], PAID_YEARLY, "700"),
+        f'  <line x1="{left - big * 1.22}" y1="{y_num - big * 0.33}" x2="{left + big * 1.22}" y2="{y_num - big * 0.33}" '
+        f'stroke="{c["sub"]}" stroke-width="{2.5 if wide else 2}" stroke-linecap="round"/>',
+        _text(left, y_cap, cap, c["sub"], "≈ paid apps per year"),
+        _text(mid, y_num - big * 0.2, big * 0.6, c["sub"], "→"),
+        _text(right, y_num, big, green, "$0", "700"),
+        _text(right, y_cap, cap, c["ink"], "Whytap", "600"),
+    ])
+    return _box(w, h, c, body)
+
+
+def responsive(kind, alt, width):
+    b = lambda lay, t: f"docs/assets/readme/free-api-{kind}-{lay}-{t}.svg"
+    return (
+        "<picture>"
+        f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{b("phone", "dark")}">'
+        f'<source media="(max-width: 640px)" srcset="{b("phone", "light")}">'
+        f'<source media="(prefers-color-scheme: dark)" srcset="{b("wide", "dark")}">'
+        f'<source media="(prefers-color-scheme: light)" srcset="{b("wide", "light")}">'
+        f'<img alt="{html.escape(alt)}" src="{b("wide", "dark")}" width="{width}">'
+        "</picture>"
+    )
 
 
 def section():
@@ -176,37 +217,34 @@ def section():
         slug = re.sub(r"[^a-z0-9]+", "-", o["provider"].lower()).strip("-")
         for t in THEMES:
             (OUT / f"free-api-{slug}-{t}.svg").write_text(card(o, t))
+            (OUT / f"free-api-{slug}-wide-{t}.svg").write_text(wide_card(o, t))
         src = lambda t: f"docs/assets/readme/free-api-{slug}-{t}.svg"
+        wsrc = lambda t: f"docs/assets/readme/free-api-{slug}-wide-{t}.svg"
         alt = html.escape(f"{o['provider']}: {o['allowance']} {o['cadence']} ({CATEGORY[o['category']]})")
         cards.append(
             f'<a href="{o["url"]}"><picture>'
-            f'<source media="(prefers-color-scheme: dark)" srcset="{src("dark")}">'
-            f'<source media="(prefers-color-scheme: light)" srcset="{src("light")}">'
-            f'<img alt="{alt}" src="{src("dark")}" width="{W}"></picture></a>'
+            f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{src("dark")}">'
+            f'<source media="(max-width: 640px)" srcset="{src("light")}">'
+            f'<source media="(prefers-color-scheme: dark)" srcset="{wsrc("dark")}">'
+            f'<source media="(prefers-color-scheme: light)" srcset="{wsrc("light")}">'
+            f'<img alt="{alt}" src="{wsrc("dark")}" width="49%"></picture></a>'
         )
-    for lay in BANNER:
+    for lay in WIDTH:
         for t in THEMES:
-            (OUT / f"free-api-banner-{lay}-{t}.svg").write_text(banner(t, lay, newest))
-    b = lambda lay, t: f"docs/assets/readme/free-api-banner-{lay}-{t}.svg"
-    alt_text = (f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0. "
-                + "; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
+            (OUT / f"free-api-ways-{lay}-{t}.svg").write_text(ways_banner(t, lay, newest))
+            (OUT / f"free-api-price-{lay}-{t}.svg").write_text(price_banner(t, lay))
+    ways_alt = ("; ".join(f"{way['title']} ({way['sub']})" for way in WAYS) + f". {QUOTAS} "
                 + ", ".join(facts(newest)) + ".")
-    banner_html = (
-        "<picture>"
-        f'<source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="{b("phone", "dark")}">'
-        f'<source media="(max-width: 640px)" srcset="{b("phone", "light")}">'
-        f'<source media="(prefers-color-scheme: dark)" srcset="{b("wide", "dark")}">'
-        f'<source media="(prefers-color-scheme: light)" srcset="{b("wide", "light")}">'
-        f'<img alt="{html.escape(alt_text)}" src="{b("wide", "dark")}" width="{BANNER["wide"][0]}">'
-        "</picture>"
-    )
+    price_alt = f"Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0."
     return "\n".join([
         HEADING,
         "",
-        f"<p align=\"center\">{banner_html}</p>",
+        f"<p align=\"center\">{responsive('ways', ways_alt, '100%')}</p>",
+        "",
+        f"<p align=\"center\">{responsive('price', price_alt, '100%')}</p>",
         "",
         "<p align=\"center\">",
-        "\n".join(cards),
+        "\n<br>\n".join("\n".join(cards[i:i + 2]) for i in range(0, len(cards), 2)),
         "</p>",
     ]) + "\n"
 

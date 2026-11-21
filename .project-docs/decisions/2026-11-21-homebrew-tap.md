@@ -76,7 +76,7 @@ Homebrew symbol for macOS 14.2; the app itself refuses older systems.
   in-process and trusted the tap for that run only through an environment
   variable; no Homebrew setting was changed.
 - The DMG's `CFBundleIdentifier` is `com.rootwise.sidekey` and its
-  `LSMinimumSystemVersion` is 14.2, matching the cask and the zap paths.
+  `LSMinimumSystemVersion` enforces 14.2 within the cask's Sonoma requirement.
 - 15 unit tests cover the rewrite rules, downgrade refusal, hash mismatch,
   a missing asset, dry run, a concurrent edit and the stale check. A live
   `check` and `--dry-run` against the real tap behaved as expected.

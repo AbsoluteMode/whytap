@@ -50,8 +50,8 @@ brew install absolutemode/tap/whytap
 
 The cask lives in the public tap
 [AbsoluteMode/homebrew-tap](https://github.com/AbsoluteMode/homebrew-tap). It pins
-the release tag and the SHA-256 of that release's `Whytap-latest.dmg`, requires
-macOS 14 or newer and is refreshed by Whytap's release process after each
+the release tag and the SHA-256 of that release's `Whytap-latest.dmg`. Whytap
+requires macOS 14.2 or newer. The cask is refreshed by the release process after each
 release, so it can trail the newest release by a short time (`brew upgrade --cask
 whytap` catches up). Whytap updates itself through Sparkle, so you do not need
 `brew upgrade` to stay current; the cask is marked `auto_updates`. Quit a running

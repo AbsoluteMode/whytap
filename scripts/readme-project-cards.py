@@ -2,19 +2,20 @@
 """Write the README "You may also like" cards: other AbsoluteMode projects.
 
 Four cards in a 2x2 grid, the same look as the Free to use cards (two per row,
-49% of the README column each): an icon disk, the name, who it works with, a
+49% of the README column each): the name, who it works with, a
 short description, and an arrow for a linked repository or a "soon" pill.
+No icons: the projects have no logos of their own, and Maxim found generic
+ones worse than none (2026-11-21).
 GitHub strips CSS from READMEs, so each card is an SVG in dark and light
 (docs/assets/readme/project-*.svg) chosen by <picture> and prefers-color-scheme.
 Lines are wrapped by hand so the cards look the same on every machine; the
 phone cards carry the same meaning in shorter lines. The alt text repeats the
 wide card's text.
 
-Usage (icons come from Lucide, ISC, see docs/assets/readme/tool-icons.LICENSE.txt):
-    npm pack lucide-static@0.460.0 && tar xzf lucide-static-0.460.0.tgz
-    python3 scripts/readme-project-cards.py package/icons
+Usage:
+    python3 scripts/readme-project-cards.py
 """
-import html, pathlib, re, sys
+import html, pathlib, sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 README = REPO / "README.md"
@@ -22,28 +23,28 @@ OUT = REPO / "docs/assets/readme"
 HEADING = "## You may also like"
 FOOTER = '<p align="center"><sub>'  # the footer links that follow the section
 
-# slug, name, URL (None: not published yet, shown as soon), Lucide icon,
+# slug, name, URL (None: not published yet, shown as soon),
 # wide: (who, [description lines]), phone: ([who lines], [description lines])
 PROJECTS = [
-    ("session-recall", "Session Recall", "https://github.com/AbsoluteMode/session-recall", "brain",
+    ("session-recall", "Session Recall", "https://github.com/AbsoluteMode/session-recall",
      ("Claude Code · Codex · Cursor · Antigravity",
       ["Shared semantic memory: find an old decision by meaning",
        "across all your agents' chats, with links to the original turns."]),
      (["Claude Code · Codex ·", "Cursor · Antigravity"],
       ["Shared semantic memory:", "find an old decision by", "meaning in all your", "agents' chats."])),
-    ("flora", "flora", "https://github.com/AbsoluteMode/flora", "list-checks",
+    ("flora", "flora", "https://github.com/AbsoluteMode/flora",
      ("Workflow contracts for coding harnesses",
       ["Every step says what proves it is done, and an independent",
        "verifier checks that before the next step starts."]),
      (["Workflow contracts for", "coding harnesses"],
       ["Every step says what", "proves it is done; a", "verifier checks it before", "the next step starts."])),
-    ("harness-link", "Harness Link", "https://github.com/AbsoluteMode/harness-link", "link",
+    ("harness-link", "Harness Link", "https://github.com/AbsoluteMode/harness-link",
      ("Claude Code · Codex · Antigravity (Gemini)",
       ["Connects their sessions: shared rooms, addressed messages",
        "to running sessions and persistent Claude consultations."]),
      (["Claude Code · Codex ·", "Antigravity (Gemini)"],
       ["Shared rooms, messages", "to running sessions and", "persistent Claude", "consultations."])),
-    ("orchestrator", "Orchestrator", None, "layout-grid",
+    ("orchestrator", "Orchestrator", None,
      ("Claude Code plugin",
       ["Ten chats in one window: it keeps the task list, starts the",
        "sessions and writes to you only when it needs you."]),
@@ -53,27 +54,23 @@ PROJECTS = [
 
 THEMES = {  # the Tools and Free to use cards' palette
     "dark": dict(bg="#151b23", border="#2d333b", title="#f0f6fc", sub="#9198a1", accent="#b8adff",
-                 disk="#2a2350", icon="#b8adff", pill="#6c5ce7", pilltext="#ffffff"),
+                 pill="#6c5ce7", pilltext="#ffffff"),
     "light": dict(bg="#f6f8fa", border="#d1d9e0", title="#1f2328", sub="#59636e", accent="#5b4bd6",
-                  disk="#ece9ff", icon="#5b4bd6", pill="#6c5ce7", pilltext="#ffffff"),
+                  pill="#6c5ce7", pilltext="#ffffff"),
 }
 FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
 LAYOUTS = {
     # wide: two per row at 49% of the README column from 641 px up
-    "wide": dict(W=421, H=136, rx=14, cx=34, cy=34, r=17, isz=18, tx=62, ty=40, ts=16,
-                 ax=18, ay=80, afs=12.5, astep=0, dy=103, dfs=12.5, dstep=18,
+    "wide": dict(W=421, H=112, rx=14, x=18, ty=34, ts=16, hy=29,
+                 ay=58, afs=12.5, astep=0, dy=80, dfs=12.5, dstep=18,
                  arrow=16, pw=44, ph=20, pfs=11.5),
     # phone: the same two columns on a narrow column, so shorter lines
-    "phone": dict(W=196, H=182, rx=14, cx=28, cy=28, r=14, isz=15, tx=50, ty=33, ts=14.5,
-                  ax=16, ay=66, afs=11.5, astep=15, dy=106, dfs=12, dstep=16,
+    "phone": dict(W=196, H=158, rx=14, x=16, ty=31, ts=14.5, hy=26,
+                  ay=54, afs=11.5, astep=15, dy=92, dfs=12, dstep=16,
                   arrow=14, pw=38, ph=18, pfs=10.5),
 }
-
-
-def icon_inner(lucide, name):
-    svg = (lucide / f"{name}.svg").read_text()
-    svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
-    return re.search(r"<svg[^>]*>(.*)</svg>", svg, re.S).group(1).strip()
+# Lucide arrow-up-right (ISC, see docs/assets/readme/tool-icons.LICENSE.txt)
+ARROW = '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>'
 
 
 def text(x, y, size, fill, body, weight="400", anchor="start"):
@@ -81,40 +78,32 @@ def text(x, y, size, fill, body, weight="400", anchor="start"):
             f'font-weight="{weight}" fill="{fill}">{html.escape(body, quote=False)}</text>')
 
 
-def card(lucide, project, theme, layout):
-    slug, name, url, icon, wide, phone = project
+def card(project, theme, layout):
+    slug, name, url, wide, phone = project
     c, g = THEMES[theme], LAYOUTS[layout]
-    W, H = g["W"], g["H"]
+    W, H, x = g["W"], g["H"], g["x"]
     who, desc = (([wide[0]], wide[1]) if layout == "wide" else phone)
-    sc = g["isz"] / 24
     rows = [
         f'  <rect x="0.5" y="0.5" width="{W-1}" height="{H-1}" rx="{g["rx"]}" fill="{c["bg"]}" stroke="{c["border"]}"/>',
-        f'  <circle cx="{g["cx"]}" cy="{g["cy"]}" r="{g["r"]}" fill="{c["disk"]}"/>',
-        f'  <g transform="translate({g["cx"]-g["isz"]/2} {g["cy"]-g["isz"]/2}) scale({sc:.4f})" fill="none" '
-        f'stroke="{c["icon"]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_inner(lucide, icon)}</g>',
-        text(g["tx"], g["ty"], g["ts"], c["title"], name, "600"),
+        text(x, g["ty"], g["ts"], c["title"], name, "600"),
     ]
     right = W - 16
     if url:  # a drawn arrow to the repository, like a link mark
-        a, top = g["arrow"], g["cy"] - g["arrow"] / 2
-        s = a / 24
-        rows.append(f'  <g transform="translate({right - a} {top}) scale({s:.4f})" fill="none" stroke="{c["sub"]}" '
-                    f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_inner(lucide, "arrow-up-right")}</g>')
-    elif layout == "wide":  # not published yet: a pill where the arrow would be
-        px, py = right - g["pw"], g["cy"] - g["ph"] / 2
-    else:  # the phone title has no room beside it: the pill goes under the one-line "who"
-        px, py = g["ax"], g["ay"] + 7
-    if not url:
+        a = g["arrow"]
+        rows.append(f'  <g transform="translate({right - a} {g["hy"] - a / 2}) scale({a / 24:.4f})" fill="none" '
+                    f'stroke="{c["sub"]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{ARROW}</g>')
+    else:  # not published yet: a pill where the arrow would be
+        px, py = right - g["pw"], g["hy"] - g["ph"] / 2
         rows.append(f'  <rect x="{px}" y="{py}" width="{g["pw"]}" height="{g["ph"]}" rx="{g["ph"]/2}" fill="{c["pill"]}"/>')
         rows.append(text(px + g["pw"] / 2, f'{py + g["ph"]/2 + g["pfs"]*0.36:.1f}', g["pfs"], c["pilltext"], "soon", "600", "middle"))
-    rows += [text(g["ax"], g["ay"] + i * g["astep"], g["afs"], c["accent"], line, "600") for i, line in enumerate(who)]
-    rows += [text(g["ax"], g["dy"] + i * g["dstep"], g["dfs"], c["sub"], line) for i, line in enumerate(desc)]
+    rows += [text(x, g["ay"] + i * g["astep"], g["afs"], c["accent"], line, "600") for i, line in enumerate(who)]
+    rows += [text(x, g["dy"] + i * g["dstep"], g["dfs"], c["sub"], line) for i, line in enumerate(desc)]
     body = "\n".join(rows)
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n{body}\n</svg>\n'
 
 
 def alt(project):
-    slug, name, url, icon, wide, phone = project
+    slug, name, url, wide, phone = project
     soon = "" if url else " (soon)"
     return f"{name}{soon}: {wide[0]}. {' '.join(wide[1])}"
 
@@ -136,13 +125,12 @@ def section():
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 1:
         sys.exit(__doc__)
-    lucide = pathlib.Path(sys.argv[1])
     for p in PROJECTS:
         for lay in LAYOUTS:
             for t in THEMES:
-                (OUT / f"project-{p[0]}-{lay}-{t}.svg").write_text(card(lucide, p, t, lay))
+                (OUT / f"project-{p[0]}-{lay}-{t}.svg").write_text(card(p, t, lay))
     readme = README.read_text()
     start, end = readme.index(HEADING), readme.index(FOOTER)
     README.write_text(readme[:start] + section() + readme[end:])

@@ -1,16 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="196" height="182" viewBox="0 0 196 182">
-  <rect x="0.5" y="0.5" width="195" height="181" rx="14" fill="#151b23" stroke="#2d333b"/>
-  <circle cx="28" cy="28" r="14" fill="#2a2350"/>
-  <g transform="translate(20.5 20.5) scale(0.6250)" fill="none" stroke="#b8adff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1" />
-  <rect width="7" height="7" x="14" y="3" rx="1" />
-  <rect width="7" height="7" x="14" y="14" rx="1" />
-  <rect width="7" height="7" x="3" y="14" rx="1" /></g>
-  <text x="50" y="33" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#f0f6fc">Orchestrator</text>
-  <rect x="16" y="73" width="38" height="18" rx="9.0" fill="#6c5ce7"/>
-  <text x="35.0" y="85.8" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#ffffff">soon</text>
-  <text x="16" y="66" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#b8adff">Claude Code plugin</text>
-  <text x="16" y="106" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">Ten chats in one window:</text>
-  <text x="16" y="122" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">it keeps the task list</text>
-  <text x="16" y="138" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">and writes to you only</text>
-  <text x="16" y="154" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">when it needs you.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="196" height="158" viewBox="0 0 196 158">
+  <rect x="0.5" y="0.5" width="195" height="157" rx="14" fill="#151b23" stroke="#2d333b"/>
+  <text x="16" y="31" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#f0f6fc">Orchestrator</text>
+  <rect x="142" y="17.0" width="38" height="18" rx="9.0" fill="#6c5ce7"/>
+  <text x="161.0" y="29.8" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#ffffff">soon</text>
+  <text x="16" y="54" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#b8adff">Claude Code plugin</text>
+  <text x="16" y="92" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">Ten chats in one window:</text>
+  <text x="16" y="108" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">it keeps the task list</text>
+  <text x="16" y="124" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">and writes to you only</text>
+  <text x="16" y="140" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#9198a1">when it needs you.</text>
 </svg>

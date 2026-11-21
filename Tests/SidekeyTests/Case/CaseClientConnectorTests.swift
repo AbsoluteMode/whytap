@@ -20,7 +20,7 @@ final class CaseClientConnectorTests: XCTestCase {
         XCTAssertEqual(runner.calls.count, 1, "nothing configured yet: a single add")
         let call = try XCTUnwrap(runner.calls.first)
         XCTAssertEqual(call.executable, claude)
-        XCTAssertEqual(call.arguments, ["mcp", "add", "-s", "user", "case", "--", helper, "case", "mcp"])
+        XCTAssertEqual(call.arguments, ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"])
         // The child gets only what it needs to find its own config, never a value or token.
         XCTAssertEqual(Set(call.environment.keys), ["HOME", "PATH", "LANG"])
         XCTAssertEqual(call.environment["HOME"], home.path)
@@ -32,9 +32,30 @@ final class CaseClientConnectorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/settings.json").path))
     }
 
-    func test_claude_reinstall_replaces_existing_user_entry() throws {
+    /// A Claude Code connected by an earlier build has a Case-only `case`
+    /// entry: Connect adds the one `whytap` server, then removes that entry.
+    func test_claude_connect_migrates_the_older_case_entry_to_the_one_server() throws {
         let home = try temporaryHome()
-        try write(#"{"mcpServers":{"case":{"command":"/old/whytap","args":["case","mcp"]}}}"#,
+        try write(#"{"mcpServers":{"case":{"command":"\#(helper)","args":["case","mcp"]}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+        XCTAssertFalse(connector.isConfigured(), "only the old Case-only entry")
+
+        try connector.install(helperPath: helper)
+
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"],
+            ["mcp", "remove", "-s", "user", "case"],
+        ])
+    }
+
+    /// The README's older line added `whytap` -> `app mcp` by hand: Connect
+    /// replaces it with the one server, which keeps every application tool.
+    func test_claude_reinstall_replaces_our_existing_whytap_entry() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"whytap":{"type":"stdio","command":"/Applications/Whytap.app/Contents/Helpers/whytap","args":["app","mcp"]}}}"#,
                   to: home.appendingPathComponent(".claude.json"))
         let runner = FakeCommandRunner()
         let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
@@ -44,9 +65,70 @@ final class CaseClientConnectorTests: XCTestCase {
         try connector.install(helperPath: helper)
 
         XCTAssertEqual(runner.calls.map(\.arguments), [
-            ["mcp", "remove", "-s", "user", "case"],
-            ["mcp", "add", "-s", "user", "case", "--", helper, "case", "mcp"],
+            ["mcp", "remove", "-s", "user", "whytap"],
+            ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"],
         ])
+    }
+
+    /// An entry that is already `<helper> mcp` is left as it is.
+    func test_claude_current_entry_is_not_rewritten() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"whytap":{"type":"stdio","command":"\#(helper)","args":["mcp"],"env":{}}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                    locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }).install(helperPath: helper)
+        XCTAssertEqual(runner.calls, [])
+    }
+
+    /// Builder review (queue run 16213): `claude mcp add` refuses an existing
+    /// name, so ours is removed first; a refused add then puts the previous
+    /// entry back exactly as it was and reports the add's failure.
+    func test_claude_refused_replacement_restores_the_working_entry() throws {
+        let home = try temporaryHome()
+        let previous = #"{"type":"stdio","command":"\#(helper)","args":["app","mcp"],"env":{}}"#
+        try write(#"{"mcpServers":{"whytap":\#(previous)}}"#, to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        runner.failingPrefixes = [["mcp", "add", "-s"]]
+        let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+        XCTAssertThrowsError(try connector.install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .commandFailed(status: 1))
+        }
+        XCTAssertEqual(runner.calls.count, 3)
+        XCTAssertEqual(runner.calls[0].arguments, ["mcp", "remove", "-s", "user", "whytap"])
+        XCTAssertEqual(runner.calls[1].arguments, ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"])
+        XCTAssertEqual(Array(runner.calls[2].arguments.prefix(5)), ["mcp", "add-json", "-s", "user", "whytap"])
+        let restored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(runner.calls[2].arguments[5].utf8)) as? NSDictionary)
+        XCTAssertEqual(restored, try XCTUnwrap(JSONSerialization.jsonObject(with: Data(previous.utf8)) as? NSDictionary))
+    }
+
+    func test_claude_failed_restore_is_reported_as_such() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"whytap":{"command":"\#(helper)","args":["app","mcp"]}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        runner.failingPrefixes = [["mcp", "add"], ["mcp", "add-json"]]
+        XCTAssertThrowsError(try ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                         locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+            .install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .restoreFailed)
+        }
+        XCTAssertEqual(runner.calls.map { $0.arguments[1] }, ["remove", "add", "add-json"])
+    }
+
+    /// A failed cleanup of the old entry does not fail Connect: that entry
+    /// still works (`case mcp` is kept) and only repeats the Case tools.
+    func test_claude_failed_cleanup_of_the_old_entry_keeps_the_connection() throws {
+        let home = try temporaryHome()
+        try write(#"{"mcpServers":{"case":{"command":"\#(helper)","args":["case","mcp"]}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        let runner = FakeCommandRunner()
+        runner.failingArguments = ["mcp", "remove", "-s", "user", "case"]
+        let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+        XCTAssertNoThrow(try connector.install(helperPath: helper))
+        XCTAssertEqual(runner.calls.first?.arguments, ["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"])
     }
 
     func test_claude_sandbox_gets_socket_path_preserving_settings() throws {
@@ -74,7 +156,7 @@ final class CaseClientConnectorTests: XCTestCase {
         // The previous file is kept next to it.
         XCTAssertEqual(try String(contentsOf: settingsURL.appendingPathExtension("bak"), encoding: .utf8), original)
 
-        try connector.uninstall()
+        try connector.uninstall(helperPath: helper)
         let after = try readJSON(settingsURL)
         let afterNetwork = try XCTUnwrap((after["sandbox"] as? [String: Any])?["network"] as? [String: Any])
         XCTAssertEqual(afterNetwork["allowUnixSockets"] as? [String], ["/tmp/other.sock"])
@@ -132,45 +214,204 @@ final class CaseClientConnectorTests: XCTestCase {
         }
     }
 
-    func test_claude_uninstall_runs_remove_only_when_configured() throws {
+    /// Disconnect removes only the old Case-only entry. The `whytap` server
+    /// stays: it is the general Whytap server, and without a registration the
+    /// broker already refuses its Case tools.
+    func test_claude_uninstall_removes_only_the_old_case_entry() throws {
         let home = try temporaryHome()
         let runner = FakeCommandRunner()
         let connector = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
                                                 locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
-        try connector.uninstall()
+        try connector.uninstall(helperPath: helper)
         XCTAssertTrue(runner.calls.isEmpty, "nothing to remove")
 
-        try write(#"{"mcpServers":{"case":{"command":"/old/whytap","args":["case","mcp"]},"other":{}}}"#,
+        try write(#"{"mcpServers":{"whytap":{"command":"\#(helper)","args":["mcp"]}}}"#,
                   to: home.appendingPathComponent(".claude.json"))
-        try connector.uninstall()
+        try connector.uninstall(helperPath: helper)
+        XCTAssertTrue(runner.calls.isEmpty, "the one server stays")
+
+        try write(#"{"mcpServers":{"case":{"command":"\#(helper)","args":["case","mcp"]},"whytap":{"command":"\#(helper)","args":["mcp"]},"other":{}}}"#,
+                  to: home.appendingPathComponent(".claude.json"))
+        try connector.uninstall(helperPath: helper)
         XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "-s", "user", "case"]])
     }
 
     // MARK: Codex
 
-    func test_codex_connector_adds_and_removes_without_touching_sandbox() throws {
+    func test_codex_connector_reads_through_codex_then_adds_without_touching_its_config() throws {
         let home = try temporaryHome()
         let configURL = home.appendingPathComponent(".codex/config.toml")
         let config = "sandbox_mode = \"workspace-write\"\n"
         try write(config, to: configURL)
         let runner = FakeCommandRunner()
         let codex = URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex")
-        let connector = CodexCaseConnector(home: home, runner: runner, locate: { codex })
+        let connector = codexConnector(home, runner, codex)
 
+        XCTAssertFalse(connector.isConfigured())
+        runner.reads.removeAll()
         try connector.install(helperPath: helper)
-        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "case", "--", helper, "case", "mcp"]])
+        XCTAssertEqual(runner.reads, [["mcp", "get", "whytap", "--json"], ["mcp", "get", "case", "--json"]],
+                       "Codex's own parser answers; Whytap never parses config.toml")
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]])
         XCTAssertEqual(runner.calls.first?.executable, codex)
+        XCTAssertEqual(Set(runner.calls[0].environment.keys), ["HOME", "PATH", "LANG"])
         XCTAssertEqual(try String(contentsOf: configURL, encoding: .utf8), config, "Codex config is changed only by codex itself")
+    }
 
-        try write(config + "\n[mcp_servers.case]\ncommand = \"\(helper)\"\n", to: configURL)
-        XCTAssertTrue(connector.isConfigured())
-        runner.calls.removeAll()
-        try connector.install(helperPath: helper)
-        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "case"],
-                                                      ["mcp", "add", "case", "--", helper, "case", "mcp"]])
-        runner.calls.removeAll()
-        try connector.uninstall()
+    func test_codex_connect_migrates_our_older_case_entry() throws {
+        let runner = FakeCommandRunner()
+        runner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper, args: ["case", "mcp"])
+        try codexConnector(try temporaryHome(), runner).install(helperPath: helper)
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"],
+                                                      ["mcp", "remove", "case"]])
+    }
+
+    func test_codex_replaces_only_our_own_whytap_entry() throws {
+        for args in [["mcp"], ["app", "mcp"], ["case", "mcp"]] {
+            let runner = FakeCommandRunner()
+            runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: helper, args: args)
+            let connector = codexConnector(try temporaryHome(), runner)
+            XCTAssertTrue(connector.isConfigured())
+            try connector.install(helperPath: helper)
+            // `codex mcp add` replaces by name in one write: nothing is removed first.
+            XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]], "\(args)")
+        }
+    }
+
+    /// The helper reached through a symlink (the `whytap` command Case installs
+    /// in ~/.local/bin) is the same helper.
+    func test_codex_entry_naming_our_helper_through_a_symlink_is_ours() throws {
+        let home = try temporaryHome()
+        let real = home.appendingPathComponent("Whytap.app/Contents/Helpers/whytap")
+        try write("#!/bin/sh\n", to: real)
+        let link = home.appendingPathComponent("bin/whytap")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let runner = FakeCommandRunner()
+        runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: link.path, args: ["app", "mcp"])
+        try codexConnector(home, runner).install(helperPath: real.path)
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", real.path, "mcp"]])
+    }
+
+    /// Builder review (queue run 16213): a refused add must not leave the
+    /// person without the `whytap` entry that worked before. Codex is never
+    /// asked to remove it, so a refused add changes nothing.
+    func test_codex_refused_replacement_keeps_the_working_entry() throws {
+        let runner = FakeCommandRunner()
+        runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: helper, args: ["app", "mcp"])
+        runner.failingPrefixes = [["mcp", "add"]]
+        XCTAssertThrowsError(try codexConnector(try temporaryHome(), runner).install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .commandFailed(status: 1))
+        }
+        XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]], "no remove of the working entry")
+    }
+
+    func test_codex_disconnect_removes_only_our_older_case_entry() throws {
+        let runner = FakeCommandRunner()
+        runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: helper, args: ["mcp"])
+        let connector = codexConnector(try temporaryHome(), runner)
+        try connector.uninstall(helperPath: helper)
+        XCTAssertTrue(runner.calls.isEmpty, "the one server stays on disconnect")
+
+        runner.codexEntries["case"] = FakeCommandRunner.codexStdio("case", command: helper, args: ["case", "mcp"])
+        try connector.uninstall(helperPath: nil)
+        XCTAssertTrue(runner.calls.isEmpty, "without our helper path nothing can be proved ours")
+        try connector.uninstall(helperPath: helper)
         XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "remove", "case"]])
+    }
+
+    /// Codex itself unescapes `[mcp_servers."why\u0074ap"]` to `whytap`, so a
+    /// foreign server spelled that way is found (builder queue run 44301).
+    func test_codex_reads_names_through_codex_so_escaped_keys_are_found() throws {
+        let runner = FakeCommandRunner()
+        runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: "/usr/bin/true", args: [])
+        try assertCodexRefusedWithoutChanges(runner)
+    }
+
+    func test_codex_lookalike_helper_names_are_foreign() throws {
+        for command in ["/opt/local/bin/whytap-metrics", "/usr/local/bin/whytap", "whytap",
+                        "/Users/x/Downloads/Whytap.app/Contents/Helpers/whytap",
+                        "/Applications/Whytap Beta.app/Contents/Helpers/whytap-beta",
+                        "/Applications/Whytap.app/Contents/Helpers/whytap/../whytap-metrics",
+                        helper + "-metrics", ""] {
+            let runner = FakeCommandRunner()
+            runner.codexEntries["whytap"] = FakeCommandRunner.codexStdio("whytap", command: command, args: ["mcp"])
+            try assertCodexRefusedWithoutChanges(runner, command)
+        }
+    }
+
+    func test_codex_anything_it_cannot_prove_ours_is_refused_without_changes() throws {
+        let uncertain: [(String, CaseCommandOutput)] = [
+            ("url server", FakeCommandRunner.codexURL("whytap")),
+            ("our helper, another subcommand", FakeCommandRunner.codexStdio("whytap", command: helper, args: ["case", "run"])),
+            ("our helper, no args", FakeCommandRunner.codexStdio("whytap", command: helper, args: [])),
+            ("empty answer", CaseCommandOutput(status: 0, stdout: Data(), stderr: Data())),
+            ("not JSON", CaseCommandOutput(status: 0, stdout: Data("whytap  /usr/bin/true".utf8), stderr: Data())),
+            ("another name", FakeCommandRunner.codexStdio("whytap2", command: helper, args: ["mcp"])),
+            ("odd args", CaseCommandOutput(status: 0, stdout: Data(#"{"name":"whytap","transport":{"type":"stdio","command":"x","args":[1]}}"#.utf8), stderr: Data())),
+            ("broken config", CaseCommandOutput(status: 1, stdout: Data(), stderr: Data("Error: failed to load bootstrap configuration\n".utf8))),
+            ("other wording", CaseCommandOutput(status: 1, stdout: Data(), stderr: Data("error: server whytap not found".utf8))),
+            ("truncated", CaseCommandOutput(status: 0, stdout: FakeCommandRunner.codexStdio("whytap", command: helper, args: ["mcp"]).stdout,
+                                            stderr: Data(), truncated: true)),
+        ]
+        for (label, output) in uncertain {
+            let runner = FakeCommandRunner()
+            runner.codexEntries["whytap"] = output
+            try assertCodexRefusedWithoutChanges(runner, label)
+        }
+        // A read that cannot run at all.
+        let failing = FakeCommandRunner()
+        failing.readError = CaseClientConnectorError.timedOut
+        try assertCodexRefusedWithoutChanges(failing, "read failed")
+    }
+
+    func test_codex_foreign_or_unprovable_case_entry_is_left_alone() throws {
+        for output in [FakeCommandRunner.codexStdio("case", command: "/opt/local/bin/whytap-metrics", args: ["case", "mcp"]),
+                       FakeCommandRunner.codexStdio("case", command: "npx", args: ["case-mcp-server"]),
+                       FakeCommandRunner.codexURL("case"),
+                       FakeCommandRunner.codexStdio("case", command: helper, args: ["case", "run"]),
+                       CaseCommandOutput(status: 1, stdout: Data(), stderr: Data("Error: boom".utf8))] {
+            let runner = FakeCommandRunner()
+            runner.codexEntries["case"] = output
+            let connector = codexConnector(try temporaryHome(), runner)
+            try connector.install(helperPath: helper)
+            try connector.uninstall(helperPath: helper)
+            XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "whytap", "--", helper, "mcp"]])
+        }
+    }
+
+    func test_codex_without_its_cli_changes_nothing() throws {
+        let runner = FakeCommandRunner()
+        let connector = CodexCaseConnector(home: try temporaryHome(), runner: runner, reader: runner, locate: { nil })
+        XCTAssertThrowsError(try connector.install(helperPath: helper)) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .clientNotFound)
+        }
+        try connector.uninstall(helperPath: helper)
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertTrue(runner.reads.isEmpty)
+    }
+
+    func test_codex_answer_parser() {
+        XCTAssertEqual(CodexMCPEntry.parse(FakeCommandRunner.codexNotFound("whytap"), name: "whytap"), .absent)
+        XCTAssertEqual(CodexMCPEntry.parse(FakeCommandRunner.codexNotFound("case"), name: "whytap"), .uncertain)
+        XCTAssertEqual(CodexMCPEntry.parse(FakeCommandRunner.codexStdio("whytap", command: "/a", args: ["mcp"]), name: "whytap"),
+                       .stdio(command: "/a", args: ["mcp"]))
+        XCTAssertEqual(CodexMCPEntry.parse(FakeCommandRunner.codexURL("whytap"), name: "whytap"), .other)
+    }
+
+    private func codexConnector(_ home: URL, _ runner: FakeCommandRunner,
+                                _ codex: URL = URL(fileURLWithPath: "/usr/local/bin/codex")) -> CodexCaseConnector {
+        CodexCaseConnector(home: home, runner: runner, reader: runner, locate: { codex })
+    }
+
+    private func assertCodexRefusedWithoutChanges(_ runner: FakeCommandRunner, _ label: String = "",
+                                                  file: StaticString = #filePath, line: UInt = #line) throws {
+        let connector = codexConnector(try temporaryHome(), runner)
+        XCTAssertThrowsError(try connector.install(helperPath: helper), label, file: file, line: line) { error in
+            XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry, label, file: file, line: line)
+        }
+        XCTAssertTrue(runner.calls.isEmpty, "no changing CLI call: \(label)", file: file, line: line)
+        XCTAssertEqual(runner.reads, [["mcp", "get", "whytap", "--json"]], label, file: file, line: line)
     }
 
     // MARK: Cursor
@@ -191,19 +432,40 @@ final class CaseClientConnectorTests: XCTestCase {
         XCTAssertEqual(github["command"] as? String, "gh-mcp")
         XCTAssertEqual(github["args"] as? [String], ["--stdio"])
         XCTAssertEqual(github["env"] as? [String: String], ["X": "1"])
-        let entry = try XCTUnwrap(servers["case"] as? [String: Any])
+        let entry = try XCTUnwrap(servers["whytap"] as? [String: Any])
         XCTAssertEqual(entry["command"] as? String, helper)
-        XCTAssertEqual(entry["args"] as? [String], ["case", "mcp"])
+        XCTAssertEqual(entry["args"] as? [String], ["mcp"])
         XCTAssertEqual(Set(entry.keys), ["command", "args"], "no env, no token")
+        XCTAssertNil(servers["case"])
         XCTAssertEqual(try String(contentsOf: url.appendingPathExtension("bak"), encoding: .utf8), original)
         XCTAssertTrue(connector.isConfigured())
 
-        try connector.uninstall()
+        try connector.uninstall(helperPath: helper)
         let after = try readJSON(url)
         let afterServers = try XCTUnwrap(after["mcpServers"] as? [String: Any])
-        XCTAssertNil(afterServers["case"])
+        XCTAssertNotNil(afterServers["whytap"], "the one server stays on disconnect")
         XCTAssertNotNil(afterServers["github"])
         XCTAssertEqual(after["other"] as? Bool, true)
+    }
+
+    func test_cursor_connect_migrates_and_disconnect_removes_the_older_case_entry() throws {
+        let home = try temporaryHome()
+        let url = home.appendingPathComponent(".cursor/mcp.json")
+        let legacy = #"{"command":"/Applications/Whytap.app/Contents/Helpers/whytap","args":["case","mcp"]}"#
+        try write(#"{"mcpServers":{"case":\#(legacy),"github":{"command":"gh-mcp"}}}"#, to: url)
+        let connector = CursorCaseConnector(home: home, appInstalled: { true })
+
+        try connector.install(helperPath: helper)
+        var servers = try XCTUnwrap(try readJSON(url)["mcpServers"] as? [String: Any])
+        XCTAssertNil(servers["case"], "migrated in the same write")
+        XCTAssertEqual((servers["whytap"] as? [String: Any])?["args"] as? [String], ["mcp"])
+        XCTAssertNotNil(servers["github"])
+
+        // A config still holding only the old entry (connected by an earlier build).
+        try write(#"{"mcpServers":{"case":\#(legacy)}}"#, to: url)
+        try connector.uninstall(helperPath: helper)
+        servers = try XCTUnwrap(try readJSON(url)["mcpServers"] as? [String: Any])
+        XCTAssertNil(servers["case"])
     }
 
     func test_cursor_creates_missing_file_and_refuses_broken_one() throws {
@@ -211,12 +473,12 @@ final class CaseClientConnectorTests: XCTestCase {
         let url = home.appendingPathComponent(".cursor/mcp.json")
         let connector = CursorCaseConnector(home: home, appInstalled: { false })
         XCTAssertFalse(connector.isInstalled())
-        try connector.uninstall() // no file: nothing to do, nothing created
+        try connector.uninstall(helperPath: helper) // no file: nothing to do, nothing created
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
 
         try connector.install(helperPath: helper)
         let servers = try XCTUnwrap(try readJSON(url)["mcpServers"] as? [String: Any])
-        XCTAssertNotNil(servers["case"])
+        XCTAssertNotNil(servers["whytap"])
 
         try write("[1, 2", to: url)
         XCTAssertThrowsError(try connector.install(helperPath: helper)) { error in
@@ -225,61 +487,114 @@ final class CaseClientConnectorTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "[1, 2")
     }
 
-    // MARK: Foreign `case` entries
+    // MARK: Foreign entries (Claude Code, Cursor)
 
-    func test_foreign_case_entry_is_reported_not_replaced() throws {
-        let home = try temporaryHome()
-        let runner = FakeCommandRunner()
-        let foreign = #"{"mcpServers":{"case":{"command":"npx","args":["-y","case-mcp-server"]}}}"#
+    /// Every foreign `whytap` form is refused with zero CLI calls and the
+    /// file left byte for byte: a JSON-escaped key, a look-alike helper, a URL
+    /// server, odd fields.
+    func test_foreign_whytap_entries_are_refused_without_changes() throws {
+        let foreign = [
+            #"{"mcpServers":{"whytap":{"command":"npx","args":["-y","some-other-whytap"]}}}"#,
+            #"{"mcpServers":{"why\u0074ap":{"command":"/usr/bin/true","args":[]}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"/opt/local/bin/whytap-metrics","args":["mcp"]}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"/Users/x/Downloads/Whytap.app/Contents/Helpers/whytap","args":["mcp"]}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"whytap","args":["mcp"]}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"\#(helper)"}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"\#(helper)","args":"mcp"}}}"#,
+            #"{"mcpServers":{"whytap":{"command":"\#(helper)","args":["case","run"]}}}"#,
+            #"{"mcpServers":{"whytap":{"type":"http","url":"https://mcp.example.test/whytap"}}}"#,
+            #"{"mcpServers":{"whytap":{"type":"sse","command":"\#(helper)","args":["mcp"]}}}"#,
+            #"{"mcpServers":{"whytap":"npx whytap"}}"#,
+        ]
+        for config in foreign {
+            let home = try temporaryHome()
+            let claudeURL = home.appendingPathComponent(".claude.json")
+            try write(config, to: claudeURL)
+            let runner = FakeCommandRunner()
+            let claude = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                 locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+            XCTAssertThrowsError(try claude.install(helperPath: helper), config) { error in
+                XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry, config)
+                XCTAssertTrue((error as? CaseClientConnectorError)?.userMessage.contains("“whytap”") ?? false)
+            }
+            try claude.uninstall(helperPath: helper)
+            XCTAssertTrue(runner.calls.isEmpty, "Claude Code: no CLI call for \(config)")
+            XCTAssertEqual(try String(contentsOf: claudeURL, encoding: .utf8), config)
 
-        // Claude Code
-        try write(foreign, to: home.appendingPathComponent(".claude.json"))
-        let claude = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
-                                             locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
-        XCTAssertThrowsError(try claude.install(helperPath: helper)) { error in
-            XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry)
-            XCTAssertTrue((error as? CaseClientConnectorError)?.userMessage.contains("case") ?? false)
+            let cursorURL = home.appendingPathComponent(".cursor/mcp.json")
+            try write(config, to: cursorURL)
+            let cursor = CursorCaseConnector(home: home, appInstalled: { true })
+            XCTAssertThrowsError(try cursor.install(helperPath: helper), config) { error in
+                XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry, config)
+            }
+            try cursor.uninstall(helperPath: helper)
+            XCTAssertEqual(try String(contentsOf: cursorURL, encoding: .utf8), config, "Cursor: left exactly as it was")
         }
-        try claude.uninstall()
-        XCTAssertTrue(runner.calls.isEmpty, "another server named case is never removed or replaced")
-
-        // Codex
-        let codexConfig = home.appendingPathComponent(".codex/config.toml")
-        try write("[mcp_servers.case]\ncommand = \"uvx\"\nargs = [\"case-server\"]\n", to: codexConfig)
-        let codex = CodexCaseConnector(home: home, runner: runner, locate: { URL(fileURLWithPath: "/usr/local/bin/codex") })
-        XCTAssertThrowsError(try codex.install(helperPath: helper)) { error in
-            XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry)
-        }
-        try codex.uninstall()
-        XCTAssertTrue(runner.calls.isEmpty)
-
-        // Cursor
-        let cursorURL = home.appendingPathComponent(".cursor/mcp.json")
-        try write(foreign, to: cursorURL)
-        let cursor = CursorCaseConnector(home: home, appInstalled: { true })
-        XCTAssertThrowsError(try cursor.install(helperPath: helper)) { error in
-            XCTAssertEqual(error as? CaseClientConnectorError, .foreignEntry)
-        }
-        try cursor.uninstall()
-        XCTAssertEqual(try String(contentsOf: cursorURL, encoding: .utf8), foreign, "left exactly as it was")
     }
 
-    func test_our_entry_from_a_moved_or_other_flavor_app_is_replaced() throws {
-        let home = try temporaryHome()
-        let cursorURL = home.appendingPathComponent(".cursor/mcp.json")
-        try write(#"{"mcpServers":{"case":{"command":"/Users/x/Downloads/Whytap.app/Contents/Helpers/whytap","args":["case","mcp"]}}}"#,
-                  to: cursorURL)
-        try CursorCaseConnector(home: home, appInstalled: { true }).install(helperPath: helper)
-        let entry = try XCTUnwrap((try readJSON(cursorURL)["mcpServers"] as? [String: Any])?["case"] as? [String: Any])
-        XCTAssertEqual(entry["command"] as? String, helper)
+    func test_unreadable_or_odd_json_configs_are_refused_without_changes() throws {
+        for config in ["{ not json", #"{"mcpServers":["whytap"]}"#] {
+            let home = try temporaryHome()
+            try write(config, to: home.appendingPathComponent(".claude.json"))
+            let runner = FakeCommandRunner()
+            let claude = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                 locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+            XCTAssertThrowsError(try claude.install(helperPath: helper), config) { error in
+                XCTAssertEqual(error as? CaseClientConnectorError, .unreadableConfig(".claude.json"), config)
+            }
+            XCTAssertTrue(runner.calls.isEmpty, config)
 
-        let codexConfig = home.appendingPathComponent(".codex/config.toml")
-        try write("[mcp_servers.case]\ncommand = \"/Applications/Whytap Beta.app/Contents/Helpers/whytap\"\nargs = [\"case\", \"mcp\"]\n",
-                  to: codexConfig)
-        let runner = FakeCommandRunner()
-        try CodexCaseConnector(home: home, runner: runner, locate: { URL(fileURLWithPath: "/usr/local/bin/codex") })
-            .install(helperPath: helper)
-        XCTAssertEqual(runner.calls.map(\.arguments).first, ["mcp", "remove", "case"])
+            let cursorURL = home.appendingPathComponent(".cursor/mcp.json")
+            try write(config, to: cursorURL)
+            XCTAssertThrowsError(try CursorCaseConnector(home: home, appInstalled: { true }).install(helperPath: helper), config)
+            XCTAssertEqual(try String(contentsOf: cursorURL, encoding: .utf8), config)
+        }
+    }
+
+    /// Another server that happens to be named `case`, or a look-alike of ours,
+    /// is not ours: Connect adds `whytap` beside it and never removes it.
+    func test_foreign_case_entries_are_left_alone() throws {
+        for entry in [#"{"command":"npx","args":["-y","case-mcp-server"]}"#,
+                      #"{"command":"/opt/local/bin/whytap-metrics","args":["case","mcp"]}"#,
+                      #"{"command":"/Users/x/Downloads/Whytap.app/Contents/Helpers/whytap","args":["case","mcp"]}"#,
+                      #"{"command":"\#(helper)","args":["case","run"]}"#] {
+            let config = #"{"mcpServers":{"case":\#(entry)}}"#
+            let home = try temporaryHome()
+            try write(config, to: home.appendingPathComponent(".claude.json"))
+            let runner = FakeCommandRunner()
+            let claude = ClaudeCodeCaseConnector(home: home, socketPath: socket, runner: runner,
+                                                 locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
+            try claude.install(helperPath: helper)
+            try claude.uninstall(helperPath: helper)
+            XCTAssertEqual(runner.calls.map(\.arguments), [["mcp", "add", "-s", "user", "whytap", "--", helper, "mcp"]], entry)
+
+            let cursorURL = home.appendingPathComponent(".cursor/mcp.json")
+            try write(config, to: cursorURL)
+            let cursor = CursorCaseConnector(home: home, appInstalled: { true })
+            try cursor.install(helperPath: helper)
+            try cursor.uninstall(helperPath: helper)
+            let servers = try XCTUnwrap(try readJSON(cursorURL)["mcpServers"] as? [String: Any])
+            XCTAssertNotNil(servers["case"], entry)
+            XCTAssertNotNil(servers["whytap"], entry)
+        }
+    }
+
+    func test_ownership_is_the_exact_helper_path_and_a_whytap_subcommand() throws {
+        XCTAssertTrue(CaseMCPEntryOwnership.isOurServer(command: helper, args: ["mcp"], helperPath: helper))
+        XCTAssertTrue(CaseMCPEntryOwnership.isOurServer(command: helper, args: ["app", "mcp"], helperPath: helper))
+        XCTAssertTrue(CaseMCPEntryOwnership.isOurServer(command: helper, args: ["case", "mcp"], helperPath: helper))
+        XCTAssertTrue(CaseMCPEntryOwnership.isOurServer(command: "/Applications/./Whytap.app/Contents/Helpers/whytap",
+                                                        args: ["mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: helper, args: nil, helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: helper, args: ["case", "run"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: "/opt/local/bin/whytap-metrics", args: ["mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: "/x/whytap-dev", args: ["mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: "whytap", args: ["mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: "", args: ["mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurServer(command: helper, args: ["mcp"], helperPath: "whytap"))
+        XCTAssertTrue(CaseMCPEntryOwnership.isOurs(command: helper, args: ["case", "mcp"], helperPath: helper))
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurs(command: helper, args: ["mcp"], helperPath: helper), "legacy is only case mcp")
+        XCTAssertFalse(CaseMCPEntryOwnership.isOurs(command: helper, args: nil, helperPath: helper))
     }
 
     // MARK: Symlinked configs
@@ -300,7 +615,7 @@ final class CaseClientConnectorTests: XCTestCase {
         let attributes = try FileManager.default.attributesOfItem(atPath: link.path)
         XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink, "the link stays a link")
         let servers = try XCTUnwrap(try readJSON(real)["mcpServers"] as? [String: Any])
-        XCTAssertNotNil(servers["case"], "the real file got the entry")
+        XCTAssertNotNil(servers["whytap"], "the real file got the entry")
         XCTAssertNotNil(servers["github"])
         let mode = try FileManager.default.attributesOfItem(atPath: real.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(mode?.intValue, 0o640, "permission bits kept")
@@ -379,7 +694,7 @@ final class CaseClientConnectorTests: XCTestCase {
     }
 }
 
-final class FakeCommandRunner: CaseCommandRunning {
+final class FakeCommandRunner: CaseCommandRunning, CaseCommandReading {
     struct Call: Equatable {
         let executable: URL
         let arguments: [String]
@@ -389,10 +704,51 @@ final class FakeCommandRunner: CaseCommandRunning {
     var calls: [Call] = []
     var status: Int32 = 0
     var error: Error?
+    /// This one command exits with status 1; every other uses `status`.
+    var failingArguments: [String]?
+    /// Commands starting with any of these exit with status 1.
+    var failingPrefixes: [[String]] = []
 
     func run(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandResult {
         calls.append(Call(executable: executable, arguments: arguments, environment: environment))
         if let error { throw error }
+        if arguments == failingArguments || failingPrefixes.contains(where: { arguments.starts(with: $0) }) {
+            return CaseCommandResult(status: 1)
+        }
         return CaseCommandResult(status: status)
+    }
+
+    // MARK: Read-only `codex mcp get <name> --json`, in Codex 0.170's format
+
+    /// Answers by server name; a name not listed is Codex's "not found".
+    var codexEntries: [String: CaseCommandOutput] = [:]
+    var reads: [[String]] = []
+    var readError: Error?
+
+    func read(executable: URL, arguments: [String], environment: [String: String]) throws -> CaseCommandOutput {
+        reads.append(arguments)
+        if let readError { throw readError }
+        let name = arguments.count > 2 ? arguments[2] : ""
+        return codexEntries[name] ?? Self.codexNotFound(name)
+    }
+
+    static func codexNotFound(_ name: String) -> CaseCommandOutput {
+        CaseCommandOutput(status: 1, stdout: Data(), stderr: Data("Error: No MCP server named '\(name)' found.\n".utf8))
+    }
+
+    static func codexStdio(_ name: String, command: String, args: [String]) -> CaseCommandOutput {
+        let object: [String: Any] = [
+            "name": name, "enabled": true, "disabled_reason": NSNull(),
+            "transport": ["type": "stdio", "command": command, "args": args, "env": NSNull(), "env_vars": [String](), "cwd": NSNull()],
+            "enabled_tools": NSNull(), "disabled_tools": NSNull(), "startup_timeout_sec": NSNull(), "tool_timeout_sec": NSNull(),
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .withoutEscapingSlashes])) ?? Data()
+        return CaseCommandOutput(status: 0, stdout: data + Data("\n".utf8), stderr: Data())
+    }
+
+    static func codexURL(_ name: String) -> CaseCommandOutput {
+        let object: [String: Any] = ["name": name, "enabled": true,
+                                     "transport": ["type": "streamable_http", "url": "https://mcp.example.test/\(name)"]]
+        return CaseCommandOutput(status: 0, stdout: (try? JSONSerialization.data(withJSONObject: object)) ?? Data(), stderr: Data())
     }
 }

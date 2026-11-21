@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: plugins/whytap/mcp.json
     confirmed_at: 2026-10-21
-related: [../processes/local-customization.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-03-todo-helper.md, 2026-11-20-harness-access.md]
+related: [../processes/local-customization.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-03-todo-helper.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md]
 ---
 
 ## Context
@@ -109,3 +109,8 @@ quit stay outside the plugin. Case needs its own Connect. Maxim then asked for a
 
 No prior decision is superseded. Show-only links and source customization
 remain separate interfaces.
+
+The two-server packaging (separate `whytap app mcp` and `whytap case mcp`
+entries) is superseded by [one Whytap MCP server](2026-11-21-one-whytap-mcp-server.md)
+(2026-11-21): `whytap mcp` serves both sets of tools with these authorization
+paths unchanged; both older commands keep working.

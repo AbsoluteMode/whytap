@@ -81,7 +81,7 @@ nothing. In Hover, "+" on a row adds a subtask; the row's context menu edits the
 status and title; the chevron collapses a folder.
 
 MCP hosts get the same operations as `whytap_todo_add` / `whytap_todo_update` / `whytap_todo_list`
-from `whytap app mcp` (see `docs/customization/app-control.md`), so an agent can
+from `whytap mcp` (see `docs/customization/app-control.md`), so an agent can
 split a meeting note into tasks on any Mac with Whytap installed. Meeting notes
 are local Markdown files in Application Support/Sidekey/Meetings.
 

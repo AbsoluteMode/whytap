@@ -127,15 +127,13 @@ brew install absolutemode/tap/whytap
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-claude-code-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-claude-code-light.svg"><img alt="Claude Code" src="docs/assets/readme/plugin-harness-claude-code-dark.svg" width="119" align="absmiddle"></picture></p>
 
 ```bash
-claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
-claude mcp add --scope user case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
+claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/plugin-harness-codex-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/plugin-harness-codex-light.svg"><img alt="Codex" src="docs/assets/readme/plugin-harness-codex-dark.svg" width="71" align="absmiddle"></picture></p>
 
 ```bash
-codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap app mcp
-codex mcp add case -- /Applications/Whytap.app/Contents/Helpers/whytap case mcp
+codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
 <p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>

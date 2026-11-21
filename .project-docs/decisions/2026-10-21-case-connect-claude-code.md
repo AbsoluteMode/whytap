@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Case/Clients/CaseClientConnector.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-claude-desktop-binary-layout.md]
+related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-21-one-whytap-mcp-server.md]
 ---
 
 # Case Connect offers Claude Code again
@@ -84,5 +84,10 @@ step; the builder does not change that configuration for smoke.
 Amends the Connect catalog of PR #119 and
 [Case Connect and scope](../../docs/decisions/2026-10-20-case-connect-and-scope.md);
 scope, modes and broker checks are unchanged.
+
+The connector's command (`case` -> `<helper> case mcp`) is superseded by
+[one Whytap MCP server](2026-11-21-one-whytap-mcp-server.md) (2026-11-21):
+Connect now writes `whytap` -> `<helper> mcp` and removes its older `case`
+entry. The catalog is unchanged.
 
 Implementation references: [Case broker](../../docs/decisions/2026-10-19-case-secrets-broker.md), [design](../../docs/DESIGN.md) and [product spec](../../docs/SPEC.md).

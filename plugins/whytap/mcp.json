@@ -4,12 +4,7 @@
     "whytap": {
       "type": "stdio",
       "command": "/Applications/Whytap.app/Contents/Helpers/whytap",
-      "args": ["app", "mcp"]
-    },
-    "case": {
-      "type": "stdio",
-      "command": "/Applications/Whytap.app/Contents/Helpers/whytap",
-      "args": ["case", "mcp"]
+      "args": ["mcp"]
     }
   }
 }

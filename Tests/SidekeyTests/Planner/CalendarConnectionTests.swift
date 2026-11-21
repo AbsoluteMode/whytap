@@ -47,6 +47,7 @@ final class CalendarConnectionTests: XCTestCase {
     private var http: CalendarHTTP!
     private var oauth: CalendarOAuthClient!
     override func setUp() async throws {
+        openCalendarForThisTest()
         storage = PlannerMemoryCredentials()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PlannerURLProtocol.self]

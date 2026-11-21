@@ -36,6 +36,8 @@ if a[:2]==['release','upload']:
    if os.environ.get('TEST_CORRUPT_UPLOAD') and path.suffix=='.dmg':
     with (remote/path.name).open('ab') as f:f.write(b'corrupt')
  sys.exit(0)
+if a[:2]==['release','create'] and '--notes-file' in a:
+ shutil.copyfile(a[a.index('--notes-file')+1],root/'published-notes.md')
 if a[:2] in [['release','create'],['release','edit']]:sys.exit(0)
 sys.exit(70)
 '''
@@ -66,14 +68,14 @@ with (Path(os.environ['TEST_RELEASE_ROOT'])/'calls.jsonl').open('a') as f:
 
 
 class LatestReleaseTests(unittest.TestCase):
-    def run_publisher(self, flavor="prod", corrupt=False):
+    def run_publisher(self, flavor="prod", corrupt=False, notes=None):
         temp = tempfile.TemporaryDirectory(prefix="whytap-latest-publisher-")
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
         for name in ["scripts", "Resources", "build", "bin", ".build/mock"]:
             (root / name).mkdir(parents=True)
         for name in ["scripts/upload-release.sh", "scripts/release-provenance.py",
-                     "Resources/Info.plist.template"]:
+                     "scripts/release-notes-footer.md", "Resources/Info.plist.template"]:
             shutil.copyfile(ROOT / name, root / name)
         for name, body in [("bin/gh", GH), (".build/mock/generate_appcast", GENERATOR),
                            (".build/mock/sign_update", VERIFIER)]:
@@ -103,6 +105,9 @@ class LatestReleaseTests(unittest.TestCase):
                    TEST_RELEASE_ROOT=str(root), TEST_SIGNATURE=SIGNATURE)
         if corrupt:
             env["TEST_CORRUPT_UPLOAD"] = "1"
+        if notes is not None:
+            (root / "notes-input.md").write_text(notes)
+            env["RELEASE_NOTES_FILE"] = str(root / "notes-input.md")
         result = subprocess.run(["/bin/bash", str(root / "scripts/upload-release.sh")],
                                 cwd=root, env=env, capture_output=True, text=True)
         calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
@@ -115,9 +120,17 @@ class LatestReleaseTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 tag = "v9.9.9" if flavor == "prod" else "beta-v9.9.9-b42"
                 upload = next(c for c in calls if c[:3] == ["release", "upload", tag])
-                assets = [Path(a).name for a in upload if a.endswith((".dmg", ".xml"))]
-                self.assertEqual(assets, [bundle + "-latest.dmg", "appcast.xml"])
+                assets = [Path(a).name for a in upload if a.endswith((".dmg", ".json", ".xml"))]
+                manifest = bundle + "-latest.dmg.manifest.json"
+                self.assertEqual(assets, [bundle + "-latest.dmg", manifest, "appcast.xml"])
                 self.assertEqual((root / "remote" / (bundle + "-latest.dmg")).read_bytes(), b"test")
+                # The published manifest is the build-time one, byte for byte.
+                self.assertEqual((root / "remote" / manifest).read_bytes(),
+                                 (root / f"build/{bundle}-9.9.9-build42.dmg.manifest.json").read_bytes())
+                published = json.loads((root / "remote" / manifest).read_text())
+                self.assertEqual(published["archive_sha256"],
+                                 "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
+                self.assertFalse(any(str(root) in str(v) for v in published.values()))
                 items = ET.parse(root / "remote/appcast.xml").getroot().findall("./channel/item")
                 self.assertEqual(items[0].find("enclosure").get("url"),
                                  f"https://github.com/AbsoluteMode/whytap/releases/download/{tag}/{bundle}-latest.dmg")
@@ -125,6 +138,24 @@ class LatestReleaseTests(unittest.TestCase):
                                  "https://github.com/AbsoluteMode/whytap/releases/download/v9.9.8/Whytap-latest.dmg")
                 self.assertIn(["signature-verify", bundle + "-latest.dmg"], calls)
                 self.assertTrue(any(c[:3] == ["release", "edit", tag] and "--draft=false" in c for c in calls))
+
+    def test_written_notes_end_with_the_verify_footer(self):
+        root, bundle, result, calls = self.run_publisher(notes="## What's new\n\n- Faster Drop\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        published = (root / "published-notes.md").read_text()
+        self.assertTrue(published.startswith("## What's new\n\n- Faster Drop\n\n---"))
+        self.assertIn("`Whytap-latest.dmg.manifest.json`", published)
+        self.assertIn("shasum -a 256 Whytap-latest.dmg", published)
+        self.assertIn("(`adhoc`)", published)
+        self.assertIn("docs/install.md#verify-your-download", published)
+        self.assertNotIn("{{", published)
+
+    def test_generated_notes_stay_github_generated(self):
+        _, _, result, calls = self.run_publisher()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        create = next(c for c in calls if c[:2] == ["release", "create"])
+        self.assertIn("--generate-notes", create)
+        self.assertNotIn("--notes-file", create)
 
     def test_changed_downloaded_bytes_leave_the_release_unpublished(self):
         _, _, result, calls = self.run_publisher(corrupt=True)

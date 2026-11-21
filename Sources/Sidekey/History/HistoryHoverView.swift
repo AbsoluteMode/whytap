@@ -25,6 +25,24 @@ enum HistoryHoverContent {
     }
 }
 
+extension HistoryHoverContent {
+    /// The one-line text a History row shows: lines trimmed, blank lines
+    /// dropped, the rest joined by spaces. A copy that starts with a line
+    /// break or indentation (common from web pages and code) used to leave
+    /// the row blank or shifted. Copy and paste still use the full entry.
+    // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
+    static func rowText(for card: HistoryStripCard) -> String {
+        displayText(for: card)
+            .split(whereSeparator: \.isNewline)
+            .map { line in
+                let head = line.drop(while: \.isWhitespace)
+                return String(head.reversed().drop(while: \.isWhitespace).reversed())
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
 enum HistoryHoverVisualStyle {
     // Legacy rows have no shared optical backdrop. Preserve their readable
     // dark fill on older macOS; native panels use foreground lenses instead.
@@ -48,8 +66,8 @@ final class HistoryHoverKeyMonitor: ObservableObject {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            // A modal alert (Delete confirmation) owns the keyboard: Return
-            // there must never paste the row still under the pointer.
+            // A modal alert owns the keyboard: Return there must never paste
+            // the row still under the pointer.
             guard NSApp.modalWindow == nil else { return event }
             if event.keyCode == 36 || event.keyCode == 76 {
                 if let card = self.hoveredCard {
@@ -111,9 +129,6 @@ struct HistoryHoverView: View {
     let onPreviewAnchorChange: (HistoryStripCard, CGRect?) -> Void
     let onPaste: (HistoryStripCard) -> Void
     var allowsKeyboardPaste = true
-    /// Clipboard rows offer "Delete…" in their context menu when set; the
-    /// owner confirms, deletes and reloads `cards`.
-    var onDelete: ((HistoryStripCard) -> Void)? = nil
 
     @State private var hoveredCard: HistoryStripCard?
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
@@ -211,8 +226,7 @@ struct HistoryHoverView: View {
                                 } else if hoveredCard == card {
                                     hoveredCard = nil
                                 }
-                            },
-                            onDelete: deleteAction(for: card)
+                            }
                         )
                         .id(card.id)
                     }
@@ -236,19 +250,6 @@ struct HistoryHoverView: View {
                     }
                 }
             }
-        }
-    }
-
-    /// Only clipboard rows can be deleted. The row is released from hover
-    /// and preview first, so neither Return nor the bubble acts on it while
-    /// the confirmation is open.
-    private func deleteAction(for card: HistoryStripCard) -> (() -> Void)? {
-        guard let onDelete, case .clipboard = card else { return nil }
-        return {
-            if hoveredCard == card { hoveredCard = nil }
-            keyMonitor.hoveredCard = nil
-            onPreviewAnchorChange(card, nil)
-            onDelete(card)
         }
     }
 
@@ -308,14 +309,12 @@ private struct HistoryHoverRow: View {
     /// on exit — drives the preview bubble anchored to the row.
     let onAnchorChange: (CGRect?) -> Void
     let onHover: (Bool) -> Void
-    /// `nil` hides the context menu (Agent/Drop rows, read-only hosts).
-    var onDelete: (() -> Void)? = nil
 
     @State private var rowFrame: CGRect = .zero
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(HistoryHoverContent.displayText(for: card))
+            Text(HistoryHoverContent.rowText(for: card))
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(IslandInk.color.opacity(0.84))
                 .lineLimit(1)
@@ -327,11 +326,6 @@ private struct HistoryHoverRow: View {
         .background(rowBackground(isHovered: isHovered))
         .contentShape(Rectangle())
         .onTapGesture(perform: onCopy)
-        .contextMenu {
-            if let onDelete {
-                Button("Delete…", role: .destructive, action: onDelete)
-            }
-        }
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named(HistoryHoverView.hoverZoneSpaceName))
         } action: { rowFrame = $0 }

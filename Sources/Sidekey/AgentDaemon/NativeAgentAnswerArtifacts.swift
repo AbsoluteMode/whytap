@@ -105,7 +105,10 @@ enum NativeAgentAnswerArtifacts {
             } else if let item = path(target, decodePercent: true) { candidates.append((range, item)) }
         }
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
-            detector.enumerateMatches(in: text, range: full) { match, _, stop in
+            // Markdown cells can touch their pipe delimiters. Mask the raw
+            // pipes for detection while keeping UTF-16 ranges in the answer.
+            let detectorText = text.replacingOccurrences(of: "|", with: " ")
+            detector.enumerateMatches(in: detectorText, range: full) { match, _, stop in
                 guard let match else { return }
                 if candidates.count >= 100 { stop.pointee = true; return }
                 let alreadyCovered = overlaps(match.range, excluded + occupied)

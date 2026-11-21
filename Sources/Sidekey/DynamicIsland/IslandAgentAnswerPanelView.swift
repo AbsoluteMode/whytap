@@ -8,6 +8,8 @@ import SwiftUI
 /// placeholder are rendered THERE, not duplicated here.
 @MainActor
 struct IslandAgentAnswerPanelView: View {
+    private static let verticalPadding: CGFloat = 12
+
     @ObservedObject var responseStore: AskResponseStore
     @ObservedObject var linksSelection: UsefulLinksSelectionState
     /// Card width. Driven from the island's `compactWidth` so the answer sits in
@@ -50,7 +52,7 @@ struct IslandAgentAnswerPanelView: View {
         // face), NOT over the card: the wing sits empty in the answer phase, so
         // it is the natural home for the dismiss control. The click is caught at
         // the window level (`IslandPanel.sendEvent` against `answerCloseHotspot`,
-        // now mapped onto the wing) — see docs/troubleshooting.md.
+        // now mapped onto the wing) — see docs/bugs/2026-09-04-island-answer-close-first-mouse.md.
         //
         // No detached-panel background: the answer's components (query pill,
         // text, blocks) read as separate elements floating on the wallpaper
@@ -58,11 +60,12 @@ struct IslandAgentAnswerPanelView: View {
         AgentAnswerBodyView(
             store: responseStore,
             usefulLinksSelectionState: linksSelection,
-            contentMaxWidth: panelWidth
+            contentMaxWidth: panelWidth,
+            contentMaxHeight: IslandFrameLayout.agentAnswerZoneHeight - 2 * Self.verticalPadding
         )
         // Vertical padding only: horizontal inset is dropped so the pills reach
         // the island's edges (they were ~24pt narrower than the Dynamic Island).
-        .padding(.vertical, 12)
+        .padding(.vertical, Self.verticalPadding)
         .frame(width: panelWidth, alignment: .topLeading)
     }
 }

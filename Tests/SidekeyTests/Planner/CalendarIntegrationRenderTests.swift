@@ -5,6 +5,8 @@ import XCTest
 
 @MainActor
 final class CalendarIntegrationRenderTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     func testOffscreenCalendarIntegrationStates() async throws {
         guard let output = ProcessInfo.processInfo.environment["WHYTAP_CALENDAR_INTEGRATIONS_RENDER_DIR"] else {
             throw XCTSkip("Set WHYTAP_CALENDAR_INTEGRATIONS_RENDER_DIR for offscreen integration fixtures.")

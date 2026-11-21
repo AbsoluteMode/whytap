@@ -60,6 +60,8 @@ final class HoverHotkeyTests: XCTestCase {
     }
 
     func test_all_catalog_tools_can_register_beyond_five_tiles_with_unique_ids() {
+        // Calendar is "Soon" and registers no key; this contract is for the open catalog.
+        openCalendarForThisTest()
         let bindings = ToolHotkeyBinding.resolve(Dictionary(uniqueKeysWithValues:
             HoverTool.allCases.map { ($0, HotkeyShortcut.combo(.optionD)) }))
         XCTAssertEqual(bindings.count, HoverTool.allCases.count)

@@ -29,7 +29,7 @@ sources:
   - type: trace
     reference: Probe bundle com.rootwise.sidekey.signing-probe signed on 2026-10-21 with the team's Developer ID Application identity from the login keychain, hardened runtime and secure timestamp; designated requirement and controls recorded below.
     confirmed_at: 2026-10-21
-related: [2026-10-19-community-signing-identity.md, 2026-10-17-community-updates.md, 2026-10-17-source-first-distribution.md, ../processes/shared-app-development.md]
+related: [2026-10-19-community-signing-identity.md, 2026-10-17-community-updates.md, 2026-10-17-source-first-distribution.md, ../processes/shared-app-development.md, 2026-11-21-published-release-manifest.md]
 ---
 
 # Developer ID team signing

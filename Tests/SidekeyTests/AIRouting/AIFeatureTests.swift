@@ -73,7 +73,7 @@ final class AIFeatureTests: XCTestCase {
             ),
             TableRow(
                 features: [.meetings],
-                soniox: .asyncSTT, deepgram: .realtimeSTT, elevenLabs: .realtimeSTT,
+                soniox: .asyncSTT, deepgram: .asyncSTT, elevenLabs: .asyncSTT,
                 openRouter: nil, anthropic: nil, openAICompatible: .realtimeSTT
             ),
             TableRow(

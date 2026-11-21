@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarDayViewTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-20-calendar-day-view.md]
+related: [2026-11-20-calendar-day-view.md, 2026-11-21-calendar-soon.md]
 ---
 
 # Calendar logos instead of colours

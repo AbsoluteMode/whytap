@@ -8,6 +8,8 @@ import XCTest
 /// .project-docs/decisions/2026-11-21-calendar-logos.md
 @MainActor
 final class CalendarDayViewTests: XCTestCase {
+    override func setUp() { super.setUp(); openCalendarForThisTest() }
+
     private let calendar = Calendar.current
     private var day: DateInterval {
         calendar.dateInterval(of: .day, for: calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 12))!)!

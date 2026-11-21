@@ -337,7 +337,9 @@ struct HotkeysSettingsView: View {
         return HotkeySettingRow(
             iconName: info.sfSymbol,
             title: tool == .meetingRecord ? "Record (additional shortcut)" : info.title,
-            detail: shortcut.map { Self.rowDetail(base: info.description, for: $0) } ?? info.description,
+            detail: tool.isComingSoon
+                ? "\(CalendarAvailability.badge): \(CalendarAvailability.message) A shortcut saved here stays inactive."
+                : (shortcut.map { Self.rowDetail(base: info.description, for: $0) } ?? info.description),
             gesture: .tap,
             allowsGestureSwitch: false,
             shortcutContents: shortcutContents(for: target, fallback: shortcut?.contents ?? []),

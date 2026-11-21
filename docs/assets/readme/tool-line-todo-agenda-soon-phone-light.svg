@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="44" viewBox="0 0 300 44">
+  <rect x="0.5" y="0.5" width="299" height="43" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <circle cx="21" cy="22.0" r="13" fill="#ece9ff"/>
+  <g transform="translate(13.5 14.5) scale(0.6250)" fill="none" stroke="#5b4bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="6" height="6" rx="1" />
+  <path d="m3 17 2 2 4-4" />
+  <path d="M13 6h8" />
+  <path d="M13 12h8" />
+  <path d="M13 18h8" /></g>
+  <text x="41" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#1f2328">To-do &amp; Calendar (soon)</text>
+  <text x="41" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#5b4bd6" xml:space="preserve"><tspan>Tasks in the notch</tspan><tspan fill="#b3aae8">  ·  </tspan><tspan>Today&#x27;s agenda</tspan></text>
+
+  <rect x="252" y="5" width="42" height="17" rx="8.5" fill="#6c5ce7"/>
+  <text x="273.0" y="17.3" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#ffffff">Click</text>
+</svg>

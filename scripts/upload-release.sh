@@ -18,15 +18,17 @@
 # Optional env:
 #   GITHUB_REPO          owner/name (default: AbsoluteMode/whytap)
 #   RELEASE_NOTES_FILE   markdown file used as the release body
-#                        (default: GitHub auto-generated notes)
+#                        (default: GitHub auto-generated notes). The committed
+#                        scripts/release-notes-footer.md is appended to it.
 #   EXODIA_NOTARIZE      1 (default with the committed team) requires an
 #                        Apple-notarized, stapled archive; 0 explicitly
 #                        publishes a team archive without notarization
 #
 # Channels:
 #   prod  -> tag v${SHORT_VERSION}. Assets: one
-#            ${APP_BUNDLE_NAME}-latest.dmg (stable download link) and
-#            appcast.xml. The app's feed URL is
+#            ${APP_BUNDLE_NAME}-latest.dmg (stable download link), its
+#            provenance manifest ${APP_BUNDLE_NAME}-latest.dmg.manifest.json
+#            and appcast.xml. The app's feed URL is
 #            https://github.com/<repo>/releases/latest/download/appcast.xml,
 #            so the newest non-prerelease release always carries the feed.
 #   beta  -> tag beta-v${SHORT_VERSION}-b${BUILD_VERSION}, marked prerelease,
@@ -335,6 +337,13 @@ if [ ! -f "${STAGING_DIR}/appcast.xml" ]; then
 fi
 prepare_appcast "${STAGING_DIR}/appcast.xml"
 cp "${STAGING_DIR}/${DMG_FILENAME}" "${STAGING_DIR}/${LATEST_FILENAME}"
+# Publish the verified build-time manifest beside the archive so anyone can
+# compare the download's SHA-256, source commit, signing team and notarization.
+# It holds only release metadata (no paths or secrets). Copied after
+# generate_appcast so the appcast generator never sees it.
+# WHY: .project-docs/decisions/2026-11-21-published-release-manifest.md
+MANIFEST_ASSET="${LATEST_FILENAME}.manifest.json"
+cp "${DMG_MANIFEST}" "${STAGING_DIR}/${MANIFEST_ASSET}"
 if ! validate_signed_appcast_item "${STAGING_DIR}/appcast.xml" "$BUILD_VERSION" \
         "${STAGING_DIR}/${LATEST_FILENAME}" "${DOWNLOAD_BASE}/${TAG}/${LATEST_FILENAME}"; then
     echo "ERROR: appcast.xml has no valid signed update for build ${BUILD_VERSION}; refusing publication." >&2
@@ -363,7 +372,28 @@ if [ "$(verify_archive_provenance "${STAGING_DIR}/${DMG_FILENAME}")" != "${SOURC
 fi
 notes_args=(--generate-notes)
 if [ -n "${RELEASE_NOTES_FILE:-}" ]; then
-    notes_args=(--notes-file "$RELEASE_NOTES_FILE")
+    # Written release notes always end with the committed "Verify your
+    # download" footer, filled in with this release's asset names and signing.
+    RELEASE_NOTES_FOOTER="${PROJECT_DIR}/scripts/release-notes-footer.md"
+    if [ ! -f "${RELEASE_NOTES_FOOTER}" ]; then
+        echo "ERROR: ${RELEASE_NOTES_FOOTER} is missing." >&2
+        exit 1
+    fi
+    STAGED_NOTES="${STAGING_DIR}/release-notes.md"
+    /usr/bin/python3 - "$RELEASE_NOTES_FILE" "$RELEASE_NOTES_FOOTER" "$STAGED_NOTES" \
+        "$LATEST_FILENAME" "$MANIFEST_ASSET" "$EXPECTED_CODE_SIGNING" "$EXPECTED_NOTARIZATION" <<'PYNOTES'
+import sys
+from pathlib import Path
+body, footer, out, archive, manifest, signing, notarization = sys.argv[1:8]
+text = Path(footer).read_text(encoding="utf-8")
+for key, value in {"ARCHIVE": archive, "MANIFEST": manifest, "CODE_SIGNING": signing,
+                   "NOTARIZATION": notarization}.items():
+    text = text.replace("{{" + key + "}}", value)
+if "{{" in text:
+    raise SystemExit("release-notes-footer.md has an unknown placeholder")
+Path(out).write_text(Path(body).read_text(encoding="utf-8").rstrip() + "\n\n" + text, encoding="utf-8")
+PYNOTES
+    notes_args=(--notes-file "$STAGED_NOTES")
 fi
 
 # Keep arrays nonempty for the macOS Bash 3.2 + set -u contract.
@@ -376,12 +406,13 @@ gh release create "$TAG" --repo "$GITHUB_REPO" "${create_args[@]}"
 # No --clobber: even a concurrent publisher cannot replace versioned bytes.
 gh release upload "$TAG" --repo "$GITHUB_REPO" \
     "${STAGING_DIR}/${LATEST_FILENAME}" \
+    "${STAGING_DIR}/${MANIFEST_ASSET}" \
     "${STAGING_DIR}/appcast.xml"
 
 VERIFY_DIR="$(mktemp -d "${STAGING_DIR}/verify.XXXXXX")"
 gh release download "$TAG" --repo "$GITHUB_REPO" --dir "$VERIFY_DIR" \
-    --pattern "$LATEST_FILENAME" --pattern appcast.xml
-/usr/bin/python3 - "$STAGING_DIR" "$VERIFY_DIR" "$LATEST_FILENAME" <<'PYVERIFY'
+    --pattern "$LATEST_FILENAME" --pattern "$MANIFEST_ASSET" --pattern appcast.xml
+/usr/bin/python3 - "$STAGING_DIR" "$VERIFY_DIR" "$LATEST_FILENAME" "$MANIFEST_ASSET" <<'PYVERIFY'
 import hashlib
 from pathlib import Path
 import sys
@@ -394,11 +425,11 @@ def digest(path):
     return result.digest()
 
 staging, downloaded = map(Path, sys.argv[1:3])
-for name in [sys.argv[3], "appcast.xml"]:
+for name in [sys.argv[3], sys.argv[4], "appcast.xml"]:
     expected, actual = staging / name, downloaded / name
     if not actual.is_file() or actual.stat().st_size != expected.stat().st_size or digest(actual) != digest(expected):
         raise SystemExit("uploaded release asset bytes do not match; leaving the release as a draft")
-print("Uploaded latest archive and appcast SHA256/length verified")
+print("Uploaded latest archive, manifest and appcast SHA256/length verified")
 PYVERIFY
 
 if [ "$FLAVOR" = "prod" ]; then
@@ -419,6 +450,22 @@ if [ "$FLAVOR" = "beta" ]; then
         "${STAGING_DIR}/${LATEST_FILENAME}"
     gh release upload "$FEED_TAG" --repo "$GITHUB_REPO" --clobber \
         "${STAGING_DIR}/appcast.xml"
+fi
+
+# --- 5. Prod: point the Homebrew cask at the release just published ----------
+# The release is already public; a cask failure must not fail it, so it only
+# warns. The cask pins this tag and the verified SHA-256 of the staged archive.
+# EXODIA_HOMEBREW_CASK=0 skips it. Forks publish elsewhere and skip it unless
+# HOMEBREW_TAP_REPO (owner/name) names their own tap.
+# WHY: .project-docs/decisions/2026-11-21-homebrew-tap.md
+if [ "$FLAVOR" = "prod" ] && [ "${EXODIA_HOMEBREW_CASK:-1}" != "0" ] \
+   && { [ "$GITHUB_REPO" = "AbsoluteMode/whytap" ] || [ -n "${HOMEBREW_TAP_REPO:-}" ]; }; then
+    if ! /usr/bin/python3 "${PROJECT_DIR}/scripts/update-homebrew-cask.py" \
+            --repo "$GITHUB_REPO" --tap "${HOMEBREW_TAP_REPO:-AbsoluteMode/homebrew-tap}" \
+            update --version "$SHORT_VERSION" --dmg "${STAGING_DIR}/${LATEST_FILENAME}"; then
+        echo "WARN: the release is published, but the Homebrew cask was NOT updated." >&2
+        echo "      Retry: python3 scripts/update-homebrew-cask.py update --version ${SHORT_VERSION}" >&2
+    fi
 fi
 
 echo ""

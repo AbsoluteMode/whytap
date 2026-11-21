@@ -39,6 +39,74 @@ launch checks.
 
 Requirements: macOS 14.2 or newer, on Apple Silicon or Intel.
 
+## Verify your download
+
+Optional: check that the download is Whytap's notarized build and see which
+source commit it came from. Whytap's Apple Team ID is **`UVBKCN5PPV`**. Open
+Terminal and go to the folder with the download first, for example
+`cd Downloads`.
+
+1. Gatekeeper's verdict on the disk image, before opening it:
+
+   ```bash
+   spctl -a -vv -t open --context context:primary-signature Whytap-latest.dmg
+   ```
+
+   Expect `accepted`, `source=Notarized Developer ID` and an `origin` line
+   ending in `(UVBKCN5PPV)`.
+2. The installed app's identity and verdict:
+
+   ```bash
+   codesign -dv --verbose=2 /Applications/Whytap.app 2>&1 | grep -E '^(Identifier|TeamIdentifier)='
+   spctl -a -vv /Applications/Whytap.app
+   ```
+
+   Expect `Identifier=com.rootwise.sidekey`, `TeamIdentifier=UVBKCN5PPV`,
+   `accepted` and `source=Notarized Developer ID`.
+3. The source it was built from: newer releases also attach
+   `Whytap-latest.dmg.manifest.json`, written when the DMG was built. Compare
+   its `archive_sha256` with
+
+   ```bash
+   shasum -a 256 Whytap-latest.dmg
+   ```
+
+   `source_revision` is the commit the release was built from
+   (`https://github.com/AbsoluteMode/whytap/commit/<source_revision>`), and
+   `code_signing` and `notarization` should read `team:UVBKCN5PPV` and
+   `notarized`. The manifest's `archive` field keeps the versioned build name
+   (for example `Whytap-2.2.26-build1500.dmg`); it is the same file as
+   `Whytap-latest.dmg`. Releases published before the manifest was attached
+   have only the DMG and `appcast.xml`.
+
+Sparkle checks each in-app update separately with Whytap's Ed25519 key before
+installing it. A build you made yourself from source is ad-hoc or locally
+signed and does not pass these checks; that is expected.
+
+## Install with Homebrew
+
+If you use [Homebrew](https://brew.sh), one command installs the same signed and
+notarized DMG from GitHub Releases:
+
+```bash
+brew install absolutemode/tap/whytap
+```
+
+The cask lives in the public tap
+[AbsoluteMode/homebrew-tap](https://github.com/AbsoluteMode/homebrew-tap). It pins
+the release tag and the SHA-256 of that release's `Whytap-latest.dmg`. Whytap
+requires macOS 14.2 or newer. The cask is refreshed by the release process after each
+release, so it can trail the newest release by a short time (`brew upgrade --cask
+whytap` catches up). Whytap updates itself through Sparkle, so you do not need
+`brew upgrade` to stay current; the cask is marked `auto_updates`. Quit a running
+Whytap before `brew install` or `brew upgrade` replaces the app.
+
+`brew uninstall --cask whytap` removes the app only, like moving it to Trash
+(see [removal](#troubleshooting-and-removal)). `brew uninstall --cask --zap whytap`
+also deletes Whytap's data in your user Library folder, including meeting notes, history
+and the Case vault. Make a backup first (**Settings → Backup**). Keychain items are
+never touched.
+
 ## Moving from Exodia or an older Whytap
 
 Whytap is the restored product name. Quit the running app normally before

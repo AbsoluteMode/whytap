@@ -1,5 +1,22 @@
 # Interface decisions
 
+## Structured agent answers — 2026-11-21
+
+- The first line of the answer stays in view when the turn completes so the
+  reader sees the conclusion immediately. The Markdown viewport scrolls in the
+  space left by the title and action cards.
+- Comparisons use a header and horizontal row separators when up to three
+  columns each have at least 72 pt. Record cards keep the name and its labeled
+  values together when a grid is too narrow. VoiceOver reads each row as one
+  item, beginning with its name.
+- After eight rows, a full-width button reveals the remaining rows beneath it.
+  The button stays in place and has visible hover, press and keyboard focus.
+- Note and Warning use a tinted surface, a text label and an icon so their
+  meaning is available without color. Code and source cards retain their
+  existing controls.
+
+See the [structured answer decision](../.project-docs/decisions/2026-11-21-structured-agent-answers.md).
+
 ## Recording wing width — 2026-11-16
 
 Drop and agent voice open a compact wing fitted to `listening…` and the
@@ -537,8 +554,9 @@ real provider output remain acceptance in the shared app after promotion.
 
 ## Screenshot permission — 2026-10-20
 
-First launch update (2026-10-26): a new Mac with missing permissions opens this
-existing screen once alongside the island. The marker stays on that Mac and
+First launch update (2026-10-26, replaced 2026-11-21 by the onboarding below):
+a new Mac with missing permissions opened this existing screen once alongside
+the island. The marker stays on that Mac and
 does not travel in backups. A fully authorized Mac is not interrupted. The
 Screen Recording Allow action shows a small progress indicator in its reserved
 60 × 26 pt action slot while macOS handles the request; repeated requests are
@@ -1581,6 +1599,29 @@ Subtitles keep their separate Speech/LLM setup and explicit Start/Stop journey.
 Their two-stage pipeline is not evidence of the standalone audio model’s latency
 or translation quality. Fake-provider flow checks and offscreen renders do not
 prove live permissions, physical keyboard/focus or provider quality.
+## Subtitles: compact caption overlay — 2026-11-21
+
+The user called the titled 440×400 pt Subtitles window a huge application and
+asked for the neat overlay of their standalone RealtimeTranslator, allowing only
+languages to be added. Subtitles are glanced at over a video or call, so the
+caption is the whole surface: a transparent borderless panel (760×190 pt,
+clamped, 72 pt above the bottom of the island's display) holds one bottom-anchored
+box, black at 60 % with 14 pt corners and a soft shadow. The caption is 20 pt
+rounded medium white, the newest translated phrases as one paragraph, at most
+five lines with older words leaving at the top. The box height hugs shorter
+text; its width spans the panel like the original, so it does not jump with
+each phrase.
+Status (Connecting…, Waiting for speech…, Translating…, an error with Open API &
+Models) replaces the caption. One row inside the box holds source → target,
+Start/Stop (Cancel while connecting/finishing) and ×; it shows while idle and on
+hover while running, easing over 0.15 s (none with Reduce Motion). No title,
+mode switch, labels, audio status, Original/Follow, empty-state screen or
+footer. Copy translation, Clear and Translate text live in the context menu.
+Showing subtitles does not make the panel key. Toolbox shows the same row and
+box (15 pt caption) only when there is text. Offscreen renders cover idle,
+result and Toolbox listening; hover and live focus are unverified. WHY:
+`.project-docs/decisions/2026-11-21-compact-subtitle-overlay.md`.
+
 ## Display: brightness hold (2026-10-28)
 
 The user opens Display to keep a chosen brightness steady. The slider remains
@@ -1639,3 +1680,30 @@ Validation uses invisible non-key native fixtures for distinct first-mouse targe
 text/gap exclusion, drag cancellation, removed/disabled controls, content width and
 rest/pressed/disabled images. Physical pointer, keyboard and VoiceOver behavior
 remain shared-app acceptance.
+
+## First-launch onboarding — 2026-11-21
+
+One fixed 600 × 540 pt window beside the island, one column, built from the
+Settings components (MacCard, MacRow, MacButton, MacSwitch, MacSegmented) so it
+follows light and dark appearance like Settings. Each page has a 38 pt
+Instrument Serif heading (bundled font, system fallback), one 14 pt sentence,
+its controls, and a footer with the way on aligned right: quiet text actions
+(Set up later, Skip) beside one primary button. Progress is a row of dots, the
+current one a wider accent capsule. Pages slide 24 pt with a fade (0.25 s);
+Reduce Motion keeps only the fade. Hidden pages leave no dot.
+
+Speech is one card (On this Mac, size, the primary button and, beside it, the
+sentence that it sets Drop only), with two quiet links under it. The key form
+reuses ProviderKeyForm without Remove, a provider segment and the no-card offers
+as links. Permissions reuse the Settings rows and the Drop shortcut repair
+section. The try page shows the shortcut with HotkeyHintView ("Hold Space"),
+a native text field with a placeholder, and one status line (download progress,
+a missing model or shortcut with its one action, or the green success line;
+the field's outline turns green with it). The features page is one card of
+three rows, each with its ▶ video and its switch or "Add a model".
+
+Why: the first success is the person's own sentence; everything else is one
+line and one action. Offscreen renders of every page in both appearances were
+reviewed (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the native TCC
+dialogs and the real island remain acceptance in the installed app. See
+`.project-docs/decisions/2026-11-21-first-launch-onboarding.md`.

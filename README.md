@@ -21,7 +21,7 @@
 ## Tools
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-drop-smart-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-drop-smart-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-drop-smart-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-drop-smart-wide-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/tool-line-drop-smart-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-drop-smart-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-drop-smart-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-drop-smart-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-drop-smart-wide-light.svg"><img alt="Drop Smart: Speak, correct yourself, release" src="docs/assets/readme/tool-line-drop-smart-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-drop-smart.webp" width="88%" loading="lazy" alt="Drop Smart demo">
@@ -30,7 +30,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-agent-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-agent-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-agent-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-agent-wide-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/tool-line-agent-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-agent-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-agent-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-agent-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-agent-wide-light.svg"><img alt="Agent: Get an answer in the notch" src="docs/assets/readme/tool-line-agent-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-agent.webp" width="88%" loading="lazy" alt="Agent demo">
@@ -39,7 +39,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-case-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-case-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-case-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-case-wide-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/tool-line-case-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-case-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-case-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-case-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-case-wide-light.svg"><img alt="Case: Approve a command in the notch" src="docs/assets/readme/tool-line-case-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-case.webp" width="88%" loading="lazy" alt="Case demo">
@@ -48,7 +48,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-meetings-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-meetings-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-meetings-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-meetings-wide-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/tool-line-meetings-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-meetings-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-meetings-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-meetings-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-meetings-wide-light.svg"><img alt="Meeting Notes: From a call to the next steps" src="docs/assets/readme/tool-line-meetings-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-meetings.webp" width="88%" loading="lazy" alt="Meeting Notes demo">
@@ -57,7 +57,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-language-vocab-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-language-vocab-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-language-vocab-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-language-vocab-wide-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/tool-line-language-vocab-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-language-vocab-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-language-vocab-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-language-vocab-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-language-vocab-wide-light.svg"><img alt="Output Language &amp; Vocab: Set up dictation for the way you speak" src="docs/assets/readme/tool-line-language-vocab-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-output-lang.webp" width="43.5%" loading="lazy" alt="Output Language &amp; Vocab demo">
@@ -67,7 +67,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-shot-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-shot-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-shot-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-shot-wide-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/tool-line-shot-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-shot-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-shot-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-shot-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-shot-wide-light.svg"><img alt="Shot: Capture and edit a region" src="docs/assets/readme/tool-line-shot-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-shot.webp" width="88%" loading="lazy" alt="Shot demo">
@@ -76,7 +76,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-history-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-history-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-history-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-history-wide-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/tool-line-history-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-history-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-history-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-history-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-history-wide-light.svg"><img alt="History: Find something you used earlier" src="docs/assets/readme/tool-line-history-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-history.webp" width="88%" loading="lazy" alt="History demo">
@@ -85,7 +85,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-notify-monitor-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-notify-monitor-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-notify-monitor-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-notify-monitor-wide-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/tool-line-notify-monitor-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-notify-monitor-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-notify-monitor-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-notify-monitor-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-notify-monitor-wide-light.svg"><img alt="Notify &amp; Monitor: Keep an eye on your tools" src="docs/assets/readme/tool-line-notify-monitor-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-notify.webp" width="88%" loading="lazy" alt="Notify &amp; Monitor demo">
@@ -94,7 +94,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-calendar-todo-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-calendar-todo-wide-light.svg"><img alt="Calendar &amp; To-do: Check your agenda and manage tasks" src="docs/assets/readme/tool-line-calendar-todo-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/readme/demo-calendar-todo-still.webp"><img src="docs/assets/readme/demo-calendar-todo.gif" width="88%" loading="lazy" alt="Calendar &amp; To-do demo"></picture>
@@ -103,7 +103,7 @@
 </details>
 
 <details name="tool-demo">
-<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-display-extra-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-display-extra-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-display-extra-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-display-extra-wide-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/tool-line-display-extra-wide-dark.svg" width="93%" align="absmiddle"></picture></summary>
+<summary><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-display-extra-phone-dark.svg"><source media="(max-width: 640px)" srcset="docs/assets/readme/tool-line-display-extra-phone-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tool-line-display-extra-wide-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/assets/readme/tool-line-display-extra-wide-light.svg"><img alt="Display Extra: Use the display’s available HDR headroom" src="docs/assets/readme/tool-line-display-extra-wide-dark.svg" width="92%" align="absmiddle"></picture></summary>
 
 <p></p>
 <p>&emsp;&emsp;<img src="docs/assets/readme/demo-brightness.webp" width="88%" loading="lazy" alt="Display Extra demo">

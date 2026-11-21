@@ -678,9 +678,11 @@ Monitor inside hover:
   Refresh calls requestRefresh and reuses existing collectors/snapshot rendering.
   Hover launch and the legacy openMonitor callback both request inline .monitor
   with programmatic expansion; neither opens a window. The legacy window class
-  is retained for compatibility only. A custom dashboard's picker row and the
-  open board's heading have Delete… in their context menu (Cancel-first alert;
-  Server status has none). It records the ID in Monitor/removed-dashboards.json,
+  is retained for compatibility only. A custom dashboard's picker row has an ×
+  (no context menu: the island has no right-click actions; rows have no chevron
+  and the scroller sits in the right margin beside the cards; row and × show
+  hover/press/focus only while enabled). The × asks first
+  (Cancel-first alert; Server status has none). It records the ID in Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
   Collectors, their scripts and servers.json are never touched; install-dashboard

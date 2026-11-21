@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -219,6 +221,113 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true)).delete(board)
 
         XCTAssertEqual(try MonitorRemovedDashboards.load(root: root).ids, ["anthropic-budget", "openai-usage"])
+    }
+
+    // MARK: - Picker
+
+    /// The island has no right-click interactions: a custom board's row has an
+    /// ×, rows have no chevron, and the scroller sits beside the cards.
+    func testPickerDeletesWithACrossNotAContextMenu() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Sidekey/Monitor/MonitorHoverPanel.swift")
+        let source = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(source.contains(".contextMenu"))
+        XCTAssertFalse(source.contains("chevron.right"))
+        XCTAssertTrue(source.contains("MonitorDashboardDeleteButton(title:"))
+        XCTAssertTrue(source.contains("onDelete: nil"), "Server status gets no ×")
+        XCTAssertGreaterThan(MonitorHoverPanel.scrollerGutter, 0)
+    }
+
+    func testCrossShowsHoverPressAndFocusOnlyWhileEnabled() {
+        typealias Look = MonitorPickerControlAppearance
+        let idle = Look.deleteCross(hovered: false, pressed: false, focused: false, enabled: true)
+        let hover = Look.deleteCross(hovered: true, pressed: false, focused: false, enabled: true)
+        let press = Look.deleteCross(hovered: true, pressed: true, focused: false, enabled: true)
+        let focus = Look.deleteCross(hovered: false, pressed: false, focused: true, enabled: true)
+        XCTAssertEqual(idle.fill, 0)
+        XCTAssertGreaterThan(hover.fill, idle.fill)
+        XCTAssertGreaterThan(hover.symbol, idle.symbol)
+        XCTAssertGreaterThan(press.fill, hover.fill)
+        XCTAssertGreaterThan(focus.focusRing, 0)
+        XCTAssertEqual(idle.focusRing, 0)
+
+        // A delete in progress disables the ×; the pointer may still be on it.
+        let disabled = Look.deleteCross(hovered: false, pressed: false, focused: false, enabled: false)
+        for hovered in [false, true] { for pressed in [false, true] { for focused in [false, true] {
+            XCTAssertEqual(Look.deleteCross(hovered: hovered, pressed: pressed, focused: focused, enabled: false),
+                           disabled)
+        } } }
+        XCTAssertEqual(disabled.fill, 0)
+        XCTAssertLessThan(disabled.symbol, idle.symbol, "disabled reads dimmer than resting")
+    }
+
+    func testRowShowsHoverPressAndFocusWithoutAChevron() {
+        typealias Look = MonitorPickerControlAppearance
+        let idle = Look.row(hovered: false, pressed: false, focused: false, enabled: true)
+        let hover = Look.row(hovered: true, pressed: false, focused: false, enabled: true)
+        let press = Look.row(hovered: true, pressed: true, focused: false, enabled: true)
+        let focus = Look.row(hovered: false, pressed: false, focused: true, enabled: true)
+        XCTAssertGreaterThan(hover.fill, idle.fill)
+        XCTAssertGreaterThan(press.fill, hover.fill)
+        XCTAssertGreaterThan(focus.focusRing, 0)
+        XCTAssertEqual(Look.row(hovered: true, pressed: true, focused: true, enabled: false),
+                       Look.row(hovered: false, pressed: false, focused: false, enabled: false))
+    }
+
+    /// The builder's offscreen probe: a × disabled under the pointer drew the
+    /// hovered surface. Rendered pixels must match a resting disabled ×.
+    func testRenderedCrossDisabledUnderThePointerLooksDisabled() throws {
+        let enabled = try render(MonitorDashboardDeleteButton(title: "Fixture", action: {}))
+        let enabledHover = try render(MonitorDashboardDeleteButton(title: "Fixture", initiallyHovered: true, action: {}))
+        let disabled = try render(MonitorDashboardDeleteButton(title: "Fixture", action: {}).disabled(true))
+        let disabledHover = try render(MonitorDashboardDeleteButton(title: "Fixture", initiallyHovered: true,
+                                                                   action: {}).disabled(true))
+        XCTAssertGreaterThan(changedPixels(enabled, enabledHover), 100, "hover is visible")
+        XCTAssertGreaterThan(changedPixels(enabled, disabled), 0, "disabled is visible")
+        XCTAssertEqual(changedPixels(disabled, disabledHover), 0)
+    }
+
+    func testRenderedRowHoverIsVisible() throws {
+        func row(_ hovered: Bool) -> some View {
+            MonitorDashboardRowButton(title: "Fixture", initiallyHovered: hovered, action: {}) {
+                Text("Fixture").padding(10)
+            }
+        }
+        XCTAssertGreaterThan(changedPixels(try render(row(false), size: 120), try render(row(true), size: 120)), 100)
+    }
+
+    private func render<V: View>(_ view: V, size: CGFloat = 40) throws -> NSBitmapImageRep {
+        let host = NSHostingView(rootView: view.padding(8).frame(width: size, height: 40)
+            .background(Color(white: 0.12)).environment(\.colorScheme, .dark))
+        let bounds = NSRect(x: 0, y: 0, width: size, height: 40)
+        let panel = NSPanel(contentRect: bounds.offsetBy(dx: -20_000, dy: -20_000),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = host
+        host.frame = bounds
+        host.appearance = NSAppearance(named: .darkAqua)
+        for _ in 0..<3 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        XCTAssertFalse(panel.isVisible)
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: bounds))
+        host.cacheDisplay(in: bounds, to: bitmap)
+        panel.contentView = nil
+        panel.close()
+        return bitmap
+    }
+
+    private func changedPixels(_ first: NSBitmapImageRep, _ second: NSBitmapImageRep) -> Int {
+        var changed = 0
+        for y in 0..<min(first.pixelsHigh, second.pixelsHigh) {
+            for x in 0..<min(first.pixelsWide, second.pixelsWide)
+            where first.colorAt(x: x, y: y) != second.colorAt(x: x, y: y) {
+                changed += 1
+            }
+        }
+        return changed
     }
 
     // MARK: - Confirmation

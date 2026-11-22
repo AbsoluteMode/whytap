@@ -30,6 +30,9 @@ enum AnthropicUsagePrices {
         "claude-haiku-5-5": rates(0.10, 0.01, 0.50), "claude-haiku-4-5": rates(1, 0.10, 5),
         "claude-3-5-haiku": rates(0.80, 0.08, 4),
     ]
+    /// USD per web search: $10 per 1,000 searches, verified 2026-11-22 at
+    /// https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+    static let webSearchFee = 0.01
     /// Claude Haiku 5.5 prompts over 100,000 tokens (cache reads/writes included).
     private static let haiku55LongPrompt = rates(0.50, 0.05, 2.50)
 
@@ -71,7 +74,15 @@ enum AnthropicUsagePrices {
                 guard let region = region as? String else { return nil }
                 if region == "us" { geo = 1.1 }
             }
-            return micro / 1_000_000 * geo
+            // Built-in web search: a flat fee per search on top of tokens
+            // (result content is already counted as input tokens). Other
+            // server tools have no per-use price here; their tokens are counted.
+            var searches = 0
+            if let server = present(usage["server_tool_use"]) {
+                guard let server = server as? [String: Any] else { return nil }
+                searches = try tokens(server["web_search_requests"])
+            }
+            return micro / 1_000_000 * geo + Double(searches) * webSearchFee
         } catch { return nil }
     }
 

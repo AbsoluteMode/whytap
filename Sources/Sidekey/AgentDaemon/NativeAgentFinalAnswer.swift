@@ -10,7 +10,7 @@ struct NativeAgentFinalAnswer {
     /// model decides every turn; a missing value (endpoints that ignore strict
     /// schemas) means none. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
     static let insertField = "insert_text"
-    static let actionWarning = " Earlier file edits or commands may have completed; check before retrying."
+    static let actionWarning = " Earlier file edits, commands or Whytap changes may have completed; check before retrying."
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String
@@ -47,17 +47,22 @@ struct NativeAgentFinalAnswer {
                 ])]
     }
 
-    init(arguments: [String: Any]) throws {
+    /// `openAICitations`: the turn ran on OpenAI (directly or an `openai/`
+    /// model on OpenRouter), whose built-in search can leave its citation
+    /// markup in the text; other providers' output is never touched.
+    init(arguments: [String: Any], openAICitations: Bool = true) throws {
+        let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
-        let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = clean(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+        let insertField = (arguments[Self.insertField] as? String).map(clean) ?? arguments[Self.insertField]
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
         let insert: String
-        switch arguments[Self.insertField] {
+        switch insertField {
         case nil, is NSNull: insert = ""
         case let value as String: insert = Self.pasteText(value)
         default: throw Self.invalid()
@@ -86,8 +91,11 @@ struct NativeAgentFinalAnswer {
                       !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw Self.invalid() }
                 items.append(.path(path: path, description: label.isEmpty ? nil : label))
             case "copy":
-                guard Set(action.keys) == ["type", "text", "description"], let text = action["text"] as? String,
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 32_000 else { throw Self.invalid() }
+                guard Set(action.keys) == ["type", "text", "description"], let raw = action["text"] as? String,
+                      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, raw.count <= 32_000 else { throw Self.invalid() }
+                let text = clean(raw)
+                // A copy card that was only a citation mark is dropped; the answer stays.
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                 items.append(.copy(text: text, description: label.isEmpty ? nil : label))
             default: throw Self.invalid()
             }
@@ -101,6 +109,108 @@ struct NativeAgentFinalAnswer {
 
     /// Plain paste text: surrounding whitespace removed and one enclosing
     /// Markdown fence unwrapped, so a fenced command does not paste backticks.
+    /// OpenAI's built-in search can leave its citation markup in model text:
+    /// "\u{E200}cite\u{E202}turn0search0\u{E201}" (private-use characters
+    /// that render as "citeturn0search0"), one or more `turn<n><kind><n>`
+    /// references. It is removed, with the spaces before it, only where it
+    /// annotates prose: after whitespace or at a line start, before the line
+    /// end, whitespace or punctuation, and outside every literal span (fenced
+    /// code with backticks or tildes, also in a blockquote or list, and
+    /// indented code, as `MarkdownCodeLines` finds them; inline code between equal backtick runs in one paragraph; single
+    /// (also multiline), double (with escapes), curly and guillemet quotes). The same bytes inside a word, path, URL or literal stay, as does
+    /// any other private-use glyph or sequence.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
+    static func withoutProviderCitationMarks(_ text: String) -> String {
+        guard text.unicodeScalars.contains("\u{E200}"), let regex = citationMarkup else { return text }
+        let string = text as NSString
+        let literal = literalRanges(in: text)
+        var result = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: string.length)).reversed() {
+            let mark = match.range(at: 1)
+            guard !literal.contains(where: { NSIntersectionRange($0, mark).length > 0 }) else { continue }
+            result = result.replacingCharacters(in: match.range, with: "") as NSString
+        }
+        return result as String
+    }
+
+    private static let citationMarkup = try? NSRegularExpression(
+        pattern: "(?:^|[ \\t]+)(\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201})(?=$|[\\s.,;:!?)\\]])",
+        options: [.anchorsMatchLines])
+
+    /// Literal spans of Markdown and shell text, in UTF-16 ranges.
+    static func literalRanges(in text: String) -> [NSRange] {
+        let string = text as NSString
+        // Fenced and indented code lines and leaf block starts, after
+        // Markdown's container rules.
+        let structure = MarkdownCodeLines.structure(of: string)
+        let blocks = structure.code
+
+        // Delimiters are searched with the code lines blanked out, so one
+        // inside a block never pairs with one outside it.
+        let masked = NSMutableString(string: text)
+        for block in blocks {
+            masked.replaceCharacters(in: block, with: String(repeating: " ", count: block.length))
+        }
+        let search = masked as NSString
+        var ranges = blocks
+        // Inline code pairs only within one leaf block (paragraph, list item
+        // or quote paragraph).
+        let starts = structure.blockStarts + [string.length]
+        for (start, end) in zip(starts, starts.dropFirst()) where end > start {
+            ranges += inlineCode(in: search, range: NSRange(location: start, length: end - start))
+        }
+        // Quoted text in Markdown or a shell command may span lines whatever
+        // they start with, but never a blank line (LF, CRLF or CR).
+        let lineBreak = "(?:\\r\\n?|\\n)"
+        let patterns = [
+            // Shell-style single quotes; an apostrophe inside a word stays inside.
+            "(?<![\\p{L}\\p{N}])'(?:[^'\\r\\n]|\(lineBreak)(?![ \\t]*\(lineBreak))|(?<=[\\p{L}\\p{N}])'(?=[\\p{L}\\p{N}]))*'(?![\\p{L}\\p{N}])",
+            // Double quotes with backslash escapes.
+            "(?<![\\p{L}\\p{N}])\"(?:[^\"\\\\\\r\\n]|\\\\.|\(lineBreak)(?![ \\t]*\(lineBreak)))*\"(?![\\p{L}\\p{N}])",
+            "“[^”\\r\\n]*”", "‘(?:[^’\\r\\n]|(?<=[\\p{L}\\p{N}])’(?=[\\p{L}\\p{N}]))*’", "«[^»\\r\\n]*»",
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            ranges += regex.matches(in: search as String, range: NSRange(location: 0, length: string.length)).map(\.range)
+        }
+        return ranges
+    }
+
+    /// Code spans: a backtick run up to the next run of the same length. A
+    /// backslash outside a span escapes the next character, so after an odd
+    /// number of backslashes a backtick opens nothing.
+    private static func inlineCode(in string: NSString, range: NSRange) -> [NSRange] {
+        let backtick: unichar = 0x60, backslash: unichar = 0x5C
+        let end = NSMaxRange(range)
+        func runEnd(_ index: Int) -> Int {
+            var cursor = index
+            while cursor < end, string.character(at: cursor) == backtick { cursor += 1 }
+            return cursor
+        }
+        var spans: [NSRange] = []
+        var index = range.location
+        while index < end {
+            let current = string.character(at: index)
+            if current == backslash { index += 2; continue }
+            guard current == backtick else { index += 1; continue }
+            let openEnd = runEnd(index), length = openEnd - index
+            var cursor = openEnd, close: Int?
+            while cursor < end {
+                guard string.character(at: cursor) == backtick else { cursor += 1; continue }
+                let closeEnd = runEnd(cursor)
+                if closeEnd - cursor == length { close = closeEnd; break }
+                cursor = closeEnd
+            }
+            if let close {
+                spans.append(NSRange(location: index, length: close - index))
+                index = close
+            } else {
+                index = openEnd
+            }
+        }
+        return spans
+    }
+
     static func pasteText(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         var lines = text.components(separatedBy: "\n")

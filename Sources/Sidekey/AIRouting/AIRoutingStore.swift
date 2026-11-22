@@ -79,6 +79,7 @@ final class AIRoutingStore: ObservableObject {
         // all use the recorded model.
         // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
         moveMeetingsToRecordedModelIfNeeded()
+        adoptExplicitServerModelsIfNeeded()
     }
 
     // MARK: - Routes
@@ -142,12 +143,118 @@ final class AIRoutingStore: ObservableObject {
         let id = UUID()
         let server = ServerEndpoint(
             id: id, name: name, baseURL: baseURL,
-            keyAccount: "byok.server.\(id.uuidString.lowercased()).api_key"
+            keyAccount: Self.serverKeyAccount(for: id),
+            models: []
         )
         var updated = stateWithSubtitleSeparation
         updated.servers.append(server)
         commit(updated)
         return server
+    }
+
+    /// The Keychain account of a server added in API & Models.
+    static func serverKeyAccount(for id: UUID) -> String {
+        "byok.server.\(id.uuidString.lowercased()).api_key"
+    }
+
+    /// Adds a server exactly as the server window saved it (ID, address and
+    /// models together), in one write.
+    func insertServer(_ server: ServerEndpoint) {
+        var updated = stateWithSubtitleSeparation
+        guard !updated.servers.contains(where: { $0.id == server.id }) else { return }
+        var server = server
+        server.models = Self.deduplicated(server.models ?? [])
+        updated.servers.append(server)
+        commit(updated)
+    }
+
+    /// Changes a server's address, the name older builds show and its model
+    /// list in one write; its key and its routes stay. Features of a kind
+    /// that ran on a model taken off the list become Not set (a route on a
+    /// model that was never listed stays). Returns those features.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @discardableResult
+    func updateServer(_ id: UUID, name: String, baseURL: String, models: [ServerModel]) -> [AIFeature] {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return [] }
+        let old = updated.servers[index].models ?? []
+        let kept = Self.deduplicated(models)
+        updated.servers[index].name = name
+        updated.servers[index].baseURL = baseURL
+        updated.servers[index].models = kept
+        let cleared = AIFeature.activeCases.filter { feature in
+            guard let route = updated.routes[feature.rawValue], route.account == .server(id),
+                  let kind = ServerModel.Kind(feature) else { return false }
+            let wasListed = old.contains { $0.name == route.model && $0.kind == kind }
+            let isListed = kept.contains { $0.name == route.model && $0.kind == kind }
+            return wasListed && !isListed
+        }
+        for feature in cleared { updated.routes[feature.rawValue] = nil }
+        commit(updated)
+        return cleared
+    }
+
+    /// The first of a repeated name and kind is kept.
+    private static func deduplicated(_ models: [ServerModel]) -> [ServerModel] {
+        var kept: [ServerModel] = []
+        for model in models where !kept.contains(where: { $0.name == model.name && $0.kind == model.kind }) {
+            kept.append(model)
+        }
+        return kept
+    }
+
+    /// Adds a model to the server's list. `false` when the server is gone or
+    /// already has this name as this kind; the same name may be added once
+    /// per kind (a model that both chats and transcribes).
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @discardableResult
+    func addModel(_ model: ServerModel, toServer id: UUID) -> Bool {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }),
+              !updated.servers[index].hasModel(model.name, kind: model.kind) else { return false }
+        updated.servers[index].models = (updated.servers[index].models ?? []) + [model]
+        commit(updated)
+        return true
+    }
+
+    /// Removes one model of one kind and un-sets the features of that kind
+    /// that ran on it, in registry order. None moves to another model.
+    @discardableResult
+    func removeModel(named name: String, kind: ServerModel.Kind, fromServer id: UUID) -> [AIFeature] {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return [] }
+        updated.servers[index].models = (updated.servers[index].models ?? []).filter { $0.name != name || $0.kind != kind }
+        let cleared = AIFeature.activeCases.filter { feature in
+            guard let route = updated.routes[feature.rawValue] else { return false }
+            return route.account == .server(id) && route.model == name && ServerModel.Kind(feature) == kind
+        }
+        for feature in cleared { updated.routes[feature.rawValue] = nil }
+        commit(updated)
+        return cleared
+    }
+
+    /// A server written before models were added explicitly gets, once, one
+    /// entry per model its features run on, with that feature's kind, marked
+    /// checked (it was in use). Its other `/v1/models` entries are no longer
+    /// offered until the user adds them. Runs at launch and after settings
+    /// sync, so a server restored from an older backup or synced from an older
+    /// Mac is converted too; a server that already has a list is left alone.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func adoptExplicitServerModelsIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for index in updated.servers.indices where updated.servers[index].models == nil {
+            let account = ProviderAccount.server(updated.servers[index].id)
+            var models: [ServerModel] = []
+            for feature in AIFeature.activeCases {
+                guard let route = updated.routes[feature.rawValue], route.account == account,
+                      let kind = ServerModel.Kind(feature),
+                      !models.contains(where: { $0.name == route.model && $0.kind == kind }) else { continue }
+                models.append(ServerModel(name: route.model, kind: kind, checked: true))
+            }
+            updated.servers[index].models = models
+        }
+        commit(updated)
     }
 
     /// Removes the server and un-sets every feature that ran on it. Those
@@ -270,6 +377,26 @@ final class AIRoutingStore: ObservableObject {
         var updated = stateWithSubtitleSeparation
         for (feature, route) in updated.routes where route.account == .soniox {
             if let newer = replacements[route.model] { updated.routes[feature]?.model = newer }
+        }
+        commit(updated)
+    }
+
+    /// OpenAI speech offers two models on the owner's decision: a route saved
+    /// on another OpenAI transcription model (`gpt-realtime-whisper`, the
+    /// deprecated `gpt-4o-*transcribe` and `whisper-1`, or `gpt-transcribe` on
+    /// a live feature) moves to `gpt-live-transcribe` on a live feature and to
+    /// `gpt-transcribe` on a recorded one, on the same account and key. Not
+    /// version-gated, so a route restored from an older backup moves too.
+    /// Text routes on OpenAI and every other provider stay as they are.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func narrowOpenAISpeechModelsIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for (key, route) in updated.routes where route.account == .openAI {
+            guard let feature = AIFeature(rawValue: key),
+                  let newer = ModelRegistry.openAISpeechReplacement(for: route.model, mode: feature.mode)
+            else { continue }
+            updated.routes[key]?.model = newer
         }
         commit(updated)
     }

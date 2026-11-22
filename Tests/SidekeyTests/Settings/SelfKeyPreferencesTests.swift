@@ -45,20 +45,18 @@ final class SelfKeyPreferencesTests: XCTestCase {
         XCTAssertEqual(intel.llmLevel, .yourKey)
     }
 
-    func testLegacyOpenAISelectionMigratesToSoniox() {
-        // OpenAI is no longer offered for BYOK; a legacy/stored OpenAI selection
-        // resolves to soniox so it's gone from the UI AND the runtime path.
+    // A stored OpenAI choice is OpenAI again: reading it as Soniox sent the
+    // user's audio to a provider they never chose.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func testLegacyOpenAISelectionStaysOpenAI() {
         let d = makeDefaults()
         let prefs = SelfKeyPreferences(defaults: d)
         prefs.selectedProvider = .openAI
-        XCTAssertEqual(SelfKeyPreferences(defaults: d).selectedProvider, .soniox)
+        XCTAssertEqual(SelfKeyPreferences(defaults: d).selectedProvider, .openAI)
     }
 
-    func testSelectableExcludesOpenAIButKeepsCaseForDecoding() {
-        XCTAssertFalse(BYOKProvider.selectable.contains(.openAI))
-        XCTAssertEqual(BYOKProvider.selectable, [.selfHosted, .deepgram, .soniox, .elevenLabs])
-        // The case must remain so a legacy stored "openAI" value still decodes.
-        XCTAssertTrue(BYOKProvider.allCases.contains(.openAI))
+    func testNothingStoredReadsAsSoniox() {
+        XCTAssertEqual(SelfKeyPreferences(defaults: makeDefaults()).selectedProvider, .soniox)
     }
 
     func testPersistsLevelProviderBaseURLModel() {
@@ -77,7 +75,7 @@ final class SelfKeyPreferencesTests: XCTestCase {
     }
 
     func testAvailableTranscriptionModelsPerProvider() {
-        XCTAssertEqual(BYOKProvider.openAI.availableTranscriptionModels, ["gpt-4o-transcribe", "gpt-4o-mini-transcribe"])
+        XCTAssertEqual(BYOKProvider.openAI.availableTranscriptionModels, ["gpt-live-transcribe"])
         XCTAssertEqual(BYOKProvider.deepgram.availableTranscriptionModels, ["nova-3"])
         XCTAssertEqual(BYOKProvider.soniox.availableTranscriptionModels, ["stt-rt-v6"])
         XCTAssertEqual(BYOKProvider.elevenLabs.availableTranscriptionModels, ["scribe_v3_live"])
@@ -86,7 +84,7 @@ final class SelfKeyPreferencesTests: XCTestCase {
 
     func testTranscriptionModelDefaultsToProviderDefault() {
         let prefs = SelfKeyPreferences(defaults: makeDefaults())
-        XCTAssertEqual(prefs.transcriptionModel(for: .openAI), "gpt-4o-transcribe")
+        XCTAssertEqual(prefs.transcriptionModel(for: .openAI), "gpt-live-transcribe")
         XCTAssertEqual(prefs.transcriptionModel(for: .deepgram), "nova-3")
         XCTAssertEqual(prefs.transcriptionModel(for: .soniox), "stt-rt-v6")
         XCTAssertEqual(prefs.transcriptionModel(for: .elevenLabs), "scribe_v3_live")

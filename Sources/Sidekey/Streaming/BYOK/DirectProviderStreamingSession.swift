@@ -438,17 +438,21 @@ final class DirectProviderStreamingSession: StreamingSessionRunning {
     /// locally-captured audio.
     ///
     /// Deliberate allow-list (the BYOK `.error` payload is an open `String`):
-    /// only the two codes emitted on genuine socket breakage with audio intact
-    /// are transport-class —
+    /// the codes emitted on genuine socket breakage with audio intact are
+    /// transport-class —
     ///   • `"transport"`            — `receive()` failed (Wi-Fi drop / provider close)
     ///   • `endOfStreamSendFailed`  — the EOF send broke the socket; audio captured
+    /// — and so is `providerRefused`, the OpenAI Realtime refusal: its batch
+    /// rung either delivers (a failed turn) or names the refusal (key, credit,
+    /// rate) through `ProviderFailure`, which a `.failed` take cannot.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     /// Everything else is NOT transport-class and fails immediately:
     ///   • `"provider"` / `"error"` / any other code — the provider rejected the
     ///     content (bad key, quota, unsupported); on the BYOK direct path a batch
     ///     to the SAME provider key would fail identically, so don't degrade.
     static func isTransportClass(_ code: String) -> Bool {
         switch code {
-        case "transport", BYOKStreamErrorCode.endOfStreamSendFailed:
+        case "transport", BYOKStreamErrorCode.endOfStreamSendFailed, BYOKStreamErrorCode.providerRefused:
             return true
         default:
             return false

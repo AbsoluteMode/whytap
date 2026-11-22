@@ -4,13 +4,14 @@ Find **Screenshot** in the island's **Search all tools**, or add it from
 Settings → Toolbox. Settings → Hotkeys → Tools can assign its optional named
 shortcut. Existing layouts and shortcuts are preserved.
 
-Settings → Permissions → **Screen Recording** shows **Allowed** or **Not allowed**
-for screenshots. Click **Allow** to request access; **Open** returns to its system
-settings when already allowed. A previous denial opens System Settings →
+Settings → Permissions → **Screen Recording** shows a green checkmark when
+access is granted, or **Allow** when it is missing. The first **Allow** only
+asks macOS; later presses read **Open Settings** and open System Settings →
 Privacy & Security → Screen & System Audio Recording. Returning to Whytap or
 clicking Refresh updates the status. Screenshot invocation can also request
-this access; opening Settings or launching Whytap never requests it. The first
-Screenshot press without access shows only the macOS dialog; its button leads to
+this access; opening Settings or launching Whytap never requests it. In the next version
+after 2.2.26, the first Screenshot press without access shows only the macOS
+dialog; its button leads to
 System Settings. A later press without access shows Whytap's own explanation with
 Open System Settings. It is optional for other features. Follow macOS's reopen instruction after finishing
 current work.
@@ -61,7 +62,7 @@ are discarded. Escape restores the text before this edit or discards a new label
 a second Escape cancels capture. Finishing an edit or move creates one screenshot
 undo step. Handles, editing outlines and the caret never enter exported pixels. Click the
 active tool again to stop drawing, then move annotations or move/resize the
-selection by its corners. Arrow keys also move it; Option plus arrows resizes it. Blur patches
+selection by its corners. Shift plus arrows moves it; Option plus arrows resizes it (bare arrows run their assigned tools). Blur patches
 can be deleted or undone; they cannot be moved because moving them would
 expose original information. Undo/redo preserves the selected region.
 

@@ -1,13 +1,14 @@
 import Combine
 import Foundation
 
-/// One provider account in the API keys row. Carries the check outcome, never
-/// the key.
+/// One provider account in the API keys row, with its check and server settings.
 struct KeyChip: Equatable, Identifiable {
     let account: ProviderAccount
     let title: String
     let statusText: String
     let checkedAt: Date?
+    /// A server's added models, in the order added; `nil` for other accounts.
+    var serverModels: [ServerModel]? = nil
     var id: String { account.storageID }
 }
 
@@ -143,6 +144,11 @@ final class APIAndModelsViewModel: ObservableObject {
             )
         }
     }
+    /// Speech and LLM, read from the per-feature routes.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    @Published private(set) var sharedRows: [SharedModelRow] = []
+    /// The Agent's web search, shown under Speech and LLM.
+    @Published private(set) var searchRow = AgentSearchRow(options: AgentRunOptions(), tavilyConnected: false)
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
     @Published private(set) var unsetBanner: String?
     @Published var proposal: AssignProposal?
@@ -154,6 +160,7 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
+    private let agentSettings: AgentSettingsStore
 
     func makeTavilySettings() -> TavilySettings { TavilySettings(keys: keys) }
     private let catalogs: ModelCatalogStore
@@ -161,6 +168,7 @@ final class APIAndModelsViewModel: ObservableObject {
     private let keyStatuses: KeyStatusStore
     private let keyChecker: any ProviderKeyChecking
     private let probe: any ModelProbing
+    private let serverModelChecker: any ServerModelChecking
     private let endpoints: any OpenRouterEndpointsFetching
     private let now: () -> Date
     private let inputLanguage: @MainActor () -> String?
@@ -169,6 +177,8 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private var checking: Set<AIFeature> = []
     private var messages: [AIFeature: String] = [:]
+    private var sharedChecking: Set<SharedModelKind> = []
+    private var sharedNotes: [SharedModelKind: [String]] = [:]
     private var observers: Set<AnyCancellable> = []
 
     /// The `.shared` stores and the input language are main-actor state, so
@@ -182,12 +192,15 @@ final class APIAndModelsViewModel: ObservableObject {
         keyStatuses: KeyStatusStore? = nil,
         keyChecker: any ProviderKeyChecking = ProviderKeyChecker(),
         probe: any ModelProbing = ModelProbe(),
+        serverModelChecker: any ServerModelChecking = ServerModelChecker(),
         endpoints: any OpenRouterEndpointsFetching = OpenRouterEndpointsClient(),
         now: @escaping () -> Date = Date.init,
         inputLanguage: (@MainActor () -> String?)? = nil,
-        onDevice: OnDeviceSpeechReadiness = .live
+        onDevice: OnDeviceSpeechReadiness = .live,
+        agentSettings: AgentSettingsStore? = nil
     ) {
         self.onDevice = onDevice
+        self.agentSettings = agentSettings ?? .shared
         let routing = routing ?? .shared
         let catalogs = catalogs ?? .shared
         let checks = checks ?? .shared
@@ -199,6 +212,7 @@ final class APIAndModelsViewModel: ObservableObject {
         self.keyStatuses = keyStatuses
         self.keyChecker = keyChecker
         self.probe = probe
+        self.serverModelChecker = serverModelChecker
         self.endpoints = endpoints
         self.now = now
         self.inputLanguage = inputLanguage ?? { PrivacyPreferences.shared.selectedLanguage?.code }
@@ -216,6 +230,17 @@ final class APIAndModelsViewModel: ObservableObject {
                 MainActor.assumeIsolated { self?.recompute() }
             }
             .store(in: &observers)
+        NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.recompute() }
+            }
+            .store(in: &observers)
+    }
+
+    /// API & Models → Models → Search: the Agent model's search (`.auto`) or Tavily.
+    func selectSearch(_ choice: AgentWebSearchChoice) {
+        agentSettings.webSearchChoice = choice
+        recompute()
     }
 
     /// Kinds the Add key menu offers: built-in providers without a key (an
@@ -298,6 +323,7 @@ final class APIAndModelsViewModel: ObservableObject {
         keyStatuses.set(status, for: account, at: now())
         await catalogs.refresh(account, apiKey: apiKey, server: server)
         if proposeModels { proposeSetup(for: account) }
+        lastAddedServer = account
         recompute()
         return nil
     }
@@ -306,6 +332,216 @@ final class APIAndModelsViewModel: ObservableObject {
     /// first key. A rejected replacement leaves the previous saved key in place.
     func replaceKey(_ key: String, for account: ProviderAccount) async -> String? {
         await store(key, for: account, proposing: false)
+    }
+
+    // MARK: - Server models
+
+    /// The server the last successful `addServer` created, so the server
+    /// window can store its models right after.
+    private(set) var lastAddedServer: ProviderAccount?
+
+    private func serverModels(of account: ProviderAccount) -> [ServerModel]? {
+        guard case .server(let id) = account else { return nil }
+        return routing.server(id)?.models ?? []
+    }
+
+    /// Names from the server's `/v1/models`, for the Model field: only
+    /// suggestions, the user can type any name. Names already added for both
+    /// kinds are left out.
+    func modelSuggestions(for account: ProviderAccount) -> [String] {
+        guard case .server(let id) = account, let server = routing.server(id) else { return [] }
+        let ids = (catalogs.snapshot(for: account, server: server)?.models ?? []).map(\.id)
+        return Array(Set(ids)).filter { name in
+            !ServerModel.Kind.allCases.allSatisfy { server.hasModel(name, kind: $0) }
+        }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Why `name` cannot be added as `kind`, before any request; `nil` when it can.
+    func serverModelProblem(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) -> String? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .server(let id) = account, let server = routing.server(id) else { return "This server was removed" }
+        if name.isEmpty { return "Enter the model's name" }
+        if server.hasModel(name, kind: kind) { return "\(name) is already added as \(kind.label)" }
+        return nil
+    }
+
+    // MARK: - Server sheet
+
+    /// The server window's starting state: an empty server with one model row,
+    /// or the saved server with its models (checked ones as Works).
+    func serverSheetDraft(for account: ProviderAccount?) -> ServerSheetDraft {
+        guard case .server(let id)? = account, let server = routing.server(id) else {
+            return ServerSheetDraft(isNew: true, baseURL: "", apiKey: "", hasStoredKey: false, rows: [.init()])
+        }
+        var storedKey = false
+        if case .key = keys.lookup(account: server.keyAccount) { storedKey = true }
+        let rows = (server.models ?? []).map {
+            ServerSheetDraft.Row(name: $0.name, kind: $0.kind, status: $0.checked ? .works : .notChecked)
+        }
+        return ServerSheetDraft(isNew: false, baseURL: server.baseURL, apiKey: "", hasStoredKey: storedKey,
+                                rows: rows.isEmpty ? [.init()] : rows)
+    }
+
+    /// What the window's model checks run against: the typed address and the
+    /// typed key, or the saved key when none is typed and the address is still
+    /// the saved server's origin (scheme, host and port). A saved key is never
+    /// sent to another origin: the user types it again for the new address.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    func serverSheetConnection(baseURL: String, typedKey: String, account: ProviderAccount) -> Result<ServerSheetConnection, ServerSheetProblem> {
+        let url = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.isEmpty { return .failure(.init(message: "Enter the server's base URL")) }
+        if let error = Self.baseURLError(url) { return .failure(.init(message: error)) }
+        var apiKey = typedKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard case .server(let id) = account else { return .failure(.init(message: "This server was removed")) }
+        var endpoint = ServerEndpoint(id: id, name: ServerEndpoint.displayName(for: url) ?? url, baseURL: url,
+                                      keyAccount: AIRoutingStore.serverKeyAccount(for: id))
+        if let saved = routing.server(id) {
+            endpoint = saved
+            endpoint.baseURL = url
+            if apiKey == nil, Self.origin(url) == Self.origin(saved.baseURL) {
+                switch keys.lookup(account: saved.keyAccount) {
+                case .key(let key): apiKey = key
+                case .absent: break
+                case .unreadable: return .failure(.init(message: "Couldn't read this server's key from the Keychain"))
+                }
+            }
+        }
+        return .success(ServerSheetConnection(
+            server: endpoint, apiKey: apiKey,
+            target: ServerModelTarget(account: account, baseURL: url, apiKey: apiKey)
+        ))
+    }
+
+    /// The saved server has a key that the window will not send, because the
+    /// address now points to another origin and no key is typed.
+    func serverSheetWithholdsKey(baseURL: String, typedKey: String, account: ProviderAccount) -> Bool {
+        guard case .server(let id) = account, let saved = routing.server(id),
+              typedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              Self.origin(baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) != Self.origin(saved.baseURL)
+        else { return false }
+        if case .absent = keys.lookup(account: saved.keyAccount) { return false }
+        return true
+    }
+
+    /// `/v1/models` names for the window: only while it points at the saved
+    /// server's own address, whose list they are.
+    func serverSheetSuggestions(baseURL: String, account: ProviderAccount) -> [String] {
+        guard case .server(let id) = account, let saved = routing.server(id),
+              baseURL.trimmingCharacters(in: .whitespacesAndNewlines) == saved.baseURL else { return [] }
+        return modelSuggestions(for: account)
+    }
+
+    /// `scheme://host:port`, lower case, with the scheme's default port.
+    static func origin(_ url: String) -> String? {
+        guard let components = URLComponents(string: url), let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(), !host.isEmpty else { return nil }
+        let port = components.port ?? (scheme == "https" || scheme == "wss" ? 443 : 80)
+        return "\(scheme)://\(host):\(port)"
+    }
+
+    /// One small request to the server: a one-word chat for an LLM, half a
+    /// second of silence for a transcription model.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func checkServerModel(_ name: String, kind: ServerModel.Kind, on connection: ServerSheetConnection) async -> ServerModelCheckResult {
+        await serverModelChecker.check(name, kind: kind, on: connection.server, apiKey: connection.apiKey)
+    }
+
+    /// Saves the whole window at once: the address (and the name older builds
+    /// show, which is the address), a typed key and the model list. A new
+    /// server, a changed address or a typed key goes through the ordinary key
+    /// check first, with the same key the rows were checked with; nothing is
+    /// stored before it passes. `expected` is what the rows were checked
+    /// against: if the address or key changed meanwhile (a synced key, say),
+    /// nothing is stored. The address, name and models are written together;
+    /// models taken off the list un-set the features of that kind that ran on
+    /// them. A saved key that would go to another origin is removed unless a
+    /// key is typed. `nil` on success.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    func saveServer(_ draft: ServerSheetDraft, models: [ServerModel], account: ProviderAccount,
+                    expected: ServerModelTarget) async -> String? {
+        guard case .server(let id) = account else { return "This server was removed" }
+        let connection: ServerSheetConnection
+        switch serverSheetConnection(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account) {
+        case .success(let value): connection = value
+        case .failure(let problem): return problem.message
+        }
+        guard connection.target == expected else { return Self.serverChangedDuringCheck }
+        let url = connection.server.baseURL
+        let name = ServerEndpoint.displayName(for: url) ?? url
+        let typed = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let saved = routing.server(id)
+        if !draft.isNew, saved == nil { return "This server was removed" }
+
+        var status: KeyStatus?
+        if saved == nil || url != saved?.baseURL || typed != nil {
+            let checked = await keyChecker.check(account, apiKey: connection.apiKey, server: connection.server,
+                                                 allowPaidProbe: true)
+            if case .rejected(.invalidKey) = checked {
+                return connection.apiKey == nil ? "This server asks for a key" : "Key not accepted"
+            }
+            guard checked == .valid || checked == .limited else { return Self.statusText(for: checked, account: account) }
+            status = checked
+            // The check awaited: the window's state must still be the one checked.
+            guard case .success(let after) = serverSheetConnection(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account),
+                  after.target == expected else { return Self.serverChangedDuringCheck }
+            if !draft.isNew, routing.server(id) == nil { return "This server was removed" }
+        }
+
+        // From here nothing awaits until everything is written, and Save
+        // ends here: what it reports is what is stored.
+        let current = routing.server(id)
+        if saved != nil, current == nil { return "This server was removed" }
+        let keyAccount = current?.keyAccount ?? AIRoutingStore.serverKeyAccount(for: id)
+        let movesOrigin = current.map { Self.origin(url) != Self.origin($0.baseURL) } ?? false
+        do {
+            if let typed {
+                try keys.save(typed, account: keyAccount)
+            } else if movesOrigin, keys.lookup(account: keyAccount) != .absent {
+                // Read now, not when Save began: a key synced for the old
+                // address meanwhile does not go with the new one either.
+                try keys.delete(account: keyAccount)
+            }
+        } catch {
+            return "Couldn't save the key"
+        }
+        let before = Dictionary(uniqueKeysWithValues: AIFeature.activeCases.compactMap { feature in
+            routing.route(for: feature).flatMap { $0.account == account ? (feature, $0.model) : nil }
+        })
+        if current == nil {
+            routing.insertServer(ServerEndpoint(id: id, name: name, baseURL: url, keyAccount: keyAccount, models: models))
+            lastAddedServer = account
+        } else {
+            if url != current?.baseURL { catalogs.forget(account) }
+            for feature in routing.updateServer(id, name: name, baseURL: url, models: models) {
+                messages[feature] = "\(before[feature] ?? "Its model") was removed from \(name)"
+            }
+        }
+        if let status { keyStatuses.set(status, for: account, at: now()) }
+        recompute()
+        // The list only suggests names: it is loaded after Save, which does
+        // not wait for it, and a server removed meanwhile just has no list.
+        let apiKey = connection.apiKey
+        Task { [weak self] in
+            guard let self, let server = self.routing.server(id), server.baseURL == url else { return }
+            await self.catalogs.refresh(account, apiKey: apiKey, server: server)
+            self.recompute()
+        }
+        return nil
+    }
+
+    static let serverChangedDuringCheck = "The server's address or key changed during the check. Save again."
+
+
+    /// Adds the model to the server; `checked` is false when the user saved it
+    /// without a passing check. `nil` on success, otherwise what to show.
+    @discardableResult
+    func addServerModel(_ name: String, kind: ServerModel.Kind, checked: Bool, to account: ProviderAccount) -> String? {
+        if let problem = serverModelProblem(name, kind: kind, on: account) { return problem }
+        guard case .server(let id) = account else { return "This server was removed" }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        routing.addModel(ServerModel(name: name, kind: kind, checked: checked), toServer: id)
+        recompute()
+        return nil
     }
 
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
@@ -334,6 +570,36 @@ final class APIAndModelsViewModel: ObservableObject {
         let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: true)
         keyStatuses.set(status, for: account, at: now())
         recompute()
+    }
+
+    /// The free check Settings runs on opening, now, for a saved key about to
+    /// be used (the onboarding's Continue). `nil` without a readable key. A
+    /// free "limited" does not clear a recorded refusal, as on opening.
+    func checkSavedKey(_ account: ProviderAccount) async -> KeyStatus? {
+        // An answer counts only for the key it was about: a key replaced in
+        // Settings while the request ran is checked again, never marked with
+        // the old key's result.
+        // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+        for _ in 0..<3 {
+            guard let checked = access(account) else { return nil }
+            let status = await keyChecker.check(account, apiKey: checked.apiKey, server: checked.server, allowPaidProbe: false)
+            guard let current = access(account) else { return nil }
+            guard current.apiKey == checked.apiKey else { continue }
+            if status == .limited, case .rejected(let reason) = keyStatuses.record(for: account)?.status {
+                return .rejected(reason)
+            }
+            keyStatuses.set(status, for: account, at: now())
+            recompute()
+            return status
+        }
+        return nil
+    }
+
+    /// Why a saved key was refused, in the API keys tile's words; `nil` when
+    /// it was not.
+    func keyRefusal(_ account: ProviderAccount) -> String? {
+        guard let status = keyStatuses.record(for: account)?.status, case .rejected = status else { return nil }
+        return Self.statusText(for: status, account: account)
     }
 
     // MARK: - On this Mac
@@ -399,6 +665,122 @@ final class APIAndModelsViewModel: ObservableObject {
             assign(route, to: [feature])
             return true
         }
+    }
+
+    // MARK: - Shared Speech / LLM
+
+    func sharedRow(_ kind: SharedModelKind) -> SharedModelRow? {
+        sharedRows.first { $0.kind == kind }
+    }
+
+    func sharedSections(_ kind: SharedModelKind) -> [PickerSection] {
+        resolver.sections(for: kind.pickerFeature)
+    }
+
+    /// Puts one model on every feature of `kind` it can serve: the same model,
+    /// or for Meetings the provider's recorded counterpart. Features set to
+    /// their own model (custom) keep it unless `replaceCustom`. A feature the
+    /// model cannot serve keeps its route, and the row says which. Every
+    /// distinct model and use that is not verified yet is checked once; a
+    /// passed tool-use check also covers plain text on the same model. Nothing
+    /// changes for a model whose check fails.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    @discardableResult
+    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool) async -> Bool {
+        guard !sharedChecking.contains(kind) else { return false }
+        let planner = makePlanner()
+        let before = planner.row(kind: kind, title: title(of:))
+        let choice = FeatureRoute(account: account, model: model)
+        let custom = Set(before.custom)
+        var notes: [String] = []
+        var targets: [(feature: AIFeature, route: FeatureRoute, current: FeatureRoute?)] = []
+        let plan = planner.plan(choice, kind: kind)
+        for item in plan {
+            let current = routing.route(for: item.feature)
+            guard let planned = item.route else {
+                let kept = current.map { " · kept \($0.model)" } ?? ""
+                notes.append("\(item.feature.title): \(item.skipReason ?? "not available")\(kept)")
+                continue
+            }
+            if custom.contains(item.feature), !replaceCustom { continue }
+            if current?.account == planned.account, current?.model == planned.model { continue }
+            targets.append((item.feature, planned, current))
+        }
+
+        // One check per distinct model and use that is not verified yet.
+        struct Check { let route: FeatureRoute; let use: ModelUse; var features: [AIFeature] }
+        var pending: [Check] = []
+        for target in targets {
+            guard let use = target.feature.modelUse(on: target.route.account.kind) else { continue }
+            let failedBefore = resolver.hasStoredProbeFailure(model: target.route.model, account: target.route.account, for: target.feature)
+            let verdict = resolver.verdict(model: target.route.model, account: target.route.account,
+                                           for: target.feature, ignoringStoredFailure: true)
+            if case .verified = verdict, !failedBefore { continue }
+            if let index = pending.firstIndex(where: { $0.route == target.route && $0.use == use }) {
+                pending[index].features.append(target.feature)
+            } else {
+                pending.append(Check(route: target.route, use: use, features: [target.feature]))
+            }
+        }
+        // Tool use first: when it passes, plain text on that model needs no request.
+        pending.sort { ($0.use == .chatWithTools ? 0 : 1) < ($1.use == .chatWithTools ? 0 : 1) }
+        var passedTools: Set<String> = []
+        var refused: Set<AIFeature> = []
+        if !pending.isEmpty {
+            sharedChecking.insert(kind)
+            sharedNotes[kind] = nil
+            recompute()
+        }
+        for check in pending {
+            if check.use == .chat, passedTools.contains("\(check.route.account.storageID)|\(check.route.model)") {
+                checks.store(.passed, for: ModelCheckKey(account: check.route.account.storageID, model: check.route.model, use: .chat),
+                             adapterVersion: ModelRegistry.adapterVersion(check.route.account.kind, .chat), at: now())
+                continue
+            }
+            if await probePassed(check.route, for: check.features) {
+                if check.use == .chatWithTools { passedTools.insert("\(check.route.account.storageID)|\(check.route.model)") }
+            } else {
+                refused.formUnion(check.features)
+                let reason = check.features.first.flatMap { messages[$0] } ?? "the check failed"
+                notes.append("\(check.features.map(\.title).joined(separator: ", ")): \(reason)")
+            }
+        }
+        sharedChecking.remove(kind)
+        guard !Task.isCancelled else { recompute(); return false }
+
+        var assigned = 0
+        for target in targets where !refused.contains(target.feature) {
+            // A route changed meanwhile (Advanced, another window) is the user's newer choice.
+            guard routing.route(for: target.feature) == target.current else { continue }
+            assign(target.route, to: [target.feature])
+            assigned += 1
+        }
+        sharedNotes[kind] = notes.isEmpty ? nil : notes
+        recompute()
+        // A model no feature of the kind can take (an LLM typed into Speech)
+        // changed nothing: not a success, the notes say why.
+        guard plan.contains(where: { $0.route != nil }) else { return false }
+        return refused.isEmpty && (assigned > 0 || targets.isEmpty)
+    }
+
+    /// Answers are memoized for one planner (one recompute or one pick); the
+    /// accounts with a section are read once, not per question.
+    private func makePlanner() -> SharedModelPlanner {
+        var cache: [String: PickerReach] = [:]
+        var accounts: [ProviderAccount]?
+        let resolver = self.resolver
+        let routing = self.routing
+        return SharedModelPlanner(
+            reach: { model, account, feature in
+                let key = "\(feature.rawValue)|\(account.storageID)|\(model)"
+                if let hit = cache[key] { return hit }
+                if accounts == nil { accounts = resolver.pickerAccounts() }
+                let found = resolver.pickerReach(model: model, account: account, for: feature, accountsWithSection: accounts)
+                cache[key] = found
+                return found
+            },
+            route: { routing.route(for: $0) }
+        )
     }
 
     // MARK: - OpenRouter provider
@@ -629,7 +1011,22 @@ final class APIAndModelsViewModel: ObservableObject {
         if self.chips != chips { self.chips = chips }
         if self.rows != rows { self.rows = rows }
         if self.aliasGroups != groups { self.aliasGroups = groups }
+        let planner = makePlanner()
+        let shared = SharedModelKind.allCases.map { kind in
+            var row = planner.row(kind: kind, title: title(of:))
+            row.isChecking = sharedChecking.contains(kind)
+            row.notes = sharedNotes[kind] ?? []
+            return row
+        }
+        if self.sharedRows != shared { self.sharedRows = shared }
+        let search = makeSearchRow()
+        if self.searchRow != search { self.searchRow = search }
         if self.unsetBanner != banner { self.unsetBanner = banner }
+    }
+
+    private func makeSearchRow() -> AgentSearchRow {
+        AgentSearchRow(options: agentSettings.options(for: .native),
+                       tavilyConnected: keys.read(account: TavilySearch.keychainAccount) != nil)
     }
 
     private func row(for feature: AIFeature) -> FeatureRow {
@@ -674,15 +1071,16 @@ final class APIAndModelsViewModel: ObservableObject {
         if account == .thisMac {
             return KeyChip(account: account, title: title(of: account), statusText: "Model downloaded", checkedAt: nil)
         }
+        let models = serverModels(of: account)
         if lookup(account) == .unreadable {
             return KeyChip(account: account, title: title(of: account),
-                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil)
+                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil, serverModels: models)
         }
         let record = keyStatuses.record(for: account)
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt
+            checkedAt: record?.checkedAt, serverModels: models
         )
     }
 
@@ -744,11 +1142,11 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func title(of account: ProviderAccount) -> String {
-        if case .server(let id) = account, let server = routing.server(id) { return server.name }
+        if case .server(let id) = account, let server = routing.server(id) { return server.displayName }
         return account.kind.displayName
     }
 
-    private static func builtInAccount(for kind: AIProviderKind) -> ProviderAccount? {
+    static func builtInAccount(for kind: AIProviderKind) -> ProviderAccount? {
         switch kind {
         case .soniox: return .soniox
         case .deepgram: return .deepgram

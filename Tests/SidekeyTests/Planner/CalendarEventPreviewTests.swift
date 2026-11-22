@@ -206,10 +206,10 @@ final class CalendarEventPreviewTests: XCTestCase {
     }
 
     func testAClosedCalendarNeverShowsAPreview() {
-        CalendarAvailability.testOverride = false
+        closeCalendarForThisTest()
         let state = CalendarEventPreviewState(hideDelay: .milliseconds(40))
         state.show(content("a"), frame: CGRect(x: 0, y: 0, width: 100, height: 40))
-        XCTAssertNil(state.anchor, "Calendar is Soon: no event details anywhere")
+        XCTAssertNil(state.anchor, "A closed (Soon) Calendar shows no event details anywhere")
     }
 
     func testTheDescriptionGetsTheLinesItsRoomHolds() {
@@ -237,7 +237,11 @@ final class CalendarEventPreviewTests: XCTestCase {
         XCTAssertEqual(state.anchor?.content.id, "b", "Leaving an event that is no longer shown changes nothing")
         state.hide("b")
         XCTAssertEqual(state.anchor?.content.id, "b", "Hiding waits briefly for the next event")
-        try await Task.sleep(for: .milliseconds(120))
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(2)
+        while state.anchor != nil, clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(10))
+        }
         XCTAssertNil(state.anchor)
         state.show(first, frame: .zero); state.clear()
         XCTAssertNil(state.anchor, "Closing the panel hides at once")

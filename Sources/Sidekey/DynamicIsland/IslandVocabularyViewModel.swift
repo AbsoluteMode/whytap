@@ -28,9 +28,27 @@ final class IslandVocabularyViewModel: ObservableObject {
 
     private let vocabulary: VocabularyCache
     private var hasLoaded = false
+    private var changeObserver: NSObjectProtocol?
 
     init(vocabulary: VocabularyCache = .shared) {
         self.vocabulary = vocabulary
+        // The list loads once, then is saved whole; a term added elsewhere
+        // (a learning suggestion's Y) must reach this copy before the next save.
+        // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: VocabularyCache.didChangeNotification, object: vocabulary, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reloadIfLoaded() }
+        }
+    }
+
+    deinit {
+        if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
+    }
+
+    private func reloadIfLoaded() {
+        guard hasLoaded, state != .saving else { return }
+        terms = vocabulary.terms
     }
 
     var visibleTerms: [String] {

@@ -18,15 +18,123 @@
   next to it need the MacBook. See the
   [decision](../.project-docs/decisions/2026-11-22-island-beside-system-island.md).
 
+## Server window — 2026-11-22
+
+The person comes to connect their own server and say what runs on it. First
+they see the address and each model with its type and whether it works; then
+they add or fix a model and save once. Direction: the maintainer's "one
+window" request (REV 6 mockups approved before wiring).
+
+- The Custom server tile and each server's tile open a 600 pt sheet, not the
+  inline key form: title (the server's address name, or "Add your server"),
+  one 11.5 pt line on what fits, then two inset groups. Connection: Base URL
+  and API key as labeled rows (88 pt label column). Models: one row per model,
+  "+ Add model" as the group's last row, an explanation under the group.
+  Footer: Remove server (existing only), a one-line summary, Cancel, Save.
+  Why: one object, one window, one Save.
+- No name field. The title and the tile show the address
+  (`ServerEndpoint.displayName`). Why: the name was useless and drifted.
+- A model row is a monospaced name field with a ▾ of the server's
+  `/v1/models` inside it, a 176 pt LLM/Transcription segmented control, a
+  104 pt status column (reserved even before the first check, so rows line
+  up) and ×. Status: spinner + Checking…, green Works, red Failed with the
+  server's reason as a full-width line under the row, orange Not checked.
+  Why: the type and the result sit next to the model they describe.
+- Save is disabled while a row is checking and turns into Save anyway when a
+  failure is on screen; the summary says what Save anyway does in red. Save
+  errors use the same summary line. Cancel is the cancel action, Save the
+  default action.
+- The connection and model groups scroll past 460 pt and shrink further
+  when the window has less room; the title and the footer keep their height.
+  Why: a long model list must not push Save off the screen.
+- A typed key that was already sent is cleared when the address moves to
+  another server, with "The key was typed for another address. Type it
+  again to use it here." under the field. Why: a key goes to one server.
+- When the address moves to another server and no key is typed, the key
+  field reads "Optional" with "The saved key stays with the old address.
+  Type it again to use it here." under it. Why: the saved key is not sent to
+  another server, and the user should know before Save removes it.
+- Colors are the shared Settings tokens (status green/red/orange, row
+  separators, card groups) in both appearances; no new tokens.
+
+Offscreen renders cover new, two models of both types, a failed check, a
+new server's first check and 16 models (scrolling) in light and dark, plus
+the tiles. Real pointer,
+keyboard focus order and VoiceOver in the installed app remain acceptance.
+
+## Toolbox: tool hotkey and selected tile — 2026-11-22
+
+The user selects a tool in Toolbox and wants to give it a key there, then
+change the tool's settings below.
+
+- A selected tool pins its title row and a Hotkey block above the scrolling
+  tool panel: a soft hover-tinted band with a keyboard glyph and "Hotkey"
+  ("Extra hotkey" for Record), and on the right Set (tinted), or the keycaps,
+  Change and a remove glyph. Recording shows dashed live keycaps, a hint and
+  Cancel; a conflict turns them red with an orange warning line and keeps
+  recording. It saves without a Save step.
+- Selected tile: 20 % accent wash on the circle, accent symbol, semibold
+  label-color caption, no outline. Keyboard focus is a 2 pt accent ring 4 pt
+  outside the circle; focus a click gives draws nothing. Why: the system
+  click-focus ring drew a thick rectangle around circle and caption;
+  ring/solid variants were rejected because a ring reads as focus and a solid
+  fill as an "on" state. Hover and press anywhere on the tile tint the circle
+  with MacButton's 10 % / 18 % label-color highlight; hover also lifts the
+  caption to the label color. Tiles stay draggable: the feedback is observed,
+  never a gesture (`2026-11-22-toolbox-tile-drag.md`). Variants and reasons:
+  `.project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md`.
+- Offscreen renders cover the minimum content size in both appearances; the
+  live focus ring and VoiceOver remain installed-app checks.
+
+## Shared Speech and LLM rows — 2026-11-22
+
+- Models opens with two cards, Speech ("Drop, voice, Meetings") and LLM
+  ("Cleanup, notes, Agent"), each a single model menu that sets every feature
+  of its kind. Subtitles keeps its own card below them.
+- The menu label tells the whole state in one line: "Choose a model",
+  "ElevenLabs · scribe_v3_live", "Anthropic · claude-opus-5 · 1 custom",
+  "· 2 not set", or "Mixed · 4 custom". A card with no model or with features
+  still unset keeps the orange setup contour.
+- Under the menu, one line per feature the pick could not serve, with the
+  reason ("Agent: no tool support · kept …"), and "Checking…" while the single
+  probe runs.
+- "Advanced · a model per feature" (chevron, collapsed by default) holds the
+  former per-feature groups unchanged. It starts expanded for Mixed, a link
+  to one feature, and "Show" for features without a model.
+- Re-picking with custom features asks in a native dialog: Keep custom models
+  (default), Replace them too, Cancel; the message names those features.
+
+See the [shared model rows decision](../.project-docs/decisions/2026-11-22-shared-model-rows.md).
+
+## Search row — 2026-11-22
+
+- A third card under Speech and LLM, laid out like them: "Search" with the
+  caption "Agent web search" and one menu. The label is what the Agent uses
+  now: "Anthropic · built-in", "OpenAI · built-in", "OpenRouter · web",
+  "Tavily" or "Off — add a Tavily key".
+- The menu offers the Agent model's built-in search (when it has one) and
+  Tavily, with a checkmark on the current one; without a Tavily key it offers
+  "Add a Tavily key…", which opens API keys.
+- Under the menu, "Follows the Agent model: <provider> · <model>." names the
+  model the search follows (the Agent can keep its own model while the LLM row
+  shows another), then one line names the price and who bills it. Off keeps
+  the orange setup contour and turns the price line orange.
+
+See the [provider web search decision](../.project-docs/decisions/2026-11-22-agent-provider-web-search.md).
+
 ## History: several rows in one paste — 2026-11-22
 
 - ⌘-click marks a History row; a blue badge at its right edge shows its paste
   number and the row gets a blue tint and border. ⌘-click again unmarks and the
-  others renumber. Marking is offered only when Enter can paste (a captured
-  target); in Toolbox ⌘-click still copies.
+  others renumber. Marking works everywhere, also without a paste target and
+  in Toolbox (2026-11-22, after the user marked three rows, clicked and got
+  nothing copied).
+- With marks, a plain click on any row copies all marked rows in mark order
+  and clears the marks; Enter pastes them where there is a target.
 - The footer teaches the gesture in one line ("⌘-click for several") and,
-  once rows are marked, states the outcome: "Enter to paste N to <app>   Esc
-  to clear". Plain click and plain Enter keep their meaning.
+  once rows are marked, states the outcome: "Click to copy N   Enter to paste
+  N to <app>   Esc to clear" (no Enter part without a target; Toolbox says
+  "⌘-click to unmark"). Without marks plain click and Enter keep their meaning.
 - Marked rows stay marked while switching Agent, Drop and Clipboard, so text
   and files from different tabs can go out together in mark order.
 
@@ -1728,29 +1836,36 @@ text/gap exclusion, drag cancellation, removed/disabled controls, content width 
 rest/pressed/disabled images. Physical pointer, keyboard and VoiceOver behavior
 remain shared-app acceptance.
 
-## First-launch onboarding — 2026-11-21
+## First-launch onboarding — 2026-11-21, redesigned 2026-11-22
 
-One fixed 600 × 540 pt window beside the island, one column, built from the
-Settings components (MacCard, MacRow, MacButton, MacSwitch, MacSegmented) so it
-follows light and dark appearance like Settings. Each page has a 38 pt
-Instrument Serif heading (bundled font, system fallback), one 14 pt sentence,
-its controls, and a footer with the way on aligned right: quiet text actions
-(Set up later, Skip) beside one primary button. Progress is a row of dots, the
-current one a wider accent capsule. Pages slide 24 pt with a fade (0.25 s);
-Reduce Motion keeps only the fade. Hidden pages leave no dot.
+The former paid onboarding's look, with today's content. One always-dark
+960 × 600 pt window (OnboardingTheme tokens: near-black background, three
+surface steps, purple accent, green for success and free offers). Left pane
+380 pt: a mono step caption ("SPEECH · 1 / 5"), a 44 pt Instrument Serif
+headline with one italic word, at most one short line, the page's controls,
+and a footer aligned right (quiet text actions beside one white capsule), with a
+quiet ‹ Back on its left on every page but the first (← and ⌘[ outside text
+fields do the same).
+Right: a stage with a soft purple wash (green on the try page after success)
+showing mock windows with traffic lights, the real island orb, or a 16:9 clip
+with the person's own keycaps under it. Pages fade (0.28 s); the left pane
+slides 10 pt in; Reduce Motion keeps the fade and shows clip posters.
 
-Speech is one card (On this Mac, size, the primary button and, beside it, the
-sentence that it sets Drop only), with two quiet links under it. The key form
-reuses ProviderKeyForm without Remove, a provider segment and the no-card offers
-as links. Permissions reuse the Settings rows and the Drop shortcut repair
-section. The try page shows the shortcut with HotkeyHintView ("Hold Space"),
-a native text field with a placeholder, and one status line (download progress,
-a missing model or shortcut with its one action, or the green success line;
-the field's outline turns green with it). The features page is one card of
-three rows, each with its ▶ video and its switch or "Add a model".
+Speech: the language picker (a dark label opening a searchable list), the On
+this Mac card with its white button, and a card of seven provider tiles in a
+4-column grid (muted badge, logo, name, offer). Selected tiles get the accent
+outline; the key field and Save appear under the grid and Get offer beside the
+card title. The saved speech key Drop will use says For Drop in the accent with
+the same outline; the footer's right place is Continue with "Drop will use X"
+(or the refusal in orange) on its own line above, else the quiet Set up later. Permissions: two cards with Allow / Open Settings / a green check,
+and a dashed secondary row for Screen Recording ("Optional · for Shot").
+Try: three numbered italic verbs, the real field in a note window. Make it
+yours and Turn on more: selectable cards (accent outline) that pick the stage's
+clip, with switches, "Add a model" or Connect at the end of the row.
 
-Why: the first success is the person's own sentence; everything else is one
-line and one action. Offscreen renders of every page in both appearances were
-reviewed (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the native TCC
-dialogs and the real island remain acceptance in the installed app. See
+Why: the first contact should impress and read in seconds; the stage explains
+so the left side can stay short. Offscreen renders of every page were reviewed
+by the maintainer (`WHYTAP_ONBOARDING_RENDER_DIR`); live hover, focus, the
+native TCC dialogs, playing clips and the real island remain acceptance in the
+installed app. See
 `.project-docs/decisions/2026-11-21-first-launch-onboarding.md`.

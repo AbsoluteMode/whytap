@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: plugins/whytap/mcp.json
     confirmed_at: 2026-10-21
-related: [../processes/local-customization.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-03-todo-helper.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md]
+related: [../processes/local-customization.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-03-todo-helper.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-22-agent-toolbox-hotkeys.md]
 ---
 
 ## Context

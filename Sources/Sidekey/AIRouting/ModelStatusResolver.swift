@@ -26,7 +26,8 @@ struct PickerOption: Equatable {
     let hint: String?
     var dateLabel: String? = nil
     var catalogDate: Date? = nil
-    /// OpenRouter's list price; display only, never part of search or routing.
+    /// A list price: per audio minute for a speech model, OpenRouter's per
+    /// token price for an LLM. Display only, never part of search or routing.
     var priceLabel: String? = nil
 }
 
@@ -44,6 +45,20 @@ struct PickerSection: Equatable {
     /// A custom server without a catalog still accepts its configured model
     /// name, even when the selected route is included in `options`.
     var acceptsModelName = false
+}
+
+/// What a feature's picker does with one model (`ModelStatusResolver.pickerReach`).
+enum PickerReach: Equatable {
+    /// The account has no section for this feature (no key, or it can't serve it).
+    case noSection
+    /// `verdict` rules the model out for this feature.
+    case ruledOut(reason: String)
+    /// Listed: registry, catalog or the feature's own route.
+    case offered
+    /// Not listed, but the server section takes a typed model name.
+    case typed
+    /// The section neither lists it nor takes a typed name.
+    case notListed
 }
 
 /// One "Switch" action: several features sit on the same deprecated alias of
@@ -146,18 +161,57 @@ struct ModelStatusResolver {
 
     // MARK: - Picker
 
-    func sections(for feature: AIFeature) -> [PickerSection] {
-        let selected = routing.route(for: feature)
-        let openRouterModels = Dictionary(
-            (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first })
+    /// The accounts with a picker section, in picker order.
+    func pickerAccounts() -> [ProviderAccount] {
         var accounts = Self.directAccounts.filter { credential(of: $0) != .missing }
         let servers = routing.state.servers.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
         accounts += servers.map { ProviderAccount.server($0.id) }
         if credential(of: .openRouter) != .missing { accounts.append(.openRouter) }
+        return accounts
+    }
 
+    /// What `feature`'s picker does with one model of one account, answered
+    /// without building the list: the shared Speech and LLM rows ask this for
+    /// a handful of routes whenever Settings recomputes, and a full section
+    /// of a large cached catalog (OpenRouter) costs seconds on the main actor.
+    /// The same rules as `sections(for:)`: the account needs a section, the
+    /// model must not be ruled out (`verdict`), and it is offered when the
+    /// registry or the catalog lists it or it is the feature's route. A
+    /// server offers only the models the user added for this kind, which
+    /// `verdict` already enforces.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md,
+    // .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func pickerReach(model: String, account: ProviderAccount, for feature: AIFeature,
+                     accountsWithSection: [ProviderAccount]? = nil) -> PickerReach {
+        guard (accountsWithSection ?? pickerAccounts()).contains(account),
+              let use = feature.modelUse(on: account.kind) else { return .noSection }
+        if case .notSupported(let reason) = verdict(model: model, account: account, for: feature) {
+            return .ruledOut(reason: reason)
+        }
+        let selected = routing.route(for: feature)
+        if selected?.account == account, selected?.model == model { return .offered }
+        if case .server = account { return .offered }
+        if ModelRegistry.models.contains(where: { $0.kind == account.kind && $0.id == model && $0.uses.contains(use) }) {
+            return .offered
+        }
+        let snapshot = catalogs.snapshot(for: account)
+        if let entry = snapshot?.models.first(where: { $0.id == model }), entry.aliasOf == nil,
+           !ModelRegistry.offersOnlyBuiltInModels(account.kind, use: use), !Self.isStale(entry, fetchedAt: snapshot?.fetchedAt) {
+            return .offered
+        }
+        return .notListed
+    }
+
+    /// `only`: build just that account's section.
+    func sections(for feature: AIFeature, only: ProviderAccount? = nil) -> [PickerSection] {
+        let selected = routing.route(for: feature)
+        let openRouterModels = Dictionary(
+            (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        var accounts = pickerAccounts()
+        if let only { accounts = accounts.filter { $0 == only } }
         return accounts.compactMap { account in
             guard let use = feature.modelUse(on: account.kind) else { return nil }
             let snapshot = catalogs.snapshot(for: account)
@@ -169,12 +223,24 @@ struct ModelStatusResolver {
             for model in ModelRegistry.models where model.kind == account.kind && model.uses.contains(use) {
                 add(model.id)
             }
-            for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
-            where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind)
-                && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
-                add(model.id)
+            if case .server(let id) = account {
+                // Only what the user added for this kind; `/v1/models` only
+                // suggests names in the server's form.
+                // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+                if let kind = ServerModel.Kind(feature) {
+                    for model in routing.server(id)?.models(of: kind) ?? [] { add(model.name) }
+                }
+            } else {
+                for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
+                where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind, use: use)
+                    && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
+                    add(model.id)
+                }
             }
             if let selected, selected.account == account { add(selected.model) }
+            // A server with nothing of this kind has no section: its models are
+            // added in its API keys form, not typed into a picker.
+            if account.kind == .openAICompatible, ids.isEmpty { return nil }
 
             var options: [PickerOption] = []
             for id in ids {
@@ -197,7 +263,8 @@ struct ModelStatusResolver {
                     hint: hint(model: id, account: account, feature: feature, use: use, listing: listing),
                     dateLabel: dateLabel,
                     catalogDate: dateLabel == nil ? nil : date,
-                    priceLabel: Self.catalogPriceLabel(listing?.tokenPrice)
+                    priceLabel: Self.speechPriceLabel(ModelRegistry.speechListPrice(id, kind: account.kind, use: use))
+                        ?? Self.catalogPriceLabel(listing?.tokenPrice)
                 ))
             }
             return PickerSection(
@@ -205,8 +272,7 @@ struct ModelStatusResolver {
                 title: title(of: account),
                 options: options,
                 refreshFailed: snapshot?.lastRefreshFailed ?? false,
-                keyProblem: keyProblem(of: account),
-                acceptsModelName: account.kind == .openAICompatible && (snapshot?.models.isEmpty ?? true)
+                keyProblem: keyProblem(of: account)
             )
         }
     }
@@ -249,6 +315,15 @@ struct ModelStatusResolver {
         else { return nil }
         if price.inputPerMillion == 0, price.outputPerMillion == 0 { return "Free" }
         return "$\(input) in / $\(output) out per 1M tokens"
+    }
+
+    /// A speech model's list price per audio minute: `$0.017 per min`, or
+    /// `From $0.0048 per min` where options the provider bills extra raise it.
+    /// No known price, no label: never a zero.
+    // WHY: .project-docs/decisions/2026-11-22-speech-model-prices.md
+    static func speechPriceLabel(_ price: SpeechListPrice?) -> String? {
+        guard let price, price.usdPerMinute > 0, let amount = priceAmount(price.usdPerMinute) else { return nil }
+        return "\(price.startingAt ? "From " : "")$\(amount) per min"
     }
 
     /// The same model in OpenRouter's catalog, for a direct Anthropic or
@@ -349,7 +424,10 @@ struct ModelStatusResolver {
         if let reason = ModelRegistry.knownUnsupportedReason(model, kind: kind, use: use) {
             return .notSupported(reason: reason)
         }
-        if let entry = catalogs.snapshot(for: account)?.models.first(where: { $0.id == model }),
+        if let reason = notAddedReason(model: model, account: account, for: feature) {
+            return .notSupported(reason: reason)
+        }
+        if let entry = judgedEntry(model: model, account: account, for: feature),
            let reason = contradiction(entry, feature: feature, use: use) {
             return .notSupported(reason: reason)
         }
@@ -411,7 +489,7 @@ struct ModelStatusResolver {
     }
 
     private func title(of account: ProviderAccount) -> String {
-        if case .server(let id) = account, let server = routing.server(id) { return server.name }
+        if case .server(let id) = account, let server = routing.server(id) { return server.displayName }
         return account.kind.displayName
     }
 
@@ -444,13 +522,37 @@ struct ModelStatusResolver {
         return false
     }
 
+    /// A server serves only the models the user added, each for its own
+    /// kind. The model a feature already runs on is exempt: a route saved
+    /// before models were added explicitly (or synced from an older Mac)
+    /// keeps working and stays offered; only the user moves it.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    private func notAddedReason(model: String, account: ProviderAccount, for feature: AIFeature) -> String? {
+        guard case .server(let id) = account, let kind = ServerModel.Kind(feature) else { return nil }
+        let current = routing.route(for: feature)
+        if current?.account == account, current?.model == model { return nil }
+        guard let server = routing.server(id), !server.hasModel(model, kind: kind) else { return nil }
+        return "Not added to \(server.displayName) as \(kind == .llm ? "an LLM" : "a Transcription model")"
+    }
+
+    /// The catalog's entry as `verdict` judges it. A server's `/v1/models`
+    /// says nothing about what a model does: its kind is the user's entry.
+    private func judgedEntry(model: String, account: ProviderAccount, for feature: AIFeature) -> CatalogModel? {
+        if case .server = account { return nil }
+        return catalogs.snapshot(for: account)?.models.first(where: { $0.id == model })
+    }
+
     /// Why the catalog's own description rules a model out for this use.
     private func contradiction(_ entry: CatalogModel, feature: AIFeature, use: ModelUse) -> String? {
         switch use {
         case .realtimeSTT:
-            if let uses = entry.uses, !uses.contains(.realtimeSTT) { return "recorded only" }
+            if let uses = entry.uses, !uses.contains(.realtimeSTT) {
+                return uses.contains(.asyncSTT) ? "recorded only" : "not a speech model"
+            }
         case .asyncSTT:
-            if let uses = entry.uses, !uses.contains(.asyncSTT) { return "real-time only" }
+            if let uses = entry.uses, !uses.contains(.asyncSTT) {
+                return uses.contains(.realtimeSTT) ? "real-time only" : "not a speech model"
+            }
         case .decision:
             if let uses = entry.uses, !uses.contains(.decision) { return "not a decision model" }
         case .chat:
@@ -490,7 +592,13 @@ struct ModelStatusResolver {
             if registered?.diarization == true { return "with speakers" }
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             return account == .thisMac ? "without speakers" : nil
-        case .dropFast, .dropSmart, .meetingNotes, .agent, .retiredMeetingText, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
+        case .dropFast, .dropSmart, .agentVoice, .voiceSearch:
+            // A turn-based OpenAI model runs with server VAD: its text comes
+            // after each pause, not word by word.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            if account == .openAI, !ModelRegistry.openAIStreamsWithinTurn(model) { return "text after each pause" }
+            return nil
+        case .meetingNotes, .agent, .retiredMeetingText, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
             return nil
         }
     }

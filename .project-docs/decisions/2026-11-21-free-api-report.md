@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/APIHintsRenderTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-10-19-api-hints.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-10-19-api-hints.md, 2026-11-22-agent-provider-web-search.md]
 ---
 
 ## Context
@@ -111,6 +111,16 @@ paying.
   and submits it to the build queue, then reports to Maxim what changed. New
   offers it finds at providers Whytap supports are proposed in the report,
   not added: adding or removing a row is Maxim's call.
+
+2026-11-22 follow-up: an outside agent given the repository read "Everyday use
+fits in the free quotas" as a promise that Whytap can be used for free. Maxim
+does not promise a free path: Whytap is for people and companies that already
+have provider keys, self-hosted speech or language models, or ChatGPT/Claude
+plans with monthly API credits. The banner now says "Whytap is free. Your
+providers bill your own keys." ("Providers bill your own keys." on phones),
+and one line under the heading says the free tiers are for trying it out. The
+heading "Free to use" stays: it is matched by `APIHintsRenderTests`, and
+renaming it is a separate change.
 
 ## Why
 

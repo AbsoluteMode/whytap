@@ -94,4 +94,54 @@ struct ServerEndpoint: Codable, Equatable, Identifiable, Sendable {
     var name: String
     var baseURL: String
     let keyAccount: String
+    /// The models the user added, each with its kind. `nil`: written before
+    /// models were added explicitly; launch turns such a server's routes into
+    /// entries (`AIRoutingStore.adoptExplicitServerModelsIfNeeded`). An older
+    /// build ignores the field; an entry this build cannot read is skipped
+    /// instead of dropping the server (backup validation decodes every
+    /// server strictly).
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    var models: [ServerModel]?
+
+    init(id: UUID, name: String, baseURL: String, keyAccount: String, models: [ServerModel]? = nil) {
+        self.id = id
+        self.name = name
+        self.baseURL = baseURL
+        self.keyAccount = keyAccount
+        self.models = models
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, baseURL, keyAccount, models
+    }
+
+    private struct Lenient<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        keyAccount = try container.decode(String.self, forKey: .keyAccount)
+        // The 2026-11-22 "Offer models for" choice (`modelKinds`) is not read:
+        // explicit models replace it.
+        if container.contains(.models) {
+            let entries = (try? container.decode([Lenient<ServerModel>].self, forKey: .models)) ?? []
+            models = entries.compactMap(\.value)
+        } else {
+            models = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encode(keyAccount, forKey: .keyAccount)
+        try container.encodeIfPresent(models, forKey: .models)
+    }
 }

@@ -94,6 +94,10 @@ final class CarbonHotkeyMonitor {
     static let toolHotKeyIDBase: UInt32 = 100
 
     static let meetingRecordHotKeyID: UInt32 = 18
+    /// ⌃Y / ⌃N for the learning suggestion drops, registered only while the
+    /// drops are on screen. WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+    static let dropLearningYesHotKeyID: UInt32 = 19
+    static let dropLearningNoHotKeyID: UInt32 = 20
 
     /// kVK_Escape from Carbon HIToolbox/Events.h. Consumed by
     /// `EscapeCloseEventMonitor`'s bare-Escape predicate.

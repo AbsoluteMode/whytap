@@ -7,10 +7,9 @@ struct HotkeysSettingsView: View {
     @ObservedObject var preferences: HotkeyPreferences
     @State private var draft: HotkeyConfiguration
     @State private var saveError: String?
-    @State private var recordingTarget: RecordingTarget?
-    @State private var recordingContents: [KeycapContent] = []
-    @State private var shortcutRecorder = HotkeyShortcutRecorder()
-    @State private var eventMonitor: Any?
+    /// Shared with the Toolbox Hotkey block: one recorder, Escape cancels.
+    @StateObject private var recording = HotkeyRecordingSession<RecordingTarget>()
+    private var recordingTarget: RecordingTarget? { recording.target }
 
     init(preferences: HotkeyPreferences? = nil) {
         let preferences = preferences ?? HotkeyPreferences.shared
@@ -358,48 +357,18 @@ struct HotkeysSettingsView: View {
     }
 
     private func startRecording(_ target: RecordingTarget) {
-        stopRecording()
         saveError = nil
-        shortcutRecorder = HotkeyShortcutRecorder(shortcut: shortcut(for: target))
-        recordingContents = initialRecordingContents(for: target)
-        recordingTarget = target
-        AppState.shared.hotkeyRecordingActive = true
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { event in
-            handleRecordingEvent(event)
+        recording.start(target, current: shortcut(for: target)) { shortcut, target in
+            assignShortcut(shortcut, to: target)
         }
     }
 
     private func stopRecording() {
-        if let eventMonitor {
-            NSEvent.removeMonitor(eventMonitor)
-            self.eventMonitor = nil
-        }
-        recordingTarget = nil
-        AppState.shared.hotkeyRecordingActive = false
-        recordingContents = []
-    }
-
-    private func handleRecordingEvent(_ event: NSEvent) -> NSEvent? {
-        guard let target = recordingTarget else { return event }
-        if event.type == .keyDown, event.keyCode == UInt16(kVK_Escape) {
-            stopRecording()
-            return nil
-        }
-
-        guard event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged else { return nil }
-        if let shortcut = shortcutRecorder.record(event) {
-            assignShortcut(shortcut, to: target)
-        }
-        recordingContents = shortcutRecorder.contents
-        return nil
-    }
-
-    private func initialRecordingContents(for target: RecordingTarget) -> [KeycapContent] {
-        shortcut(for: target)?.contents ?? []
+        recording.stop()
     }
 
     private func shortcutContents(for target: RecordingTarget, fallback: [KeycapContent]) -> [KeycapContent] {
-        recordingTarget == target ? recordingContents : fallback
+        recordingTarget == target ? recording.contents : fallback
     }
 
     private func assignShortcut(_ shortcut: HotkeyShortcut, to target: RecordingTarget) {
@@ -816,7 +785,7 @@ private struct ShortcutGestureSlot: View {
 }
 
 @MainActor
-private struct ShortcutKeySlot: View {
+struct ShortcutKeySlot: View {
     let content: KeycapContent?
     let isRecording: Bool
     let hasConflict: Bool

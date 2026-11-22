@@ -9,7 +9,9 @@ enum OnboardingPage: String, CaseIterable, Equatable {
     case permissions
     /// Hold the Drop shortcut and dictate into a real field.
     case tryDrop
-    /// Google, Meetings and Agent: one switch each, then Done.
+    /// Shortcuts for any tool and the tools hovering the island shows.
+    case customize
+    /// Google, Meetings, Agent and the coding-agent plugin, then Done.
     case features
 }
 
@@ -28,7 +30,7 @@ enum OnboardingFlow {
         var pages: [OnboardingPage] = []
         if !conditions.dropSpeechReady { pages.append(.speech) }
         if !conditions.permissionsReady { pages.append(.permissions) }
-        pages.append(contentsOf: [.tryDrop, .features])
+        pages.append(contentsOf: [.tryDrop, .customize, .features])
         return pages
     }
 
@@ -38,6 +40,15 @@ enum OnboardingFlow {
     static func next(after page: OnboardingPage, in pages: [OnboardingPage], speechExpected: Bool) -> OnboardingPage? {
         guard let index = pages.firstIndex(of: page) else { return nil }
         return pages[(index + 1)...].first { $0 != .tryDrop || speechExpected }
+    }
+
+    /// The page Back returns to, or `nil` on the first page. It walks the same
+    /// list as `next`, so a hidden page is never reached and the try page is
+    /// passed over by the same rule.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    static func previous(before page: OnboardingPage, in pages: [OnboardingPage], speechExpected: Bool) -> OnboardingPage? {
+        guard let index = pages.firstIndex(of: page) else { return nil }
+        return pages[..<index].last { $0 != .tryDrop || speechExpected }
     }
 
     /// Pages with a permissions page added before the try page, for a Drop

@@ -227,7 +227,11 @@ struct ModelProbe: ModelProbing {
         case .anthropic:
             return await probeAnthropic(route, withTools: withTools)
         case .openAI:
-            guard key != nil else { return .inconclusive(reason: "Key problem") }
+            guard let key else { return .inconclusive(reason: "Key problem") }
+            // The Agent (the only tool-use feature) runs on the Responses API;
+            // newer reasoning models refuse function tools on Chat Completions.
+            // WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
+            if withTools { return await probeOpenAIResponses(route, key: key) }
             url = URL(string: "https://api.openai.com/v1")!
             isOpenRouter = false
         case .soniox, .deepgram, .elevenLabs, .thisMac:
@@ -283,6 +287,57 @@ struct ModelProbe: ModelProbing {
             parameters: .init(type: "object", properties: .init())
         )
     )
+
+    // MARK: - OpenAI Responses
+
+    /// The shape of the Agent's own OpenAI request (`NativeAgentModel`): the
+    /// Responses API with one function tool, nothing stored. Any 2xx passes,
+    /// an `incomplete` answer cut off at `max_output_tokens` included.
+    private func probeOpenAIResponses(_ route: ResolvedRoute, key: String) async -> ProbeOutcome {
+        let body: [String: Any] = [
+            "model": route.model,
+            "input": "Reply with OK.",
+            "store": false,
+            "max_output_tokens": 512,
+            "tools": [["type": "function", "name": "whytap_probe", "description": "Probe tool. Do not call.",
+                       "parameters": ["type": "object", "properties": [String: Any]()], "strict": false]],
+        ]
+        guard let encoded = try? JSONSerialization.data(withJSONObject: body) else {
+            return .inconclusive(reason: "Could not build the request")
+        }
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = Self.seconds(timeout)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.httpBody = encoded
+        let data: Data
+        let status: Int
+        do {
+            let (received, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .inconclusive(reason: "No connection") }
+            data = received
+            status = http.statusCode
+        } catch {
+            return .inconclusive(reason: "No connection")
+        }
+        switch status {
+        case 200..<300:
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .inconclusive(reason: "Unexpected answer")
+            }
+            if ["completed", "incomplete"].contains(object["status"] as? String ?? "") { return .passed }
+            return .failed(reason: "Provider refused: " + (Self.providerMessage(object, key: key) ?? "empty answer"))
+        case 400, 404, 422:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let message = object.flatMap { Self.providerMessage($0, key: key) } ?? "HTTP \(status)"
+            return .failed(reason: "Provider refused: " + message)
+        case 401, 402, 403:
+            return .inconclusive(reason: "Key problem")
+        default:
+            return .inconclusive(reason: "No answer from the provider")
+        }
+    }
 
     // MARK: - Anthropic
 

@@ -57,6 +57,7 @@ final class TavilySettings: ObservableObject {
             try Task.checkCancellation()
             try keys.save(key, account: TavilySearch.keychainAccount)
             configured = true; draftKey = ""; showMessage("Tavily connected.")
+            NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
         } catch is CancellationError { return }
         catch {
             guard !Task.isCancelled else { return }
@@ -71,6 +72,7 @@ final class TavilySettings: ObservableObject {
         do {
             try keys.delete(account: TavilySearch.keychainAccount)
             configured = false; draftKey = ""; showMessage("Tavily disconnected.")
+            NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
         } catch { showMessage("Couldn’t remove the key from Keychain. Try again.", error: true) }
     }
 

@@ -1,5 +1,7 @@
 # BYOK Models UI: drop OpenAI + remove illusory one-option model dropdowns
 
+> Пересмотрено 22.11.2026: OpenAI снова провайдер речи (live-модели стримят слова, пофразовые идут через server VAD), сохранённый выбор OpenAI больше не читается как Soniox — [2026-11-22-openai-speech-provider](../../.project-docs/decisions/2026-11-22-openai-speech-provider.md).
+
 **Дата:** 2026-06-23
 **Где:** `Sources/Sidekey/Settings/SelfKeyPreferences.swift`, `SettingsModelsView.swift`.
 

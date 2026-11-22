@@ -21,8 +21,8 @@ Drag the palette background to move it.
 
 In **Settings → API & Models**, choose:
 
-- **Translation**: an OpenRouter text model or your own OpenAI-compatible text
-  endpoint for typed text.
+- **Translation**: a language model from OpenRouter, OpenAI, Anthropic or your
+  own OpenAI-compatible server, for typed text.
 - **Subtitles** is an ordinary row with its model already chosen: **OpenAI ·
   gpt-realtime-translate**. It hears and translates in one step (about $3.06
   per hour of audio: $0.034 a minute for the translation and $0.017 for the
@@ -32,6 +32,11 @@ In **Settings → API & Models**, choose:
   **Start** says "Subtitles need an OpenAI key" with a button to **API &
   Models**. Subtitles models chosen in earlier versions (Speech and LLM) are no
   longer used.
+
+  This Subtitles setup comes with the next version after 2.2.26. In 2.2.26
+  Subtitles have two rows of their own: a speech model (a provider or On this
+  Mac) for the system audio and a language model that translates finished
+  phrases.
 - A Subtitles session ends by itself after one hour, exactly as if you had
   pressed **Stop**: nothing is shown and **Start** begins a new hour. This
   keeps a forgotten session from spending your OpenAI credit.
@@ -104,8 +109,8 @@ unsent text as well. Close the window before choosing Restart.
 At most nine phrases wait for translation and forty recent pairs remain in
 memory. Audio also crosses a bounded queue. If the connection or model cannot
 keep up, capture stops with an actionable error instead of accumulating delay
-or silently dropping speech. Choose a faster model and start again. Starting a
-new subtitle session clears the previous lines.
+or silently dropping speech. Start again when the connection is stable.
+Starting a new subtitle session clears the previous lines.
 
 ## Verification
 

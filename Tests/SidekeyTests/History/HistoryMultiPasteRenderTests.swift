@@ -30,19 +30,21 @@ final class HistoryMultiPasteRenderTests: XCTestCase {
             text(5, "https://example.com/booking/7731"),
         ]
 
-        let states: [(String, String?, [HistoryStripCard])] = [
-            ("hint", "Telegram", []),
-            ("three-files", "Telegram", [cards[2], cards[0], cards[3]]),
-            ("mixed", "Mail", [cards[1], cards[0], cards[3]]),
-            ("no-target", nil, []),
+        let states: [(String, String?, [HistoryStripCard], Bool)] = [
+            ("hint", "Telegram", [], true),
+            ("three-files", "Telegram", [cards[2], cards[0], cards[3]], true),
+            ("mixed", "Mail", [cards[1], cards[0], cards[3]], true),
+            ("no-target", nil, [], true),
+            ("no-target-marked", nil, [cards[0], cards[3]], true),
+            ("toolbox-marked", nil, [cards[2], cards[0]], false),
         ]
         let width: CGFloat = 312
         let height = HistoryHoverView.requiredContentHeight + 12
-        for (name, target, marked) in states {
+        for (name, target, marked, keyboard) in states {
             let view = HistoryHoverView(
                 mode: .constant(.clipboard), cards: cards, targetAppName: target,
                 onSelectMode: { _ in }, onCopy: { _ in }, onPreviewAnchorChange: { _, _ in },
-                onPaste: { _ in }, allowsKeyboardPaste: true, initialSelection: marked
+                onPaste: { _ in }, allowsKeyboardPaste: keyboard, initialSelection: marked
             )
             .frame(width: width, height: height, alignment: .top)
             .background(Color.black)

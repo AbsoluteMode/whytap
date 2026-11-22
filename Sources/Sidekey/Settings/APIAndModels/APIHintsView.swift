@@ -67,7 +67,7 @@ struct APIHintsView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add keys in API keys. Choose language and speech models in Models; Tavily provides web search for Agent.")
+            Text("Add keys in API keys. Choose language and speech models in Models. Agent searches the web with its model: on Anthropic or OpenAI about $10 per 1,000 searches plus result tokens, through OpenRouter Exa at about $7 per 1,000 (Claude models use Anthropic's search). Tavily serves other models, or when chosen in Models → Search.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
 
@@ -202,7 +202,7 @@ struct APIHintsView: View {
             allowance: "1,000",
             cadence: "free search credits each month",
             access: .noCard,
-            detail: "Web search for Agent. No card required. One basic search uses one credit. Add the Tavily key in API keys.",
+            detail: "Web search for Agent with a model that has no search of its own, or when chosen in Models → Search. No card required. One basic search uses one credit. Add the Tavily key in API keys.",
             url: URL(string: "https://www.tavily.com/pricing")!,
             checked: "2026-11-21"
         ),

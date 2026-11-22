@@ -2,6 +2,63 @@ import EventKit
 import SwiftUI
 import Combine
 
+/// Calendar on this Mac through EventKit. Tests replace it so no scenario asks
+/// macOS for access or reads the user's real calendars.
+// WHY: .project-docs/decisions/2026-11-22-calendar-release.md
+struct AppleCalendarAccess {
+    /// Read-only; never shows a system prompt.
+    var status: @MainActor () -> EKAuthorizationStatus
+    /// Shows the macOS prompt while undecided; afterwards answers at once.
+    var request: @MainActor () async throws -> Bool
+    var read: @MainActor (DateInterval) -> (feeds: [CalendarFeed], events: [CalendarFeedEvent])
+
+    /// Whytap may read events: Full Access. "Add Events Only" cannot read.
+    static func canRead(_ status: EKAuthorizationStatus) -> Bool { status == .fullAccess }
+
+    /// One store for the app's lifetime, created only when the user connects or
+    /// access was already granted; creating it shows no prompt by itself.
+    @MainActor static let eventKit: AppleCalendarAccess = {
+        let box = EventKitStoreBox()
+        return AppleCalendarAccess(
+            status: { EKEventStore.authorizationStatus(for: .event) },
+            request: { try await box.store.requestFullAccessToEvents() },
+            read: { interval in
+                let store = box.store
+                let calendars = store.calendars(for: .event)
+                let feeds = calendars.map { calendar in
+                    CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
+                        title: calendar.title + " · " + calendar.source.title, provider: .apple,
+                        displayService: calendar.source.map {
+                            CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
+                        })
+                }
+                // EventKit reads every calendar when the list is empty; no calendars means no events.
+                guard !calendars.isEmpty else { return (feeds, []) }
+                let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
+                let events = store.events(matching: predicate).map { event in
+                    CalendarFeedEvent(id: "apple:" + (event.eventIdentifier ?? event.calendarItemIdentifier) + ":" + CalendarDateCodec.string(event.startDate),
+                        feedID: "apple:" + event.calendar.calendarIdentifier,
+                        event: PlannerEvent(title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate,
+                            allDay: event.isAllDay, location: event.location ?? "", notes: event.notes ?? "",
+                            meetingURL: CalendarDateCodec.meetingURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " ")),
+                            attendees: PlannerEventAttendee.eventKit(event)),
+                        sourceURL: CalendarEventAction.appleEventURL(identifier: event.calendarItemIdentifier),
+                        externalUID: event.calendarItemExternalIdentifier)
+                }
+                return (feeds, events)
+            })
+    }()
+}
+
+@MainActor
+private final class EventKitStoreBox {
+    private var created: EKEventStore?
+    var store: EKEventStore {
+        if let created { return created }
+        let store = EKEventStore(); created = store; return store
+    }
+}
+
 @MainActor
 final class CalendarConnections: ObservableObject {
     static let shared = CalendarConnections(backup: .shared, activityChanged: { AppState.shared.calendarConnectionActive = $0 })
@@ -14,6 +71,14 @@ final class CalendarConnections: ObservableObject {
     @Published private(set) var hiddenFeeds: Set<String> = []
     @Published private(set) var appleEnabled = false
     @Published private(set) var connectingProvider: CalendarProvider?
+    /// macOS refuses Whytap calendar access (denied, restricted, revoked or
+    /// "Add Events Only") for a saved Apple connection or a Connect refused in
+    /// this run: only System Settings can change it. `checkAppleAccess()` keeps
+    /// it current from the live authorization status.
+    @Published private(set) var appleAccessOff = false
+    /// Connect was refused in this run; nothing was saved. Cleared once access is
+    /// allowed (then Connect succeeds without a prompt) or by Disconnect.
+    @Published private(set) var appleConnectRefused = false
     var isConnecting: Bool { connectingProvider != nil }
     var connectionBlockReason: String? { CalendarAvailability.blockReason ?? backup?.calendarConnectionBlockReason }
     var accountConnectionIssue: String? {
@@ -26,15 +91,17 @@ final class CalendarConnections: ObservableObject {
     private let defaults: UserDefaults
     let oauth: CalendarOAuthClient
     private let remote: CalendarRemoteClient
-    private var appleStore: EKEventStore?
+    private let apple: AppleCalendarAccess
     private var generation = 0
     private var metadataValid = true
     private static let accountsKey = CalendarAccountSettings.accountsKey
 
     init(defaults: UserDefaults = .standard, oauth: CalendarOAuthClient = CalendarOAuthClient(),
         http: CalendarHTTP = CalendarHTTP(), backup: BackupViewModel? = nil,
+        apple: AppleCalendarAccess? = nil,
         activityChanged: @escaping (Bool) -> Void = { _ in }) {
         self.defaults = defaults; self.oauth = oauth; self.backup = backup; self.activityChanged = activityChanged
+        self.apple = apple ?? .eventKit
         remote = CalendarRemoteClient(http: http, oauth: oauth)
         hiddenFeeds = Set(defaults.stringArray(forKey: "planner.calendar.hiddenFeeds") ?? [])
         appleEnabled = defaults.bool(forKey: "planner.calendar.appleEnabled")
@@ -102,10 +169,18 @@ final class CalendarConnections: ObservableObject {
     func enableApple() async throws {
         // Closed: never create the event store or ask macOS for calendar access.
         guard CalendarAvailability.isOpen else { throw CalendarConnectionError.comingSoon }
-        let store = appleStore ?? EKEventStore()
-        appleStore = store
-        guard try await store.requestFullAccessToEvents() else { throw CalendarConnectionError.denied }
+        // Only here, after the user pressed Connect, may macOS show its prompt.
+        // A refusal saved earlier answers at once without a prompt.
+        let granted = try await apple.request()
         try Task.checkCancellation()
+        guard granted, AppleCalendarAccess.canRead(apple.status()) else {
+            appleAccessOff = true
+            appleConnectRefused = true
+            throw CalendarConnectionError.appleConnectRefused
+        }
+        appleAccessOff = false
+        appleConnectRefused = false
+        errors.removeValue(forKey: "apple")
         appleEnabled = true
         defaults.set(true, forKey: "planner.calendar.appleEnabled")
     }
@@ -114,6 +189,8 @@ final class CalendarConnections: ObservableObject {
         generation += 1
         refreshing = false
         appleEnabled = false
+        appleAccessOff = false
+        appleConnectRefused = false
         defaults.set(false, forKey: "planner.calendar.appleEnabled")
         feeds.removeAll { $0.provider == .apple }
         events.removeAll { $0.feedID.hasPrefix("apple:") }
@@ -149,6 +226,28 @@ final class CalendarConnections: ObservableObject {
         }
     }
 
+    /// Re-reads the authorization status (never prompts, never reads events) for a
+    /// saved Apple connection or a refused Connect, e.g. when Settings or Calendar
+    /// opens or Whytap becomes active after System Settings. Returns true when a
+    /// saved connection can read again, so the caller may refresh its events.
+    @discardableResult
+    func checkAppleAccess() -> Bool {
+        guard CalendarAvailability.isOpen, appleEnabled || appleConnectRefused else { return false }
+        if AppleCalendarAccess.canRead(apple.status()) {
+            let recovered = appleEnabled && appleAccessOff
+            appleAccessOff = false
+            appleConnectRefused = false
+            if errors["apple"] == CalendarConnectionError.appleAccessOffMessage { errors.removeValue(forKey: "apple") }
+            return recovered
+        }
+        appleAccessOff = true
+        if appleEnabled {
+            feeds.removeAll { $0.provider == .apple }; events.removeAll { $0.feedID.hasPrefix("apple:") }
+            errors["apple"] = CalendarConnectionError.appleAccessOffMessage
+        }
+        return false
+    }
+
     func refreshAppleIfEnabled(interval: DateInterval) {
         guard CalendarAvailability.isOpen, appleEnabled else { return }
         do { try refreshApple(interval: interval); errors.removeValue(forKey: "apple"); lastSynced["apple"] = Date() }
@@ -156,31 +255,14 @@ final class CalendarConnections: ObservableObject {
     }
 
     private func refreshApple(interval: DateInterval) throws {
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
+        // Read-only status check: a revoked access never brings up a prompt.
+        guard AppleCalendarAccess.canRead(apple.status()) else {
             feeds.removeAll { $0.provider == .apple }; events.removeAll { $0.feedID.hasPrefix("apple:") }
-            throw CalendarConnectionError.denied
+            appleAccessOff = true
+            throw CalendarConnectionError.appleAccessOff
         }
-        let store = appleStore ?? EKEventStore()
-        appleStore = store
-        let calendars = store.calendars(for: .event)
-        let foundFeeds = calendars.map { calendar in
-            CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
-                title: calendar.title + " · " + calendar.source.title, provider: .apple,
-                displayService: calendar.source.map {
-                    CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
-                })
-        }
-        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
-        let foundEvents = store.events(matching: predicate).map { event in
-            CalendarFeedEvent(id: "apple:" + (event.eventIdentifier ?? event.calendarItemIdentifier) + ":" + CalendarDateCodec.string(event.startDate),
-                feedID: "apple:" + event.calendar.calendarIdentifier,
-                event: PlannerEvent(title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate,
-                    allDay: event.isAllDay, location: event.location ?? "", notes: event.notes ?? "",
-                    meetingURL: CalendarDateCodec.meetingURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: " ")),
-                    attendees: PlannerEventAttendee.eventKit(event)),
-                sourceURL: CalendarEventAction.appleEventURL(identifier: event.calendarItemIdentifier),
-                externalUID: event.calendarItemExternalIdentifier)
-        }
+        appleAccessOff = false
+        let (foundFeeds, foundEvents) = apple.read(interval)
         feeds.removeAll { $0.provider == .apple }; events.removeAll { $0.feedID.hasPrefix("apple:") }
         feeds += foundFeeds; events += foundEvents
         let currentIDs = Set(foundFeeds.map(\.id))

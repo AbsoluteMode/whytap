@@ -108,6 +108,37 @@ enum HistoryPastePlan {
 }
 
 enum HistoryPasteboardWriter {
+    /// Puts every group on the pasteboard at once, for a click that copies
+    /// several marked rows. One group is written exactly like `write`. Several
+    /// (texts and files mixed) become one pasteboard with one item per group
+    /// member in mark order: neighbouring texts as one string item a line
+    /// each, then each file and image as its own item. Apps that take files
+    /// attach them; a plain text read gets every text item joined by line
+    /// breaks (AppKit's behaviour); some apps read only the first item.
+    /// WHY: .project-docs/decisions/2026-11-22-history-multi-copy.md
+    static func writeAll(_ groups: [HistoryPasteGroup], to pasteboard: NSPasteboard, assetsDirectory: URL) {
+        guard !groups.isEmpty else { return }
+        if groups.count == 1, let group = groups.first {
+            write(group, to: pasteboard, assetsDirectory: assetsDirectory)
+            return
+        }
+        pasteboard.clearContents()
+        var objects: [NSPasteboardWriting] = []
+        for group in groups {
+            switch group {
+            case .text(let text):
+                let item = NSPasteboardItem()
+                item.setString(text, forType: .string)
+                objects.append(item)
+            case .attachments(let items):
+                objects += items.compactMap { pasteboardObject(for: $0, assetsDirectory: assetsDirectory) }
+            }
+        }
+        if !objects.isEmpty {
+            pasteboard.writeObjects(objects)
+        }
+    }
+
     /// Replaces the pasteboard with one paste's content. A single row is
     /// written exactly as History always wrote it.
     static func write(_ group: HistoryPasteGroup, to pasteboard: NSPasteboard, assetsDirectory: URL) {
@@ -155,16 +186,18 @@ enum HistoryKeyDecision {
     static let escapeKeyCode: UInt16 = 53
 
     /// Enter pastes the marked rows when there are any, otherwise the
-    /// hovered row. Escape first drops the marks; with nothing marked it
-    /// keeps its usual meaning.
+    /// hovered row. Without a paste target (`canPaste` false) Enter leaves
+    /// marked rows alone, so they stay for a click to copy. Escape first
+    /// drops the marks; with nothing marked it keeps its usual meaning.
     static func action(
         keyCode: UInt16,
         hovered: HistoryStripCard?,
-        selection: [HistoryStripCard]
+        selection: [HistoryStripCard],
+        canPaste: Bool = true
     ) -> HistoryKeyAction {
         switch keyCode {
         case returnKeyCode, keypadEnterKeyCode:
-            if !selection.isEmpty { return .paste(selection) }
+            if !selection.isEmpty { return canPaste ? .paste(selection) : .pass }
             if let hovered { return .paste([hovered]) }
             return .pass
         case escapeKeyCode:

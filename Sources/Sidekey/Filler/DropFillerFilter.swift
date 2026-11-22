@@ -32,6 +32,23 @@ enum DropFillerFilter {
         return restoreSentenceCase(result)
     }
 
+    /// The configured terms that occur in `text` (as written in the list), for
+    /// the reverse learning suggestion ("Stop cutting “типа”").
+    static func matchedTerms(in text: String, terms: [String]) -> [String] {
+        let prepared = terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !prepared.isEmpty, let regex = makeRegex(prepared) else { return [] }
+        let ns = text as NSString
+        var found: [String] = []
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let value = ns.substring(with: match.range)
+            if let term = prepared.first(where: { $0.caseInsensitiveCompare(value) == .orderedSame }),
+               !found.contains(term) { found.append(term) }
+        }
+        return found
+    }
+
     private static func makeRegex(_ terms: [String]) -> NSRegularExpression? {
         // Longest-first so multi-word phrases win over their substrings.
         let alternation = terms

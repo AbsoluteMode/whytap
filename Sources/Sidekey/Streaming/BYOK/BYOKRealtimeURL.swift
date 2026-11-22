@@ -2,6 +2,12 @@
 import Foundation
 
 enum BYOKRealtimeURL {
+    /// OpenAI's own realtime transcription socket, used only by a route on
+    /// the OpenAI account. A server route never reaches it: its URL comes
+    /// from `openAIRealtime(baseURL:)`, which has no default host.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static let openAIHosted = URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!
+
     /// Build the OpenAI Realtime transcription WS URL on the user's
     /// self-hosted host. Any scheme (http/https/ws/wss) is normalized to `wss`.
     /// There is no default host: a nil, empty or unparseable `baseURL` returns

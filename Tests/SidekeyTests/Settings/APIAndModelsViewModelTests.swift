@@ -189,6 +189,23 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertTrue(AIFeature.allCases.allSatisfy { env.routing.route(for: $0) == nil })
     }
 
+    func test_server_models_refresh_the_open_key_form() throws {
+        let env = try makeEnv()
+        let server = env.routing.addServer(name: "Custom server", baseURL: "http://localhost:8000/v1")
+        let account = ProviderAccount.server(server.id)
+        let model = env.makeViewModel()
+        XCTAssertEqual(model.chips.first { $0.account == account }?.serverModels, [])
+        var changeCount = 0
+        let observation = model.objectWillChange.sink { _ in changeCount += 1 }
+        defer { observation.cancel() }
+
+        XCTAssertNil(model.addServerModel("ut-llm", kind: .llm, checked: true, to: account))
+
+        XCTAssertEqual(model.chips.first { $0.account == account }?.serverModels,
+                       [ServerModel(name: "ut-llm", kind: .llm, checked: true)])
+        XCTAssertGreaterThan(changeCount, 0, "The open form must refresh when a model is added")
+    }
+
     // MARK: - Chips
 
     func test_opening_picker_uses_fresh_cache_without_requests_or_model_probes() async throws {
@@ -266,18 +283,28 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(env.lookup(.openAI), .absent)
     }
 
-    func test_catalogless_server_can_pick_a_named_model_through_the_same_probe() async throws {
+    /// A server without `/v1/models` offers what the user added in its form,
+    /// and picking it runs the same probe as any other new model.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func test_catalogless_server_offers_its_added_models_through_the_same_probe() async throws {
         let env = try makeEnv()
         let server = env.routing.addServer(name: "My server", baseURL: "https://server.example/v1")
+        let account = ProviderAccount.server(server.id)
         let vm = env.makeViewModel()
-        XCTAssertTrue(vm.sections(for: .translation).first { $0.account == .server(server.id) }?.options.isEmpty == true)
-        await vm.select(model: "my-local-model", account: .server(server.id), for: .translation)
+        XCTAssertNil(vm.sections(for: .translation).first { $0.account == account }, "nothing added: no section")
+        await vm.select(model: "my-local-model", account: account, for: .translation)
+        XCTAssertTrue(env.probe.probedModels.isEmpty, "a name the user never added is refused before a probe")
+        XCTAssertNil(env.routing.route(for: .translation))
+
+        XCTAssertNil(vm.addServerModel("my-local-model", kind: .llm, checked: false, to: account))
+        XCTAssertNil(vm.addServerModel("replacement-model", kind: .llm, checked: true, to: account))
+        let section = try XCTUnwrap(vm.sections(for: .translation).first { $0.account == account })
+        XCTAssertEqual(section.options.map(\.model), ["my-local-model", "replacement-model"])
+        XCTAssertFalse(section.acceptsModelName)
+        await vm.select(model: "my-local-model", account: account, for: .translation)
         XCTAssertEqual(env.probe.probedModels, ["my-local-model"])
-        XCTAssertEqual(env.routing.route(for: .translation), FeatureRoute(account: .server(server.id), model: "my-local-model"))
-        let reopened = try XCTUnwrap(vm.sections(for: .translation).first { $0.account == .server(server.id) })
-        XCTAssertFalse(reopened.options.isEmpty)
-        XCTAssertTrue(reopened.acceptsModelName, "The saved route must not hide the server model-name field")
-        await vm.select(model: "replacement-model", account: .server(server.id), for: .translation)
+        XCTAssertEqual(env.routing.route(for: .translation), FeatureRoute(account: account, model: "my-local-model"))
+        await vm.select(model: "replacement-model", account: account, for: .translation)
         XCTAssertEqual(env.routing.route(for: .translation)?.model, "replacement-model")
     }
 
@@ -312,7 +339,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.chips[1].statusText, "Couldn't read the key from the Keychain",
                        "an unreadable key is a key problem, never no key")
         XCTAssertEqual(vm.chips[2].statusText, "Out of credit or key limit reached")
-        XCTAssertEqual(vm.chips[3].title, "Lab")
+        XCTAssertEqual(vm.chips[3].title, "10.0.0.2:8000", "a server is named by its address")
         XCTAssertEqual(vm.chips[3].statusText, "Not checked yet")
         XCTAssertEqual(vm.addableKinds, [.deepgram, .openAI, .anthropic, .openAICompatible])
     }

@@ -45,16 +45,18 @@ is a verifiable claim rather than a slogan.
   Key values are never shown again after saving and are never written to
   UserDefaults, plaintext files or logs. UserDefaults holds only which provider
   and model each feature uses, plus the names and addresses of your own servers.
-  Encrypted local history and optional recovery archives can also contain the
-  Soniox, Deepgram, ElevenLabs, OpenRouter and legacy custom-endpoint keys,
-  protected by the independent backup key. No plaintext key export file is created.
+  Encrypted local history, optional recovery archives and settings sync can
+  also contain the provider keys you saved (speech, language-model, Tavily and
+  your servers' keys), protected by the independent backup key. No plaintext key export file is created.
 - Cached model catalogs (a file in the app's Caches folder) and the results of
   key and model checks (provider, model, status, time; never a key, audio or
   text) stay on the Mac.
-- Smart selects a formatting profile locally from the target application and
-  focused Accessibility field/document metadata. Document URLs used for that
-  selection are not separately attached to model requests or logged. The
-  existing bounded screen-context envelope can still contain visible URLs.
+- Smart sends the cleanup model you chose the transcript of your dictation,
+  the name of the app you dictate into, Whytap's own instructions and your
+  language settings. It does not read or send the text of that app's window.
+  To pick a destination format (Markdown, Slack, Telegram) it reads, on
+  the Mac, only the focused field's Accessibility role and the document's
+  address; these are not sent with the request or logged.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
 - Logs go to the unified system log (`os_log`, subsystem
@@ -111,23 +113,29 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 |---|---|---|
 | Meeting detector (FluidAudio Silero VAD) | nowhere; a one-time download from Hugging Face fetches the model | the first time the detector checks for speech |
 | On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in API & Models; recognition while a feature set to On this Mac is in use |
-| Your key: speech (Soniox, Deepgram, ElevenLabs, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
-| Agent (native) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key; tool actions may access destinations needed by your request | when you submit an agent request |
+| Your key: speech (Soniox, Deepgram, ElevenLabs, OpenAI, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
+| Agent (native, off by default) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key: your request, its recent context, and whatever its tools read for it (file contents, web pages, a screenshot). Tool actions may access destinations needed by your request; with Allow file edits and commands on (the default once the Agent is on) it can also write files and run commands as your user ([Whytap Agent](agent.md)) | when you submit an agent request |
 | Agent model mark | public image files on OpenRouter for the displayed model author; no API key, cookies, audio, prompt or reply. Bundled marks appear immediately; a small local cache is disposable | asynchronously when the voice mark is shown, at most weekly per cached author; failures retain usable artwork |
 | Key checks | the provider of the key: a free request (model list, key or account endpoint) that sends only the key. A restricted ElevenLabs key may need a minimal paid speech request, made only when you save the key or press Check now | when you save a key, press Check now, or open API & Models and the last result is a day old |
 | Model catalogs | the public model lists of OpenRouter and Deepgram (no key), and the model lists of Soniox and Anthropic (your key); a custom server's `/models` list. Only the request itself is sent, no audio or text | when you open API & Models and the cache is a day old, save a key, or press Refresh models |
 | OpenRouter providers | OpenRouter, with your key: the list of providers serving the model selected for an OpenRouter feature, with their latency and throughput. Only the request itself is sent, no audio or text. A pinned provider then receives that feature's requests alone, with no fallback | when an OpenRouter row is shown in API & Models (reused for 5 minutes) |
 | Model probes | the provider of the feature you are choosing a model for: 1 second of digital silence for speech models, the prompt "Reply with OK." (plus one fictitious tool for agent models) for text models. Never your audio, transcripts, prompts or notes. Costs a fraction of a cent | only when you pick a model that is not in the built-in list, or press Check now |
 | Encrypted backup | your private GitHub repository or the folder/sync service you selected; only authenticated ciphertext leaves Whytap | after you explicitly configure and enable Backup |
-| Connected calendars | the Google, Microsoft or Zoom account provider you explicitly connect; OAuth authorization and event queries for the displayed date range | sign-in in your browser, then while the calendar view is visible or refreshing; local tasks/events are not uploaded |
+| Connected calendars (Calendar shows Soon in the published 2.2.26 build) | the Google, Microsoft or Zoom account provider you explicitly connect; OAuth authorization and event queries for the displayed date range | sign-in in your browser, then while the calendar view is visible or refreshing; local tasks/events are not uploaded |
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
-OpenAI itself is not offered for speech. An older saved OpenAI choice reads as
-Soniox and sends audio there only with a Soniox key you stored; without one,
-dictation opens Settings → API & Models instead of recording.
+OpenAI speech uses the same OpenAI key as its language models. A dictation on
+an OpenAI route streams the microphone audio to `wss://api.openai.com/v1/realtime`
+while you record, and a take the live stream could not finish (or Retry) is
+sent once as a WAV file to `https://api.openai.com/v1/audio/transcriptions`.
+Meeting audio uses its own configured provider. OpenAI speech is available
+for dictation, Agent voice and Voice search. A self-hosted server is never sent to api.openai.com, even when it names
+an OpenAI model. An older saved OpenAI choice from the former Models tab stays
+OpenAI and runs only when that OpenAI key is stored; it is never moved to
+Soniox and never brings back the separate OpenAI speech key of older builds.
 
 Each provider has its own data-use terms; check them before pasting a key.
 Data-use policies depend on the selected provider and its account settings.
@@ -135,15 +143,18 @@ Data-use policies depend on the selected provider and its account settings.
 ## Permissions
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
-  editable text field before recording and, only when Brightness keys is
-  switched on in Settings → Toolbox → Display, the Mac's brightness keys.
+  editable text field before recording, the focused field's role and
+  document address for Smart formatting (never the window's text) and, only
+  when Brightness keys is switched on in Settings → Toolbox → Display, the
+  Mac's brightness keys.
 - Microphone: dictation and meetings.
 - System Audio Recording: the other side of a call, only while a meeting is
   being recorded. The audio tap is created at recording start and torn down
   at stop.
 - Post Event (part of Accessibility on current macOS): the synthetic
   Command-V used to paste.
-- Calendars: only after choosing Apple Calendar in Planner's Connect account.
+- Calendars: only after choosing Apple Calendar in Planner's Connect account,
+  once Calendar is available (it is shown as Soon and asks for nothing today).
   macOS requires full event access to read selected system calendars; Whytap's
   current native calendar adapter only reads events. Direct Google, Microsoft
   and Zoom connections use their provider's OAuth consent instead.
@@ -186,7 +197,10 @@ other applications are not silently copied. [Coverage and recovery](backup.md).
 Translate sends submitted text to the chosen Translation LLM route. Subtitles
 send system audio to OpenAI (`gpt-realtime-translate`, Audio translate) with
 the OpenAI key from API & Models; OpenAI returns the translation and the
-transcript of what it heard. Without that key Subtitles do not start. A session ends by itself after one hour, like Stop. It never opens the microphone or creates a
+transcript of what it heard. Without that key Subtitles do not start. This is
+the next version after 2.2.26; in 2.2.26 Subtitles send system audio to the
+speech route chosen for them (or recognize it On this Mac) and the finished
+phrases to their own language-model route. A session ends by itself after one hour, like Stop. It never opens the microphone or creates a
 recording/meeting note. Forty recent lines stay in memory, with no automatic
 history saved. Copy writes translations only after a click. Window close,
 Cancel and sleep stop capture and cancel requests. See [translation](translation.md).

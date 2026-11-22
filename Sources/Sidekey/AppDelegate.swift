@@ -2355,13 +2355,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether the press that produced `route` starts a take that ends by
     /// itself. Only a Toggle shortcut (a hold ends on release), only a start,
     /// and only on a route whose provider sends words while the user speaks:
-    /// a self-hosted OpenAI-realtime server transcribes after a commit, so
-    /// nothing could tell that the speaker has finished.
+    /// a self-hosted OpenAI-realtime server transcribes after a commit, and a
+    /// turn-based OpenAI model only after a pause, so the five seconds
+    /// without words would end a take whose first sentence is long.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     static func dropPressStartsAutoStopTake(
         enabled: Bool, gesture: HotkeyGesture, route: DropFlowRoute, speechRoute: FeatureRoute?
     ) -> Bool {
         guard enabled, gesture == .tap, DropHotkeyRecovery.requiresStartPermission(route) else { return false }
         if let speechRoute, case .server = speechRoute.account { return false }
+        if let speechRoute, speechRoute.account == .openAI,
+           !ModelRegistry.openAIStreamsWithinTurn(speechRoute.model) { return false }
         return true
     }
 
@@ -3207,7 +3211,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preservingMarkdown: { formatting != .plain }
             ) { [self] in
                 guard let postProcessor else { throw OpenRouterLLMError.notConfigured }
-                let snapshot = await AXContextReader.formattingSnapshot(forPID: targetPID)
+                // Local formatting metadata only; no window text reaches the model.
+                // WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
+                let snapshot = await SmartFormattingMetadataReader.snapshot(forPID: targetPID)
                 try Task.checkCancellation()
                 formatting = SmartFormattingProfile.resolve(
                     bundleID: targetBundleID, appName: targetApp,
@@ -3217,8 +3223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 contextMs = Int((cleanupStartedAt - processStartedAt) * 1000)
                 let prefs = PrivacyPreferences.shared
                 let output = try await postProcessor.processOutput(
-                    rawText, targetApp: targetApp, appContext: snapshot?.context,
-                    screenshot: nil, language: prefs.selectedLanguage?.code,
+                    rawText, targetApp: targetApp, screenshot: nil, language: prefs.selectedLanguage?.code,
                     outputLanguage: outputLanguageCodeForDrop(mode: mode),
                     transcriptionMode: mode.rawValue, formatting: formatting
                 )

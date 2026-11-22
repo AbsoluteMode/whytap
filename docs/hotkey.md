@@ -246,6 +246,10 @@ Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a
 shortcut beside a named function and Save; remove it with the clear button and
 Save. Escape cancels recording, Revert discards the draft, and Reset to defaults
 clears optional tool bindings. New installs do not reserve Option 1–5.
+Settings → Toolbox also sets the selected tool's shortcut in the Hotkey block
+at the top of its pane: Set, Change or remove, saved at once through the same
+`HotkeyPreferences.apply` path, conflict check and recorder
+(`HotkeyRecordingSession`); a conflicting key saves nothing and names its owner.
 
 Bindings use stable tool IDs in `HotkeyConfiguration.toolShortcuts` and
 `hotkeys.toolShortcuts.v1`. Moving or removing a tile never changes its shortcut;
@@ -337,8 +341,9 @@ Whytap take them from macOS (`BrightnessKeys`, `BrightnessKeyEventTap`).
   held. The next press lowers brightness normally (also with ⌥⇧). A first
   slider decrease likewise consumes the whole drag; a new drag or accessibility
   adjustment can then lower the backlight. Native macOS brightness changes,
-  automatic brightness and idle dimming still turn Extra off when they lower
-  the backlight, detected about every half second with the strip closed.
+  automatic brightness and battery or idle dimming keep Extra on; only
+  Whytap's own first decrease (above), its switch, heat, a display change or
+  another app adjusting the display end it.
 - ⌘, ⌃, ⌥ or ⇧ (other than ⌥⇧), hidden hover widgets and an unadjustable
   display leave the keys with macOS; ⌥ still opens Displays settings. Fn and
   Caps Lock do not matter. A press belongs wholly to whoever got its first

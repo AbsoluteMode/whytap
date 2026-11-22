@@ -3,7 +3,7 @@ import Foundation
 /// What the app last learned about one account's model catalog. Model metadata
 /// only: no keys, no URLs, no response bodies.
 struct CatalogSnapshot: Codable, Equatable {
-    static let currentMetadataVersion = 4
+    static let currentMetadataVersion = 5
     var models: [CatalogModel]
     /// Last successful load.
     var fetchedAt: Date?
@@ -13,7 +13,8 @@ struct CatalogSnapshot: Codable, Equatable {
     /// The key may not list models: only the built-in registry applies.
     var limited: Bool
     /// Older caches remain readable offline, but refresh once for dates,
-    /// capabilities and OpenRouter prices (version 4).
+    /// capabilities and OpenRouter prices (version 4) and OpenAI's speech
+    /// models (version 5).
     var metadataVersion: Int?
 
     init(models: [CatalogModel] = [], fetchedAt: Date? = nil, lastRefreshFailed: Bool = false, limited: Bool = false) {

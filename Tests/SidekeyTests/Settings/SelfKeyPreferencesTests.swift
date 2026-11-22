@@ -45,20 +45,18 @@ final class SelfKeyPreferencesTests: XCTestCase {
         XCTAssertEqual(intel.llmLevel, .yourKey)
     }
 
-    func testLegacyOpenAISelectionMigratesToSoniox() {
-        // OpenAI is no longer offered for BYOK; a legacy/stored OpenAI selection
-        // resolves to soniox so it's gone from the UI AND the runtime path.
+    // A stored OpenAI choice is OpenAI again: reading it as Soniox sent the
+    // user's audio to a provider they never chose.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func testLegacyOpenAISelectionStaysOpenAI() {
         let d = makeDefaults()
         let prefs = SelfKeyPreferences(defaults: d)
         prefs.selectedProvider = .openAI
-        XCTAssertEqual(SelfKeyPreferences(defaults: d).selectedProvider, .soniox)
+        XCTAssertEqual(SelfKeyPreferences(defaults: d).selectedProvider, .openAI)
     }
 
-    func testSelectableExcludesOpenAIButKeepsCaseForDecoding() {
-        XCTAssertFalse(BYOKProvider.selectable.contains(.openAI))
-        XCTAssertEqual(BYOKProvider.selectable, [.selfHosted, .deepgram, .soniox, .elevenLabs])
-        // The case must remain so a legacy stored "openAI" value still decodes.
-        XCTAssertTrue(BYOKProvider.allCases.contains(.openAI))
+    func testNothingStoredReadsAsSoniox() {
+        XCTAssertEqual(SelfKeyPreferences(defaults: makeDefaults()).selectedProvider, .soniox)
     }
 
     func testPersistsLevelProviderBaseURLModel() {

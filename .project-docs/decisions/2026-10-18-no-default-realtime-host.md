@@ -17,7 +17,7 @@ sources:
   - type: trace
     reference: Full local swift test on main bbfc076 plus this change, 2,839 tests, 5 skipped, 0 failures in 48.160 seconds.
     confirmed_at: 2026-10-18
-related: [2026-10-18-provider-batch-transcription.md, ../project.md, 2026-10-18-remove-local-models.md]
+related: [2026-10-18-provider-batch-transcription.md, ../project.md, 2026-10-18-remove-local-models.md, 2026-11-22-openai-speech-provider.md]
 ---
 
 # No default host for the self-hosted realtime route

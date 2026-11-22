@@ -1,7 +1,7 @@
 # Whytap Planner
 
 Open **Search all tools → To-do** for a compact list inside hover.
-**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
+**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button. The published 2.2.26 build shows Calendar as **Soon**.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
 range and the calendar name. A Google or Outlook account synced through Calendar
@@ -107,7 +107,7 @@ Planner support preserve connections already configured on the target Mac.
 
 ## Unified calendar
 
-Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
+Not available yet (shown as Soon); this is how it will work. Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
 selection and the same connection flow used by Settings → Integrations. It does
 not create a Whytap account. Previous/next day and Today stay in the panel;
 opening Calendar again always returns to today. Hover an event whose block cuts
@@ -142,6 +142,15 @@ Disconnect removes local credentials/events, keeping the original provider data.
 **Apple Calendar:** Connect account → Apple Calendar requests the macOS calendar
 permission. It shows the calendars available through EventKit, including iCloud.
 macOS requires full event permission even for reading; Whytap only reads.
+macOS asks only when you press Connect, never when Whytap starts or Calendar
+opens. It asks once. After **Don't Allow** nothing is connected: Settings and the
+Connect page say to turn on Whytap in **System Settings → Privacy & Security →
+Calendars** (Full Access), with an **Open Privacy Settings** button; then press
+Connect again, which needs no second prompt. If access of a connected Apple
+Calendar is later turned off or limited to "Add Events Only", its events leave
+the day, its row reads **Access off** and opens System Settings, and the
+connection is kept: allowing access brings the events back. Calendar and Settings
+check the current permission when they open and when you return to Whytap.
 This connection does not require a Whytap backend or a new Apple OAuth client.
 When the same Google/Exchange account is also available through macOS, use the
 feed checkboxes to select the desired source. UID-based collapse cannot identify

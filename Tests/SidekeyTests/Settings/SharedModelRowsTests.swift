@@ -207,9 +207,45 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(APIAndModelsView.sharedStatusLines(shared).allSatisfy { $0.hasPrefix("Meetings: ") })
     }
 
+    // OpenAI speech on the shared OpenAI key: one pick in Speech sets the four
+    // live features; Meetings has no OpenAI model and says so. The picker
+    // has an OpenAI section with the live models and the turn-based ones from
+    // the catalog, the diarizing model left out.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func test_openai_speech_pick_sets_live_features_and_names_meetings() async throws {
+        let catalog = try ModelCatalogFetcher.parseOpenAI(Data(#"""
+        {"data":[{"id":"gpt-live-transcribe","created":1790000000},{"id":"gpt-realtime-whisper"},
+                 {"id":"gpt-4o-mini-transcribe"},{"id":"gpt-4o-transcribe-diarize"},{"id":"gpt-6"},
+                 {"id":"gpt-realtime-translate"}]}
+        """#.utf8))
+        let env = try makeEnv(snapshots: [.openAI: fresh(catalog)], keyed: [.openAI])
+        let vm = env.makeViewModel()
+
+        let section = try XCTUnwrap(vm.sections(for: SharedModelKind.speech.pickerFeature).first { $0.account == .openAI })
+        XCTAssertEqual(Set(section.options.map(\.model)),
+                       ["gpt-live-transcribe", "gpt-realtime-whisper", "gpt-4o-mini-transcribe"])
+        XCTAssertEqual(section.options.first { $0.model == "gpt-4o-mini-transcribe" }?.hint, "text after each pause")
+        XCTAssertNil(section.options.first { $0.model == "gpt-live-transcribe" }?.hint)
+
+        let picked = await vm.selectShared(model: ModelRegistry.openAILiveModel, account: .openAI,
+                                           kind: .speech, replaceCustom: false)
+        XCTAssertTrue(picked)
+        XCTAssertTrue(env.probe.calls.isEmpty, "built-in speech models need no check")
+        for feature in [AIFeature.dropFast, .dropSmart, .agentVoice, .voiceSearch] {
+            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .openAI, model: "gpt-live-transcribe"))
+        }
+        XCTAssertNil(env.routing.route(for: .meetings))
+        let shared = try row(.speech, vm)
+        XCTAssertEqual(shared.label, "OpenAI · gpt-live-transcribe · 1 not set")
+        XCTAssertEqual(shared.uncovered.map(\.feature), [.meetings])
+        XCTAssertEqual(shared.uncovered.first?.skipReason, "OpenAI can't serve Meetings")
+    }
+
     func test_self_hosted_server_serves_its_kinds_with_one_check_each() async throws {
         let env = try makeEnv(keyed: [])
         let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:8000/v1")
+        env.routing.addModel(ServerModel(name: "whisper-large-v3", kind: .transcription, checked: true), toServer: server.id)
+        env.routing.addModel(ServerModel(name: "qwen3:8b", kind: .llm, checked: true), toServer: server.id)
         let account = ProviderAccount.server(server.id)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: file) }
@@ -247,43 +283,45 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(notes.contains { $0.contains("answered 404") }, "\(notes)")
     }
 
-    /// Build queue 397: a server set to Language models has an empty speech
-    /// list, so the shared Speech picker takes a typed name. Typing its LLM
-    /// there must be refused like Advanced refuses it, before any check or
-    /// write; a name the server does not list stays allowed.
-    func test_typed_model_on_a_language_only_server_is_refused_like_in_advanced() async throws {
+    /// A server serves a model only as the kind the user added it as. Its
+    /// LLM is refused in the shared Speech row like in Advanced, before any
+    /// check or write, and so is a name the user never added; adding it as
+    /// Transcription makes it a speech model.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func test_server_llm_is_refused_as_speech_until_added_as_transcription() async throws {
         let env = try makeEnv(keyed: [])
         let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:11434/v1")
-        env.routing.setModelKinds(.language, forServer: server.id)
+        env.routing.addModel(ServerModel(name: "qwen3:8b", kind: .llm, checked: true), toServer: server.id)
         let account = ProviderAccount.server(server.id)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: file) }
-        try JSONEncoder().encode([account.storageID: fresh([CatalogModel(id: "qwen3:8b")])]).write(to: file)
+        try JSONEncoder().encode([account.storageID: fresh([CatalogModel(id: "qwen3:8b"), CatalogModel(id: "parakeet-rt")])]).write(to: file)
         let env2 = Env(routing: env.routing, keys: env.keys, catalogs: ModelCatalogStore(fileURL: file, fetcher: Offline()),
                        checks: env.checks, keyStatuses: env.keyStatuses)
         let vm = env2.makeViewModel()
-        let speechSection = try XCTUnwrap(vm.sharedSections(.speech).first { $0.account == account })
-        XCTAssertTrue(speechSection.acceptsModelName, "the empty speech list takes a typed name")
-        XCTAssertTrue(speechSection.options.isEmpty)
+        XCTAssertNil(vm.sharedSections(.speech).first { $0.account == account }, "no Transcription model: no speech section")
+        XCTAssertEqual(vm.sharedSections(.llm).first { $0.account == account }?.options.map(\.model), ["qwen3:8b"])
 
         // Advanced refuses it without a check.
         await vm.select(model: "qwen3:8b", account: account, for: .dropFast)
         XCTAssertNil(env.routing.route(for: .dropFast))
 
-        let applied = await vm.selectShared(model: "qwen3:8b", account: account, kind: .speech, replaceCustom: false)
-        XCTAssertFalse(applied)
+        for model in ["qwen3:8b", "parakeet-rt"] {
+            let applied = await vm.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)
+            XCTAssertFalse(applied, model)
+        }
         XCTAssertTrue(env2.probe.calls.isEmpty, "\(env2.probe.calls)")
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { env.routing.route(for: $0) == nil })
         let notes = try row(.speech, vm).notes
         XCTAssertEqual(notes.count, SharedModelKind.speech.features.count)
-        XCTAssertTrue(notes.allSatisfy { $0.contains("not a speech model") }, "\(notes)")
+        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Lab as a Transcription model") }, "\(notes)")
 
-        // A model the server does not list is still the user's to type.
-        let typed = await vm.selectShared(model: "parakeet-rt", account: account, kind: .speech, replaceCustom: false)
+        // Added as Transcription, the same name is a speech model too.
+        XCTAssertNil(vm.addServerModel("qwen3:8b", kind: .transcription, checked: true, to: account))
+        let typed = await vm.selectShared(model: "qwen3:8b", account: account, kind: .speech, replaceCustom: false)
         XCTAssertTrue(typed)
-        XCTAssertEqual(env2.probe.calls.map(\.model), ["parakeet-rt"])
         for feature in SharedModelKind.speech.features {
-            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: account, model: "parakeet-rt"), "\(feature)")
+            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: account, model: "qwen3:8b"), "\(feature)")
         }
     }
 

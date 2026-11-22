@@ -42,6 +42,15 @@ enum OnboardingFlow {
         return pages[(index + 1)...].first { $0 != .tryDrop || speechExpected }
     }
 
+    /// The page Back returns to, or `nil` on the first page. It walks the same
+    /// list as `next`, so a hidden page is never reached and the try page is
+    /// passed over by the same rule.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    static func previous(before page: OnboardingPage, in pages: [OnboardingPage], speechExpected: Bool) -> OnboardingPage? {
+        guard let index = pages.firstIndex(of: page) else { return nil }
+        return pages[..<index].last { $0 != .tryDrop || speechExpected }
+    }
+
     /// Pages with a permissions page added before the try page, for a Drop
     /// press that found a permission missing after that page was hidden.
     static func addingPermissions(to pages: [OnboardingPage]) -> [OnboardingPage] {

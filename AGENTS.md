@@ -200,8 +200,13 @@ Voice flow (Drop / dictation):
        requests stay requests; known names are always corrected. The prompt
        does not change selected routes. WHY:
        .project-docs/decisions/2026-11-20-smart-ready-text.md
+       The cleanup request carries Whytap's instructions, the target app's
+       name, the language and mode hints and the transcript; no text of the
+       target window is read or sent, with no setting to add it. WHY:
+       .project-docs/decisions/2026-11-22-smart-no-window-context.md
        SmartFormattingProfile selects destination syntax from app identity and
-       focused AX role/document metadata (within the same 1.5s context deadline).
+       the focused element's AX role and document URL, read on this Mac by
+       SmartFormattingMetadataReader (1.5s deadline) and never sent.
        Markdown editors/recognized web composers use a fixed syntax subset;
        IDEs require a real Markdown file, and single-line/unknown fields stay plain.
        Slack/Telegram use local RTF + semantic HTML + plain clipboard fallback;
@@ -211,8 +216,8 @@ Voice flow (Drop / dictation):
        Smart uses the lowest supported OpenRouter reasoning effort (or off
        when optional), discovered from the cached model catalog, and asks
        OpenRouter to sort providers of the selected model by throughput. Meeting
-       summaries and custom endpoints retain their own defaults. AX context
-       has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
+       summaries and custom endpoints retain their own defaults. The
+       formatting metadata read has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
        timings/counts/IDs only. WHY: docs/decisions/2026-09-07-smart-latency.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->
@@ -682,6 +687,13 @@ Hover capsules and materials:
   Saved tools scroll horizontally; Add and locked Settings remain visible.
   Add accepts drops and offers a click chooser. Catalog tiles remain selectable
   and draggable when pinned; their header/context menu supports Add/Remove.
+  A selected tool pins its title and a Hotkey block (Set, or keys with Change
+  and remove) above its scrolling panel; it saves at once through
+  HotkeyPreferences.assignToolShortcut (the Hotkeys apply path, conflicts save
+  nothing) with the HotkeyRecordingSession shared with Settings -> Hotkeys.
+  The selected tile is an accent wash with a bold caption; tiles take focus
+  only through keyboard navigation, with a circular focus ring. WHY:
+  .project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md
   Translate/Subtitles embed the shared translation models in compact views;
   History disables the island keyboard-paste monitor; Monitor and Record expose
   working panels. Other tools have explicit actions instead of blank panes.
@@ -1208,7 +1220,9 @@ OnboardingWindowController, accessory app, no Dock icon) in place of the former
 Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
 onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
 word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+five pages, each skippable, closing = Done; every page but the first has Back
+(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
+OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
 route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
 Lang setting; searchable list, English or native name, arrows and Return), On
 this Mac card ("Download and use for Drop", about 470 MB; when the download
@@ -1217,7 +1231,11 @@ cannot run, nothing else; hidden on Intel), and one tile per keyed provider
 (OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
 Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
 badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; "Restore from another Mac"; the
+speech key also sets that provider for Drop; one footer place: Continue when a
+saved speech key (not refused) or the downloaded model can run Drop, with "Drop
+will use X" above it (preselected: Drop's running provider, else Soniox,
+Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
+the free key check before a new provider), else Set up later; "Restore from another Mac"; the
 stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
 and Keyboard control on PermissionsSettingsViewModel, done at
 dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but

@@ -1,5 +1,29 @@
 # Interface decisions
 
+## Toolbox: tool hotkey and selected tile — 2026-11-22
+
+The user selects a tool in Toolbox and wants to give it a key there, then
+change the tool's settings below.
+
+- A selected tool pins its title row and a Hotkey block above the scrolling
+  tool panel: a soft hover-tinted band with a keyboard glyph and "Hotkey"
+  ("Extra hotkey" for Record), and on the right Set (tinted), or the keycaps,
+  Change and a remove glyph. Recording shows dashed live keycaps, a hint and
+  Cancel; a conflict turns them red with an orange warning line and keeps
+  recording. It saves without a Save step.
+- Selected tile: 20 % accent wash on the circle, accent symbol, semibold
+  label-color caption, no outline. Keyboard focus is the system ring shaped to
+  the circle and appears only with keyboard navigation (tiles are not focused by
+  a click). Why: the click-focus ring drew a thick rectangle around circle and
+  caption; ring/solid variants were rejected because a ring reads as focus and
+  a solid fill as an "on" state. Hover and press anywhere on the tile tint
+  the circle with MacButton's 10 % / 18 % label-color highlight; hover also
+  lifts the caption to the label color; a drag cancels the press. Variants
+  and reasons:
+  `.project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md`.
+- Offscreen renders cover the minimum content size in both appearances; the
+  live focus ring and VoiceOver remain installed-app checks.
+
 ## Shared Speech and LLM rows — 2026-11-22
 
 - Models opens with two cards, Speech ("Drop, voice, Meetings") and LLM
@@ -1741,7 +1765,9 @@ The former paid onboarding's look, with today's content. One always-dark
 surface steps, purple accent, green for success and free offers). Left pane
 380 pt: a mono step caption ("SPEECH · 1 / 5"), a 44 pt Instrument Serif
 headline with one italic word, at most one short line, the page's controls,
-and a footer aligned right (quiet text actions beside one white capsule).
+and a footer aligned right (quiet text actions beside one white capsule), with a
+quiet ‹ Back on its left on every page but the first (← and ⌘[ outside text
+fields do the same).
 Right: a stage with a soft purple wash (green on the try page after success)
 showing mock windows with traffic lights, the real island orb, or a 16:9 clip
 with the person's own keycaps under it. Pages fade (0.28 s); the left pane
@@ -1751,7 +1777,9 @@ Speech: the language picker (a dark label opening a searchable list), the On
 this Mac card with its white button, and a card of seven provider tiles in a
 4-column grid (muted badge, logo, name, offer). Selected tiles get the accent
 outline; the key field and Save appear under the grid and Get offer beside the
-card title. Permissions: two cards with Allow / Open Settings / a green check,
+card title. The saved speech key Drop will use says For Drop in the accent with
+the same outline; the footer's right place is Continue with "Drop will use X"
+(or the refusal in orange) on its own line above, else the quiet Set up later. Permissions: two cards with Allow / Open Settings / a green check,
 and a dashed secondary row for Screen Recording ("Optional · for Shot").
 Try: three numbered italic verbs, the real field in a note window. Make it
 yours and Turn on more: selectable cards (accent outline) that pick the stage's

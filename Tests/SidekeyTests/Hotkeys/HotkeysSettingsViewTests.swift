@@ -257,7 +257,13 @@ final class HotkeysSettingsViewTests: XCTestCase {
     func testRecordingMonitorListensForKeyUp() throws {
         // Release-to-commit needs keyUp; the local monitor and the event guard
         // must both admit .keyUp or a bare key (no modifier release) never commits.
-        let src = try hotkeysSettingsViewSource()
+        // The recorder lives in the session shared with Settings -> Toolbox.
+        let viewURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Sidekey/Hotkeys/HotkeyRecordingSession.swift")
+        let src = try String(contentsOf: viewURL, encoding: .utf8)
+        XCTAssertTrue(try hotkeysSettingsViewSource().contains("recording.start(target"))
         XCTAssertTrue(
             src.contains("matching: [.keyDown, .keyUp, .flagsChanged]"),
             "startRecording must listen for keyUp (release-to-commit)."

@@ -11,6 +11,11 @@ final class MonitorStore: ObservableObject {
     /// Server status was deleted like any other board: it is not listed and
     /// Whytap does not connect to the servers in servers.json.
     @Published private(set) var serverStatusRemoved = false
+    /// Server status is a board only for a user who set servers up: it is
+    /// listed while servers.json names at least one server (or cannot be
+    /// read, so the mistake is visible) and the board was not deleted.
+    /// WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
+    @Published private(set) var serverStatusListed = false
 
     /// Server status's ID in the deleted list; never a snapshot's ID.
     static let serverStatusID = "server-status"
@@ -136,12 +141,11 @@ final class MonitorStore: ObservableObject {
         let configFile = root.appendingPathComponent("servers.json")
         // A deleted Server status reads no configuration, so refreshServers
         // has nothing to connect to; servers.json itself stays as it is.
-        guard pollingAllowed, fm.fileExists(atPath: configFile.path) else {
+        guard !serverStatusRemoved, fm.fileExists(atPath: configFile.path) else {
+            serverStatusListed = false
             configuration = nil
             readings = []
-            serverError = removed == nil
-                ? "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
-                : nil
+            serverError = nil
             return
         }
         do {
@@ -151,6 +155,21 @@ final class MonitorStore: ObservableObject {
                 throw MonitorValidationError.invalidServers
             }
             let newConfiguration = try MonitorServerConfiguration.decode(Data(contentsOf: configFile))
+            // No servers named: nothing was set up, so there is no board.
+            guard !newConfiguration.servers.isEmpty else {
+                serverStatusListed = false
+                configuration = nil
+                readings = []
+                serverError = nil
+                return
+            }
+            serverStatusListed = true
+            guard pollingAllowed else {
+                configuration = nil
+                readings = []
+                serverError = "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
+                return
+            }
             if newConfiguration != configuration {
                 let previous = Dictionary(uniqueKeysWithValues: readings.map { ($0.id, $0) })
                 readings = newConfiguration.servers.map { server in
@@ -163,6 +182,9 @@ final class MonitorStore: ObservableObject {
             }
             serverError = nil
         } catch {
+            // A file that is there but unreadable is a setup attempt: the
+            // board stays listed and says what is wrong.
+            serverStatusListed = true
             configuration = nil
             serverError = "Server configuration could not be loaded. Ask your agent to validate servers.json."
             readings = readings.map { reading in
@@ -192,7 +214,7 @@ final class MonitorStore: ObservableObject {
         let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
             reloadFiles()
             let wasListed = id == Self.serverStatusID
-                ? !serverStatusRemoved : dashboards.contains { $0.id == id }
+                ? serverStatusListed : dashboards.contains { $0.id == id }
             var removed = try MonitorRemovedDashboards.load(root: root)
             if !removed.contains(id) {
                 removed.insert(id)

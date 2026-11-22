@@ -51,7 +51,7 @@ private struct MonitorWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("DASHBOARDS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .padding(.top, 12)
-                if !store.serverStatusRemoved {
+                if store.serverStatusListed {
                     dashboardButton(id: MonitorStore.serverStatusID, title: "Server status")
                 }
                 ForEach(store.dashboards) { dashboard in
@@ -75,15 +75,20 @@ private struct MonitorWindowView: View {
                 if let error = store.dashboardError {
                     Text(error).font(.caption).foregroundStyle(.orange).padding(16)
                 }
-                if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved {
+                if selectedID == MonitorStore.serverStatusID, store.serverStatusListed {
                     MonitorServersView(store: store)
                 } else if let dashboard = store.dashboards.first(where: { $0.id == selectedID }) {
                     MonitorCustomDashboardView(dashboard: dashboard)
                 } else {
                     VStack(spacing: 12) {
-                        Text("Choose a dashboard").font(.title2.weight(.semibold))
-                        Text("Open Server status or ask your agent to add a custom monitor.")
+                        let empty = MonitorHoverPanel.pickerIsEmpty(
+                            serverStatusListed: store.serverStatusListed, dashboardCount: store.dashboards.count)
+                        Text(empty ? MonitorHoverPanel.emptyTitle : "Choose a dashboard")
+                            .font(.title2.weight(.semibold))
+                        Text(empty ? MonitorHoverPanel.emptyText
+                                   : "Pick one on the left or ask your agent to add another.")
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }

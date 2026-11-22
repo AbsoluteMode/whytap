@@ -199,7 +199,7 @@ def scaffold_hover(args: argparse.Namespace) -> int:
 def scaffold_dashboard(args: argparse.Namespace) -> int:
     dashboard_id = identifier(args.id)
     if dashboard_id == "server-status":
-        raise ValueError("server-status is reserved for the built-in dashboard; use a custom ID")
+        raise ValueError("server-status is reserved for Server status; use a custom ID")
     dashboard_title = title(args.title)
     destination = make_output(args.output, dashboard_id)
     snapshot = {
@@ -439,7 +439,8 @@ def restore_dashboard_command(args: argparse.Namespace) -> int:
 
     Only the ID leaves the deleted list, under the same lock Whytap takes. A
     custom board appears when its collector next writes its snapshot (or after
-    install-dashboard); Server status reconnects to the servers in servers.json.
+    install-dashboard); Server status reconnects to the servers in servers.json
+    (it is listed only while that file names a server).
     WHY: .project-docs/decisions/2026-11-21-monitor-dashboard-delete.md
     """
     dashboard_id = args.id
@@ -468,7 +469,8 @@ def restore_dashboard_command(args: argparse.Namespace) -> int:
             temporary.unlink(missing_ok=True)
             raise
     if dashboard_id == "server-status":
-        print("Server status is listed again; Whytap reconnects to the servers in servers.json")
+        print("Server status is no longer deleted; Monitor lists it while servers.json names a server "
+              "and Whytap reconnects to those servers")
     else:
         print(f"{dashboard_id} is listed again; it appears when its collector next writes its snapshot")
     return 0

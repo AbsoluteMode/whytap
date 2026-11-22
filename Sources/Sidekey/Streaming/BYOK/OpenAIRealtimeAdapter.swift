@@ -57,7 +57,8 @@ struct OpenAIRealtimeAdapter: BYOKTranscriptionAdapter {
     init(apiKey: String, url: URL, model: String, dialect: OpenAIRealtimeDialect = .server) {
         self.model = model
         self.dialect = dialect
-        self.pingInterval = Self.defaultPingInterval
+        // A user's server keeps its earlier stall behavior: no pings.
+        self.pingInterval = dialect == .openAI ? Self.defaultPingInterval : nil
         self.makeTransport = {
             let request = Self.handshakeRequest(url: url, apiKey: apiKey)
             let task = URLSession.shared.webSocketTask(with: request)
@@ -90,7 +91,7 @@ struct OpenAIRealtimeAdapter: BYOKTranscriptionAdapter {
     func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession {
         let transport = makeTransport()
         transport.resume()
-        let session = OpenAIRealtimeSession(transport: transport,
+        let session = OpenAIRealtimeSession(transport: transport, dialect: dialect,
                                             turns: OpenAIRealtimeTurns.forModel(model, dialect: dialect),
                                             pingInterval: pingInterval)
         try await session.start(config: Self.sessionUpdate(model: model, dialect: dialect,
@@ -165,8 +166,18 @@ struct OpenAIRealtimeAdapter: BYOKTranscriptionAdapter {
 /// item (`item_id`): deltas build the item's partial text, and completed
 /// items become finals in commit order, since OpenAI does not order
 /// completions of different turns.
+///
+/// The take's end on OpenAI: the app's final commit carries its own
+/// `event_id`. With server VAD it is followed by `input_audio_buffer.clear`,
+/// whose `cleared` answer comes after every commit the server made from the
+/// take's audio, automatic or the app's own (the server handles client
+/// events in order), so `cleared` is the tail boundary. Only OpenAI's
+/// empty-buffer refusal of that commit means "nothing left"; any other error
+/// fails the take.
+// WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
 final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
     private let transport: StreamingTransporting
+    private let dialect: OpenAIRealtimeDialect
     private let turns: OpenAIRealtimeTurns
     private let pingInterval: Duration?
     private var continuation: AsyncStream<BYOKStreamEvent>.Continuation?
@@ -183,22 +194,32 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
     private var flushed = 0
     private var finalParts: [String] = []
     private var endRequested = false
-    private var commitSettled = false
+    /// Every commit of the take is answered: the push-to-talk turn completed,
+    /// the final commit was refused as empty, or (server VAD) `cleared` came.
+    private var tailReached = false
     private var finished = false
 
-    /// Diagnostic only — logs upstream event TYPES and error codes (never
-    /// transcript content, keys, or audio) so a protocol mismatch is visible
+    /// Diagnostic only — logs upstream event TYPES and allowlisted error
+    /// labels (never transcript content, keys, audio or a server's own error
+    /// text) so a protocol mismatch is visible
     /// (`log stream --predicate 'category == "byok-openai-realtime"'`).
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "byok-openai-realtime")
     /// OpenAI Realtime GA requires input PCM at >= 24 kHz; our capture is 16 kHz.
     static let outputSampleRate = 24_000
     /// An item event without `item_id` (a minimal server) belongs to the one turn.
     private static let unnamedItem = "_"
+    /// Client `event_id`s of the take's end, echoed in an error's `event_id`.
+    static let finalCommitEventID = "whytap_final_commit"
+    static let tailBoundaryEventID = "whytap_tail_boundary"
+    /// OpenAI's refusal of a commit with nothing in the buffer.
+    static let emptyCommitCode = "input_audio_buffer_commit_empty"
 
     let events: AsyncStream<BYOKStreamEvent>
 
-    init(transport: StreamingTransporting, turns: OpenAIRealtimeTurns = .oneCommit, pingInterval: Duration? = nil) {
+    init(transport: StreamingTransporting, dialect: OpenAIRealtimeDialect = .server,
+         turns: OpenAIRealtimeTurns = .oneCommit, pingInterval: Duration? = nil) {
         self.transport = transport
+        self.dialect = dialect
         self.turns = turns
         self.pingInterval = pingInterval
         var cont: AsyncStream<BYOKStreamEvent>.Continuation!
@@ -206,11 +227,21 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
         self.continuation = cont
     }
 
+    /// A server's refusal stays terminal (`"provider"`), as before OpenAI
+    /// speech existed; OpenAI's goes to Drop's batch rung.
+    private var refusalCode: String {
+        dialect == .openAI ? BYOKStreamErrorCode.providerRefused : "provider"
+    }
+
     func start(config: [String: Any]) async throws {
-        let data = try JSONSerialization.data(withJSONObject: config)
-        try await transport.send(.text(String(decoding: data, as: UTF8.self)))
+        try await send(config)
         startReceiveLoop()
         startPings()
+    }
+
+    private func send(_ object: [String: Any]) async throws {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        try await transport.send(.text(String(decoding: data, as: UTF8.self)))
     }
 
     private func startReceiveLoop() {
@@ -228,7 +259,7 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
                     guard case .text(let s) = frame,
                           let obj = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any],
                           let type = obj["type"] as? String else { continue }
-                    os_log("byok openai event type=%{public}@", log: Self.log, type: .debug, type)
+                    os_log("byok openai event type=%{public}@", log: Self.log, type: .debug, Self.eventLabel(type))
                     if self.handle(type: type, object: obj) { return }
                 }
             }
@@ -257,9 +288,11 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
         switch type {
         case "input_audio_buffer.committed":
             place(item, after: obj["previous_item_id"] as? String)
-            if endRequested { commitSettled = true }
             emitPartialLocked()
-            // The turn may have completed before its commit was reported.
+        case "input_audio_buffer.cleared":
+            // Server VAD's tail boundary: every commit of the take is in.
+            if dialect == .openAI, turns == .serverVAD, endRequested { tailReached = true }
+            emitPartialLocked()
             finishIfDoneLocked()
         case "conversation.item.input_audio_transcription.delta":
             place(item, after: nil)
@@ -269,24 +302,25 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
             place(item, after: nil)
             completed[item] = (obj["transcript"] as? String) ?? ""
             // Push-to-talk has one turn: its completion is the take's end.
-            if turns == .oneCommit { commitSettled = true; endRequested = true }
+            if turns == .oneCommit { tailReached = true; endRequested = true }
             flushLocked()
         case "conversation.item.input_audio_transcription.failed":
-            os_log("byok openai realtime item failed code=%{public}@", log: Self.log, type: .error,
-                   Self.errorCode(obj) ?? "none")
-            failLocked(BYOKStreamErrorCode.providerRefused)
+            // A server's failed turn was never acted on; keep it that way.
+            guard dialect == .openAI else { break }
+            os_log("byok openai realtime turn failed code=%{public}@", log: Self.log, type: .error,
+                   Self.errorLabel(Self.errorCode(obj)))
+            failLocked(refusalCode)
         case "error":
             let code = Self.errorCode(obj)
-            os_log("byok openai realtime error code=%{public}@", log: Self.log, type: .error, code ?? "none")
-            // After the take's end a server-VAD session may have committed
-            // everything already, and the final commit then finds an empty
-            // buffer. That refusal only says nothing is left; a key, credit
-            // or rate refusal still fails the take.
-            if turns == .serverVAD, endRequested, !commitSettled, !Self.isAccountRefusal(code, type: Self.errorType(obj)) {
-                commitSettled = true
+            os_log("byok openai realtime error code=%{public}@", log: Self.log, type: .error, Self.errorLabel(code))
+            if isEmptyFinalCommit(code: code, eventID: Self.errorEventID(obj)) {
+                // Nothing was left after the last automatic commit (or the
+                // take had no audio). With server VAD `cleared` still marks
+                // the tail; push-to-talk has no turn left to wait for.
+                if turns == .oneCommit { tailReached = true }
                 finishIfDoneLocked()
             } else {
-                failLocked(BYOKStreamErrorCode.providerRefused)
+                failLocked(refusalCode)
             }
         default:
             // Any other server event (speech started or stopped, session
@@ -294,6 +328,14 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
             emitPartialLocked()
         }
         return finished
+    }
+
+    /// OpenAI's empty-buffer refusal of the app's own final commit, and
+    /// nothing else: a server's error, an error before the take's end, an
+    /// error naming another client event or any other code fails the take.
+    private func isEmptyFinalCommit(code: String?, eventID: String?) -> Bool {
+        guard dialect == .openAI, endRequested, code == Self.emptyCommitCode else { return false }
+        return eventID == nil || eventID == Self.finalCommitEventID
     }
 
     /// Records `item` in commit order: after `previous` when known, else last.
@@ -341,7 +383,7 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
     }
 
     private func finishIfDoneLocked() {
-        guard !finished, endRequested, commitSettled, flushed == order.count else { return }
+        guard !finished, endRequested, tailReached, flushed == order.count else { return }
         finished = true
         continuation?.yield(.done(finalParts.joined(separator: " ")))
         continuation?.finish()
@@ -363,34 +405,37 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
         (obj["error"] as? [String: Any])?["code"] as? String
     }
 
-    private static func errorType(_ obj: [String: Any]) -> String? {
-        (obj["error"] as? [String: Any])?["type"] as? String
+    private static func errorEventID(_ obj: [String: Any]) -> String? {
+        (obj["error"] as? [String: Any])?["event_id"] as? String
     }
 
-    /// Refusals about the key, the account's credit or its rate: never the
-    /// harmless empty final commit.
-    static func isAccountRefusal(_ code: String?, type: String?) -> Bool {
-        let refusals: Set<String> = [
-            "invalid_api_key", "incorrect_api_key", "invalid_authentication", "authentication_error", "unauthorized",
-            "insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached", "billing_not_active",
-            "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded",
-            "rate_limit_exceeded", "slow_down", "session_limit_reached", "concurrent_session_limit",
-            "model_not_found", "invalid_model",
-        ]
-        if let code, refusals.contains(code) { return true }
-        if let type, ["insufficient_quota", "rate_limit_error", "authentication_error"].contains(type) { return true }
-        return false
+    /// Error codes the log may name; anything else (a server can put any
+    /// text there) is logged as `unlisted`.
+    private static let loggableErrorCodes: Set<String> = [
+        emptyCommitCode, "invalid_value", "invalid_request_error", "invalid_api_key", "incorrect_api_key",
+        "invalid_authentication", "insufficient_quota", "credit_balance_exhausted", "rate_limit_exceeded",
+        "slow_down", "session_limit_reached", "model_not_found", "invalid_model", "server_error",
+        "unsupported_language", "invalid_language",
+    ]
+
+    static func errorLabel(_ code: String?) -> String {
+        guard let code else { return "none" }
+        return loggableErrorCodes.contains(code) ? code : "unlisted"
+    }
+
+    /// Event types the log may name; anything else is `other`.
+    static func eventLabel(_ type: String) -> String {
+        let known = type.hasPrefix("input_audio_buffer.") || type.hasPrefix("conversation.item.")
+            || type.hasPrefix("session.") || type.hasPrefix("transcription_session.") || type == "error"
+        return known && type.count <= 64 && type.allSatisfy({ $0.isLetter || $0 == "." || $0 == "_" }) ? type : "other"
     }
 
     func sendAudio(_ pcm: Data) async {
         let upsampled = Self.upsample16kTo24k(pcm)
-        let msg: [String: Any] = [
+        try? await send([
             "type": "input_audio_buffer.append",
             "audio": upsampled.base64EncodedString(),
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: msg) {
-            try? await transport.send(.text(String(decoding: data, as: UTF8.self)))
-        }
+        ])
     }
 
     /// Linear-interpolate mono PCM16 LE from 16 kHz to 24 kHz (3:2 ratio).
@@ -417,14 +462,19 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
         lock.lock()
         endRequested = true
         lock.unlock()
-        // Log the event type only (no payload) on a failed commit so a
-        // half-open socket is diagnosable; the session's stop watchdog bounds
-        // the resulting receive-side wait.
-        let msg: [String: Any] = ["type": "input_audio_buffer.commit"]
-        guard let data = try? JSONSerialization.data(withJSONObject: msg) else { return }
+        // A server gets the plain commit it always got. OpenAI's carries an
+        // event_id, and with server VAD a clear follows as the tail boundary.
+        var commit: [String: Any] = ["type": "input_audio_buffer.commit"]
+        if dialect == .openAI { commit["event_id"] = Self.finalCommitEventID }
         do {
-            try await transport.send(.text(String(decoding: data, as: UTF8.self)))
+            try await send(commit)
+            if dialect == .openAI, turns == .serverVAD {
+                try await send(["type": "input_audio_buffer.clear", "event_id": Self.tailBoundaryEventID])
+            }
         } catch {
+            // Log the event type only (no payload) on a failed commit so a
+            // half-open socket is diagnosable; the session's stop watchdog
+            // bounds the resulting receive-side wait.
             os_log("byok openai realtime endInput send failed", log: Self.log, type: .error)
             fail(BYOKStreamErrorCode.endOfStreamSendFailed)
         }

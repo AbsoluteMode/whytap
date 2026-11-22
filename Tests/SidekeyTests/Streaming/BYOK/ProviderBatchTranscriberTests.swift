@@ -633,6 +633,21 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         }
     }
 
+    func testProbeOpenAIQuotaIsDistinguishedFromRateLimiting() async {
+        StubURLProtocol.handler = { _ in
+            (429, ["Content-Type": "application/json"], Self.json([
+                "error": ["code": "credit_balance_exhausted", "type": "insufficient_quota"],
+            ]))
+        }
+        do {
+            _ = try await transcriber(.openAI(apiKey: "synthetic-key", model: "gpt-transcribe"))
+                .transcribe(audio: pcm, language: nil)
+            XCTFail("A quota denial must fail batch recovery")
+        } catch {
+            XCTAssertEqual(ProviderFailure(error), .outOfCredit)
+        }
+    }
+
     // MARK: Soniox
 
     // Breaks if the file flow (upload -> job -> poll -> transcript) leaves the

@@ -93,6 +93,35 @@ enum ProviderBatchTranscriptionError: Error, Equatable {
     /// covers a wrong key, a missing permission and an exhausted quota alike,
     /// so the status code cannot tell them apart.
     case elevenLabs(status: Int, refusal: ElevenLabsRefusal)
+    /// OpenAI named an account refusal in `error.code` / `error.type`: its
+    /// 429 covers both an exhausted balance and a rate limit.
+    case openAI(status: Int, refusal: OpenAIRefusal)
+}
+
+/// The OpenAI account refusals the app tells apart, read only from the
+/// allowlisted `error.code` and `error.type` values of the body; nothing else
+/// of it is read, kept or logged.
+// WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+enum OpenAIRefusal: String, Equatable, Sendable {
+    case outOfCredit = "out_of_credit"
+    case invalidKey = "invalid_key"
+
+    private static let creditCodes: Set<String> = [
+        "insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached", "billing_not_active",
+        "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded",
+    ]
+    private static let keyCodes: Set<String> = ["invalid_api_key", "incorrect_api_key", "invalid_authentication"]
+
+    init?(body: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let error = object["error"] as? [String: Any] else { return nil }
+        let code = error["code"] as? String
+        let type = error["type"] as? String
+        if let code, Self.creditCodes.contains(code) { self = .outOfCredit; return }
+        if type == "insufficient_quota" { self = .outOfCredit; return }
+        if let code, Self.keyCodes.contains(code) { self = .invalidKey; return }
+        return nil
+    }
 }
 
 /// The refusals of ElevenLabs the app tells apart. Only these three values of
@@ -206,7 +235,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
                 result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)
             case .openAI(let apiKey, let model):
                 result = try await selfHosted(wav, apiKey: apiKey, endpoint: ProviderBatchRoute.openAIEndpoint,
-                                              model: model, language: language)
+                                              model: model, language: language, openAI: true)
             case .onDevice:
                 result = try await onDevice.transcribe(audio: audio, language: language)
             }
@@ -284,7 +313,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
     /// OpenAI-compatible `/v1/audio/transcriptions` with the user's model. The
     /// key is optional: without one there is no `Authorization` header.
     private func selfHosted(
-        _ wav: Data, apiKey: String?, endpoint: URL, model: String, language: String?
+        _ wav: Data, apiKey: String?, endpoint: URL, model: String, language: String?, openAI: Bool = false
     ) async throws -> String {
         var form = MultipartFormBody()
         form.field("model", model)
@@ -297,7 +326,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
-        let data = try await send(request, body: form.finished())
+        let data = try await send(request, body: form.finished(), openAI: openAI)
         return try Self.text(in: data)
     }
 
@@ -383,7 +412,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
     // MARK: HTTP
 
     /// The body of a 2xx answer; any other status is thrown.
-    private func send(_ request: URLRequest, body: Data? = nil, elevenLabs: Bool = false,
+    private func send(_ request: URLRequest, body: Data? = nil, elevenLabs: Bool = false, openAI: Bool = false,
                       onResponse: ((HTTPURLResponse) -> Void)? = nil) async throws -> Data {
         var request = request
         request.httpBody = body
@@ -393,6 +422,9 @@ struct ProviderBatchTranscriber: BatchTranscribing {
         guard (200..<300).contains(status) else {
             if elevenLabs, let refusal = ElevenLabsRefusal(body: data) {
                 throw ProviderBatchTranscriptionError.elevenLabs(status: status, refusal: refusal)
+            }
+            if openAI, let refusal = OpenAIRefusal(body: data) {
+                throw ProviderBatchTranscriptionError.openAI(status: status, refusal: refusal)
             }
             throw ProviderBatchTranscriptionError.httpStatus(status)
         }
@@ -437,6 +469,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             case .jobFailed: return "job_failed"
             case .timedOut: return "timed_out"
             case .elevenLabs(let status, let refusal): return "http_\(status)_\(refusal.rawValue)"
+            case .openAI(let status, let refusal): return "http_\(status)_\(refusal.rawValue)"
             }
         }
         if error is CancellationError { return "cancelled" }

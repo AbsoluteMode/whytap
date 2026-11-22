@@ -166,7 +166,8 @@ final class OpenAIRealtimeAdapterTests: XCTestCase {
         await session.endInput()
         // Server VAD already committed everything: the final commit finds an
         // empty buffer. That says nothing is left, not that the take failed.
-        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","event_id":"whytap_final_commit"}}"#)
+        stub.deliverText(#"{"type":"input_audio_buffer.cleared"}"#)
         let got = await events(session)
 
         let finals = got.compactMap { if case .final(let f) = $0 { return f } else { return nil } }
@@ -174,7 +175,8 @@ final class OpenAIRealtimeAdapterTests: XCTestCase {
         XCTAssertTrue(partials(got).contains("One two."), "a completed later phrase waits behind the open one")
         XCTAssertEqual(got.last, .done("One, two."))
         let texts = stub.sent.compactMap { if case .text(let t) = $0 { return t } else { return nil } }
-        XCTAssertTrue(texts.contains { $0.contains("input_audio_buffer.commit") })
+        XCTAssertTrue(texts.contains { $0.contains("input_audio_buffer.commit") && $0.contains("whytap_final_commit") })
+        XCTAssertTrue(texts.contains { $0.contains("whytap_tail_boundary") }, "the clear after the final commit")
         await session.close()
     }
 
@@ -184,9 +186,55 @@ final class OpenAIRealtimeAdapterTests: XCTestCase {
             .open(language: nil, terms: [])
         await session.endInput()
         stub.deliverText(#"{"type":"input_audio_buffer.committed","item_id":"z","previous_item_id":null}"#)
+        // The tail boundary arrives before the last phrase is transcribed.
+        stub.deliverText(#"{"type":"input_audio_buffer.cleared"}"#)
         stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"z","transcript":"Last words."}"#)
         let got = await events(session)
         XCTAssertEqual(got.last, .done("Last words."))
+        await session.close()
+    }
+
+    func testProbeLateAutomaticVADCommitDoesNotEndBeforeTheManualTail() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "gpt-4o-mini-transcribe", dialect: .openAI) { stub }
+            .open(language: nil, terms: [])
+        // The server auto-committed the first phrase at a pause, but its
+        // acknowledgment reaches the app only after it sends the tail commit.
+        await session.sendAudio(Data(count: 32_000))
+        await session.endInput()
+        stub.deliverText(#"{"type":"input_audio_buffer.committed","item_id":"a","previous_item_id":null}"#)
+        stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"First phrase."}"#)
+        stub.deliverText(#"{"type":"input_audio_buffer.committed","item_id":"b","previous_item_id":"a"}"#)
+        stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"b","transcript":"Last words."}"#)
+        // OpenAI answers the app's tail `clear` after every commit of the take:
+        // that answer, not an earlier `committed`, ends the take.
+        stub.deliverText(#"{"type":"input_audio_buffer.cleared"}"#)
+        let got = await events(session)
+        XCTAssertEqual(got.last, .done("First phrase. Last words."))
+        XCTAssertFalse(got.contains(.done("First phrase.")))
+        await session.close()
+    }
+
+    func testProbeUnrelatedLateSessionErrorDoesNotReportSilence() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "gpt-4o-mini-transcribe", dialect: .openAI) { stub }
+            .open(language: nil, terms: [])
+        await session.sendAudio(Data(count: 32_000))
+        await session.endInput()
+        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","param":"session.audio.input.transcription.language"}}"#)
+        let got = await events(session)
+        XCTAssertEqual(got.last, .error(BYOKStreamErrorCode.providerRefused))
+        await session.close()
+    }
+
+    func testProbeSelfHostedProviderRefusalRetainsItsExistingTerminalResult() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "local-transcriber", dialect: .server) { stub }
+            .open(language: nil, terms: [])
+        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"invalid_model"}}"#)
+        let got = await events(session)
+        XCTAssertEqual(got.last, .error("provider"))
+        XCTAssertFalse(DirectProviderStreamingSession.isTransportClass("provider"))
         await session.close()
     }
 
@@ -210,7 +258,8 @@ final class OpenAIRealtimeAdapterTests: XCTestCase {
         let vadSession = try await OpenAIRealtimeAdapter(model: "gpt-4o-transcribe", dialect: .openAI) { vad }
             .open(language: nil, terms: [])
         await vadSession.endInput()
-        vad.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+        vad.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","event_id":"whytap_final_commit"}}"#)
+        vad.deliverText(#"{"type":"input_audio_buffer.cleared"}"#)
         let vadEvents = await events(vadSession)
         XCTAssertEqual(vadEvents.last, .done(""))
         await vadSession.close()
@@ -334,5 +383,68 @@ final class OpenAIRealtimeAdapterTests: XCTestCase {
         XCTAssertEqual(result, .degraded)
         XCTAssertEqual(session.capturedAudioPCM16(), captured)
         XCTAssertEqual(live, ["Hello"], "the island showed the live words")
+    }
+
+    // The tail boundary: a phrase committed before `cleared` is waited for, a
+    // late `committed` of an automatic turn cannot end the take early.
+    func test_take_does_not_end_before_the_tail_boundary() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "gpt-4o-mini-transcribe", dialect: .openAI) { stub }
+            .open(language: nil, terms: [])
+        await session.endInput()
+        stub.deliverText(#"{"type":"input_audio_buffer.committed","item_id":"a","previous_item_id":null}"#)
+        stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"First phrase."}"#)
+        stub.deliverText(#"{"type":"input_audio_buffer.committed","item_id":"b","previous_item_id":"a"}"#)
+        stub.deliverText(#"{"type":"input_audio_buffer.cleared"}"#)
+        let collector = Task { () -> [BYOKStreamEvent] in
+            var all: [BYOKStreamEvent] = []
+            for await ev in session.events { all.append(ev); if case .done = ev { break } }
+            return all
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"b","transcript":"Last words."}"#)
+        let got = await collector.value
+        XCTAssertEqual(got.last, .done("First phrase. Last words."))
+        await session.close()
+    }
+
+    // An empty-commit code is "nothing left" only for the app's own final
+    // commit: one that names another client event fails the take.
+    func test_empty_commit_of_another_event_fails_the_take() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "gpt-4o-mini-transcribe", dialect: .openAI) { stub }
+            .open(language: nil, terms: [])
+        await session.endInput()
+        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","event_id":"evt_other"}}"#)
+        let got = await events(session)
+        XCTAssertEqual(got.last, .error(BYOKStreamErrorCode.providerRefused))
+        await session.close()
+    }
+
+    // Logs name only allowlisted codes and event types; a server's own text
+    // never reaches them.
+    func test_log_labels_are_allowlisted() {
+        XCTAssertEqual(OpenAIRealtimeSession.errorLabel("insufficient_quota"), "insufficient_quota")
+        XCTAssertEqual(OpenAIRealtimeSession.errorLabel("my secret transcript"), "unlisted")
+        XCTAssertEqual(OpenAIRealtimeSession.errorLabel(nil), "none")
+        XCTAssertEqual(OpenAIRealtimeSession.eventLabel("input_audio_buffer.committed"), "input_audio_buffer.committed")
+        XCTAssertEqual(OpenAIRealtimeSession.eventLabel("transcript: hello there"), "other")
+    }
+
+    // A server keeps its pre-OpenAI contract: plain commit, terminal refusal,
+    // a failed turn ignored, no pings.
+    func test_server_keeps_its_plain_commit_and_terminal_refusal() async throws {
+        let stub = StubWebSocketTransport()
+        let session = try await OpenAIRealtimeAdapter(model: "whisper-large-v3", dialect: .server) { stub }
+            .open(language: nil, terms: [])
+        await session.endInput()
+        let texts = stub.sent.compactMap { if case .text(let t) = $0 { return t } else { return nil } }
+        XCTAssertEqual(texts.last, #"{"type":"input_audio_buffer.commit"}"#)
+        XCTAssertFalse(texts.contains { $0.contains("input_audio_buffer.clear") })
+        stub.deliverText(#"{"type":"conversation.item.input_audio_transcription.failed","item_id":"i","error":{"code":"x"}}"#)
+        stub.deliverText(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+        let got = await events(session)
+        XCTAssertEqual(got.last, .error("provider"))
+        await session.close()
     }
 }

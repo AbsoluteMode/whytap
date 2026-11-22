@@ -65,17 +65,32 @@ The maintainer wants to try OpenAI's speech models in the island.
   `prompt` for the older models. A server keeps its unchanged shape.
 - The session tracks turns by `item_id`: deltas add up to the turn's partial,
   completed turns become finals in commit order (OpenAI does not order
-  completions of different turns). After the take's end in server-VAD mode an
-  error that is not an account refusal (key, credit, rate, model) means the
-  final commit found an empty buffer: nothing is left, the take is done.
-- Every 2 s the session pings the socket; a pong repeats the current partial,
+  completions of different turns).
+- The take's end has a deterministic tail. The app's final commit carries
+  `event_id` `whytap_final_commit`; with server VAD it is followed by
+  `input_audio_buffer.clear`. OpenAI handles client events in order, so its
+  `cleared` answer comes after every commit made from the take's audio,
+  automatic or the app's own: the take ends once `cleared` has arrived and
+  every committed turn is transcribed. A late `committed` of an automatic turn
+  can no longer end it early. Only `input_audio_buffer_commit_empty` for the
+  app's own commit (its `event_id`, or none) means nothing is left; any other
+  error after the end, such as a late `invalid_value`, fails the take.
+- Every 2 s the OpenAI session pings the socket; a pong repeats the current partial,
   which the stall detector counts as progress and the island ignores. A pause
   in speech therefore no longer degrades the take, while a dead socket still
   does.
 - An OpenAI `error` or failed turn is `providerRefused`, which Drop treats like
   a broken connection: the take's own audio goes to the batch rung, which
-  either delivers or names the refusal ("OpenAI refused the key", "OpenAI is
-  busy, try again") through `ProviderFailure`.
+  either delivers or names the refusal ("OpenAI refused the key", "OpenAI:
+  out of credit", "OpenAI is busy, try again") through `ProviderFailure`. The
+  batch path reads only allowlisted `error.code` / `error.type` values, so a
+  429 naming `credit_balance_exhausted` or `insufficient_quota` is out of
+  credit, and any other 429 a rate limit.
+- A user's server keeps its earlier contract: the plain commit, a refusal that
+  stays terminal (`"provider"`), a failed turn ignored and no pings. Only its
+  partials now add up the deltas of a turn.
+- Logs name only allowlisted error codes and event types (`unlisted`,
+  `other` otherwise): a server can put any text in those fields.
 - Batch rung, Retry and agent batch voice: `/v1/audio/transcriptions` on
   api.openai.com with the shared key; the live-only models map to
   `gpt-transcribe`, a file-capable model is kept.
@@ -125,6 +140,12 @@ The maintainer wants to try OpenAI's speech models in the island.
   model; with only the retired key it stays Not set and never goes to Soniox.
 - Mutation: disabling the empty-commit rule and flushing finals in completion
   order failed 4 of the session tests; reverted.
+- The builder's offline probes (queue ticket 407) found five cases in the first
+  version: a late automatic `committed` ending the take before the tail, a
+  late `invalid_value` read as silence, a server's refusal sent to batch
+  recovery, `credit_balance_exhausted` read as busy and raw error codes in
+  public logs. All five are fixed and covered: the probes pass, the first one
+  with the `cleared` answer OpenAI sends to the tail `clear`.
 - Not tested live: no paid request was made. The exact name of the empty-commit
   error code and the per-model field acceptance come from OpenAI's docs; the
   session does not depend on the code's name. Acceptance in the island remains.

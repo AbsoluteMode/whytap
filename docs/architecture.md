@@ -60,10 +60,14 @@ Voice flow (Drop / dictation):
             end); a turn-based model (gpt-transcribe, gpt-4o-*-transcribe,
             whisper-1) runs with server VAD and shows text after each pause,
             so it starts no auto-stop take. Turns are tracked by item_id and
-            finals kept in commit order; a pong is stall progress; a refusal
-            (providerRefused) degrades Drop to the batch rung
-            (/v1/audio/transcriptions, gpt-transcribe for the live-only
-            models), which names it. Meetings have no OpenAI model. A legacy
+            finals kept in commit order; the take ends at the `cleared`
+            answer to a clear sent after the final commit (server VAD), and
+            only OpenAI's empty-commit refusal of that commit means nothing
+            is left; a pong is stall progress; a refusal (providerRefused)
+            degrades Drop to the batch rung (/v1/audio/transcriptions,
+            gpt-transcribe for the live-only models), which names it (credit
+            apart from a rate limit). A server keeps its plain commit,
+            terminal refusal and no pings. Meetings have no OpenAI model. A legacy
             OpenAI choice migrates to OpenAI with its model, never to Soniox.
             WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
             A server route has no default host: a missing or unparseable base

@@ -60,7 +60,10 @@ final class OnboardingGlobeMesh {
                 }
             }.filter { $0.count >= 3 }
             guard !rings.isEmpty else { continue }
-            countries.append(OnboardingGlobeCountry(code: String(fields[0]), name: String(fields[1]),
+            let code = String(fields[0])
+            // The Mac's English name where it has one ("Côte d’Ivoire", not "Côte d'Ivoire").
+            let name = code.count == 2 ? Locale(identifier: "en_US").localizedString(forRegionCode: code) : nil
+            countries.append(OnboardingGlobeCountry(code: code, name: name ?? String(fields[1]),
                                                     languages: fields[2].split(separator: " ").map(String.init),
                                                     lat: center[0], lon: center[1]))
             centers.append(Self.point(lat: center[0], lon: center[1]))
@@ -69,7 +72,10 @@ final class OnboardingGlobeMesh {
             var dots: [Int] = []
             for ring in rings {
                 var indices: [Int] = []
-                let stride = ring.count > 10 ? 3 : 4
+                // Corner dots by distance along the coast, so a detailed
+                // outline is not a string of beads: about every 7° (4° on
+                // the lit country).
+                var sinceDot = Double.infinity, sinceBaseDot = Double.infinity
                 for (i, a) in ring.enumerated() {
                     let b = ring[(i + 1) % ring.count]
                     let angle = acos(max(-1, min(1, simd_dot(a, b)))) * 180 / .pi
@@ -77,10 +83,10 @@ final class OnboardingGlobeMesh {
                     let start = vertices.count
                     vertices.append(a)
                     indices.append(start)
-                    if i % stride == 0 {
-                        dots.append(start)
-                        if ring.count > 8 || i == 0 { baseDots.append(start) }
-                    }
+                    if sinceDot >= 4 { dots.append(start); sinceDot = 0 }
+                    if sinceBaseDot >= 7 { baseDots.append(start); sinceBaseDot = 0 }
+                    sinceDot += angle
+                    sinceBaseDot += angle
                     for s in 1..<steps {
                         let f = Double(s) / Double(steps)
                         indices.append(vertices.count)
@@ -89,6 +95,8 @@ final class OnboardingGlobeMesh {
                 }
                 for (i, u) in indices.enumerated() {
                     let w = indices[(i + 1) % indices.count]
+                    // Natural Earth cuts Russia and Fiji at 180°: no border there.
+                    if Self.onDateline(vertices[u]), Self.onDateline(vertices[w]) { continue }
                     edges.append((u, w))
                     // A border two countries share is drawn once.
                     let key = SIMD3<Int>(Int(((vertices[u] + vertices[w]) * 220).x.rounded()),
@@ -116,6 +124,8 @@ final class OnboardingGlobeMesh {
             }
         }
     }
+
+    private static func onDateline(_ v: SIMD3<Double>) -> Bool { abs(v.x) < 2e-3 && v.z < 0 }
 
     func index(of code: String) -> Int? { countries.firstIndex { $0.code == code } }
 

@@ -406,9 +406,15 @@ window, Back and a progress bar.
   checkmark until a language is chosen; then the outline turns green, the
   field's arrow becomes a check and the step moves on by itself. The
   outlines come from `scripts/onboarding_globe_data.py` into
-  `OnboardingGlobeCountries.swift`; this version is built from the
-  prototype's 79 regions (some neighbours joined), and the script takes
-  Natural Earth's admin-0 countries for finer outlines. Language variants
+  `OnboardingGlobeCountries.swift`, built from Natural Earth's 1:110m
+  admin-0 countries (world-atlas 2.0.2 TopoJSON, public domain, ISC for the
+  conversion; `Resources/OnboardingGlobe/`, not shipped, with its license
+  note), downloaded with the owner's go-ahead after he found the
+  prototype's 79 joined regions too rough: 171 countries, simplified to
+  0.8 degree (finer detail is under a pixel at this size), corner dots about
+  every 7 degrees (4 on the lit country), no border drawn along the 180th
+  meridian where Natural Earth cuts Russia and Fiji, names from the Mac's
+  English region names. Language variants
   (English US/UK/AU, Portuguese BR/PT, Spanish ES/MX) show under the
   language with every speech route, as in the prototype (the owner, REV 51:
   "show the variants, it looks good"): the lit country's own variant is
@@ -443,7 +449,8 @@ window, Back and a progress bar.
   "Jap", "Port" before Portuguese, "uk") and a language's home country with
   that language (Russian in Cyrillic, "English", "Catalan"), nothing for "Xyzzy"; a
   click finds the country under it (Russia, Brazil, the US, Japan, none in
-  the open Pacific); each country offers its own variant (Ireland UK, New
+  the open Pacific, and apart: Switzerland, Lithuania, Latvia, Estonia, the
+  Netherlands); each country offers its own variant (Ireland UK, New
   Zealand AU, Argentina MX, Angola PT) and the variant is stored beside the
   language, gone when the language changes elsewhere, absent for Auto; a
   point of the view maps back to the sphere at any

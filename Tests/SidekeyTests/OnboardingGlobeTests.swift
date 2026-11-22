@@ -12,7 +12,8 @@ final class OnboardingGlobeTests: XCTestCase {
     private func code(_ match: OnboardingGlobeMatch?) -> String? { match.map { mesh.countries[$0.country].code } }
 
     func testTheDataHasTheCountriesThePrototypeShowed() {
-        XCTAssertGreaterThanOrEqual(mesh.countries.count, 79)
+        XCTAssertGreaterThanOrEqual(mesh.countries.count, 170, "Natural Earth 1:110m, every country")
+        XCTAssertEqual(Set(mesh.countries.map(\.code)).count, mesh.countries.count, "each country once")
         for code in ["RU", "US", "GB", "BR", "PT", "ES", "MX", "JP", "DE", "FR", "CH", "AU", "IN", "CN"] {
             XCTAssertNotNil(mesh.index(of: code), code)
         }
@@ -51,6 +52,12 @@ final class OnboardingGlobeTests: XCTestCase {
         XCTAssertEqual(at(39, -100), "US")
         XCTAssertEqual(at(36, 138), "JP")
         XCTAssertNil(at(-40, -130), "the open Pacific is no country")
+        // Natural Earth's outlines: small and neighbouring countries apart.
+        XCTAssertEqual(at(46.8, 8.2), "CH")
+        XCTAssertEqual(at(55.3, 23.9), "LT")
+        XCTAssertEqual(at(56.9, 24.6), "LV")
+        XCTAssertEqual(at(58.7, 25.5), "EE")
+        XCTAssertEqual(at(52.1, 5.3), "NL")
     }
 
     /// A click lands where the globe drew it, at any turn of the globe.

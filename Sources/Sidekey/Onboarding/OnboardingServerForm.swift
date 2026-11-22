@@ -39,7 +39,7 @@ struct OnboardingServerDraft: Equatable {
     }
 }
 
-/// "Use your own server →" on a key step: the key field becomes three
+/// "Self-hosted" on a key step: the key field becomes three
 /// fields of the same family in the same place (Base URL, an optional key,
 /// one model: a transcription model on the speech step, an LLM on the
 /// language model step), over the same key and padlock.
@@ -47,7 +47,7 @@ struct OnboardingServerDraft: Equatable {
 /// padlock answers like it does for a key, and success moves straight on.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingServerFields: View {
-    static let pillHeight: CGFloat = 40
+    static let pillHeight: CGFloat = 36
 
     let kind: OnboardingKeyStageKind
     @ObservedObject var model: OnboardingJourneyModel
@@ -55,7 +55,7 @@ struct OnboardingServerFields: View {
     /// The key field's capsule, so it reshapes into the first field.
     let morph: Namespace.ID
     /// The two lower fields unfold out of the first one, and fold back
-    /// into it before "Back to keys" turns it into the key field again.
+    /// into it before a provider mark turns it into the key field again.
     @Binding var grown: Bool
 
     @State private var draft: OnboardingServerDraft
@@ -81,7 +81,7 @@ struct OnboardingServerFields: View {
     private var failure: String? { if case .failed = outcome { return outcome.failureText } else { return nil } }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 5) {
             pill(icon: "server.rack", first: true) {
                 TextField("", text: $draft.address,
                           prompt: Text("Base URL · http://localhost:11434/v1").foregroundColor(OnboardingTheme.faint))
@@ -103,7 +103,7 @@ struct OnboardingServerFields: View {
                     .accessibilityLabel("API key, optional")
             }
             .opacity(grown ? 1 : 0)
-            .offset(y: grown ? 0 : -(Self.pillHeight + 6))
+            .offset(y: grown ? 0 : -(Self.pillHeight + 5))
             pill(icon: "cube") {
                 TextField("", text: $draft.model,
                           prompt: Text(kind == .speech ? "Transcription model · e.g. whisper-large-v3-turbo"
@@ -117,13 +117,12 @@ struct OnboardingServerFields: View {
                 trailing
             }
             .opacity(grown ? 1 : 0)
-            .offset(y: grown ? 0 : -2 * (Self.pillHeight + 6))
+            .offset(y: grown ? 0 : -2 * (Self.pillHeight + 5))
             line
-                .font(OnboardingTheme.sans(12))
+                .font(OnboardingTheme.sans(11.5))
                 .multilineTextAlignment(.center)
                 .lineLimit(1)
-                .frame(height: 18, alignment: .top)
-                .padding(.top, 2)
+                .frame(height: 15, alignment: .top)
                 .opacity(grown ? 1 : 0)
         }
         .disabled(checking || accepted)

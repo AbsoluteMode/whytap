@@ -1120,41 +1120,15 @@ struct OnboardingSourceStage: View {
 
 /// One provider of a key step (speech or language model), with where to get
 /// a key and pay.
-/// Whose key a key step takes: a model provider, or Tavily for search.
-enum OnboardingKeyVendor: Hashable {
-    case provider(AIProviderKind)
-    case tavily
-
-    var displayName: String {
-        switch self {
-        case .provider(let kind): return kind.displayName
-        case .tavily: return "Tavily"
-        }
-    }
-
-    var provider: AIProviderKind? { if case .provider(let kind) = self { return kind } else { return nil } }
-}
-
 struct OnboardingKeyProvider: Equatable {
-    let kind: OnboardingKeyVendor
+    let kind: AIProviderKind
     let assetName: String
     let keysURL: URL
     let billingURL: URL
 
-    static let tavily = OnboardingKeyProvider(kind: .tavily, assetName: "tavily",
-                                              keysURL: URL(string: "https://app.tavily.com/home")!,
-                                              billingURL: URL(string: "https://app.tavily.com/billing")!)
-
-    static func of(_ vendor: OnboardingKeyVendor) -> OnboardingKeyProvider? {
-        switch vendor {
-        case .provider(let kind): return of(kind)
-        case .tavily: return tavily
-        }
-    }
-
     static func of(_ kind: AIProviderKind) -> OnboardingKeyProvider? {
         func provider(_ asset: String, _ keys: String, _ billing: String) -> OnboardingKeyProvider {
-            .init(kind: .provider(kind), assetName: asset, keysURL: URL(string: keys)!, billingURL: URL(string: billing)!)
+            .init(kind: kind, assetName: asset, keysURL: URL(string: keys)!, billingURL: URL(string: billing)!)
         }
         switch kind {
         case .soniox: return provider("soniox", "https://console.soniox.com", "https://console.soniox.com")
@@ -1177,9 +1151,9 @@ struct OnboardingKeyProvider: Equatable {
     /// The prefixes keys really start with, for every provider Whytap knows,
     /// longest first. Soniox keys have none; Deepgram's are 40 hexadecimal
     /// characters.
-    static let prefixes: [(prefix: String, kind: OnboardingKeyVendor)] = [
-        ("sk-svcacct-", .provider(.openAI)), ("sk-proj-", .provider(.openAI)), ("sk-ant-", .provider(.anthropic)),
-        ("sk-or-", .provider(.openRouter)), ("tvly-", .tavily), ("sk_", .provider(.elevenLabs)), ("sk-", .provider(.openAI)),
+    static let prefixes: [(prefix: String, kind: AIProviderKind)] = [
+        ("sk-svcacct-", .openAI), ("sk-proj-", .openAI), ("sk-ant-", .anthropic),
+        ("sk-or-", .openRouter), ("sk_", .elevenLabs), ("sk-", .openAI),
     ]
 
     /// A real key is at least this long; shorter input is never recognised.
@@ -1194,7 +1168,7 @@ struct OnboardingKeyProvider: Equatable {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard key.count >= minimumLength, OnboardingKeyMask.isKeyLike(key) else { return nil }
         if key.count == 40, key.allSatisfy(\.isHexDigit) {
-            return providers.first { $0.kind == .provider(.deepgram) }
+            return providers.first { $0.kind == .deepgram }
         }
         guard let match = prefixes.first(where: { key.hasPrefix($0.prefix) }) else { return nil }
         return providers.first { $0.kind == match.kind }
@@ -1226,37 +1200,32 @@ enum OnboardingKeyMask {
 /// Which key a key step asks for. Both steps share one layout, the wire key
 /// over its padlock, the mask and the five problems.
 enum OnboardingKeyStageKind: Equatable {
-    case speech, languageModel, search
+    case speech, languageModel
 
     var step: OnboardingStep {
         switch self {
         case .speech: return .speechKey
         case .languageModel: return .llmKey
-        case .search: return .search
         }
     }
     var title: String {
         switch self {
         case .speech: return "Paste your speech key."
         case .languageModel: return "Paste a language model key."
-        case .search: return "Paste a Tavily key."
         }
     }
     init?(step: OnboardingStep) {
         switch step {
         case .speechKey: self = .speech
         case .llmKey: self = .languageModel
-        case .search: self = .search
         default: return nil
         }
     }
 
-    /// Search has no server of its own: its link is absent.
-    var serverHelp: String? {
+    var serverHelp: String {
         switch self {
         case .speech: return "Add an OpenAI-compatible speech server (Ollama, LM Studio, vLLM)"
         case .languageModel: return "Add an OpenAI-compatible language model server (Ollama, LM Studio, vLLM)"
-        case .search: return nil
         }
     }
 }
@@ -1279,8 +1248,9 @@ struct OnboardingKeyStage: View {
     @State private var draft = ""
     /// A mark the person clicked: the one choice that names a provider
     /// without the key's own format.
-    @State private var picked: OnboardingKeyVendor?
-    @State private var hoveredLogo: OnboardingKeyVendor?
+    @State private var picked: AIProviderKind?
+    @State private var hoveredLogo: AIProviderKind?
+    @State private var hoveredServer = false
     /// The key field and the own-server fields share one capsule.
     @Namespace private var morph
     @State private var serverGrown = false
@@ -1290,26 +1260,20 @@ struct OnboardingKeyStage: View {
         switch kind {
         case .speech: return model.speechProviders.compactMap(OnboardingKeyProvider.of)
         case .languageModel: return OnboardingJourneyModel.llmProviders.compactMap(OnboardingKeyProvider.of)
-        case .search: return [.tavily]
         }
     }
     private var detected: OnboardingKeyProvider? { OnboardingKeyProvider.detect(draft, among: providers) }
     /// The provider the key's format or the person named; nil otherwise.
-    private var known: OnboardingKeyProvider? {
-        // The search step has one provider: with the field empty it is known.
-        detected ?? picked.flatMap(OnboardingKeyProvider.of) ?? (kind == .search && draft.isEmpty ? .tavily : nil)
-    }
+    private var known: OnboardingKeyProvider? { detected ?? picked.flatMap(OnboardingKeyProvider.of) }
     /// The step's provider in the model: whose key is saved or was answered.
-    private var current: OnboardingKeyVendor {
+    private var current: AIProviderKind {
         switch kind {
-        case .speech: return .provider(model.speechProvider)
-        case .languageModel: return .provider(model.llmProvider)
-        case .search: return .tavily
+        case .speech: return model.speechProvider
+        case .languageModel: return model.llmProvider
         }
     }
-    private func setCurrent(_ vendor: OnboardingKeyVendor) {
-        guard let provider = vendor.provider else { return }
-        if kind == .speech { model.speechProvider = provider } else if kind == .languageModel { model.llmProvider = provider }
+    private func setCurrent(_ provider: AIProviderKind) {
+        if kind == .speech { model.speechProvider = provider } else { model.llmProvider = provider }
     }
     /// The provider that answered (a saved or accepted key with the field
     /// empty, or a refusal); never for a key that named nobody.
@@ -1326,10 +1290,7 @@ struct OnboardingKeyStage: View {
     private var problem: OnboardingKeyProblem? {
         if case .failed = outcome { return model.keyProblems[step] ?? .other(outcome.failureText ?? "") } else { return nil }
     }
-    private var saved: Bool {
-        if case .provider(let provider) = current { return model.keySaved(provider) }
-        return model.tavily.configured
-    }
+    private var saved: Bool { model.keySaved(current) }
 
     private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
@@ -1337,14 +1298,14 @@ struct OnboardingKeyStage: View {
         if let problem {
             switch problem {
             case .format, .unrecognized: return .format
-            case .unreachable, .busy: return .network
+            case .unreachable: return .network
             default: return .refused
             }
         }
         return draft.isEmpty ? .empty : .pasted
     }
 
-    /// "Use your own server →" turned the key field into the server's fields.
+    /// "Self-hosted" turned the key field into the server's fields.
     private var server: Bool { model.showsServerForm(kind) }
 
     var body: some View {
@@ -1359,7 +1320,7 @@ struct OnboardingKeyStage: View {
             .padding(.top, 6)
             .accessibilityAddTraits(.isHeader)
             keyBand
-                .frame(height: 100)
+                .frame(height: server ? 86 : 100)
             if server {
                 OnboardingServerFields(kind: kind, model: model, scene: scene, morph: morph, grown: $serverGrown)
                     .padding(.horizontal, Self.fieldInset)
@@ -1369,18 +1330,13 @@ struct OnboardingKeyStage: View {
                             serverGrown = true
                         }
                     }
-                Spacer(minLength: 0)
-                Button(action: backToKeys) {
-                    Text("‹ Back to keys")
-                        .font(OnboardingTheme.sans(12.5))
-                        .foregroundColor(OnboardingTheme.muted)
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-                .disabled(checking || outcome.isDone)
-                .opacity(outcome.isDone ? 0 : 1)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+                // Escape folds the fields back into the key field.
+                Button("", action: backToKeys)
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(checking || outcome.isDone)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityLabel("Back to keys")
             } else {
                 field
                     .padding(.horizontal, Self.fieldInset)
@@ -1389,30 +1345,13 @@ struct OnboardingKeyStage: View {
                     .frame(height: 44, alignment: .top)
                     .padding(.horizontal, Self.fieldInset)
                     .padding(.top, 9)
-                Spacer(minLength: 12)
-                logos
-                    .transition(.opacity)
             }
-            if server {
-                EmptyView()
-            } else if let help = kind.serverHelp {
-                Button { model.useOwnServer(kind) } label: {
-                    Text("Use your own server →")
-                        .font(OnboardingTheme.sans(12.5))
-                        .foregroundColor(OnboardingTheme.muted)
-                }
-                .buttonStyle(.plain)
-                .help(help)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-            } else {
-                // Search: one quiet line in the link's place, so the axis holds.
-                Text("Optional · the Agent searches the web with it")
-                    .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.faint)
-                    .padding(.top, 12)
-                    .padding(.bottom, 4)
-            }
+            // The same row in both, right under the fields: a provider mark
+            // returns to its key, Self-hosted turns the key field into the
+            // server's fields.
+            logos
+                .padding(.top, server ? 2 : 10)
+            Spacer(minLength: 4)
         }
         .frame(maxWidth: .infinity)
         .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion, allowFade: true),
@@ -1617,7 +1556,7 @@ struct OnboardingKeyStage: View {
 
     /// " · claude-sonnet-5-5": the model the language model step will use.
     private func modelSuffix(_ name: String) -> String {
-        guard kind == .languageModel, let provider = detected?.kind.provider,
+        guard kind == .languageModel, let provider = detected?.kind,
               let model = model.llmModel ?? model.preselectedModel(provider) else { return "" }
         return " · \(model)"
     }
@@ -1638,9 +1577,10 @@ struct OnboardingKeyStage: View {
     private var logos: some View {
         HStack(spacing: 10) {
             ForEach(providers, id: \.kind) { provider in
-                let open = shown?.kind == provider.kind || hoveredLogo == provider.kind
+                let open = (!server && shown?.kind == provider.kind) || hoveredLogo == provider.kind
                 let dimmed = detected != nil && !open
                 Button {
+                    if server { backToKeys() }
                     picked = picked == provider.kind && draft.isEmpty ? nil : provider.kind
                     setCurrent(provider.kind)
                     focused = true
@@ -1648,7 +1588,7 @@ struct OnboardingKeyStage: View {
                     HStack(spacing: 7) {
                         ProviderBrandIcon(assetName: provider.assetName, size: 19, color: OnboardingTheme.ink)
                             .frame(width: 20, height: 20)
-                            .opacity(open ? 1 : dimmed ? 0.24 : provider.kind == .provider(.openAI) ? 0.58 : 0.46)
+                            .opacity(open ? 1 : dimmed ? 0.24 : provider.kind == .openAI ? 0.58 : 0.46)
                         if open {
                             Text(provider.kind.displayName)
                                 .font(OnboardingTheme.sans(13, weight: .medium))
@@ -1670,14 +1610,55 @@ struct OnboardingKeyStage: View {
                     if inside { hoveredLogo = provider.kind } else if hoveredLogo == provider.kind { hoveredLogo = nil }
                 }
                 .accessibilityLabel(provider.kind.displayName)
-                .accessibilityAddTraits(shown?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAddTraits(!server && shown?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
             }
+            serverMark
         }
         .frame(height: 36)
         .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
                    value: hoveredLogo)
         .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
                    value: shown?.kind)
+        .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
+                   value: hoveredServer)
+    }
+
+    /// "Self-hosted": an OpenAI-compatible server, a mark in the same row,
+    /// monochrome and of the marks' optical height; named on hover and
+    /// while its fields are shown.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    private var serverMark: some View {
+        let open = server || hoveredServer
+        return Button {
+            if !server { model.useOwnServer(kind) }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .frame(width: 20, height: 20)
+                    .opacity(open ? 1 : detected != nil ? 0.24 : 0.46)
+                if open {
+                    Text("Self-hosted")
+                        .font(OnboardingTheme.sans(13, weight: .medium))
+                        .foregroundColor(OnboardingTheme.ink)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+            }
+            .padding(.leading, open ? 11 : 10)
+            .padding(.trailing, open ? 13 : 10)
+            .frame(height: 34)
+            .background(Capsule().fill(Color.white.opacity(open ? 0.075 : 0)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(open ? 0.10 : 0), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(checking)
+        .onHover { hoveredServer = $0 }
+        .help(kind.serverHelp)
+        .accessibilityLabel("Self-hosted server")
+        .accessibilityAddTraits(server ? [.isButton, .isSelected] : .isButton)
     }
 
     private static func monoWidth(_ text: String) -> CGFloat {
@@ -1718,13 +1699,13 @@ struct OnboardingKeyStage: View {
         use(key, provider: provider)
     }
 
-    private func use(_ key: String, provider: OnboardingKeyVendor) {
+    private func use(_ key: String, provider: AIProviderKind) {
         let step = self.step
         Task {
-            switch provider {
-            case .provider(let kind) where self.kind == .speech: await model.useSpeechKey(key, provider: kind)
-            case .provider(let kind): await model.useLLMKey(key, provider: kind)
-            case .tavily: await model.useSearchKey(key)
+            if kind == .speech {
+                await model.useSpeechKey(key, provider: provider)
+            } else {
+                await model.useLLMKey(key, provider: provider)
             }
             if model.outcome(step).isDone { draft = "" }
         }

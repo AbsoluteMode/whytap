@@ -1181,26 +1181,23 @@ first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/
 OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
 Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
 fields), a progress rail with one segment per step (a passed step reached by
-Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 13", one step at
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 12", one step at
 a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
 (On this Mac or API keys, two wire figures), Speech key, Language model key
-(optional), Search for the Agent (Tavily, only with a language model that
-cannot search the web itself: not after Anthropic, OpenAI or OpenRouter,
-OnboardingJourney.searchesTheWeb),
-Language, Keyboard control, Microphone, Input Monitoring (only when the Drop
+(optional), Language, Keyboard control, Microphone, Input Monitoring (only when the Drop
 shortcut needs it), Screen Recording (optional), Try Drop, Shortcuts, Toolbox,
-Help, Thank you; a step whose result already holds is left out. A step whose
+Help, Thank you; a step whose result already holds is left out. Web search is
+not a step: it is set in Settings -> API & Models. A step whose
 action succeeds moves on by itself after its dwell (OnboardingDwellController;
 1.15 s on the key steps so the padlock opens first) with no chip or Continue;
 Return goes on at once, Back keeps what was done and a step reached by Back
-offers a plain Next. Step 1 and the three key steps share one wire scene
+offers a plain Next. Step 1 and the two key steps share one wire scene
 (OnboardingWireScene, drawn per display frame): the chosen key flies to its
 padlock, turns and opens it when a key is accepted and catches when refused.
 The key field (OnboardingKeyStage) shows every input as dots; a provider is
 named only by its key's own format (prefix or Deepgram's 40 hex characters)
 or a clicked mark, otherwise Return is a format problem; five problems are
-named (format, refused, no credit or access, no answer with Retry; Tavily's
-429 is "busy" with Retry). An accepted language model key starts on the
+named (format, refused, no credit or access, no answer with Retry). An accepted language model key starts on the
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
 generation, highest known output price). When the provider has several
@@ -1210,12 +1207,13 @@ prices, the recommended one first with a small tag; after a pick the button
 names the model. The step waits for a pick or
 Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
 through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
-"Use your own server →" turns the step's key field into Base URL, an optional
-key and one model on the same step (OnboardingServerFields): a transcription
+The provider row ends with a "Self-hosted" mark; it turns the step's key
+field into Base URL, an optional key and one model on the same step
+(OnboardingServerFields): a transcription
 model on the speech step, an LLM on the language model step, and a server
 added on one comes back filled in on the other; Return adds the server and its checked model like
 Settings does (addServer, runServerModelCheck, addServerModel), sets the
-shared row and moves on; "‹ Back to keys" turns the fields back.
+shared row and moves on; a provider mark or Escape turns the fields back.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap. System Audio Recording, Automation and Calendar are asked at
 first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)

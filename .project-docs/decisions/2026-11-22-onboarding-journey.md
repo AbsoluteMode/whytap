@@ -2,7 +2,7 @@
 id: onboarding-journey-2026-11-22
 type: decision
 title: The first-launch onboarding becomes a small window of single steps that move on by themselves
-summary: The five-page onboarding is replaced by one small window with a progress bar and up to fourteen single-purpose steps (speech source, speech key, optional language model, optional search, language, one screen per permission, Try Drop, shortcuts, Toolbox, help, thanks); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
+summary: The five-page onboarding is replaced by one small window with a progress bar and up to thirteen single-purpose steps (speech source, speech key, optional language model, language, one screen per permission, Try Drop, shortcuts, Toolbox, help, thanks); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
 status: confirmed
 tags: [onboarding, first-launch, permissions, models, routing]
 canonical_for: [onboarding-journey]
@@ -61,7 +61,7 @@ window, Back and a progress bar.
 ## Decision
 
 - **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
-  progress rail and "NN / 13" on top; the act, a serif title and one line
+  progress rail and "NN / 12" on top; the act, a serif title and one line
   under it; the step's stage; a footer with Skip or Set up later on the left
   and Next on the right only when nothing moves on by itself. Back also answers ← and ⌘[ outside text
   fields. The visual and motion come from the design pass (dark raised
@@ -80,14 +80,15 @@ window, Back and a progress bar.
   2. Speech key: Soniox, Deepgram or ElevenLabs.
   3. Language model key (optional): Anthropic, OpenAI or OpenRouter, with a
      preselected model.
-  4. Search for the Agent (optional; only when a language model is set).
-  5. Language.
-  6. Keyboard control (Accessibility).
-  7. Microphone.
-  8. Input Monitoring, only when the Drop shortcut reports it needs it.
-  9. Screen Recording (optional).
-  10. Try Drop (only when speech is on the way).
-  11. Shortcuts. 12. Toolbox. 13. Help on whytap.ai. 14. Thank you.
+  4. Language.
+  5. Keyboard control (Accessibility).
+  6. Microphone.
+  7. Input Monitoring, only when the Drop shortcut reports it needs it.
+  8. Screen Recording (optional).
+  9. Try Drop (only when speech is on the way).
+  10. Shortcuts. 11. Toolbox. 12. Help on whytap.ai. 13. Thank you.
+  Web search for the Agent is not a step (see "Web search is not an
+  onboarding step").
 - **Moving on by itself, with no chip.** When a shown step's action
   succeeds (a key accepted and applied, a permission turning granted, a
   dictation inserted, a language picked, a source chosen) its segment fills
@@ -119,10 +120,9 @@ window, Back and a progress bar.
   so the page ignores the safe area and the header keeps its place with a
   24 pt top inset.
 - **Done before means not shown.** Steps whose result already holds when the
-  window opens (speech runs, an LLM is set, a Tavily key is saved, the
+  window opens (speech runs, an LLM is set, the
   language is chosen, a permission is granted) are left out; choices remove
-  the steps they make unnecessary (On this Mac removes the speech key step;
-  no language model removes search). A Drop press that finds a permission
+  the steps they make unnecessary (On this Mac removes the speech key step). A Drop press that finds a permission
   missing brings the permission steps back.
 - **Speech and the LLM go through the shared rows.** A speech key, or On this
   Mac, is applied with `APIAndModelsViewModel.selectShared(kind: .speech)`;
@@ -152,16 +152,14 @@ window, Back and a progress bar.
   Agent cannot use it yet: it would have to round-trip server-tool blocks,
   handle `pause_turn` and mixed search/tool turns, and carry citations into
   `finish_answer.sources`. That is a separate Agent change (session 78).
-  Superseded on 2026-11-22 (below, "Search is asked only when the model
-  cannot search"): the onboarding already leaves step 4 out for those
-  providers.
+  Superseded on 2026-11-22 (below, "Web search is not an onboarding
+  step").
 
 - **Texts only say what holds for every provider** (corrections to the
   design pass): the API card does not promise free credit (Soniox has no
   free offer; Anthropic and OpenAI credits come with paid plans), so each
   provider tab shows its own offer from API hints or nothing; no latency
-  claims for the local model, only "Free. Works offline." and its size; the
-  search step offers only Tavily; shortcuts, the Agent's state and the
+  claims for the local model, only "Free. Works offline." and its size; shortcuts, the Agent's state and the
   Toolbox tiles come from the person's own HotkeyConfiguration, Agent switch
   and saved layout; the help example is a real answer (Settings → Hotkeys →
   Tools); the receipt reads the saved routes; nothing simulates dictation
@@ -178,7 +176,7 @@ window, Back and a progress bar.
   target `OnboardingPreview`, never packaged) opens the whole onboarding from
   step 1 in the same window and model, outside Whytap: its own defaults
   suite emptied on start and quit, keys in memory, offline key checks,
-  catalogs and Tavily check (a key containing "bad" is refused), Allow that
+  catalogs and server model checks (a key containing "bad" is refused), Allow that
   only pretends macOS granted it, a timer for the speech model download and
   a Simulate Drop button. It starts no hotkeys, event taps, stores or island
   and never touches `com.rootwise.sidekey`, the Keychain or the network.
@@ -191,7 +189,7 @@ window, Back and a progress bar.
   without its caption. Step 2 is "Paste your speech key.": a dark pill
   field with the whole key masked, the speech providers only (with
   their logos from `UsefulLinkIcons`), the provider's real offer, and a
-  quiet "Use your own server →" (see below). Only a key's own format picks
+  "Self-hosted" mark for your own server (see below). Only a key's own format picks
   the provider (see "Only a key's own format names its provider"). A refusal names one of five causes
   without blame: the key's shape (checked before any request), a refused
   key, an empty balance, a key without speech access, or no answer (with
@@ -260,7 +258,7 @@ window, Back and a progress bar.
   it (empty at rest), four monochrome provider marks of one optical height
   with no preselected one (a mark shows its name on hover, when picked, or
   when the key is recognised: ElevenLabs and OpenAI by prefix, Deepgram by
-  40 hexadecimal characters), then one quiet "Use your own server →". A
+  40 hexadecimal characters) and, last in the row, "Self-hosted". A
   picked mark offers "Need a … key? Get one" with the provider's real offer.
   "Set up later" stays in the footer like on every step, aligned with the
   field's edge. The standalone preview already shows OpenAI as the fourth
@@ -313,21 +311,21 @@ window, Back and a progress bar.
   change; a provider without that family falls back to the newest flagship.
   The list tags it "Recommended"; any other pick replaces it. The speech
   step recommends the registry's Drop model.
-- **Search is asked only when the model cannot search.** The owner,
-  2026-11-22: when search works without Tavily, Tavily is not asked for.
-  Anthropic, OpenAI and OpenRouter search the web themselves
-  (`OnboardingJourney.searchesTheWeb`), so with one of them as the language
-  model (picked on step 3 or set before the window opened) the search step
-  is left out; a language model on the person's own server keeps it. The
-  step is the key steps' screen: "Paste a Tavily key.", the wire key and
-  padlock, dots from the first character, a monochrome Tavily mark, no
-  chips, the same dwell and flow, "Optional · the Agent searches the web
-  with it" instead of the server link, and Skip. A key without Tavily's
-  `tvly-` prefix is a format problem; Tavily's answers name the other four:
-  401 or 403 refused, 432 or 433 (plan and pay-as-you-go limits) no credit,
-  429 busy with Retry, no answer unreachable with Retry. The Agent's use of
-  the providers' built-in search is session 78's change, not this one.
-- **"Use your own server →" changes the step in place.** The owner,
+- **Web search is not an onboarding step.** First (REV 32) the step was
+  left out when the language model searched the web itself and otherwise
+  asked for a Tavily key on the key steps' screen. On 2026-11-22 the owner
+  asked whether to drop Tavily together with the step; the decision was to
+  drop only the step, for every provider and your own server. Search is set
+  in Settings -> API & Models -> Models (the Search row, a separate change,
+  session 78); Tavily stays in API keys for people on their own servers.
+  The progress rail is one segment shorter ("NN / 12").
+- **Your own server is a mark in the row and changes the step in place.**
+  The owner asked on 2026-11-22 for the quiet "Use your own server →" link
+  to become a card like the providers, captioned "Self-hosted": the row ends
+  with a monochrome server mark of the marks' optical height, named on
+  hover and while its fields are shown (on the speech step after Soniox,
+  Deepgram, ElevenLabs and OpenAI; on the language model step after
+  Anthropic, OpenAI and OpenRouter). The owner,
   2026-11-22: a separate screen (first a form over the window, in the app
   Settings) and a return to the key step before the move looked cobbled
   together. Now, in the app and the preview alike, the key field's capsule
@@ -339,8 +337,8 @@ window, Back and a progress bar.
   as `qwen3:8b` on the language model step. A server added on one of them
   comes back filled in (address and key) on the other and is added once,
   with both models; the title reads "Your own server.", the wire key and
-  padlock stay. "‹ Back to keys" (or Escape, or Back) folds them into the
-  key field again. Return on the model adds the server the way Settings
+  padlock stay, the row stays under the fields with Self-hosted selected.
+  A provider mark (or Escape, or Back) folds them into the key field again. Return on the model adds the server the way Settings
   does (`addServer`: the address answers, the key if any is accepted), runs
   the model's small check (`runServerModelCheck`), adds it and sets the
   shared Speech or LLM row; the padlock answers like for a key and success
@@ -380,8 +378,8 @@ window, Back and a progress bar.
   offline key/model checks: a speech key sets all five speech features
   (Meetings on the recorded model) and moves on after the beat; a refused key
   stays with the reason and sets nothing; a saved key is reused; an LLM key
-  sets all four text features (and, from Anthropic, leaves search out); skipping the LLM
-  skips search; OpenAI preselects its newest usable catalog model; On this
+  sets all four text features and goes on to the language; skipping the LLM
+  goes on to the language; OpenAI preselects its newest usable catalog model; On this
   Mac with and without the model here; permissions granted while shown move
   on, granted elsewhere do not; Input Monitoring only when the shortcut needs
   it; informational steps end with Done; an earlier speech key whose check
@@ -405,12 +403,9 @@ window, Back and a progress bar.
   recommendation is the newest Sonnet or Sol. `OnboardingJourneyModelTests`
   add a server model with its check (a refused model keeps the fields, the
   retry reuses the server, the shared row takes it, the move goes straight
-  to search), leave the search step out after an Anthropic key, keep it
-  after a server language model, and name Tavily's refused, no credit, busy and unreachable
-  answers and a foreign key's format; Tavily keys are recognised only on the
-  search step.
+  to the language), and there is no web search step.
 - `OnboardingPreviewTests`: the preview session walks every step with its
-  fakes (refused and accepted keys, the stubbed Tavily check, pretend
+  fakes (refused and accepted keys, server model checks, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its
   own suite; On this Mac finishes its timed download.
 - OpenAI is not a speech tab until the registry has its speech model; an

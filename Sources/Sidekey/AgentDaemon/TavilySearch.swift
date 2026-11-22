@@ -37,9 +37,6 @@ final class TavilySettings: ObservableObject {
     @Published private(set) var saving = false
     @Published private(set) var message: String?
     @Published private(set) var messageIsError = false
-    /// Why the last check failed, for callers that name the problem (the
-    /// onboarding's key step); nil after a success or before any check.
-    private(set) var lastFailure: Error?
     private let keys: ProviderKeyStore
     private let search: TavilySearch
 
@@ -53,7 +50,7 @@ final class TavilySettings: ObservableObject {
         guard !saving else { return }
         let key = draftKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { showMessage("Enter a Tavily API key.", error: true); return }
-        saving = true; clearMessage(); lastFailure = nil
+        saving = true; clearMessage()
         defer { saving = false }
         do {
             try await search.validate(key: key)
@@ -63,7 +60,6 @@ final class TavilySettings: ObservableObject {
         } catch is CancellationError { return }
         catch {
             guard !Task.isCancelled else { return }
-            lastFailure = error
             showMessage(configured
                 ? "Couldn’t replace the Tavily key. Check the key and connection; your saved key is unchanged."
                 : "Couldn’t connect Tavily. Check the key and connection, then retry.", error: true)

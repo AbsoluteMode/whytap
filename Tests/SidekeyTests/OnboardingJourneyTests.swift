@@ -35,18 +35,12 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertEqual(steps(intel).first, .speechKey)
     }
 
-    func testSearchAppearsOnlyWithALanguageModel() {
-        XCTAssertFalse(steps().contains(.search))
-        let withLLM = steps(.cleanMac, OnboardingProgress(source: .yourKey, hasLanguageModel: true))
-        XCTAssertEqual(withLLM[withLLM.firstIndex(of: .llmKey)! + 1], .search)
-        var ready = OnboardingStart.cleanMac
-        ready.llmReady = true
-        XCTAssertTrue(steps(ready).contains(.search), "an LLM set before the onboarding offers search too")
-        ready.searchReady = true
-        XCTAssertFalse(steps(ready).contains(.search))
-        let searching = steps(.cleanMac, OnboardingProgress(source: .yourKey, hasLanguageModel: true,
-                                                            languageModelSearches: true))
-        XCTAssertFalse(searching.contains(.search), "a model that searches itself needs no Tavily key")
+    /// The owner, 2026-11-22: web search is set in Settings -> API & Models,
+    /// not in the onboarding, whatever the language model.
+    func testThereIsNoWebSearchStep() {
+        XCTAssertEqual(OnboardingStep.allCases.count, 13)
+        let withLLM = steps(.cleanMac, OnboardingProgress(source: .yourKey))
+        XCTAssertEqual(withLLM[withLLM.firstIndex(of: .llmKey)! + 1], .language)
     }
 
     func testInputMonitoringOnlyWhenTheShortcutAsksForIt() {
@@ -56,7 +50,7 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     func testEverythingDoneBeforeShowsOnlyTheTour() {
-        let done = OnboardingStart(speechReady: true, llmReady: true, searchReady: true, languageChosen: true,
+        let done = OnboardingStart(speechReady: true, llmReady: true, languageChosen: true,
                                    keyboardGranted: true, microphoneGranted: true, screenRecordingGranted: true)
         XCTAssertEqual(steps(done), [.tryDrop, .hotkeys, .toolbox, .help, .thanks])
     }
@@ -69,7 +63,7 @@ final class OnboardingJourneyTests: XCTestCase {
     // MARK: - Next and Back
 
     func testNextAndBackWalkTheSameList() {
-        let way = steps(.cleanMac, OnboardingProgress(source: .yourKey, hasLanguageModel: true, speechExpected: true))
+        let way = steps(.cleanMac, OnboardingProgress(source: .yourKey, speechExpected: true))
         var forward: [OnboardingStep] = [way[0]]
         while let next = OnboardingJourney.next(after: forward.last!, in: way) { forward.append(next) }
         XCTAssertEqual(forward, way)
@@ -106,11 +100,10 @@ final class OnboardingJourneyTests: XCTestCase {
         let segments = OnboardingJourney.segments(start: start, progress: progress, current: .language,
                                                   done: [.source])
         func state(_ step: OnboardingStep) -> OnboardingSegmentState? { segments.first { $0.step == step }?.state }
-        XCTAssertEqual(segments.count, 13, "Input Monitoring is not a segment unless it is needed")
+        XCTAssertEqual(segments.count, 12, "Input Monitoring is not a segment unless it is needed")
         XCTAssertEqual(state(.source), .completed)
         XCTAssertEqual(state(.speechKey), .bypassed, "On this Mac made the key unnecessary")
         XCTAssertEqual(state(.llmKey), .bypassed, "skipped, never a false done")
-        XCTAssertEqual(state(.search), .bypassed, "no language model, no search")
         XCTAssertEqual(state(.language), .current)
         XCTAssertEqual(state(.keyboard), .completed, "granted before the window opened")
         XCTAssertEqual(state(.microphone), .upcoming)
@@ -182,7 +175,7 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     func testOptionalAndInformationalSteps() {
-        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .search, .screenRecording, .tryDrop])
+        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .screenRecording, .tryDrop])
         XCTAssertEqual(OnboardingStep.allCases.filter(\.isInformational), [.hotkeys, .toolbox, .help, .thanks])
     }
 

@@ -97,8 +97,11 @@ other tools' errors, so the rule is now structural:
   unsupported/invalid value, unsupported parameter, tool not supported) is
   about something else;
 - a location decides: `param` or a leading `messages[0]:` / `tools.3.type:`
-  path must be the search tool's own index in `tools`; a message, input or
-  another tool's index never qualifies;
+  path must be the search tool itself or its `type` at its own index in
+  `tools`, and the error must still refuse it (`unsupported_value`,
+  `tool_not_supported` or a refusal word); one of its options (`max_uses`,
+  `search_context_size`: builder #436), a message, input or another tool's
+  index never qualifies;
 - otherwise quoted text is removed (a quoted tool identifier such as
   `'web_search'` stays), size or context wording disqualifies, and the tool's
   identifier must sit in one clause with the refusal ("Tool 'web_search' is not
@@ -120,15 +123,15 @@ request** that names the web search tool retries once without it. OpenRouter's t
 works for every model: an `anthropic/` model keeps the default engine
 (Anthropic's own search, which honors `max_uses`), every other model gets
 `engine: "exa"`, which OpenRouter runs and caps before a search executes;
-other native engines ignore `max_uses`. A workspace whose locked Server Tools
-policy leaves Exa out refuses that request with 403 before anything runs
-(builder #433): the request is retried once, same provider and data, with the
-engine left to the workspace, and the rest of the turn keeps it. On that
-engine `max_uses` is still sent (Anthropic native and OpenRouter-run engines
-honor it) and the tool is dropped once the turn's two searches are spent;
-a non-Anthropic native engine there can run more than the remainder inside one
-request, which only the workspace's policy controls. A second 403 is the key
-or account, shown as before. Searches count from
+other native engines ignore `max_uses`, and OpenRouter documents no other cap
+that bounds them before they run (`max_tool_calls` is not stated to cover
+native search). A workspace whose locked Server Tools policy leaves Exa out
+refuses that first request with 403 before anything runs (builder #433). The
+turn then retries once without the search tool, like a refusal: Tavily when
+its key exists (bounded by Whytap), else no search and a text answer. An
+unbounded search tool is never sent (builder #436). Tavily is reached only if
+the retry succeeds, which shows the 403 was the search tool; a key or account
+403 fails again on the retry and is shown as before. Searches count from
 `usage.server_tool_use_details.web_search_requests`, else
 `tool_calls_executed` (search is the only server tool sent), else citations.
 
@@ -187,8 +190,10 @@ unavailable, never 0.
   response shapes (quotes, neighboring terms, another tool's index, a message
   location, typed errors, real refusals), and on the wire no Tavily request
   for any of them; an OpenRouter workspace that locks out Exa answers after
-  one 403 and a retry with its own engine, while an allowed workspace keeps
-  Exa in one request and a repeated 403 is shown as a key error.
+  one 403 and a retry without the search tool (Tavily only with its key),
+  while an allowed workspace keeps Exa in one request and a repeated 403 is
+  shown as a key error; a 400 on one of the search tool's options keeps the
+  route on all three providers.
 - Not verified live: no paid request was made. In particular OpenAI's replay
   of `web_search_call` items with `store: false`, OpenRouter's server tool on
   Chat Completions with `tool_choice: "required"`, and the exact shape of
@@ -213,8 +218,11 @@ unavailable, never 0.
   ignore `max_uses`, so one request could exceed the turn's two searches.
 - Exa pinned with no way out (#431 version): a locked workspace without Exa
   refused every Agent request with 403, shown as a bad key (builder #433).
-- Dropping search on an OpenRouter 403: the workspace allows its own engine;
-  removing only the engine keeps search and the same data path.
+- Retrying an OpenRouter 403 with the workspace's own engine (#433 version):
+  a non-Anthropic native engine ignores `max_uses`, so one request could run
+  more than the turn's two searches (builder #436).
+- Sending OpenRouter's request-level `max_tool_calls` as the cap: its support
+  on Chat Completions and its effect on native engines are not documented.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

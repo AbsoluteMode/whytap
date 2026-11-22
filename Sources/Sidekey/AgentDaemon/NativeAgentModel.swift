@@ -40,9 +40,6 @@ struct NativeAgentModel {
     /// Anthropic: a search was requested in the last response and its result
     /// arrives only in the next request (search beside a function call).
     private(set) var pendingSearch = false
-    /// OpenRouter refused the pinned Exa engine (a workspace's locked Server
-    /// Tools policy): the rest of the turn uses the workspace's engine.
-    private var routerEngineRefused = false
     private var citedSources: [NativeAgentWebSearch.Source] = []
     private var resultSources: [NativeAgentWebSearch.Source] = []
     /// Pages the provider's search cited or returned this turn, citations first.
@@ -86,8 +83,7 @@ struct NativeAgentModel {
         let remaining = NativeAgentWebSearch.maxSearches
             - (options.openCodeProvider == .anthropic ? providerTurnBase : searchesUsed)
         let search = builtInSearch && !tools.isEmpty && remaining > 0
-        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining, model: model,
-                                                           pinEngine: !routerEngineRefused)
+        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining, model: model)
         switch options.openCodeProvider {
         case .openAI:
             var body: [String: Any] = [
@@ -154,21 +150,7 @@ struct NativeAgentModel {
         do {
             let response: [String: Any]
             do {
-                let result: NativeAgentHTTP.Response
-                let unpinned = options.openCodeProvider == .openRouter && search && !routerEngineRefused
-                    ? NativeAgentWebSearch.withoutEngine(request.httpBody) : nil
-                do {
-                    result = try await http.response(request)
-                } catch NativeAgentError.service(_, 403, _) where unpinned != nil {
-                    // A workspace whose locked Server Tools policy excludes Exa
-                    // refuses the whole request with 403 before anything runs.
-                    // Retry once with the workspace's own engine; a second 403
-                    // is the key or account. Same provider, same data.
-                    // WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-                    routerEngineRefused = true
-                    request.httpBody = unpinned
-                    result = try await http.response(request)
-                }
+                let result = try await http.response(request)
                 response = result.object; responseStatus = result.status; responseBytes = result.bytes
             } catch {
                 usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),

@@ -37,8 +37,9 @@ enum NativeAgentDiagnostics {
         /// - the error is untyped: an OpenRouter category or an OpenAI `code`
         ///   outside the refusal codes is about something else;
         /// - a location (`param`, or a leading `messages[0]:`-style path)
-        ///   must be the search tool's own index; any other location
-        ///   (a message, a function schema) never qualifies;
+        ///   must be the search tool itself or its `type`, never one of its
+        ///   options (`max_uses`, `search_context_size`) or any other place,
+        ///   and the error must still refuse it (a refusal code or word);
         /// - otherwise, with quoted text removed (a quoted tool identifier is
         ///   kept) and no size or context wording, the refusal must name the
         ///   tool's identifier in one clause ("Tool 'web_search' is not
@@ -52,13 +53,19 @@ enum NativeAgentDiagnostics {
                !["unsupported_value", "invalid_value", "unsupported_parameter", "tool_not_supported"].contains(code) {
                 return false
             }
-            if let path = (error?["param"] as? String)?.lowercased() ?? leadingPath(message) {
-                if let index = toolsIndex(path) { return index == searchToolIndex }
-                if path != "tools" { return false }
-            }
             let plain = unquoted(message)
             let size = ["context", "too long", "too large", "maximum", "exceeds", "exceeded", "token", "length"]
             guard !size.contains(where: plain.contains) else { return false }
+            if let path = (error?["param"] as? String)?.lowercased() ?? leadingPath(message) {
+                if let (index, field) = toolsLocation(path) {
+                    guard index == searchToolIndex, ["", ".type", "[type]"].contains(field) else { return false }
+                    let code = error?["code"] as? String
+                    return code == "unsupported_value" || code == "tool_not_supported"
+                        || plain.range(of: #"\b(?:not supported|unsupported|disabled|not enabled|not available|unavailable|not allowed|not permitted|turned off|unknown|does not support|doesn't support)\b"#,
+                                       options: .regularExpression) != nil
+                }
+                if path != "tools" { return false }
+            }
             return refusalPatterns.contains { plain.range(of: $0, options: .regularExpression) != nil }
         }
 
@@ -78,10 +85,11 @@ enum NativeAgentDiagnostics {
             return message[range].trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ":")))
         }
 
-        /// `tools[3]`, `tools.3.type` → 3.
-        static func toolsIndex(_ path: String) -> Int? {
-            guard let range = path.range(of: #"^tools(?:\[\d+\]|\.\d+)"#, options: .regularExpression) else { return nil }
-            return Int(path[range].filter(\.isNumber))
+        /// `tools[3]` → (3, ""), `tools.3.max_uses` → (3, ".max_uses").
+        static func toolsLocation(_ path: String) -> (index: Int, field: String)? {
+            guard let range = path.range(of: #"^tools(?:\[\d+\]|\.\d+)"#, options: .regularExpression),
+                  let index = Int(path[range].filter(\.isNumber)) else { return nil }
+            return (index, String(path[range.upperBound...]))
         }
 
         /// Removes quoted text (often the user's own words) and keeps a quoted

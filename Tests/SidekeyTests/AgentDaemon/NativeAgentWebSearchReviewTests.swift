@@ -248,7 +248,14 @@ extension NativeAgentWebSearchTests {
         // Refusals of the tool itself, in each response shape.
         XCTAssertTrue(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model.","type":"invalid_request_error"}}"#))
         XCTAssertTrue(refuses(#"{"error":{"message":"Hosted tool web_search is unavailable for this model.","param":"tools[3].type","code":"unsupported_value"}}"#))
-        XCTAssertTrue(refuses(#"{"error":{"message":"Invalid value.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
+        XCTAssertTrue(refuses(#"{"error":{"message":"This model does not support this tool.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
+        // The right entry, but no refusal: generic validation or one of its options.
+        XCTAssertFalse(refuses(#"{"error":{"message":"Invalid value.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Invalid search context size.","param":"tools[3].search_context_size","code":"invalid_value"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Unsupported value.","param":"tools[3].search_context_size","code":"unsupported_value"}}"#))
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.3.max_uses: Value exceeds maximum."}}"#))
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.3.max_uses: Input should be greater than 0"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"tools.3.parameters.max_uses: invalid"}}"#))
         XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"Web search is disabled for this organization."}}"#))
         XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"'claude-x' does not support tool types: web_search_20250305."}}"#))
         XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.3.type: unsupported tool type"}}"#))
@@ -407,35 +414,99 @@ extension NativeAgentWebSearchTests {
 
     // MARK: - OpenRouter workspace engine policy (builder #433)
 
-    func testOpenRouterLockedWorkspaceWithoutExaStillAnswers() async throws {
+    func testOpenRouterLockedWorkspaceWithoutExaAnswersWithoutAnUnboundedSearch() async throws {
+        for tavily in [false, true] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+            if tavily { try keys.save("fixture-tavily-key", account: TavilySearch.keychainAccount) }
+            var searchTools: [[String: Any]?] = [], tavilyFunction: [Bool] = []
+            StubURLProtocol.handler = { _ in
+                let index = StubURLProtocol.capturedBodies.count - 1
+                let tools = try self.body(index)["tools"] as? [[String: Any]] ?? []
+                let search = tools.first { $0["type"] as? String == "openrouter:web_search" }
+                searchTools.append(search)
+                tavilyFunction.append(tools.contains { ($0["function"] as? [String: Any])?["name"] as? String == "web_search" })
+                if search != nil {
+                    // Exa is locked out; any other engine would ignore max_uses.
+                    return (403, [:], Data(#"{"error":{"message":"The selected web search engine is disabled for this workspace."}}"#.utf8))
+                }
+                return self.serve(["choices": [["finish_reason": "tool_calls", "message": [
+                    "role": "assistant", "content": NSNull(),
+                    "tool_calls": [["id": "final", "type": "function", "function": [
+                        "name": "finish_answer", "arguments": self.arguments(self.final("Four."))
+                    ]]]
+                ]]]])
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let events = await run(provider, "What is two plus two?", .init(model: "openai/gpt-6.2-astra"))
+            XCTAssertEqual(finalText(events), "Four.", "A workspace engine restriction does not break the Agent")
+            XCTAssertEqual(searchTools.count, 2, "One unbilled 403, one retry")
+            XCTAssertEqual((searchTools[0]?["parameters"] as? [String: Any])?["engine"] as? String, "exa")
+            XCTAssertNil(searchTools[1], "No search tool whose count OpenRouter would not cap")
+            XCTAssertEqual(tavilyFunction, [false, tavily], "Tavily only with its key, after the refusal")
+        }
+    }
+
+    /// Builder #436: a locked workspace never gets a search tool OpenRouter would not cap.
+    func testLockedWorkspaceNativeSearchIsCappedBeforeExecution() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
-        var engines: [String?] = []
+        var searches = 0, requestCount = 0
         StubURLProtocol.handler = { _ in
-            let index = StubURLProtocol.capturedBodies.count - 1
-            let tool = (try self.body(index)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" }
-            let engine = (tool?["parameters"] as? [String: Any])?["engine"] as? String
-            engines.append(engine)
-            if engine == "exa" {
-                return (403, [:], Data(#"{"error":{"message":"The selected web search engine is disabled for this workspace."}}"#.utf8))
-            }
-            if engines.count == 2 {
-                return self.serve(["choices": [["finish_reason": "stop", "message": ["role": "assistant", "content": "Looked it up."]]],
-                                   "usage": ["cost": 0.01, "server_tool_use_details": ["web_search_requests": 1]]])
+            let body = try self.body(requestCount)
+            requestCount += 1
+            let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
+            if let search = tools.first(where: { $0["type"] as? String == "openrouter:web_search" }) {
+                let parameters = try XCTUnwrap(search["parameters"] as? [String: Any])
+                if parameters["engine"] as? String == "exa" {
+                    return (403, [:], Data(#"{"error":{"message":"The selected web search engine is disabled for this workspace."}}"#.utf8))
+                }
+                searches = min(3, body["max_tool_calls"] as? Int ?? 3)
+                return self.serve(["choices": [["finish_reason": "stop", "message": ["role": "assistant", "content": "Sources collected."]]],
+                                   "usage": ["server_tool_use_details": ["web_search_requests": searches]]])
             }
             return self.serve(["choices": [["finish_reason": "tool_calls", "message": [
                 "role": "assistant", "content": NSNull(),
                 "tool_calls": [["id": "final", "type": "function", "function": [
-                    "name": "finish_answer", "arguments": self.arguments(self.final("Four."))
+                    "name": "finish_answer", "arguments": self.arguments(self.final("Done."))
                 ]]]
             ]]]])
         }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-        let events = await run(provider, "What is two plus two?", .init(model: "openai/gpt-6.2-astra"))
-        XCTAssertEqual(finalText(events), "Four.", "A workspace engine restriction does not break the Agent")
-        XCTAssertEqual(engines, ["exa", nil, nil], "One unbilled 403, then the workspace's engine for the rest of the turn")
-        let tool = try XCTUnwrap((try body(2)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" })
-        XCTAssertEqual((tool["parameters"] as? [String: Any])?["max_uses"] as? Int, 1, "The budget still counts what ran")
+        let events = await run(provider, "fixture", .init(model: "openai/gpt-6.2-astra"))
+        XCTAssertEqual(finalText(events), "Done.")
+        XCTAssertGreaterThanOrEqual(requestCount, 2)
+        XCTAssertLessThanOrEqual(searches, 2, "The first successful request cannot exceed the whole-turn budget")
+    }
+
+    /// Builder #436: a 400 on one of the search tool's options keeps the route.
+    func testInvalidSearchOptionKeepsSelectedRoute() async throws {
+        let routes: [(OpenCodeModelProvider, String, String, String)] = [
+            (.anthropic, "claude-opus-5-5", "web_search_20250305", "max_uses"),
+            (.openAI, "gpt-6.2-astra", "web_search", "search_context_size"),
+            (.openRouter, "openai/gpt-6.2-astra", "openrouter:web_search", "parameters.max_uses"),
+        ]
+        for (route, model, type, property) in routes {
+            let (directory, keys, http) = try fixture()
+            try keys.save("fixture-anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+            try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+            try keys.save("fixture-openai-key", account: ProviderAccount.openAIKeychainAccount)
+            try keys.save("fixture-tavily-key", account: TavilySearch.keychainAccount)
+            var providerRequests = 0
+            StubURLProtocol.handler = { _ in
+                providerRequests += 1
+                let tools = try XCTUnwrap(try self.body(providerRequests - 1)["tools"] as? [[String: Any]])
+                let index = try XCTUnwrap(tools.firstIndex { $0["type"] as? String == type })
+                var error: [String: Any] = ["message": "tools.\(index).\(property): Value exceeds maximum."]
+                if route == .openAI {
+                    error = ["message": "Invalid search context size.", "param": "tools[\(index)].search_context_size", "code": "invalid_value"]
+                }
+                return (400, [:], try JSONSerialization.data(withJSONObject: ["error": error]))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            _ = await run(provider, "fixture", .init(model: model, openCodeProvider: route))
+            XCTAssertEqual(providerRequests, 1, "\(route): an invalid tool option does not show that search is unavailable")
+        }
     }
 
     func testOpenRouterDefaultWorkspaceKeepsExaAndASecond403IsTheKey() async throws {

@@ -377,8 +377,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   with built-in search retries once without it only on tool-specific evidence
   (ErrorShape.refusesWebSearch from a bounded body read of `message` only: the
   request carried a search tool; no typed category or unrelated OpenAI code;
-  a param or leading path must be the search tool's own index, any other
-  location never qualifies; otherwise, with quoted text removed and no
+  a param or leading path must be the search tool itself or its type (never
+  one of its options or any other location) and still carry a refusal code
+  or word; otherwise, with quoted text removed and no
   size/context wording, the tool's identifier and a refusal in one clause, or
   a message opening with an account or model policy); an ambiguous error stays
   on the route and later failures are never retried. The two-search budget is per
@@ -387,9 +388,10 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   provider turn (the app's "Continue" message) gets what is left; OpenAI
   (max_tool_calls, counting every web_search_call action) and OpenRouter
   (max_uses; engine exa except for anthropic/ models, because other native
-  engines ignore max_uses; a 403 from a workspace whose locked Server Tools
-  policy excludes Exa retries that request once with the workspace's engine,
-  kept for the rest of the turn) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
+  engines ignore max_uses and nothing else caps them before they run; a 403 on
+  the first request from a workspace whose locked Server Tools policy excludes
+  Exa retries once without the search tool, with Tavily or none, like a
+  refusal) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
   (an OpenAI open_page, OpenRouter usage.server_tool_use_details
   web_search_requests or tool_calls_executed without citations, Anthropic
   end_turn after a search or after a deferred web_search_tool_result)

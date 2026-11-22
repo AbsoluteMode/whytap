@@ -660,6 +660,40 @@ final class CaseApprovalControllerTests: XCTestCase {
         XCTAssertEqual(CaseApprovalView.commandLine("git push\n  --force"), "git push --force",
                        "one line, whitespace collapsed")
     }
+
+    // MARK: - Touch: a tap shows the whole command
+
+    func test_touch_tap_expands_the_command_and_every_new_prompt_starts_collapsed() async {
+        controller.toggleCommandExpanded()
+        XCTAssertFalse(controller.isCommandExpanded, "nothing to expand without a prompt")
+
+        let first = await ask(request(command: "deploy one"))
+        _ = await ask(request(command: "deploy two"))
+        controller.toggleCommandExpanded()
+        XCTAssertTrue(controller.isCommandExpanded)
+        controller.toggleCommandExpanded()
+        XCTAssertFalse(controller.isCommandExpanded, "a second tap collapses it")
+        controller.toggleCommandExpanded()
+
+        clock.advance(by: CaseApprovalController.armingDelay)
+        controller.choose(.deny)
+        _ = await first.value
+        XCTAssertEqual(controller.current?.command, "deploy two")
+        XCTAssertFalse(controller.isCommandExpanded, "the next prompt is collapsed")
+    }
+
+    func test_expanded_command_keeps_its_own_lines_and_only_touch_screens_expand() {
+        XCTAssertEqual(CaseApprovalView.commandText("  git push\n  --force\n", expanded: true), "git push\n  --force")
+        XCTAssertEqual(CaseApprovalView.commandText("git push\n  --force", expanded: false), "git push --force")
+        func screen(touch: Bool) -> IslandScreenDescriptor {
+            IslandScreenDescriptor(
+                uuid: "s", frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+                visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 944), safeAreaTopInset: 38,
+                auxiliaryTopLeftArea: nil, auxiliaryTopRightArea: nil, isBuiltIn: true, isTouchCapable: touch)
+        }
+        XCTAssertFalse(CaseApprovalView.expandsCommandOnTap(on: screen(touch: false)), "a pointer keeps the tooltip")
+        XCTAssertTrue(CaseApprovalView.expandsCommandOnTap(on: screen(touch: true)))
+    }
 }
 
 @MainActor
@@ -875,5 +909,27 @@ final class CaseApprovalViewRenderTests: XCTestCase {
         }
         window.contentView = nil
         window.close()
+    }
+}
+
+/// The card grows to the whole command only when a touch expanded it.
+@MainActor
+final class CaseApprovalTouchCommandTests: XCTestCase {
+    func test_expanded_card_is_taller_only_on_a_touch_screen() {
+        _ = NSApplication.shared
+        let request = CaseApprovalRequest(
+            appName: "Claude Code", projectName: "alpha", keyNames: ["FAKE_TOKEN"],
+            command: "docker compose -f deploy/compose.prod.yml run --rm migrate && ./scripts/seed.sh --env production --force",
+            timedMinutes: 15)
+        func height(touch: Bool, expanded: Bool) -> CGFloat {
+            NSHostingView(rootView: CaseApprovalView(
+                request: request, width: 312, pendingCount: 0, isArmed: true, onChoose: { _ in },
+                expandsCommandOnTap: touch, commandExpanded: expanded)).fittingSize.height
+        }
+        let collapsed = height(touch: false, expanded: false)
+        XCTAssertEqual(height(touch: false, expanded: true), collapsed, accuracy: 0.5,
+                       "a pointer never expands, whatever the controller says")
+        XCTAssertEqual(height(touch: true, expanded: false), collapsed, accuracy: 0.5)
+        XCTAssertGreaterThan(height(touch: true, expanded: true), collapsed + 10)
     }
 }

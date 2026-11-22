@@ -765,6 +765,30 @@ final class ScreenBrightnessControllerTests: XCTestCase {
         XCTAssertFalse(ScreenBrightnessDisplay(id: 1, potentialHeadroom: 1.005).supportsExtra)
         XCTAssertTrue(ScreenBrightnessDisplay(id: 1, potentialHeadroom: 1.6).supportsExtra)
     }
+
+    // MARK: Touch OLED (MacBook Pro PROLED XDR, macOS 27)
+
+    func testExtraIsHiddenOnTheTouchOLEDUntilVerified() {
+        XCTAssertFalse(ScreenBrightnessDisplay(id: 1, potentialHeadroom: 16, isTouchOLED: true).supportsExtra)
+
+        let f = Fixture(), device = f.device, controller = f.controller
+        device.connected = [ScreenBrightnessDisplay(id: 1, potentialHeadroom: 16, isTouchOLED: true)]
+        controller.beginInteraction()
+        XCTAssertFalse(controller.supportsExtra)
+        controller.setExtra(true)
+        XCTAssertFalse(controller.isExtraOn)
+        XCTAssertTrue(device.boosts.isEmpty, "No gamma table is ever written on the OLED.")
+    }
+
+    func testTouchOLEDDetection() {
+        // The built-in touch display alone, or beside an ordinary monitor.
+        XCTAssertTrue(ScreenBrightnessDisplay.isTouchOLED(builtIn: true, touchCapable: true, allScreensTouch: true, screenCount: 1))
+        XCTAssertTrue(ScreenBrightnessDisplay.isTouchOLED(builtIn: true, touchCapable: true, allScreensTouch: false, screenCount: 2))
+        // Today's Macs, and every screen under a touch Sidecar (TN3212).
+        XCTAssertFalse(ScreenBrightnessDisplay.isTouchOLED(builtIn: true, touchCapable: false, allScreensTouch: false, screenCount: 1))
+        XCTAssertFalse(ScreenBrightnessDisplay.isTouchOLED(builtIn: false, touchCapable: true, allScreensTouch: false, screenCount: 2))
+        XCTAssertFalse(ScreenBrightnessDisplay.isTouchOLED(builtIn: true, touchCapable: true, allScreensTouch: true, screenCount: 2))
+    }
 }
 
 /// Display 1 at 40% with XDR headroom; display selection, clock and thermal policy are adjustable.

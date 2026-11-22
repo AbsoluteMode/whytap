@@ -30,6 +30,10 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
     /// Changes with every prompt shown, so the view starts each one fresh.
     @Published private(set) var promptSerial = 0
     @Published private(set) var isEditingMinutes = false
+    /// The visible prompt shows its whole command (a tap on a touch display;
+    /// a pointer has the tooltip). Every new prompt starts collapsed.
+    /// WHY: .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+    @Published private(set) var isCommandExpanded = false
     @Published private(set) var selectedTimedMinutes = CaseVaultPayload.defaultTimedApprovalMinutes
     /// The harness the user just allowed, shown for `connectedDuration` when
     /// no other prompt is waiting.
@@ -106,6 +110,11 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
         selectedTimedMinutes = minutes
     }
 
+    func toggleCommandExpanded() {
+        guard active != nil else { return }
+        isCommandExpanded.toggle()
+    }
+
     /// Editing the duration must never consume Y/N/A/Escape as approval answers.
     func setEditingMinutes(_ editing: Bool) {
         guard active != nil, offersTimed else { return }
@@ -119,6 +128,7 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
         clearTimers()
         active = nil
         isEditingMinutes = false
+        isCommandExpanded = false
         entry.continuation.resume(returning: outcome)
         if case .allowTimed(let minutes) = outcome, CaseViewModel.timedApprovalRange.contains(minutes) {
             allowWaiting(coveredBy: entry.request)
@@ -206,6 +216,7 @@ final class CaseApprovalController: ObservableObject, CaseApprovalPresenting {
         let shown = now()
         isArmed = false
         isEditingMinutes = false
+        isCommandExpanded = false
         pendingCount = queue.count
         deadline = shown.addingTimeInterval(Self.timeout)
         promptSerial += 1

@@ -16,6 +16,12 @@ struct CaseApprovalView: View {
     var onMinutesEditingChange: (Bool) -> Void = { _ in }
     /// Whytap's own icon on the harness card; the running app's by default.
     var appIcon: NSImage? = nil
+    /// On a touch display a tap on the command shows all of it (a finger has
+    /// no tooltip); a pointer keeps the one line and the tooltip.
+    /// WHY: .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+    var expandsCommandOnTap = false
+    var commandExpanded = false
+    var onToggleCommand: () -> Void = {}
 
     @State private var validTimedInput = true
     @State private var editingMinutes = false
@@ -70,6 +76,20 @@ struct CaseApprovalView: View {
     /// one space; the view truncates the tail with «…».
     static func commandLine(_ command: String) -> String {
         command.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+    }
+
+    /// Lines the expanded command may take before it truncates.
+    static let expandedCommandLineLimit = 12
+
+    /// What the command box shows: the collapsed single line, or the original
+    /// command with its own line breaks once a touch expanded it.
+    static func commandText(_ command: String, expanded: Bool) -> String {
+        expanded ? command.trimmingCharacters(in: .whitespacesAndNewlines) : commandLine(command)
+    }
+
+    /// Only a touch-capable island screen turns a tap into "show the whole command".
+    static func expandsCommandOnTap(on screen: IslandScreenDescriptor) -> Bool {
+        screen.isTouchCapable
     }
 
     // MARK: Body
@@ -218,11 +238,13 @@ struct CaseApprovalView: View {
     }
 
     private var commandBox: some View {
-        Text(Self.commandLine(request.command))
+        let expanded = expandsCommandOnTap && commandExpanded
+        return Text(Self.commandText(request.command, expanded: expanded))
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(Color.white.opacity(0.88))
-            .lineLimit(1)
+            .lineLimit(expanded ? Self.expandedCommandLineLimit : 1)
             .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: expanded)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,6 +253,8 @@ struct CaseApprovalView: View {
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
             .help(request.command)
+            .contentShape(Rectangle())
+            .onTapGesture { if expandsCommandOnTap { onToggleCommand() } }
             .accessibilityLabel("Command: \(request.command)")
     }
 
@@ -598,6 +622,7 @@ struct CaseApprovalConnectedView: View {
 struct CaseApprovalHostView: View {
     @ObservedObject var controller: CaseApprovalController
     let width: CGFloat
+    var expandsCommandOnTap = false
 
     var body: some View {
         if let request = controller.current {
@@ -609,7 +634,10 @@ struct CaseApprovalHostView: View {
                 onChoose: { controller.choose($0) },
                 timedMinutes: controller.selectedTimedMinutes,
                 onTimedMinutesChange: { controller.setTimedMinutes($0) },
-                onMinutesEditingChange: { controller.setEditingMinutes($0) }
+                onMinutesEditingChange: { controller.setEditingMinutes($0) },
+                expandsCommandOnTap: expandsCommandOnTap,
+                commandExpanded: controller.isCommandExpanded,
+                onToggleCommand: { controller.toggleCommandExpanded() }
             )
             // A new prompt is a new card (resets hover and the countdown).
             .id(controller.promptSerial)
@@ -668,6 +696,12 @@ final class CaseApprovalPanel: NSPanel {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] visible in self?.apply(visible: visible) }
+            .store(in: &cancellables)
+        // A tap expanded or collapsed the command: fit the panel to it.
+        controller.$isCommandExpanded
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshFrameIfVisible() }
             .store(in: &cancellables)
         // The prompt gives way to its shorter confirmation: fit the panel to it.
         controller.$connected
@@ -742,8 +776,11 @@ final class CaseApprovalPanel: NSPanel {
     }
 
     private func refreshFrame() {
-        let islandFrame = IslandFrameLayout.islandFrame(on: IslandScreenResolver.currentDescriptor())
-        host.rootView = AnyView(CaseApprovalHostView(controller: controller, width: islandFrame.width))
+        let screen = IslandScreenResolver.currentDescriptor()
+        let islandFrame = IslandFrameLayout.islandFrame(on: screen)
+        host.rootView = AnyView(CaseApprovalHostView(
+            controller: controller, width: islandFrame.width,
+            expandsCommandOnTap: CaseApprovalView.expandsCommandOnTap(on: screen)))
         let height = ceil(host.fittingSize.height)
         let target = Self.frame(islandFrame: islandFrame, cardHeight: max(height, 1),
                                 meetingNudgeVisible: AppState.shared.meetingSuggestionActive,

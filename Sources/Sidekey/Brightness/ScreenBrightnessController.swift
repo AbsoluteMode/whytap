@@ -26,7 +26,19 @@ struct ScreenBrightnessDisplay: Equatable {
     let id: CGDirectDisplayID
     /// `NSScreen.maximumPotentialExtendedDynamicRangeColorComponentValue`.
     let potentialHeadroom: Double
-    var supportsExtra: Bool { potentialHeadroom > 1.01 }
+    /// The built-in touch OLED display (MacBook Pro PROLED XDR, macOS 27).
+    /// Extra's gamma boost was measured only on mini-LED panels; on OLED a
+    /// brighter table means more power and burn-in risk and nobody has
+    /// checked it, so Extra stays off there until it is verified.
+    /// WHY: .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
+    var isTouchOLED = false
+    var supportsExtra: Bool { !isTouchOLED && potentialHeadroom > 1.01 }
+
+    /// A display is the touch OLED when it is built in and reports touch,
+    /// unless every screen reports touch (a touch Sidecar connected, TN3212).
+    static func isTouchOLED(builtIn: Bool, touchCapable: Bool, allScreensTouch: Bool, screenCount: Int) -> Bool {
+        builtIn && touchCapable && !(screenCount > 1 && allScreensTouch)
+    }
 }
 
 enum BrightnessBoostEnd: Equatable {
@@ -414,11 +426,16 @@ final class NativeScreenBrightnessDevice: ScreenBrightnessDevice {
     }
 
     func displays() -> [ScreenBrightnessDisplay] {
-        NSScreen.screens.compactMap { screen in
+        let screens = NSScreen.screens
+        let allTouch = screens.allSatisfy(\.sidekeyIsTouchCapable)
+        return screens.compactMap { screen in
             guard let id = screen.brightnessDisplayID else { return nil }
             return ScreenBrightnessDisplay(
                 id: id,
-                potentialHeadroom: Double(screen.maximumPotentialExtendedDynamicRangeColorComponentValue))
+                potentialHeadroom: Double(screen.maximumPotentialExtendedDynamicRangeColorComponentValue),
+                isTouchOLED: ScreenBrightnessDisplay.isTouchOLED(
+                    builtIn: screen.sidekeyIsBuiltIn, touchCapable: screen.sidekeyIsTouchCapable,
+                    allScreensTouch: allTouch, screenCount: screens.count))
         }
     }
 

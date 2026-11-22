@@ -9,13 +9,15 @@ import Foundation
 /// earlier, shorter state of the phrase. Shown as they arrive, the words on
 /// screen disappear and come back.
 ///
-/// The stabilizer compares each snapshot with the text it gave out last, word
-/// by word:
+/// The stabilizer compares each snapshot with the text on screen, word by
+/// word:
 /// - new words after the last word both have in common are shown at once,
 ///   and they replace whatever was shown after that word;
 /// - a snapshot that only ends earlier is not shown: the words on screen stay;
 /// - a change before that word waits. It is shown in one step once the
-///   provider has kept it for `confirmSeconds`.
+///   provider has kept that same change for `confirmSeconds`.
+/// Only text that reached the screen is kept: words delivered but not
+/// revealed yet always follow the newest snapshot.
 /// Display only: paste, Drop auto-stop and the fallback read the provider's
 /// own text. The same for every provider: only the text is compared.
 /// WHY: .project-docs/decisions/2026-11-23-live-text-stable-display.md
@@ -27,16 +29,25 @@ struct LiveTextStabilizer {
     /// A change spanning more words than this is shown as it is.
     static let longestRevision = 120
 
-    /// The text the line shows.
+    /// The line's text: what `arrived` or `settled` returned last.
     private(set) var shown = ""
     private var pending: Pending?
+
+    /// Whether a change is waiting for `settled`.
+    var isWaiting: Bool { pending != nil }
+
+    /// What the provider wants changed in the text on screen: the words on
+    /// screen and the provider's words for them, without the words around
+    /// them that both have. New words at the end do not change it.
+    struct Correction: Equatable {
+        let old: [String]
+        let new: [String]
+    }
 
     private struct Pending {
         /// The provider's newest text.
         var text: String
-        /// The provider's reading being waited on: while its snapshots begin
-        /// with these words, it has not changed its mind.
-        let key: [String]
+        let correction: Correction
         let since: TimeInterval
     }
 
@@ -46,22 +57,32 @@ struct LiveTextStabilizer {
         pending = nil
     }
 
-    /// The provider's text is now `text`; the first `revealed` characters of
-    /// the line's text are on screen. Returns the line's new text. Words that
-    /// were delivered but not revealed yet are replaced freely.
-    mutating func arrived(_ text: String, revealed: Int = .max, now: TimeInterval) -> String {
+    /// The provider's text is now `text`, and `visible` is the part of the
+    /// line that is on screen. Returns the line's new text.
+    mutating func arrived(_ text: String, visible: String, now: TimeInterval) -> String {
         guard confirmSeconds > 0 else {
             reset(text)
             return text
         }
-        let merged = Self.merge(shown: shown, revealed: revealed, incoming: text)
+        // Whether the reveal point is inside a word.
+        let cutWord = shown.count > visible.count && shown.hasPrefix(visible) &&
+            visible.last?.isWhitespace == false &&
+            !shown[shown.index(shown.startIndex, offsetBy: visible.count)].isWhitespace
+        var merged = Self.merge(visible: visible, endsInsideWord: cutWord, incoming: text)
+        // The first letters of a word are not a word the reader has, so an
+        // earlier state of the phrase takes them back.
+        if merged.earlier, cutWord {
+            let characters = Array(visible)
+            let whole = String(characters[..<(Self.words(characters).last?.start ?? 0)])
+            merged = Self.merge(visible: whole, incoming: text)
+        }
         shown = merged.text
-        if merged.text == text {
-            pending = nil
-        } else if let waiting = pending, Self.words(Array(text)).map(\.key).starts(with: waiting.key) {
-            pending = Pending(text: text, key: waiting.key, since: waiting.since)
+        if let correction = merged.correction {
+            // The wait belongs to one correction. A different one starts again.
+            let since = pending?.correction == correction ? pending?.since : nil
+            pending = Pending(text: text, correction: correction, since: since ?? now)
         } else {
-            pending = Pending(text: text, key: merged.key, since: now)
+            pending = nil
         }
         return shown
     }
@@ -101,37 +122,56 @@ struct LiveTextStabilizer {
         return words
     }
 
+    /// The letters of a word as written, without its marks.
+    private static func letters(_ characters: [Character], _ words: [Word], _ index: Int) -> [Character] {
+        let end = index + 1 < words.count ? words[index + 1].start : characters.count
+        return characters[words[index].start..<end].filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The line's text for a snapshot, and the correction it leaves waiting
+    /// (nil when the line shows the snapshot itself). `earlier`: the snapshot
+    /// is an earlier state of the phrase and the visible text was kept.
     static func merge(
-        shown: String, revealed: Int = .max, incoming: String
-    ) -> (text: String, key: [String]) {
-        guard revealed > 0, !shown.isEmpty, !incoming.isEmpty, !incoming.hasPrefix(shown) else {
-            return (incoming, [])
+        visible: String, endsInsideWord: Bool = false, incoming: String
+    ) -> (text: String, correction: Correction?, earlier: Bool) {
+        guard !visible.isEmpty, !incoming.isEmpty, !incoming.hasPrefix(visible) else {
+            return (incoming, nil, false)
         }
-        let old = Array(Array(shown).prefix(revealed)), new = Array(incoming)
+        let old = Array(visible), new = Array(incoming)
         let oldWords = words(old), newWords = words(new)
-        var common = 0
-        while common < min(oldWords.count, newWords.count), oldWords[common].key == newWords[common].key {
-            common += 1
+        let oldKeys = oldWords.map(\.key), newKeys = newWords.map(\.key)
+        guard !oldKeys.isEmpty, !newKeys.isEmpty else { return (incoming, nil, false) }
+        // The last word may be unfinished: the provider is still typing its
+        // own, and the reveal point can be inside the line's.
+        func same(_ i: Int, _ j: Int) -> Bool {
+            oldKeys[i] == newKeys[j] ||
+                (j == newKeys.count - 1 && oldKeys[i].hasPrefix(newKeys[j])) ||
+                (endsInsideWord && i == oldKeys.count - 1 && newKeys[j].hasPrefix(oldKeys[i]))
         }
-        let oldRest = oldWords[common...].map(\.key), newRest = newWords[common...].map(\.key)
-        guard oldRest.count <= longestRevision, newRest.count <= longestRevision else { return (incoming, []) }
+        var matched = 0
+        var common = 0
+        while common < min(oldKeys.count, newKeys.count), same(common, common) { common += 1 }
+        let oldRest = oldKeys.count - common, newRest = newKeys.count - common
+        guard oldRest <= longestRevision, newRest <= longestRevision else { return (incoming, nil, false) }
         // The last word both texts have in common, matching each word as
         // early as it can be: a repeated word at the live edge ("и" -> "и вот
         // и") is new speech, not the word already shown.
+        matched = common
         var last: (old: Int, new: Int)? = common > 0 ? (common - 1, common - 1) : nil
-        if !oldRest.isEmpty, !newRest.isEmpty {
-            var length = Array(repeating: Array(repeating: 0, count: newRest.count + 1), count: oldRest.count + 1)
-            for i in stride(from: oldRest.count - 1, through: 0, by: -1) {
-                for j in stride(from: newRest.count - 1, through: 0, by: -1) {
-                    length[i][j] = oldRest[i] == newRest[j]
+        if oldRest > 0, newRest > 0 {
+            var length = Array(repeating: Array(repeating: 0, count: newRest + 1), count: oldRest + 1)
+            for i in stride(from: oldRest - 1, through: 0, by: -1) {
+                for j in stride(from: newRest - 1, through: 0, by: -1) {
+                    length[i][j] = same(common + i, common + j)
                         ? length[i + 1][j + 1] + 1
                         : max(length[i + 1][j], length[i][j + 1])
                 }
             }
             var i = 0, j = 0
-            while i < oldRest.count, j < newRest.count {
-                if oldRest[i] == newRest[j], length[i][j] == length[i + 1][j + 1] + 1 {
+            while i < oldRest, j < newRest {
+                if same(common + i, common + j), length[i][j] == length[i + 1][j + 1] + 1 {
                     last = (common + i, common + j)
+                    matched += 1
                     i += 1
                     j += 1
                 } else if length[i + 1][j] >= length[i][j + 1] {
@@ -141,14 +181,45 @@ struct LiveTextStabilizer {
                 }
             }
         }
-        guard let last else { return (incoming, []) }
-        let keys = newWords.map(\.key)
-        if last.new == newWords.count - 1, last.old < oldWords.count - 1 {
-            // Nothing new after the common word and the line shows more: an
-            // earlier state of the phrase. Its last word may be unfinished.
-            return (shown, Array(keys.dropLast(keys.count > 1 ? 1 : 0)))
+        guard let last else { return (incoming, nil, false) }
+        // A word or two that happen to be in both texts do not tie a new
+        // phrase to the old one: up to the common word, each text must have
+        // at least as many common words as words of its own.
+        guard last.old + 1 - matched <= matched, last.new + 1 - matched <= matched else {
+            return (incoming, nil, false)
         }
-        let text = String(old[..<oldWords[last.old].start] + new[newWords[last.new].start...])
-        return (text, Array(keys[...last.new]))
+        // Nothing new after the common word, and the line shows more words
+        // or more of that word: an earlier state of the phrase.
+        let earlier = last.new == newKeys.count - 1 &&
+            (last.old < oldKeys.count - 1 || oldKeys[last.old].count > newKeys[last.new].count)
+        let text: String
+        if earlier {
+            text = visible
+        } else if last.old < oldWords.count - 1, last.new < newWords.count - 1,
+                  letters(old, oldWords, last.old) != letters(new, newWords, last.new) {
+            // The common word is behind the live one and only its case
+            // differs (the mark before it changed): it stays as shown.
+            text = String(old[..<oldWords[last.old + 1].start] + new[newWords[last.new + 1].start...])
+        } else {
+            // The provider's marks on the common word are shown with its
+            // new words.
+            text = String(old[..<oldWords[last.old].start] + new[newWords[last.new].start...])
+        }
+        guard text != incoming else { return (incoming, nil, false) }
+        // The common word itself is not part of the correction: while the
+        // provider types it letter by letter the correction is the same.
+        var before = oldKeys[..<last.old]
+        var after = newKeys[..<last.new]
+        while let a = before.first, let b = after.first, a == b {
+            before.removeFirst()
+            after.removeFirst()
+        }
+        while let a = before.last, let b = after.last, a == b {
+            before.removeLast()
+            after.removeLast()
+        }
+        // The words an earlier state lacks are part of what waits.
+        let lacking = last.old + 1 < oldKeys.count ? ["\u{2026}"] + oldKeys[(last.old + 1)...] : []
+        return (text, Correction(old: Array(before) + lacking, new: Array(after)), earlier)
     }
 }

@@ -56,24 +56,41 @@ mark, so an old one cannot be recognised by anything but its text.
 ## Decision
 
 `LiveTextStabilizer` stands between the provider's text and the line. It
-compares each snapshot with the revealed text word by word (case and
-punctuation ignored; longest common subsequence, each word matched as early
-as possible) and finds the last word both have in common.
+compares each snapshot with the text that is on screen, word by word (case
+and punctuation ignored; longest common subsequence, each word matched as
+early as possible) and finds the last word both have in common. The last
+provider's last word may be unfinished and matches a shown word it begins;
+so does the line's last word when the reveal point is inside it.
 
 - Words of the snapshot after that word are shown at once. They replace
   whatever the line showed after it: that is the provider's live guess.
 - A snapshot with nothing after that word, while the line shows more, is an
   earlier state of the phrase. It is not shown.
 - Text before that word stays as the line shows it. A different beginning, a
-  removed repetition or a shorter phrase is shown in one step when the
-  provider's snapshots have begun with the same words for 1.5 s. A provider
-  that changes its mind starts the wait again.
-- Words delivered but not revealed yet are replaced freely.
-- A text without a common word, an empty text, a change spanning more than
-  120 words and text without spaces are shown as they arrive.
+  removed repetition or a shorter phrase is a correction: the words on screen
+  and the provider's words for them, without the words around them that both
+  have. It is shown in one step when the provider has kept that same
+  correction for 1.5 s. New words at the end, and the common word being
+  typed letter by letter, do not change a correction; a different one, or a
+  second one further on, starts the wait again. A confirmed correction skips
+  the 0.35 s hold: the next snapshot would cancel it there.
+- Only text that reached the screen is kept. Words delivered but not revealed
+  yet, a rewrite still waiting in the 0.35 s hold, and the first letters of a
+  word still being revealed follow the newest snapshot.
+- A word or two that happen to be in both texts do not tie a new phrase to
+  the old one: up to the common word each text must have at least as many
+  common words as words of its own. Otherwise, and for a text without a
+  common word, an empty text and a change spanning more than 120 words, the
+  snapshot is shown as it arrives. Text without spaces is one word per
+  phrase: a rewrite is shown as it arrives, a cut is an earlier state.
+- The plain line (Reduce Motion, and scripts shaped as a whole line such as
+  Arabic and Hebrew) goes through the same stabilizer in
+  `IslandPlainLiveText`. It shows all of its text at once, so all of it
+  counts as on screen. Its shaping, head truncation and lack of motion are
+  unchanged.
 
 The 0.35 s hold and the forward-only layout still apply to what the
-stabilizer lets through. Only the recording wing uses it: paste, Drop
+stabilizer lets through on the animated line. Only the recording wing uses it: paste, Drop
 auto-stop and the fallback read the provider's own text. The rule is the same
 for every provider, since only the text is compared.
 
@@ -101,12 +118,31 @@ for every provider, since only the text is compared.
   `testAChangedBeginningWaitsWhileNewWordsAreShownAtOnce`,
   `testAProviderThatChangesItsMindStartsTheWaitAgain`,
   `testTheLiveWordIsReplacedAtOnce`, `testARepeatedWordAtTheLiveEdgeIsNewSpeech`,
-  `testWordsNotRevealedYetAreReplacedFreely` and the pass-through cases.
+  `testAWordTheProviderIsTypingAgainIsAnEarlierState` and the pass-through
+  cases.
+- Only shown text is kept: `testWordsNotRevealedYetFollowTheNewestSnapshot`,
+  `testLettersOfAWordStillBeingRevealedAreNotKept`,
+  `testAWordCutByTheRevealPointMatchesTheWholeWord`,
+  `testAGuessWithdrawnBeforeItWasRevealedIsNeverDrawn`,
+  `testARewriteReplacedWhileItWaitsIsNeverDrawn` (the last two through the
+  ticker model, frame by frame).
+- One wait per correction: `testADifferentCorrectionDoesNotInheritTheWait`,
+  `testTheSameCorrectionKeepsItsWaitWhileNewWordsArrive`,
+  `testASecondCorrectionFurtherOnStartsTheWaitAgain`.
+- The plain line: `testThePlainLineShowsTheSameSnapshots`,
+  `testThePlainLineShowsAKeptChangeWhenTheNextSnapshotArrives`,
+  `testThePlainLineStartsFromTheProvidersText`.
+- From an independent review of the first fix:
+  `testACorrectionSettlesWhileTheSpeakerKeepsTalking`,
+  `testACorrectionSettlesWhileTheProviderTypesTheNextWord`,
+  `testASnapshotRightAfterTheWaitDoesNotStartItAgain`,
+  `testAFewSharedWordsDoNotTieANewPhraseToTheOldOne`,
+  `testAWholeLastWordIsNotTakenForTheStartOfAnother`.
 - The 2026-11-21 recorded take still passes its four tests.
 
 ## Not verified
 
-- The look in the running app.
+- The look in the running app, with and without Reduce Motion.
 - The provider's actual events of the 2026-11-23 take: the sequence was read
   from the screen, not from the socket. No live request was made.
 - Soniox, Deepgram and OpenAI were not recorded; their appended text passes
@@ -118,7 +154,10 @@ for every provider, since only the text is compared.
   stays on screen up to 1.5 s longer than before.
 - A wrong last word that the provider removes while the speaker is silent
   stays for 1.5 s.
-- For that time the line can show a beginning the provider no longer has.
+- For that time the line can show a beginning the provider no longer has,
+  and a word the provider inserted before the last common word is missing.
+- A provider's unfinished last word that begins a shown word ("to a b" after
+  "went and bought") reads as an earlier state for one snapshot.
 
 ## Rejected
 

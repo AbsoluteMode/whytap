@@ -33,6 +33,60 @@ struct IslandLiveTextTicker: View {
     }
 }
 
+/// The live transcript as one plain line: Reduce Motion, and scripts that need
+/// the whole line shaped (`LiveTextTicker.canDrawPerCharacter`). It shows the
+/// same snapshots as the animated line, all of the text at once.
+/// WHY: .project-docs/decisions/2026-11-23-live-text-stable-display.md
+struct IslandPlainLiveText: View {
+    let text: String
+    /// The shown text changed: its value, and the provider's text it is for.
+    let onShownTextChange: (_ shown: String, _ text: String) -> Void
+
+    @State private var model = IslandPlainLiveTextModel()
+    @State private var shown: String?
+
+    var body: some View {
+        Text(shown ?? text)
+            .font(.system(size: IslandLiveTextTickerModel.fontSize, weight: .medium))
+            .foregroundStyle(.white.opacity(IslandLiveTextTickerModel.textOpacity))
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(of: text, initial: true) { _, next in
+                show(model.textArrived(next, now: Date.now.timeIntervalSinceReferenceDate))
+            }
+            .task(id: text) {
+                // A change the provider keeps is shown without a new snapshot.
+                while model.isWaiting, !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled else { return }
+                    if let settled = model.settled(now: Date.now.timeIntervalSinceReferenceDate) { show(settled) }
+                }
+            }
+            .accessibilityLabel(text)
+    }
+
+    private func show(_ next: String) {
+        if next != shown { shown = next }
+        onShownTextChange(next, text)
+    }
+}
+
+/// The plain line shows all of its text, so all of it is on screen.
+final class IslandPlainLiveTextModel {
+    private var stabilizer = LiveTextStabilizer()
+
+    var isWaiting: Bool { stabilizer.isWaiting }
+
+    func textArrived(_ text: String, now: TimeInterval) -> String {
+        // Snapshots can arrive faster than the view asks for a settled change.
+        _ = stabilizer.settled(now: now)
+        return stabilizer.arrived(text, visible: stabilizer.shown, now: now)
+    }
+
+    func settled(now: TimeInterval) -> String? { stabilizer.settled(now: now) }
+}
+
 /// Drawing state of one ticker. A reference type so the canvas can advance it
 /// every frame without invalidating the view.
 final class IslandLiveTextTickerModel {
@@ -108,9 +162,10 @@ final class IslandLiveTextTickerModel {
     /// WHY: .project-docs/decisions/2026-11-23-live-text-stable-display.md
     func textArrived(_ text: String, now: TimeInterval) {
         let before = stabilizer.shown
-        // A waiting rewrite is not in the ticker yet: count all of it as shown.
-        let revealed = heldRewrite == nil ? ticker.revealedCount : Int.max
-        let stable = stabilizer.arrived(text, revealed: revealed, now: now)
+        // Only what is on screen is kept. Words still waiting to be revealed,
+        // and a rewrite still waiting in the hold, follow the newest snapshot.
+        let visible = String(ticker.characters.prefix(ticker.revealedCount))
+        let stable = stabilizer.arrived(text, visible: visible, now: now)
         if stable != before { stableTextArrived(stable, now: now) }
     }
 
@@ -239,7 +294,12 @@ final class IslandLiveTextTickerModel {
 
     @discardableResult
     func advance(now: TimeInterval) -> CGFloat {
-        if let settled = stabilizer.settled(now: now) { stableTextArrived(settled, now: now) }
+        if let settled = stabilizer.settled(now: now) {
+            // It has waited already; the hold would let the next snapshot
+            // cancel it and start the wait again.
+            heldRewrite = nil
+            show(settled, now: now)
+        }
         if let rewrite = heldRewrite, now >= heldRewriteUntil {
             heldRewrite = nil
             show(rewrite, now: now)

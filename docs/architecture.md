@@ -267,12 +267,14 @@ Live text in the recording wing (Drop and agent voice):
   the text before it in place and leaves free space at the right edge. WHY:
   .project-docs/decisions/2026-11-21-live-text-forward-only.md
   LiveTextStabilizer first decides which snapshots the line shows at all. It
-  compares each one with the revealed text word by word: words after the last
-  common word are shown at once and replace the live guess after it; a
+  compares each one with the text on screen word by word: words after the
+  last common word are shown at once and replace the live guess after it; a
   snapshot that only ends earlier is not shown; a change before that word (or
-  a shorter phrase) is shown in one step after the provider has kept it for
-  1.5 s. ElevenLabs scribe_v3_live alternates between readings of a phrase
-  for a second or two. Display only: paste and auto-stop read the provider's
+  a shorter phrase) is shown in one step after the provider has kept that
+  same change for 1.5 s. Text delivered but not revealed yet follows the
+  newest snapshot. The plain line (IslandPlainLiveText) uses the same rule.
+  ElevenLabs scribe_v3_live alternates between readings of a phrase for a
+  second or two. Display only: paste and auto-stop read the provider's
   text. Any provider. WHY:
   .project-docs/decisions/2026-11-23-live-text-stable-display.md
   Soniox publishes the complete live snapshot once per token frame.

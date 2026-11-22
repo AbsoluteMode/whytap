@@ -61,14 +61,20 @@ it.
   it annotates prose: after whitespace or a line start, before a line end,
   whitespace or punctuation, with `turn<n><kind><n>` references only, and
   outside every literal span: fenced code (backticks or tildes, any length,
-  also in a blockquote or list, closed only by a bare fence line), indented
-  code, inline code between equal complete backtick runs within one paragraph
-  and outside blocks, single quotes (also multiline, with apostrophes inside
+  also in a blockquote or list, opened and closed only at up to three columns
+  past the container's content margin, closed only by a bare fence line, and
+  ended with its quote or list item, including a sibling or an empty item),
+  indented code (four columns past the margin, never inside a paragraph; a
+  heading, setext underline or thematic break ends the paragraph), inline
+  code between equal complete backtick runs within one leaf block (paragraph,
+  list item or quote paragraph; a backtick after an odd number of backslashes
+  opens nothing), quotes searched over the whole text so shell lines that
+  look like Markdown stay inside them, single quotes (also multiline, with apostrophes inside
   words), double quotes with escapes, curly and guillemet quotes. The same bytes inside a word, path, URL or
   literal stay, as does any other private-use glyph or sequence
   (`project-name`); prose beside a literal is still cleaned. A copy card that
   was only a citation mark is dropped and the answer kept (builder #447,
-  #448, #450). Source cards still come from
+  #448, #450, #451, #452). `MarkdownCodeLines` finds the code lines. Source cards still come from
   `sources` and the provider's citations.
 - The Search row adds "Follows the Agent model: <provider> · <model>." The
   Agent can keep its own model while the LLM row shows another ("1 custom",
@@ -88,7 +94,11 @@ it.
   spacing rule alone still read quoted commands, inline code and tilde,
   indented or blockquoted fences as prose (builder #450); a whole-text
   backtick search paired unequal runs and delimiters across paragraphs or
-  fences and hid real prose citations (builder #451).
+  fences and hid real prose citations (builder #451); a fence pattern with
+  unlimited leading whitespace read top-level indented code as a fence and an
+  overindented marker as a closer, so the line scanner follows CommonMark's
+  container margins instead (builder #452). HTML blocks are not recognised:
+  a fence inside one is still read as a fence.
 
 ## What we tested
 

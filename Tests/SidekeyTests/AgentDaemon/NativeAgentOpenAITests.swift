@@ -245,4 +245,91 @@ extension NativeAgentWebSearchTests {
         let infoLine = "Sample:\n\n```text\n```not-a-close\nkeep \(mark) here\n```"
         XCTAssertEqual(try finalAnswer(infoLine).answer, infoLine, "a fence line with text does not close the block")
     }
+
+    // MARK: - Builder #452: fence indentation counts from the container's margin
+
+    func testFenceIndentationCountsFromTheContainerMargin() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        func cleansProse(_ text: String, _ label: String) throws {
+            XCTAssertEqual(try finalAnswer(text).answer, text.replacingOccurrences(of: "Verified \(mark).", with: "Verified."), label)
+        }
+        for marker in ["```", "~~~"] {
+            // Four or more columns at the top level are indented code, never an opener.
+            for indent in ["    ", "       ", "        ", "\t", "   \t    "] {
+                try cleansProse("A code sample:\n\n\(indent)\(marker)text\n\nVerified \(mark).", "\(marker) opener indented \(indent.debugDescription)")
+            }
+            // A closer counts only at up to three columns; deeper, the line stays code.
+            for count in 0...8 {
+                let fixture = "Example:\n\n\(marker)text\n\(String(repeating: " ", count: count))\(marker)\nkeep \(mark) here\n\(marker)"
+                let expected = count <= 3 ? fixture.replacingOccurrences(of: "keep \(mark) here", with: "keep here") : fixture
+                XCTAssertEqual(try finalAnswer(fixture).answer, expected, "\(marker) closer with \(count) spaces")
+            }
+            // Inside containers the same rule counts from the content margin.
+            try cleansProse("123456. Example:\n        \(marker)text\n        prefix \(mark) suffix\n        \(marker)\n\nVerified \(mark).",
+                            "\(marker) at an ordered item's eight-column margin")
+            try cleansProse("- Outer:\n  - Inner:\n    \(marker)text\n    prefix \(mark) suffix\n    \(marker)\n\nVerified \(mark).",
+                            "\(marker) in a nested list")
+            try cleansProse("> > \(marker)text\n> > prefix \(mark) suffix\n> > \(marker)\n\nVerified \(mark).", "\(marker) in a nested quote")
+            try cleansProse("- Item:\n  \(marker)text\n  keep \(mark) here\n        \(marker)\n  still \(mark) code\n  \(marker)\n\nVerified \(mark).",
+                            "\(marker) overindented in a list item does not close")
+            // A quote or item that ends ends its fence.
+            try cleansProse("Quoted example:\n\n> \(marker)sh\n> echo \(mark) x\n\nVerified \(mark).", "\(marker) open in a quote that ends")
+            try cleansProse("- Item:\n  \(marker)sh\n  echo \(mark) x\nVerified \(mark).", "\(marker) open in a list item that ends")
+        }
+        try cleansProse("One stray ` delimiter.\r\n\r\nVerified \(mark).\r\n\r\nAnother stray ` delimiter.", "CRLF paragraphs")
+        try cleansProse("When using `prefix \(mark)\n    suffix` use care. Verified \(mark).", "an indented paragraph continuation is not code")
+        let continued = "printf '%s' 'prefix \(mark)\n    suffix'"
+        let continuedFinal = try finalAnswer("Use the exact command.", insert: continued, copy: continued)
+        XCTAssertEqual(copyText(continuedFinal.insert), continued, "indented quote continuation, Insert")
+        XCTAssertTrue(continuedFinal.actions.items.contains { copyText($0) == continued }, "indented quote continuation, Copy")
+        try cleansProse("> Quoted line with `code\nlazy` continuation.\n\nVerified \(mark).", "a lazy quote continuation keeps the paragraph")
+    }
+
+    func testListItemsHeadingsAndBreaksBoundCodeAndInlineDelimiters() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        func keeps(_ text: String, _ label: String) throws {
+            XCTAssertEqual(try finalAnswer(text).answer, text, label)
+        }
+        func cleansProse(_ text: String, _ label: String) throws {
+            XCTAssertEqual(try finalAnswer(text).answer, text.replacingOccurrences(of: "Verified \(mark).", with: "Verified."), label)
+        }
+        // A sibling item, any number or empty, starts a new item instead of continuing the paragraph.
+        try keeps("1. First\n2. ```sh\n   echo \(mark).\n   ```", "fence in a second ordered item")
+        try keeps("- 1. First\n  2. ~~~\n     code \(mark).\n     ~~~", "fence in a nested sibling item")
+        try cleansProse("-   First\n-\n  ~~~\n  code\nVerified \(mark).", "an empty sibling item ends with its fence")
+        // A blank line right after an empty item's marker ends the item.
+        try keeps("-\n\n    echo \(mark).", "indented code after an empty item")
+        for breakLine in ["\n", "\r\n", "\r"] {
+            try cleansProse(["-", "", "    ~~~", "  Verified \(mark).", "  ~~~"].joined(separator: breakLine),
+                            "an empty item does not hold the next lines, \(breakLine.debugDescription)")
+        }
+        // Headings, setext underlines and thematic breaks end a paragraph, so indented code may follow.
+        try keeps("## Example\n    echo \(mark).", "code after an ATX heading")
+        try keeps("Example\n---\n    echo \(mark).", "code after a setext heading")
+        try keeps("- > Summary\n  ## Example\n      echo \(mark).", "a heading ends a nested quote")
+        try keeps("- Summary\n  * * *\n      echo \(mark).", "a thematic break is not a list item")
+        try keeps("> Summary\n---\n    echo \(mark).", "a thematic break ends a quote")
+        // Inline delimiters pair only within one leaf block.
+        try cleansProse("> One stray `.\n>\n> Verified \(mark).\n> Another stray `.", "quote paragraphs")
+        try cleansProse("- One stray `.\n- Verified \(mark).\n- Another stray `.", "sibling items")
+        try cleansProse("Use \\` literally. Verified \(mark). This \\` is literal.", "escaped backticks")
+        try keeps("Literal \\\\`x \(mark). y`.", "an escaped backslash leaves the backtick an opener")
+        // Shell text is not Markdown: a quoted command keeps its bytes whatever its lines start with.
+        for prefix in ["- ", "# ", "1. ", "> "] {
+            for quote in ["'", "\""] {
+                let command = "printf %s \(quote)head\n\(prefix)body \(mark). tail\nend\(quote)"
+                let final = try finalAnswer("Use the exact command.", insert: command, copy: command)
+                XCTAssertEqual(copyText(final.insert), command, "quoted command with a \(prefix.debugDescription) line, Insert")
+                XCTAssertTrue(final.actions.items.contains { copyText($0) == command }, "quoted command with a \(prefix.debugDescription) line, Copy")
+            }
+        }
+    }
+
+    func testDeeplyNestedListsAreScannedInLinearTime() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        let text = String(repeating: "- ", count: 20_000) + "Verified \(mark)."
+        let started = Date()
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks(text), String(repeating: "- ", count: 20_000) + "Verified.")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "a quadratic scan takes many seconds here")
+    }
 }

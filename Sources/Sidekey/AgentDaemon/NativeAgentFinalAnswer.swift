@@ -115,8 +115,8 @@ struct NativeAgentFinalAnswer {
     /// references. It is removed, with the spaces before it, only where it
     /// annotates prose: after whitespace or at a line start, before the line
     /// end, whitespace or punctuation, and outside every literal span (fenced
-    /// code with backticks or tildes, also in a blockquote or list; indented
-    /// code; inline code between equal backtick runs in one paragraph; single
+    /// code with backticks or tildes, also in a blockquote or list, and
+    /// indented code, as `MarkdownCodeLines` finds them; inline code between equal backtick runs in one paragraph; single
     /// (also multiline), double (with escapes), curly and guillemet quotes). The same bytes inside a word, path, URL or literal stay, as does
     /// any other private-use glyph or sequence.
     /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
@@ -140,66 +140,75 @@ struct NativeAgentFinalAnswer {
     /// Literal spans of Markdown and shell text, in UTF-16 ranges.
     static func literalRanges(in text: String) -> [NSRange] {
         let string = text as NSString
-        var blocks: [NSRange] = []
-        // Fenced code (``` or ~~~, three or more, optionally in a blockquote
-        // or list) up to a fence line of the same character, at least the
-        // same length and nothing after it; indented code lines.
-        let opening = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]*(`{3,}|~{3,})")
-        let closing = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]*(`{3,}|~{3,})[ \\t]*$")
-        var open: (char: Character, length: Int, start: Int)?
-        var location = 0
-        for line in text.components(separatedBy: "\n") {
-            let length = (line as NSString).length
-            let lineRange = NSRange(location: location, length: length)
-            location += length + 1
-            func fence(_ regex: NSRegularExpression?) -> String? {
-                regex?.firstMatch(in: line, range: NSRange(location: 0, length: length))
-                    .map { (line as NSString).substring(with: $0.range(at: 1)) }
-            }
-            if let current = open {
-                if let marker = fence(closing), marker.first == current.char, marker.count >= current.length {
-                    blocks.append(NSRange(location: current.start, length: NSMaxRange(lineRange) - current.start))
-                    open = nil
-                }
-                continue
-            }
-            if let marker = fence(opening), let char = marker.first {
-                open = (char, marker.count, lineRange.location)
-            } else if line.hasPrefix("    ") || line.hasPrefix("\t") {
-                blocks.append(lineRange)
-            }
-        }
-        if let current = open { blocks.append(NSRange(location: current.start, length: string.length - current.start)) }
+        // Fenced and indented code lines and leaf block starts, after
+        // Markdown's container rules.
+        let structure = MarkdownCodeLines.structure(of: string)
+        let blocks = structure.code
 
-        // Inline code and quoted text are searched with the blocks blanked
-        // out, so a delimiter inside a block never pairs with one outside it.
+        // Delimiters are searched with the code lines blanked out, so one
+        // inside a block never pairs with one outside it.
         let masked = NSMutableString(string: text)
         for block in blocks {
-            let blank = (string.substring(with: block) as NSString)
-            var chars = [unichar](repeating: 0x20, count: block.length)
-            for index in 0..<block.length where blank.character(at: index) == 0x0A { chars[index] = 0x0A }
-            masked.replaceCharacters(in: block, with: String(utf16CodeUnits: chars, count: chars.count))
+            masked.replaceCharacters(in: block, with: String(repeating: " ", count: block.length))
         }
-        let search = masked as String
-        // Within one paragraph: never across a blank line.
-        let inParagraph = "(?:[^\\n]|\\n(?![ \\t]*\\n))"
-        let patterns = [
-            // Equal, complete backtick runs.
-            "(?<!`)(`+)(?!`)\(inParagraph)+?(?<!`)\\1(?!`)",
-            // Shell-style single quotes may span lines; an apostrophe inside a word stays inside.
-            "(?<![\\p{L}\\p{N}])'(?:[^'\\n]|\\n(?![ \\t]*\\n)|(?<=[\\p{L}\\p{N}])'(?=[\\p{L}\\p{N}]))*'(?![\\p{L}\\p{N}])",
-            // Double quotes with backslash escapes.
-            "(?<![\\p{L}\\p{N}])\"(?:[^\"\\\\\\n]|\\\\.|\\n(?![ \\t]*\\n))*\"(?![\\p{L}\\p{N}])",
-            "“[^”\\n]*”", "‘(?:[^’\\n]|(?<=[\\p{L}\\p{N}])’(?=[\\p{L}\\p{N}]))*’", "«[^»\\n]*»",
-        ]
+        let search = masked as NSString
         var ranges = blocks
+        // Inline code pairs only within one leaf block (paragraph, list item
+        // or quote paragraph).
+        let starts = structure.blockStarts + [string.length]
+        for (start, end) in zip(starts, starts.dropFirst()) where end > start {
+            ranges += inlineCode(in: search, range: NSRange(location: start, length: end - start))
+        }
+        // Quoted text in Markdown or a shell command may span lines whatever
+        // they start with, but never a blank line (LF, CRLF or CR).
+        let lineBreak = "(?:\\r\\n?|\\n)"
+        let patterns = [
+            // Shell-style single quotes; an apostrophe inside a word stays inside.
+            "(?<![\\p{L}\\p{N}])'(?:[^'\\r\\n]|\(lineBreak)(?![ \\t]*\(lineBreak))|(?<=[\\p{L}\\p{N}])'(?=[\\p{L}\\p{N}]))*'(?![\\p{L}\\p{N}])",
+            // Double quotes with backslash escapes.
+            "(?<![\\p{L}\\p{N}])\"(?:[^\"\\\\\\r\\n]|\\\\.|\(lineBreak)(?![ \\t]*\(lineBreak)))*\"(?![\\p{L}\\p{N}])",
+            "“[^”\\r\\n]*”", "‘(?:[^’\\r\\n]|(?<=[\\p{L}\\p{N}])’(?=[\\p{L}\\p{N}]))*’", "«[^»\\r\\n]*»",
+        ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for match in regex.matches(in: search, range: NSRange(location: 0, length: string.length)) {
-                ranges.append(match.range)
-            }
+            ranges += regex.matches(in: search as String, range: NSRange(location: 0, length: string.length)).map(\.range)
         }
         return ranges
+    }
+
+    /// Code spans: a backtick run up to the next run of the same length. A
+    /// backslash outside a span escapes the next character, so after an odd
+    /// number of backslashes a backtick opens nothing.
+    private static func inlineCode(in string: NSString, range: NSRange) -> [NSRange] {
+        let backtick: unichar = 0x60, backslash: unichar = 0x5C
+        let end = NSMaxRange(range)
+        func runEnd(_ index: Int) -> Int {
+            var cursor = index
+            while cursor < end, string.character(at: cursor) == backtick { cursor += 1 }
+            return cursor
+        }
+        var spans: [NSRange] = []
+        var index = range.location
+        while index < end {
+            let current = string.character(at: index)
+            if current == backslash { index += 2; continue }
+            guard current == backtick else { index += 1; continue }
+            let openEnd = runEnd(index), length = openEnd - index
+            var cursor = openEnd, close: Int?
+            while cursor < end {
+                guard string.character(at: cursor) == backtick else { cursor += 1; continue }
+                let closeEnd = runEnd(cursor)
+                if closeEnd - cursor == length { close = closeEnd; break }
+                cursor = closeEnd
+            }
+            if let close {
+                spans.append(NSRange(location: index, length: close - index))
+                index = close
+            } else {
+                index = openEnd
+            }
+        }
+        return spans
     }
 
     static func pasteText(_ raw: String) -> String {

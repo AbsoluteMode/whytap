@@ -380,12 +380,15 @@ enum OnboardingLanguageSearch {
 struct OnboardingLanguageList: View {
     let selected: AppLanguage?
     let choose: (AppLanguage?) -> Void
+    /// The height of the scrolling rows under the search field.
+    var rowsHeight: CGFloat = 248
     @State private var query: String
     @State private var highlighted = 0
     @FocusState private var focused: Bool
 
-    init(selected: AppLanguage?, query: String = "", choose: @escaping (AppLanguage?) -> Void) {
+    init(selected: AppLanguage?, query: String = "", rowsHeight: CGFloat = 248, choose: @escaping (AppLanguage?) -> Void) {
         self.selected = selected
+        self.rowsHeight = rowsHeight
         self.choose = choose
         _query = State(initialValue: query)
     }
@@ -429,7 +432,7 @@ struct OnboardingLanguageList: View {
                 }
                 .onChange(of: highlighted) { _, index in proxy.scrollTo(index) }
             }
-            .frame(height: 248)
+            .frame(height: rowsHeight)
         }
         .frame(width: 260)
         .background(OnboardingTheme.surface)

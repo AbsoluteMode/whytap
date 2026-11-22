@@ -155,7 +155,7 @@ struct TranslationView: View {
     // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
     @ViewBuilder private var subtitleContent: some View {
         let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live,
-                                        liveTranslation: subtitles.liveTranslation)
+                                        liveTranslation: subtitles.liveTranslation, liveID: subtitles.liveID)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
@@ -173,13 +173,18 @@ struct TranslationView: View {
         } else {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                // The box hugs its widest pair (up to the panel's inner width)
-                // and stays centred, so no empty strip runs beside the text.
+                // While a session runs, or pairs are on screen, the box has
+                // one fixed size, so its controls never move and no text
+                // reflows. Idle without pairs, it hugs its controls.
+                // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
-                    if showsOverlayControls { subtitleControls }
+                    if !subtitles.phase.isActive { subtitleControls }
                     if subtitles.issue != nil || !rows.isEmpty
                         || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
                         caption(rows)
+                            .frame(width: Self.overlayContentWidth,
+                                   height: subtitles.phase.isActive ? Self.captionHeight : Self.stoppedCaptionHeight,
+                                   alignment: .bottomLeading)
                     }
                     if let feature = subtitles.issue?.feature {
                         Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
@@ -189,34 +194,49 @@ struct TranslationView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                // While running, the controls cover the top of the caption on
+                // hover instead of pushing it: Stop and × stay in one place.
+                .overlay(alignment: .top) {
+                    if subtitles.phase.isActive && overlayHovered {
+                        subtitleControls
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Color.black.opacity(0.88),
+                                        in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
+                            .transition(.opacity)
+                    }
+                }
                 .shadow(radius: 5)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
                 .onHover { overlayHovered = $0 }
                 .contextMenu { subtitleMenu }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsOverlayControls)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: overlayHovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: subtitles.phase)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(10)
         }
     }
 
+    /// The running caption: five lines of the 18 pt translation, as many as
+    /// the original overlay showed.
+    static let captionHeight: CGFloat = 146
+    /// After Stop the controls return above the caption inside the same panel.
+    static let stoppedCaptionHeight: CGFloat = 108
+    /// The original's share of the width: Russian runs about a fifth longer
+    /// than English and is the line being read.
+    static let sourceFraction: CGFloat = 0.38
+
     /// The overlay panel is 760 pt wide: 10 pt outside and 16 pt inside the box.
     static let overlayContentWidth: CGFloat = 760 - 2 * 10 - 2 * 16
-
-    /// While subtitles run, the overlay shows only the caption; the controls
-    /// return on hover and whenever capture is not running.
-    private var showsOverlayControls: Bool { !subtitles.phase.isActive || overlayHovered }
 
     private var waitingWithoutAudio: Bool {
         subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
     }
 
-    /// Pairs when there are phrases, otherwise one status line. The box keeps
-    /// the overlay panel's height: pairs are bottom-anchored and only whole
-    /// pairs show, so the newest pair never moves and the oldest leaves at the
-    /// top in one piece; a new pair fades and slides in from the bottom. The
-    /// controls row, shown on hover, takes its height from the pairs.
+    /// Pairs when there are phrases, otherwise one status line. In the
+    /// overlay the caption has a fixed size: pairs are bottom-anchored with a
+    /// fixed column split, the live pair settles in place, and older lines
+    /// leave at the top as new ones push them up. Toolbox keeps whole pairs.
     @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
         if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
             captionText(status)
@@ -233,10 +253,12 @@ struct TranslationView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Subtitles")
         } else {
-            // Russian runs about a fifth longer than English and is the line
-            // being read: the grid gives the original only what it needs.
-            PairGridLayout(rowSpacing: 8, columnSpacing: 18, maxWidth: Self.overlayContentWidth,
-                           maxHeight: showsOverlayControls ? 108 : 146, inset: Self.bandInset) {
+            // Bottom-anchored, clipped at the top with a short fade: new text
+            // pushes older lines up smoothly, a line at a time.
+            SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: Self.sourceFraction,
+                              size: CGSize(width: Self.overlayContentWidth,
+                                           height: subtitles.phase.isActive ? Self.captionHeight : Self.stoppedCaptionHeight),
+                              inset: Self.bandInset) {
                 ForEach(rows) { row in
                     Group {
                         RoundedRectangle(cornerRadius: 7)
@@ -244,11 +266,15 @@ struct TranslationView: View {
                         sourceText(row)
                         translationText(row)
                     }
-                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                    .transition(.opacity)
                 }
             }
             .clipped()
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .mask {
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.14)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: rows)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Subtitles")
         }

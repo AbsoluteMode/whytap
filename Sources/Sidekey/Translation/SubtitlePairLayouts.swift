@@ -49,104 +49,63 @@ struct NewestRowsLayout: Layout {
     }
 }
 
-/// The overlay's pairs as one grid: every row is three subviews (its band,
-/// its original, its translation). One column split serves all visible rows
-/// so the columns line up, and it is chosen from the content: the original
-/// takes what it needs up to 45 % and the translation gets the rest, which
-/// keeps a translation from wrapping beside an empty strip. The grid reports
-/// the width its rows use, so the box hugs the text; only the newest rows
-/// that fit whole are shown, bottom-anchored.
-// WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-struct PairGridLayout: Layout {
+/// The overlay's pairs, laid out so text already on screen never moves
+/// sideways or reflows: the column split is fixed (the original gets
+/// `sourceFraction` of the width, the translation the rest), the size is the
+/// box's fixed caption area, and the newest row sits at the bottom. Every row
+/// is placed; the ones above the area are clipped by the caller, so an old
+/// pair leaves at the top a line at a time as new lines push it up, like the
+/// RealtimeTranslator caption. Every row is three subviews: its band, its
+/// original, its translation.
+// WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+struct SteadyPairsLayout: Layout {
     var rowSpacing: CGFloat
     var columnSpacing: CGFloat
-    var maxWidth: CGFloat
-    var maxHeight: CGFloat
-    /// Padding inside a row's band (zero when bands are off).
+    var sourceFraction: CGFloat
+    var size: CGSize
+    /// Padding inside a row's band.
     var inset = CGSize.zero
 
-    struct Plan {
-        var sourceWidth: CGFloat = 0
-        var translationWidth: CGFloat = 0
-        var rows: [(height: CGFloat, sourceY: CGFloat, translationY: CGFloat)] = []
-        var first = 0
-        var size = CGSize.zero
+    struct Columns: Equatable { var source: CGFloat; var translation: CGFloat }
+
+    /// Depends only on the width, never on the text.
+    func columns(width: CGFloat) -> Columns {
+        let inner = max(0, width - 2 * inset.width - columnSpacing)
+        let source = (inner * sourceFraction).rounded(.down)
+        return Columns(source: source, translation: inner - source)
     }
 
     private func groups(_ subviews: Subviews) -> [Range<Int>] {
         stride(from: 0, to: subviews.count - subviews.count % 3, by: 3).map { $0..<($0 + 3) }
     }
 
-    private func measure(_ subviews: Subviews, _ group: Range<Int>, source: CGFloat, translation: CGFloat)
+    private func measure(_ subviews: Subviews, _ group: Range<Int>, _ columns: Columns)
         -> (height: CGFloat, sourceY: CGFloat, translationY: CGFloat) {
-        let a = subviews[group.lowerBound + 1].dimensions(in: ProposedViewSize(width: source, height: nil))
-        let b = subviews[group.lowerBound + 2].dimensions(in: ProposedViewSize(width: translation, height: nil))
+        let a = subviews[group.lowerBound + 1].dimensions(in: ProposedViewSize(width: columns.source, height: nil))
+        let b = subviews[group.lowerBound + 2].dimensions(in: ProposedViewSize(width: columns.translation, height: nil))
         let baseline = max(a[VerticalAlignment.firstTextBaseline], b[VerticalAlignment.firstTextBaseline])
         let sourceY = baseline - a[VerticalAlignment.firstTextBaseline]
         let translationY = baseline - b[VerticalAlignment.firstTextBaseline]
         return (max(sourceY + a.height, translationY + b.height) + 2 * inset.height, sourceY, translationY)
     }
 
-    func plan(_ subviews: Subviews, width proposed: CGFloat?) -> Plan {
-        let groups = groups(subviews)
-        guard !groups.isEmpty else { return Plan() }
-        let width = min(proposed ?? maxWidth, maxWidth)
-        let inner = max(0, width - 2 * inset.width - columnSpacing)
-        let sourceNatural = groups.map { subviews[$0.lowerBound + 1].sizeThatFits(.unspecified).width }.max() ?? 0
-        let translationNatural = groups.map { subviews[$0.lowerBound + 2].sizeThatFits(.unspecified).width }.max() ?? 0
-        var plan = Plan()
-        if sourceNatural + translationNatural <= inner {
-            plan.sourceWidth = sourceNatural
-            plan.translationWidth = translationNatural
-        } else {
-            // Try splits from a quarter to 45 % of the width; keep the one
-            // with the fewest total lines (lowest height), then the widest
-            // translation. Only the newest rows matter: older ones leave.
-            let recent = groups.suffix(SubtitleCaption.maxPairs)
-            var best: (height: CGFloat, source: CGFloat)?
-            for step in 0...8 {
-                let source = min(sourceNatural, (inner * (0.25 + 0.025 * CGFloat(step))).rounded(.down))
-                let translation = min(translationNatural, inner - source)
-                let height = recent.reduce(0) { $0 + measure(subviews, $1, source: source, translation: translation).height }
-                if best == nil || height < best!.height - 0.5 { best = (height, source) }
-            }
-            plan.sourceWidth = best?.source ?? (inner * 0.4).rounded(.down)
-            plan.translationWidth = min(translationNatural, inner - plan.sourceWidth)
-        }
-        plan.rows = groups.map { measure(subviews, $0, source: plan.sourceWidth, translation: plan.translationWidth) }
-        var total: CGFloat = 0
-        plan.first = groups.count
-        for index in plan.rows.indices.reversed() {
-            let next = total + plan.rows[index].height + (plan.first == groups.count ? 0 : rowSpacing)
-            if next > maxHeight, plan.first < groups.count { break }
-            total = next
-            plan.first = index
-        }
-        let used = plan.sourceWidth + columnSpacing + plan.translationWidth + 2 * inset.width
-        plan.size = CGSize(width: min(width, used.rounded(.up)), height: min(total, maxHeight))
-        return plan
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        plan(subviews, width: proposal.width).size
-    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize { size }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let plan = plan(subviews, width: bounds.width)
+        let columns = columns(width: bounds.width)
         var y = bounds.maxY
-        for (index, group) in groups(subviews).enumerated().reversed() {
-            let row = plan.rows[index]
+        for group in groups(subviews).reversed() {
+            let row = measure(subviews, group, columns)
             y -= row.height
-            let top = index >= plan.first ? y : min(y, bounds.minY - row.height - rowSpacing)
-            subviews[group.lowerBound].place(at: CGPoint(x: bounds.minX, y: top), anchor: .topLeading,
+            subviews[group.lowerBound].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
                                              proposal: ProposedViewSize(width: bounds.width, height: row.height))
             subviews[group.lowerBound + 1].place(
-                at: CGPoint(x: bounds.minX + inset.width, y: top + inset.height + row.sourceY), anchor: .topLeading,
-                proposal: ProposedViewSize(width: plan.sourceWidth, height: nil))
+                at: CGPoint(x: bounds.minX + inset.width, y: y + inset.height + row.sourceY), anchor: .topLeading,
+                proposal: ProposedViewSize(width: columns.source, height: nil))
             subviews[group.lowerBound + 2].place(
-                at: CGPoint(x: bounds.minX + inset.width + plan.sourceWidth + columnSpacing,
-                            y: top + inset.height + row.translationY), anchor: .topLeading,
-                proposal: ProposedViewSize(width: plan.translationWidth, height: nil))
+                at: CGPoint(x: bounds.minX + inset.width + columns.source + columnSpacing,
+                            y: y + inset.height + row.translationY), anchor: .topLeading,
+                proposal: ProposedViewSize(width: columns.translation, height: nil))
             y -= rowSpacing
         }
     }

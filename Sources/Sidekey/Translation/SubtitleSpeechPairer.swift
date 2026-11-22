@@ -37,6 +37,16 @@ struct SubtitleSpeechPairer {
     private(set) var carry = ""
 
     var liveSource: String { String(source.map(\.character)).trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The live pair's original: the heard text up to its first sentence end.
+    /// The original runs ahead of the translation, and the words after that
+    /// end usually belong to the next pair; showing them here would move them
+    /// out of this row when it settles.
+    // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+    var liveSourceHead: String {
+        let text = liveSource
+        guard let end = SubtitleSegmenter.firstSentenceEnd(in: text), end < text.endIndex else { return text }
+        return text[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     /// The translation still being spoken, whole words only: the model
     /// streams parts of words ("ошиб" + "лась"), and a fragment is never shown.
     var liveTranslation: String {

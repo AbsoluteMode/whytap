@@ -216,4 +216,33 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(disabled.answer, "Verbatim \(mark).")
         XCTAssertEqual(copyText(disabled.insert), quotedCommand)
     }
+
+    // MARK: - Builder #451: delimiters pair only as Markdown and shells pair them
+
+    func testDelimitersPairOnlyWithinTheirOwnKindAndParagraph() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        func cleansProse(_ text: String, _ label: String) throws {
+            XCTAssertEqual(try finalAnswer(text).answer, text.replacingOccurrences(of: "Verified \(mark).", with: "Verified."), label)
+        }
+        try cleansProse("One stray ` delimiter.\n\nVerified \(mark).\n\nAnother stray ` delimiter.", "separate paragraphs")
+        try cleansProse("One stray `` delimiter. Verified \(mark). One stray ` delimiter.", "unequal runs")
+        try cleansProse("Example:\n\n~~~text\n  incomplete ` here\n~~~\n\nVerified \(mark).\n\n~~~text\n  another ` here\n~~~", "tilde fences")
+        try cleansProse("Example:\n\n```text\n  incomplete ` here\n```\n\nVerified \(mark).\n\n```text\n  another ` here\n```", "backtick fences")
+        try cleansProse("- Example:\n  ```sh\n  echo \(mark) x\n  ```\n\nVerified \(mark).", "fence in a list")
+        XCTAssertEqual(try finalAnswer("Literal ``some ` exact \(mark) bytes``; prose \(mark).").answer,
+                       "Literal ``some ` exact \(mark) bytes``; prose.", "matched double-backtick code")
+
+        let escaped = #"printf '%s' "lead \"quoted\" \#(mark) tail""#
+        let escapedFinal = try finalAnswer("Use the exact command.", insert: escaped, copy: escaped)
+        XCTAssertEqual(copyText(escapedFinal.insert), escaped, "escaped double quotes, Insert")
+        XCTAssertTrue(escapedFinal.actions.items.contains { copyText($0) == escaped }, "escaped double quotes, Copy")
+        let multiline = "printf '%s' 'head\nbody \(mark) tail\nend'"
+        let multilineFinal = try finalAnswer("Use the exact command.", insert: multiline, copy: multiline)
+        XCTAssertEqual(copyText(multilineFinal.insert), multiline, "multiline single quotes, Insert")
+        XCTAssertTrue(multilineFinal.actions.items.contains { copyText($0) == multiline }, "multiline single quotes, Copy")
+        let contraction = "They wrote 'it isn’t over and it hasn't changed \(mark) yet'."
+        XCTAssertEqual(try finalAnswer(contraction).answer, contraction, "apostrophes inside a quote")
+        let infoLine = "Sample:\n\n```text\n```not-a-close\nkeep \(mark) here\n```"
+        XCTAssertEqual(try finalAnswer(infoLine).answer, infoLine, "a fence line with text does not close the block")
+    }
 }

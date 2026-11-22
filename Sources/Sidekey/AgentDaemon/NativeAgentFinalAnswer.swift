@@ -115,9 +115,9 @@ struct NativeAgentFinalAnswer {
     /// references. It is removed, with the spaces before it, only where it
     /// annotates prose: after whitespace or at a line start, before the line
     /// end, whitespace or punctuation, and outside every literal span (fenced
-    /// code with backticks or tildes, also in a blockquote; indented code;
-    /// inline code of any backtick length; single, double and curly quoted
-    /// text). The same bytes inside a word, path, URL or literal stay, as does
+    /// code with backticks or tildes, also in a blockquote or list; indented
+    /// code; inline code between equal backtick runs in one paragraph; single
+    /// (also multiline), double (with escapes), curly and guillemet quotes). The same bytes inside a word, path, URL or literal stay, as does
     /// any other private-use glyph or sequence.
     /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
     static func withoutProviderCitationMarks(_ text: String) -> String {
@@ -140,43 +140,62 @@ struct NativeAgentFinalAnswer {
     /// Literal spans of Markdown and shell text, in UTF-16 ranges.
     static func literalRanges(in text: String) -> [NSRange] {
         let string = text as NSString
-        var ranges: [NSRange] = []
-        // Fenced code (``` or ~~~, three or more, optionally in a blockquote)
-        // up to a closing fence of the same character and at least the same
-        // length; indented code lines.
-        let fence = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]{0,3}(`{3,}|~{3,})")
+        var blocks: [NSRange] = []
+        // Fenced code (``` or ~~~, three or more, optionally in a blockquote
+        // or list) up to a fence line of the same character, at least the
+        // same length and nothing after it; indented code lines.
+        let opening = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]*(`{3,}|~{3,})")
+        let closing = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]*(`{3,}|~{3,})[ \\t]*$")
         var open: (char: Character, length: Int, start: Int)?
         var location = 0
         for line in text.components(separatedBy: "\n") {
-            let lineRange = NSRange(location: location, length: (line as NSString).length)
-            location += lineRange.length + 1
-            let marker = fence?.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length))
-                .map { (line as NSString).substring(with: $0.range(at: 1)) }
+            let length = (line as NSString).length
+            let lineRange = NSRange(location: location, length: length)
+            location += length + 1
+            func fence(_ regex: NSRegularExpression?) -> String? {
+                regex?.firstMatch(in: line, range: NSRange(location: 0, length: length))
+                    .map { (line as NSString).substring(with: $0.range(at: 1)) }
+            }
             if let current = open {
-                if let marker, marker.first == current.char, marker.count >= current.length {
-                    ranges.append(NSRange(location: current.start, length: NSMaxRange(lineRange) - current.start))
+                if let marker = fence(closing), marker.first == current.char, marker.count >= current.length {
+                    blocks.append(NSRange(location: current.start, length: NSMaxRange(lineRange) - current.start))
                     open = nil
                 }
                 continue
             }
-            if let marker, let char = marker.first {
+            if let marker = fence(opening), let char = marker.first {
                 open = (char, marker.count, lineRange.location)
             } else if line.hasPrefix("    ") || line.hasPrefix("\t") {
-                ranges.append(lineRange)
+                blocks.append(lineRange)
             }
         }
-        if let current = open { ranges.append(NSRange(location: current.start, length: string.length - current.start)) }
-        // Inline code and quoted text outside those blocks.
+        if let current = open { blocks.append(NSRange(location: current.start, length: string.length - current.start)) }
+
+        // Inline code and quoted text are searched with the blocks blanked
+        // out, so a delimiter inside a block never pairs with one outside it.
+        let masked = NSMutableString(string: text)
+        for block in blocks {
+            let blank = (string.substring(with: block) as NSString)
+            var chars = [unichar](repeating: 0x20, count: block.length)
+            for index in 0..<block.length where blank.character(at: index) == 0x0A { chars[index] = 0x0A }
+            masked.replaceCharacters(in: block, with: String(utf16CodeUnits: chars, count: chars.count))
+        }
+        let search = masked as String
+        // Within one paragraph: never across a blank line.
+        let inParagraph = "(?:[^\\n]|\\n(?![ \\t]*\\n))"
         let patterns = [
-            "(`+)[\\s\\S]+?(?<!`)\\1(?!`)",
-            "(?<![\\p{L}\\p{N}])'[^'\\n]*'(?![\\p{L}\\p{N}])",
-            "(?<![\\p{L}\\p{N}])\"[^\"\\n]*\"(?![\\p{L}\\p{N}])",
-            "“[^”\\n]*”", "‘[^’\\n]*’", "«[^»\\n]*»",
+            // Equal, complete backtick runs.
+            "(?<!`)(`+)(?!`)\(inParagraph)+?(?<!`)\\1(?!`)",
+            // Shell-style single quotes may span lines; an apostrophe inside a word stays inside.
+            "(?<![\\p{L}\\p{N}])'(?:[^'\\n]|\\n(?![ \\t]*\\n)|(?<=[\\p{L}\\p{N}])'(?=[\\p{L}\\p{N}]))*'(?![\\p{L}\\p{N}])",
+            // Double quotes with backslash escapes.
+            "(?<![\\p{L}\\p{N}])\"(?:[^\"\\\\\\n]|\\\\.|\\n(?![ \\t]*\\n))*\"(?![\\p{L}\\p{N}])",
+            "“[^”\\n]*”", "‘(?:[^’\\n]|(?<=[\\p{L}\\p{N}])’(?=[\\p{L}\\p{N}]))*’", "«[^»\\n]*»",
         ]
+        var ranges = blocks
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for match in regex.matches(in: text, range: NSRange(location: 0, length: string.length))
-            where !ranges.contains(where: { NSIntersectionRange($0, match.range).length > 0 && $0.length >= match.range.length && NSLocationInRange(match.range.location, $0) }) {
+            for match in regex.matches(in: search, range: NSRange(location: 0, length: string.length)) {
                 ranges.append(match.range)
             }
         }

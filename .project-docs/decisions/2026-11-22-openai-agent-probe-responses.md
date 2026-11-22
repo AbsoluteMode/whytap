@@ -61,8 +61,10 @@ it.
   it annotates prose: after whitespace or a line start, before a line end,
   whitespace or punctuation, with `turn<n><kind><n>` references only, and
   outside every literal span: fenced code (backticks or tildes, any length,
-  also in a blockquote), indented code, inline code, and single, double,
-  curly or guillemet quoted text. The same bytes inside a word, path, URL or
+  also in a blockquote or list, closed only by a bare fence line), indented
+  code, inline code between equal complete backtick runs within one paragraph
+  and outside blocks, single quotes (also multiline, with apostrophes inside
+  words), double quotes with escapes, curly and guillemet quotes. The same bytes inside a word, path, URL or
   literal stay, as does any other private-use glyph or sequence
   (`project-name`); prose beside a literal is still cleaned. A copy card that
   was only a citation mark is dropped and the answer kept (builder #447,
@@ -84,7 +86,9 @@ it.
   markup everywhere still erased it from quoted commands, paths and URLs and
   rejected an answer whose only copy card was a mark (builder #448); a
   spacing rule alone still read quoted commands, inline code and tilde,
-  indented or blockquoted fences as prose (builder #450).
+  indented or blockquoted fences as prose (builder #450); a whole-text
+  backtick search paired unequal runs and delimiters across paragraphs or
+  fences and hid real prose citations (builder #451).
 
 ## What we tested
 

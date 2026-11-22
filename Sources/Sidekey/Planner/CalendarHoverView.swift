@@ -425,6 +425,11 @@ struct CalendarHoverView: View {
                             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
                     }
                 }
+                if connections.appleAccessOff {
+                    CalendarHoverButton { PermissionsHelper.openCalendarsSettings() } label: {
+                        Text("Open Privacy Settings").font(.system(size: 11, weight: .medium)).padding(8)
+                    }.accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
+                }
                 if connectionFlow.working {
                     CalendarHoverButton { connectionFlow.cancel() } label: {
                         Text("Cancel").font(.system(size: 11)).padding(8)

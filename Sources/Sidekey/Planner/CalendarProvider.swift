@@ -139,7 +139,10 @@ enum CalendarEventMerger {
 }
 
 enum CalendarConnectionError: Error, LocalizedError {
-    case invalidResponse, signInRequired, denied, cancelled, timeout, keychain, configuration, unavailable, publicReviewPending, comingSoon
+    /// macOS asks once; after a refusal only System Settings can allow access.
+    static let appleAccessOffMessage = "Whytap has no access to Calendar on this Mac. Turn on Whytap in System Settings → Privacy & Security → Calendars (Full Access)."
+
+    case invalidResponse, signInRequired, denied, cancelled, timeout, keychain, configuration, unavailable, publicReviewPending, comingSoon, appleAccessOff
     case http(Int)
 
     var errorDescription: String? {
@@ -153,6 +156,7 @@ enum CalendarConnectionError: Error, LocalizedError {
         case .configuration: return "Check the OAuth client configuration and registered redirect address."
         case .publicReviewPending: return "Public calendar sign-in is awaiting provider approval."
         case .comingSoon: return CalendarAvailability.message
+        case .appleAccessOff: return CalendarConnectionError.appleAccessOffMessage
         case .unavailable: return "Couldn’t reach the calendar service. Check your connection and retry."
         case .http(403): return "Access denied. Check calendar permissions and your organization’s policy."
         case .http(429): return "The calendar service is busy. Wait a little before refreshing."

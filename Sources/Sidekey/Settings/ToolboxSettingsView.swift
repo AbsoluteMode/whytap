@@ -705,9 +705,9 @@ struct ToolboxTileView: View {
     let onTap: () -> Void
 
     private static let tileSize: CGFloat = 56
-    private static let pressSlop: CGFloat = 4
     @State private var isHovered = false
-    @GestureState private var isPressed = false
+    @StateObject private var pointer = ToolboxTilePointerTracker()
+    @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Hover and press tint over the circle: MacButton's 10 % / 18 %.
@@ -765,9 +765,17 @@ struct ToolboxTileView: View {
                         // Hover and press over the whole tile tint the circle,
                         // as MacButton does: selection and focus stay distinct.
                         Circle().fill(MacSettingsTheme.text.opacity(Self.highlightOpacity(
-                            hovered: isHovered, pressed: isPressed)))
+                            hovered: isHovered, pressed: pointer.isPressed)))
                     )
                     .frame(width: Self.tileSize, height: Self.tileSize)
+                    .overlay(
+                        // Keyboard focus only: a circle around the circle.
+                        Circle()
+                            .strokeBorder(MacSettingsTheme.accent, lineWidth: 2)
+                            .padding(-4)
+                            .opacity(isFocused && !pointer.focusFromPointer ? 1 : 0)
+                            .accessibilityHidden(true)
+                    )
 
                 Image(systemName: sfSymbol)
                     .font(.system(size: 20, weight: .regular))
@@ -814,21 +822,26 @@ struct ToolboxTileView: View {
                 .frame(width: Self.tileSize, height: 26)
         }
         .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+        // The tile carries no gesture besides the tap: `.draggable` around it
+        // (catalog and hover row) must own every drag. A press gesture here
+        // (#400) cost the user dragging tiles; press and hover are observed
+        // without taking part in gesture recognition.
+        // WHY: .project-docs/decisions/2026-11-22-toolbox-tile-drag.md
+        .onHover { hovering in
+            isHovered = hovering
+            pointer.setHovering(hovering)
+        }
         .onTapGesture { onTap() }
-        // Pressed state only: the gesture never completes, so the tap above
-        // still selects; release, or moving more than a few points (a drag),
-        // ends it and `@GestureState` resets the tint.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: .infinity, maximumDistance: Self.pressSlop)
-                .updating($isPressed) { pressing, state, _ in state = pressing }
-        )
+        .onDisappear { pointer.setHovering(false) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: isHovered)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: isPressed)
-        // Like a native button: reached by keyboard navigation, never focused
-        // by a click, and its focus ring follows the circle, not the tile.
-        .focusable(interactions: .activate)
-        .contentShape(.focusEffect, ToolboxTileFocusShape(diameter: Self.tileSize))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: pointer.isPressed)
+        // The same focus behavior that coexisted with `.draggable` before
+        // #400, without the system's rectangular ring: a click that focuses
+        // the tile shows nothing, keyboard focus shows the circle ring above.
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .onChange(of: isFocused) { _, focused in pointer.focusChanged(focused) }
         .onKeyPress(.return) { onTap(); return .handled }
         .onKeyPress(.space) { onTap(); return .handled }
         .accessibilityAction { onTap() }
@@ -839,12 +852,53 @@ struct ToolboxTileView: View {
     }
 }
 
-/// The tile's circle at the top of its frame: the shape of its focus ring.
-struct ToolboxTileFocusShape: Shape {
-    let diameter: CGFloat
+/// Press and pointer-focus state of one Toolbox tile, read from a local
+/// mouse monitor that only observes: it returns every event unchanged and
+/// exists only while the pointer is over the tile, so it never competes with
+/// `.draggable` or the tap. A drag keeps the tile pressed until the pointer
+/// leaves it.
+// WHY: .project-docs/decisions/2026-11-22-toolbox-tile-drag.md
+@MainActor
+final class ToolboxTilePointerTracker: ObservableObject {
+    @Published private(set) var isPressed = false
+    /// Focus that a click gave the tile: no focus ring for it.
+    @Published private(set) var focusFromPointer = false
+    /// AppKit moves focus on mouse down and SwiftUI reports it before the
+    /// mouse up is handled, so only focus gained while the button is held is
+    /// the click's. A finished click leaves nothing behind: a later Tab onto
+    /// the hovered tile shows the ring.
+    private var buttonIsDown = false
+    private var monitor: Any?
 
-    func path(in rect: CGRect) -> Path {
-        Path(ellipseIn: CGRect(x: rect.midX - diameter / 2, y: rect.minY,
-                               width: diameter, height: diameter))
+    func setHovering(_ hovering: Bool, installsMonitor: Bool = true) {
+        if hovering {
+            guard installsMonitor, monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+                self?.observe(event.type)
+                return event
+            }
+        } else {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            isPressed = false
+            buttonIsDown = false
+        }
+    }
+
+    func observe(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDown:
+            isPressed = true
+            buttonIsDown = true
+        case .leftMouseUp:
+            isPressed = false
+            buttonIsDown = false
+        default:
+            break
+        }
+    }
+
+    func focusChanged(_ focused: Bool) {
+        focusFromPointer = focused && buttonIsDown
     }
 }

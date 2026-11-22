@@ -3,88 +3,103 @@ import SwiftUI
 import XCTest
 @testable import Sidekey
 
-/// The tile's press tint must not take the click from selection: a synthetic
-/// mouse down/up still selects, the circle is tinted only while the button is
-/// held, and a drag ends the press without selecting. SwiftUI gestures only
-/// receive events in an ordered window, so the test orders one far outside
-/// every display at zero opacity; it never becomes key or shows on screen.
-// WHY: .project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md
+/// Toolbox tiles must stay draggable (catalog -> hover, reorder in hover).
+/// #400 added a press gesture to the tile and the user could no longer drag
+/// tiles. A real drag cannot be tested: it starts a system drag session that
+/// waits for the physical mouse. So the tile's gesture surface is pinned to
+/// what coexists with `.draggable` (one tap), and press/hover/focus feedback
+/// is checked on the observer that replaced the gesture.
+// WHY: .project-docs/decisions/2026-11-22-toolbox-tile-drag.md
 @MainActor
 final class ToolboxTileInteractionTests: XCTestCase {
-    private func host(onTap: @escaping () -> Void) -> (NSWindow, NSHostingView<AnyView>) {
-        let tile = ToolboxTileView(title: "Notify", sfSymbol: "bell", isSelected: false, isLocked: false,
-                                   isAdded: false, onTap: onTap)
-            .padding(20)
-            .background(MacSettingsTheme.bgCard)
-        let host = NSHostingView(rootView: AnyView(tile))
-        host.appearance = NSAppearance(named: .aqua)
-        host.frame = NSRect(x: 0, y: 0, width: 100, height: 130)
-        let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        window.alphaValue = 0
-        window.setFrameOrigin(NSPoint(x: -30_000, y: -30_000))
-        window.orderFrontRegardless()
-        host.layoutSubtreeIfNeeded()
-        return (window, host)
+    private func source(_ path: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
     }
 
-    private func mouse(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow) -> NSEvent {
-        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                           clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+    private func tileSource() throws -> Substring {
+        let toolbox = try source("Sources/Sidekey/Settings/ToolboxSettingsView.swift")
+        let start = try XCTUnwrap(toolbox.range(of: "struct ToolboxTileView: View {"))
+        let end = try XCTUnwrap(toolbox.range(of: "final class ToolboxTilePointerTracker"))
+        return toolbox[start.lowerBound..<end.lowerBound]
     }
 
-    private func spin() { RunLoop.main.run(until: Date().addingTimeInterval(0.15)) }
+    // MARK: - Drag stays possible
 
-    private func circleColor(_ host: NSView) -> NSColor? {
-        let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
-        host.cacheDisplay(in: host.bounds, to: rep)
-        // A point inside the circle, clear of the symbol (circle spans x 22...78, y 20...76 from top).
-        let x = Int(Double(rep.pixelsWide) * 30 / 100), y = Int(Double(rep.pixelsHigh) * 48 / 130)
-        return rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+    func test_tile_has_no_gesture_that_competes_with_draggable() throws {
+        let tile = try tileSource()
+        for forbidden in ["simultaneousGesture", "highPriorityGesture", ".gesture(", "LongPressGesture",
+                          "DragGesture", "@GestureState", "onLongPressGesture", "Button(",
+                          "focusable(interactions:"] {
+            XCTAssertFalse(tile.contains(forbidden), "ToolboxTileView must not use \(forbidden): it blocks .draggable")
+        }
+        XCTAssertEqual(tile.components(separatedBy: ".onTapGesture").count - 1, 1, "exactly one tap")
+        XCTAssertTrue(tile.contains(".focusable()"), "the focus form that coexisted with .draggable before #400")
     }
 
-    func test_click_selects_and_press_tints_only_while_held() throws {
-        var taps = 0
-        let (window, host) = host { taps += 1 }
-        defer { window.close() }
-        // Circle centre in window coordinates (origin bottom-left).
-        let centre = NSPoint(x: 50, y: 130 - 48)
-        let idle = try XCTUnwrap(circleColor(host))
+    func test_catalog_and_hover_tiles_are_draggable_and_accepted() throws {
+        let toolbox = try source("Sources/Sidekey/Settings/ToolboxSettingsView.swift")
+        XCTAssertTrue(toolbox.contains("tile.draggable(tool.rawValue)"), "hover tiles reorder by drag")
+        XCTAssertTrue(toolbox.contains(".draggable(tool.rawValue) {"), "catalog tiles drag onto hover")
 
-        window.sendEvent(mouse(.leftMouseDown, at: centre, in: window))
-        spin()
-        let held = try XCTUnwrap(circleColor(host))
-        window.sendEvent(mouse(.leftMouseUp, at: centre, in: window))
-        spin()
-        let released = try XCTUnwrap(circleColor(host))
-
-        XCTAssertEqual(taps, 1, "the press gesture must not swallow the click")
-        XCTAssertLessThan(held.brightnessComponent, idle.brightnessComponent - 0.02, "pressed tints the circle")
-        XCTAssertEqual(released.brightnessComponent, idle.brightnessComponent, accuracy: 0.01, "release clears it")
-        XCTAssertFalse(window.isKeyWindow)
-        XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) }, "never on a display")
+        let defaults = UserDefaults(suiteName: "ToolboxTileInteractionTests.\(UUID().uuidString)")!
+        let store = HoverLayoutStore(defaults: defaults)
+        XCTAssertTrue(store.placeTool(.calendar, at: store.lockSlotIndex), "a catalog tool drops onto Add")
+        XCTAssertTrue(store.placeTool(.calendar, at: 0), "a hover tool reorders")
+        XCTAssertEqual(store.slots.first, .calendar)
     }
 
-    func test_a_drag_ends_the_press_and_does_not_select() throws {
-        var taps = 0
-        let (window, host) = host { taps += 1 }
-        defer { window.close() }
-        let centre = NSPoint(x: 50, y: 130 - 48)
-        let idle = try XCTUnwrap(circleColor(host))
+    // MARK: - Feedback without gestures
 
-        window.sendEvent(mouse(.leftMouseDown, at: centre, in: window))
-        spin()
-        window.sendEvent(mouse(.leftMouseDragged, at: NSPoint(x: centre.x + 12, y: centre.y), in: window))
-        spin()
-        let dragged = try XCTUnwrap(circleColor(host))
-        window.sendEvent(mouse(.leftMouseUp, at: NSPoint(x: centre.x + 12, y: centre.y), in: window))
-        spin()
+    func test_pointer_tracker_press_follows_the_button_and_hover() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.setHovering(true, installsMonitor: false)
+        XCTAssertFalse(tracker.isPressed)
+        tracker.observe(.leftMouseDown)
+        XCTAssertTrue(tracker.isPressed)
+        tracker.observe(.leftMouseUp)
+        XCTAssertFalse(tracker.isPressed)
 
-        XCTAssertEqual(dragged.brightnessComponent, idle.brightnessComponent, accuracy: 0.01,
-                       "moving past the slop clears the press tint")
-        XCTAssertEqual(taps, 0, "a drag is not a click")
+        // A drag session swallows the mouse up; leaving the tile resets it.
+        tracker.observe(.leftMouseDown)
+        tracker.setHovering(false)
+        XCTAssertFalse(tracker.isPressed)
+    }
+
+    func test_click_focus_shows_no_ring_keyboard_focus_does() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.observe(.leftMouseDown)
+        tracker.focusChanged(true)
+        XCTAssertTrue(tracker.focusFromPointer, "focus gained during a click draws no ring")
+        tracker.observe(.leftMouseUp)
+        tracker.focusChanged(false)
+        XCTAssertFalse(tracker.focusFromPointer)
+        tracker.focusChanged(true)
+        XCTAssertFalse(tracker.focusFromPointer, "Tab focus draws the ring")
+    }
+
+    /// Builder finding on 21b7abe9 (its probe, kept as written): a finished
+    /// click that moved no focus left its flag set, so the next Tab onto the
+    /// hovered tile showed no ring.
+    func test_keyboard_focus_after_a_mouse_sequence_that_did_not_focus_the_tile_shows_the_ring() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.setHovering(true, installsMonitor: false)
+        tracker.observe(.leftMouseDown)
+        tracker.observe(.leftMouseUp)
+        XCTAssertFalse(tracker.isPressed)
+        tracker.focusChanged(true)
+        XCTAssertFalse(tracker.focusFromPointer, "a completed mouse sequence must not hide later keyboard focus")
+    }
+
+    func test_leaving_the_tile_mid_press_never_marks_a_later_focus_as_a_click() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.setHovering(true, installsMonitor: false)
+        tracker.observe(.leftMouseDown)   // a drag starts; its mouse up is swallowed
+        tracker.setHovering(false)
+        tracker.focusChanged(true)
+        XCTAssertFalse(tracker.focusFromPointer)
+        XCTAssertFalse(tracker.isPressed)
     }
 
     func test_highlight_matches_mac_button() {
@@ -92,5 +107,35 @@ final class ToolboxTileInteractionTests: XCTestCase {
         XCTAssertEqual(ToolboxTileView.highlightOpacity(hovered: true, pressed: false), 0.10)
         XCTAssertEqual(ToolboxTileView.highlightOpacity(hovered: true, pressed: true), 0.18)
         XCTAssertEqual(ToolboxTileView.highlightOpacity(hovered: false, pressed: true), 0.18)
+    }
+
+    /// A click still selects. No `.draggable` here, so no drag session can
+    /// start; the window is ordered far outside every display at zero opacity
+    /// (SwiftUI only routes events to an ordered window) and is never key.
+    func test_click_selects() throws {
+        var taps = 0
+        let tile = ToolboxTileView(title: "Notify", sfSymbol: "bell", isSelected: false, isLocked: false,
+                                   isAdded: false, onTap: { taps += 1 })
+            .padding(20)
+        let host = NSHostingView(rootView: tile)
+        host.frame = NSRect(x: 0, y: 0, width: 100, height: 130)
+        let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.alphaValue = 0
+        window.setFrameOrigin(NSPoint(x: -30_000, y: -30_000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: 50, y: 82), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(taps, 1)
+        XCTAssertFalse(window.isKeyWindow)
+        XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) }, "never on a display")
     }
 }

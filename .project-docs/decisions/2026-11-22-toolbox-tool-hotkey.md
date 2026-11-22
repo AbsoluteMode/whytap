@@ -2,7 +2,7 @@
 id: toolbox-tool-hotkey-2026-11-22
 type: decision
 title: Settings -> Toolbox sets a tool's hotkey at the top of its pane, and a selected tile is a soft accent wash
-summary: A selected Toolbox tool shows a pinned Hotkey block (Set, or the current keys with Change and Remove) that saves at once through the Hotkeys Save path and records with the recorder shared with Settings -> Hotkeys; the selected tile is an accent wash on its circle with a bold caption, and tiles take keyboard focus like native buttons, with a circular focus ring.
+summary: A selected Toolbox tool shows a pinned Hotkey block (Set, or the current keys with Change and Remove) that saves at once through the Hotkeys Save path and records with the recorder shared with Settings -> Hotkeys; the selected tile is an accent wash on its circle with a bold caption, and keyboard focus draws a ring around the tile circle.
 status: confirmed
 tags: [settings, toolbox, hotkeys, accessibility, design]
 canonical_for: [toolbox-tool-hotkey, toolbox-tile-selection]
@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/ToolboxHotkeyBlockTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-20-toolbox-mini-apps.md, 2026-10-18-toolbox-drag-feedback.md, 2026-11-20-toolbox-system-background.md]
+related: [2026-11-22-toolbox-tile-drag.md, 2026-10-20-toolbox-mini-apps.md, 2026-10-18-toolbox-drag-feedback.md, 2026-11-20-toolbox-system-background.md]
 ---
 
 # Context
@@ -70,16 +70,13 @@ and caption. That rectangle was what looked crude.
   viewport's minimum content height is 260 pt instead of 330 pt, so the
   Hotkey block and the start of the tool fit at the minimum Settings size.
 - **Selected tile:** an accent wash (20 %) fills the circle, the symbol turns
-  accent and the caption becomes semibold in the label color; no outline. Tiles
-  use `.focusable(interactions: .activate)`: like native buttons they are
-  reached by keyboard navigation and are never focused by a click, and
-  `ToolboxTileFocusShape` gives the system focus ring the circle's shape.
+  accent and the caption becomes semibold in the label color; no outline.
   Hover and press over the whole tile tint the circle like `MacButton`
   (10 % / 18 % of the label color) and hover lifts the caption to the label
-  color. Press is a never-completing `LongPressGesture` with a 4 pt slop in
-  `@GestureState`, simultaneous with the tap, so a click still selects and a
-  drag ends the press; the tile stays a plain view for `.draggable`
-  (FB14518001).
+  color. Keyboard focus draws a ring around the circle; a click's focus draws
+  none. How focus and press are observed changed after release, because the
+  first version (button-like focus and a press gesture) stopped tile dragging:
+  see 2026-11-22-toolbox-tile-drag.md.
 
 # Why
 

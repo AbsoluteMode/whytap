@@ -922,16 +922,18 @@ Input language offer:
 
 Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   the drops UI and its switch come after the visual is approved):
-  finishDropDelivery captures the target app's own focused element right
-  before Cmd+V (metadata only; never Whytap's own editors), it must still be
-  focused right after the paste, and DropLearningCoordinator reads it once 5 s
-  later, only if it is still that app's focused element and DropEditFieldGate
+  AutoPasteEngine.paste hands over the field at the paste boundary (after
+  focus restore, right before Cmd+V): the system-wide focused element of the
+  frontmost target app, metadata only, never Whytap's own editors.
+  DropLearningCoordinator reads it once 5 s later, only if that app is still
+  frontmost, the same element still has keyboard focus and DropEditFieldGate
   allows it (metadata before any text, fail closed: AXSecureTextField, secure
   event input, terminals and password managers by bundle ID, own process,
-  unknown app, non-text role, any AX error but a missing attribute); the text
-  is read once, bounded to 20,000 UTF-16 units, and a non-string value skips.
-  Switching learning or calibration off stops a scheduled read. It compares with what
-  reached the field (a rich paste's plainText), aligns the take inside the
+  unknown app, non-text role, any AX error but a missing attribute). The
+  field must report its length (at most 20,000 UTF-16 units) and only that
+  range is requested (AXStringForRange); no length means no read.
+  Switching learning or calibration off stops a scheduled read. It
+  compares with what reached the field (a rich paste's plainText), aligns the take inside the
   field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
   DropLearningClassifier turns edits into candidates without a model: a
   sound-alike term -> Vocab (only if the wrong word is in the provider's raw
@@ -950,7 +952,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   notification). Hidden calibration (sidekey.dropLearning.calibration):
   reads until the field holds still (<=30 s), journals to Application
   Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
-  ledger, dry-run Y, 0700 folder / 0600 file without following links, ends
+  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
+  links, ends
   itself after 14 days (checked at launch, hourly and before every read) and
   deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler

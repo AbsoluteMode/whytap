@@ -66,8 +66,9 @@ final class DropLearningJournal {
     }
 
     /// Appends only to a private destination: the folder is a real 0700
-    /// directory, the file is a regular file of this user opened without
-    /// following links, and it is made 0600 before anything is written.
+    /// directory, the file is a regular file of this user with one name
+    /// (no hard link), opened without following links, and it is made 0600
+    /// before anything is written.
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
     func append(_ entry: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(entry),
@@ -85,8 +86,10 @@ final class DropLearningJournal {
         guard fd >= 0 else { return }
         defer { close(fd) }
         var info = stat()
+        // A hard link would make this write land in another named file:
+        // only a file with this one name is ever changed.
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_uid == getuid(),
-              fchmod(fd, 0o600) == 0 else { return }
+              info.st_nlink == 1, fchmod(fd, 0o600) == 0 else { return }
         _ = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
     }
 

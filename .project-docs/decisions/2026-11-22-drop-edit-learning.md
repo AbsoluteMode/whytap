@@ -36,15 +36,19 @@ that rewrites what the provider keeps getting wrong.
 
 ## Decision
 
-- **One read of the same field.** Right before Cmd+V the target app's own
-  focused element is captured from its identity and security metadata only;
-  right after the paste it must still be that app's focused element, so a
-  field focused during the paste delay is never read. Five seconds later it is
-  read once, only if it is still that focused element and the gate still
-  allows it: the length is checked first when the field reports it, then the
-  text is read once and bounded to 20,000 UTF-16 units. A changed, closed or
-  emptied field (Enter in a messenger), an AX error or a field without a string
-  value is skipped silently. Whytap's own editors are never read.
+- **One read of the same field.** At the paste boundary, after focus is
+  back on the target and right before Cmd+V, the paste engine hands over the
+  element that has keyboard focus (the system-wide focused element of the
+  frontmost app), from its identity and security metadata only. Five seconds
+  later it is read once, only if that app is still frontmost, the same
+  element still has keyboard focus and the gate still allows it. An app keeps
+  its own focused element while another app is in front, so that alone never
+  counts as focus. The transfer is bounded before it happens: the field must
+  report its length (at most 20,000 UTF-16 units) and only that range is
+  requested through AXStringForRange; a field that reports no length or
+  cannot return a range is not read at all. A changed, closed or emptied
+  field (Enter in a messenger), an AX error or a non-string value is skipped
+  silently. Whytap's own editors are never read.
 - **Own fail-closed gate** (`DropEditFieldGate`). `PasteTargetValidator` is not
   a password gate: it accepts any text field before its subrole and says yes
   on AX errors. The gate refuses AXSecureTextField, secure event input,
@@ -109,7 +113,8 @@ that rewrites what the provider keeps getting wrong.
   missed) to Application Support/<bundle id>/drop-learning/calibration.jsonl,
   counts in its own ledger and is a dry run: Y saves nothing. The journal is
   written only into a real 0700 directory of this user, through a regular
-  file opened without following links and made 0600 before each write. It
+  file with one name (a hard link is refused) opened without following links
+  and made 0600 before each write. It
   ends itself 14 days after it was first seen; expiry and switching it off are
   checked at launch, every hour and before every read and journal write, so a
   read already scheduled stops and the journal and its ledger are deleted
@@ -159,6 +164,12 @@ before Filler. Budget: per-route limits, Cyrillic, URL size, dedupe.
 Builder review of PR #406 (queue #409) found the gate reading the value
 before its checks, capture after the paste delay, calibration continuing after
 opt-out, a journal accepting a 0644 file and fillers in protected code counted
-as cut; all five were fixed with regression tests before integration.
+as cut; all five were fixed with regression tests before integration. The
+second review (queue #412) found a full value read when the field reports
+no length, the app's own focused element counted as focus after the user
+switched apps, and the journal writing through a hard link; the read now
+needs a length and requests only that range, focus is the system-wide
+focused element of the frontmost app captured inside the paste engine
+right before Cmd+V, and the journal refuses a file with more than one name.
 
 2026-11-22 · ORCH-TASK 72 · PR #406: candidate logic (drops UI follows)

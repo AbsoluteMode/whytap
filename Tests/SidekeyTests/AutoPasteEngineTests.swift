@@ -40,6 +40,33 @@ final class AutoPasteEngineTests: XCTestCase {
         XCTAssertTrue(env.postedEvents[3].flags.isEmpty)
     }
 
+    /// Learning from edits captures the field at the paste boundary: after
+    /// focus is back on the target, before any key of Cmd+V is posted.
+    func testBeforeCommandVRunsAfterFocusRestoreAndBeforeTheFirstKey() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        env.frontmost = Self.targetB
+        env.frontmostAfterActivate = Self.targetA
+        var seen: (events: Int, activated: [pid_t])?
+        let result = await engine.paste("hello", beforeCommandV: { seen = (env.postedEvents.count, env.activatedPids) })
+        XCTAssertTrue(result)
+        XCTAssertEqual(seen?.events, 0)
+        XCTAssertEqual(seen?.activated, [Self.targetA.pid])
+        XCTAssertEqual(env.postedEvents.count, 4)
+    }
+
+    func testBeforeCommandVNeverRunsWhenNoCmdVIsPosted() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true,
+                          pasteboardWriteSucceeds: false)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        var called = false
+        let result = await engine.paste("hello", beforeCommandV: { called = true })
+        XCTAssertFalse(result)
+        XCTAssertFalse(called)
+    }
+
     func testPasteHappyPathEmitsExpectedLogLineSequence() async {
         let env = TestEnv(
             frontmost: Self.targetA,

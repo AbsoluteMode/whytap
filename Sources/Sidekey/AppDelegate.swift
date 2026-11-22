@@ -1343,10 +1343,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliverDropTranscript(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
+    private func deliverDropTranscript(
+        _ text: String,
+        formatting: SmartFormattingProfile = .plain,
+        beforeCommandV: (() -> Void)? = nil
+    ) async -> Bool {
         guard !text.isEmpty else { return false }
 
-        return await autoPasteEngine.paste(text, formatting: formatting)
+        return await autoPasteEngine.paste(text, formatting: formatting, beforeCommandV: beforeCommandV)
     }
 
     private func finishDropDelivery(
@@ -1359,12 +1363,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
-        // Whytap's own editors are never read. The target app's focused field
-        // is captured before Cmd+V (metadata only) and read once later only
-        // if it is still that field. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-        let learningField = learning != nil && !autoPasteEngine.hasLocalDropTarget
-            ? dropLearning.prepareDelivery(targetPID: targetPID) : nil
-        let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
+        // Whytap's own editors are never read. The focused field is captured
+        // at the paste boundary, right before Cmd+V (metadata only), and read
+        // once later only if it is still the focused field of the frontmost
+        // app. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        var learningField: DropEditFieldHandle?
+        let wantsField = learning != nil && !autoPasteEngine.hasLocalDropTarget
+        let pasted = await deliverDropTranscript(cleaned, formatting: formatting, beforeCommandV: wantsField ? { [weak self] in
+            learningField = self?.dropLearning.prepareDelivery(targetPID: targetPID)
+        } : nil)
         if pasted, !autoPasteEngine.hasLocalDropTarget, let learning {
             dropLearning.delivered(learning, handle: learningField)
         }

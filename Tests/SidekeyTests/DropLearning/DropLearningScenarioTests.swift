@@ -377,6 +377,24 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertEqual(permissions?.intValue, 0o600)
     }
 
+    /// A hard link would turn the journal write into a write to another
+    /// named file: neither its text nor its mode may change.
+    func testJournalNeverWritesThroughAHardLink() throws {
+        let manager = FileManager.default
+        let directory = journalURL.deletingLastPathComponent()
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: directory) }
+        let other = directory.appendingPathComponent("ordinary-document.txt")
+        let original = Data("synthetic document".utf8)
+        try original.write(to: other)
+        try manager.setAttributes([.posixPermissions: 0o640], ofItemAtPath: other.path)
+        try manager.linkItem(at: other, to: journalURL)
+        DropLearningJournal(url: journalURL).append(["synthetic": "private correction"])
+        XCTAssertEqual(try Data(contentsOf: other), original)
+        let permission = try manager.attributesOfItem(atPath: other.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permission?.intValue, 0o640)
+    }
+
     func testJournalNeverFollowsALink() throws {
         let manager = FileManager.default
         let directory = journalURL.deletingLastPathComponent()

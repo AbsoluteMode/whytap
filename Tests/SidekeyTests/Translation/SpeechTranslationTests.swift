@@ -365,7 +365,11 @@ final class SpeechTranslationRoutingTests: XCTestCase {
     /// (`SubtitleAudioTranslateTests`); the registry still knows it.
     func testTheTranslateModelStaysKnownButIsNoPickerModel() {
         XCTAssertNil(AIFeature.subtitlesAudio.modelUse(on: .openAI))
-        XCTAssertNil(AIFeature.dropFast.modelUse(on: .openAI))
+        // OpenAI serves Drop's live speech again, but never with the translate
+        // model: it is no speech-to-text model.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+        XCTAssertEqual(AIFeature.dropFast.modelUse(on: .openAI), .realtimeSTT)
+        XCTAssertFalse(ModelRegistry.isVerified("gpt-realtime-translate", kind: .openAI, use: .realtimeSTT))
         XCTAssertEqual(SubtitleAudioTranslate.model, "gpt-realtime-translate")
         XCTAssertTrue(ModelRegistry.isVerified("gpt-realtime-translate", kind: .openAI, use: .speechTranslation))
     }
@@ -376,6 +380,30 @@ final class SpeechTranslationRoutingTests: XCTestCase {
         XCTAssertEqual(models.first { $0.id == "gpt-realtime-translate" }?.uses, [.speechTranslation])
         XCTAssertNil(models.first { $0.id == "gpt-realtime-2" })
         XCTAssertEqual(models.first { $0.id == "gpt-6" }?.uses?.contains(.speechTranslation), false)
+    }
+
+    // OpenAI speech: published per-minute prices, an unknown model unpriced.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func testOpenAISpeechCostsAreEstimatedPerMinute() {
+        for (model, hour) in [("gpt-live-transcribe", 1.02), ("gpt-transcribe", 0.27), ("gpt-4o-mini-transcribe", 0.18)] {
+            let event = AIUsageEvent.speech(AIUsageContext(feature: .dropFast, account: .openAI, model: model), seconds: 3_600)
+            XCTAssertEqual(event.amount ?? -1, hour, accuracy: 0.0001, model)
+            XCTAssertEqual(event.basis, .estimated)
+        }
+        let unknown = AIUsageEvent.speech(AIUsageContext(feature: .dropFast, account: .openAI, model: "gpt-9-transcribe"), seconds: 60)
+        XCTAssertNil(unknown.amount)
+        XCTAssertEqual(unknown.basis, .unavailable)
+    }
+
+    func testOpenAISpeechModelsAreClassified() throws {
+        let body = #"{"data":[{"id":"gpt-live-transcribe"},{"id":"gpt-realtime-whisper"},{"id":"gpt-transcribe"},{"id":"whisper-1"},{"id":"gpt-4o-transcribe-diarize"},{"id":"gpt-4o-mini-transcribe-2025-12-15"}]}"#
+        let models = try ModelCatalogFetcher.parseOpenAI(Data(body.utf8))
+        XCTAssertEqual(models.first { $0.id == "gpt-live-transcribe" }?.uses, [.realtimeSTT])
+        XCTAssertEqual(models.first { $0.id == "gpt-realtime-whisper" }?.uses, [.realtimeSTT])
+        XCTAssertEqual(models.first { $0.id == "gpt-transcribe" }?.uses, [.realtimeSTT, .asyncSTT])
+        XCTAssertEqual(models.first { $0.id == "whisper-1" }?.uses, [.realtimeSTT, .asyncSTT])
+        XCTAssertEqual(models.first { $0.id == "gpt-4o-mini-transcribe-2025-12-15" }?.uses, [.realtimeSTT, .asyncSTT])
+        XCTAssertNil(models.first { $0.id == "gpt-4o-transcribe-diarize" }, "no realtime speaker labels")
     }
 
     func testCostsEstimateAnHourAtThreeDollarsSix() {

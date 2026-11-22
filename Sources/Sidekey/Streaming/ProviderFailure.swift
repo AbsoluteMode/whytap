@@ -30,6 +30,9 @@ enum ProviderFailure: Equatable, Sendable {
             case .elevenLabs(_, .missingPermissions): self = .missingPermission
             case .elevenLabs(_, .quotaExceeded): self = .outOfCredit
             case .elevenLabs(_, .invalidKey): self = .keyRefused
+            // OpenAI's 429 is a rate limit unless its code names the balance.
+            case .openAI(_, .outOfCredit): self = .outOfCredit
+            case .openAI(_, .invalidKey): self = .keyRefused
             case .httpStatus(401): self = .keyRefused
             case .httpStatus(402): self = .outOfCredit
             case .httpStatus(403): self = .refused

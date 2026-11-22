@@ -20,8 +20,13 @@ final class ModelCatalogFetcherTests: XCTestCase {
     func test_openai_catalog_authenticates_and_excludes_non_text_endpoints() async throws {
         let fetcher = makeFetcher(body: #"{"data":[{"id":"gpt-6.1-sol"},{"id":"gpt-4.1-mini"},{"id":"o3"},{"id":"text-embedding-3-small"},{"id":"gpt-4o-transcribe"},{"id":"gpt-realtime"},{"id":"gpt-image-1"},{"id":"gpt-5-pro"},{"id":"gpt-5-codex"}]}"#)
         let models = try await fetcher.fetch(account: .openAI, apiKey: "openai-key", server: nil)
-        XCTAssertEqual(models.map(\.id), ["gpt-4.1-mini", "gpt-6.1-sol", "o3"])
-        XCTAssertTrue(models.allSatisfy { $0.uses == [.chat, .chatWithTools] })
+        let text = models.filter { $0.uses?.contains(.chat) == true }
+        XCTAssertEqual(text.map(\.id), ["gpt-4.1-mini", "gpt-6.1-sol", "o3"])
+        XCTAssertTrue(text.allSatisfy { $0.uses == [.chat, .chatWithTools] })
+        // A transcription model is a speech model, never a text one.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+        XCTAssertEqual(models.first { $0.id == "gpt-4o-transcribe" }?.uses, [.realtimeSTT, .asyncSTT])
+        XCTAssertEqual(models.count, 4)
         let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
         XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/models")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer openai-key")
@@ -193,7 +198,7 @@ final class ModelCatalogFetcherTests: XCTestCase {
             let models = try await fetcher.fetch(
                 account: .server(UUID()), apiKey: key, server: server("http://h:8000/v1"))
             XCTAssertEqual(models.map(\.id), ["qwen", "llama"])
-            XCTAssertEqual(models[0].uses, ServerModelClassifier.languageUses)
+            XCTAssertNil(models[0].uses)
             let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
         }

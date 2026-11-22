@@ -26,8 +26,7 @@ struct CatalogTokenPrice: Codable, Equatable, Sendable {
 /// report stay `nil`.
 struct CatalogModel: Codable, Equatable, Sendable {
     let id: String
-    /// `nil`: the provider does not say. A user's server is guessed from the
-    /// model's name (`ServerModelClassifier`).
+    /// `nil`: the provider does not say (a user's server).
     var uses: Set<ModelUse>?
     /// Soniox `aliased_model_id`: the model this one is a deprecated alias of.
     var aliasOf: String?
@@ -498,14 +497,12 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         let data: [Model]
     }
 
-    /// A server lists IDs only: what each model serves is guessed from its
-    /// name. Pickers apply the server's own choice over this
-    /// (`ServerModelKinds`), so a cache written before it still sorts.
-    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+    /// A server lists IDs only. They suggest names when the user adds a model
+    /// to the server; what each model does is the user's entry
+    /// (`ServerEndpoint.models`), never this list.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
     static func parseServer(_ data: Data) throws -> [CatalogModel] {
-        try decode(ServerResponse.self, from: data).data.map {
-            CatalogModel(id: $0.id, uses: ServerModelClassifier.uses(of: $0.id), catalogDate: $0.created?.date)
-        }
+        try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id, catalogDate: $0.created?.date) }
     }
 
     /// OpenAI's list has IDs, not endpoint capabilities. Offer text families;
@@ -525,6 +522,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             if base.hasPrefix("gpt-realtime-translate") {
                 return CatalogModel(id: id, uses: [.speechTranslation], catalogDate: model.created?.date)
             }
+            if let uses = openAISpeechUses(base) {
+                return uses.isEmpty ? nil : CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
+            }
             guard base.hasPrefix("gpt-") || ["o1", "o3", "o4"].contains(where: { base == $0 || base.hasPrefix($0 + "-") }),
                   !["audio", "realtime", "transcribe", "tts", "image", "search", "codex", "deep-research", "-pro", "instruct"].contains(where: base.contains)
             else { return nil }
@@ -532,6 +532,24 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             if id == ModelRegistry.openAIDecisionModel { uses.insert(.decision) }
             return CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
         }.sorted { $0.id < $1.id }
+    }
+
+    /// What an OpenAI transcription model can do, or `nil` for a model that
+    /// is not one. The streaming models (`gpt-live-transcribe`,
+    /// `gpt-realtime-whisper`) are live only; the turn-based ones also take a
+    /// file. The diarizing model is left out (`[]`): no OpenAI realtime
+    /// session labels speakers and OpenAI retires it.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static func openAISpeechUses(_ base: String) -> Set<ModelUse>? {
+        if base.hasPrefix(ModelRegistry.openAILiveModel) || base.hasPrefix(ModelRegistry.openAIRealtimeWhisperModel) {
+            return [.realtimeSTT]
+        }
+        if base.contains("transcribe-diarize") { return [] }
+        if base == "whisper-1" || base.hasPrefix(ModelRegistry.openAIRecordedModel)
+            || base.hasPrefix("gpt-4o-transcribe") || base.hasPrefix("gpt-4o-mini-transcribe") {
+            return [.realtimeSTT, .asyncSTT]
+        }
+        return nil
     }
 
     /// Optional metadata must never make an otherwise usable catalog fail.

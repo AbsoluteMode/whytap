@@ -484,4 +484,39 @@ final class AIRoutingMigrationTests: XCTestCase {
         XCTAssertNotNil(env.routing.route(for: .dropFast))
         XCTAssertEqual(env.routing.route(for: .agent)?.model, "anthropic/claude-sonnet-5.5")
     }
+
+    // MARK: - A stored OpenAI speech choice
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+
+    func test_stored_openai_choice_moves_to_the_openai_account_with_its_model() throws {
+        let env = makeEnv()
+        env.defaults.set("yourKey", forKey: Old.level)
+        env.defaults.set("openAI", forKey: Old.provider)
+        env.defaults.set("gpt-4o-mini-transcribe", forKey: "sidekey.models.byokModel.openAI")
+        try env.keys.save("openai-key", account: "byok.openai.llm_api_key")
+        // A Soniox key on the same Mac must not attract the OpenAI choice.
+        try env.keys.save("soniox-key", account: Account.soniox)
+
+        migrate(env)
+
+        for feature in realtimeFeatures {
+            XCTAssertEqual(env.routing.route(for: feature),
+                           FeatureRoute(account: .openAI, model: "gpt-4o-mini-transcribe"), "\(feature)")
+        }
+        XCTAssertNil(env.routing.route(for: .meetings), "OpenAI has no meetings model")
+    }
+
+    func test_stored_openai_choice_never_revives_the_retired_speech_key() throws {
+        let env = makeEnv()
+        env.defaults.set("yourKey", forKey: Old.level)
+        env.defaults.set("openAI", forKey: Old.provider)
+        try env.keys.save("old-speech-key", account: "byok.openAI.api_key")
+        try env.keys.save("soniox-key", account: Account.soniox)
+
+        migrate(env)
+
+        for feature in realtimeFeatures + [.meetings] {
+            XCTAssertNil(env.routing.route(for: feature), "\(feature): neither OpenAI on the retired key nor Soniox")
+        }
+    }
 }

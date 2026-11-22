@@ -36,7 +36,12 @@ enum RealtimeAdapterFactory {
             // search get their own session from `TranscriptionSessionFactory`.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             return OnDeviceStreamingAdapter(feature: route.feature, livePartials: route.feature != .meetings)
-        case .openRouter, .openAI, .anthropic:
+        case .openAI:
+            // OpenAI's own host, explicitly, on the shared OpenAI key.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            return OpenAIRealtimeAdapter(apiKey: try requiredKey(route), url: BYOKRealtimeURL.openAIHosted,
+                                         model: route.model, dialect: .openAI)
+        case .openRouter, .anthropic:
             // OpenRouter and Anthropic serve text models only.
             throw FeatureRouteError.notSet(route.feature)
         }

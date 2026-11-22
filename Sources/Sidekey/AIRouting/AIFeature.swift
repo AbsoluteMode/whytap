@@ -114,11 +114,12 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             // through their own session, Subtitles audio through
             // `OnDeviceStreamingAdapter`.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return .realtimeSTT
-            // OpenAI's live speech translation is Subtitles' own Audio
-            // translate slot (`SubtitleAudioTranslate`), not a Speech model.
-            // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
-            case .openAI, .openRouter, .anthropic: return nil
+            // OpenAI transcribes live speech on the shared OpenAI key; its
+            // live speech translation stays Subtitles' own Audio translate
+            // slot (`SubtitleAudioTranslate`), which is no feature route.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            case .soniox, .deepgram, .elevenLabs, .openAI, .openAICompatible, .onDevice: return .realtimeSTT
+            case .openRouter, .anthropic: return nil
             }
         case .recorded:
             switch kind {
@@ -128,6 +129,9 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             // like a user's own server: a transcript without speaker labels.
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             case .onDevice: return .realtimeSTT
+            // No OpenAI model labels speakers (the diarizing one is retired by
+            // OpenAI) and its file endpoint takes 25 MB, under 15 minutes.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
             case .openRouter, .openAI, .anthropic: return nil
             }
         case .llm:

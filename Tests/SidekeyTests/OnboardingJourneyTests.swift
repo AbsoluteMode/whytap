@@ -35,12 +35,24 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertEqual(steps(intel).first, .speechKey)
     }
 
-    /// The owner, 2026-11-22: web search is set in Settings -> API & Models,
-    /// not in the onboarding, whatever the language model.
-    func testThereIsNoWebSearchStep() {
-        XCTAssertEqual(OnboardingStep.allCases.count, 13)
-        let withLLM = steps(.cleanMac, OnboardingProgress(source: .yourKey))
-        XCTAssertEqual(withLLM[withLLM.firstIndex(of: .llmKey)! + 1], .language)
+    /// The owner, 2026-11-22: the Tavily step comes only after Self-hosted
+    /// on the language model step; a provider's model searches the web itself.
+    func testSearchAppearsOnlyAfterASelfHostedLanguageModel() {
+        XCTAssertFalse(steps().contains(.search))
+        var ready = OnboardingStart.cleanMac
+        ready.llmReady = true
+        XCTAssertFalse(steps(ready).contains(.search), "a provider's model set before: no search step")
+        let selfHosted = steps(.cleanMac, OnboardingProgress(source: .yourKey, languageModelSelfHosted: true))
+        XCTAssertEqual(selfHosted[selfHosted.firstIndex(of: .llmKey)! + 1], .search)
+        ready.searchReady = true
+        XCTAssertFalse(steps(ready, OnboardingProgress(languageModelSelfHosted: true)).contains(.search),
+                       "a saved Tavily key: no step")
+        // No segment unless the step is on the way.
+        func segmentSteps(_ progress: OnboardingProgress) -> [OnboardingStep] {
+            OnboardingJourney.segments(start: .cleanMac, progress: progress, current: .source, done: []).map(\.step)
+        }
+        XCTAssertFalse(segmentSteps(OnboardingProgress()).contains(.search))
+        XCTAssertTrue(segmentSteps(OnboardingProgress(languageModelSelfHosted: true)).contains(.search))
     }
 
     func testInputMonitoringOnlyWhenTheShortcutAsksForIt() {
@@ -50,7 +62,7 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     func testEverythingDoneBeforeShowsOnlyTheTour() {
-        let done = OnboardingStart(speechReady: true, llmReady: true, languageChosen: true,
+        let done = OnboardingStart(speechReady: true, llmReady: true, searchReady: true, languageChosen: true,
                                    keyboardGranted: true, microphoneGranted: true, screenRecordingGranted: true)
         XCTAssertEqual(steps(done), [.tryDrop, .hotkeys, .toolbox, .help, .thanks])
     }
@@ -100,7 +112,7 @@ final class OnboardingJourneyTests: XCTestCase {
         let segments = OnboardingJourney.segments(start: start, progress: progress, current: .language,
                                                   done: [.source])
         func state(_ step: OnboardingStep) -> OnboardingSegmentState? { segments.first { $0.step == step }?.state }
-        XCTAssertEqual(segments.count, 12, "Input Monitoring is not a segment unless it is needed")
+        XCTAssertEqual(segments.count, 12, "Input Monitoring and search are not segments unless needed")
         XCTAssertEqual(state(.source), .completed)
         XCTAssertEqual(state(.speechKey), .bypassed, "On this Mac made the key unnecessary")
         XCTAssertEqual(state(.llmKey), .bypassed, "skipped, never a false done")
@@ -175,7 +187,7 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     func testOptionalAndInformationalSteps() {
-        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .screenRecording, .tryDrop])
+        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .search, .screenRecording, .tryDrop])
         XCTAssertEqual(OnboardingStep.allCases.filter(\.isInformational), [.hotkeys, .toolbox, .help, .thanks])
     }
 

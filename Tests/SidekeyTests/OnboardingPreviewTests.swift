@@ -37,7 +37,21 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
-        XCTAssertEqual(model.step, .language, "web search is not an onboarding step")
+        XCTAssertEqual(model.step, .language, "Anthropic searches the web itself: no Tavily step")
+        model.back()
+        XCTAssertEqual(model.step, .llmKey)
+        model.useOwnServer(.languageModel)
+        await model.saveServer(OnboardingServerDraft(address: "localhost:1234/v1", model: "qwen3"), on: .languageModel)
+        XCTAssertTrue(model.outcome(.llmKey).isDone)
+        model.next()
+        XCTAssertEqual(model.step, .search, "a server's model has no known search")
+        await model.useSearchKey("tvly-bad-0123456789abcdef")
+        XCTAssertEqual(model.keyProblems[.search], .refused, "the stubbed Tavily check refuses it")
+        await model.useSearchKey("tvly-preview-0123456789abcdef")
+        XCTAssertTrue(model.outcome(.search).isDone, "the stubbed Tavily check passes without a network request")
+
+        model.next()
+        XCTAssertEqual(model.step, .language)
         model.setLanguage(nil)
         model.next()
         XCTAssertEqual(model.step, .keyboard)
@@ -110,26 +124,30 @@ final class OnboardingPreviewTests: XCTestCase {
     func testOnlyAKeysOwnFormatNamesItsProvider() throws {
         let speech = [AIProviderKind.soniox, .deepgram, .elevenLabs].compactMap(OnboardingKeyProvider.of)
         let elevenLabs = "sk_" + String(repeating: "0a", count: 24)
-        XCTAssertEqual(OnboardingKeyProvider.detect(elevenLabs, among: speech)?.kind, .elevenLabs)
-        XCTAssertEqual(OnboardingKeyProvider.detect(String(repeating: "0f", count: 20), among: speech)?.kind, .deepgram,
+        XCTAssertEqual(OnboardingKeyProvider.detect(elevenLabs, among: speech)?.kind, .provider(.elevenLabs))
+        XCTAssertEqual(OnboardingKeyProvider.detect(String(repeating: "0f", count: 20), among: speech)?.kind, .provider(.deepgram),
                        "Deepgram keys are 40 hexadecimal characters")
         for random in ["adsfdsfasdfasfafa", "adsfdsfasdfasfafaqwerty", "0123456789abcdef0123", "sk_short", "фываолдж0123456789abcdef"] {
             XCTAssertNil(OnboardingKeyProvider.detect(random, among: speech), "\(random) names nobody")
         }
         XCTAssertNil(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: speech), "OpenAI is not offered here")
         let withOpenAI = speech + [OnboardingKeyProvider.of(.openAI)!]
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: withOpenAI)?.kind, .openAI)
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: withOpenAI)?.kind, .provider(.openAI))
         XCTAssertNil(OnboardingKeyProvider.detect("adsfdsfasdfasfafaqwerty", among: withOpenAI), "no guess at OpenAI")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: withOpenAI), "an Anthropic key is not speech")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: withOpenAI), "an OpenRouter key is not speech")
 
         let llm = OnboardingJourneyModel.llmProviders.compactMap(OnboardingKeyProvider.of)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: llm)?.kind, .anthropic)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: llm)?.kind, .openRouter)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: llm)?.kind, .openAI)
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: llm)?.kind, .provider(.anthropic))
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: llm)?.kind, .provider(.openRouter))
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: llm)?.kind, .provider(.openAI))
         XCTAssertNil(OnboardingKeyProvider.detect(elevenLabs, among: llm), "a speech key is not a language model")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-0123", among: llm), "too short to be a key")
 
+        let search = [OnboardingKeyProvider.tavily]
+        XCTAssertEqual(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: search)?.kind, .tavily)
+        XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: search), "only Tavily's own format")
+        XCTAssertNil(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: llm), "a Tavily key is not a language model")
     }
 
     /// The owner typed in the Russian layout and saw

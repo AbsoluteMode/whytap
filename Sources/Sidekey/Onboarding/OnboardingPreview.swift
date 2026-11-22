@@ -8,8 +8,8 @@ import Foundation
 ///
 /// Isolated from the app: its settings live in their own defaults suite,
 /// emptied at every start and quit (never `com.rootwise.sidekey`); keys stay
-/// in memory (no Keychain); key checks, catalogs, model probes and server
-/// model checks are answered here without a network request; a word in the key
+/// in memory (no Keychain); key checks, catalogs, model probes and the Tavily
+/// check are answered here without a network request; a word in the key
 /// picks the answer ("bad": refused, "credit": out of credit, "noaccess": no
 /// speech access, "offline": no answer; shorter than 16 characters fails the
 /// shape check before any request); Allow only pretends macOS granted it; the speech model
@@ -137,6 +137,9 @@ final class OnboardingPreviewSession {
         system.permissions = permissions
         let screenRecording = ScreenRecordingAccess(isGranted: { system.screen },
                                                     request: { await MainActor.run { system.grant { $0.screen = true } } })
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
+        let tavily = TavilySettings(keys: keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
 
         model = OnboardingJourneyModel(
             models: models, permissions: permissions,
@@ -146,6 +149,7 @@ final class OnboardingPreviewSession {
             screenRecording: screenRecording,
             openScreenRecordingSettings: { system.grant { $0.screen = true } },
             defaultsChanges: NotificationCenter(),
+            tavily: tavily,
             hotkeys: HotkeyPreferences(defaults: defaults),
             toolbox: HoverLayoutStore(defaults: defaults),
             agentEnabled: { UserPreferencesCache(defaults: defaults).currentAgentEnabled },
@@ -291,4 +295,42 @@ final class OnboardingPreviewSpeechModel: OnDeviceSpeechModelManaging, @unchecke
     func delete() async throws { lock.withLock { present = false } }
     func acquire() async throws -> AsrManager { throw OnDeviceSpeechError.modelNotDownloaded }
     func release() async {}
+}
+
+/// Answers every request of the preview's own URLSession locally, like
+/// Tavily's usage check: a key containing "bad" is refused (401), "credit"
+/// is over its plan (432), "busy" is rate limited (429), "offline" gets no
+/// answer; any other key passes.
+final class OnboardingPreviewURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    static func status(_ authorization: String?) -> Int? {
+        let key = authorization?.lowercased() ?? ""
+        if key.contains("offline") { return nil }
+        if key.contains("bad") { return 401 }
+        if key.contains("credit") { return 432 }
+        if key.contains("busy") { return 429 }
+        return 200
+    }
+
+    override func startLoading() {
+        let status = Self.status(request.value(forHTTPHeaderField: "Authorization"))
+        let body = Data((status == 200 ? "{}" : #"{"detail":{"error":"preview"}}"#).utf8)
+        let response = HTTPURLResponse(url: request.url ?? URL(string: "https://preview.invalid")!,
+                                       statusCode: status ?? 200, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "application/json"])!
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            guard status != nil else {
+                self.client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+                return
+            }
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: body)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
 }

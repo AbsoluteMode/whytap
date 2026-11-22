@@ -1120,15 +1120,41 @@ struct OnboardingSourceStage: View {
 
 /// One provider of a key step (speech or language model), with where to get
 /// a key and pay.
+/// Whose key a key step takes: a model provider, or Tavily for search.
+enum OnboardingKeyVendor: Hashable {
+    case provider(AIProviderKind)
+    case tavily
+
+    var displayName: String {
+        switch self {
+        case .provider(let kind): return kind.displayName
+        case .tavily: return "Tavily"
+        }
+    }
+
+    var provider: AIProviderKind? { if case .provider(let kind) = self { return kind } else { return nil } }
+}
+
 struct OnboardingKeyProvider: Equatable {
-    let kind: AIProviderKind
+    let kind: OnboardingKeyVendor
     let assetName: String
     let keysURL: URL
     let billingURL: URL
 
+    static let tavily = OnboardingKeyProvider(kind: .tavily, assetName: "tavily",
+                                              keysURL: URL(string: "https://app.tavily.com/home")!,
+                                              billingURL: URL(string: "https://app.tavily.com/billing")!)
+
+    static func of(_ vendor: OnboardingKeyVendor) -> OnboardingKeyProvider? {
+        switch vendor {
+        case .provider(let kind): return of(kind)
+        case .tavily: return tavily
+        }
+    }
+
     static func of(_ kind: AIProviderKind) -> OnboardingKeyProvider? {
         func provider(_ asset: String, _ keys: String, _ billing: String) -> OnboardingKeyProvider {
-            .init(kind: kind, assetName: asset, keysURL: URL(string: keys)!, billingURL: URL(string: billing)!)
+            .init(kind: .provider(kind), assetName: asset, keysURL: URL(string: keys)!, billingURL: URL(string: billing)!)
         }
         switch kind {
         case .soniox: return provider("soniox", "https://console.soniox.com", "https://console.soniox.com")
@@ -1151,9 +1177,9 @@ struct OnboardingKeyProvider: Equatable {
     /// The prefixes keys really start with, for every provider Whytap knows,
     /// longest first. Soniox keys have none; Deepgram's are 40 hexadecimal
     /// characters.
-    static let prefixes: [(prefix: String, kind: AIProviderKind)] = [
-        ("sk-svcacct-", .openAI), ("sk-proj-", .openAI), ("sk-ant-", .anthropic),
-        ("sk-or-", .openRouter), ("sk_", .elevenLabs), ("sk-", .openAI),
+    static let prefixes: [(prefix: String, kind: OnboardingKeyVendor)] = [
+        ("sk-svcacct-", .provider(.openAI)), ("sk-proj-", .provider(.openAI)), ("sk-ant-", .provider(.anthropic)),
+        ("sk-or-", .provider(.openRouter)), ("tvly-", .tavily), ("sk_", .provider(.elevenLabs)), ("sk-", .provider(.openAI)),
     ]
 
     /// A real key is at least this long; shorter input is never recognised.
@@ -1168,7 +1194,7 @@ struct OnboardingKeyProvider: Equatable {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard key.count >= minimumLength, OnboardingKeyMask.isKeyLike(key) else { return nil }
         if key.count == 40, key.allSatisfy(\.isHexDigit) {
-            return providers.first { $0.kind == .deepgram }
+            return providers.first { $0.kind == .provider(.deepgram) }
         }
         guard let match = prefixes.first(where: { key.hasPrefix($0.prefix) }) else { return nil }
         return providers.first { $0.kind == match.kind }
@@ -1200,32 +1226,37 @@ enum OnboardingKeyMask {
 /// Which key a key step asks for. Both steps share one layout, the wire key
 /// over its padlock, the mask and the five problems.
 enum OnboardingKeyStageKind: Equatable {
-    case speech, languageModel
+    case speech, languageModel, search
 
     var step: OnboardingStep {
         switch self {
         case .speech: return .speechKey
         case .languageModel: return .llmKey
+        case .search: return .search
         }
     }
     var title: String {
         switch self {
         case .speech: return "Paste your speech key."
         case .languageModel: return "Paste a language model key."
+        case .search: return "Paste a Tavily key."
         }
     }
     init?(step: OnboardingStep) {
         switch step {
         case .speechKey: self = .speech
         case .llmKey: self = .languageModel
+        case .search: self = .search
         default: return nil
         }
     }
 
-    var serverHelp: String {
+    /// Search has no server of its own: its link is absent.
+    var serverHelp: String? {
         switch self {
         case .speech: return "Add an OpenAI-compatible speech server (Ollama, LM Studio, vLLM)"
         case .languageModel: return "Add an OpenAI-compatible language model server (Ollama, LM Studio, vLLM)"
+        case .search: return nil
         }
     }
 }
@@ -1248,8 +1279,8 @@ struct OnboardingKeyStage: View {
     @State private var draft = ""
     /// A mark the person clicked: the one choice that names a provider
     /// without the key's own format.
-    @State private var picked: AIProviderKind?
-    @State private var hoveredLogo: AIProviderKind?
+    @State private var picked: OnboardingKeyVendor?
+    @State private var hoveredLogo: OnboardingKeyVendor?
     @State private var hoveredServer = false
     /// The key field and the own-server fields share one capsule.
     @Namespace private var morph
@@ -1260,20 +1291,26 @@ struct OnboardingKeyStage: View {
         switch kind {
         case .speech: return model.speechProviders.compactMap(OnboardingKeyProvider.of)
         case .languageModel: return OnboardingJourneyModel.llmProviders.compactMap(OnboardingKeyProvider.of)
+        case .search: return [.tavily]
         }
     }
     private var detected: OnboardingKeyProvider? { OnboardingKeyProvider.detect(draft, among: providers) }
     /// The provider the key's format or the person named; nil otherwise.
-    private var known: OnboardingKeyProvider? { detected ?? picked.flatMap(OnboardingKeyProvider.of) }
+    private var known: OnboardingKeyProvider? {
+        // The search step has one provider: with the field empty it is known.
+        detected ?? picked.flatMap(OnboardingKeyProvider.of) ?? (kind == .search && draft.isEmpty ? .tavily : nil)
+    }
     /// The step's provider in the model: whose key is saved or was answered.
-    private var current: AIProviderKind {
+    private var current: OnboardingKeyVendor {
         switch kind {
-        case .speech: return model.speechProvider
-        case .languageModel: return model.llmProvider
+        case .speech: return .provider(model.speechProvider)
+        case .languageModel: return .provider(model.llmProvider)
+        case .search: return .tavily
         }
     }
-    private func setCurrent(_ provider: AIProviderKind) {
-        if kind == .speech { model.speechProvider = provider } else { model.llmProvider = provider }
+    private func setCurrent(_ vendor: OnboardingKeyVendor) {
+        guard let provider = vendor.provider else { return }
+        if kind == .speech { model.speechProvider = provider } else if kind == .languageModel { model.llmProvider = provider }
     }
     /// The provider that answered (a saved or accepted key with the field
     /// empty, or a refusal); never for a key that named nobody.
@@ -1290,7 +1327,10 @@ struct OnboardingKeyStage: View {
     private var problem: OnboardingKeyProblem? {
         if case .failed = outcome { return model.keyProblems[step] ?? .other(outcome.failureText ?? "") } else { return nil }
     }
-    private var saved: Bool { model.keySaved(current) }
+    private var saved: Bool {
+        if case .provider(let provider) = current { return model.keySaved(provider) }
+        return model.tavily.configured
+    }
 
     private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
@@ -1298,7 +1338,7 @@ struct OnboardingKeyStage: View {
         if let problem {
             switch problem {
             case .format, .unrecognized: return .format
-            case .unreachable: return .network
+            case .unreachable, .busy: return .network
             default: return .refused
             }
         }
@@ -1350,7 +1390,14 @@ struct OnboardingKeyStage: View {
             // returns to its key, Self-hosted turns the key field into the
             // server's fields.
             logos
-                .padding(.top, server ? 2 : 10)
+                .padding(.top, server ? 2 : kind == .search ? 2 : 10)
+            if kind == .search {
+                // Search: one quiet line under its one mark.
+                Text("Optional · the Agent searches the web with it")
+                    .font(OnboardingTheme.sans(12.5))
+                    .foregroundColor(OnboardingTheme.faint)
+                    .padding(.top, 4)
+            }
             Spacer(minLength: 4)
         }
         .frame(maxWidth: .infinity)
@@ -1555,7 +1602,7 @@ struct OnboardingKeyStage: View {
 
     /// " · claude-sonnet-5-5": the model the language model step will use.
     private func modelSuffix(_ name: String) -> String {
-        guard kind == .languageModel, let provider = detected?.kind,
+        guard kind == .languageModel, let provider = detected?.kind.provider,
               let model = model.llmModel ?? model.preselectedModel(provider) else { return "" }
         return " · \(model)"
     }
@@ -1587,7 +1634,7 @@ struct OnboardingKeyStage: View {
                     HStack(spacing: 7) {
                         ProviderBrandIcon(assetName: provider.assetName, size: 19, color: OnboardingTheme.ink)
                             .frame(width: 20, height: 20)
-                            .opacity(open ? 1 : dimmed ? 0.24 : provider.kind == .openAI ? 0.58 : 0.46)
+                            .opacity(open ? 1 : dimmed ? 0.24 : provider.kind == .provider(.openAI) ? 0.58 : 0.46)
                         if open {
                             Text(provider.kind.displayName)
                                 .font(OnboardingTheme.sans(13, weight: .medium))
@@ -1611,7 +1658,7 @@ struct OnboardingKeyStage: View {
                 .accessibilityLabel(provider.kind.displayName)
                 .accessibilityAddTraits(!server && shown?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
             }
-            serverMark
+            if kind.serverHelp != nil { serverMark }
         }
         .frame(height: 36)
         .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
@@ -1655,7 +1702,7 @@ struct OnboardingKeyStage: View {
         .buttonStyle(.plain)
         .disabled(checking)
         .onHover { hoveredServer = $0 }
-        .help(kind.serverHelp)
+        .help(kind.serverHelp ?? "")
         .accessibilityLabel("Self-hosted server")
         .accessibilityAddTraits(server ? [.isButton, .isSelected] : .isButton)
     }
@@ -1698,13 +1745,13 @@ struct OnboardingKeyStage: View {
         use(key, provider: provider)
     }
 
-    private func use(_ key: String, provider: AIProviderKind) {
+    private func use(_ key: String, provider: OnboardingKeyVendor) {
         let step = self.step
         Task {
-            if kind == .speech {
-                await model.useSpeechKey(key, provider: provider)
-            } else {
-                await model.useLLMKey(key, provider: provider)
+            switch provider {
+            case .provider(let kind) where self.kind == .speech: await model.useSpeechKey(key, provider: kind)
+            case .provider(let kind): await model.useLLMKey(key, provider: kind)
+            case .tavily: await model.useSearchKey(key)
             }
             if model.outcome(step).isDone { draft = "" }
         }

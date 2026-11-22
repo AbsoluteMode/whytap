@@ -1181,23 +1181,25 @@ first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/
 OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
 Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
 fields), a progress rail with one segment per step (a passed step reached by
-Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 12", one step at
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 12"
+("NN / 13" with the search step), one step at
 a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
 (On this Mac or API keys, two wire figures), Speech key, Language model key
-(optional), Language, Keyboard control, Microphone, Input Monitoring (only when the Drop
+(optional), Web search for the Agent (Tavily, only after a Self-hosted language
+model: a server has no web search of its own; no segment otherwise), Language, Keyboard control, Microphone, Input Monitoring (only when the Drop
 shortcut needs it), Screen Recording (optional), Try Drop, Shortcuts, Toolbox,
-Help, Thank you; a step whose result already holds is left out. Web search is
-not a step: it is set in Settings -> API & Models. A step whose
+Help, Thank you; a step whose result already holds is left out. A step whose
 action succeeds moves on by itself after its dwell (OnboardingDwellController;
 1.15 s on the key steps so the padlock opens first) with no chip or Continue;
 Return goes on at once, Back keeps what was done and a step reached by Back
-offers a plain Next. Step 1 and the two key steps share one wire scene
+offers a plain Next. Step 1 and the three key steps share one wire scene
 (OnboardingWireScene, drawn per display frame): the chosen key flies to its
 padlock, turns and opens it when a key is accepted and catches when refused.
 The key field (OnboardingKeyStage) shows every input as dots; a provider is
 named only by its key's own format (prefix or Deepgram's 40 hex characters)
 or a clicked mark, otherwise Return is a format problem; five problems are
-named (format, refused, no credit or access, no answer with Retry). An accepted language model key starts on the
+named (format, refused, no credit or access, no answer with Retry; Tavily's
+429 is "busy" with Retry). An accepted language model key starts on the
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
 generation, highest known output price). When the provider has several

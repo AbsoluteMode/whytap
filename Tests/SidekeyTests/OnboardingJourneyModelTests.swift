@@ -160,6 +160,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
             screenRecordingRequester: {}, accessibilityRequester: {}, openAccessibilitySettings: {},
             openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
         let beat = env.beat
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
+        let tavily = TavilySettings(keys: env.keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
         let model = OnboardingJourneyModel(
             models: models, permissions: permissions,
             onDevice: OnDeviceSpeechModelController(store: FakeStore(present: env.modelPresent)),
@@ -169,6 +172,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
             openScreenRecordingSettings: {}, defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
+            tavily: tavily,
             isPreview: isPreview,
             offersOpenAISpeech: offersOpenAISpeech)
         addTeardownBlock { model.stop() }
@@ -204,6 +208,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.useOwnServer(.speech)
         XCTAssertTrue(model.showsServerForm(.speech))
         XCTAssertFalse(model.showsServerForm(.languageModel))
+        model.useOwnServer(.search)
+        XCTAssertFalse(model.showsServerForm(.search), "search has no server")
         XCTAssertTrue(settings.isEmpty)
         model.closeServerForm(.speech)
         XCTAssertFalse(model.showsServerForm(.speech))
@@ -233,7 +239,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             guard case .server = route.account else { return XCTFail("text features run on the added server") }
         }
         XCTAssertEqual(env.routing.state.servers.count, 1, "the second try reused the server")
-        try await endBeat(env, until: .language, in: model)
+        XCTAssertTrue(model.steps.contains(.search), "a server model has no known web search")
+        try await endBeat(env, until: .search, in: model)
     }
 
     // MARK: - OpenAI for speech and text
@@ -342,12 +349,13 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertTrue(model.keySaved(.soniox), "the earlier key stays saved")
     }
 
-    // MARK: - Language model
+    // MARK: - Language model and search
 
-    /// Web search is not an onboarding step (Settings -> API & Models).
-    func testAnLLMKeySetsEveryTextFeatureAndGoesOnToTheLanguage() async throws {
+    /// Anthropic searches the web itself: the Tavily step is left out.
+    func testAnLLMKeySetsEveryTextFeatureAndSkipsSearchWhenItsProviderSearches() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
+        XCTAssertFalse(model.steps.contains(.search))
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
         model.next() // Set up later for speech
@@ -360,10 +368,54 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            "\(feature) follows the shared LLM")
         }
         XCTAssertEqual(model.summary, "LLM: Anthropic \(expected)")
+        XCTAssertFalse(model.steps.contains(.search), "Anthropic searches the web itself")
         try await endBeat(env, until: .language, in: model)
     }
 
-    func testSkippingTheLLMGoesOnToTheLanguage() async throws {
+    /// A server's model has no web search: the Tavily step comes after it;
+    /// Back and a provider's key take the step away again.
+    func testOnlyASelfHostedLanguageModelAsksForTavily() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        model.useOwnServer(.languageModel)
+        await model.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3"), on: .languageModel)
+        XCTAssertTrue(model.steps.contains(.search), "a server has no known web search")
+        try await endBeat(env, until: .search, in: model)
+        model.back()
+        XCTAssertEqual(model.step, .llmKey)
+        model.closeServerForm(.languageModel)
+        await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
+        XCTAssertFalse(model.steps.contains(.search), "Anthropic searches the web itself: the step goes away")
+    }
+
+    /// The Tavily step names the five problems from the real answers.
+    func testTheSearchStepNamesTavilysAnswers() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        model.rejectUnrecognizedKey(on: .search)
+        XCTAssertEqual(model.keyProblems[.search], .format, "one provider: a foreign key is a format problem")
+        let cases: [(String, OnboardingKeyProblem)] = [
+            ("tvly-bad-0123456789abcdef", .refused),
+            ("tvly-credit-0123456789abcdef", .noCredit),
+            ("tvly-busy-0123456789abcdef", .busy),
+            ("tvly-offline-0123456789abcdef", .unreachable),
+        ]
+        for (key, problem) in cases {
+            await model.useSearchKey(key)
+            XCTAssertEqual(model.keyProblems[.search], problem, key)
+            XCTAssertFalse(model.outcome(.search).isDone, key)
+        }
+        await model.useSearchKey("tvly-dev-0123456789abcdef")
+        XCTAssertNil(model.keyProblems[.search])
+        XCTAssertTrue(model.outcome(.search).isDone)
+        XCTAssertTrue(model.tavily.configured)
+    }
+
+    func testSkippingTheLLMSkipsSearchToo() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
@@ -650,6 +702,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("llm-key-done")
         await model.chooseModel("claude-fable-5-2", on: .llmKey)
         try await snap("llm-key-model-picked")
+        // Anthropic searches the web itself: no Tavily step.
         try await endBeat(env, until: .language, in: model)
         while true {
             try await snap(model.step.rawValue)
@@ -673,7 +726,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
                 .write(to: directory.appendingPathComponent(String(format: "%02d-model-list-%@.png", index, provider.rawValue)))
         }
 
-        // Self-hosted on the language model step: the fields, then added.
+        // A language model on your own server has no known web search, so
+        // the Tavily step comes: the same key, padlock and lines.
         let env2 = try makeEnv()
         let second = try makeModel(env2, isPreview: true, realCatalogs: true)
         let controller2 = OnboardingJourneyWindowController(model: second, onClosed: {})
@@ -688,6 +742,13 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("llm-server-fields")
         await second.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3"), on: .languageModel)
         try await snap("llm-server-added", after: 300)
-        try await endBeat(env2, until: .language, in: second)
+        try await endBeat(env2, until: .search, in: second)
+        try await snap("search-key")
+        second.rejectUnrecognizedKey(on: .search)
+        try await snap("search-key-format")
+        await second.useSearchKey("tvly-busy-0123456789abcdef")
+        try await snap("search-key-busy")
+        await second.useSearchKey("tvly-dev-0123456789abcdef")
+        try await snap("search-key-done")
     }
 }

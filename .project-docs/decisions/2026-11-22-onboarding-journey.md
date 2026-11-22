@@ -2,7 +2,7 @@
 id: onboarding-journey-2026-11-22
 type: decision
 title: The first-launch onboarding becomes a small window of single steps that move on by themselves
-summary: The five-page onboarding is replaced by one small window with a progress bar and up to thirteen single-purpose steps (speech source, speech key, optional language model, language, one screen per permission, Try Drop, shortcuts, Toolbox, help, thanks); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
+summary: The five-page onboarding is replaced by one small window with a progress bar and up to fourteen single-purpose steps (speech source, speech key, optional language model, web search only after a self-hosted model, language, one screen per permission, Try Drop, shortcuts, Toolbox, help, thanks); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
 status: confirmed
 tags: [onboarding, first-launch, permissions, models, routing]
 canonical_for: [onboarding-journey]
@@ -61,7 +61,7 @@ window, Back and a progress bar.
 ## Decision
 
 - **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
-  progress rail and "NN / 12" on top; the act, a serif title and one line
+  progress rail and "NN / 12" on top ("NN / 13" with the search step); the act, a serif title and one line
   under it; the step's stage; a footer with Skip or Set up later on the left
   and Next on the right only when nothing moves on by itself. Back also answers ← and ⌘[ outside text
   fields. The visual and motion come from the design pass (dark raised
@@ -80,15 +80,15 @@ window, Back and a progress bar.
   2. Speech key: Soniox, Deepgram or ElevenLabs.
   3. Language model key (optional): Anthropic, OpenAI or OpenRouter, with a
      preselected model.
-  4. Language.
-  5. Keyboard control (Accessibility).
-  6. Microphone.
-  7. Input Monitoring, only when the Drop shortcut reports it needs it.
-  8. Screen Recording (optional).
-  9. Try Drop (only when speech is on the way).
-  10. Shortcuts. 11. Toolbox. 12. Help on whytap.ai. 13. Thank you.
-  Web search for the Agent is not a step (see "Web search is not an
-  onboarding step").
+  4. Web search for the Agent (optional; only after a Self-hosted language
+     model, see "Web search: a step only after Self-hosted").
+  5. Language.
+  6. Keyboard control (Accessibility).
+  7. Microphone.
+  8. Input Monitoring, only when the Drop shortcut reports it needs it.
+  9. Screen Recording (optional).
+  10. Try Drop (only when speech is on the way).
+  11. Shortcuts. 12. Toolbox. 13. Help on whytap.ai. 14. Thank you.
 - **Moving on by itself, with no chip.** When a shown step's action
   succeeds (a key accepted and applied, a permission turning granted, a
   dictation inserted, a language picked, a source chosen) its segment fills
@@ -152,8 +152,8 @@ window, Back and a progress bar.
   Agent cannot use it yet: it would have to round-trip server-tool blocks,
   handle `pause_turn` and mixed search/tool turns, and carry citations into
   `finish_answer.sources`. That is a separate Agent change (session 78).
-  Superseded on 2026-11-22 (below, "Web search is not an onboarding
-  step").
+  Superseded on 2026-11-22 (below, "Web search: a step only after
+  Self-hosted").
 
 - **Texts only say what holds for every provider** (corrections to the
   design pass): the API card does not promise free credit (Soniox has no
@@ -315,14 +315,22 @@ window, Back and a progress bar.
   change; a provider without that family falls back to the newest flagship.
   The list tags it "Recommended"; any other pick replaces it. The speech
   step recommends the registry's Drop model.
-- **Web search is not an onboarding step.** First (REV 32) the step was
-  left out when the language model searched the web itself and otherwise
-  asked for a Tavily key on the key steps' screen. On 2026-11-22 the owner
-  asked whether to drop Tavily together with the step; the decision was to
-  drop only the step, for every provider and your own server. Search is set
-  in Settings -> API & Models -> Models (the Search row, a separate change,
-  session 78); Tavily stays in API keys for people on their own servers.
-  The progress rail is one segment shorter ("NN / 12").
+- **Web search: a step only after Self-hosted.** First (REV 32) the step
+  was left out when the language model searched the web itself; then the
+  owner dropped it for everyone (search is set in Settings -> API & Models,
+  the Search row of session 78, and Tavily stays in API keys). Seeing that a
+  Self-hosted language model led nowhere he brought it back for that case
+  only ("I forgot about self-hosted"): a server has no web search of its
+  own. So the Tavily step and its rail segment appear only when the
+  language model runs on the person's own server (Self-hosted on step 3, or
+  set so before the window opened) and no Tavily key is saved; Back and a
+  provider's key take the step away again. The step is the key steps'
+  screen: "Paste a Tavily key.", the wire key and padlock, dots from the
+  first character, a monochrome Tavily mark, no chips, the same dwell and
+  flow, "Optional · the Agent searches the web with it" and Skip. A key
+  without Tavily's `tvly-` prefix is a format problem; Tavily's answers name
+  the other four: 401 or 403 refused, 432 or 433 (plan and pay-as-you-go
+  limits) no credit, 429 busy with Retry, no answer unreachable with Retry.
 - **Your own server is a mark in the row and changes the step in place.**
   The owner asked on 2026-11-22 for the quiet "Use your own server →" link
   to become a card like the providers, captioned "Self-hosted": the row ends
@@ -407,7 +415,10 @@ window, Back and a progress bar.
   recommendation is the newest Sonnet or Sol. `OnboardingJourneyModelTests`
   add a server model with its check (a refused model keeps the fields, the
   retry reuses the server, the shared row takes it, the move goes straight
-  to the language), and there is no web search step.
+  to the Tavily step), bring the Tavily step only after a Self-hosted
+  language model and take it away after a provider's key, and name
+  Tavily's refused, no credit, busy and unreachable answers and a foreign
+  key's format.
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, server model checks, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its

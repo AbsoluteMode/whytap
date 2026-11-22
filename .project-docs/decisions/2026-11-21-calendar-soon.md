@@ -6,7 +6,7 @@ summary: Calendar stays visible with a Soon badge but cannot be opened, connecte
 status: confirmed
 tags: [calendar, availability, soon, hover, settings, hotkeys]
 canonical_for: [calendar-soon]
-verified_at: 2026-11-21
+verified_at: 2026-11-22
 sources:
   - type: user-confirmed
     reference: On 2026-11-21 the maintainer asked, through the orchestrating session, to close Calendar for now because a collaborator is still reworking it; users must see it marked Soon but not be able to enable or use it, the code must stay, and the lock must be removable in one change. The new onboarding must not offer Calendar either.
@@ -17,10 +17,15 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarSoonTests.swift
     confirmed_at: 2026-11-21
-related: [2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-logos.md, 2026-11-21-calendar-event-details.md]
+related: [2026-11-22-calendar-release.md, 2026-10-21-calendar-hover.md, 2026-10-21-calendar-integrations.md, 2026-11-20-calendar-day-view.md, 2026-11-21-calendar-logos.md, 2026-11-21-calendar-event-details.md]
 ---
 
 # Calendar is Soon
+
+> **Lifted 2026-11-22.** The collaborator's work is in main and the maintainer
+> released Calendar: `CalendarAvailability.shipped` is now `true`. The switch and
+> every gate below stay, so `false` closes Calendar as Soon again in one edit.
+> Why and what was checked: [Calendar is released](2026-11-22-calendar-release.md).
 
 ## Context
 
@@ -56,9 +61,9 @@ is the single switch. It is `false`, so Calendar is "Soon":
 - **Onboarding and new surfaces** must ask `CalendarAvailability.isOpen` or
   `HoverTool.isComingSoon` and not offer Calendar while it is closed.
 
-To reopen Calendar: set `shipped = true` and remove the "Soon" assertions in
-`CalendarSoonTests` (the rest of the Calendar tests already open it for their
-duration with `openCalendarForThisTest()`).
+To reopen Calendar: set `shipped = true` (done on 2026-11-22). `CalendarSoonTests`
+closes the switch with `closeCalendarForThisTest()` and keeps checking the closed
+state; to close Calendar again set `shipped = false`.
 
 ## Why
 

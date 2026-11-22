@@ -6,7 +6,7 @@
   <path d="M13 6h8" />
   <path d="M13 12h8" />
   <path d="M13 18h8" /></g>
-  <text x="41" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#f0f6fc">To-do &amp; Calendar (soon)</text>
+  <text x="41" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#f0f6fc">To-do &amp; Calendar</text>
   <text x="41" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#b8adff" xml:space="preserve"><tspan>Tasks in the notch</tspan><tspan fill="#5b5490">  ·  </tspan><tspan>Today&#x27;s agenda</tspan></text>
 
   <rect x="252" y="5" width="42" height="17" rx="8.5" fill="#6c5ce7"/>

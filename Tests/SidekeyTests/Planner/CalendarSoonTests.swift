@@ -3,8 +3,8 @@ import SwiftUI
 import XCTest
 @testable import Sidekey
 
-/// Calendar ships closed with a "Soon" badge. These tests run with the real
-/// default (no override): it can be seen, never used, never asks for access.
+/// Calendar ships open since 2026-11-22, but the switch can close it again as
+/// "Soon". These tests close it: it can be seen, never used, never asks for access.
 // WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
 @MainActor
 final class CalendarSoonTests: XCTestCase {
@@ -17,6 +17,7 @@ final class CalendarSoonTests: XCTestCase {
 
     override func setUp() async throws {
         XCTAssertNil(CalendarAvailability.testOverride, "another test leaked the Calendar override")
+        closeCalendarForThisTest()
         storage = PlannerMemoryCredentials()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PlannerURLProtocol.self]
@@ -34,19 +35,27 @@ final class CalendarSoonTests: XCTestCase {
     }
 
     /// A user who had Apple Calendar and a Google account connected before it was closed.
-    private func previouslyConnected(activity: ((Bool) -> Void)? = nil) throws -> CalendarConnections {
+    /// Apple access is a fake: a closed Calendar must not even look at it.
+    private func previouslyConnected(apple: AppleCalendarAccess? = nil, activity: ((Bool) -> Void)? = nil) throws -> CalendarConnections {
         let account = ConnectedCalendarAccount(id: UUID(), provider: .google, label: "Work")
         defaults.set(try JSONEncoder().encode([account]), forKey: CalendarAccountSettings.accountsKey)
         defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
         try storage.save(CalendarCredential(provider: .google, clientID: "fixture-client", accessToken: "fixture-access",
             refreshToken: "fixture-refresh", expiresAt: .distantPast), id: account.id)
-        return CalendarConnections(defaults: defaults, oauth: oauth, http: http, activityChanged: activity ?? { _ in })
+        return CalendarConnections(defaults: defaults, oauth: oauth, http: http, apple: apple ?? untouchableApple,
+            activityChanged: activity ?? { _ in })
+    }
+
+    /// Fails the test if a closed Calendar asks macOS or reads Calendar on this Mac.
+    private var untouchableApple: AppleCalendarAccess {
+        AppleCalendarAccess(status: { XCTFail("closed Calendar read the access status"); return .denied },
+            request: { XCTFail("closed Calendar asked macOS for access"); return false },
+            read: { _ in XCTFail("closed Calendar read events"); return ([], []) })
     }
 
     // MARK: - The switch
 
-    func testShipsClosed() {
-        XCTAssertFalse(CalendarAvailability.shipped)
+    func testTheSwitchClosesCalendarAsSoon() {
         XCTAssertFalse(CalendarAvailability.isOpen)
         XCTAssertEqual(CalendarAvailability.blockReason, CalendarAvailability.message)
         XCTAssertEqual(CalendarAvailability.badge, "Soon")
@@ -111,7 +120,7 @@ final class CalendarSoonTests: XCTestCase {
     // MARK: - Nothing connects, nothing is requested
 
     func testConnectionIsRefusedWithoutAskingMacOSOrAProvider() async throws {
-        let connections = CalendarConnections(defaults: defaults, oauth: oauth, http: http)
+        let connections = CalendarConnections(defaults: defaults, oauth: oauth, http: http, apple: untouchableApple)
         XCTAssertEqual(connections.connectionBlockReason, CalendarAvailability.message)
         XCTAssertFalse(connections.beginConnecting(provider: .apple))
         XCTAssertFalse(connections.isConnecting)
@@ -166,7 +175,10 @@ final class CalendarSoonTests: XCTestCase {
     }
 
     func testReopeningCalendarBringsBackThePreviousConnections() async throws {
-        let connections = try previouslyConnected()
+        var appleReads = 0
+        let connections = try previouslyConnected(apple: AppleCalendarAccess(status: { .fullAccess },
+            request: { XCTFail("a saved Apple connection needs no new prompt"); return true },
+            read: { _ in appleReads += 1; return ([], []) }))
         openCalendarForThisTest()
         XCTAssertNil(connections.connectionBlockReason)
         PlannerURLProtocol.handler = { [unowned self] request in
@@ -178,6 +190,7 @@ final class CalendarSoonTests: XCTestCase {
         }
         await connections.refresh(interval: DateInterval(start: Date(), duration: 86_400))
         XCTAssertGreaterThan(requests, 0, "once opened the stored account is read again")
+        XCTAssertEqual(appleReads, 1, "and Calendar on this Mac too, without asking again")
     }
 
     func testHoverModelDoesNotOpenOrConnect() throws {

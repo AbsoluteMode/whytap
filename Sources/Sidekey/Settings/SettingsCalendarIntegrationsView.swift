@@ -128,6 +128,10 @@ private struct CalendarIntegrationCard: View {
                     Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if provider == .apple, connections.appleAccessOff {
+                    IntegrationAction(title: "Open Privacy Settings") { PermissionsHelper.openCalendarsSettings() }
+                        .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
+                }
                 ForEach(accounts) { account in
                     HStack(spacing: 12) {
                         Text(account.label).font(.system(size: 12))

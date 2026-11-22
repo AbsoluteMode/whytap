@@ -65,6 +65,14 @@ final class IslandLiveTextTickerModel {
     static let unheldTailCharacters = 2
     private var heldRewrite: String?
     private var heldRewriteUntil: TimeInterval = 0
+    /// Decides which of the provider's snapshots the line shows.
+    private var stabilizer = LiveTextStabilizer()
+    /// How long the provider must keep a change of earlier words, or a
+    /// shorter phrase, before it is shown. Zero shows every snapshot.
+    var confirmSeconds: TimeInterval {
+        get { stabilizer.confirmSeconds }
+        set { stabilizer.confirmSeconds = newValue }
+    }
     var wingWidth: CGFloat = 0
     private var lastFrameAt: TimeInterval?
     /// How fast a slide is eased out (time constant).
@@ -78,6 +86,7 @@ final class IslandLiveTextTickerModel {
         slide = 0
         gap = 0
         heldRewrite = nil
+        stabilizer.reset(text)
         ticker.prime(text, now: now)
         measure()
         scroll = 0
@@ -92,7 +101,20 @@ final class IslandLiveTextTickerModel {
     /// closing marks) is shown at once and cancels a waiting rewrite.
     /// The same for every provider: only the text is compared.
     /// WHY: .project-docs/decisions/2026-11-19-live-text-rewrite-hold.md
+    ///
+    /// Before that, the stabilizer leaves out snapshots that would take
+    /// shown words back: a provider switching between two readings of the
+    /// phrase, or sending an earlier, shorter state of it.
+    /// WHY: .project-docs/decisions/2026-11-23-live-text-stable-display.md
     func textArrived(_ text: String, now: TimeInterval) {
+        let before = stabilizer.shown
+        // A waiting rewrite is not in the ticker yet: count all of it as shown.
+        let revealed = heldRewrite == nil ? ticker.revealedCount : Int.max
+        let stable = stabilizer.arrived(text, revealed: revealed, now: now)
+        if stable != before { stableTextArrived(stable, now: now) }
+    }
+
+    private func stableTextArrived(_ text: String, now: TimeInterval) {
         let visible = ticker.characters.prefix(ticker.revealedCount)
         // The end of the visible text is often a provisional mark ("-" after
         // a word in progress, ".", "?", "...") that the next snapshot
@@ -217,6 +239,7 @@ final class IslandLiveTextTickerModel {
 
     @discardableResult
     func advance(now: TimeInterval) -> CGFloat {
+        if let settled = stabilizer.settled(now: now) { stableTextArrived(settled, now: now) }
         if let rewrite = heldRewrite, now >= heldRewriteUntil {
             heldRewrite = nil
             show(rewrite, now: now)

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LiveText/ElevenLabsLiveTextReplayTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-19-live-text-rewrite-hold.md, 2026-11-15-live-text-rewrites.md, 2026-11-13-live-text-sand.md]
+related: [2026-11-19-live-text-rewrite-hold.md, 2026-11-15-live-text-rewrites.md, 2026-11-13-live-text-sand.md, 2026-11-23-live-text-stable-display.md]
 ---
 
 # The live line only scrolls forward
@@ -139,7 +139,9 @@ as without it (one, a pause of the speaker).
 ## Rejected
 
 - Hiding the shortening by keeping the removed words on screen: the wing
-  would show text the provider no longer has.
+  would show text the provider no longer has. Changed 2026-11-23
+  ([stable display](2026-11-23-live-text-stable-display.md)): a shortening
+  the provider keeps is still shown, 1.5 s later; one it takes back is not.
 - Turning `no_verbatim` off: it changes the delivered transcript, not only
   the display.
 

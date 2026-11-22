@@ -240,4 +240,104 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertNil(name("not an address"))
         XCTAssertNil(name(""))
     }
+
+    // MARK: - The model, after a key is accepted
+
+    /// The owner asked what the preselected "gpt-5.6 dinosaur" was (a fixed
+    /// name in the preview's catalog): the step now starts on the provider's
+    /// newest flagship from its catalog and lets the person pick another.
+    func testTheLanguageModelStepStartsOnTheNewestFlagshipAndWaitsForTheChoice() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        await model.useSpeechKey("good-0123456789abcdef", provider: .soniox)
+        try await eventually { model.step == .llmKey }
+
+        model.llmProvider = .openAI
+        await model.useLLMKey("sk-proj-good-0123456789abcdef", provider: .openAI)
+        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"),
+                       "the newest generation's top tier by price, not the newest small or voice model")
+        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-astra")
+        let ids = model.modelChoices(.llmKey).map(\.id)
+        XCTAssertEqual(ids.first, "gpt-6.2-sol", "newest first")
+        XCTAssertTrue(ids.contains("gpt-6.2-astra"))
+        XCTAssertFalse(ids.contains("gpt-live-1.1"), "a voice model is not a text choice")
+        XCTAssertFalse(ids.contains("gpt-5.5-2026-04-23"), "dated snapshots are left out")
+        XCTAssertFalse(ids.contains { $0.contains("transcribe") || $0.contains("whisper") })
+        XCTAssertLessThanOrEqual(ids.count, OnboardingModelPick.listLimit)
+        XCTAssertEqual(model.modelChoices(.llmKey).first { $0.id == "gpt-6.2-astra" }?.price, "$8 / $40 per 1M")
+
+        try await Task.sleep(for: .milliseconds(1_600))
+        XCTAssertEqual(model.step, .llmKey, "with a choice of models the step waits")
+        await model.chooseModel("gpt-6.2-sol", on: .llmKey)
+        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-sol"))
+        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-sol", "the shared LLM row runs the pick")
+        try await eventually { model.step != .llmKey }
+    }
+
+    func testAnthropicStartsOnItsNewestFlagshipWithItsPrice() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.llmProvider = .anthropic
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        XCTAssertEqual(model.outcome(.llmKey), .done("claude-fable-5-2"))
+        let choices = model.modelChoices(.llmKey)
+        XCTAssertEqual(choices.first { $0.id == "claude-fable-5-2" }?.price, "$8 / $40 per 1M")
+        XCTAssertTrue(choices.contains { $0.id == "claude-sonnet-5-5" })
+        XCTAssertFalse(choices.contains { $0.id == "claude-opus-4-5-20251101" })
+    }
+
+    /// OpenAI speech has more than one model: the speech step offers them
+    /// too, with the per-minute price, and waits; one-model providers move on.
+    func testOpenAISpeechOffersItsModelsAndWaits() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        model.speechProvider = .openAI
+        await model.useSpeechKey("sk-proj-good-0123456789abcdef", provider: .openAI)
+        XCTAssertTrue(model.outcome(.speechKey).isDone)
+        let choices = model.modelChoices(.speechKey)
+        XCTAssertGreaterThan(choices.count, 1, "\(choices.map(\.id))")
+        XCTAssertEqual(choices.first { $0.id == ModelRegistry.openAILiveModel }?.price, "$0.017 / min")
+        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel)
+        try await Task.sleep(for: .milliseconds(1_600))
+        XCTAssertEqual(model.step, .speechKey, "the step waits for the choice; Return keeps the model")
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+    }
+
+    func testTheFlagshipRuleAndTheListedModels() {
+        let day: TimeInterval = 86_400
+        let now = Date()
+        func choice(_ id: String, _ days: Double, _ out: Double? = nil) -> OnboardingModelChoice {
+            OnboardingModelChoice(id: id, price: nil, date: now.addingTimeInterval(-days * day), outputPerMillion: out)
+        }
+        // Prices known: the newest generation's priciest.
+        XCTAssertEqual(OnboardingModelPick.flagship([choice("a-sol", 3, 10), choice("a-astra", 5, 40),
+                                                     choice("a-old-astra", 80, 50)])?.id, "a-astra")
+        // No prices: the newest; small tiers never the default.
+        XCTAssertEqual(OnboardingModelPick.flagship([choice("x-mini", 1), choice("x-large", 9)])?.id, "x-large")
+        XCTAssertEqual(OnboardingModelPick.flagship([choice("only-mini", 1)])?.id, "only-mini")
+        XCTAssertNil(OnboardingModelPick.flagship([]))
+        XCTAssertFalse(OnboardingModelPick.isListed("gpt-5.5-2026-04-23", speech: false))
+        XCTAssertFalse(OnboardingModelPick.isListed("claude-opus-4-5-20251101", speech: false))
+        XCTAssertFalse(OnboardingModelPick.isListed("gpt-live-1.1", speech: false))
+        XCTAssertTrue(OnboardingModelPick.isListed("gpt-live-transcribe", speech: true))
+        XCTAssertEqual(OnboardingModelPick.shortPrice("$1.25 in / $10 out per 1M tokens"), "$1.25 / $10 per 1M")
+        XCTAssertEqual(OnboardingModelPick.outputPrice("$1.25 in / $10 out per 1M tokens"), 10)
+        XCTAssertEqual(OnboardingModelPick.outputPrice("$0.1 in / $1,200 out per 1M tokens"), 1_200)
+        XCTAssertNil(OnboardingModelPick.outputPrice("Free"))
+        XCTAssertEqual(OnboardingModelPick.minutePrice(0.017), "0.017")
+        XCTAssertEqual(OnboardingModelPick.minutePrice(0.0045), "0.0045")
+        // OpenRouter: each major author's flagship, Anthropic first.
+        let router = OnboardingModelPick.listed([choice("openai/gpt-6.2-astra", 3, 40), choice("openai/gpt-6.2-sol", 3, 10),
+                                                 choice("anthropic/claude-fable-5.2", 12, 40), choice("anthropic/claude-haiku-5.5", 40, 0.5),
+                                                 choice("some/unknown", 1, 99)], speech: false, router: true)
+        XCTAssertEqual(router.map(\.id), ["anthropic/claude-fable-5.2", "openai/gpt-6.2-astra"])
+    }
 }

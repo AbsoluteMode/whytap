@@ -302,10 +302,10 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The shown step's action succeeded: show it for the step's dwell, then
     /// move on. A success of a step that is not shown is only recorded.
-    private func succeed(_ done: OnboardingStep, _ text: String) {
+    private func succeed(_ done: OnboardingStep, _ text: String, holds: Bool = false) {
         outcomes[done] = .done(text)
         if done == .source, step == .source { moveOnFromSource(); return }
-        guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
+        guard !holds, done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
         dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
     }
@@ -408,7 +408,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.speechExpected = true
-        succeed(.speechKey, model)
+        succeed(.speechKey, model, holds: modelChoices(.speechKey).count > 1)
     }
 
     // MARK: - 3. Language model key
@@ -418,11 +418,80 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Agent's tools), otherwise the newest catalog model the Agent can use.
     /// OpenAI has no registry default: its live catalog is the source.
     func preselectedModel(_ provider: AIProviderKind) -> String? {
-        if let recommended = ModelRegistry.recommended(for: .agent, kind: provider) { return recommended }
-        guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return nil }
-        let options = models.sections(for: .agent).filter { $0.account == account }.flatMap(\.options)
+        // The provider's current catalog decides (its newest flagship); the
+        // registry only before the catalog is there.
+        // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+        if let flagship = OnboardingModelPick.flagship(choices(for: provider, speech: false)) { return flagship.id }
+        return ModelRegistry.recommended(for: .agent, kind: provider)
+    }
+
+    // MARK: - The model, after a key is accepted
+
+    /// The models a key step offers for its provider, newest first, each
+    /// with a short price when the catalogs know it.
+    func modelChoices(_ step: OnboardingStep) -> [OnboardingModelChoice] {
+        switch step {
+        case .speechKey: return choices(for: speechProvider, speech: true)
+        case .llmKey: return choices(for: llmProvider, speech: false)
+        default: return []
+        }
+    }
+
+    private func choices(for provider: AIProviderKind, speech: Bool) -> [OnboardingModelChoice] {
+        _ = revision
+        guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return [] }
+        let options = models.sections(for: speech ? .dropFast : .agent).filter { $0.account == account }.flatMap(\.options)
         let usable = options.filter { if case .notSupported = $0.state { return false } else { return true } }
-        return usable.max { ($0.catalogDate ?? .distantPast) < ($1.catalogDate ?? .distantPast) }?.model
+        let all = usable.map { option -> OnboardingModelChoice in
+            let perMinute = provider == .openAI ? ModelRegistry.openAISpeechUSDPerMinute(option.model) : nil
+            let price = speech ? perMinute.map { "$\(OnboardingModelPick.minutePrice($0)) / min" }
+                               : OnboardingModelPick.shortPrice(option.priceLabel)
+            return OnboardingModelChoice(id: option.model, price: price, date: option.catalogDate,
+                                         outputPerMillion: speech ? nil : OnboardingModelPick.outputPrice(option.priceLabel))
+        }
+        return OnboardingModelPick.listed(all, speech: speech, router: provider == .openRouter)
+    }
+
+    /// The model the step's shared row runs on its provider now.
+    func currentModel(_ step: OnboardingStep) -> String? {
+        _ = revision
+        let kind: SharedModelKind = step == .speechKey ? .speech : .llm
+        let provider = step == .speechKey ? speechProvider : llmProvider
+        guard let choice = models.sharedRow(kind)?.choice,
+              choice.account == APIAndModelsViewModel.builtInAccount(for: provider) else { return nil }
+        return choice.model
+    }
+
+    /// The pause after a picked model is applied, before the step moves on.
+    static let afterModelPick: TimeInterval = 0.78
+
+    /// A model is being applied on this step.
+    @Published private(set) var choosingModel: OnboardingStep?
+
+    /// The person picked another model on an accepted key step: it goes
+    /// through the shared row like the first pick, then the step moves on.
+    func chooseModel(_ id: String, on step: OnboardingStep) async {
+        guard step == .speechKey || step == .llmKey, outcome(step).isDone, choosingModel == nil else { return }
+        let kind: SharedModelKind = step == .speechKey ? .speech : .llm
+        let provider = step == .speechKey ? speechProvider : llmProvider
+        guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
+        let action = begin(kind)
+        choosingModel = step
+        defer { if choosingModel == step { choosingModel = nil } }
+        if step == .llmKey { llmModel = id }
+        let applied = await models.selectShared(model: id, account: account, kind: kind, replaceCustom: false)
+        guard isLatest(action, kind) else { return }
+        notes = models.sharedRow(kind)?.notes ?? []
+        revision += 1
+        guard applied || models.sharedRow(kind)?.choice?.model == id else {
+            outcomes[step] = .failed(notes.first ?? "\(provider.displayName) · \(id) could not be used")
+            return
+        }
+        outcomes[step] = .done(id)
+        guard step == self.step, !dwell.isCounting, !dwell.isLatched else { return }
+        let seconds = Self.afterModelPick
+        let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
+        dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
     }
 
     // MARK: - Key steps: the field and your own server
@@ -504,7 +573,8 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.hasLanguageModel = true
-        succeed(.llmKey, model)
+        // With a choice of models the step waits for it (Return keeps this one).
+        succeed(.llmKey, model, holds: modelChoices(.llmKey).count > 1)
     }
 
     /// A new key is checked for its shape here, then goes through Settings'

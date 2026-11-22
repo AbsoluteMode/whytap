@@ -129,17 +129,25 @@ final class OnboardingJourneyModelTests: XCTestCase {
     private func makeModel(_ env: Env, refusing: [ProviderAccount] = [], supportsOnDevice: Bool = true,
                            hotkey: DropHotkeyStatus = .accessibilityRequired,
                            keyChecker: ProviderKeyChecking? = nil,
-                           offersOpenAISpeech: Bool = false, isPreview: Bool = false) throws -> OnboardingJourneyModel {
+                           offersOpenAISpeech: Bool = false, isPreview: Bool = false,
+                           realCatalogs: Bool = false) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
-        try Data("{}".utf8).write(to: catalogURL)
+        if realCatalogs {
+            let cached = [ProviderAccount.openRouter.storageID:
+                            CatalogSnapshot(models: OnboardingPreviewProviders.openRouter, fetchedAt: Date())]
+            try JSONEncoder().encode(cached).write(to: catalogURL)
+        } else {
+            try Data("{}".utf8).write(to: catalogURL)
+        }
         let offline = Offline(refusing: Set(refusing.map(\.storageID)))
         let present = env.modelPresent
         let readiness = OnDeviceSpeechReadiness { present.value }
         let models = APIAndModelsViewModel(
             routing: env.routing, keys: env.keys,
-            catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: offline),
+            catalogs: ModelCatalogStore(fileURL: catalogURL,
+                                        fetcher: realCatalogs ? OnboardingPreviewProviders() as ModelCatalogFetching : offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
             keyChecker: keyChecker ?? offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
         let snapshot = env.snapshot
@@ -555,7 +563,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
-        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true)
+        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true, realCatalogs: true)
         let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
         let window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
@@ -597,10 +605,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .llmKey, in: model)
         try await snap("llm-key")
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
+        // The key worked: the newest flagship is set and the person can pick.
         try await snap("llm-key-done")
-        model.dwell.latch()
-        try await snap("llm-key-latched")
-        model.dwell.commitNow()
+        await model.chooseModel("claude-sonnet-5-5", on: .llmKey)
+        try await snap("llm-key-model-picked")
+        try await endBeat(env, until: .search, in: model)
         XCTAssertEqual(model.step, .search)
         while true {
             try await snap(model.step.rawValue)

@@ -1281,15 +1281,15 @@ struct OnboardingKeyStage: View {
                 .padding(.top, 6)
                 .accessibilityAddTraits(.isHeader)
             keyBand
-                .frame(height: 108)
+                .frame(height: 100)
             field
                 .padding(.horizontal, Self.fieldInset)
                 .padding(.top, 4)
             feedback
-                .frame(height: 36, alignment: .top)
+                .frame(height: 44, alignment: .top)
                 .padding(.horizontal, Self.fieldInset)
-                .padding(.top, 10)
-            Spacer(minLength: 4)
+                .padding(.top, 9)
+            Spacer(minLength: 12)
             logos
             Button { model.useOwnServer(kind) } label: {
                 Text("Use your own server →")
@@ -1430,6 +1430,16 @@ struct OnboardingKeyStage: View {
         Group {
             if checking {
                 Text("Checking the key with \(name)…").foregroundColor(OnboardingTheme.muted)
+            } else if accepted, choices.count > 1 {
+                // The key worked: the person picks the model, the newest
+                // flagship already set; Return keeps it.
+                VStack(spacing: 5) {
+                    Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
+                    OnboardingModelMenu(choices: choices, selected: model.currentModel(step),
+                                        busy: model.choosingModel == step) { id in
+                        Task { await model.chooseModel(id, on: step) }
+                    }
+                }
             } else if accepted {
                 Text(acceptedLine(name)).foregroundColor(OnboardingTheme.green)
             } else if let problem {
@@ -1465,6 +1475,8 @@ struct OnboardingKeyStage: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
+
+    private var choices: [OnboardingModelChoice] { model.modelChoices(step) }
 
     private func acceptedLine(_ name: String) -> String {
         if case .done(let what) = outcome, kind == .languageModel { return "\(name) · \(what) · key saved in your Keychain" }
@@ -1557,6 +1569,11 @@ struct OnboardingKeyStage: View {
     private func submit() {
         guard !checking else { return }
         let key = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.isEmpty, outcome.isDone {
+            // Return on an accepted key goes on (with the model it shows).
+            if model.dwell.isCounting || model.dwell.isLatched { model.dwell.commitNow() } else { model.next() }
+            return
+        }
         if key.isEmpty {
             // An empty field uses the key already saved for this step.
             guard saved, !outcome.isDone else { return }
@@ -1582,6 +1599,103 @@ struct OnboardingKeyStage: View {
     /// hand-picked mark only when the check succeeded.
     private func react(to outcome: OnboardingStepOutcome) {
         if outcome.isDone { picked = nil }
+    }
+}
+
+/// The model of an accepted key: one quiet line, "Model  gpt-6.2-astra ⌄
+/// $8 / $40 per 1M", opening a small dark list of the provider's current
+/// models with their prices. No chip, no extra step. (A native menu drew only
+/// "Model": AppKit keeps one text of a menu's label.)
+struct OnboardingModelMenu: View {
+    let choices: [OnboardingModelChoice]
+    let selected: String?
+    let busy: Bool
+    let pick: (String) -> Void
+    @State private var hovered = false
+    @State private var open = false
+
+    private var current: OnboardingModelChoice? { choices.first { $0.id == selected } }
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: 6) {
+                Text("Model").foregroundColor(OnboardingTheme.faint)
+                Text(selected ?? "Choose")
+                    .font(OnboardingTheme.mono(12))
+                    .foregroundColor(OnboardingTheme.ink)
+                Image(systemName: busy ? "ellipsis" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.muted)
+                if let price = current?.price {
+                    Text(price).foregroundColor(OnboardingTheme.faint)
+                }
+            }
+            .font(OnboardingTheme.sans(12))
+            .padding(.horizontal, 11)
+            .frame(height: 24)
+            .background(Capsule().fill(Color.white.opacity(hovered || open ? 0.08 : 0.04)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(hovered || open ? 0.12 : 0.06), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(busy)
+        .onHover { hovered = $0 }
+        .popover(isPresented: $open, arrowEdge: .bottom) { list }
+        .help("The newest flagship is set; pick another of this provider's current models")
+        .accessibilityLabel("Model, \(selected ?? "none")")
+    }
+
+    private var list: some View {
+        VStack(spacing: 1) {
+            ForEach(choices) { choice in
+                OnboardingModelRow(choice: choice, isSelected: choice.id == selected) {
+                    open = false
+                    if choice.id != selected { pick(choice.id) }
+                }
+            }
+        }
+        .padding(6)
+        .frame(width: 330)
+        .background(Color(red: 0.086, green: 0.086, blue: 0.098))
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct OnboardingModelRow: View {
+    let choice: OnboardingModelChoice
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 12)
+                Text(choice.id)
+                    .font(OnboardingTheme.mono(12))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let price = choice.price {
+                    Text(price)
+                        .font(OnboardingTheme.sans(11.5))
+                        .foregroundColor(OnboardingTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovered ? 0.08 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

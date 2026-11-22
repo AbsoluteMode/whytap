@@ -266,6 +266,24 @@ window, Back and a progress bar.
   and OpenRouter marks; a recognised key names the model it will set. The
   lock closes again when the step opens (the key withdraws), and the page
   flows under the key like step 1 into step 2. "Skip" stays in the footer.
+- **The model is the person's choice, from the provider's current list.**
+  The owner asked what the preset "gpt-5.6" was: a fixed name in the
+  preview's fake catalog, while the app took OpenAI's newest catalog model
+  and Anthropic's registry model. Now an accepted key starts on the
+  provider's newest flagship from its own catalog: the newest generation
+  (within 30 days of the newest text model) and in it the highest output
+  price when OpenRouter's cached list prices are known (OpenAI
+  `gpt-6.2-astra`, Anthropic `claude-fable-5-2` on 2026-11-22), otherwise the
+  newest; small tiers, voice, search and dated snapshots are never the
+  default. The registry is used only before the catalog exists. Under the
+  accepted line a quiet "Model … ⌄ price" opens a small dark list of up to
+  eight current models with prices (OpenRouter: each major author's
+  flagship); a pick goes through the shared row and the step moves on. With
+  a choice of models the step waits after the padlock opens; Return keeps
+  the set model. The speech step does the same when its provider has more
+  than one model (OpenAI: per-minute prices), otherwise it moves on as
+  before. A native menu was not used: AppKit draws only one text of its
+  label, so the model and price disappeared.
 - **"Use your own server →" shows the server form in the same window (the
   preview).** Base URL, an optional key (a secure field), the models with
   LLM or Transcription each, one Save; the name comes from the address
@@ -323,7 +341,10 @@ window, Back and a progress bar.
   its first character (Russian layout and symbols included, with the dots'
   width equal to the typed text's), calls an unnamed key a format problem until it
   is edited, and opens and closes the server form (Back, Save, the name
-  from the address).
+  from the address), starts the language model step on the newest flagship
+  of a realistic catalog, lists only current text models with prices, waits
+  for the choice and applies a pick, offers OpenAI's speech models with
+  per-minute prices, and checks the flagship rule on its own.
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, the stubbed Tavily check, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its

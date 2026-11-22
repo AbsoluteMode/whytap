@@ -1196,7 +1196,11 @@ padlock, turns and opens it when a key is accepted and catches when refused.
 The key field (OnboardingKeyStage) shows every input as dots; a provider is
 named only by its key's own format (prefix or Deepgram's 40 hex characters)
 or a clicked mark, otherwise Return is a format problem; five problems are
-named (format, refused, no credit or access, no answer with Retry). Speech and
+named (format, refused, no credit or access, no answer with Retry). An
+accepted key starts on the provider's newest flagship from its catalog
+(OnboardingModelPick: newest generation, highest known output price) and,
+when the provider has several models, the step waits with a quiet model
+list with prices (OnboardingModelMenu); a pick moves on, Return keeps it. Speech and
 the language model go through the shared Speech and LLM rows
 (APIAndModelsViewModel.selectShared). "Use your own server →" opens Settings ->
 API & Models -> API keys with the Custom server tile's form

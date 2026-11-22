@@ -108,7 +108,11 @@ final class OnboardingPreviewSession {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("whytap-onboarding-preview-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let catalogURL = directory.appendingPathComponent("catalogs.json")
-        try? Data("{}".utf8).write(to: catalogURL)
+        // OpenRouter's public list is cached, as on a Mac that has opened a
+        // picker: direct Anthropic and OpenAI models show its list prices.
+        let cached = [ProviderAccount.openRouter.storageID:
+                        CatalogSnapshot(models: OnboardingPreviewProviders.openRouter, fetchedAt: Date())]
+        try? ((try? JSONEncoder().encode(cached)) ?? Data("{}".utf8)).write(to: catalogURL)
 
         let tokens = OnboardingPreviewTokenStore.Box()
         let keys = ProviderKeyStore(makeStore: { OnboardingPreviewTokenStore(account: $0, box: tokens) })
@@ -199,18 +203,57 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
         return .valid
     }
 
+    /// The providers' catalogs as they looked on 2026-11-22 (IDs, ages and
+    /// OpenRouter list prices), so the key steps' model choice looks real.
     func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
-        func model(_ id: String, daysAgo: Double) -> CatalogModel {
-            var model = CatalogModel(id: id, uses: [.chat, .chatWithTools], contextLength: 400_000, supportsTools: true)
-            model.catalogDate = Date().addingTimeInterval(-daysAgo * 86_400)
-            return model
-        }
         switch account.kind {
-        case .anthropic: return [model(ModelRegistry.anthropicAgentModel, daysAgo: 30)]
-        case .openAI: return [model("gpt-5.6", daysAgo: 10), model("gpt-5.5", daysAgo: 90)]
+        case .anthropic: return Self.anthropic
+        case .openAI: return Self.openAI
+        case .openRouter: return Self.openRouter
         default: return []
         }
     }
+
+    private static func model(_ id: String, daysAgo: Double, uses: Set<ModelUse> = [.chat, .chatWithTools],
+                              price: (Double, Double)? = nil) -> CatalogModel {
+        var model = CatalogModel(id: id, uses: uses, contextLength: 400_000, supportsTools: !uses.isDisjoint(with: [.chatWithTools]))
+        model.catalogDate = Date().addingTimeInterval(-daysAgo * 86_400)
+        model.tokenPrice = price.flatMap {
+            CatalogTokenPrice(promptPerToken: Decimal($0.0) / 1_000_000, completionPerToken: Decimal($0.1) / 1_000_000)
+        }
+        return model
+    }
+
+    static let anthropic = [
+        model("claude-fable-5-2", daysAgo: 12), model("claude-haiku-5-5", daysAgo: 45),
+        model("claude-sonnet-5-5", daysAgo: 55), model("claude-opus-5-5", daysAgo: 61),
+        model("claude-fable-5-1", daysAgo: 86), model("claude-opus-4-5-20251101", daysAgo: 380),
+    ]
+
+    static let openAI = [
+        model("gpt-live-1.1", daysAgo: 3), model("gpt-6.2-sol", daysAgo: 18), model("gpt-6.2-astra", daysAgo: 21),
+        model("gpt-6.1-terra", daysAgo: 38), model("gpt-6.1-sol", daysAgo: 54), model("gpt-6-luna", daysAgo: 67),
+        model("gpt-6-astra", daysAgo: 82), model("gpt-5.6-terra", daysAgo: 150), model("gpt-5.5-2026-04-23", daysAgo: 210),
+        model("gpt-live-transcribe", daysAgo: 115, uses: [.realtimeSTT]),
+        model("gpt-transcribe", daysAgo: 115, uses: [.asyncSTT, .realtimeSTT]),
+        model("gpt-realtime-whisper", daysAgo: 196, uses: [.realtimeSTT]),
+    ]
+
+    static let openRouter = [
+        model("anthropic/claude-fable-5.2", daysAgo: 12, price: (8, 40)),
+        model("anthropic/claude-opus-5.5", daysAgo: 60, price: (4, 20)),
+        model("anthropic/claude-sonnet-5.5", daysAgo: 55, price: (2, 10)),
+        model("anthropic/claude-haiku-5.5", daysAgo: 45, price: (0.1, 0.5)),
+        model("openai/gpt-6.2-astra", daysAgo: 3, price: (8, 40)),
+        model("openai/gpt-6.2-sol", daysAgo: 3, price: (2, 10)),
+        model("openai/gpt-6.1-terra", daysAgo: 25, price: (1, 5)),
+        model("openai/gpt-6.1-sol", daysAgo: 52, price: (2, 10)),
+        model("openai/gpt-6-luna", daysAgo: 58, price: (0.1, 0.5)),
+        model("openai/gpt-6-astra", daysAgo: 77, price: (10, 50)),
+        model("google/gemini-3.8-pro", daysAgo: 20, price: (2.5, 15)),
+        model("google/gemini-3.8-flash", daysAgo: 20, price: (0.3, 2.5)),
+        model("deepseek/deepseek-v4", daysAgo: 30, price: (0.3, 1.2)),
+    ]
 
     func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
         try? await Task.sleep(nanoseconds: 700_000_000)

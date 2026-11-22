@@ -18,6 +18,9 @@ sources:
     reference: Sources/Sidekey/Hotkeys/HotkeyRecordingSession.swift
     confirmed_at: 2026-11-22
   - type: repository
+    reference: Sources/Sidekey/Hotkeys/ToolShortcutAssignment.swift
+    confirmed_at: 2026-11-22
+  - type: repository
     reference: Sources/Sidekey/Settings/ToolboxSettingsView.swift
     confirmed_at: 2026-11-22
   - type: repository

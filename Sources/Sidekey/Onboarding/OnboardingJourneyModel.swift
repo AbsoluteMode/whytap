@@ -135,6 +135,8 @@ final class OnboardingJourneyModel: ObservableObject {
     @Published var llmProvider: AIProviderKind = .anthropic
     /// The dictation language; `nil` is Auto.
     @Published private(set) var language: AppLanguage?
+    /// The variant picked with it on the globe ("en-GB"), kept beside it.
+    @Published private(set) var languageVariant: String?
     /// Features the shared pick could not serve, one line each.
     @Published private(set) var notes: [String] = []
     /// Bumped when routes change elsewhere, so captions re-read them.
@@ -229,6 +231,7 @@ final class OnboardingJourneyModel: ObservableObject {
         dwell = OnboardingDwellController(wait: dwellWait)
         pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
+        languageVariant = preferences.selectedLanguageVariant
         let tavily = tavily ?? models.makeTavilySettings()
         self.tavily = tavily
         self.hotkeys = hotkeys ?? .shared
@@ -904,10 +907,16 @@ final class OnboardingJourneyModel: ObservableObject {
         }
     }
 
-    func setLanguage(_ language: AppLanguage?) {
+    /// `variant` ("en-GB") is stored beside the language; providers still
+    /// get the language's own code.
+    func setLanguage(_ language: AppLanguage?, variant: String? = nil) {
         preferences.selectedLanguage = language
+        preferences.selectedLanguageVariant = language == nil ? nil : variant
         self.language = preferences.selectedLanguage
-        succeed(.language, language?.englishName ?? "Detect automatically")
+        languageVariant = preferences.selectedLanguageVariant
+        let name = OnboardingLanguageVariant.all.first { $0.tag == languageVariant }
+            .map { "\(language?.englishName ?? "") (\($0.code))" }
+        succeed(.language, name ?? language?.englishName ?? "Detect automatically")
     }
 
     // MARK: - 6–8. Permissions

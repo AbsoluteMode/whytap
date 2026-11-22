@@ -95,4 +95,55 @@ final class OnboardingGlobeTests: XCTestCase {
                        "no Auto-detect where the model has none")
         XCTAssertTrue(OnboardingJourneyModel.detectsLanguage(account: .soniox, model: "stt-rt-v4"))
     }
+
+    // MARK: Variants (REV 51)
+
+    /// English US/UK/AU, Portuguese BR/PT, Spanish ES/MX, with any speech
+    /// route; the lit country names its own variant.
+    func testEachCountryOffersItsOwnVariant() {
+        XCTAssertEqual(OnboardingLanguageVariant.variants(of: "en").map(\.code), ["US", "UK", "AU"])
+        XCTAssertEqual(OnboardingLanguageVariant.variants(of: "pt").map(\.code), ["BR", "PT"])
+        XCTAssertEqual(OnboardingLanguageVariant.variants(of: "es").map(\.code), ["ES", "MX"])
+        XCTAssertTrue(OnboardingLanguageVariant.variants(of: "ru").isEmpty)
+        XCTAssertEqual(OnboardingLanguageVariant.variant(of: "en", in: "IE")?.tag, "en-GB")
+        XCTAssertEqual(OnboardingLanguageVariant.variant(of: "en", in: "NZ")?.tag, "en-AU")
+        XCTAssertEqual(OnboardingLanguageVariant.variant(of: "en", in: nil)?.tag, "en-US")
+        XCTAssertEqual(OnboardingLanguageVariant.variant(of: "es", in: "AR")?.tag, "es-MX")
+        XCTAssertEqual(OnboardingLanguageVariant.variant(of: "pt", in: "AO")?.tag, "pt-PT")
+        for variant in OnboardingLanguageVariant.all {
+            XCTAssertNotNil(mesh.index(of: variant.country), "the globe has \(variant.country)")
+        }
+    }
+
+    /// The variant is kept beside the language; providers keep the language's code.
+    func testTheVariantIsStoredBesideTheLanguage() throws {
+        let suite = "OnboardingGlobeTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = PrivacyPreferences(defaults: defaults)
+        preferences.selectedLanguage = AppLanguage.find(code: "en")
+        preferences.selectedLanguageVariant = "en-GB"
+        XCTAssertEqual(preferences.selectedLanguage?.code, "en", "providers get the base code")
+        XCTAssertEqual(preferences.selectedLanguageVariant, "en-GB")
+        // A language changed elsewhere (the Island picker) leaves no stale variant.
+        preferences.selectedLanguage = AppLanguage.find(code: "fr")
+        XCTAssertNil(preferences.selectedLanguageVariant)
+        preferences.selectedLanguageVariant = nil
+        XCTAssertNil(defaults.string(forKey: "sidekey.preferences.selectedLanguageVariant"))
+        XCTAssertNotNil(ConfigBackupRegistry.entries["sidekey.preferences.selectedLanguageVariant"], "backed up with the language")
+    }
+
+    func testChoosingAVariantOnTheStep() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingGlobeTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.setLanguage(AppLanguage.find(code: "en"), variant: "en-GB")
+        XCTAssertEqual(model.language?.code, "en")
+        XCTAssertEqual(model.languageVariant, "en-GB")
+        XCTAssertEqual(model.outcome(.language), .done("English (UK)"))
+        model.setLanguage(AppLanguage.find(code: "ru"), variant: nil)
+        XCTAssertNil(model.languageVariant)
+        model.setLanguage(nil, variant: "en-GB")
+        XCTAssertNil(model.languageVariant, "Auto has no variant")
+    }
 }

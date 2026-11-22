@@ -409,9 +409,15 @@ window, Back and a progress bar.
   `OnboardingGlobeCountries.swift`; this version is built from the
   prototype's 79 regions (some neighbours joined), and the script takes
   Natural Earth's admin-0 countries for finer outlines. Language variants
-  (English US/UK/AU, Portuguese BR/PT, Spanish ES/MX) are not offered yet:
-  Whytap stores and sends one ISO 639-1 code, and only Deepgram takes a
-  variant.
+  (English US/UK/AU, Portuguese BR/PT, Spanish ES/MX) show under the
+  language with every speech route, as in the prototype (the owner, REV 51:
+  "show the variants, it looks good"): the lit country's own variant is
+  underlined and taken by Return, a variant under the pointer turns the
+  globe to its country, and a click chooses it. The variant is stored beside
+  the language (`sidekey.preferences.selectedLanguageVariant`, BCP 47, valid
+  only while its language is the selected one, backed up with it); every
+  provider still gets the language's ISO 639-1 code. Sending the variant to
+  Deepgram is left out of this change.
 
 ## Rejected
 
@@ -437,7 +443,10 @@ window, Back and a progress bar.
   "Jap", "Port" before Portuguese, "uk") and a language's home country with
   that language (Russian in Cyrillic, "English", "Catalan"), nothing for "Xyzzy"; a
   click finds the country under it (Russia, Brazil, the US, Japan, none in
-  the open Pacific); a point of the view maps back to the sphere at any
+  the open Pacific); each country offers its own variant (Ireland UK, New
+  Zealand AU, Argentina MX, Angola PT) and the variant is stored beside the
+  language, gone when the language changes elsewhere, absent for Auto; a
+  point of the view maps back to the sphere at any
   turn; the spring lands with the country facing the viewer; a Deepgram
   model offers only its languages and Auto-detect only where it has it.
   Offscreen renders of the step at rest, typing, picked, a country of three

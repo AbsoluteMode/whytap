@@ -725,14 +725,14 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { OnboardingGlobeMotion.settlesAtOnce = false }
         for (name, query, country) in [("rest", "", nil), ("typing-rus", "Rus", nil), ("typing-jap", "Jap", nil),
                                        ("typing-english", "English", nil), ("picked-brazil", "", "BR"),
-                                       ("picked-switzerland", "", "CH"), ("unavailable-iceland", "", "IS"),
+                                       ("picked-switzerland", "", "CH"), ("picked-uk", "", "GB"), ("picked-mexico", "", "MX"), ("unavailable-iceland", "", "IS"),
                                        ("no-match", "Xyzzy", nil)] as [(String, String, String?)] {
             let stage = OnboardingLanguageStage(model: model, query: query, country: country)
-                .frame(width: 520, height: 330)
+                .frame(width: 520, height: 320)
                 .background(OnboardingTheme.bg)
                 .preferredColorScheme(.dark)
             let host = NSHostingView(rootView: stage)
-            host.frame = NSRect(x: 0, y: 0, width: 520, height: 330)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(120))
             host.layoutSubtreeIfNeeded()

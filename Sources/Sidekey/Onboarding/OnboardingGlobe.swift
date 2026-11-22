@@ -167,6 +167,55 @@ final class OnboardingGlobeMesh {
     }
 }
 
+// MARK: - Variants
+
+/// A variant of a language the globe offers under it, like the prototype:
+/// English US / UK / AU, Portuguese BR / PT, Spanish ES / MX. Shown with
+/// every speech route; it is stored beside the language and providers keep
+/// getting the language's own code (the owner, REV 51).
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+struct OnboardingLanguageVariant: Equatable, Identifiable {
+    /// The language's ISO 639-1 code.
+    let language: String
+    /// "UK", "BR": shown small after the label.
+    let code: String
+    /// In the language itself: "United Kingdom", "Brasil", "México".
+    let label: String
+    /// BCP 47: "en-GB".
+    let tag: String
+    /// Where it is spoken first, the country the globe lights for it.
+    let country: String
+    /// The other countries that speak this variant.
+    let countries: Set<String>
+    var id: String { tag }
+
+    static let all: [OnboardingLanguageVariant] = [
+        .init(language: "en", code: "US", label: "United States", tag: "en-US", country: "US",
+              countries: ["US", "CA", "PH", "PR", "LR", "JM", "BS", "BZ", "TT", "GY"]),
+        .init(language: "en", code: "UK", label: "United Kingdom", tag: "en-GB", country: "GB",
+              countries: ["GB", "IE", "NG", "ZA", "NA_BW", "GH", "KE", "UG", "TZ", "ZM", "ZW", "IN", "PK", "SG",
+                          "MT", "SL", "GM", "BW", "NA", "SZ", "LS", "MW", "SS", "SD", "MZ_ZW", "WA_REGION", "CM"]),
+        .init(language: "en", code: "AU", label: "Australia", tag: "en-AU", country: "AU",
+              countries: ["AU", "NZ", "PG", "FJ", "SB", "VU"]),
+        .init(language: "pt", code: "BR", label: "Brasil", tag: "pt-BR", country: "BR", countries: ["BR"]),
+        .init(language: "pt", code: "PT", label: "Portugal", tag: "pt-PT", country: "PT",
+              countries: ["PT", "AO", "MZ", "GW", "TL", "MZ_ZW", "CD_AO"]),
+        .init(language: "es", code: "ES", label: "España", tag: "es-ES", country: "ES", countries: ["ES", "GQ"]),
+        .init(language: "es", code: "MX", label: "México", tag: "es-MX", country: "MX",
+              countries: ["MX", "AR", "CO", "CL", "PE", "VE", "CU", "GT", "GT_PA", "HN", "SV", "NI", "CR", "PA",
+                          "DO", "PR", "EC", "BO", "PY", "UY", "US"]),
+    ]
+
+    static func variants(of language: String) -> [OnboardingLanguageVariant] { all.filter { $0.language == language } }
+
+    /// The variant spoken in a country, else the language's first.
+    static func variant(of language: String, in country: String?) -> OnboardingLanguageVariant? {
+        let options = variants(of: language)
+        return options.first { $0.country == country } ?? options.first { country.map($0.countries.contains) ?? false }
+            ?? options.first
+    }
+}
+
 // MARK: - Search
 
 /// What the typed text points to: a country, and the language when the text
@@ -389,7 +438,7 @@ struct OnboardingGlobe: View {
     @State private var travelled = 0.0
 
     private static let mesh = OnboardingGlobeMesh.shared
-    static let radius = 70.0
+    static let radius = 68.0
 
     var body: some View {
         GeometryReader { proxy in

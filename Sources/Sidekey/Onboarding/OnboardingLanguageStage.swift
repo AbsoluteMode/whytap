@@ -20,6 +20,8 @@ struct OnboardingLanguageStage: View {
     @State private var hovered: Int?
     /// The language under the pointer in a row of several.
     @State private var hoveredLanguage: String?
+    /// The variant under the pointer ("en-GB"): the globe turns to it.
+    @State private var hoveredVariant: String?
     @FocusState private var focused: Bool
 
     private static let mesh = OnboardingGlobeMesh.shared
@@ -31,8 +33,10 @@ struct OnboardingLanguageStage: View {
         _query = State(initialValue: query)
         _matched = State(initialValue: OnboardingGlobeSearch.best(query))
         // Back to a chosen language: its country is lit again.
+        let chosenCountry = OnboardingLanguageVariant.all.first { $0.tag == model.languageVariant }?.country
         let picked = country.flatMap(Self.mesh.index(of:))
-            ?? (query.isEmpty ? model.language.flatMap { OnboardingGlobeSearch.home(of: $0.code) } : nil)
+            ?? (query.isEmpty ? chosenCountry.flatMap(Self.mesh.index(of:))
+                ?? model.language.flatMap { OnboardingGlobeSearch.home(of: $0.code) } : nil)
         _picked = State(initialValue: picked)
     }
 
@@ -58,6 +62,26 @@ struct OnboardingLanguageStage: View {
         return country.languages.compactMap(AppLanguage.find(code:))
     }
 
+    /// The lit language with variants (English, Portuguese, Spanish): the
+    /// line names it and offers its variants, as the prototype does.
+    private var variantLanguage: AppLanguage? {
+        choices.first.flatMap { OnboardingLanguageVariant.variants(of: $0.code).isEmpty ? nil : $0 }
+    }
+    private var variants: [OnboardingLanguageVariant] {
+        variantLanguage.map { OnboardingLanguageVariant.variants(of: $0.code) } ?? []
+    }
+    /// The variant Return takes: the one under the pointer, else the lit
+    /// country's own.
+    private var focusedVariant: OnboardingLanguageVariant? {
+        guard let language = variantLanguage else { return nil }
+        return variants.first { $0.tag == hoveredVariant }
+            ?? OnboardingLanguageVariant.variant(of: language.code, in: picked == nil && matched?.language != nil ? nil : country?.code)
+    }
+    /// The country a variant under the pointer stands for.
+    private var preview: Int? {
+        hoveredVariant.flatMap { tag in variants.first { $0.tag == tag } }.flatMap { Self.mesh.index(of: $0.country) }
+    }
+
     private var chosen: Bool { model.outcome(.language).isDone }
     /// The language Return takes: the one under the pointer, else the first.
     private var preferred: AppLanguage? {
@@ -71,8 +95,18 @@ struct OnboardingLanguageStage: View {
                 $0 != active && Self.mesh.countries[$0].languages.first == code
             }
         }
-        let confirmed = chosen && (model.language.map { language in choices.contains { $0 == language } } ?? false)
-        return OnboardingGlobeLight(active: active, siblings: siblings, hovered: hovered, confirmed: confirmed)
+        var lit = active
+        if let preview, preview != active {
+            // A variant under the pointer lights its country; the picked one stays softly lit.
+            if let active { siblings.append(active) }
+            lit = preview
+        }
+        return OnboardingGlobeLight(active: lit, siblings: siblings, hovered: hovered, confirmed: confirmed)
+    }
+
+    private var confirmed: Bool {
+        guard chosen, let language = model.language, choices.contains(language) else { return false }
+        return variants.isEmpty || variants.contains { $0.tag == model.languageVariant }
     }
 
     var body: some View {
@@ -92,14 +126,14 @@ struct OnboardingLanguageStage: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
-            .frame(height: 170)
+            .frame(height: 152)
             field
                 .padding(.horizontal, Self.fieldInset)
-                .padding(.top, 8)
+                .padding(.top, 6)
             line
-                .frame(height: 44, alignment: .top)
+                .frame(height: 52, alignment: .top)
                 .padding(.horizontal, Self.fieldInset)
-                .padding(.top, 12)
+                .padding(.top, 10)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
@@ -108,6 +142,7 @@ struct OnboardingLanguageStage: View {
             focused = true
         }
         .onChange(of: active) { _, _ in motion.aim(at: country) }
+        .onChange(of: preview) { _, new in motion.aim(at: (new ?? active).map { Self.mesh.countries[$0] }) }
     }
 
     // MARK: The field
@@ -128,6 +163,7 @@ struct OnboardingLanguageStage: View {
                 .onChange(of: query) { _, new in
                     picked = nil
                     hoveredLanguage = nil
+                    hoveredVariant = nil
                     matched = OnboardingGlobeSearch.best(new, languages: AppLanguage.all)
                 }
                 .accessibilityLabel("Language or country")
@@ -157,7 +193,42 @@ struct OnboardingLanguageStage: View {
     // MARK: The line under the field
 
     @ViewBuilder private var line: some View {
-        if let first = choices.first, choices.count == 1 {
+        if let language = variantLanguage {
+            // The language, then its variants (the prototype's dialect row).
+            VStack(spacing: 6) {
+                names(language, strong: true)
+                HStack(spacing: 12) {
+                    ForEach(Array(variants.enumerated()), id: \.element.tag) { index, variant in
+                        if index > 0 {
+                            Text("·").foregroundColor(OnboardingTheme.faint).accessibilityHidden(true)
+                        }
+                        let focused = variant == focusedVariant
+                        Button { choose(language, variant: variant) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Text(variant.label)
+                                    .font(OnboardingTheme.sans(14, weight: focused ? .medium : .regular))
+                                    .foregroundColor(light.confirmed && focused ? OnboardingTheme.green
+                                                     : focused ? OnboardingTheme.ink : OnboardingTheme.muted)
+                                Text(variant.code)
+                                    .font(OnboardingTheme.sans(10.5, weight: .medium))
+                                    .foregroundColor(OnboardingTheme.faint)
+                            }
+                            .fixedSize()
+                            .padding(.bottom, 4)
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(OnboardingTheme.ink.opacity(focused ? 0.55 : 0)).frame(height: 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(light.confirmed)
+                        .onHover { inside in
+                            if inside { hoveredVariant = variant.tag } else if hoveredVariant == variant.tag { hoveredVariant = nil }
+                        }
+                        .accessibilityLabel("\(language.englishName), \(variant.label)")
+                    }
+                }
+            }
+        } else if let first = choices.first, choices.count == 1 {
             Button { choose(first) } label: {
                 HStack(spacing: 8) {
                     names(first, strong: true)
@@ -270,14 +341,21 @@ struct OnboardingLanguageStage: View {
     }
 
     private func submit() {
+        if let language = variantLanguage, let variant = focusedVariant { return choose(language, variant: variant) }
         if let preferred { return choose(preferred) }
         if query.trimmingCharacters(in: .whitespaces).isEmpty, active == nil, model.speechDetectsLanguage { choose(nil) }
     }
 
-    private func choose(_ language: AppLanguage?) {
-        if let language, picked == nil, matched == nil, let home = OnboardingGlobeSearch.home(of: language.code) {
+    private func choose(_ language: AppLanguage?, variant: OnboardingLanguageVariant? = nil) {
+        if let variant, let index = Self.mesh.index(of: variant.country), !(country.map { variant.countries.contains($0.code) } ?? false) {
+            // A variant of another country: the globe settles on its country.
+            picked = index
+        } else if let language, picked == nil, matched == nil, let home = OnboardingGlobeSearch.home(of: language.code) {
             picked = home
         }
-        model.setLanguage(language)
+        hoveredVariant = nil
+        // A language with variants is always chosen with one.
+        let tag = variant?.tag ?? language.flatMap { OnboardingLanguageVariant.variant(of: $0.code, in: country?.code)?.tag }
+        model.setLanguage(language, variant: tag)
     }
 }

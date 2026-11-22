@@ -1188,7 +1188,9 @@ a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
 (optional), Web search for the Agent (Tavily, only after a Self-hosted language
 model: a server has no web search of its own; no segment otherwise), Language (a
 wireframe globe: drag to turn, click a country or type a country or language;
-OnboardingLanguageStage, OnboardingGlobe; only the speech route's languages,
+OnboardingLanguageStage, OnboardingGlobe; only the speech route's languages;
+English, Portuguese and Spanish offer variants, stored beside the language in
+PrivacyPreferences.selectedLanguageVariant while providers keep the base code;
 outlines from scripts/onboarding_globe_data.py), Keyboard control, Microphone, Input Monitoring (only when the Drop
 shortcut needs it), Screen Recording (optional), Try Drop, Shortcuts, Toolbox,
 Help, Thank you; a step whose result already holds is left out. A step whose

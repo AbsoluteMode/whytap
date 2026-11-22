@@ -1163,8 +1163,8 @@ struct OnboardingSpeechKeyProvider: Equatable {
     }
 }
 
-/// Hides the middle of what looks like a key: Latin letters, digits, "-" and
-/// "_", 20 characters or more. Anything else (short, Cyrillic, spaces) shows
+/// Hides all of what looks like a key: Latin letters, digits, "-" and "_",
+/// 20 characters or more. Anything else (short, Cyrillic, spaces) shows
 /// as typed, so a mistyped word is visible and named as a format problem.
 /// The mask keeps the length (one dot per hidden character, in a monospaced
 /// font), so the caret stays where the typed character is.
@@ -1177,12 +1177,12 @@ enum OnboardingKeyMask {
         }
     }
 
-    /// The start (the provider's prefix, or four characters) and the last
-    /// four stay visible; nil when the input does not look like a key.
-    static func masked(_ raw: String, prefix: Int?) -> String? {
+    /// Every character becomes a dot, none of the key stays visible (the
+    /// owner asked for the whole key closed); nil when the input does not
+    /// look like a key.
+    static func masked(_ raw: String) -> String? {
         guard looksLikeAKey(raw) else { return nil }
-        let head = min(prefix ?? 4, raw.count - 8)
-        return String(raw.prefix(head)) + String(repeating: "•", count: raw.count - head - 4) + String(raw.suffix(4))
+        return String(repeating: "•", count: raw.count)
     }
 }
 
@@ -1301,7 +1301,7 @@ struct OnboardingSpeechKeyStage: View {
                     .transition(.opacity)
             }
             ZStack(alignment: .leading) {
-                let masked = OnboardingKeyMask.masked(draft, prefix: detected?.prefix)
+                let masked = OnboardingKeyMask.masked(draft)
                 if draft.isEmpty {
                     Text(accepted ? "\(active.kind.displayName) key saved"
                          : saved ? "Saved \(active.kind.displayName) key · press Return to use it"

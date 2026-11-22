@@ -121,31 +121,28 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(OnboardingSpeechKeyProvider.detect("sk-proj-0123456789", among: withOpenAI)?.provider.kind, .openAI)
         XCTAssertNil(OnboardingSpeechKeyProvider.detect("sk-ant-0123456789", among: withOpenAI), "an Anthropic key is not speech")
 
-        let masked = try XCTUnwrap(OnboardingKeyMask.masked("sk_0123456789abcdefWXYZ", prefix: 3))
-        XCTAssertTrue(masked.hasPrefix("sk_"))
-        XCTAssertTrue(masked.hasSuffix("WXYZ"))
-        XCTAssertFalse(masked.contains("0123"), "the middle is hidden")
+        let masked = try XCTUnwrap(OnboardingKeyMask.masked("sk_0123456789abcdefWXYZ"))
+        XCTAssertEqual(masked, String(repeating: "•", count: 23), "the whole key is closed, start and end included")
     }
 
     /// "фывааф" typed by hand showed as "фы•••аф". Only key-like input is
     /// masked; the rest shows as typed and is named as a format problem.
     func testOnlyKeyLikeInputIsMaskedAndTypingKeepsTheCaret() async throws {
         for typed in ["фывааф", "фыва", "short-key", "key with spaces 0123456789", "фываолдж0123456789abcdef"] {
-            XCTAssertNil(OnboardingKeyMask.masked(typed, prefix: nil), "\(typed) shows as typed")
+            XCTAssertNil(OnboardingKeyMask.masked(typed), "\(typed) shows as typed")
         }
         // Typing a key by hand, one character at a time: plain until it looks
         // like a key, then masked at the same length (the caret does not move).
         let key = "sk_live0123456789abcdefWXYZ"
         for length in 1...key.count {
             let typed = String(key.prefix(length))
-            let masked = OnboardingKeyMask.masked(typed, prefix: 3)
+            let masked = OnboardingKeyMask.masked(typed)
             if length < OnboardingKeyMask.minimumLength {
                 XCTAssertNil(masked, "\(length) characters are not masked yet")
             } else {
                 let masked = try XCTUnwrap(masked)
                 XCTAssertEqual(masked.count, typed.count, "same length, so the caret stays at \(length)")
-                XCTAssertTrue(masked.hasPrefix("sk_"))
-                XCTAssertEqual(String(masked.suffix(4)), String(typed.suffix(4)))
+                XCTAssertTrue(masked.allSatisfy { $0 == "•" }, "no character of the key shows at \(length)")
             }
         }
 

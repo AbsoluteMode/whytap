@@ -174,7 +174,7 @@ window, Back and a progress bar.
   a laptop and a key drawn as depth-sorted wire solids on a softly lit
   ground. Hover brings a figure forward; the other recedes, dimmer and
   without its caption. Step 2 is "Paste your speech key.": a dark pill
-  field with the middle of the key masked, the speech providers only (with
+  field with the whole key masked, the speech providers only (with
   their logos from `UsefulLinkIcons`), the provider's real offer, and a
   quiet "Use your own server →" to Settings → API & Models. Only real key
   prefixes pick the provider (ElevenLabs `sk_`, OpenAI `sk-` once offered;
@@ -219,7 +219,8 @@ window, Back and a progress bar.
   figure's size, full-strength dots in the vertices) and breathe slowly in
   depth and yaw, like the key on step 1.
 - **Only what looks like a key is masked.** Latin letters, digits, "-" and
-  "_", 20 characters or more, show the start and the last four. Anything
+  "_", 20 characters or more, is closed entirely with dots: no start and no
+  last four stay visible (the owner asked for the whole key closed). Anything
   else (a typed word, Cyrillic, spaces, short input) shows as typed and is
   named as a format problem; the owner had seen a typed Cyrillic word shown masked. The
   mask keeps the length in the monospaced font, so typing a key by hand
@@ -275,7 +276,7 @@ window, Back and a progress bar.
   per-step dwell times.
 - `OnboardingPreviewTests` also names each of the five key problems
   (and saves no refused key), accepts only real prefixes, keeps an
-  Anthropic key out of speech and masks the middle of a key.
+  Anthropic key out of speech and masks the whole key.
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, the stubbed Tavily check, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its

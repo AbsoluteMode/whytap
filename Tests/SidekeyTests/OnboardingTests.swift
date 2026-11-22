@@ -502,6 +502,24 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(model.keyAvailable(.deepgram), "the saved key stays for later")
     }
 
+    func testASaveThatSupersedesAContinueCheckLeavesContinueAvailable() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { _ in .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        _ = model.beginSpeechAction()  // Save pressed for another key; it will fail
+        XCTAssertEqual(model.dropCheck, .idle, "Continue is available at once, not after the old answer")
+        checker.release("soniox-key")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        model.continueFromSpeech()  // Continue works again
+        try await eventually { model.page == .permissions }
+    }
+
     func testARefusedKeyFallsBackToTheNextChoice() async throws {
         let env = try makeEnv()
         try saveKeys(env, [.soniox, .deepgram])

@@ -137,7 +137,8 @@ AI and search keys alone keep Set up later.
 The latest speech action wins. Picking a tile, Continue, saving a speech key
 and the download each take a new number (`OnboardingModel.speechAction`); a
 key check or a save that answers after a newer action changes neither Drop's
-route nor the page. A save that lands late still keeps its key, so the tile
+route nor the page, and a newer action frees Continue from the check it
+replaced at once. A save that lands late still keeps its key, so the tile
 reads Saved. A key check counts only for the key it checked: when the key is
 replaced in Settings while the request runs, `checkSavedKey` checks the new
 key again instead of marking it with the old key's refusal or success. Key
@@ -221,7 +222,9 @@ earlier Continue whose check finishes first sets nothing and does not move
 the page while a later Continue is checking, which then wins; a key replaced
 during its check is checked again, so neither the old refusal nor the old
 success counts for the new key; a save that finishes after Continue keeps its
-key and leaves Continue's route and page.
+key and leaves Continue's route and page; a save started during a Continue
+check makes Continue available again at once. An independent review of the
+fix found that last case, which was then fixed.
 
 2026-11-22 Back: scenario tests walk Back from every page to the first (which
 has none) with the counter following, with the speech and permissions pages

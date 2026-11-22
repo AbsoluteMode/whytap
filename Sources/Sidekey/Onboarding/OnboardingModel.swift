@@ -198,6 +198,8 @@ final class OnboardingModel: ObservableObject {
     @discardableResult
     func beginSpeechAction() -> Int {
         speechAction += 1
+        // The check a newer action replaced no longer holds Continue.
+        if dropCheck == .checking { dropCheck = .idle }
         return speechAction
     }
 

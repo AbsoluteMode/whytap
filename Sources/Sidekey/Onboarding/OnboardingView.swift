@@ -1395,6 +1395,8 @@ struct OnboardingKeyTileButton<Label: View>: View {
             .buttonStyle(Style(highlighted: highlighted, hovered: hovered && isEnabled,
                                focused: focused, isEnabled: isEnabled))
             .disabled(!isEnabled)
+            // The accent ring is the focus indicator; no second system ring.
+            .focusEffectDisabled()
             .focused($focused)
             .onHover { hovered = $0 }
     }

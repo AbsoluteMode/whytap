@@ -984,8 +984,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   letters at rest, check/cross under the pointer. Answers: click, or
   Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
   the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
-  conflict check and listed in Help. Any phase other than idle, sleep or quit
-  puts them out and lets an unanswered suggestion go. WHY:
+  conflict check and listed in Help. An active Drop or Agent phase, an open
+  Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
   .project-docs/decisions/2026-11-22-drop-learning-drops.md
 
 Island display selection (multi-monitor):

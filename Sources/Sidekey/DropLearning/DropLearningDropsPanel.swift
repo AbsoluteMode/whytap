@@ -163,6 +163,7 @@ final class DropLearningDropsController {
     let model: DropLearningDropsModel
     private let keys: DropLearningKeyCapturing
     private let present: (Bool) -> Void
+    private var islandIsIdle = false
     private var phaseObserver: AnyCancellable?
 
     init(
@@ -170,12 +171,17 @@ final class DropLearningDropsController {
         model: DropLearningDropsModel,
         keys: DropLearningKeyCapturing,
         present: @escaping (Bool) -> Void,
-        phase: AnyPublisher<AppPhase, Never>
+        phase: AnyPublisher<AppPhase, Never>,
+        agentPhase: AnyPublisher<AgentPhase, Never>,
+        agentAnswerVisible: AnyPublisher<Bool, Never>
     ) {
         self.model = model
         self.keys = keys
         self.present = present
-        coordinator.onSuggestion = { [weak model] suggestion in model?.show(suggestion) }
+        coordinator.onSuggestion = { [weak self] suggestion in
+            guard let self, self.islandIsIdle else { return }
+            self.model.show(suggestion)
+        }
         model.onOutcome = { [weak coordinator] suggestion, outcome in
             switch outcome {
             case .accepted: coordinator?.accept(suggestion)
@@ -184,9 +190,14 @@ final class DropLearningDropsController {
             }
         }
         model.onVisibleChange = { [weak self] visible in self?.visibilityChanged(visible) }
-        phaseObserver = phase.sink { [weak model] phase in
-            if phase != .idle { model?.dismissForBusyIsland() }
-        }
+        phaseObserver = phase.combineLatest(agentPhase, agentAnswerVisible)
+            .map { drop, agent, answerVisible in drop == .idle && agent == .idle && !answerVisible }
+            .removeDuplicates()
+            .sink { [weak self] isIdle in
+                guard let self else { return }
+                self.islandIsIdle = isIdle
+                if !isIdle { self.model.dismissForBusyIsland() }
+            }
     }
 
     private func visibilityChanged(_ visible: Bool) {
@@ -208,7 +219,9 @@ final class DropLearningDropsController {
         let controller = DropLearningDropsController(
             coordinator: coordinator, model: model, keys: DropLearningKeys(),
             present: { [weak panel] visible in visible ? panel?.present() : panel?.dismiss() },
-            phase: AppState.shared.$phase.removeDuplicates().eraseToAnyPublisher()
+            phase: AppState.shared.$phase.eraseToAnyPublisher(),
+            agentPhase: AppState.shared.$agentPhase.eraseToAnyPublisher(),
+            agentAnswerVisible: IslandPanel.shared.agentFlow.$answerPanelVisible.eraseToAnyPublisher()
         )
         return (controller, panel)
     }

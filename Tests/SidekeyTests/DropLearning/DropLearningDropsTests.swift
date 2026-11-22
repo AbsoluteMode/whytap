@@ -254,12 +254,16 @@ final class DropLearningDropsTests: XCTestCase {
             replacements: DropReplacementStore(defaults: defaults)
         ))
         let keys = FakeKeys()
-        let phase = PassthroughSubject<AppPhase, Never>()
+        let phase = CurrentValueSubject<AppPhase, Never>(.idle)
+        let agentPhase = CurrentValueSubject<AgentPhase, Never>(.idle)
+        let agentAnswerVisible = CurrentValueSubject<Bool, Never>(false)
         var presented: [Bool] = []
         let model = model()
         let controller = DropLearningDropsController(
             coordinator: coordinator, model: model, keys: keys,
-            present: { presented.append($0) }, phase: phase.eraseToAnyPublisher()
+            present: { presented.append($0) }, phase: phase.eraseToAnyPublisher(),
+            agentPhase: agentPhase.eraseToAnyPublisher(),
+            agentAnswerVisible: agentAnswerVisible.eraseToAnyPublisher()
         )
         XCTAssertFalse(keys.capturing)
 
@@ -280,6 +284,21 @@ final class DropLearningDropsTests: XCTestCase {
         phase.send(.recording)
         XCTAssertFalse(keys.capturing)
         XCTAssertEqual(model.stage, .hidden)
+
+        phase.send(.idle)
+        coordinator.onSuggestion?(typa)
+        clock.advance(0.7)
+        agentPhase.send(.executing)
+        XCTAssertFalse(keys.capturing, "Agent work dismisses the drops while Drop remains idle")
+        coordinator.onSuggestion?(whytap)
+        XCTAssertFalse(keys.capturing, "New suggestions also wait while Agent is working")
+        agentAnswerVisible.send(true)
+        agentPhase.send(.idle)
+        coordinator.onSuggestion?(whytap)
+        XCTAssertFalse(keys.capturing, "An open answer still owns the island")
+        agentAnswerVisible.send(false)
+        coordinator.onSuggestion?(whytap)
+        XCTAssertTrue(keys.capturing)
         withExtendedLifetime(controller) {}
     }
 

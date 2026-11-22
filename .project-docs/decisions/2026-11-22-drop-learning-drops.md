@@ -62,9 +62,9 @@ and the answer must never cost the field a letter.
   row pauses it and leaving resumes what was left. Expiry lets the suggestion
   go (counting starts over); N declines it forever; Y saves through the same
   stores as the editors (dry run in calibration).
-- **Busy island:** any phase other than idle, sleep or quit puts the drops out
-  at once and lets an unanswered suggestion go. One suggestion at a time; a
-  second one while drops are shown waits for the next repeat.
+- **Busy island:** an active Drop or Agent phase, an open Agent answer, sleep
+  or quit puts the drops out at once and lets an unanswered suggestion go.
+  One suggestion at a time; a second one while drops are shown waits for the next repeat.
 - **Keys:** ⌃Y and ⌃N are Carbon hot keys registered only from show to hide;
   ⌃ alone lights Y and N through a flags-changed monitor. Plain Y and N always
   reach the field. ⌃Y / ⌃N are reserved in the Hotkeys conflict check ("Suggestion

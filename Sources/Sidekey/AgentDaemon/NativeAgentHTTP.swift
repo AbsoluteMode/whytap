@@ -32,9 +32,11 @@ struct NativeAgentHTTP {
             var data = Data()
             var truncated = false
             // Only OpenRouter's documented, allowlisted categories are useful
-            // here. Error messages/raw metadata can contain keys or user text.
+            // here, plus a keyword flag for a refused web search tool on a 400.
+            // Error messages/raw metadata can contain keys or user text.
             // Bound the transient read; never log, store or echo its contents.
-            if request.url?.host == "openrouter.ai" {
+            if request.url?.host == "openrouter.ai"
+                || (http.statusCode == 400 && ["api.openai.com", "api.anthropic.com"].contains(request.url?.host ?? "")) {
                 do {
                     for try await byte in bytes {
                         if data.count >= 16_384 { truncated = true; break }

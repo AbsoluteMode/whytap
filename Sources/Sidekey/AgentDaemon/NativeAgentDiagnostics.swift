@@ -24,6 +24,11 @@ enum NativeAgentDiagnostics {
         let truncated: Bool
         let parsed: Bool
         let envelope: Envelope
+        /// The error names the web search tool and is none of the typed,
+        /// unrelated failures: positive evidence that the model or account
+        /// refuses built-in search. A keyword flag; no text is kept.
+        /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+        let rejectsWebSearch: Bool?
 
         enum Category: String, Codable {
             case context_length_exceeded, string_too_long, invalid_prompt, invalid_request
@@ -39,6 +44,10 @@ enum NativeAgentDiagnostics {
             let text = [error?["message"] as? String, metadata?["raw"] as? String]
                 .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
+            let unrelated: Set<Category> = [.context_length_exceeded, .string_too_long, .max_tokens_exceeded, .token_limit_exceeded,
+                                            .provider_overloaded, .provider_unavailable, .rate_limit_exceeded]
+            rejectsWebSearch = !unrelated.contains(category)
+                && ["web_search", "web search", "websearch", "server_tool", "server tool"].contains(where: text.contains)
             self.truncated = truncated
             parsed = object != nil
             self.envelope = envelope

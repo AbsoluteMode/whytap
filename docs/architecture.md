@@ -372,8 +372,25 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
   the row updates. Without any search the prompt asks for a one-line answer
   pointing to a Tavily key in API keys. A 400 on the turn's first request
-  with built-in search retries once without it (nothing has run or been billed);
-  later failures are never retried. Anthropic server blocks, including
+  with built-in search retries once without it only when the error names the
+  web search tool (ErrorShape.rejectsWebSearch, a keyword flag from a bounded
+  body read; typed unrelated categories such as context_length_exceeded never
+  qualify); later failures are never retried. The two-search budget is per
+  turn: Anthropic's max_uses counts across its provider turn (pause_turn and
+  tool_result continuations), so the tool stays unchanged there and a new
+  provider turn (the app's "Continue" message) gets what is left; OpenAI
+  (max_tool_calls, counting every web_search_call action) and OpenRouter
+  (max_uses, ignored by non-Anthropic native engines) get the remainder per
+  request, and the tool is dropped once it is spent. Any provider web work
+  (an OpenAI open_page, OpenRouter usage.server_tool_use_details.
+  web_search_requests without citations, Anthropic end_turn after a search)
+  with no function call continues the turn; only pause_turn is replayed
+  verbatim, every other continuation adds the user "Continue" message because
+  current Claude models reject prefill. Anthropic's catalog capabilities decode
+  independently, and AgentSettingsStore.selectedWebSearchSupport feeds both the
+  next turn and the Search row even without token limits. A synced
+  agent.native.webSearch reloads through SettingsSyncLiveReload, which also
+  refreshes the row for a synced Tavily key. Anthropic server blocks, including
   encrypted_content, are replayed verbatim; pause_turn and a search without a
   function call continue the same turn (OpenAI/OpenRouter add a short user
   "Continue" message). A finish_answer beside an Anthropic search whose result

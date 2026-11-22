@@ -37,7 +37,11 @@ the same provider (at most two searches per request).
 | OpenRouter | `openrouter:web_search` | the model's own search at its provider's price, otherwise Exa at about $7 per 1,000; included in the cost OpenRouter reports |
 
 The provider runs the search and sends its results to the model; Whytap
-never sees a separate search request. The pages the model cites appear as
+never sees a separate search request. "Searching the web" appears once the
+provider's response reports a search, not while it runs. At most two built-in
+searches (OpenAI: web calls) per request you make, across all of the Agent's
+model calls for it; OpenRouter's own engines other than Anthropic's ignore the
+per-call cap, so the app stops offering the tool once two are spent. The pages the model cites appear as
 source cards. If the model lists none itself, Whytap shows the provider's
 citations (up to five).
 
@@ -50,8 +54,9 @@ the Agent model (the default) or Tavily.
 **Tavily** serves a model without web search of its own (the Anthropic catalog
 says so, a few old OpenAI models such as `gpt-4.1-nano`, or the provider
 rejects the search tool on the first request) and anyone who picks it in
-Search; it also gives search to Agent models on your own servers once those
-can run the Agent. A saved Tavily key alone never replaces built-in search.
+Search. (The Agent runs only on Anthropic, OpenAI and OpenRouter today; Tavily
+would also serve your own servers if they become Agent routes.) A saved Tavily
+key alone never replaces built-in search.
 Add the key in **Settings → API & Models → API keys** (saving checks the key
 without running a search). Only the search query goes to Tavily; the returned
 excerpts and links go to your selected model. With neither, the

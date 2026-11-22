@@ -27,8 +27,15 @@ struct NativeAgentModel {
     var builtInSearch = false
     /// Built-in searches the provider ran in the last response.
     private(set) var searchesInLastResponse = 0
+    /// Built-in web tool calls spent in this turn, across requests. The app's
+    /// limit (`NativeAgentWebSearch.maxSearches`) holds for the whole turn.
+    private(set) var searchesUsed = 0
+    /// Anthropic counts `max_uses` per provider turn (pause_turn and
+    /// tool_result continuations included); a plain user message starts a new
+    /// one. Searches spent before the current provider turn began.
+    private var providerTurnBase = 0
     /// The last response stopped to be continued with no tool results:
-    /// Anthropic `pause_turn`, or a search with no function call after it.
+    /// Anthropic `pause_turn`, or provider web work with no function call.
     private(set) var awaitingContinuation = false
     /// Anthropic: a search was requested in the last response and its result
     /// arrives only in the next request (search beside a function call).
@@ -70,8 +77,13 @@ struct NativeAgentModel {
         guard textSize < textBudget else { throw NativeAgentError.message("This task filled the agent’s context. Start a shorter request.") }
         let outputLimit = min(8192, options.openCodeModelSpec?.outputLimit ?? 8192)
         var request: URLRequest
-        let search = builtInSearch && !tools.isEmpty
-        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider)
+        // Searches still allowed: Anthropic enforces max_uses across its own
+        // turn, so its tool stays unchanged within that turn; OpenAI and
+        // OpenRouter cap per request, so they get what is left of the turn.
+        let remaining = NativeAgentWebSearch.maxSearches
+            - (options.openCodeProvider == .anthropic ? providerTurnBase : searchesUsed)
+        let search = builtInSearch && !tools.isEmpty && remaining > 0
+        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining)
         switch options.openCodeProvider {
         case .openAI:
             var body: [String: Any] = [
@@ -83,7 +95,7 @@ struct NativeAgentModel {
                     + (search ? [searchTool] : [])
             ]
             // Caps built-in tool calls (searches) per response, not functions.
-            if search { body["max_tool_calls"] = NativeAgentWebSearch.maxSearches }
+            if search { body["max_tool_calls"] = remaining }
             request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body)
         case .anthropic:
             request = try NativeAgentHTTP.request(url: URL(string: "https://api.anthropic.com/v1/messages")!, key: key, body: [
@@ -182,7 +194,10 @@ struct NativeAgentModel {
     private mutating func accept(_ response: [String: Any]) throws -> (String, [NativeAgentToolCall]) {
         var text = ""
         var calls: [NativeAgentToolCall] = []
-        var searches = 0, paused = false
+        // `searches`: billable or budgeted web calls; `webWork`: any provider
+        // web activity (an OpenAI open_page, an OpenRouter search without
+        // citations), which also needs the turn to continue to an answer.
+        var searches = 0, paused = false, webWork = false
         pendingSearch = false
         func cite(_ annotations: Any?) {
             for annotation in annotations as? [[String: Any]] ?? [] where annotation["type"] as? String == "url_citation" {
@@ -203,8 +218,10 @@ struct NativeAgentModel {
                 if item["type"] as? String == "function_call" {
                     calls.append(try call(id: item["call_id"], name: item["name"], arguments: item["arguments"]))
                 } else if item["type"] as? String == "web_search_call" {
+                    // Every built-in call (search, open_page, find_in_page)
+                    // counts against max_tool_calls and the turn's budget.
                     let action = item["action"] as? [String: Any]
-                    if action?["type"] as? String ?? "search" == "search" { searches += 1 }
+                    searches += 1; webWork = true
                     for source in action?["sources"] as? [[String: Any]] ?? [] {
                         if let page = NativeAgentWebSearch.Source(title: source["title"] as? String, url: source["url"] as? String) {
                             resultSources.append(page)
@@ -235,7 +252,7 @@ struct NativeAgentModel {
                     calls.append(try call(id: block["id"], name: block["name"], arguments: block["input"]))
                 case "server_tool_use":
                     if block["name"] as? String == "web_search" {
-                        searches += 1
+                        searches += 1; webWork = true
                         if let id = block["id"] as? String { requested.insert(id) }
                     }
                 case "web_search_tool_result":
@@ -266,9 +283,12 @@ struct NativeAgentModel {
             text = message["content"] as? String ?? message["refusal"] as? String ?? ""
             let annotations = (message["annotations"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "url_citation" }
             cite(annotations)
-            // OpenRouter runs its server tool inside the request; citations
-            // are the evidence a search ran. The exact count is not reported.
-            if !annotations.isEmpty { searches = 1 }
+            // OpenRouter runs its server tool inside the request. Its usage
+            // reports the count; citations alone still show a search ran.
+            let details = (response["usage"] as? [String: Any])?["server_tool_use_details"] as? [String: Any]
+            let reported = AIUsageNumber.nonnegative(details?["web_search_requests"]).map { Int(min($0, 1_000)) }
+            searches = reported ?? (annotations.isEmpty ? 0 : 1)
+            webWork = searches > 0 || !annotations.isEmpty
             let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
             for item in rawCalls {
                 let function = item["function"] as? [String: Any] ?? [:]
@@ -300,10 +320,15 @@ struct NativeAgentModel {
             messages.append(replay)
         }
         searchesInLastResponse = searches
-        awaitingContinuation = calls.isEmpty && (paused || (builtInSearch && searches > 0))
-        if awaitingContinuation, !paused, options.openCodeProvider != .anthropic {
-            // A request may not end on the assistant's own message everywhere.
+        searchesUsed += searches
+        awaitingContinuation = calls.isEmpty && (paused || (builtInSearch && webWork))
+        if awaitingContinuation, !paused {
+            // Only pause_turn is resumed verbatim. After a finished response a
+            // request must not end on the assistant's message (current Claude
+            // models reject prefill), so ask for the answer; for Anthropic
+            // this starts a new provider turn and its max_uses count.
             messages.append(["role": "user", "content": "Continue: complete the turn with finish_answer using the search results."])
+            providerTurnBase = searchesUsed
         }
         guard calls.count <= 12, Set(calls.map(\.id)).count == calls.count else {
             throw NativeAgentError.message("The model requested too many tools or repeated a call ID.")

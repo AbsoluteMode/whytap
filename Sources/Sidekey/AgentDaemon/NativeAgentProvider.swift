@@ -129,10 +129,12 @@ final class NativeAgentProvider: CLIProvider {
             do {
                 do {
                     calls = try await model.next(tools: definitions, structuredCompletion: true).1
-                } catch NativeAgentError.service(_, 400, _) where !accepted && search.isBuiltIn {
+                } catch NativeAgentError.service(_, 400, let shape) where !accepted && search.isBuiltIn
+                            && shape.rejectsWebSearch == true {
                     // A model or account without the provider's search (or with
                     // it turned off by an admin) rejects the first request before
                     // anything ran or was billed. Retry once with Tavily or none.
+                    // Any other 400 (context length, format) stays on this route.
                     search = tavilyConnected ? .tavily : .none
                     model.builtInSearch = false
                     model.system = baseSystem + "\n" + search.promptLine

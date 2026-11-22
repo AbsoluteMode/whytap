@@ -148,8 +148,7 @@ final class APIAndModelsViewModel: ObservableObject {
     // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
     @Published private(set) var sharedRows: [SharedModelRow] = []
     /// The Agent's web search, shown under Speech and LLM.
-    @Published private(set) var searchRow = AgentSearchRow(agentProvider: nil, model: nil, catalogFlag: nil,
-                                                           tavilyConnected: false, choice: .auto)
+    @Published private(set) var searchRow = AgentSearchRow(options: AgentRunOptions(), tavilyConnected: false)
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
     @Published private(set) var unsetBanner: String?
     @Published var proposal: AssignProposal?
@@ -921,15 +920,8 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func makeSearchRow() -> AgentSearchRow {
-        let route = routing.route(for: .agent)
-        let provider = route.flatMap { OpenCodeModelProvider(account: $0.account) }
-        let model = route.map { OpenCodeEnvironment.normalizeModel($0.model) }
-        let flag = provider.flatMap { provider in
-            catalogs.snapshot(for: provider.account)?.models.first { OpenCodeEnvironment.normalizeModel($0.id) == model }?.supportsWebSearch
-        }
-        return AgentSearchRow(agentProvider: provider, model: model?.isEmpty == false ? model : nil, catalogFlag: flag,
-                              tavilyConnected: keys.read(account: TavilySearch.keychainAccount) != nil,
-                              choice: agentSettings.webSearchChoice)
+        AgentSearchRow(options: agentSettings.options(for: .native),
+                       tavilyConnected: keys.read(account: TavilySearch.keychainAccount) != nil)
     }
 
     private func row(for feature: AIFeature) -> FeatureRow {

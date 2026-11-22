@@ -2,7 +2,7 @@
 id: agent-provider-web-search-2026-11-22
 type: decision
 title: The native Agent searches with its model provider's own web search; Tavily is the fallback
-summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches with the provider's server-side web search tool by default; a Search row in API & Models → Models shows and picks the search (built-in or Tavily), Tavily serves models without built-in search, and with neither the Agent answers in one line how to turn search on.
+summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches with the provider's server-side web search tool by default; a Search row in API & Models → Models shows and picks the search (built-in or Tavily), Tavily serves models without built-in search, and with neither the Agent answers in one line how to turn search on. Fallback to Tavily needs positive evidence; the search budget is per turn.
 status: confirmed
 tags: [agent, native-agent, web-search, tavily, anthropic, openai, openrouter, costs]
 canonical_for: [agent-web-search]
@@ -12,7 +12,7 @@ sources:
     reference: On 2026-11-22 the maintainer approved ("yes, do it") moving the Agent to the provider's built-in web search with Tavily as fallback (orchestrator task 78).
     confirmed_at: 2026-11-22
   - type: user-confirmed
-    reference: On 2026-11-22 the maintainer clarified that when search works without Tavily, Tavily is not used by default, and then agreed to a Search row on the Models screen beside Speech and LLM ("I would add search here"); Tavily stays for models and own servers without built-in search (orchestrator task 78, REV 1).
+    reference: On 2026-11-22 the maintainer clarified that when search works without Tavily, Tavily is not used by default, and then agreed to a Search row on the Models screen beside Speech and LLM ("I would add search here"); Tavily stays for models without built-in search and for own servers should they become Agent routes (orchestrator task 78, REV 1).
     confirmed_at: 2026-11-22
   - type: url
     reference: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
@@ -72,17 +72,36 @@ Wire formats: Anthropic `web_search_20250305` with `max_uses: 2`; OpenAI
 with `max_results: 5, max_uses: 2`. The Tavily `web_search` function is left
 out when the built-in tool is sent (Anthropic's server tool has the same name).
 
+Budget: at most two built-in searches per turn, whatever the number of
+requests. Anthropic counts `max_uses` across its own turn (pause_turn and
+tool_result continuations), so its tool stays unchanged there; a new provider
+turn (the app's "Continue" message) gets what is left. OpenAI
+(`max_tool_calls`, every `web_search_call` action) and OpenRouter (`max_uses`,
+which non-Anthropic native engines ignore) get the remainder per request, and
+the tool is dropped once it is spent. Any provider web work without a
+function call (an OpenAI `open_page`, OpenRouter
+`usage.server_tool_use_details.web_search_requests` without citations,
+Anthropic `end_turn` after a search) continues the turn; only `pause_turn` is
+replayed verbatim, the rest add the "Continue" user message because current
+Claude models reject prefill.
+
+Fallback evidence: a first-request 400 moves to Tavily only when its bounded
+body names the web search tool (`ErrorShape.rejectsWebSearch`, a keyword flag;
+the text is never kept) and is not a typed unrelated category such as
+`context_length_exceeded`.
+
 Support: Anthropic's Models API flag
 `capabilities.server_tools.web_search.supported` (now stored in the catalog)
-decides when present. OpenAI publishes no flag, so a short list of families
+decides when present; capabilities decode independently, and the same flag
+(`AgentSettingsStore.selectedWebSearchSupport`) feeds the next turn and the
+Search row even when the catalog gives no token limits. OpenAI publishes no flag, so a short list of families
 documented or known without search (`gpt-4.1-nano`, legacy GPT-3.5/4, audio,
 realtime, search-preview models) uses Tavily, and a **400 on the turn's first
-request** with the built-in tool retries once without it. OpenRouter's tool
+request** that names the web search tool retries once without it. OpenRouter's tool
 works for every model (its own search or Exa).
 
-Loop changes: Anthropic `pause_turn` and a response that searched but called
-no function continue the same turn (OpenAI and OpenRouter get a short user
-"Continue" message so the request does not end on the assistant). Anthropic
+Loop changes: Anthropic `pause_turn` and a response with web work but no
+function call continue the same turn (see Budget). Anthropic
 server blocks, including `encrypted_content`, are replayed verbatim and are not
 counted against the text budget. A `finish_answer` sent beside an Anthropic
 search whose result has not arrived yet gets a tool result asking to wait.
@@ -105,7 +124,9 @@ unavailable, never 0.
 - The maintainer's rule: if search works without Tavily, Tavily is not used
   by default. A visible Search row next to Speech and LLM says what is used and
   what it costs, and keeps the choice where other models are chosen; Tavily
-  keeps models (and own servers) without search useful.
+  keeps models without search useful. Own servers are not Agent routes today
+  (OpenCodeModelProvider has Anthropic, OpenAI and OpenRouter only); if they
+  become one, Tavily is their search.
 - Anthropic's basic tool version stays ZDR-eligible and works with the
   existing `anthropic-version: 2023-06-01`; dynamic filtering (`_20260209`+)
   would need programmatic tool calling or `allowed_callers` and loses ZDR.
@@ -141,8 +162,11 @@ unavailable, never 0.
   version of this PR): replaced by the Search row, where models are chosen.
 - Never letting the user pick Tavily on a built-in route (second version):
   the Search menu works like Speech and LLM, so both choices are offered.
-- Removing Tavily: it is the only search for own servers and models without
-  built-in search.
+- Removing Tavily: it is the only search for models without built-in search,
+  and the planned one for own servers.
+- Falling back to Tavily on any first-request 400 (builder review): a context
+  length or format error would move the query to another service. Only an
+  error that names the web search tool qualifies.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

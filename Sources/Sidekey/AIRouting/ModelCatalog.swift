@@ -455,12 +455,22 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 struct ServerTools: Decodable {
                     let webSearch: Support?
                     enum CodingKeys: String, CodingKey { case webSearch = "web_search" }
+                    init(from decoder: Decoder) throws {
+                        webSearch = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Support.self, forKey: .webSearch)
+                    }
                 }
                 let thinking: Support?
                 let serverTools: ServerTools?
                 enum CodingKeys: String, CodingKey {
                     case thinking
                     case serverTools = "server_tools"
+                }
+                // Each capability decodes on its own: an odd value in one
+                // (say web_search.supported) never costs another (thinking).
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    thinking = try? container.decodeIfPresent(Support.self, forKey: .thinking)
+                    serverTools = try? container.decodeIfPresent(ServerTools.self, forKey: .serverTools)
                 }
             }
 

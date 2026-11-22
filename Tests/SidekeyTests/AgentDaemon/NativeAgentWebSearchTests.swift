@@ -6,7 +6,7 @@ import XCTest
 /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
 @MainActor
 final class NativeAgentWebSearchTests: XCTestCase {
-    private func fixture() throws -> (URL, ProviderKeyStore, NativeAgentHTTP) {
+    func fixture() throws -> (URL, ProviderKeyStore, NativeAgentHTTP) {
         StubURLProtocol.reset()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -19,40 +19,40 @@ final class NativeAgentWebSearchTests: XCTestCase {
         return (directory, keys, NativeAgentHTTP(session: session))
     }
 
-    private func serve(_ object: [String: Any]) -> (Int, [String: String], Data) {
+    func serve(_ object: [String: Any]) -> (Int, [String: String], Data) {
         (200, ["Content-Type": "application/json"], try! JSONSerialization.data(withJSONObject: object))
     }
 
-    private func body(_ index: Int) throws -> [String: Any] {
+    func body(_ index: Int) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.capturedBodies[index]) as? [String: Any])
     }
 
-    private func text(_ index: Int) -> String {
+    func text(_ index: Int) -> String {
         String(decoding: StubURLProtocol.capturedBodies[index], as: UTF8.self).replacingOccurrences(of: "\\/", with: "/")
     }
 
-    private func final(_ answer: String, status: String = "answered", sources: [[String: Any]] = []) -> [String: Any] {
+    func final(_ answer: String, status: String = "answered", sources: [[String: Any]] = []) -> [String: Any] {
         ["status": status, "answer": answer, "sources": sources, "actions": []]
     }
 
-    private func arguments(_ object: [String: Any]) -> String {
+    func arguments(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
-    private func run(_ provider: NativeAgentProvider, _ prompt: String, _ options: AgentRunOptions) async -> [AgentSSEEvent] {
+    func run(_ provider: NativeAgentProvider, _ prompt: String, _ options: AgentRunOptions) async -> [AgentSSEEvent] {
         var events: [AgentSSEEvent] = []
         for await event in provider.run(prompt: prompt, resumeSessionID: nil, options: options) { events.append(event) }
         return events
     }
 
-    private func links(_ events: [AgentSSEEvent]) -> [ActionItem] {
+    func links(_ events: [AgentSSEEvent]) -> [ActionItem] {
         events.compactMap { event -> [ActionItem]? in
             if case .blockComplete(.usefulActions(let block)) = event { return block.items }
             return nil
         }.flatMap { $0 }.filter { if case .link = $0 { return true }; return false }
     }
 
-    private func finalText(_ events: [AgentSSEEvent]) -> String? {
+    func finalText(_ events: [AgentSSEEvent]) -> String? {
         events.compactMap { if case .finalAnswer(let text) = $0 { return text }; return nil }.first
     }
 
@@ -61,9 +61,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
     func testResolutionDefaultsToBuiltInThenTavilyThenNone() {
         func resolve(_ provider: OpenCodeModelProvider, _ model: String, flag: Bool? = nil,
                      prefer: Bool = false, tavily: Bool) -> NativeAgentWebSearch {
-            let spec = flag.map { OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 200_000, outputLimit: 8192, webSearch: $0) }
-            return NativeAgentWebSearch.resolve(options: .init(model: model, openCodeModelSpec: spec, openCodeProvider: provider,
-                                                               preferTavilySearch: prefer), tavilyConnected: tavily)
+            NativeAgentWebSearch.resolve(options: .init(model: model, openCodeProvider: provider, preferTavilySearch: prefer,
+                                                        webSearchSupport: flag), tavilyConnected: tavily)
         }
         XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", tavily: false), .builtIn(.anthropic))
         XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", tavily: true), .builtIn(.anthropic),
@@ -126,7 +125,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
     func testSearchRowShowsWhatTheAgentSearchesWithAndOffersTheRest() {
         func row(_ provider: OpenCodeModelProvider?, _ model: String? = "m", flag: Bool? = nil, tavily: Bool,
                  _ choice: AgentWebSearchChoice = .auto) -> AgentSearchRow {
-            AgentSearchRow(agentProvider: provider, model: model, catalogFlag: flag, tavilyConnected: tavily, choice: choice)
+            AgentSearchRow(options: .init(model: provider == nil ? nil : model, openCodeProvider: provider ?? .openRouter,
+                                          preferTavilySearch: choice == .tavily, webSearchSupport: flag), tavilyConnected: tavily)
         }
         XCTAssertEqual(row(.anthropic, tavily: false).current.label, "Anthropic · built-in")
         XCTAssertEqual(row(.openAI, "gpt-6.2-astra", tavily: false).current.label, "OpenAI · built-in")
@@ -250,6 +250,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(replayed["role"] as? String, "assistant")
         XCTAssertTrue(text(1).contains("ENCRYPTED-STATE"))
         XCTAssertEqual(((second["tools"] as? [[String: Any]])?.count), tools.count, "Same tools in the continuation")
+        XCTAssertEqual((second["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "web_search_20250305" }?["max_uses"] as? Int, 2,
+                       "Anthropic counts max_uses across its own turn: the pause_turn continuation keeps the tool unchanged")
 
         XCTAssertEqual(finalText(events), "Сегодня в Москве около −3 °C, облачно.")
         XCTAssertTrue(events.contains(.toolExecuting(tool: "web_search", label: "Searching the web")))
@@ -354,6 +356,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
         let events = await run(provider, "q", .init(model: "gpt-6.2-astra", openCodeProvider: .openAI))
         XCTAssertEqual(calls, 2)
         XCTAssertEqual(finalText(events), "Done.")
+        XCTAssertEqual(try body(0)["max_tool_calls"] as? Int, 2)
+        XCTAssertEqual(try body(1)["max_tool_calls"] as? Int, 1, "One search left in the turn")
         let input = try XCTUnwrap(try body(1)["input"] as? [[String: Any]])
         XCTAssertEqual(input.last?["role"] as? String, "user", "The continuation does not end on the assistant's message")
         XCTAssertTrue(input.contains { $0["type"] as? String == "web_search_call" }, "Search items are replayed")
@@ -402,9 +406,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
             return self.serve(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "f", "name": "finish_answer",
                 "input": self.final("−3 °C.", sources: [["title": "Tavily result", "url": "https://tavily.example/r"]])]]])
         }
-        let spec = OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 200_000, outputLimit: 8192, webSearch: false)
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-        let events = await run(provider, "погода", .init(model: "claude-legacy", openCodeModelSpec: spec, openCodeProvider: .anthropic))
+        let events = await run(provider, "погода", .init(model: "claude-legacy", openCodeProvider: .anthropic, webSearchSupport: false))
         let tools = try XCTUnwrap(try body(0)["tools"] as? [[String: Any]])
         XCTAssertFalse(tools.contains { $0["type"] as? String == "web_search_20250305" })
         XCTAssertTrue(tools.contains { $0["name"] as? String == "web_search" && $0["input_schema"] != nil })
@@ -419,7 +422,9 @@ final class NativeAgentWebSearchTests: XCTestCase {
         var calls = 0
         StubURLProtocol.handler = { _ in
             calls += 1
-            if calls == 1 { return (400, [:], Data("{\"error\":{\"message\":\"tool not supported\"}}".utf8)) }
+            if calls == 1 {
+                return (400, [:], Data("{\"error\":{\"message\":\"Tool 'web_search' is not supported with this model.\",\"type\":\"invalid_request_error\"}}".utf8))
+            }
             return self.serve(["status": "completed", "output": [
                 ["type": "function_call", "call_id": "c", "name": "finish_answer", "arguments": self.arguments(self.final("Answer."))]]])
         }

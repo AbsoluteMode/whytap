@@ -21,7 +21,7 @@ enum NativeAgentWebSearch: Equatable {
     static func resolve(options: AgentRunOptions, tavilyConnected: Bool) -> Self {
         if options.preferTavilySearch, tavilyConnected { return .tavily }
         if let model = options.model, supportsBuiltIn(provider: options.openCodeProvider, model: model,
-                                                      catalogFlag: options.openCodeModelSpec?.webSearch) {
+                                                      catalogFlag: options.webSearchSupport) {
             return .builtIn(options.openCodeProvider)
         }
         return tavilyConnected ? .tavily : .none
@@ -50,11 +50,16 @@ enum NativeAgentWebSearch: Equatable {
 
     /// The provider tool added to the request's `tools`. The Anthropic basic
     /// version stays ZDR-eligible and needs no newer API version header.
-    static func providerTool(for provider: OpenCodeModelProvider) -> [String: Any] {
+    /// `limit`: searches still allowed (Anthropic: in its provider turn;
+    /// OpenRouter: in this request, which native engines other than
+    /// Anthropic ignore, so the app also stops offering the tool once the
+    /// turn's budget is spent).
+    static func providerTool(for provider: OpenCodeModelProvider, limit: Int = maxSearches) -> [String: Any] {
+        let limit = max(1, min(limit, maxSearches))
         switch provider {
-        case .anthropic: return ["type": "web_search_20250305", "name": "web_search", "max_uses": maxSearches]
+        case .anthropic: return ["type": "web_search_20250305", "name": "web_search", "max_uses": limit]
         case .openAI: return ["type": "web_search"]
-        case .openRouter: return ["type": "openrouter:web_search", "parameters": ["max_results": 5, "max_uses": maxSearches]]
+        case .openRouter: return ["type": "openrouter:web_search", "parameters": ["max_results": 5, "max_uses": limit]]
         }
     }
 
@@ -139,20 +144,16 @@ struct AgentSearchRow: Equatable {
     let tavilyConnected: Bool
     let choice: AgentWebSearchChoice
 
-    /// The same resolution an Agent turn makes (`NativeAgentWebSearch.resolve`).
-    init(agentProvider: OpenCodeModelProvider?, model: String?, catalogFlag: Bool?,
-         tavilyConnected: Bool, choice: AgentWebSearchChoice) {
-        let options = AgentRunOptions(
-            model: agentProvider == nil ? nil : model,
-            openCodeModelSpec: catalogFlag.map { OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 0, outputLimit: 0, webSearch: $0) },
-            openCodeProvider: agentProvider ?? .openRouter,
-            preferTavilySearch: choice == .tavily)
+    /// The same options and resolution as the next Agent turn
+    /// (`AgentSettingsStore.options(for: .native)`, `NativeAgentWebSearch.resolve`).
+    init(options: AgentRunOptions, tavilyConnected: Bool) {
         current = NativeAgentWebSearch.resolve(options: options, tavilyConnected: tavilyConnected)
-        let own = NativeAgentWebSearch.resolve(options: { var o = options; o.preferTavilySearch = false; return o }(),
-                                               tavilyConnected: false)
-        builtIn = own.isBuiltIn ? own : nil
+        var own = options
+        own.preferTavilySearch = false
+        let builtIn = NativeAgentWebSearch.resolve(options: own, tavilyConnected: false)
+        self.builtIn = builtIn.isBuiltIn ? builtIn : nil
         self.tavilyConnected = tavilyConnected
-        self.choice = choice
+        choice = options.preferTavilySearch ? .tavily : .auto
     }
 
     /// The orange setup contour: the Agent cannot search at all.

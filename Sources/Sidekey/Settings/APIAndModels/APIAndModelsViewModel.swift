@@ -1,13 +1,13 @@
 import Combine
 import Foundation
 
-/// One provider account in the API keys row. Carries the check outcome, never
-/// the key.
+/// One provider account in the API keys row, with its check and server settings.
 struct KeyChip: Equatable, Identifiable {
     let account: ProviderAccount
     let title: String
     let statusText: String
     let checkedAt: Date?
+    var modelKinds: ServerModelKinds? = nil
     var id: String { account.storageID }
 }
 
@@ -309,7 +309,7 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     /// Which of a server's models the pickers offer; `nil` for any other account.
-    func modelKinds(of account: ProviderAccount) -> ServerModelKinds? {
+    private func modelKinds(of account: ProviderAccount) -> ServerModelKinds? {
         guard case .server(let id) = account else { return nil }
         return routing.server(id)?.modelKinds
     }
@@ -688,15 +688,16 @@ final class APIAndModelsViewModel: ObservableObject {
         if account == .thisMac {
             return KeyChip(account: account, title: title(of: account), statusText: "Model downloaded", checkedAt: nil)
         }
+        let kinds = modelKinds(of: account)
         if lookup(account) == .unreadable {
             return KeyChip(account: account, title: title(of: account),
-                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil)
+                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil, modelKinds: kinds)
         }
         let record = keyStatuses.record(for: account)
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt
+            checkedAt: record?.checkedAt, modelKinds: kinds
         )
     }
 

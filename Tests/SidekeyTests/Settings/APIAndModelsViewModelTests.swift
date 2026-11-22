@@ -189,6 +189,23 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertTrue(AIFeature.allCases.allSatisfy { env.routing.route(for: $0) == nil })
     }
 
+    func test_server_model_kinds_invalidate_the_open_key_form() throws {
+        let env = try makeEnv()
+        let server = env.routing.addServer(name: "Custom server", baseURL: "http://localhost:8000/v1")
+        let account = ProviderAccount.server(server.id)
+        let model = env.makeViewModel()
+        XCTAssertEqual(model.chips.first { $0.account == account }?.modelKinds, .automatic)
+        var changeCount = 0
+        let observation = model.objectWillChange.sink { _ in changeCount += 1 }
+        defer { observation.cancel() }
+
+        model.setModelKinds(.both, for: account)
+
+        XCTAssertEqual(env.routing.server(server.id)?.modelKinds, .both)
+        XCTAssertEqual(model.chips.first { $0.account == account }?.modelKinds, .both)
+        XCTAssertGreaterThan(changeCount, 0, "The visible popup must refresh when just its choice changes")
+    }
+
     // MARK: - Chips
 
     func test_opening_picker_uses_fresh_cache_without_requests_or_model_probes() async throws {

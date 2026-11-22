@@ -234,7 +234,7 @@ final class SharedModelRowsTests: XCTestCase {
         }
         XCTAssertEqual(env2.probe.calls.map(\.use), [.realtimeSTT, .chat])
         let text = try row(.llm, vm)
-        XCTAssertEqual(text.label, "Lab · qwen3:8b · 1 not set")
+        XCTAssertEqual(text.label, "localhost:8000 · qwen3:8b · 1 not set", "a server is named by its address")
         XCTAssertEqual(text.uncovered.map(\.feature), [.agent])
     }
 
@@ -280,7 +280,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { env.routing.route(for: $0) == nil })
         let notes = try row(.speech, vm).notes
         XCTAssertEqual(notes.count, SharedModelKind.speech.features.count)
-        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Lab as a Transcription model") }, "\(notes)")
+        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Ollama · localhost:11434 as a Transcription model") }, "\(notes)")
 
         // Added as Transcription, the same name is a speech model too.
         XCTAssertNil(vm.addServerModel("qwen3:8b", kind: .transcription, checked: true, to: account))

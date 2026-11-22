@@ -375,8 +375,9 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
-    /// The one server window: a new server, a server with an LLM and a
-    /// transcription model, a refused check, and a server named after a model.
+    /// The one server window (a new server, an LLM and a transcription model,
+    /// a refused check, a new server's first check) and the tiles, which
+    /// show each server by its address.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
     func test_render_server_sheet() async throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
@@ -384,6 +385,25 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+        }
+        let routing = AIRoutingStore(defaults: defaults)
+        // Named by an earlier build after a model: the tile shows the address.
+        routing.addServer(name: "qwen3:0.6b", baseURL: "http://localhost:11434/v1")
+        routing.addServer(name: "Company gateway", baseURL: "https://vllm.company.ru/v1")
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
+        let stub = NoNetwork(list: [])
+        let vm = APIAndModelsViewModel(
+            routing: routing, keys: keys, catalogs: ModelCatalogStore(fileURL: file, fetcher: stub),
+            checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
+            keyChecker: stub, probe: stub, endpoints: stub, inputLanguage: { nil }
+        )
         let suggestions = ["qwen3:0.6b", "qwen3-asr", "whisper-large-v3-turbo"]
         let states: [(String, ServerSheetDraft)] = [
             ("1-new", .init(isNew: true, baseURL: "", apiKey: "", hasStoredKey: false, rows: [.init()])),
@@ -400,70 +420,17 @@ final class APIAndModelsRenderTests: XCTestCase {
         ]
         for dark in [false, true] {
             for (label, draft) in states {
-                var state = draft
-                let binding = Binding(get: { state }, set: { state = $0 })
-                try await render(ServerSheet(draft: binding, suggestions: suggestions)
+                let model = ServerSheetModel(viewModel: vm, previewing: draft, suggestions: suggestions)
+                try await render(ServerSheet(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
                     size: NSSize(width: 600, height: 560), dark: dark,
                     to: directory.appendingPathComponent("server-sheet-\(label)-\(dark ? "dark" : "light").png"))
             }
-        }
-    }
-
-    /// The server form: a new server, an empty model list, models of both
-    /// kinds with Not checked, and a refused check offering Save without check.
-    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-    func test_render_server_models() async throws {
-        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
-            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
-        }
-        let directory = URL(fileURLWithPath: output, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-        addTeardownBlock {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: file)
-        }
-        let routing = AIRoutingStore(defaults: defaults)
-        let empty = routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
-        let lab = routing.addServer(name: "Company gateway", baseURL: "https://llm.example.internal/v1")
-        routing.addModel(ServerModel(name: "ut-llm", kind: .llm, checked: true), toServer: lab.id)
-        routing.addModel(ServerModel(name: "qwen3-asr", kind: .transcription, checked: true), toServer: lab.id)
-        routing.addModel(ServerModel(name: "whisper-large-v3-turbo", kind: .transcription, checked: false), toServer: lab.id)
-        try JSONEncoder().encode([ProviderAccount.server(empty.id).storageID: CatalogSnapshot(
-            models: [CatalogModel(id: "qwen3:0.6b"), CatalogModel(id: "nomic-embed-text")], fetchedAt: Date())]).write(to: file)
-        let box = InMemoryTokenStore.Box()
-        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
-        let stub = NoNetwork(list: [])
-        let vm = APIAndModelsViewModel(
-            routing: routing, keys: keys, catalogs: ModelCatalogStore(fileURL: file, fetcher: stub),
-            checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
-            keyChecker: stub, probe: stub, endpoints: stub, inputLanguage: { nil }
-        )
-        let failure = "Server answered 404 on /audio/transcriptions — this model can't transcribe here (404 page not found)"
-        for dark in [false, true] {
-            for width in [600.0, 900.0] {
-                let suffix = "\(dark ? "dark" : "light")-\(Int(width))"
-                for (label, target) in [("new", ProviderKeyTiles.Target.provider(.openAICompatible)),
-                                        ("empty", .server(.server(empty.id))), ("models", .server(.server(lab.id)))] {
-                    try await render(ProviderKeyTiles(viewModel: vm, initiallyExpanded: target)
-                        .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .background(MacSettingsTheme.bgCard),
-                        size: NSSize(width: width, height: 1000), dark: dark,
-                        to: directory.appendingPathComponent("server-form-\(label)-\(suffix).png"))
-                }
-                try await render(ServerModelsSection(viewModel: vm, account: .server(empty.id), models: [],
-                                                     activity: .constant(ServerFormActivity()),
-                                                     draft: "qwen3:0.6b", draftKind: .transcription, draftFailure: failure)
-                    .padding(16).frame(width: width - 36, alignment: .topLeading)
-                    .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 12))
-                    .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(MacSettingsTheme.bgCard),
-                    size: NSSize(width: width, height: 320), dark: dark,
-                    to: directory.appendingPathComponent("server-form-refused-\(suffix).png"))
-            }
+            try await render(ProviderKeyTiles(viewModel: vm)
+                .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(MacSettingsTheme.bgCard),
+                size: NSSize(width: 700, height: 760), dark: dark,
+                to: directory.appendingPathComponent("server-tiles-\(dark ? "dark" : "light").png"))
         }
     }
 

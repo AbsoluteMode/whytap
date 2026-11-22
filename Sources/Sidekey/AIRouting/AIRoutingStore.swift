@@ -152,6 +152,43 @@ final class AIRoutingStore: ObservableObject {
         return server
     }
 
+    /// Changes a server's address and the name older builds show; routes,
+    /// key and models stay.
+    func updateServer(_ id: UUID, name: String, baseURL: String) {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return }
+        updated.servers[index].name = name
+        updated.servers[index].baseURL = baseURL
+        commit(updated)
+    }
+
+    /// Replaces the server's model list (the first of a repeated name and
+    /// kind is kept). Features of a kind that ran on a model taken off the
+    /// list become Not set; a route on a model that was never listed stays.
+    /// Returns the features that became Not set.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @discardableResult
+    func setModels(_ models: [ServerModel], forServer id: UUID) -> [AIFeature] {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return [] }
+        let old = updated.servers[index].models ?? []
+        var kept: [ServerModel] = []
+        for model in models where !kept.contains(where: { $0.name == model.name && $0.kind == model.kind }) {
+            kept.append(model)
+        }
+        updated.servers[index].models = kept
+        let cleared = AIFeature.activeCases.filter { feature in
+            guard let route = updated.routes[feature.rawValue], route.account == .server(id),
+                  let kind = ServerModel.Kind(feature) else { return false }
+            let wasListed = old.contains { $0.name == route.model && $0.kind == kind }
+            let isListed = kept.contains { $0.name == route.model && $0.kind == kind }
+            return wasListed && !isListed
+        }
+        for feature in cleared { updated.routes[feature.rawValue] = nil }
+        commit(updated)
+        return cleared
+    }
+
     /// Adds a model to the server's list. `false` when the server is gone or
     /// already has this name as this kind; the same name may be added once
     /// per kind (a model that both chats and transcribes).

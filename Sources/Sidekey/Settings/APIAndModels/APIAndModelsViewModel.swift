@@ -320,8 +320,8 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Server models
 
-    /// The server the last successful `addServer` created, so its form can
-    /// open next and ask for the first model.
+    /// The server the last successful `addServer` created, so the server
+    /// window can store its models right after.
     private(set) var lastAddedServer: ProviderAccount?
 
     private func serverModels(of account: ProviderAccount) -> [ServerModel]? {
@@ -349,53 +349,114 @@ final class APIAndModelsViewModel: ObservableObject {
         return nil
     }
 
-    /// What a check of `account` would run against now; `nil` when the
-    /// server was removed or its key cannot be read.
-    func serverModelTarget(_ account: ProviderAccount) -> ServerModelTarget? {
-        guard let access = access(account), let server = access.server else { return nil }
-        return ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+    // MARK: - Server sheet
+
+    /// The server window's starting state: an empty server with one model row,
+    /// or the saved server with its models (checked ones as Works).
+    func serverSheetDraft(for account: ProviderAccount?) -> ServerSheetDraft {
+        guard case .server(let id)? = account, let server = routing.server(id) else {
+            return ServerSheetDraft(isNew: true, baseURL: "", apiKey: "", hasStoredKey: false, rows: [.init()])
+        }
+        var storedKey = false
+        if case .key = keys.lookup(account: server.keyAccount) { storedKey = true }
+        let rows = (server.models ?? []).map {
+            ServerSheetDraft.Row(name: $0.name, kind: $0.kind, status: $0.checked ? .works : .notChecked)
+        }
+        return ServerSheetDraft(isNew: false, baseURL: server.baseURL, apiKey: "", hasStoredKey: storedKey,
+                                rows: rows.isEmpty ? [.init()] : rows)
+    }
+
+    /// What the window's model checks run against: the typed address and the
+    /// typed key, or the saved key when none is typed. `nil` with the reason
+    /// when no request can be made.
+    func serverSheetConnection(baseURL: String, typedKey: String, account: ProviderAccount) -> Result<ServerSheetConnection, ServerSheetProblem> {
+        let url = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.isEmpty { return .failure(.init(message: "Enter the server's base URL")) }
+        if let error = Self.baseURLError(url) { return .failure(.init(message: error)) }
+        var apiKey = typedKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard case .server(let id) = account else { return .failure(.init(message: "This server was removed")) }
+        var endpoint = ServerEndpoint(id: id, name: ServerEndpoint.displayName(for: url) ?? url, baseURL: url, keyAccount: "")
+        if let saved = routing.server(id) {
+            endpoint = saved
+            endpoint.baseURL = url
+            if apiKey == nil {
+                switch keys.lookup(account: saved.keyAccount) {
+                case .key(let key): apiKey = key
+                case .absent: break
+                case .unreadable: return .failure(.init(message: "Couldn't read this server's key from the Keychain"))
+                }
+            }
+        }
+        return .success(ServerSheetConnection(
+            server: endpoint, apiKey: apiKey,
+            target: ServerModelTarget(account: account, baseURL: url, apiKey: apiKey)
+        ))
     }
 
     /// One small request to the server: a one-word chat for an LLM, half a
-    /// second of silence for a transcription model. The result is bound to
-    /// the server's address and key when it started: if either changed while
-    /// it ran, it is reported as stale instead of passed.
+    /// second of silence for a transcription model.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-    func runServerModelCheck(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheck {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard case .server(let id) = account, routing.server(id) != nil else {
-            return ServerModelCheck(name: name, kind: kind, target: nil, result: .failed("This server was removed"))
-        }
-        guard let access = access(account), let server = access.server else {
-            return ServerModelCheck(name: name, kind: kind, target: nil,
-                                    result: .failed("Couldn't read this server's key from the Keychain"))
-        }
-        let target = ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
-        let result = await serverModelChecker.check(name, kind: kind, on: server, apiKey: access.apiKey)
-        guard serverModelTarget(account) == target else {
-            return ServerModelCheck(name: name, kind: kind, target: target,
-                                    result: .failed(Self.serverChangedDuringCheck), stale: true)
-        }
-        return ServerModelCheck(name: name, kind: kind, target: target, result: result)
+    func checkServerModel(_ name: String, kind: ServerModel.Kind, on connection: ServerSheetConnection) async -> ServerModelCheckResult {
+        await serverModelChecker.check(name, kind: kind, on: connection.server, apiKey: connection.apiKey)
     }
 
-    static let serverChangedDuringCheck = "The server's address or key changed during the check. Add the model again."
-    static let serverChangedSinceCheck = "The server's address or key changed since the check. Add the model again."
+    /// Saves the whole window at once: the address (and the name older builds
+    /// show, which is the address), a typed key, and the model list. A new
+    /// server, a changed address or a typed key is checked first, like any
+    /// key; a refusal saves nothing. Models taken off the list un-set the
+    /// features of that kind that ran on them. `nil` on success.
+    func saveServer(_ draft: ServerSheetDraft, models: [ServerModel], account: ProviderAccount) async -> String? {
+        let url = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let error = Self.baseURLError(url) { return error }
+        let name = ServerEndpoint.displayName(for: url) ?? url
+        let typed = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard case .server(let id) = account else { return "This server was removed" }
 
-    func checkServerModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheckResult {
-        await runServerModelCheck(name, kind: kind, on: account).result
+        if draft.isNew {
+            if let failure = await addServer(name: name, baseURL: url, key: typed, proposeModels: false) { return failure }
+            guard case .server(let added)? = lastAddedServer else { return "This server was removed" }
+            applyServerModels(models, to: added, serverName: name)
+            return nil
+        }
+
+        guard let server = routing.server(id) else { return "This server was removed" }
+        if url != server.baseURL || typed != nil {
+            var candidate = server
+            candidate.baseURL = url
+            var apiKey = typed
+            if apiKey == nil {
+                switch keys.lookup(account: server.keyAccount) {
+                case .key(let key): apiKey = key
+                case .absent: break
+                case .unreadable: return "Couldn't read this server's key from the Keychain"
+                }
+            }
+            let status = await keyChecker.check(account, apiKey: apiKey, server: candidate, allowPaidProbe: true)
+            if case .rejected(.invalidKey) = status { return apiKey == nil ? "This server asks for a key" : "Key not accepted" }
+            guard status == .valid || status == .limited else { return Self.statusText(for: status, account: account) }
+            guard routing.server(id) != nil else { return "This server was removed" }
+            if let typed {
+                do { try keys.save(typed, account: server.keyAccount) } catch { return "Couldn't save the key" }
+            }
+            routing.updateServer(id, name: name, baseURL: url)
+            keyStatuses.set(status, for: account, at: now())
+            await catalogs.refresh(account, apiKey: apiKey, server: routing.server(id))
+        } else if server.name != name {
+            routing.updateServer(id, name: name, baseURL: url)
+        }
+        applyServerModels(models, to: id, serverName: name)
+        return nil
     }
 
-    /// Adds the model a check was for: checked when it passed, unchecked
-    /// ("Save without check") when it did not. Refused when the server's
-    /// address or key is no longer the one the check ran against, so a
-    /// result never carries over to another configuration.
-    @discardableResult
-    func addServerModel(after check: ServerModelCheck, to account: ProviderAccount) -> String? {
-        if check.stale { return Self.serverChangedDuringCheck }
-        guard let target = check.target else { return "This server was removed" }
-        guard target.account == account, serverModelTarget(account) == target else { return Self.serverChangedSinceCheck }
-        return addServerModel(check.name, kind: check.kind, checked: check.result == .passed, to: account)
+    private func applyServerModels(_ models: [ServerModel], to id: UUID, serverName: String) {
+        let account = ProviderAccount.server(id)
+        let before = Dictionary(uniqueKeysWithValues: AIFeature.activeCases.compactMap { feature in
+            routing.route(for: feature).flatMap { $0.account == account ? (feature, $0.model) : nil }
+        })
+        for feature in routing.setModels(models, forServer: id) {
+            messages[feature] = "\(before[feature] ?? "Its model") was removed from \(serverName)"
+        }
+        recompute()
     }
 
     /// Adds the model to the server; `checked` is false when the user saved it
@@ -408,19 +469,6 @@ final class APIAndModelsViewModel: ObservableObject {
         routing.addModel(ServerModel(name: name, kind: kind, checked: checked), toServer: id)
         recompute()
         return nil
-    }
-
-    /// Removes one model of one kind; the features of that kind that ran on
-    /// it become Not set, and nothing moves to another model.
-    /// Returns the features that became Not set, for the form to name them.
-    @discardableResult
-    func removeServerModel(_ model: ServerModel, from account: ProviderAccount) -> [AIFeature] {
-        guard case .server(let id) = account else { return [] }
-        let server = title(of: account)
-        let cleared = routing.removeModel(named: model.name, kind: model.kind, fromServer: id)
-        for feature in cleared { messages[feature] = "\(model.name) was removed from \(server)" }
-        recompute()
-        return cleared
     }
 
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
@@ -1014,7 +1062,7 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func title(of account: ProviderAccount) -> String {
-        if case .server(let id) = account, let server = routing.server(id) { return server.name }
+        if case .server(let id) = account, let server = routing.server(id) { return server.displayName }
         return account.kind.displayName
     }
 

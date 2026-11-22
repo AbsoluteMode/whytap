@@ -17,6 +17,9 @@ struct ProviderKeyTiles: View {
     /// Why a key was not saved, after `onSaveResult(false)`.
     let onSaveFailure: (String) -> Void
     @State private var expanded: Target?
+    /// A server opens its own window instead of an inline form.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @State private var serverSheet: ServerSheetModel?
     @State private var busy = false
     @FocusState private var focused: Target?
 
@@ -53,8 +56,7 @@ struct ProviderKeyTiles: View {
                 } else if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
                                 onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
-                                onSaveFailure: onSaveFailure, onClose: close,
-                                onServerAdded: { self.expanded = .server($0) })
+                                onSaveFailure: onSaveFailure, onClose: close)
                     .id(expanded)
                 }
             }
@@ -64,17 +66,26 @@ struct ProviderKeyTiles: View {
             close()
             return .handled
         }
+        .sheet(item: $serverSheet) { model in
+            ServerSheet(model: model) { serverSheet = nil }
+        }
     }
 
     private func tile(_ target: Target) -> some View {
         let provider = kind(target)
         let chip = account(target).flatMap { account in viewModel.chips.first { $0.account == account } }
         let title = target == .tavily ? "Tavily" : chip?.title ?? (provider == .openAICompatible ? "Custom server" : provider?.displayName ?? "")
-        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key") : chip?.statusText ?? "Add API key"
+        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key")
+            : chip?.statusText ?? (provider == .openAICompatible ? "Add server" : "Add API key")
         let hasKey = target == .tavily ? tavily.configured : chip != nil
         let selected = expanded == target
         return Button {
-            expanded = selected ? nil : target
+            if opensServerSheet(target) {
+                expanded = nil
+                serverSheet = ServerSheetModel(viewModel: viewModel, account: account(target))
+            } else {
+                expanded = selected ? nil : target
+            }
         } label: {
             Color.clear.aspectRatio(1, contentMode: .fit)
                 .overlay {
@@ -113,6 +124,15 @@ struct ProviderKeyTiles: View {
         .accessibilityLabel(title)
         .accessibilityValue("\(status), \(selected ? "Expanded" : "Collapsed")")
         .accessibilityHint(selected ? "Close key settings" : "Open key settings")
+    }
+
+    /// The Custom server tile adds a server; a server's tile edits it.
+    private func opensServerSheet(_ target: Target) -> Bool {
+        switch target {
+        case .provider(let kind): return kind == .openAICompatible
+        case .server: return true
+        case .tavily: return false
+        }
     }
 
     private func kind(_ target: Target) -> AIProviderKind? {
@@ -200,41 +220,21 @@ struct ProviderKeyForm: View {
     var onSaveResult: (Bool) -> Void = { _ in }
     var onSaveFailure: (String) -> Void = { _ in }
     let onClose: () -> Void
-    /// A new server was saved: its own form opens next and asks for a model.
-    var onServerAdded: (ProviderAccount) -> Void = { _ in }
     /// The onboarding's form only adds a key; removing one stays in Settings.
     var showsRemove = true
 
     @State private var key = ""
-    @State private var name = ""
-    @State private var baseURL = ""
-    /// One operation at a time: a key save or a model check. The form, its
-    /// Save/Remove and the parent's tile switching follow `busy`.
-    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-    @State private var activity = ServerFormActivity()
+    @State private var saving = false
     @FocusState private var keyFocused: Bool
     @State private var keyHovered = false
 
     private var chip: KeyChip? { viewModel.chips.first { $0.account == account } }
-    private var newServer: Bool { kind == .openAICompatible && account == nil }
-    private var busy: Bool { activity.busy }
-    private var canSave: Bool {
-        !busy && (newServer ? !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  && !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    }
+    private var busy: Bool { saving }
+    private var canSave: Bool { !busy && !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if newServer {
-                MacField(placeholder: "Server name", text: $name)
-                MacField(placeholder: "Base URL", text: $baseURL, monospaced: true)
-            }
-            if let account, let models = chip?.serverModels {
-                ServerModelsSection(viewModel: viewModel, account: account, models: models, activity: $activity)
-            }
-            if chip?.serverModels != nil { Divider() }
-            SecureField(chip == nil ? (newServer ? "API key (optional)" : "API key") : "New API key", text: $key)
+            SecureField(chip == nil ? "API key" : "New API key", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .focused($keyFocused)
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !busy ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }
@@ -242,14 +242,14 @@ struct ProviderKeyForm: View {
                 .onSubmit(save)
             HStack(spacing: 10) {
                 if showsRemove {
-                    APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil && activity.canRemove) {
-                        guard let account, activity.canRemove else { return }
+                    APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil && !busy) {
+                        guard let account, !busy else { return }
                         viewModel.remove(account)
                         onClose()
                     }
                 }
                 Spacer(minLength: 0)
-                if activity.savingKey { ProgressView().controlSize(.small).accessibilityLabel("Saving key") }
+                if saving { ProgressView().controlSize(.small).accessibilityLabel("Saving key") }
                 APIModelAction(title: "Save", style: .primary, isEnabled: canSave, action: save)
             }
         }
@@ -263,26 +263,20 @@ struct ProviderKeyForm: View {
     }
 
     private func save() {
-        guard canSave, activity.beginKeySave() else { return }
+        guard canSave else { return }
+        saving = true
         let candidate = key
         Task {
             let failure: String?
-            if newServer {
-                failure = await viewModel.addServer(name: name, baseURL: baseURL, key: candidate, proposeModels: false)
-            } else if let account {
+            if let account {
                 failure = await viewModel.replaceKey(candidate, for: account)
             } else {
                 failure = await viewModel.addKey(candidate, kind: kind)
             }
-            activity.finishKeySave()
+            saving = false
             onSaveResult(failure == nil)
             if let failure { onSaveFailure(failure) }
-            if failure == nil {
-                key = ""
-                if newServer {
-                    if let added = viewModel.lastAddedServer { onServerAdded(added) } else { onClose() }
-                }
-            }
+            if failure == nil { key = "" }
         }
     }
 }
@@ -308,212 +302,3 @@ struct ProviderKeySaveNotice: View {
     }
 }
 
-/// A server's models, each with its kind, and the row that adds one: a name
-/// (any name; the server's `/v1/models` only suggests), LLM or Transcription
-/// (preselected from the name, the user decides) and a check request before
-/// it is saved. A check that does not pass can still be saved, marked Not
-/// checked.
-// WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-@MainActor
-struct ServerModelsSection: View {
-    @ObservedObject var viewModel: APIAndModelsViewModel
-    let account: ProviderAccount
-    let models: [ServerModel]
-    /// The form's one operation at a time; a check runs only when nothing else does.
-    @Binding var activity: ServerFormActivity
-
-    @State private var name = ""
-    @State private var kind: ServerModel.Kind = .llm
-    @State private var kindChosen = false
-    /// The last check's message, for exactly `failedFor`.
-    @State private var failure: String?
-    @State private var failedFor: ServerModel?
-    /// The refused check that "Save without check" adds from; bound to the
-    /// server's address and key it ran against.
-    @State private var failedCheck: ServerModelCheck?
-    @State private var removedNote: String?
-
-    init(viewModel: APIAndModelsViewModel, account: ProviderAccount, models: [ServerModel],
-         activity: Binding<ServerFormActivity>,
-         draft: String = "", draftKind: ServerModel.Kind? = nil, draftFailure: String? = nil) {
-        self.viewModel = viewModel
-        self.account = account
-        self.models = models
-        _activity = activity
-        _name = State(initialValue: draft)
-        _kind = State(initialValue: draftKind ?? ServerModelClassifier.suggestedKind(for: draft))
-        _kindChosen = State(initialValue: draftKind != nil)
-        _failure = State(initialValue: draftFailure)
-        let failed = draftFailure == nil ? nil : ServerModel(name: draft, kind: draftKind ?? .llm, checked: false)
-        _failedFor = State(initialValue: failed)
-        _failedCheck = State(initialValue: failed.map {
-            ServerModelCheck(name: $0.name, kind: $0.kind, target: viewModel.serverModelTarget(account),
-                             result: .failed(draftFailure ?? ""))
-        })
-    }
-
-    private var checking: Bool { activity.checkingModel }
-
-    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var problem: String? {
-        trimmed.isEmpty ? nil : viewModel.serverModelProblem(trimmed, kind: kind, on: account)
-    }
-    private var canAdd: Bool { !activity.busy && !trimmed.isEmpty && problem == nil }
-    private var canSaveUnchecked: Bool {
-        guard !activity.busy, let failedCheck else { return false }
-        return failedCheck.name == trimmed && failedCheck.kind == kind
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Models")
-                .font(.system(size: 13, weight: .semibold))
-            if models.isEmpty {
-                Text("Add the models this server runs. Each one shows up only where its type fits.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(models.enumerated()), id: \.offset) { index, model in
-                        if index > 0 { Divider() }
-                        row(model)
-                    }
-                }
-                .background(MacSettingsTheme.controlBg, in: RoundedRectangle(cornerRadius: 8))
-            }
-            HStack(spacing: 8) {
-                MacField(placeholder: "Model", text: $name, monospaced: true)
-                    .onSubmit(add)
-                    .accessibilityLabel("Model name")
-                let suggestions = viewModel.modelSuggestions(for: account)
-                if !suggestions.isEmpty {
-                    MacMenu(title: "From server", minWidth: 110, maxWidth: 140) {
-                        ForEach(suggestions, id: \.self) { suggestion in
-                            Button(suggestion) { name = suggestion }
-                        }
-                    }
-                    .accessibilityLabel("Models this server lists")
-                }
-            }
-            HStack(spacing: 10) {
-                Picker("Type", selection: Binding(get: { kind }, set: { kind = $0; kindChosen = true })) {
-                    ForEach(ServerModel.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 210)
-                .accessibilityLabel("Model type")
-                Spacer(minLength: 0)
-                if checking {
-                    ProgressView().controlSize(.small)
-                    Text("Checking…").font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
-                }
-                if canSaveUnchecked {
-                    APIModelAction(title: "Save without check", style: .default, isEnabled: true, action: saveUnchecked)
-                }
-                APIModelAction(title: "Add", style: .tinted, isEnabled: canAdd, action: add)
-            }
-            if let message = problem ?? (failedFor == ServerModel(name: trimmed, kind: kind, checked: false) ? failure : nil) {
-                Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Problem: \(message)")
-            } else if let removedNote {
-                Text(removedNote)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .onChange(of: name) { _, newValue in
-            removedNote = nil
-            if !kindChosen { kind = ServerModelClassifier.suggestedKind(for: newValue) }
-        }
-    }
-
-    private func row(_ model: ServerModel) -> some View {
-        HStack(spacing: 8) {
-            Text(model.name)
-                .font(.system(size: 12.5, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-            Spacer(minLength: 6)
-            if !model.checked {
-                Text("Not checked")
-                    .font(.system(size: 11))
-                    .foregroundStyle(MacSettingsTheme.orange)
-            }
-            Text(model.kind.label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(MacSettingsTheme.fieldBg, in: Capsule())
-            Button {
-                let cleared = viewModel.removeServerModel(model, from: account)
-                removedNote = cleared.isEmpty ? nil
-                    : "\(cleared.map(\.title).joined(separator: ", ")) \(cleared.count == 1 ? "has" : "have") no model now"
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(APIModelFeedbackStyle(cornerRadius: 5))
-            .help("Remove \(model.name)")
-            .accessibilityLabel("Remove \(model.name), \(model.kind.label)")
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Checks the draft, then adds it. The draft and the whole form stay
-    /// disabled while the check runs; the outcome applies only to the draft it
-    /// was started for and only while the server's address and key are unchanged.
-    private func add() {
-        guard canAdd, activity.beginModelCheck() else { return }
-        let candidate = ServerModel(name: trimmed, kind: kind, checked: false)
-        failure = nil
-        failedFor = nil
-        failedCheck = nil
-        Task {
-            let check = await viewModel.runServerModelCheck(candidate.name, kind: candidate.kind, on: account)
-            activity.finishModelCheck()
-            guard trimmed == candidate.name, kind == candidate.kind else { return }
-            failedFor = candidate
-            switch check.result {
-            case .passed:
-                if let problem = viewModel.addServerModel(after: check, to: account) {
-                    failure = problem
-                } else {
-                    reset()
-                }
-            case .failed(let message), .unreachable(let message):
-                failure = message
-                failedCheck = check.stale ? nil : check
-            }
-        }
-    }
-
-    private func saveUnchecked() {
-        guard canSaveUnchecked, let check = failedCheck else { return }
-        if let problem = viewModel.addServerModel(after: check, to: account) {
-            failure = problem
-            failedFor = ServerModel(name: check.name, kind: check.kind, checked: false)
-            failedCheck = nil
-        } else {
-            reset()
-        }
-    }
-
-    private func reset() {
-        name = ""
-        kindChosen = false
-        kind = .llm
-        failure = nil
-        failedFor = nil
-        failedCheck = nil
-    }
-}

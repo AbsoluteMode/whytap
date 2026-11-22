@@ -40,13 +40,12 @@ struct ServerSheetDraft: Equatable {
 
 @MainActor
 struct ServerSheet: View {
-    @Binding var draft: ServerSheetDraft
-    /// Names from the server's `/v1/models`, offered in each model field.
-    var suggestions: [String] = []
-    var saving = false
-    var onRemove: () -> Void = {}
-    var onCancel: () -> Void = {}
-    var onSave: () -> Void = {}
+    @ObservedObject var model: ServerSheetModel
+    /// The window closes: after Save, Cancel or Remove server.
+    var onClose: () -> Void = {}
+
+    private var draft: ServerSheetDraft { model.draft }
+    private var saving: Bool { model.saving }
 
     private static let labelWidth: CGFloat = 88
     private static let typeWidth: CGFloat = 176
@@ -67,8 +66,11 @@ struct ServerSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
-            connection
-            models
+            Group {
+                connection
+                models
+            }
+            .disabled(saving)
             footer
         }
         .padding(22)
@@ -95,12 +97,13 @@ struct ServerSheet: View {
     private var connection: some View {
         group {
             labeled("Base URL") {
-                MacField(placeholder: "http://localhost:11434/v1", text: $draft.baseURL, monospaced: true)
+                MacField(placeholder: "http://localhost:11434/v1",
+                         text: Binding(get: { model.draft.baseURL }, set: { model.setBaseURL($0) }), monospaced: true)
             }
             divider
             labeled("API key") {
                 MacField(placeholder: draft.hasStoredKey ? "Saved · type to replace" : "Optional",
-                         text: $draft.apiKey, isSecure: true)
+                         text: Binding(get: { model.draft.apiKey }, set: { model.setKey($0) }), isSecure: true)
             }
         }
     }
@@ -120,7 +123,7 @@ struct ServerSheet: View {
                 }
                 divider
                 Button {
-                    draft.rows.append(.init())
+                    model.addRow()
                 } label: {
                     Label("Add model", systemImage: "plus")
                         .font(.system(size: 13, weight: .medium))
@@ -145,7 +148,7 @@ struct ServerSheet: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 nameField(index)
-                Picker("Type", selection: $draft.rows[index].kind) {
+                Picker("Type", selection: Binding(get: { row.kind }, set: { model.setKind($0, of: row.id) })) {
                     ForEach(ServerModel.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -155,7 +158,7 @@ struct ServerSheet: View {
                 status(row.status)
                     .frame(width: Self.statusWidth, alignment: .leading)
                 Button {
-                    draft.rows.remove(at: index)
+                    model.removeRow(row.id)
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -180,8 +183,11 @@ struct ServerSheet: View {
     }
 
     private func nameField(_ index: Int) -> some View {
-        HStack(spacing: 4) {
-            TextField("Model name", text: $draft.rows[index].name)
+        let id = draft.rows[index].id
+        let suggestions = model.suggestions
+        return HStack(spacing: 4) {
+            TextField("Model name", text: Binding(get: { model.draft.rows.first { $0.id == id }?.name ?? "" },
+                                                   set: { model.setName($0, of: id) }))
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(MacSettingsTheme.text)
@@ -191,10 +197,7 @@ struct ServerSheet: View {
                 Menu {
                     Section("On this server") {
                         ForEach(suggestions, id: \.self) { name in
-                            Button(name) {
-                                draft.rows[index].name = name
-                                draft.rows[index].kind = ServerModelClassifier.suggestedKind(for: name)
-                            }
+                            Button(name) { model.choose(name, for: id) }
                         }
                     }
                 } label: {
@@ -246,6 +249,7 @@ struct ServerSheet: View {
     // MARK: - Footer
 
     private var summary: String? {
+        if let error = model.saveError { return error }
         if checking > 0 { return checking == 1 ? "Checking 1 model…" : "Checking \(checking) models…" }
         if failed.count == 1, let name = failed.first?.name {
             return "\(name) didn't pass. Save anyway keeps it, marked Not checked."
@@ -258,19 +262,29 @@ struct ServerSheet: View {
     private var footer: some View {
         HStack(alignment: .center, spacing: 8) {
             if !draft.isNew {
-                APIModelAction(title: "Remove server", style: .danger, isEnabled: !saving, action: onRemove)
+                APIModelAction(title: "Remove server", style: .danger, isEnabled: !saving) {
+                    model.removeServer()
+                    onClose()
+                }
             }
             if let summary {
                 Text(summary)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(checking == 0 && !failed.isEmpty ? MacSettingsTheme.red : MacSettingsTheme.text2)
+                    .foregroundStyle(model.saveError != nil || (checking == 0 && !failed.isEmpty)
+                                     ? MacSettingsTheme.red : MacSettingsTheme.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             if saving { ProgressView().controlSize(.small) }
-            APIModelAction(title: "Cancel", style: .default, isEnabled: !saving, action: onCancel)
-            APIModelAction(title: failed.isEmpty ? "Save" : "Save anyway", style: .primary,
-                           isEnabled: canSave, action: onSave)
+            APIModelAction(title: "Cancel", style: .default, isEnabled: !saving) {
+                model.cancel()
+                onClose()
+            }
+            .keyboardShortcut(.cancelAction)
+            APIModelAction(title: failed.isEmpty ? "Save" : "Save anyway", style: .primary, isEnabled: canSave) {
+                Task { if await model.save() { onClose() } }
+            }
+            .keyboardShortcut(.defaultAction)
         }
     }
 

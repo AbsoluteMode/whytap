@@ -1,0 +1,107 @@
+---
+id: server-window-2026-11-22
+type: decision
+title: A user's server is set up in one window and named by its address
+summary: The Custom server tile and each server's tile open one window with the base URL, the optional key and model rows (name, LLM or Transcription, check status); one Save keeps it all. There is no name field; a server is shown as its address everywhere, which replaces names from earlier builds.
+status: confirmed
+tags: [settings, models, server, self-hosted, design]
+canonical_for: [server-window, server-display-name]
+verified_at: 2026-11-22
+sources:
+  - type: user-confirmed
+    reference: On 2026-11-22, looking at build 1710's server form (a tile named "qwen3:0.6b", a separate Models block with its own Add, then a separate key field with Remove and Save), the maintainer asked why it could not all be one window; then that the useless name field go, with the model name and the LLM/Transcription switch right in the window when a server is created, and the server's title come from its address. The REV 6 mockup renders were approved before wiring.
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Settings/APIAndModels/ServerSheet.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Settings/APIAndModels/ServerSheetModel.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Tests/SidekeyTests/AIRouting/ServerExplicitModelsTests.swift
+    confirmed_at: 2026-11-22
+related: [2026-11-22-server-explicit-models.md, 2026-10-21-provider-key-tiles.md]
+---
+
+# A user's server is set up in one window and named by its address
+
+## Context
+
+The [explicit server models](2026-11-22-server-explicit-models.md) shipped
+in build 1710 with the server's settings split across the inline key form:
+a Server name and Base URL for a new server, a Models block with its own
+field, type and Add button, then the key field with its own Remove and
+Save. Two Saves for one server, and a name nobody needed: earlier builds
+had named servers after a model ("qwen3:0.6b"), so the tile showed a model
+where the server should be.
+
+## Decision
+
+- **One window.** The Custom server tile and each server's tile open a sheet
+  (`ServerSheet`, state in `ServerSheetModel`) instead of the inline form.
+  It has Base URL, API key (optional; "Saved · type to replace" when one is
+  stored) and a Models list. A new server starts with one empty model row.
+  One Save keeps the address, the key and the models together; Cancel
+  changes nothing; Remove server is at the bottom left.
+- **Model rows.** Each row has the model's name (typed, or chosen from ▾,
+  the server's `/v1/models`), the type LLM or Transcription, the check's
+  status (Checking…, Works, Failed with the server's reason under the row,
+  Not checked) and ×. "+ Add model" adds a row. A name chosen from the list
+  preselects its type; typing never changes the type.
+- **Checks.** A row is checked 0.8 s after its name stops changing, at once
+  when its type changes or a name is chosen from the list, and again when
+  the address or key changes. A result applies only to the name, type,
+  address and key it was sent for (see the explicit-models decision). Save
+  checks every row whose result no longer describes it; a failure that Save
+  finds stops it so the reason is seen, and the button becomes Save anyway,
+  which keeps failed rows marked Not checked. The same name and type twice
+  is refused on the second row.
+- **Saving.** A new server, a changed address or a typed key goes through
+  the ordinary key check first; a refusal saves nothing. Rows removed from
+  the list un-set the features of their type that ran on them, with "<model>
+  was removed from <server>" on those rows; a route on a model that was
+  never listed stays.
+- **Name.** A server has no name field. Tiles, picker sections, the shared
+  rows and messages show `ServerEndpoint.displayName`: host, the port unless
+  it is the scheme's own, and the known local servers' names by port
+  (`Ollama · localhost:11434`, `LM Studio · 127.0.0.1:1234`); any other
+  address is itself (`vllm.company.ru`). Names stored by earlier builds are
+  not shown; Save writes the address name into the stored `name`, so a
+  rollback build shows it too.
+
+## Why
+
+A server is one thing to set up: where it is, how to get in, what it runs.
+One window with one Save matches that, and every model's check result is
+visible next to it before anything is stored. The address already says
+which server it is; a typed name added a field and drifted from the truth.
+
+## What we tested
+
+- `ServerExplicitModelsTests`: a new server saved with its first model in
+  one window (nothing stored before Save, tile named by the address);
+  address required and empty rows ignored; a name chosen from the server
+  preselects Transcription; a qwen-named model kept as Transcription when
+  the user says so; one name as both types, a repeated type refused, removal
+  of one type un-setting only its features; a failed check stops Save once,
+  then Save anyway keeps it Not checked; an unreachable server; Cancel; a
+  changed address and typed key saved with the models; a legacy name
+  replaced; a pass under a replaced key not counting; an address typed
+  during a check discarding the result; a refusal shown under the old key
+  checked again before Save anyway; a server removed while the window is
+  open; Remove server; display names for Ollama, LM Studio, plain hosts,
+  default and custom ports, missing hosts.
+- Offscreen renders of the window (new, two models of both types, a failed
+  check, a new server's first check) and of the tiles, light and dark;
+  the REV 6 mockups were approved before the code was wired.
+
+## Rejected
+
+- Keep the inline form and add a Save per block: two Saves for one server
+  was the complaint.
+- A name field with a suggested name: the maintainer called the field
+  useless; the address is the name.
+- Check only on Save: the user would not see which model fails until the
+  end; rows check as they are typed, and Save checks only what is stale.
+
+2026-11-22, branch `claude/server-one-window`.

@@ -478,7 +478,7 @@ struct ModelStatusResolver {
     }
 
     private func title(of account: ProviderAccount) -> String {
-        if case .server(let id) = account, let server = routing.server(id) { return server.name }
+        if case .server(let id) = account, let server = routing.server(id) { return server.displayName }
         return account.kind.displayName
     }
 
@@ -521,7 +521,7 @@ struct ModelStatusResolver {
         let current = routing.route(for: feature)
         if current?.account == account, current?.model == model { return nil }
         guard let server = routing.server(id), !server.hasModel(model, kind: kind) else { return nil }
-        return "Not added to \(server.name) as \(kind == .llm ? "an LLM" : "a Transcription model")"
+        return "Not added to \(server.displayName) as \(kind == .llm ? "an LLM" : "a Transcription model")"
     }
 
     /// The catalog's entry as `verdict` judges it. A server's `/v1/models`

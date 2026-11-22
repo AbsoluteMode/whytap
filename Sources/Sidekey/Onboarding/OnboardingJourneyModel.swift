@@ -481,6 +481,14 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     /// The model the step's shared row runs on its provider now.
+    /// The model checked in "Choose model": none until the person picks one
+    /// (the owner: "the checkmark after the choice"); the recommended model
+    /// is only tagged until then, and Next keeps it.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    func checkedModel(_ step: OnboardingStep) -> String? {
+        pickedModels.contains(step) ? currentModel(step) : nil
+    }
+
     func currentModel(_ step: OnboardingStep) -> String? {
         _ = revision
         let kind: SharedModelKind = step == .speechKey ? .speech : .llm

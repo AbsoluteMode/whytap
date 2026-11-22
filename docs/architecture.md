@@ -1203,8 +1203,8 @@ recommended model, the provider's newest Sonnet or Sol in its catalog
 generation, highest known output price). When the provider has several
 models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
 names never cut (OnboardingModelPick.readableName) with the ID under each,
-prices, the recommended one first with a small tag; after a pick the button
-names the model. The step waits for a pick or
+prices, the recommended one first with a small tag; no model is checked
+until the person picks one, then the list checks it and the button names it. The step waits for a pick or
 Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
 through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
 The provider row ends with a "Self-hosted" mark; it turns the step's key

@@ -290,7 +290,11 @@ window, Back and a progress bar.
   "Recommended" tag beside the name, and the list is as wide as its longest
   row. The button says "Choose model ⌄" until the person picks a model (the
   recommended one included) and then names it, without a price; the owner
-  asked why it still said "Choose model" after a pick. The recommended
+  asked why it still said "Choose model" after a pick. The list checks a
+  model only after the person picks one (the owner asked why a checkmark
+  was already there: "the checkmark after the choice"); before that the
+  recommended model is only tagged, closing the list changes nothing, and
+  Next keeps the recommended model. The recommended
   model is already set, and a step with a choice of models does not move on
   by itself: the owner was moved on before he could choose (2026-11-22). It
   waits, after the padlock opens, for a pick (through the shared row, then

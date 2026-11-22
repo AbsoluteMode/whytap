@@ -1503,9 +1503,8 @@ struct OnboardingKeyStage: View {
                 // waits for a pick in "Choose model" or Next.
                 VStack(spacing: 5) {
                     Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
-                    OnboardingModelMenu(choices: choices, selected: model.currentModel(step),
+                    OnboardingModelMenu(choices: choices, selected: model.checkedModel(step),
                                         recommended: model.recommendedModel(step),
-                                        picked: model.pickedModels.contains(step),
                                         busy: model.choosingModel == step,
                                         opened: { model.modelMenu(open: $0) }) { id in
                         Task { await model.chooseModel(id, on: step) }
@@ -1724,11 +1723,11 @@ struct OnboardingKeyStage: View {
 /// "Model": AppKit keeps one text of a menu's label.)
 struct OnboardingModelMenu: View {
     let choices: [OnboardingModelChoice]
+    /// The model the person picked, checked in the list and named on the
+    /// button; nil until a pick.
     let selected: String?
-    /// Marked "Recommended" in the line and the list.
+    /// Tagged "Recommended" in the list.
     let recommended: String?
-    /// The person picked a model: the button names it instead of asking.
-    var picked = false
     let busy: Bool
     /// The list opened, or closed without a pick.
     var opened: (Bool) -> Void = { _ in }
@@ -1744,7 +1743,7 @@ struct OnboardingModelMenu: View {
             // Recommended tag"; once a model is picked the button names it
             // ("Claude Sonnet 5.5 ⌄"), never cut and without its price.
             HStack(spacing: 6) {
-                Text(picked ? selected.map(OnboardingModelPick.readableName) ?? "Choose model" : "Choose model")
+                Text(selected.map(OnboardingModelPick.readableName) ?? "Choose model")
                     .foregroundColor(OnboardingTheme.ink)
                     .fixedSize()
                 Image(systemName: busy ? "ellipsis" : "chevron.down")
@@ -1766,9 +1765,8 @@ struct OnboardingModelMenu: View {
         .onChange(of: open) { _, isOpen in
             if isOpen { picking = false; opened(true) } else if !picking { opened(false) }
         }
-        .help(picked ? (selected ?? "") : "The recommended model is set; pick another of this provider's current models")
-        .accessibilityLabel(picked ? "Model, \(selected.map(OnboardingModelPick.readableName) ?? "none")"
-                            : "Choose model, \(selected.map(OnboardingModelPick.readableName) ?? "none") set")
+        .help(selected ?? "The recommended model is set; pick another of this provider's current models")
+        .accessibilityLabel(selected.map { "Model, \(OnboardingModelPick.readableName($0))" } ?? "Choose model")
     }
 
     private var list: some View {

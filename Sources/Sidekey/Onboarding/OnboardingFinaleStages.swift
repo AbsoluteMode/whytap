@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-// The last five steps after the design pass's screens 05 to 09 (approved
-// 2026-11-22): Try Drop, Shortcuts, Toolbox, whytap.ai and Finish, in the
+// The last four steps after the design pass's screens 05 to 09 (approved
+// 2026-11-22; whytap.ai and Finish became one step in REV 61): Try Drop,
+// Shortcuts, Toolbox and Enjoy Whytap, in the
 // wire language of the steps before, with the person's own shortcuts and
 // tools. No island chip while Drop listens: the line under Try Drop's lede
 // turns into soft waves that follow the voice and settles when it stops. No
@@ -608,11 +609,13 @@ struct OnboardingToolboxStage: View {
     }
 }
 
-// MARK: - whytap.ai
+// MARK: - Finish
 
-/// whytap.ai: four small solids on a ring over one Ask card with a real
-/// question and its real answer.
-struct OnboardingHelpStage: View {
+/// The last step: "Enjoy Whytap.", the figures of the steps before turning
+/// slowly on one ring, one line that sends questions to the agent on
+/// whytap.ai, and Finish. It took the place of a separate whytap.ai page.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+struct OnboardingFinishStage: View {
     @ObservedObject var model: OnboardingJourneyModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
@@ -622,121 +625,12 @@ struct OnboardingHelpStage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OnboardingWireTitle(title: "Questions?", lede: "The agent on whytap.ai answers with steps for your setup.")
-            orbit.frame(height: 58)
-            card.padding(.horizontal, 50)
-            OnboardingWirePill("Continue", isDefault: true, action: model.next)
-                .padding(.top, 10)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var orbit: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion)
-                let still = motion.still(reduceMotion)
-                let center = CGPoint(x: size.width / 2, y: 23)
-                let rx = 92.0, ry = 15.0
-                context.stroke(Path(ellipseIn: CGRect(x: center.x - rx, y: center.y - ry, width: rx * 2, height: ry * 2)),
-                               with: .color(OnboardingWireframeInk.wireColor.opacity(0.15 * motion.fade)), lineWidth: 0.85)
-                let rose = OnboardingWireframeInk.roseColor
-                context.stroke(Path { $0.move(to: CGPoint(x: center.x, y: center.y + ry + 10)); $0.addLine(to: CGPoint(x: center.x, y: size.height)) },
-                               with: .color(rose.opacity(0.45 * motion.fade)), lineWidth: 0.95)
-                let sway = motion.sway(reduceMotion)
-                let items = [Double.pi * 0.5, .pi * 1.05, .pi * 1.5, .pi * 1.95].enumerated().map { index, base -> (Int, Double) in
-                    (index, index == 0 || still ? base : base + sin(motion.clock * 0.45 + Double(index)) * 0.08)
-                }.sorted { sin($0.1) < sin($1.1) }
-                for (index, angle) in items {
-                    let depth = sin(angle)
-                    let point = CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * depth)
-                    let radius = index == 0 ? 14.0 : 10.5 + depth * 2
-                    let spin = still ? 0.5 : motion.clock * (0.38 + Double(index) * 0.09)
-                    OnboardingFinaleFigures.solids[index].draw(
-                        in: &context, center: point, worldZ: motion.stage.value + depth * 0.25, radius: radius,
-                        angles: (ax: -0.35 + sway.x, ay: spin + sway.y, az: 0.18 * Double(index)),
-                        style: OnboardingWireStrokes.style(fade: motion.fade * (0.62 + 0.38 * (depth + 1) / 2),
-                                                           tint: OnboardingWireframeInk.rose,
-                                                           strength: index == 0 ? 0.92 : 0.55, clock: motion.clock))
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 10) {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-                Text("How do I give Shot its own shortcut?")
-                    .font(OnboardingTheme.sans(13.5))
-                    .foregroundColor(OnboardingTheme.ink)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(width: 24, height: 24)
-                    .background(Circle().fill(Color.white.opacity(0.95)))
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 36)
-            .background(Capsule(style: .continuous).fill(Color.black.opacity(0.35)))
-            .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                HStack(spacing: 5) {
-                    Circle().fill(OnboardingWireframeInk.greenColor).frame(width: 5, height: 5)
-                    Text("Yes").foregroundColor(OnboardingWireframeInk.greenColor)
-                }
-                (Text("Open ") + Text("Settings › Hotkeys › Tools").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                    + Text(", click the field next to Shot and press the keys."))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(OnboardingTheme.sans(12.5))
-            .padding(.horizontal, 4)
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
-            HStack {
-                Text(verbatim: "whytap.ai")
-                    .font(OnboardingTheme.mono(10.5))
-                    .foregroundColor(OnboardingTheme.faint)
-                Spacer()
-                OnboardingWireLink(title: "Ask on whytap.ai", arrow: "arrow.up.right") { openURL(Self.site) }
-            }
-            .padding(.leading, 4)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(red: 0.11, green: 0.11, blue: 0.125)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(OnboardingWireframeInk.roseColor.opacity(0.28), lineWidth: 1))
-    }
-}
-
-// MARK: - Finish
-
-/// Finish: the figures of the steps before turn slowly on one ring; one
-/// line, and Finish.
-struct OnboardingFinishStage: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var motion = OnboardingFinaleMotion()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            OnboardingWireTitle(title: "You’re all set.")
-            constellation.frame(height: 150).padding(.top, 8)
-            Text("We hope you’ll love having Whytap on your Mac.")
-                .font(OnboardingTheme.sans(14))
-                .foregroundColor(OnboardingTheme.muted)
-                .padding(.top, 10)
+            OnboardingWireTitle(title: "Enjoy Whytap.", lede: "We hope you’ll love having it on your Mac.")
+            constellation.frame(height: 136).padding(.top, 4)
+            OnboardingAskLine { openURL(Self.site) }
+                .padding(.top, 6)
             OnboardingWirePill("Finish", disc: .finish, isDefault: true, action: model.finish)
-                .padding(.top, 22)
+                .padding(.top, 18)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
@@ -782,5 +676,44 @@ struct OnboardingFinishStage: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// The one line about questions: a quiet Ask capsule that opens whytap.ai,
+/// where the agent answers with steps for the person's setup.
+struct OnboardingAskLine: View {
+    let action: () -> Void
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                (Text("Questions? Ask on ") + Text(verbatim: "whytap.ai").foregroundColor(OnboardingTheme.ink))
+                    .font(OnboardingTheme.sans(13))
+                    .foregroundColor(OnboardingTheme.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundColor(.black)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Color.white.opacity(hovered ? 1 : 0.9)))
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 6)
+            .frame(width: 264, height: 36)
+            .background(Capsule(style: .continuous).fill(Color.black.opacity(hovered ? 0.5 : 0.35)))
+            .overlay(Capsule(style: .continuous)
+                .strokeBorder(hovered ? OnboardingWireframeInk.roseColor.opacity(0.4) : Color.white.opacity(0.09), lineWidth: 1))
+            .overlay(Capsule(style: .continuous).strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .focused($focused)
+        .onHover { hovered = $0 }
+        .accessibilityLabel("Ask on whytap.ai")
+        .accessibilityHint("Opens whytap.ai, where the agent answers questions about Whytap")
     }
 }

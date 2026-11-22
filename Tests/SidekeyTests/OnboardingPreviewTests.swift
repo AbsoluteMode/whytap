@@ -94,12 +94,12 @@ final class OnboardingPreviewTests: XCTestCase {
         voice.phaseChanged(.idle)
         XCTAssertTrue(model.outcome(.tryDrop).isDone)
         XCTAssertNotNil(model.tryDropSeconds, "the take's time from the press")
-        for expected in [OnboardingStep.hotkeys, .toolbox, .help, .thanks] {
+        for expected in [OnboardingStep.hotkeys, .toolbox, .thanks] {
             model.next()
             XCTAssertEqual(model.step, expected)
         }
         model.back()
-        XCTAssertEqual(model.step, .help, "Back works in the preview too")
+        XCTAssertEqual(model.step, .toolbox, "Back works in the preview too")
 
         var finished = false
         model.onFinish = { finished = true }

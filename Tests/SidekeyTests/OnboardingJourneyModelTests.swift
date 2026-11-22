@@ -633,8 +633,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         var finished = false
         model.onFinish = { finished = true }
         while model.step != .hotkeys { model.next() }
-        XCTAssertEqual(model.steps.suffix(4), [.hotkeys, .toolbox, .help, .thanks])
-        let tour: [OnboardingStep] = [.hotkeys, .toolbox, .help]
+        XCTAssertEqual(model.steps.suffix(3), [.hotkeys, .toolbox, .thanks], "whytap.ai is part of the last step")
+        let tour: [OnboardingStep] = [.hotkeys, .toolbox]
         for step in tour {
             XCTAssertEqual(model.step, step)
             XCTAssertEqual(model.dwell.state, OnboardingDwellController.State.idle, "\(step) has no timer")
@@ -642,6 +642,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             model.next()
         }
         XCTAssertEqual(model.step, .thanks)
+        XCTAssertFalse(model.dwell.isCounting, "the last step has no timer either")
         XCTAssertEqual(model.fraction, 1)
         model.next()
         XCTAssertTrue(finished)
@@ -729,7 +730,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             model.next()
         }
         model.back()
-        try await snap("help-review")
+        try await snap("tour-review")
 
         // The language globe in its states (REV 50), the springs landed.
         OnboardingGlobeMotion.settlesAtOnce = true
@@ -794,7 +795,6 @@ final class OnboardingJourneyModelTests: XCTestCase {
             ("shortcuts", AnyView(OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration))),
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
-            ("help", AnyView(OnboardingHelpStage(model: model))),
             ("finish", AnyView(OnboardingFinishStage(model: model))),
         ]
         for (name, view) in finale {

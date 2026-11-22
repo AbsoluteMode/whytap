@@ -67,7 +67,7 @@ struct OnboardingJourneyView: View {
     /// The steps with their own capsule (Continue, Finish) and Skip: the
     /// footer adds no Next or Skip of its own there.
     static func hasOwnActions(_ step: OnboardingStep) -> Bool {
-        [.tryDrop, .hotkeys, .toolbox, .help, .thanks].contains(step)
+        [.tryDrop, .hotkeys, .toolbox, .thanks].contains(step)
     }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
@@ -220,8 +220,6 @@ struct OnboardingJourneyView: View {
             OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration)
         case .toolbox:
             OnboardingToolboxStage(model: model)
-        case .help:
-            OnboardingHelpStage(model: model)
         case .thanks:
             OnboardingFinishStage(model: model)
         }

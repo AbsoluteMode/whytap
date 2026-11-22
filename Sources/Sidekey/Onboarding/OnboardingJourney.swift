@@ -30,9 +30,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     case hotkeys
     /// The tools hovering the island shows.
     case toolbox
-    /// The agent on whytap.ai answers questions with detailed instructions.
-    case help
-    /// Thank you for choosing Whytap.
+    /// Enjoy Whytap; questions go to the agent on whytap.ai; Finish.
     case thanks
 
     /// A step the user can pass without doing it. Required steps still have
@@ -50,7 +48,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .source, .speechKey, .llmKey, .search, .language: return .engine
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return .access
         case .tryDrop: return .tryDrop
-        case .hotkeys, .toolbox, .help, .thanks: return .island
+        case .hotkeys, .toolbox, .thanks: return .island
         }
     }
 
@@ -69,14 +67,13 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .tryDrop: return "Try Drop"
         case .hotkeys: return "Shortcuts"
         case .toolbox: return "Toolbox"
-        case .help: return "whytap.ai"
         case .thanks: return "Finish"
         }
     }
 
     /// How long a success stays on screen before the next step (the dwell),
-    /// or `nil` for a step without an action: Shortcuts, Toolbox, whytap.ai
-    /// and Finish wait for Continue (or Return) and never move on by time.
+    /// or `nil` for a step without an action: Shortcuts, Toolbox and the last
+    /// step wait for Continue or Finish (or Return) and never move on by time.
     var dwell: TimeInterval? {
         switch self {
         case .source, .language: return 0.62
@@ -89,7 +86,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return 1.05
         case .tryDrop: return 1.35
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-        case .hotkeys, .toolbox, .help, .thanks: return nil
+        case .hotkeys, .toolbox, .thanks: return nil
         }
     }
 
@@ -97,7 +94,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     /// Return), never after a pause or a success.
     var isInformational: Bool {
         switch self {
-        case .hotkeys, .toolbox, .help, .thanks: return true
+        case .hotkeys, .toolbox, .thanks: return true
         default: return false
         }
     }
@@ -182,7 +179,7 @@ enum OnboardingJourney {
             return !start.screenRecordingGranted
         case .tryDrop:
             return start.speechReady || progress.speechExpected
-        case .hotkeys, .toolbox, .help, .thanks:
+        case .hotkeys, .toolbox, .thanks:
             return true
         }
     }
@@ -277,7 +274,7 @@ extension OnboardingJourney {
         case .keyboard: return start.keyboardGranted
         case .microphone: return start.microphoneGranted
         case .screenRecording: return start.screenRecordingGranted
-        case .inputMonitoring, .tryDrop, .hotkeys, .toolbox, .help, .thanks: return false
+        case .inputMonitoring, .tryDrop, .hotkeys, .toolbox, .thanks: return false
         }
     }
 }

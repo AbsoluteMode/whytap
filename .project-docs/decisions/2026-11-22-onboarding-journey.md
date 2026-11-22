@@ -2,7 +2,7 @@
 id: onboarding-journey-2026-11-22
 type: decision
 title: The first-launch onboarding becomes a small window of single steps that move on by themselves
-summary: The five-page onboarding is replaced by one small window with a progress bar and up to fourteen single-purpose steps (speech source, speech key, optional language model, web search only after a self-hosted model, language, one screen per permission, Try Drop, shortcuts, Toolbox, help, thanks); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
+summary: The five-page onboarding is replaced by one small window with a progress bar and up to thirteen single-purpose steps (speech source, speech key, optional language model, web search only after a self-hosted model, language, one screen per permission, Try Drop, shortcuts, Toolbox, and a closing step that points questions to whytap.ai); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
 status: confirmed
 tags: [onboarding, first-launch, permissions, models, routing]
 canonical_for: [onboarding-journey]
@@ -61,7 +61,7 @@ window, Back and a progress bar.
 ## Decision
 
 - **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
-  progress rail and "NN / 12" on top ("NN / 13" with the search step); the act, a serif title and one line
+  progress rail and "NN / 11" on top ("NN / 12" with the search step); the act, a serif title and one line
   under it; the step's stage; a footer with Skip or Set up later on the left
   and Next on the right only when nothing moves on by itself. Back also answers ← and ⌘[ outside text
   fields. The visual and motion come from the design pass (dark raised
@@ -88,7 +88,8 @@ window, Back and a progress bar.
   8. Input Monitoring, only when the Drop shortcut reports it needs it.
   9. Screen Recording (optional).
   10. Try Drop (only when speech is on the way).
-  11. Shortcuts. 12. Toolbox. 13. Help on whytap.ai. 14. Thank you.
+  11. Shortcuts. 12. Toolbox. 13. Enjoy Whytap: questions to whytap.ai,
+  Finish (REV 61; it was two steps, Help and Thank you).
 - **Moving on by itself, with no chip.** When a shown step's action
   succeeds (a key accepted and applied, a permission turning granted, a
   dictation inserted, a language picked, a source chosen) its segment fills
@@ -409,11 +410,8 @@ window, Back and a progress bar.
   AppState.phase). Shortcuts: three wire keys over the person's shortcuts
   in two columns (Drop, the Agent marked Off while it is off, then the tools
   that have a shortcut, six at most); a row's modifier keys go down while
-  the pointer is on it. Toolbox (REV 60): see below. whytap.ai: four small solids on a
-  ring over one Ask card with the real question and answer kept from
-  before. Finish: "You're all set.", the key, open padlock, globe and
-  Command key turning on one ring, "We hope you'll love having Whytap on
-  your Mac." and Finish; the receipt table is gone. Each of these steps has
+  the pointer is on it. Toolbox (REV 60) and the last step (REV 61): see
+  below; the receipt table is gone. Each of these steps has
   its own capsule, so the footer adds no Next or Skip there.
 - **Steps without an action wait for Continue; Toolbox is a ring.** The
   owner, REV 60, after testing the preview: remove the timers, the screens
@@ -435,6 +433,17 @@ window, Back and a progress bar.
   little larger, tiles at equal steps along the ring (equal angles crowd
   its narrow ends). A thin rose spoke joins the card to the lit tile; the
   keyboard focus lights a tile like the pointer.
+- **whytap.ai and Finish are one last step.** The owner, REV 61, about the
+  last screen: remove it as a full page or merge it with the whytap.ai
+  step, something like "enjoy, and if you have questions write on the
+  landing"; the orchestrating session chose the merge. The last step is
+  "Enjoy Whytap." with "We hope you'll love having it on your Mac.", the
+  constellation of the earlier figures (key, open padlock, globe, Command
+  key), one Ask capsule "Questions? Ask on whytap.ai" that opens the site
+  (OnboardingAskLine), and Finish. The Help step, its four solids and its
+  sample question are gone, so the rail has one segment fewer ("NN / 11",
+  "NN / 12" with the search step). A page that only points elsewhere was a
+  stop with nothing to do; one line on the last screen says the same.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -533,6 +542,11 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 61: the flow ends Shortcuts, Toolbox, Enjoy Whytap with no Help
+  step (eleven segments by default), the last step has no timer and
+  finishes, Back from it reaches Toolbox in the preview; offscreen renders
+  of the last step alone and in the window ("11 / 11").
 
 - REV 60: Shortcuts, Toolbox and whytap.ai keep the dwell idle and their
   segment empty and wait for Continue however long the person reads, and

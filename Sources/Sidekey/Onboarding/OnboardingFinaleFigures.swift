@@ -1,9 +1,8 @@
 import SwiftUI
 
-// The wire figures of the last five steps (design pass screens 05 to 09), in
-// the key, padlock and globe family: keycaps with a crisp legend, four small
-// solids around whytap.ai, the closing constellation, and the line that
-// turns into voice waves.
+// The wire figures of the last four steps (design pass screens 05 to 09), in
+// the key, padlock and globe family: keycaps with a crisp legend, the
+// closing constellation, and the line that turns into voice waves.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 
 /// The glyph drawn on a keycap's dish.
@@ -103,60 +102,6 @@ enum OnboardingFinaleFigures {
     static let cluster = [OnboardingKeycapFigure(.option, offsetX: -1.36, offsetZ: -0.18, scale: 0.88),
                           OnboardingKeycapFigure(.shift, offsetX: 1.36, offsetZ: -0.18, scale: 0.88),
                           OnboardingKeycapFigure(.command, offsetX: 0, offsetZ: 0.22, scale: 0.96)]
-
-    /// whytap.ai: four small solids on a ring.
-    static let solids: [OnboardingWireSolid] = {
-        func distance(_ a: Vec3, _ b: Vec3) -> Double { sqrt(pow(a.x - b.x, 2) + pow(a.y - b.y, 2) + pow(a.z - b.z, 2)) }
-        // Icosahedron.
-        let phi = (1 + sqrt(5.0)) / 2, s = 0.52
-        var ico: [Vec3] = []
-        for sa in [-1.0, 1] { for sb in [-1.0, 1] {
-            ico.append(Vec3(x: 0, y: sa * s, z: sb * phi * s))
-            ico.append(Vec3(x: sa * s, y: sb * phi * s, z: 0))
-            ico.append(Vec3(x: sb * phi * s, y: 0, z: sa * s))
-        } }
-        var icoEdges: [(Int, Int)] = []
-        for i in ico.indices { for j in ico.indices where j > i && abs(distance(ico[i], ico[j]) - 2 * s) < 0.08 {
-            icoEdges.append((i, j))
-        } }
-        // Torus.
-        var torus: [Vec3] = [], torusEdges: [(Int, Int)] = [], torusDots: [Int] = []
-        let un = 12, vn = 6
-        for u in 0..<un { for w in 0..<vn {
-            let a = Double(u) / Double(un) * 2 * .pi, c = Double(w) / Double(vn) * 2 * .pi
-            let rad = 0.62 + 0.24 * cos(c)
-            torus.append(Vec3(x: rad * cos(a), y: 0.24 * sin(c), z: rad * sin(a)))
-            if w == 0 && u % 3 == 0 { torusDots.append(torus.count - 1) }
-        } }
-        for u in 0..<un { for w in 0..<vn {
-            torusEdges.append((u * vn + w, ((u + 1) % un) * vn + w))
-            if u % 2 == 0 { torusEdges.append((u * vn + w, u * vn + (w + 1) % vn)) }
-        } }
-        // Tesseract.
-        var tess: [Vec3] = [], tessEdges: [(Int, Int)] = [], tessDots: [Int] = []
-        for (layer, size) in [0.42, 0.80].enumerated() {
-            for x in [-size, size] { for y in [-size, size] { for z in [-size, size] {
-                tess.append(Vec3(x: x, y: y, z: z))
-                if layer == 1 { tessDots.append(tess.count - 1) }
-            } } }
-        }
-        for offset in [0, 8] { for i in 0..<8 { for bit in 0..<3 {
-            let j = i ^ (1 << bit)
-            if i < j { tessEdges.append((offset + i, offset + j)) }
-        } } }
-        for i in 0..<8 { tessEdges.append((i, 8 + i)) }
-        // Stella octangula.
-        var stella: [Vec3] = []
-        for x in [-0.68, 0.68] { for y in [-0.68, 0.68] { for z in [-0.68, 0.68] { stella.append(Vec3(x: x, y: y, z: z)) } } }
-        var stellaEdges: [(Int, Int)] = []
-        for i in stella.indices { for j in stella.indices where j > i && abs(distance(stella[i], stella[j]) - 0.68 * 2 * sqrt(2.0)) < 0.05 {
-            stellaEdges.append((i, j))
-        } }
-        return [OnboardingWireSolid(normalized: ico, edges: icoEdges, dotIndices: Array(ico.indices)),
-                OnboardingWireSolid(normalized: torus, edges: torusEdges, dotIndices: torusDots),
-                OnboardingWireSolid(normalized: tess, edges: tessEdges, dotIndices: tessDots),
-                OnboardingWireSolid(normalized: stella, edges: stellaEdges, dotIndices: Array(stella.indices))]
-    }()
 
     /// Finish: a key, the open padlock, a globe and the ⌘ key, the figures
     /// of the steps before.

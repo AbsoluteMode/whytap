@@ -26,11 +26,18 @@ window" request (REV 6 mockups approved before wiring).
   failure is on screen; the summary says what Save anyway does in red. Save
   errors use the same summary line. Cancel is the cancel action, Save the
   default action.
+- The connection and model groups scroll past 460 pt; the title and the
+  footer stay. Why: a long model list must not push Save off the screen.
+- When the address moves to another server and no key is typed, the key
+  field reads "Optional" with "The saved key stays with the old address.
+  Type it again to use it here." under it. Why: the saved key is not sent to
+  another server, and the user should know before Save removes it.
 - Colors are the shared Settings tokens (status green/red/orange, row
   separators, card groups) in both appearances; no new tokens.
 
-Offscreen renders cover new, two models of both types, a failed check and a
-new server's first check in light and dark, plus the tiles. Real pointer,
+Offscreen renders cover new, two models of both types, a failed check, a
+new server's first check and 16 models (scrolling) in light and dark, plus
+the tiles. Real pointer,
 keyboard focus order and VoiceOver in the installed app remain acceptance.
 
 ## Toolbox: tool hotkey and selected tile — 2026-11-22

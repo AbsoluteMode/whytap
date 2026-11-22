@@ -143,7 +143,7 @@ final class AIRoutingStore: ObservableObject {
         let id = UUID()
         let server = ServerEndpoint(
             id: id, name: name, baseURL: baseURL,
-            keyAccount: "byok.server.\(id.uuidString.lowercased()).api_key",
+            keyAccount: Self.serverKeyAccount(for: id),
             models: []
         )
         var updated = stateWithSubtitleSeparation
@@ -152,30 +152,35 @@ final class AIRoutingStore: ObservableObject {
         return server
     }
 
-    /// Changes a server's address and the name older builds show; routes,
-    /// key and models stay.
-    func updateServer(_ id: UUID, name: String, baseURL: String) {
+    /// The Keychain account of a server added in API & Models.
+    static func serverKeyAccount(for id: UUID) -> String {
+        "byok.server.\(id.uuidString.lowercased()).api_key"
+    }
+
+    /// Adds a server exactly as the server window saved it (ID, address and
+    /// models together), in one write.
+    func insertServer(_ server: ServerEndpoint) {
         var updated = stateWithSubtitleSeparation
-        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return }
-        updated.servers[index].name = name
-        updated.servers[index].baseURL = baseURL
+        guard !updated.servers.contains(where: { $0.id == server.id }) else { return }
+        var server = server
+        server.models = Self.deduplicated(server.models ?? [])
+        updated.servers.append(server)
         commit(updated)
     }
 
-    /// Replaces the server's model list (the first of a repeated name and
-    /// kind is kept). Features of a kind that ran on a model taken off the
-    /// list become Not set; a route on a model that was never listed stays.
-    /// Returns the features that became Not set.
+    /// Changes a server's address, the name older builds show and its model
+    /// list in one write; its key and its routes stay. Features of a kind
+    /// that ran on a model taken off the list become Not set (a route on a
+    /// model that was never listed stays). Returns those features.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
     @discardableResult
-    func setModels(_ models: [ServerModel], forServer id: UUID) -> [AIFeature] {
+    func updateServer(_ id: UUID, name: String, baseURL: String, models: [ServerModel]) -> [AIFeature] {
         var updated = stateWithSubtitleSeparation
         guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return [] }
         let old = updated.servers[index].models ?? []
-        var kept: [ServerModel] = []
-        for model in models where !kept.contains(where: { $0.name == model.name && $0.kind == model.kind }) {
-            kept.append(model)
-        }
+        let kept = Self.deduplicated(models)
+        updated.servers[index].name = name
+        updated.servers[index].baseURL = baseURL
         updated.servers[index].models = kept
         let cleared = AIFeature.activeCases.filter { feature in
             guard let route = updated.routes[feature.rawValue], route.account == .server(id),
@@ -187,6 +192,15 @@ final class AIRoutingStore: ObservableObject {
         for feature in cleared { updated.routes[feature.rawValue] = nil }
         commit(updated)
         return cleared
+    }
+
+    /// The first of a repeated name and kind is kept.
+    private static func deduplicated(_ models: [ServerModel]) -> [ServerModel] {
+        var kept: [ServerModel] = []
+        for model in models where !kept.contains(where: { $0.name == model.name && $0.kind == model.kind }) {
+            kept.append(model)
+        }
+        return kept
     }
 
     /// Adds a model to the server's list. `false` when the server is gone or

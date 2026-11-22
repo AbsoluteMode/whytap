@@ -415,6 +415,8 @@ final class APIAndModelsRenderTests: XCTestCase {
                                             .init(name: "qwen3:0.6b", kind: .transcription, status: .failed(
                                                 "Server answered 400 on /audio/transcriptions — this model can't transcribe here (\"qwen3:0.6b\" does not support audio input)")),
                                             .init(name: "qwen3-asr", kind: .transcription, status: .works)])),
+            ("5-many-models", .init(isNew: false, baseURL: "http://localhost:11434/v1", apiKey: "", hasStoredKey: false,
+                                     rows: (1...16).map { .init(name: "model-\($0)", kind: .llm, status: .works) })),
             ("4-new-checking", .init(isNew: true, baseURL: "http://localhost:11434/v1", apiKey: "", hasStoredKey: false,
                                      rows: [.init(name: "qwen3-asr", kind: .transcription, status: .checking)])),
         ]

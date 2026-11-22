@@ -63,13 +63,27 @@ struct ServerSheet: View {
             && !draft.baseURL.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// The address, key and model rows scroll past this height, so a long
+    /// model list never pushes Save below the screen.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    static let maxScrollHeight: CGFloat = 460
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
-            Group {
-                connection
-                models
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 18) {
+                    connection
+                    models
+                }
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: ServerSheetContentHeight.self, value: proxy.size.height)
+                })
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(max(contentHeight, 1), Self.maxScrollHeight))
+            .onPreferenceChange(ServerSheetContentHeight.self) { contentHeight = $0 }
             .disabled(saving)
             footer
         }
@@ -102,8 +116,16 @@ struct ServerSheet: View {
             }
             divider
             labeled("API key") {
-                MacField(placeholder: draft.hasStoredKey ? "Saved · type to replace" : "Optional",
-                         text: Binding(get: { model.draft.apiKey }, set: { model.setKey($0) }), isSecure: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    MacField(placeholder: draft.hasStoredKey && !model.keyWithheld ? "Saved · type to replace" : "Optional",
+                             text: Binding(get: { model.draft.apiKey }, set: { model.setKey($0) }), isSecure: true)
+                    if model.keyWithheld {
+                        Text("The saved key stays with the old address. Type it again to use it here.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacSettingsTheme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
     }
@@ -312,4 +334,9 @@ struct ServerSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
+}
+
+private struct ServerSheetContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

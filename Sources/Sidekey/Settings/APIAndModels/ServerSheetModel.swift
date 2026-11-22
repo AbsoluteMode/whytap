@@ -59,9 +59,22 @@ final class ServerSheetModel: ObservableObject, Identifiable {
         for task in tasks.values { task.cancel() }
     }
 
-    /// Names from the server's `/v1/models` for the model fields; a server
-    /// not saved yet has no list.
-    var suggestions: [String] { previewSuggestions ?? viewModel.modelSuggestions(for: account) }
+    /// Names from the server's `/v1/models` for the model fields: only while
+    /// the address is the saved server's, since the list is that server's. A
+    /// new server or an edited address has none.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    var suggestions: [String] {
+        previewSuggestions ?? viewModel.serverSheetSuggestions(baseURL: draft.baseURL, account: account)
+    }
+
+    /// The saved key is not sent: the address now points elsewhere and no
+    /// key is typed. Save removes it from this server.
+    var keyWithheld: Bool {
+        previewKeyWithheld ?? viewModel.serverSheetWithholdsKey(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account)
+    }
+
+    /// For renders.
+    var previewKeyWithheld: Bool?
 
     // MARK: - Edits
 
@@ -238,7 +251,7 @@ final class ServerSheetModel: ObservableObject, Identifiable {
         guard case .success(let after) = currentConnection(), after.target == connection.target,
               draft.rows.allSatisfy({ row in snapshot(of: row).map { verified[row.id] == $0 } ?? true }) else {
             for row in draft.rows { rowChanged(row.id, immediately: true) }
-            saveError = "The server's address or key changed during the check. Save again."
+            saveError = APIAndModelsViewModel.serverChangedDuringCheck
             return false
         }
 
@@ -247,7 +260,10 @@ final class ServerSheetModel: ObservableObject, Identifiable {
             guard !name.isEmpty else { return nil }
             return ServerModel(name: name, kind: row.kind, checked: row.status == .works)
         }
-        if let failure = await viewModel.saveServer(draft, models: models, account: account) {
+        if let failure = await viewModel.saveServer(draft, models: models, account: account, expected: connection.target) {
+            if failure == APIAndModelsViewModel.serverChangedDuringCheck {
+                for row in draft.rows { rowChanged(row.id, immediately: true) }
+            }
             saveError = failure
             return false
         }

@@ -206,7 +206,11 @@ struct ModelStatusResolver {
                 options: options,
                 refreshFailed: snapshot?.lastRefreshFailed ?? false,
                 keyProblem: keyProblem(of: account),
-                acceptsModelName: account.kind == .openAICompatible && (snapshot?.models.isEmpty ?? true)
+                // A server without a list, or whose list has nothing of this
+                // kind, takes a typed model name (it may serve more than it lists).
+                // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+                acceptsModelName: account.kind == .openAICompatible
+                    && ((snapshot?.models.isEmpty ?? true) || options.isEmpty)
             )
         }
     }
@@ -349,7 +353,7 @@ struct ModelStatusResolver {
         if let reason = ModelRegistry.knownUnsupportedReason(model, kind: kind, use: use) {
             return .notSupported(reason: reason)
         }
-        if let entry = catalogs.snapshot(for: account)?.models.first(where: { $0.id == model }),
+        if let entry = judgedEntry(model: model, account: account, for: feature),
            let reason = contradiction(entry, feature: feature, use: use) {
             return .notSupported(reason: reason)
         }
@@ -444,13 +448,35 @@ struct ModelStatusResolver {
         return false
     }
 
+    /// The catalog's entry as `verdict` judges it. A server's models serve
+    /// what the server's choice says (by default their names). The model a
+    /// feature already runs on is not judged by that guess: a route that
+    /// worked before the choice existed, or before the user changed it, keeps
+    /// working and stays offered; only the user moves it.
+    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+    private func judgedEntry(model: String, account: ProviderAccount, for feature: AIFeature) -> CatalogModel? {
+        guard var entry = catalogs.snapshot(for: account)?.models.first(where: { $0.id == model }) else { return nil }
+        guard case .server(let id) = account else { return entry }
+        let current = routing.route(for: feature)
+        if current?.account == account, current?.model == model {
+            entry.uses = nil
+        } else {
+            entry.uses = (routing.server(id)?.modelKinds ?? .automatic).uses(of: model)
+        }
+        return entry
+    }
+
     /// Why the catalog's own description rules a model out for this use.
     private func contradiction(_ entry: CatalogModel, feature: AIFeature, use: ModelUse) -> String? {
         switch use {
         case .realtimeSTT:
-            if let uses = entry.uses, !uses.contains(.realtimeSTT) { return "recorded only" }
+            if let uses = entry.uses, !uses.contains(.realtimeSTT) {
+                return uses.contains(.asyncSTT) ? "recorded only" : "not a speech model"
+            }
         case .asyncSTT:
-            if let uses = entry.uses, !uses.contains(.asyncSTT) { return "real-time only" }
+            if let uses = entry.uses, !uses.contains(.asyncSTT) {
+                return uses.contains(.realtimeSTT) ? "real-time only" : "not a speech model"
+            }
         case .decision:
             if let uses = entry.uses, !uses.contains(.decision) { return "not a decision model" }
         case .chat:

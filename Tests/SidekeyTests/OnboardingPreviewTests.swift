@@ -450,4 +450,168 @@ final class OnboardingPreviewTests: XCTestCase {
                                                  choice("some/unknown", 1, 99)], speech: false, router: true)
         XCTAssertEqual(router.map(\.id), ["anthropic/claude-fable-5.2", "openai/gpt-6.2-astra"])
     }
+
+    // MARK: - Switching marks on a key step (REV 46)
+
+    /// The owner asked what happens when a person enters one key and then
+    /// switches: "accepted" belongs to the provider or server that answered,
+    /// another mark shows its own state, and the route moves only after a
+    /// new check succeeds.
+    private func llmRoute(_ model: OnboardingJourneyModel) -> ProviderAccount? { model.models.sharedRow(.llm)?.choice?.account }
+    private func speechRoute(_ model: OnboardingJourneyModel) -> ProviderAccount? { model.models.sharedRow(.speech)?.choice?.account }
+    private func account(_ kind: AIProviderKind) -> ProviderAccount? { APIAndModelsViewModel.builtInAccount(for: kind) }
+
+    private func atLanguageModelStep() async throws -> (OnboardingPreviewSession, OnboardingJourneyModel) {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        return (session, model)
+    }
+
+    func testLanguageModelKeyThenAnotherProviderThenBack() async throws {
+        let (session, model) = try await atLanguageModelStep()
+        defer { session.clear() }
+        model.llmProvider = .anthropic
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        XCTAssertEqual(llmRoute(model), account(.anthropic))
+
+        model.llmProvider = .openAI
+        model.routeShown(on: .llmKey)
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.openAI)), .idle, "OpenAI never borrows Anthropic's answer")
+        XCTAssertFalse(model.keySaved(.openAI), "an empty field: no OpenAI key")
+        XCTAssertTrue(model.outcome(.llmKey).isDone, "the step still holds Anthropic for Next")
+        XCTAssertEqual(llmRoute(model), account(.anthropic), "a click is not a switch")
+
+        // A pick in a list never reaches a provider whose key was not checked here.
+        await model.chooseModel("gpt-6.2-sol", on: .llmKey)
+        XCTAssertEqual(llmRoute(model), account(.anthropic))
+        XCTAssertEqual(model.accepted[.llmKey]?.route, .provider(.anthropic))
+        XCTAssertNil(model.checkedModel(.llmKey))
+        XCTAssertNil(model.llmModel, "the pick is not remembered for Anthropic's next check either")
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.openAI)), .idle, "no attempt was made for OpenAI")
+
+        // A refused OpenAI key is OpenAI's: Anthropic stays accepted.
+        await model.useLLMKey("sk-proj-bad-0123456789abcdef", provider: .openAI)
+        guard case .failed = model.outcome(.llmKey, for: .provider(.openAI)) else { return XCTFail("OpenAI's refusal") }
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .done("claude-sonnet-5-5"))
+        XCTAssertEqual(llmRoute(model), account(.anthropic))
+
+        model.llmProvider = .anthropic
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .done("claude-sonnet-5-5"),
+                       "back on Anthropic: accepted again, no key asked")
+
+        // A checked OpenAI key moves the route; Anthropic's key stays saved.
+        model.llmProvider = .openAI
+        await model.useLLMKey("sk-proj-good-0123456789abcdef", provider: .openAI)
+        XCTAssertEqual(llmRoute(model), account(.openAI))
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.openAI)), .done("gpt-6.2-sol"))
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .idle)
+        XCTAssertTrue(model.keySaved(.anthropic), "the field offers \"Saved Anthropic key · press Return\"")
+    }
+
+    func testLanguageModelServerThenProvider() async throws {
+        let (session, model) = try await atLanguageModelStep()
+        defer { session.clear() }
+        model.useOwnServer(.languageModel)
+        let server = OnboardingServerDraft(address: "dsfadfdas", model: "dafdasfdasf")
+        await model.saveServer(server, on: .languageModel)
+        XCTAssertEqual(model.accepted[.llmKey]?.route, .server)
+        XCTAssertTrue(model.steps.contains(.search))
+        let serverAccount = llmRoute(model)
+
+        // The owner's screenshot: Anthropic after the server.
+        model.closeServerForm(.languageModel)
+        model.llmProvider = .anthropic
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .idle,
+                       "no \"Anthropic · dsfadfdas · dafdasfdasf\": the server's line is the server's")
+        XCTAssertEqual(llmRoute(model), serverAccount, "the server still runs the LLM")
+        XCTAssertTrue(model.steps.contains(.search), "the Tavily step goes only after a provider's key")
+        XCTAssertEqual(model.outcome(.llmKey, for: .server), .done("dsfadfdas · dafdasfdasf"))
+
+        model.useOwnServer(.languageModel)
+        XCTAssertEqual(model.acceptedServerDraft(.languageModel), server, "the fields come back as accepted")
+        model.closeServerForm(.languageModel)
+
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        XCTAssertEqual(llmRoute(model), account(.anthropic))
+        XCTAssertFalse(model.steps.contains(.search))
+        XCTAssertEqual(model.outcome(.llmKey, for: .server), .idle)
+    }
+
+    func testLanguageModelProviderThenServer() async throws {
+        let (session, model) = try await atLanguageModelStep()
+        defer { session.clear() }
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        model.useOwnServer(.languageModel)
+        XCTAssertEqual(model.outcome(.llmKey, for: .server), .idle, "the server's fields are open, not \"added\"")
+        XCTAssertNil(model.acceptedServerDraft(.languageModel))
+
+        await model.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "bad-model"), on: .languageModel)
+        guard case .failed = model.outcome(.llmKey, for: .server) else { return XCTFail("the server's own failure") }
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .done("claude-sonnet-5-5"))
+        XCTAssertEqual(llmRoute(model), account(.anthropic))
+        XCTAssertFalse(model.steps.contains(.search))
+
+        await model.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3:8b"), on: .languageModel)
+        XCTAssertEqual(model.accepted[.llmKey]?.route, .server)
+        XCTAssertNotEqual(llmRoute(model), account(.anthropic))
+        XCTAssertTrue(model.steps.contains(.search))
+        XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .idle)
+    }
+
+    func testSpeechKeyThenAnotherProviderThenBack() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        model.speechProvider = .soniox
+        await model.useSpeechKey("good-0123456789abcdef", provider: .soniox)
+        let soniox = try XCTUnwrap(model.accepted[.speechKey])
+        XCTAssertEqual(soniox.route, .provider(.soniox))
+        XCTAssertEqual(speechRoute(model), account(.soniox))
+
+        model.speechProvider = .deepgram
+        model.routeShown(on: .speechKey)
+        XCTAssertEqual(model.outcome(.speechKey, for: .provider(.deepgram)), .idle)
+        XCTAssertEqual(speechRoute(model), account(.soniox))
+        let deepgramModel = try XCTUnwrap(model.recommendedModel(.speechKey, provider: .deepgram))
+        await model.chooseModel(deepgramModel, on: .speechKey)
+        XCTAssertEqual(speechRoute(model), account(.soniox), "no Deepgram pick without its key")
+        XCTAssertEqual(model.outcome(.speechKey, for: .provider(.deepgram)), .idle, "no attempt was made for Deepgram")
+
+        await model.useSpeechKey("bad-0123456789abcdef", provider: .deepgram)
+        guard case .failed = model.outcome(.speechKey, for: .provider(.deepgram)) else { return XCTFail("Deepgram's refusal") }
+        XCTAssertEqual(model.outcome(.speechKey, for: .provider(.soniox)), .done(soniox.text))
+
+        model.speechProvider = .soniox
+        XCTAssertEqual(model.outcome(.speechKey, for: .provider(.soniox)), .done(soniox.text), "accepted again")
+        XCTAssertEqual(speechRoute(model), account(.soniox))
+    }
+
+    func testSpeechServerAndProviderSwitches() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        // Provider, then the server.
+        await model.useSpeechKey("good-0123456789abcdef", provider: .soniox)
+        model.useOwnServer(.speech)
+        XCTAssertEqual(model.outcome(.speechKey, for: .server), .idle, "the fields stay open to a server")
+        await model.saveServer(OnboardingServerDraft(address: "localhost:8000/v1", model: "whisper-large-v3-turbo"), on: .speech)
+        XCTAssertEqual(model.accepted[.speechKey]?.route, .server)
+        XCTAssertNotEqual(speechRoute(model), account(.soniox))
+        // The server, then a provider.
+        model.closeServerForm(.speech)
+        model.speechProvider = .soniox
+        XCTAssertEqual(model.outcome(.speechKey, for: .provider(.soniox)), .idle, "Soniox does not show the server's line")
+        XCTAssertTrue(model.keySaved(.soniox), "\"Saved Soniox key · press Return\"")
+        await model.useSpeechKey("", provider: .soniox)
+        XCTAssertEqual(speechRoute(model), account(.soniox), "Return on the saved key moves the route back")
+        XCTAssertEqual(model.outcome(.speechKey, for: .server), .idle)
+    }
 }

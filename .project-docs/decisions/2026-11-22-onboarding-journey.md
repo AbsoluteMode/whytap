@@ -360,6 +360,28 @@ window, Back and a progress bar.
   host). The Settings path of the first version
   (`SettingsWindowSelection.requestNewServer`) was removed with it, so this
   branch no longer touches the Custom server tile of PR 408.
+- **"Accepted" belongs to the provider or server that answered.** The owner
+  saw "Anthropic · dsfadfdas · dafdasfdasf · key saved in your Keychain"
+  after adding a server and clicking Anthropic, and asked what happens when
+  a person enters one key and then switches. A key step kept one state, so a
+  click on another mark only renamed it: the field claimed "OpenAI key
+  saved" with no OpenAI key, Self-hosted opened greyed out under
+  "<model> · added", and the line glued one provider's name to another's
+  model. Now the step remembers the route that holds (`accepted`: a
+  provider, the server or Tavily) and whose key or server the latest try
+  checked; each mark shows only its own state: its check or refusal,
+  "accepted" when it is the route that holds, otherwise "Saved X key ·
+  press Return to use it" when its key is in the Keychain or the empty
+  field. The Self-hosted fields are always open (they come back as they
+  were accepted; an edit is a new try). The route, the model, the
+  Self-hosted mark and the Tavily step change only after a new key or
+  server passes its check; a refused try leaves the accepted route
+  accepted, and coming back to its mark shows it again. "Choose model"
+  picks only on the accepted provider, so a pick never reaches a provider
+  whose key was not checked here (the old path also kept the pick as the
+  next Anthropic check's model). Another mark during the automatic move
+  stops it; Next keeps the accepted route. Keys stay in the Keychain:
+  switching saves and deletes nothing.
 
 ## Rejected
 
@@ -380,6 +402,16 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- `OnboardingPreviewTests` switching marks (REV 46), both key steps: a key,
+  another provider, back (no borrowed "accepted", no pick or route without
+  its key, a refusal stays that provider's, accepted again on return, a new
+  checked key moves the route and the old key stays saved); a server, then a
+  provider (no glued line, the server keeps the route and the Tavily step
+  until a provider's key passes, the fields come back as accepted); a
+  provider, then the server (the fields open, a failed server keeps the
+  provider, a passed one takes the route). With the pick guard removed the
+  two "then back" tests fail.
 
 - `OnboardingJourneyTests`: which steps a clean Mac, a local choice, a key
   choice, a Mac without local speech, an LLM, a missing permission and a Mac

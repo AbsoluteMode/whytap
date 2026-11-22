@@ -87,6 +87,24 @@ enum OnboardingStepOutcome: Equatable {
     var isDone: Bool { if case .done = self { return true } else { return false } }
 }
 
+/// Whose answer a key step's state is: a provider's key, the person's own
+/// server or Tavily. An accepted key belongs to its provider; another mark
+/// shows its own state and never borrows that answer.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+enum OnboardingRoute: Hashable {
+    case provider(AIProviderKind)
+    case server
+    case tavily
+
+    var provider: AIProviderKind? { if case .provider(let kind) = self { return kind } else { return nil } }
+}
+
+/// The route a key step runs on now and the line its success showed.
+struct OnboardingAcceptance: Equatable {
+    let route: OnboardingRoute
+    var text: String
+}
+
 /// State of one onboarding: the way through its steps, the choices and what
 /// each step's action did. A successful action moves on by itself after a
 /// short dwell the person can hold; Back keeps everything done.
@@ -100,8 +118,17 @@ enum OnboardingStepOutcome: Equatable {
 final class OnboardingJourneyModel: ObservableObject {
     @Published private(set) var step: OnboardingStep
     @Published private(set) var progress: OnboardingProgress
-    /// What each step's action did in this onboarding.
+    /// What each step's action did in this onboarding. On a key step it is
+    /// the latest attempt; the route that holds is in `accepted`.
     @Published private(set) var outcomes: [OnboardingStep: OnboardingStepOutcome] = [:]
+    /// The provider or server each key step's shared row runs on after this
+    /// onboarding's check. It changes only after a new check succeeds.
+    @Published private(set) var accepted: [OnboardingStep: OnboardingAcceptance] = [:]
+    /// Whose key or server the latest attempt on a key step checked.
+    private var attempts: [OnboardingStep: OnboardingRoute] = [:]
+    /// The server fields as they were accepted, shown again when the person
+    /// comes back to Self-hosted.
+    private var acceptedServerDrafts: [OnboardingKeyStageKind: OnboardingServerDraft] = [:]
     /// The speech provider whose key field is open on the speech key step.
     @Published var speechProvider: AIProviderKind = .soniox
     /// The language model provider whose key field is open.
@@ -243,14 +270,58 @@ final class OnboardingJourneyModel: ObservableObject {
     var steps: [OnboardingStep] { OnboardingJourney.steps(start: start, progress: progress) }
     var fraction: Double { OnboardingJourney.fraction(at: step, in: steps) }
     var canGoBack: Bool { OnboardingJourney.previous(before: step, in: steps) != nil }
-    func outcome(_ step: OnboardingStep) -> OnboardingStepOutcome { outcomes[step] ?? .idle }
+    /// The step's state for the way: a key step whose route holds is done,
+    /// whatever another provider's attempt answered since.
+    func outcome(_ step: OnboardingStep) -> OnboardingStepOutcome {
+        accepted[step].map { .done($0.text) } ?? latest(step)
+    }
+
+    /// A key step's state for one provider or the server: its own attempt
+    /// while that runs or failed, "accepted" when it is the route that holds,
+    /// otherwise nothing yet. One provider's name never meets another's data.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    func outcome(_ step: OnboardingStep, for route: OnboardingRoute) -> OnboardingStepOutcome {
+        let attempt = latest(step)
+        switch attempt {
+        case .working, .failed:
+            if attempts[step] == route { return attempt }
+        case .idle, .done:
+            break
+        }
+        if let accepted = accepted[step], accepted.route == route { return .done(accepted.text) }
+        return .idle
+    }
+
+    /// The route a key step shows now: the server's fields or the open mark.
+    func shownRoute(_ step: OnboardingStep) -> OnboardingRoute {
+        switch step {
+        case .speechKey: return serverForms.contains(.speech) ? .server : .provider(speechProvider)
+        case .llmKey: return serverForms.contains(.languageModel) ? .server : .provider(llmProvider)
+        default: return .tavily
+        }
+    }
+
+    /// Another mark was opened on the shown key step: a pending automatic
+    /// move with the accepted route waits for Next instead.
+    func routeShown(on step: OnboardingStep) {
+        guard step == self.step, let accepted = accepted[step], accepted.route != shownRoute(step),
+              dwell.isCounting else { return }
+        dwell.cancel()
+    }
+
+    /// The server fields this onboarding accepted on a key step.
+    func acceptedServerDraft(_ kind: OnboardingKeyStageKind) -> OnboardingServerDraft? {
+        acceptedServerDrafts[kind]
+    }
+
+    private func latest(_ step: OnboardingStep) -> OnboardingStepOutcome { outcomes[step] ?? .idle }
 
     /// Steps the person went on from; one reached again by Back is passed.
     private var leftSteps: Set<OnboardingStep> = []
 
     /// The progress bar: every step, with skipped and unnecessary ones hollow.
     var segments: [OnboardingSegment] {
-        let done = Set(outcomes.compactMap { $0.value.isDone ? $0.key : nil })
+        let done = Set(OnboardingStep.allCases.filter { outcome($0).isDone })
         let passed = leftSteps.contains(step) && (done.contains(step) || step.isInformational)
         return OnboardingJourney.segments(start: start, progress: progress, current: step, done: done,
                                           currentPassed: passed)
@@ -269,7 +340,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// move is cancelled, and a step already done waits in review.
     func back() {
         // On the server fields, Back returns to the key field first.
-        if let kind = OnboardingKeyStageKind(step: step), serverForms.contains(kind), !outcome(step).isDone {
+        if let kind = OnboardingKeyStageKind(step: step), serverForms.contains(kind), !outcome(step, for: .server).isDone {
             return closeServerForm(kind)
         }
         guard let previous = OnboardingJourney.previous(before: step, in: steps) else { return }
@@ -304,7 +375,7 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     private func arrive(at step: OnboardingStep) {
-        if case .failed = outcome(step) { outcomes[step] = .idle }
+        if case .failed = latest(step) { outcomes[step] = .idle }
         offerSavedKey(on: step)
         switch step {
         case .keyboard, .microphone, .inputMonitoring, .screenRecording:
@@ -333,8 +404,9 @@ final class OnboardingJourneyModel: ObservableObject {
     /// move on. A success of a step that is not shown is only recorded.
     /// `holds`: the step has a model to choose, so it waits for the pick or
     /// Next instead of moving on by itself.
-    private func succeed(_ done: OnboardingStep, _ text: String, holds: Bool = false) {
+    private func succeed(_ done: OnboardingStep, _ text: String, holds: Bool = false, route: OnboardingRoute? = nil) {
         outcomes[done] = .done(text)
+        if let route { accepted[done] = OnboardingAcceptance(route: route, text: text) }
         if done == .source, step == .source { moveOnFromSource(); return }
         guard !holds, done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
@@ -417,7 +489,7 @@ final class OnboardingJourneyModel: ObservableObject {
         // The preview offers OpenAI before the app has a speech model for it.
         guard model != nil || isPreview else { return }
         let action = begin(.speech)
-        pickedModels.remove(.speechKey)
+        attempts[.speechKey] = .provider(provider)
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         // A newer speech choice answers for this step now; this key stays saved.
@@ -429,7 +501,8 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         guard let model else {
             progress.speechExpected = true
-            succeed(.speechKey, "\(provider.displayName) speech")
+            pickedModels.remove(.speechKey)
+            succeed(.speechKey, "\(provider.displayName) speech", route: .provider(provider))
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)
@@ -440,7 +513,9 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.speechExpected = true
-        succeed(.speechKey, model, holds: modelChoices(.speechKey).count > 1)
+        pickedModels.remove(.speechKey)
+        succeed(.speechKey, model, holds: modelChoices(.speechKey, provider: provider).count > 1,
+                route: .provider(provider))
     }
 
     // MARK: - 3. Language model key
@@ -522,7 +597,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func currentModel(_ step: OnboardingStep) -> String? {
         _ = revision
         let kind: SharedModelKind = step == .speechKey ? .speech : .llm
-        let provider = step == .speechKey ? speechProvider : llmProvider
+        let provider = accepted[step]?.route.provider ?? (step == .speechKey ? speechProvider : llmProvider)
         guard let choice = models.sharedRow(kind)?.choice,
               choice.account == APIAndModelsViewModel.builtInAccount(for: provider) else { return nil }
         return choice.model
@@ -547,19 +622,25 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     func chooseModel(_ id: String, on step: OnboardingStep) async {
-        guard step == .speechKey || step == .llmKey, outcome(step).isDone, choosingModel == nil else { return }
+        guard step == .speechKey || step == .llmKey, choosingModel == nil else { return }
+        // Only the accepted provider's list picks: a provider whose key was
+        // not checked here never gets the route by a model pick.
+        // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+        let shown = step == .speechKey ? speechProvider : llmProvider
+        guard let route = accepted[step]?.route, route == .provider(shown), let provider = route.provider else { return }
         if step == self.step, dwell.isCounting || dwell.isLatched { dwell.cancel() }
         // The model already set (the recommended one): picked, nothing to change.
         if currentModel(step) == id {
             pickedModels.insert(step)
             outcomes[step] = .done(id)
+            accepted[step]?.text = id
             moveOnAfterPick(step)
             return
         }
         let kind: SharedModelKind = step == .speechKey ? .speech : .llm
-        let provider = step == .speechKey ? speechProvider : llmProvider
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
         let action = begin(kind)
+        attempts[step] = route
         choosingModel = step
         defer { if choosingModel == step { choosingModel = nil } }
         if step == .llmKey { llmModel = id }
@@ -573,6 +654,7 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         pickedModels.insert(step)
         outcomes[step] = .done(id)
+        accepted[step]?.text = id
         moveOnAfterPick(step)
     }
 
@@ -587,7 +669,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The key in a key step's field changed: an earlier refusal no longer
     /// describes it. An accepted key stays accepted until a new check.
     func keyEdited(on step: OnboardingStep) {
-        guard case .failed = outcome(step) else { return }
+        guard case .failed = latest(step) else { return }
         outcomes[step] = .idle
         keyProblems[step] = nil
     }
@@ -600,6 +682,7 @@ final class OnboardingJourneyModel: ObservableObject {
         // format problem, not "which provider is it".
         let problem: OnboardingKeyProblem = step == .search ? .format : .unrecognized
         keyProblems[step] = problem
+        attempts[step] = shownRoute(step)
         outcomes[step] = .failed(problem.message(provider: step == .search ? "Tavily" : ""))
     }
 
@@ -636,7 +719,7 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     private func clearFailure(_ step: OnboardingStep) {
-        guard case .failed = outcome(step) else { return }
+        guard case .failed = latest(step) else { return }
         outcomes[step] = .idle
         keyProblems[step] = nil
     }
@@ -648,6 +731,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// to the next step.
     func saveServer(_ server: OnboardingServerDraft, on kind: OnboardingKeyStageKind) async {
         let step = kind.step
+        attempts[step] = .server
         guard let url = server.url else {
             outcomes[step] = .failed("Enter an address like http://localhost:11434/v1"); return
         }
@@ -696,7 +780,9 @@ final class OnboardingJourneyModel: ObservableObject {
         } else {
             progress.speechExpected = true
         }
-        succeed(step, "\(server.name) · \(name)")
+        pickedModels.remove(step)
+        acceptedServerDrafts[kind] = server
+        succeed(step, "\(server.name) · \(name)", route: .server)
     }
 
     /// The model the person picked on the LLM step, or `nil` for the preselected one.
@@ -705,7 +791,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func useLLMKey(_ key: String, provider: AIProviderKind) async {
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
         let action = begin(.llm)
-        pickedModels.remove(.llmKey)
+        attempts[.llmKey] = .provider(provider)
         outcomes[.llmKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         guard isLatest(action, .llm) else { return }
@@ -731,7 +817,9 @@ final class OnboardingJourneyModel: ObservableObject {
         // With a choice of models the step waits for a pick or Next, which
         // keeps the recommended model already set.
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-        succeed(.llmKey, model, holds: modelChoices(.llmKey).count > 1)
+        pickedModels.remove(.llmKey)
+        succeed(.llmKey, model, holds: modelChoices(.llmKey, provider: provider).count > 1,
+                route: .provider(provider))
     }
 
     /// A new key is checked for its shape here, then goes through Settings'
@@ -761,6 +849,7 @@ final class OnboardingJourneyModel: ObservableObject {
     // MARK: - 4. Search
 
     func useSearchKey(_ key: String) async {
+        attempts[.search] = .tavily
         outcomes[.search] = .working("Checking the Tavily key…")
         keyProblems[.search] = nil
         tavily.draftKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -770,7 +859,7 @@ final class OnboardingJourneyModel: ObservableObject {
             keyProblems[.search] = problem
             outcomes[.search] = .failed(problem.message(provider: "Tavily"))
         } else {
-            succeed(.search, "Tavily")
+            succeed(.search, "Tavily", route: .tavily)
         }
     }
 

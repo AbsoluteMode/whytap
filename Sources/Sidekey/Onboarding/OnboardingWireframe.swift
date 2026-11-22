@@ -1133,6 +1133,13 @@ enum OnboardingKeyVendor: Hashable {
     }
 
     var provider: AIProviderKind? { if case .provider(let kind) = self { return kind } else { return nil } }
+
+    var route: OnboardingRoute {
+        switch self {
+        case .provider(let kind): return .provider(kind)
+        case .tavily: return .tavily
+        }
+    }
 }
 
 struct OnboardingKeyProvider: Equatable {
@@ -1320,7 +1327,11 @@ struct OnboardingKeyStage: View {
     }
     /// The mark in the field and the name in the lines under it.
     private var shown: OnboardingKeyProvider? { known ?? settled }
-    private var outcome: OnboardingStepOutcome { model.outcome(step) }
+    /// The shown mark's own state: another provider's accepted key is never
+    /// this one's (the owner, 2026-11-22: "what if they switch?").
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    private var route: OnboardingRoute { server ? .server : current.route }
+    private var outcome: OnboardingStepOutcome { model.outcome(step, for: route) }
     private var checking: Bool { if case .working = outcome { return true } else { return false } }
     /// A new key in the field is a new attempt, never the earlier answer.
     private var accepted: Bool { outcome.isDone && draft.isEmpty }
@@ -1404,6 +1415,7 @@ struct OnboardingKeyStage: View {
         .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion, allowFade: true),
                    value: server)
         .onChange(of: outcome) { _, new in react(to: new) }
+        .onChange(of: route) { _, _ in model.routeShown(on: step) }
         .onChange(of: phase) { _, new in
             scene.refusedAngle = problem == .noCredit || problem == .noSpeechAccess ? 0.46 : 0.36
             scene.keyPhase = new
@@ -1753,7 +1765,7 @@ struct OnboardingKeyStage: View {
             case .provider(let kind): await model.useLLMKey(key, provider: kind)
             case .tavily: await model.useSearchKey(key)
             }
-            if model.outcome(step).isDone { draft = "" }
+            if model.outcome(step, for: provider.route).isDone { draft = "" }
         }
     }
 

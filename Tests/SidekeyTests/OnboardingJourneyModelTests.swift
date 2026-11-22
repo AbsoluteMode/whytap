@@ -700,6 +700,14 @@ final class OnboardingJourneyModelTests: XCTestCase {
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         // The key worked: the recommended Sonnet is set and the person can pick.
         try await snap("llm-key-done")
+        // Another mark after the accepted key shows its own state (REV 46).
+        model.llmProvider = .openAI
+        try await snap("llm-key-switched-openai")
+        model.useOwnServer(.languageModel)
+        try await snap("llm-key-switched-server")
+        model.closeServerForm(.languageModel)
+        model.llmProvider = .anthropic
+        try await snap("llm-key-back-anthropic")
         await model.chooseModel("claude-fable-5-2", on: .llmKey)
         try await snap("llm-key-model-picked")
         // Anthropic searches the web itself: no Tavily step.
@@ -750,5 +758,12 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("search-key-busy")
         await second.useSearchKey("tvly-dev-0123456789abcdef")
         try await snap("search-key-done")
+        // The owner's screenshot: back to the server, then Anthropic.
+        second.back()
+        XCTAssertEqual(second.step, .llmKey)
+        try await snap("llm-server-review")
+        second.closeServerForm(.languageModel)
+        second.llmProvider = .anthropic
+        try await snap("llm-server-then-anthropic")
     }
 }

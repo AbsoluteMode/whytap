@@ -1216,6 +1216,12 @@ model on the speech step, an LLM on the language model step, and a server
 added on one comes back filled in on the other; Return adds the server and its checked model like
 Settings does (addServer, runServerModelCheck, addServerModel), sets the
 shared row and moves on; a provider mark or Escape turns the fields back.
+"Accepted" belongs to the route that answered (OnboardingJourneyModel.accepted:
+a provider, the server or Tavily; `outcome(_:for:)`): another mark shows its
+own state (its try, "Saved X key · press Return" or an empty field), the
+server fields stay open, and the route, model, Self-hosted mark and Tavily
+step change only after a new check passes; "Choose model" picks only on the
+accepted provider.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap. System Audio Recording, Automation and Calendar are asked at
 first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)

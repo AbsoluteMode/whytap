@@ -70,14 +70,17 @@ struct OnboardingServerFields: View {
         self.scene = scene
         self.morph = morph
         _grown = grown
-        // The server added on the other key step comes back filled in.
-        _draft = State(initialValue: model.serverPrefill(for: kind) ?? OnboardingServerDraft())
+        // The server accepted here comes back as it was; one added on the
+        // other key step comes back with its address and key.
+        _draft = State(initialValue: model.acceptedServerDraft(kind) ?? model.serverPrefill(for: kind) ?? OnboardingServerDraft())
     }
 
     private var step: OnboardingStep { kind.step }
-    private var outcome: OnboardingStepOutcome { model.outcome(step) }
+    /// The server's own state: a provider's accepted key never shows here.
+    private var outcome: OnboardingStepOutcome { model.outcome(step, for: .server) }
     private var checking: Bool { if case .working = outcome { return true } else { return false } }
-    private var accepted: Bool { outcome.isDone }
+    /// Accepted while the fields hold what was accepted; an edit is a new try.
+    private var accepted: Bool { outcome.isDone && draft == model.acceptedServerDraft(kind) }
     private var failure: String? { if case .failed = outcome { return outcome.failureText } else { return nil } }
 
     var body: some View {
@@ -125,7 +128,8 @@ struct OnboardingServerFields: View {
                 .frame(height: 15, alignment: .top)
                 .opacity(grown ? 1 : 0)
         }
-        .disabled(checking || accepted)
+        // Always open to a new server or model, like the key field.
+        .disabled(checking)
         .onChange(of: draft) { _, _ in model.keyEdited(on: step) }
         .onAppear { focus = draft.url == nil ? .address : .model }
     }

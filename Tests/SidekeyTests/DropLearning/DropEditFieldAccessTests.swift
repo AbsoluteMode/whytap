@@ -27,6 +27,8 @@ final class DropEditFieldAccessTests: XCTestCase {
     private var flags: [String: Bool] = [:]
     private var settable: Set<String> = []
     private var flagWrites: [(String, Bool)] = []
+    /// The target process's identity (bundle and launch); nil once it quit.
+    private var identity: String? = "app@1"
 
     override func setUp() {
         super.setUp()
@@ -43,6 +45,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         flags = [:]
         settable = []
         flagWrites = []
+        identity = "app@1"
     }
 
     private func access() -> AXDropEditFieldAccess {
@@ -72,7 +75,7 @@ final class DropEditFieldAccessTests: XCTestCase {
                 flags[name] = value
                 return true
             },
-            appFlagSettable: { [unowned self] _, name in settable.contains(name) },
+            processIdentity: { [unowned self] _ in identity },
             watch: { _, _ in nil }
         ))
     }
@@ -80,7 +83,7 @@ final class DropEditFieldAccessTests: XCTestCase {
     func testTheFocusedFieldOfTheFrontmostAppIsReadAsOneBoundedRange() throws {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
-        XCTAssertEqual(access.read(handle), text)
+        XCTAssertEqual(access.read(handle), .text(text))
         XCTAssertEqual(requestedRanges.count, 1)
         XCTAssertEqual(requestedRanges.first?.location, 0)
         XCTAssertEqual(requestedRanges.first?.length, (text as NSString).length)
@@ -99,7 +102,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         frontmost = otherPID
         focused = otherField
         XCTAssertFalse(access.isStillFocused(handle))
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .focusLeft)
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -107,7 +110,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
         focused = otherField
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .focusLeft)
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -117,7 +120,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
         count = nil
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .unreadable, "still focused: the watch must not trust old text")
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -130,7 +133,7 @@ final class DropEditFieldAccessTests: XCTestCase {
             frontmost = otherPID
             focused = otherField
         }
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .focusLeft)
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -145,7 +148,7 @@ final class DropEditFieldAccessTests: XCTestCase {
                 focused = otherField
             }
         }
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .focusLeft)
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -153,14 +156,14 @@ final class DropEditFieldAccessTests: XCTestCase {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
         duringTransfer = { [unowned self] in focused = otherField }
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .focusLeft)
     }
 
     func testAFieldLongerThanTheLimitIsNotTransferred() throws {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
         count = DropEditFieldLimits.maxFieldLength + 1
-        XCTAssertNil(access.read(handle))
+        XCTAssertEqual(access.read(handle), .unreadable)
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -168,7 +171,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
         count = 0
-        XCTAssertEqual(access.read(handle), "")
+        XCTAssertEqual(access.read(handle), .text(""))
         XCTAssertTrue(requestedRanges.isEmpty)
     }
 
@@ -204,11 +207,85 @@ final class DropEditFieldAccessTests: XCTestCase {
     func testABrowserGetsEnhancedUserInterfaceInstead() throws {
         role = "AXGroup"
         bundleID = "com.google.Chrome"
-        settable = ["AXEnhancedUserInterface"]
+        flags = ["AXEnhancedUserInterface": false]
         let lease = try XCTUnwrap(access().exposeFields(pid: targetPID))
         XCTAssertEqual(flags["AXEnhancedUserInterface"], true)
         lease.release()
         XCTAssertEqual(flags["AXEnhancedUserInterface"], false)
+    }
+
+    /// The gate now refuses the same, still focused field (it became a
+    /// password field): the kept text must not be trusted.
+    func testAFieldTheGateNowRefusesIsUnreadableNotFocusLeft() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        role = "AXSecureTextField"
+        XCTAssertEqual(access.read(handle), .unreadable)
+        XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    /// The metadata calls block: another app coming to the front meanwhile
+    /// stops the write.
+    func testExposureKeepsForegroundThroughTheBlockingMetadataRead() {
+        role = "AXWebArea"
+        flags = ["AXManualAccessibility": false]
+        duringFacts = { [unowned self] in
+            frontmost = otherPID
+            focused = otherField
+        }
+        XCTAssertNil(access().exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    /// Focus moved to another element of the same app during the metadata
+    /// read: the gate judged a different element, nothing is written.
+    func testExposureStopsWhenFocusMovesWithinTheApp() {
+        role = "AXWebArea"
+        flags = ["AXManualAccessibility": false]
+        duringFacts = { [unowned self] in focused = AXUIElementCreateApplication(4444) }
+        XCTAssertNil(access().exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    /// An attribute that cannot be read is never written, even if setting
+    /// it would succeed: there is no known value to restore.
+    func testExposureDoesNotChangeAnAttributeWhoseValueIsUnknown() {
+        role = "AXGroup"
+        bundleID = "com.google.Chrome"
+        settable = ["AXEnhancedUserInterface", "AXManualAccessibility"]
+        XCTAssertNil(access().exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    /// The value became unreadable while watching: release writes nothing.
+    func testReleaseDoesNotRestoreWithoutConfirmingWhytapStillOwnsTheValue() throws {
+        role = "AXGroup"
+        flags = ["AXEnhancedUserInterface": false]
+        let lease = try XCTUnwrap(access().exposeFields(pid: targetPID))
+        flags.removeValue(forKey: "AXEnhancedUserInterface")
+        lease.release()
+        XCTAssertEqual(flagWrites.map(\.1), [true])
+    }
+
+    /// The app quit and its pid was reused: the new process is never touched.
+    func testReleaseLeavesANewProcessWithTheSamePidAlone() throws {
+        role = "AXWebArea"
+        flags = ["AXManualAccessibility": false]
+        let lease = try XCTUnwrap(access().exposeFields(pid: targetPID))
+        identity = "other@2"
+        lease.release()
+        XCTAssertEqual(flagWrites.count, 1)
+        identity = nil
+        lease.release()
+        XCTAssertEqual(flagWrites.count, 1)
+    }
+
+    func testAProcessWithoutIdentityIsNeverExposed() {
+        role = "AXWebArea"
+        flags = ["AXManualAccessibility": false]
+        identity = nil
+        XCTAssertNil(access().exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
     }
 
     func testANativeTextFieldNeedsNothing() {

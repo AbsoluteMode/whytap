@@ -933,13 +933,24 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   focus leaves it, it goes away, another take starts or 120 s pass: AX
   value/destroyed/focus notifications plus a bounded read every 0.5 s, and a
   listen-only Return/Enter key-code monitor (only during the watch, keeps
-  nothing, never delays Return) that triggers a read. The last text that
-  still aligns with the take counts; another message (no alignment) or a
-  paste not seen within 5 s counts nothing. Electron and Chromium apps get
-  AXManualAccessibility (else AXEnhancedUserInterface) set on the target
-  app only, at take start, only when its focused element is not already a
-  readable field and the attribute is off; it is undone when the watch
-  ends, the next take goes elsewhere or 660 s pass without a paste (WHY:
+  nothing, never delays Return) that triggers a read. Both deadlines (5 s
+  to see the paste, 120 s in all) are monotonic clock times checked before
+  every read, whatever triggered it. The last text that still aligns with
+  the take counts, minus the corrections it already held when the field
+  first showed the paste (a draft is not an edit). A read reports text,
+  focus left (verified: other app, other element, process gone; the last
+  text counts) or unreadable (still focused but no length, over the bound,
+  a failed transfer or the gate now refuses it; nothing counts). Another
+  message (no alignment) or a paste not seen within 5 s counts nothing.
+  Electron and Chromium apps get AXManualAccessibility (else
+  AXEnhancedUserInterface) set on the target app only, at take start, only
+  when its focused element is not already a readable field and the
+  attribute reads as false (an unreadable attribute is never written). The
+  same process (bundle ID and launch date), frontmost, with the same
+  focused element, is confirmed right before the write. It is undone when
+  the watch ends, the next take goes elsewhere, 660 s pass without a paste,
+  learning and calibration are switched off (UserDefaults change) or Whytap
+  quits, and only while the same process still reads back true (WHY:
   .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
   happens only if that app is still frontmost, the same element still has
   keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure

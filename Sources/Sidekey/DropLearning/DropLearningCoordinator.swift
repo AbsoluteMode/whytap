@@ -82,6 +82,8 @@ final class DropLearningCoordinator {
         /// Calls back on Return or Enter while a field is watched; carries no
         /// key data. Returns the stop.
         var watchReturn: (@escaping @MainActor () -> Void) -> () -> Void = { _ in {} }
+        /// Monotonic seconds for the watch deadlines.
+        var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     }
 
     /// Set by the drops UI; until then suggestions only reach the journal.
@@ -91,8 +93,13 @@ final class DropLearningCoordinator {
         let take: DropLearningTake
         let handle: DropEditFieldHandle
         let calibrating: Bool
+        let startedAt: TimeInterval
         var elapsed: Double = 0
         var reads = 0
+        /// The first text that held the take: what the field showed once the
+        /// paste was there. Corrections already in it are not the user's
+        /// edits of this take (memory only).
+        var firstAligned: String?
         /// The last text that still held the take (memory only).
         var lastAligned: String?
         var watch: DropEditFieldWatch?
@@ -100,10 +107,11 @@ final class DropLearningCoordinator {
         var task: Task<Void, Never>?
         var returnRead: Task<Void, Never>?
 
-        init(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool) {
+        init(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool, startedAt: TimeInterval) {
             self.take = take
             self.handle = handle
             self.calibrating = calibrating
+            self.startedAt = startedAt
         }
     }
 
@@ -112,7 +120,7 @@ final class DropLearningCoordinator {
     private var lease: DropEditAccessibilityLease?
     private var leaseTimer: Task<Void, Never>?
     private var maintenanceTimer: Timer?
-    private var terminationObserver: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init(dependencies: Dependencies) { self.deps = dependencies }
 
@@ -146,12 +154,25 @@ final class DropLearningCoordinator {
             MainActor.assumeIsolated { coordinator?.performMaintenance() }
         }
         // Quitting mid-watch must not leave another app's tree turned on.
-        coordinator.terminationObserver = NotificationCenter.default.addObserver(
+        coordinator.observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak coordinator] _ in
             MainActor.assumeIsolated { coordinator?.stopWatching() }
-        }
+        })
+        // The switch only writes a preference: turning learning off ends the
+        // watch and any exposure right away, not at the next take.
+        coordinator.observers.append(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak coordinator] _ in
+            MainActor.assumeIsolated { coordinator?.settingsChanged() }
+        })
         return coordinator
+    }
+
+    /// Learning and calibration both off: nothing is watched or exposed.
+    func settingsChanged() {
+        guard !capturesFields, observation != nil || lease != nil else { return }
+        stopWatching()
     }
 
     /// Stops any watch without learning from it and undoes any exposure.
@@ -222,7 +243,7 @@ final class DropLearningCoordinator {
             if calibrating { deps.journal.append(entry(event: "skipped", take: take, extra: ["reason": "field_not_readable"])) }
             return releaseLease()
         }
-        let observation = Observation(take: take, handle: handle, calibrating: calibrating)
+        let observation = Observation(take: take, handle: handle, calibrating: calibrating, startedAt: deps.clock())
         self.observation = observation
         leaseTimer?.cancel()
         leaseTimer = nil
@@ -274,21 +295,28 @@ final class DropLearningCoordinator {
                 return
             }
             guard self.observation === observation, !Task.isCancelled else { return }
-            observation.elapsed += Self.pollInterval
-            if observation.lastAligned == nil, observation.elapsed >= Self.alignSeconds { return end(.notPasted) }
-            if observation.elapsed >= Self.maxObserveSeconds { return end(.timeout) }
         }
     }
 
-    /// One bounded read of the watched field.
+    /// One bounded read of the watched field. Every path (poll, AX
+    /// notification, Return) checks the deadlines first, on the clock.
     private func sample(_ observation: Observation) {
         guard self.observation === observation else { return }
         guard stillWanted(calibrating: observation.calibrating) else { return end(.switchedOff) }
-        guard let text = deps.fieldAccess.read(observation.handle) else {
-            return end(observation.lastAligned == nil ? .unreadable : .focusLeft)
+        observation.elapsed = max(0, deps.clock() - observation.startedAt)
+        if observation.elapsed >= Self.maxObserveSeconds { return end(.timeout) }
+        if observation.lastAligned == nil, observation.elapsed >= Self.alignSeconds { return end(.notPasted) }
+        let text: String
+        switch deps.fieldAccess.read(observation.handle) {
+        case .text(let value): text = value
+        // Focus verifiably moved: the last text counts.
+        case .focusLeft: return end(.focusLeft)
+        // Same field, but no read now: what was kept is not trusted.
+        case .unreadable: return end(.unreadable)
         }
         observation.reads += 1
         if DropEditDiff.diff(pasted: observation.take.pasted, field: text) != nil {
+            if observation.firstAligned == nil { observation.firstAligned = text }
             observation.lastAligned = text
             return
         }
@@ -317,9 +345,18 @@ final class DropLearningCoordinator {
         let calibrating = observation.calibrating
         guard stillWanted(calibrating: calibrating) else { return }
         let field = reason.counts ? observation.lastAligned : nil
-        let candidates = field.map {
-            DropLearningClassifier.candidates(take: observation.take, field: $0, lists: deps.lists(), lexicon: deps.lexicon)
-        } ?? []
+        let lists = deps.lists()
+        let classify = { (text: String) in
+            DropLearningClassifier.candidates(take: observation.take, field: text, lists: lists, lexicon: self.deps.lexicon)
+        }
+        var candidates = field.map(classify) ?? []
+        // Only corrections made while watching: text already in the field
+        // when it first held the take (a draft, a paste that never landed)
+        // is not this take's edit.
+        if let first = observation.firstAligned, !candidates.isEmpty {
+            let before = Set(classify(first).map(\.ledgerKey))
+            candidates.removeAll { before.contains($0.ledgerKey) }
+        }
         guard calibrating else {
             guard field != nil else { return }
             finish(candidates: candidates, ledger: DropLearningLedger(defaults: deps.defaults, now: deps.now), dryRun: false)

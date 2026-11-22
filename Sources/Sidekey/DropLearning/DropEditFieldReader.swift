@@ -21,9 +21,11 @@ protocol DropEditFieldAccess: AnyObject {
     func capture(pid: pid_t) -> DropEditFieldHandle?
     /// The same element still has keyboard focus and is still allowed.
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool
-    /// The field's text, or nil when it changed, closed, lost focus, became
-    /// secure, is too long or cannot be read.
-    func read(_ handle: DropEditFieldHandle) -> String?
+    /// The field's text; `.focusLeft` when keyboard focus verifiably moved
+    /// away (another element or app, the app quit); `.unreadable` when the
+    /// same field is still focused but cannot be read now (an AX failure,
+    /// changed security metadata, a field over the transfer bound).
+    func read(_ handle: DropEditFieldHandle) -> DropEditFieldRead
     /// Tells when the field's value changes, when focus leaves it and when it
     /// goes away. Carries no text. nil when the app offers no notifications:
     /// the observation then polls.
@@ -33,6 +35,12 @@ protocol DropEditFieldAccess: AnyObject {
     /// request. When the target app's focused element is not a readable field,
     /// asks that app (only it) to expose its fields; the lease undoes it.
     func exposeFields(pid: pid_t) -> DropEditAccessibilityLease?
+}
+
+enum DropEditFieldRead: Equatable {
+    case text(String)
+    case focusLeft
+    case unreadable
 }
 
 enum DropEditFieldChange: Equatable {
@@ -90,8 +98,9 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         var appFlag: (pid_t, String) -> Bool?
         /// Sets a Boolean attribute of the app element; true on success.
         var setAppFlag: (pid_t, String, Bool) -> Bool
-        /// Whether the app lets that attribute be set.
-        var appFlagSettable: (pid_t, String) -> Bool
+        /// The running process behind a pid (bundle and launch time); nil
+        /// when none runs. A reused pid gives a different identity.
+        var processIdentity: (pid_t) -> String?
         /// AX notifications on the field (value, removal) and on its app (focus).
         var watch: @MainActor (DropEditFieldHandle, @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch?
     }
@@ -114,11 +123,17 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
     /// it. An app keeps its own focused element while another app is in
     /// front, so that alone is not focus.
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool {
-        // The gate's metadata calls can block; focus is confirmed both before
-        // and after them, so the last thing checked is keyboard focus.
-        guard system.isRunning(handle.pid), hasFocus(handle),
-              allowed(handle.element, pid: handle.pid), hasFocus(handle) else { return false }
-        return true
+        stop(handle) == nil
+    }
+
+    /// Why the field may not be read now, or nil when it may. The gate's
+    /// metadata calls can block; focus is confirmed both before and after
+    /// them, so the last thing checked is keyboard focus.
+    private func stop(_ handle: DropEditFieldHandle) -> DropEditFieldRead? {
+        guard system.isRunning(handle.pid), hasFocus(handle) else { return .focusLeft }
+        let gate = allowed(handle.element, pid: handle.pid)
+        guard hasFocus(handle) else { return .focusLeft }
+        return gate ? nil : .unreadable
     }
 
     private func hasFocus(_ handle: DropEditFieldHandle) -> Bool {
@@ -127,22 +142,23 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
     }
 
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-    func read(_ handle: DropEditFieldHandle) -> String? {
-        guard isStillFocused(handle) else { return nil }
+    func read(_ handle: DropEditFieldHandle) -> DropEditFieldRead {
+        if let stop = stop(handle) { return stop }
         // The transfer is bounded before it happens: the field must report
         // its length, and only that range is requested. A field that does
         // not report it, or cannot return a range, is not read at all.
         guard let length = system.characterCount(handle.element),
-              length >= 0, length <= DropEditFieldLimits.maxFieldLength else { return nil }
+              length >= 0, length <= DropEditFieldLimits.maxFieldLength else { return stop(handle) ?? .unreadable }
         // The length query can block; focus may move meanwhile. Confirm
         // keyboard focus and the gate again right before the transfer.
-        guard isStillFocused(handle) else { return nil }
-        if length == 0 { return "" }
+        if let stop = stop(handle) { return stop }
+        if length == 0 { return .text("") }
         guard let text = system.string(handle.element, CFRange(location: 0, length: length)),
-              (text as NSString).length <= DropEditFieldLimits.maxFieldLength,
-              // A field that lost focus during the transfer is not used.
-              isStillFocused(handle) else { return nil }
-        return text
+              (text as NSString).length <= DropEditFieldLimits.maxFieldLength
+        else { return stop(handle) ?? .unreadable }
+        // A field that lost focus during the transfer is not used.
+        if let stop = stop(handle) { return stop }
+        return .text(text)
     }
 
     func watch(_ handle: DropEditFieldHandle,
@@ -152,24 +168,31 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
 
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
     func exposeFields(pid: pid_t) -> DropEditAccessibilityLease? {
-        guard system.frontmostPID() == pid else { return nil }
+        guard system.frontmostPID() == pid, let identity = system.processIdentity(pid) else { return nil }
         // Before its tree is on, an Electron app may report no focused
         // element at all; the app itself is checked instead.
-        let element = focusedElement(ofFrontmost: pid) ?? AXUIElementCreateApplication(pid)
+        let focused = focusedElement(ofFrontmost: pid)
+        let element = focused ?? AXUIElementCreateApplication(pid)
         let facts = system.facts(element, pid)
         // A readable field needs nothing; a field the gate refuses for its
         // app, a password or an error never gets the app's tree turned on.
         if DropEditFieldGate.allowsRead(facts) { return nil }
         guard DropEditFieldGate.mayExpose(facts) else { return nil }
         for attribute in Self.exposeAttributes {
-            // Only an attribute that is off now and that the app lets us set;
-            // one already on (VoiceOver, the user, another tool) stays theirs.
-            let current = system.appFlag(pid, attribute)
-            guard current != true, current == false || system.appFlagSettable(pid, attribute),
-                  system.setAppFlag(pid, attribute, true) else { continue }
+            // Only an attribute known to be off. One already on (VoiceOver,
+            // the user, another tool) stays theirs; one that cannot be read
+            // is never changed, so there is no guessed value to restore.
+            guard system.appFlag(pid, attribute) == false else { continue }
+            // The metadata and flag calls can block: the same process must
+            // still be in front right before the write, and focus must not
+            // have moved: the gate judged that element.
+            guard system.frontmostPID() == pid, system.processIdentity(pid) == identity,
+                  Self.same(focusedElement(ofFrontmost: pid), focused) else { return nil }
+            guard system.setAppFlag(pid, attribute, true) else { continue }
             return DropEditAccessibilityLease(pid: pid) { [system] in
-                // Undone only while it is still the value we set and the app runs.
-                guard system.isRunning(pid), system.appFlag(pid, attribute) != false else { return }
+                // Undone only for the same process and only while it still
+                // holds exactly the value set here.
+                guard system.processIdentity(pid) == identity, system.appFlag(pid, attribute) == true else { return }
                 _ = system.setAppFlag(pid, attribute, false)
             }
         }
@@ -182,6 +205,14 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         guard system.frontmostPID() == pid, let element = system.focusedElement(),
               system.elementPID(element) == pid else { return nil }
         return element
+    }
+
+    private static func same(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (a?, b?): return CFEqual(a, b)
+        default: return false
+        }
     }
 
     private func allowed(_ element: AXUIElement, pid: pid_t) -> Bool {
@@ -246,10 +277,9 @@ extension AXDropEditFieldAccess.System {
                 AXUIElementSetAttributeValue(appElement(pid), attribute as CFString,
                                              (flag ? kCFBooleanTrue : kCFBooleanFalse) as CFTypeRef) == .success
             },
-            appFlagSettable: { pid, attribute in
-                var settable = DarwinBoolean(false)
-                return AXUIElementIsAttributeSettable(appElement(pid), attribute as CFString, &settable) == .success
-                    && settable.boolValue
+            processIdentity: { pid in
+                guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
+                return "\(app.bundleIdentifier ?? "-")@\(app.launchDate?.timeIntervalSince1970 ?? 0)"
             },
             watch: { handle, onChange in AXDropEditFieldWatch(handle: handle, onChange: onChange) }
         )

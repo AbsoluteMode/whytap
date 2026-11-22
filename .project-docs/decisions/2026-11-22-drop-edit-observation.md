@@ -61,6 +61,20 @@ it.
     rewrite): nothing counts;
   - the paste never shows up within 5 s, or the field cannot be read:
     nothing counts.
+- **What a watch trusts** (after the builder's review of the first head):
+  - A read reports one of three things. Text. Focus left, verified: another
+    app in front, another element focused, or the process is gone; the
+    kept text counts. Unreadable: the same field still has focus but gives
+    no length, is over the bound, fails the transfer or the gate now
+    refuses it; the kept text is dropped, because the field may have
+    become something that must not be learned from.
+  - Both deadlines (5 s to see the paste, 2 minutes in all) are monotonic
+    clock times, checked before every read: the poll, each AX
+    notification and both Return reads. A late poll cannot extend them.
+  - Only corrections made during the watch count. The text the field held
+    when it first showed the take is classified too, and its candidates
+    are removed from the final ones. A draft that already held the
+    corrected word, with a paste that never landed, teaches nothing.
 - **Return.** While a field is watched, a listen-only global key monitor
   looks only at the key code of Return and keypad Enter. On either key it
   reads the field at once and again 0.15 s later. Return is never held,
@@ -75,11 +89,18 @@ it.
   manager, no secure input, no AX error), and it is frontmost. The request
   sets `AXManualAccessibility` (Electron) or, when the app does not answer
   that, `AXEnhancedUserInterface` (Chromium browsers), and only if the
-  attribute is off now. It is turned off again when the field is no longer
-  watched, when the next take goes to another app, or 11 minutes after a
-  take start that produced no paste. It is turned off only while it still
-  holds the value Whytap set. An attribute already on (VoiceOver, the
-  user, another tool) is never touched.
+  attribute reads as off now. An attribute that cannot be read is never
+  written, since there would be no known value to restore. Right before
+  the write the same process (bundle ID and launch date) must still be
+  frontmost with the same focused element, because the metadata calls
+  block. It is turned off again when the field is no longer watched, when
+  the next take goes to another app, 11 minutes after a take start that
+  produced no paste, when learning and calibration are switched off, and
+  when Whytap quits. It is turned off only for the same process and only
+  while the attribute still reads back as on; a reused pid, a value that
+  became unreadable or one another tool changed is left alone. An
+  attribute already on (VoiceOver, the user, another tool) is never
+  touched.
 - **Calibration** journals one `observed` entry per take with the reason
   watching ended, instead of the 5 s read and the settled read.
 
@@ -111,14 +132,24 @@ it.
   - a new take counts the field before its paste;
   - exposure is released after the observation, after a take that is never
     pasted, and when the next take goes to another app;
-  - nothing is exposed while learning is off.
+  - nothing is exposed while learning is off;
+  - switching learning off releases the exposure before the paste and
+    mid-watch;
+  - a still-focused field that becomes unreadable drops the kept edit;
+  - a notification after either deadline reads nothing;
+  - a draft that already held the correction teaches nothing.
 - Field access tests check the exposure rules with fake AX attributes:
   - an Electron app gets `AXManualAccessibility` and it is undone once;
   - a Chromium browser gets `AXEnhancedUserInterface`;
   - a native text field is not touched;
   - an attribute that is already on is left alone;
   - a value changed by another tool is not fought;
-  - denied apps, secure input and background apps are never exposed.
+  - denied apps, secure input and background apps are never exposed;
+  - focus or the frontmost app changing during the blocking metadata read
+    stops the write;
+  - an attribute whose value is unknown is never written;
+  - release writes nothing when the value became unreadable or the pid
+    now belongs to another process.
 - Not verified here: real Electron, Slack, Telegram and browser fields need
   the built app, because a feature session does not launch it. These are
   the acceptance checks for the builder and the maintainer.

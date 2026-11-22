@@ -1126,12 +1126,16 @@ shows the server's reason under the row ("Server answered 404 on
 is stale, stops on a failure it found, and Save anyway keeps failed rows
 marked Not checked. The saved key goes only to the saved server's origin
 (scheme, host, port): for another origin no check gets it, Save removes it
-unless a key is typed, and the window says so. After the key check Save
+unless a key is typed (read when Save writes), and the window says so; a
+typed key, once sent, is cleared when the address moves to another origin.
+After the key check Save
 verifies the address and key digest are still what the rows were checked
 with, then writes the key and the server's address, name and models in one
 routing write (AIRoutingStore.insertServer / updateServer), so a new server is
-never listed before its key passed. ▾ suggests only the saved address's
-/v1/models. There is no name field: a server is shown as its address
+never listed before its key passed; Save returns there and loads /v1/models
+afterwards. ▾ suggests only the saved address's /v1/models: the cached list
+carries a digest of its address (CatalogSnapshot.source) and a list
+forgotten while a refresh was in flight is not written back. There is no name field: a server is shown as its address
 (ServerEndpoint.displayName: "Ollama · localhost:11434", "vllm.company.ru"),
 replacing names from earlier builds. Pickers and the shared rows show a server
 model only for its own type; the same name may be listed once per type. A

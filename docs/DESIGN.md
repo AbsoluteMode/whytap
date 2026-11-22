@@ -26,8 +26,12 @@ window" request (REV 6 mockups approved before wiring).
   failure is on screen; the summary says what Save anyway does in red. Save
   errors use the same summary line. Cancel is the cancel action, Save the
   default action.
-- The connection and model groups scroll past 460 pt; the title and the
-  footer stay. Why: a long model list must not push Save off the screen.
+- The connection and model groups scroll past 460 pt and shrink further
+  when the window has less room; the title and the footer keep their height.
+  Why: a long model list must not push Save off the screen.
+- A typed key that was already sent is cleared when the address moves to
+  another server, with "The key was typed for another address. Type it
+  again to use it here." under the field. Why: a key goes to one server.
 - When the address moves to another server and no key is typed, the key
   field reads "Optional" with "The saved key stays with the old address.
   Type it again to use it here." under it. Why: the saved key is not sent to

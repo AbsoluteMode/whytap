@@ -67,7 +67,10 @@ struct ServerSheet: View {
     /// model list never pushes Save below the screen.
     // WHY: .project-docs/decisions/2026-11-22-server-window.md
     static let maxScrollHeight: CGFloat = 460
+    /// The least the rows get when the window is short: the Base URL row.
+    static let minScrollHeight: CGFloat = 64
     @State private var contentHeight: CGFloat = 0
+    private var scrollHeight: CGFloat { min(max(contentHeight, 1), Self.maxScrollHeight) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -82,7 +85,11 @@ struct ServerSheet: View {
                 })
             }
             .scrollBounceBehavior(.basedOnSize)
-            .frame(height: min(max(contentHeight, 1), Self.maxScrollHeight))
+            // Up to its content or the cap, and smaller when the window has
+            // less room: the header and footer keep their height, the rows scroll.
+            .frame(minHeight: min(max(contentHeight, 1), Self.minScrollHeight),
+                   idealHeight: scrollHeight, maxHeight: scrollHeight)
+            .layoutPriority(-1)
             .onPreferenceChange(ServerSheetContentHeight.self) { contentHeight = $0 }
             .disabled(saving)
             footer
@@ -119,8 +126,8 @@ struct ServerSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     MacField(placeholder: draft.hasStoredKey && !model.keyWithheld ? "Saved · type to replace" : "Optional",
                              text: Binding(get: { model.draft.apiKey }, set: { model.setKey($0) }), isSecure: true)
-                    if model.keyWithheld {
-                        Text("The saved key stays with the old address. Type it again to use it here.")
+                    if let note = keyNote {
+                        Text(note)
                             .font(.system(size: 11.5))
                             .foregroundStyle(MacSettingsTheme.text2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -128,6 +135,13 @@ struct ServerSheet: View {
                 }
             }
         }
+    }
+
+    /// Why the key field is empty although a key was saved or typed.
+    private var keyNote: String? {
+        if model.typedKeyCleared { return "The key was typed for another address. Type it again to use it here." }
+        if model.keyWithheld { return "The saved key stays with the old address. Type it again to use it here." }
+        return nil
     }
 
     // MARK: - Models

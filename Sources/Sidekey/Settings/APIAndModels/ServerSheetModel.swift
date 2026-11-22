@@ -76,17 +76,31 @@ final class ServerSheetModel: ObservableObject, Identifiable {
     /// For renders.
     var previewKeyWithheld: Bool?
 
+    /// The typed key was cleared: it had been sent to another address.
+    @Published private(set) var typedKeyCleared = false
+    /// Where the typed key was first sent. It goes nowhere else: moving the
+    /// address to another origin clears it, and the user types it again.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    private var typedKeyOrigin: String?
+
     // MARK: - Edits
 
     func setBaseURL(_ value: String) {
         guard value != draft.baseURL else { return }
         draft.baseURL = value
+        if let bound = typedKeyOrigin, Self.origin(value) != bound {
+            draft.apiKey = ""
+            typedKeyOrigin = nil
+            typedKeyCleared = true
+        }
         connectionChanged()
     }
 
     func setKey(_ value: String) {
         guard value != draft.apiKey else { return }
         draft.apiKey = value
+        typedKeyOrigin = nil
+        typedKeyCleared = false
         connectionChanged()
     }
 
@@ -176,6 +190,7 @@ final class ServerSheetModel: ObservableObject, Identifiable {
             return
         }
         let sent = Snapshot(name: name, kind: row.kind, target: connection.target)
+        bindTypedKey()
         draft.rows[index].status = .checking
         let result = await viewModel.checkServerModel(name, kind: row.kind, on: connection)
         guard !Task.isCancelled, let now = self.index(of: id) else { return }
@@ -260,6 +275,7 @@ final class ServerSheetModel: ObservableObject, Identifiable {
             guard !name.isEmpty else { return nil }
             return ServerModel(name: name, kind: row.kind, checked: row.status == .works)
         }
+        bindTypedKey()
         if let failure = await viewModel.saveServer(draft, models: models, account: account, expected: connection.target) {
             if failure == APIAndModelsViewModel.serverChangedDuringCheck {
                 for row in draft.rows { rowChanged(row.id, immediately: true) }
@@ -273,6 +289,16 @@ final class ServerSheetModel: ObservableObject, Identifiable {
     // MARK: - Pieces
 
     private func index(of id: UUID) -> Int? { draft.rows.firstIndex { $0.id == id } }
+
+    /// The typed key is about to be sent to the current address.
+    private func bindTypedKey() {
+        guard typedKeyOrigin == nil, !Self.trimmed(draft.apiKey).isEmpty else { return }
+        typedKeyOrigin = Self.origin(draft.baseURL)
+    }
+
+    private static func origin(_ url: String) -> String? {
+        APIAndModelsViewModel.origin(trimmed(url))
+    }
 
     private func currentConnection() -> Result<ServerSheetConnection, ServerSheetProblem> {
         viewModel.serverSheetConnection(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account)

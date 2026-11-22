@@ -426,7 +426,11 @@ final class APIAndModelsRenderTests: XCTestCase {
                 try await render(ServerSheet(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
                     size: NSSize(width: 600, height: 560), dark: dark,
-                    to: directory.appendingPathComponent("server-sheet-\(label)-\(dark ? "dark" : "light").png"))
+                    to: directory.appendingPathComponent("server-sheet-\(label)-\(dark ? "dark" : "light").png"),
+                    inspect: { window in
+                        // The window fits the room it has: the rows scroll, Save stays inside.
+                        XCTAssertEqual(window.contentView?.bounds.height ?? 0, 560, accuracy: 0.5, label)
+                    })
             }
             try await render(ProviderKeyTiles(viewModel: vm)
                 .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

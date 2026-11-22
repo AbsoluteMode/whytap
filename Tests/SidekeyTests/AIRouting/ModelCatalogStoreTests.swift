@@ -63,6 +63,44 @@ final class ModelCatalogStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot(for: .openRouter)?.models.first?.uses, [.decision])
     }
 
+    // MARK: - A server's list belongs to its address
+
+    private static func server(_ url: String) -> ServerEndpoint {
+        ServerEndpoint(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!, name: "Lab", baseURL: url,
+                       keyAccount: "byok.server.test.api_key")
+    }
+
+    func test_a_server_list_is_not_kept_for_another_address_even_when_its_refresh_fails() async {
+        let fetcher = FakeCatalogFetcher([.success(models), .failure(.offline)])
+        let store = makeStore(fetcher)
+        let account = ProviderAccount.server(Self.server("x").id)
+        let old = Self.server("http://localhost:11434/v1"), new = Self.server("https://vllm.company.ru/v1")
+        await store.refresh(account, apiKey: nil, server: old)
+        XCTAssertEqual(store.snapshot(for: account, server: old)?.models, models)
+        XCTAssertNil(store.snapshot(for: account, server: new), "the old address's list is not the new one's")
+        await store.refresh(account, apiKey: nil, server: new)
+        XCTAssertEqual(store.snapshot(for: account, server: new)?.models, [], "a failed refresh does not keep the old list")
+        XCTAssertEqual(store.snapshot(for: account, server: new)?.lastRefreshFailed, true)
+    }
+
+    func test_a_refresh_in_flight_when_the_list_is_forgotten_does_not_write_it_back() async {
+        final class Gate: ModelCatalogFetching, @unchecked Sendable {
+            var store: ModelCatalogStore?
+            let account: ProviderAccount
+            init(account: ProviderAccount) { self.account = account }
+            func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
+                await MainActor.run { store?.forget(self.account) }
+                return [CatalogModel(id: "old-address-model")]
+            }
+        }
+        let account = ProviderAccount.server(Self.server("x").id)
+        let gate = Gate(account: account)
+        let store = ModelCatalogStore(fileURL: fileURL, fetcher: gate, now: { [unowned self] in self.clock })
+        gate.store = store
+        await store.refresh(account, apiKey: nil, server: Self.server("http://localhost:11434/v1"))
+        XCTAssertNil(store.snapshot(for: account))
+    }
+
     func test_offline_refresh_keeps_models_and_marks_couldnt_refresh() async {
         let fetcher = FakeCatalogFetcher([.success(models), .failure(.offline)])
         let store = makeStore(fetcher)

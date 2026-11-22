@@ -59,6 +59,18 @@ final class ServerExplicitModelsTests: XCTestCase {
         }
     }
 
+    private struct AddressScopedCatalog: ModelCatalogFetching {
+        var onChangedAddress: (@Sendable () async -> Void)? = nil
+
+        func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
+            guard server?.baseURL == "http://localhost:11434/v1" else {
+                await onChangedAddress?()
+                throw CatalogFetchError.http(503, code: nil)
+            }
+            return [CatalogModel(id: "original-server-model")]
+        }
+    }
+
     private struct Env {
         let defaults: UserDefaults
         let routing: AIRoutingStore
@@ -73,7 +85,7 @@ final class ServerExplicitModelsTests: XCTestCase {
         }
     }
 
-    private func makeEnv(catalog: [String]? = [], storedRouting: String? = nil, keyChecker: ProviderKeyChecking = AcceptingKeys()) throws -> Env {
+    private func makeEnv(catalog: [String]? = [], storedRouting: String? = nil, keyChecker: ProviderKeyChecking = AcceptingKeys(), catalogFetcher: (any ModelCatalogFetching)? = nil) throws -> Env {
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
@@ -87,7 +99,7 @@ final class ServerExplicitModelsTests: XCTestCase {
         let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
         let checker = FakeChecker()
         let probe = Probe()
-        let catalogs = ModelCatalogStore(fileURL: file, fetcher: Catalog(models: catalog))
+        let catalogs = ModelCatalogStore(fileURL: file, fetcher: catalogFetcher ?? Catalog(models: catalog))
         let checks = ModelCheckStore(defaults: defaults)
         let keyStatuses = KeyStatusStore(defaults: defaults)
         let vm = APIAndModelsViewModel(
@@ -174,6 +186,9 @@ final class ServerExplicitModelsTests: XCTestCase {
         for feature in Self.textFeatures { XCTAssertEqual(env.offered(account, for: feature), ["ut-llm"], "\(feature)") }
         for feature in Self.speechFeatures { XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)") }
         XCTAssertNil(env.vm.sections(for: .agent).first { $0.account == account }, "a server still can't run the Agent")
+        for _ in 0..<200 where env.vm.modelSuggestions(for: account).isEmpty {
+            try? await Task.sleep(for: .milliseconds(2))  // the list loads after Save
+        }
         XCTAssertEqual(env.vm.modelSuggestions(for: account), ["qwen3:0.6b", "whisper-large-v3"], "the list only suggests")
     }
 
@@ -431,6 +446,122 @@ final class ServerExplicitModelsTests: XCTestCase {
         model.setBaseURL("http://localhost:11434/v1")
         XCTAssertEqual(model.suggestions, ["listed-model"])
         XCTAssertEqual(sheet(env).suggestions, [])
+    }
+
+    func testBuilderAnOldAddressKeySyncedDuringAnAddressChangeIsNotRetainedForTheNewAddress() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env)
+        let keychain = try keyAccount(env, account)
+        let model = sheet(env, account)
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        await type(model, "fixture-model", .llm)
+        keyChecker.onCheck = {
+            await MainActor.run {
+                try? env.keys.save("synthetic-key-for-original-server", account: keychain)
+            }
+        }
+        let saved = await model.save()
+        XCTAssertNil(keyChecker.sent.last?.apiKey)
+        if saved {
+            XCTAssertTrue(env.keys.lookup(account: keychain) == .absent, "The new address must not retain a key that arrived for the old address")
+        } else {
+            XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.baseURL, "http://localhost:11434/v1")
+        }
+    }
+
+    func testBuilderARetypedKeyStaysWithTheDraftOriginItWasTypedFor() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        model.setBaseURL("https://first.example.invalid/v1")
+        model.setKey("synthetic-key-for-first-server")
+        await type(model, "fixture-model", .llm)
+        XCTAssertTrue(env.checker.calls.last?.apiKey != nil)
+        let before = env.checker.calls.count
+        model.setBaseURL("https://second.example.invalid/v1")
+        await settle(model)
+        XCTAssertFalse(env.checker.calls.dropFirst(before).contains { $0.apiKey != nil }, "The next origin must not receive the key typed for the previous one")
+        _ = await model.save()
+        XCTAssertFalse(keyChecker.sent.contains { $0.baseURL == "https://second.example.invalid/v1" && $0.apiKey != nil })
+    }
+
+    func testBuilderAnAddressChangeWithAFailedCatalogRefreshDoesNotReviveThePreviousCatalog() async throws {
+        let env = try makeEnv(catalogFetcher: AddressScopedCatalog())
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        XCTAssertEqual(model.suggestions, ["original-server-model"])
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        XCTAssertTrue(model.suggestions.isEmpty)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertTrue(sheet(env, account).suggestions.isEmpty, "A reopened sheet must not label the previous catalog as belonging to the new server")
+    }
+
+    func testBuilderSaveDoesNotReportSuccessAfterTheServerIsRemovedDuringCatalogRefresh() async throws {
+        let removal = CatalogRemoval()
+        let catalog = AddressScopedCatalog(onChangedAddress: { await removal.run() })
+        let env = try makeEnv(catalogFetcher: catalog)
+        let account = try await connect(env)
+        removal.action = { env.vm.remove(account) }
+        let model = sheet(env, account)
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        let saved = await model.save()
+        let existsAtReturn = env.routing.server(try XCTUnwrap(Self.id(account))) != nil
+        XCTAssertFalse(saved && !existsAtReturn, "Save cannot close as successful after the server was removed")
+    }
+
+    func test_a_typed_key_is_cleared_when_the_address_moves_after_it_was_sent() async throws {
+        let env = try makeEnv()
+        let model = sheet(env)
+        model.setBaseURL("https://first.example.invalid/v1")
+        model.setKey("synthetic-key-for-first-server")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key-for-first-server")
+        model.setBaseURL("https://first.example.invalid/openai/v1")
+        XCTAssertEqual(model.draft.apiKey, "synthetic-key-for-first-server", "another path on the same server keeps it")
+        model.setBaseURL("https://second.example.invalid/v1")
+        XCTAssertEqual(model.draft.apiKey, "")
+        XCTAssertTrue(model.typedKeyCleared, "the window says why the field is empty")
+        model.setKey("synthetic-key-for-second-server")
+        XCTAssertFalse(model.typedKeyCleared)
+        await settle(model)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key-for-second-server")
+    }
+
+    func test_a_key_typed_before_the_address_follows_it_until_it_is_sent() async throws {
+        let env = try makeEnv()
+        let model = sheet(env)
+        model.setKey("synthetic-key")
+        model.setBaseURL("https://vllm.company.ru")
+        model.setBaseURL("https://vllm.company.ru/v1")
+        XCTAssertEqual(model.draft.apiKey, "synthetic-key", "nothing was sent yet")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+    }
+
+    func test_save_returns_once_stored_and_the_list_loads_afterwards() async throws {
+        let env = try makeEnv(catalog: ["listed-model"])
+        let model = sheet(env)
+        let id = try XCTUnwrap(Self.id(model.account))
+        model.setBaseURL("http://localhost:11434/v1")
+        await type(model, "ut-llm", .llm)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertNotNil(env.routing.server(id))
+        for _ in 0..<200 where env.vm.modelSuggestions(for: model.account).isEmpty {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertEqual(env.vm.modelSuggestions(for: model.account), ["listed-model"])
+    }
+
+    @MainActor
+    private final class CatalogRemoval {
+        var action: (() -> Void)?
+        func run() { action?() }
     }
 
     // MARK: - Save writes everything at once, after the key check

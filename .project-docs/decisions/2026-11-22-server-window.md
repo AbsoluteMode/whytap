@@ -67,20 +67,33 @@ where the server should be.
   Only then are the key and the server written: a new server enters the
   routing with its address, name and models in one write, so it is never
   listed before its key passed; an existing one gets its address, name and
-  models in one write. The `/v1/models` list is refreshed afterwards and
-  only suggests names, so it cannot undo a Save.
+  models in one write. Save ends there: what it reports is what is stored.
+  The `/v1/models` list is loaded afterwards without Save waiting for it, so
+  a server removed meanwhile cannot make a finished Save look failed or a
+  failed one look finished.
 - **The saved key stays with its address.** The saved key is used only while
   the address keeps the saved server's origin (scheme, host, port; a
   different path is the same server). For another origin nothing is sent:
   neither the row checks nor the key check on Save get the old key, the key
   field says "The saved key stays with the old address. Type it again to use
-  it here.", and Save removes the old key unless a new one is typed.
+  it here.", and Save removes it unless a new one is typed. Save reads the
+  key store when it writes, not when it began, so a key synced for the old
+  address during the key check is removed too.
+- **A typed key stays with the address it was sent to.** A typed key follows
+  the address until a check first sends it; from then on, moving the address
+  to another origin empties the field with "The key was typed for another
+  address. Type it again to use it here."
 - **Suggestions are the saved server's.** ▾ lists the saved server's
   `/v1/models` only while the address is the saved one; a new server or an
   edited address has no list, so a name from another server is never offered
-  as this one's.
-- **Long lists scroll.** The address, key and rows scroll past 460 pt; the
-  title and the footer with Save stay in place.
+  as this one's. The cached list carries a digest of the address it came from
+  (not the address) and is shown only for that address; a refresh for a new
+  address starts from an empty list, so a failed one does not keep the old
+  models, and a refresh still in flight when Save changes the address does
+  not write its list back.
+- **Long lists scroll.** The address, key and rows scroll past 460 pt, and
+  shrink further when the window has less room; the title and the footer
+  with Save keep their height.
 - **Name.** A server has no name field. Tiles, picker sections, the shared
   rows and messages show `ServerEndpoint.displayName`: host, the port unless
   it is the scheme's own, and the known local servers' names by port
@@ -125,6 +138,17 @@ which server it is; a typed name added a field and drifted from the truth.
   used and saved, suggestions back with the saved address, a new server
   stored only after its key check, a refused key storing nothing, a server
   removed during the key check not brought back; a 16-row render.
+- The second review (ticket #418) found the remaining gaps: a key typed for
+  one address reused after a second address edit; a key synced for the old
+  address during Save kept for the new one; Save reporting success after the
+  server was removed during the list refresh it awaited; the old list kept
+  after a failed refresh for the new address; and the 560 pt window growing
+  to 604 pt. Tests: the builder's four new probes plus a typed key cleared
+  after it was sent and another origin is typed (kept for another path), a
+  key typed before the address following it until sent, Save returning once
+  stored with the list loading afterwards, the catalog store not keeping a
+  list for another address on a failed refresh nor writing back a list
+  forgotten while in flight; renders assert the 600 × 560 window stays 560.
 
 ## Rejected
 

@@ -334,7 +334,7 @@ final class APIAndModelsViewModel: ObservableObject {
     /// kinds are left out.
     func modelSuggestions(for account: ProviderAccount) -> [String] {
         guard case .server(let id) = account, let server = routing.server(id) else { return [] }
-        let ids = (catalogs.snapshot(for: account)?.models ?? []).map(\.id)
+        let ids = (catalogs.snapshot(for: account, server: server)?.models ?? []).map(\.id)
         return Array(Set(ids)).filter { name in
             !ServerModel.Kind.allCases.allSatisfy { server.hasModel(name, kind: $0) }
         }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
@@ -455,8 +455,6 @@ final class APIAndModelsViewModel: ObservableObject {
         let typed = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let saved = routing.server(id)
         if !draft.isNew, saved == nil { return "This server was removed" }
-        let dropsKey = saved != nil && typed == nil
-            && serverSheetWithholdsKey(baseURL: url, typedKey: "", account: account)
 
         var status: KeyStatus?
         if saved == nil || url != saved?.baseURL || typed != nil {
@@ -473,31 +471,44 @@ final class APIAndModelsViewModel: ObservableObject {
             if !draft.isNew, routing.server(id) == nil { return "This server was removed" }
         }
 
-        // From here nothing awaits until everything is written.
-        let keyAccount = saved?.keyAccount ?? AIRoutingStore.serverKeyAccount(for: id)
+        // From here nothing awaits until everything is written, and Save
+        // ends here: what it reports is what is stored.
+        let current = routing.server(id)
+        if saved != nil, current == nil { return "This server was removed" }
+        let keyAccount = current?.keyAccount ?? AIRoutingStore.serverKeyAccount(for: id)
+        let movesOrigin = current.map { Self.origin(url) != Self.origin($0.baseURL) } ?? false
         do {
-            if let typed { try keys.save(typed, account: keyAccount) }
-            else if dropsKey { try keys.delete(account: keyAccount) }
+            if let typed {
+                try keys.save(typed, account: keyAccount)
+            } else if movesOrigin, keys.lookup(account: keyAccount) != .absent {
+                // Read now, not when Save began: a key synced for the old
+                // address meanwhile does not go with the new one either.
+                try keys.delete(account: keyAccount)
+            }
         } catch {
             return "Couldn't save the key"
         }
         let before = Dictionary(uniqueKeysWithValues: AIFeature.activeCases.compactMap { feature in
             routing.route(for: feature).flatMap { $0.account == account ? (feature, $0.model) : nil }
         })
-        if saved == nil {
+        if current == nil {
             routing.insertServer(ServerEndpoint(id: id, name: name, baseURL: url, keyAccount: keyAccount, models: models))
             lastAddedServer = account
         } else {
+            if url != current?.baseURL { catalogs.forget(account) }
             for feature in routing.updateServer(id, name: name, baseURL: url, models: models) {
                 messages[feature] = "\(before[feature] ?? "Its model") was removed from \(name)"
             }
         }
         if let status { keyStatuses.set(status, for: account, at: now()) }
         recompute()
-        // The list only suggests names; a refresh after the window closed changes nothing stored.
-        if let server = routing.server(id) {
-            await catalogs.refresh(account, apiKey: connection.apiKey, server: server)
-            recompute()
+        // The list only suggests names: it is loaded after Save, which does
+        // not wait for it, and a server removed meanwhile just has no list.
+        let apiKey = connection.apiKey
+        Task { [weak self] in
+            guard let self, let server = self.routing.server(id), server.baseURL == url else { return }
+            await self.catalogs.refresh(account, apiKey: apiKey, server: server)
+            self.recompute()
         }
         return nil
     }

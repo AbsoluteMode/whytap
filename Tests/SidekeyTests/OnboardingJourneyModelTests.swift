@@ -200,7 +200,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.next()
         XCTAssertEqual(model.step, .llmKey, "speech set up later")
         model.llmProvider = .openAI
-        await model.useLLMKey("sk-openai", provider: .openAI)
+        await model.useLLMKey("sk-openai-0123456789abcdef", provider: .openAI)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
 
         model.back()
@@ -212,7 +212,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
     func testASpeechKeyThatAlsoServesTextOpensTheLanguageModelStepOnIt() async throws {
         let env = try makeEnv()
         let model = try makeModel(env, offersOpenAISpeech: true)
-        let problem = await model.models.replaceKey("sk-openai", for: try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .openAI)))
+        let problem = await model.models.replaceKey("sk-openai-0123456789abcdef", for: try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .openAI)))
         XCTAssertNil(problem)
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
@@ -232,7 +232,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("sk-eleven", provider: .elevenLabs)
+        await model.useSpeechKey("sk-eleven-0123456789abcdef", provider: .elevenLabs)
         XCTAssertEqual(model.outcome(.speechKey), .done(ModelRegistry.elevenLabsRealtimeModel), "the field shows the model it set")
         for feature in speechFeatures {
             XCTAssertEqual(env.routing.route(for: feature)?.account, .elevenLabs, "\(feature) follows the shared Speech")
@@ -249,7 +249,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let model = try makeModel(env, refusing: [.soniox])
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("bad", provider: .soniox)
+        await model.useSpeechKey("bad-0123456789abcdef", provider: .soniox)
         guard case .failed = model.outcome(.speechKey) else { return XCTFail("expected a failure, got \(model.outcome(.speechKey))") }
         XCTAssertEqual(model.step, .speechKey)
         XCTAssertEqual(env.beat.count, 0, "nothing moves on")
@@ -270,15 +270,15 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {
         let env = try makeEnv()
-        let checker = GatedChecker(gated: ["sk-soniox"])
+        let checker = GatedChecker(gated: ["sk-soniox-0123456789abcdef"])
         let model = try makeModel(env, keyChecker: checker)
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        let first = Task { await model.useSpeechKey("sk-soniox", provider: .soniox) }
-        try await eventually { checker.isWaiting("sk-soniox") }
-        await model.useSpeechKey("sk-eleven", provider: .elevenLabs)
+        let first = Task { await model.useSpeechKey("sk-soniox-0123456789abcdef", provider: .soniox) }
+        try await eventually { checker.isWaiting("sk-soniox-0123456789abcdef") }
+        await model.useSpeechKey("sk-eleven-0123456789abcdef", provider: .elevenLabs)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
-        checker.release("sk-soniox")
+        checker.release("sk-soniox-0123456789abcdef")
         await first.value
         for feature in speechFeatures {
             XCTAssertEqual(env.routing.route(for: feature)?.account, .elevenLabs, "\(feature) keeps the later choice")
@@ -297,7 +297,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.next() // Set up later for speech
         XCTAssertEqual(model.step, .llmKey)
 
-        await model.useLLMKey("sk-ant", provider: .anthropic)
+        await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         let expected = try XCTUnwrap(model.preselectedModel(.anthropic))
         for feature in llmFeatures {
             XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .anthropic, model: expected),
@@ -322,9 +322,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let model = try makeModel(env)
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("sk", provider: .soniox)
+        await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
         try await endBeat(env, until: .llmKey, in: model)
-        await model.useLLMKey("sk-oa", provider: .openAI)
+        await model.useLLMKey("sk-oa-0123456789abcdef", provider: .openAI)
         XCTAssertEqual(model.preselectedModel(.openAI), "gpt-5.6", "the newest model the Agent can use")
         XCTAssertEqual(model.summary, "Speech: Soniox · LLM: OpenAI gpt-5.6")
     }
@@ -364,7 +364,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let model = try makeModel(env)
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("sk", provider: .soniox)
+        await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
         try await eventually { env.beat.count > 0 }
         model.back()
         XCTAssertEqual(model.step, .source)
@@ -499,6 +499,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
             CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
         }
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons"))
+        defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
         let model = try makeModel(env, refusing: [.deepgram])
@@ -522,17 +524,18 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
         try await snap("source")
         model.chooseYourKey()
+        try await snap("source-key-chosen")
         try await endBeat(env, until: .speechKey, in: model)
         try await snap("speech-key")
         model.speechProvider = .deepgram
-        await model.useSpeechKey("bad", provider: .deepgram)
+        await model.useSpeechKey("bad-0123456789abcdef", provider: .deepgram)
         try await snap("speech-key-refused")
         model.speechProvider = .elevenLabs
-        await model.useSpeechKey("sk", provider: .elevenLabs)
+        await model.useSpeechKey("sk-0123456789abcdef", provider: .elevenLabs)
         try await snap("speech-key-done")
         try await endBeat(env, until: .llmKey, in: model)
         try await snap("llm-key")
-        await model.useLLMKey("sk-ant", provider: .anthropic)
+        await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         try await snap("llm-key-done")
         model.dwell.latch()
         try await snap("llm-key-latched")

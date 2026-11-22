@@ -2,7 +2,7 @@ import XCTest
 @testable import Sidekey
 
 /// The standalone onboarding preview walks every step with its own fakes:
-/// keys in memory, offline checks ("bad" keys refused), pretend permissions
+/// keys in memory, offline checks (keys containing "bad" refused), pretend permissions
 /// and a Simulate Drop button, all in its own defaults suite. No window shows.
 /// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
@@ -25,16 +25,16 @@ final class OnboardingPreviewTests: XCTestCase {
         model.chooseYourKey()
         model.next()
         XCTAssertEqual(model.step, .speechKey)
-        await model.useSpeechKey("bad-key", provider: .deepgram)
-        XCTAssertEqual(model.outcome(.speechKey), .failed("Key not accepted"), "a key containing bad is refused")
-        await model.useSpeechKey("sk-preview", provider: .elevenLabs)
+        await model.useSpeechKey("bad-key-0123456789abcdef", provider: .deepgram)
+        XCTAssertEqual(model.keyProblems[.speechKey], .refused, "a key containing bad is refused")
+        await model.useSpeechKey("sk-preview-0123456789abcdef", provider: .elevenLabs)
         XCTAssertTrue(model.outcome(.speechKey).isDone)
         XCTAssertEqual(AIRoutingStore(defaults: UserDefaults(suiteName: suite)!).route(for: .dropFast)?.account, .elevenLabs,
                        "routes go to the preview's own suite")
 
         model.next()
         XCTAssertEqual(model.step, .llmKey)
-        await model.useLLMKey("sk-ant", provider: .anthropic)
+        await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
         XCTAssertEqual(model.step, .search)
@@ -83,5 +83,48 @@ final class OnboardingPreviewTests: XCTestCase {
         model.chooseOnThisMac()
         try await eventually { model.onDevice.status == .ready }
         try await eventually { model.outcome(.source) == .done("Speech on this Mac") }
+    }
+
+    func testEachKeyProblemIsNamedWithoutBlame() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        model.next()
+        let cases: [(String, OnboardingKeyProblem)] = [
+            ("short-key", .format),
+            ("key with spaces 0123456789", .format),
+            ("bad-0123456789abcdef", .refused),
+            ("credit-0123456789abcdef", .noCredit),
+            ("noaccess-0123456789abcdef", .noSpeechAccess),
+            ("offline-0123456789abcdef", .unreachable),
+        ]
+        for (key, expected) in cases {
+            await model.useSpeechKey(key, provider: .deepgram)
+            XCTAssertEqual(model.keyProblems[.speechKey], expected, key)
+            XCTAssertEqual(model.outcome(.speechKey), .failed(expected.message(provider: "Deepgram")), key)
+            XCTAssertFalse(model.keySaved(.deepgram), "a refused key is not saved: \(key)")
+        }
+        XCTAssertTrue(OnboardingKeyProblem.unreachable.offersRetry)
+        XCTAssertFalse(OnboardingKeyProblem.refused.offersRetry)
+        await model.useSpeechKey("good-0123456789abcdef", provider: .deepgram)
+        XCTAssertNil(model.keyProblems[.speechKey], "a working key clears the problem")
+        XCTAssertTrue(model.outcome(.speechKey).isDone)
+    }
+
+    func testOnlyRealKeyPrefixesPickTheProviderAndTheMiddleIsMasked() {
+        let speech = [AIProviderKind.soniox, .deepgram, .elevenLabs].compactMap(OnboardingSpeechKeyProvider.of)
+        XCTAssertEqual(OnboardingSpeechKeyProvider.detect("sk_0123456789abcdef", among: speech)?.provider.kind, .elevenLabs)
+        XCTAssertNil(OnboardingSpeechKeyProvider.detect("0123456789abcdef0123", among: speech),
+                     "Soniox and Deepgram keys have no prefix: the chosen tab decides")
+        XCTAssertNil(OnboardingSpeechKeyProvider.detect("sk-proj-0123456789", among: speech), "OpenAI is not offered yet")
+        let withOpenAI = speech + [OnboardingSpeechKeyProvider.of(.openAI)!]
+        XCTAssertEqual(OnboardingSpeechKeyProvider.detect("sk-proj-0123456789", among: withOpenAI)?.provider.kind, .openAI)
+        XCTAssertNil(OnboardingSpeechKeyProvider.detect("sk-ant-0123456789", among: withOpenAI), "an Anthropic key is not speech")
+
+        let masked = OnboardingKeyMask.masked("sk_0123456789abcdefWXYZ", prefix: 3)
+        XCTAssertTrue(masked.hasPrefix("sk_"))
+        XCTAssertTrue(masked.hasSuffix("WXYZ"))
+        XCTAssertFalse(masked.contains("0123"), "the middle is hidden")
     }
 }

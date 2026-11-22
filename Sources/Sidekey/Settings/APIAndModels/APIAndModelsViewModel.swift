@@ -127,6 +127,18 @@ struct AssignProposal: Equatable {
 /// removing one un-sets, and neither moves a feature to another provider.
 /// Keys go from the Keychain straight to the checker, catalog and probe; none
 /// is kept in published state.
+/// Why a key was not saved: the text Settings shows and, when a provider
+/// answered, its check result.
+struct KeyStoreFailure: Equatable {
+    let message: String
+    let status: KeyStatus?
+
+    init(_ message: String, status: KeyStatus? = nil) {
+        self.message = message
+        self.status = status
+    }
+}
+
 @MainActor
 final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var chips: [KeyChip] = []
@@ -266,7 +278,7 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Never assigns a feature: it opens the "Use <Provider> for" proposal.
     func addKey(_ key: String, kind: AIProviderKind) async -> String? {
         guard let account = Self.builtInAccount(for: kind) else { return "Add a server with its base URL" }
-        return await store(key, for: account, proposing: true)
+        return await store(key, for: account, proposing: true)?.message
     }
 
     /// Adds a user's own OpenAI-compatible server. A blank key means the server
@@ -310,6 +322,12 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Saves an inline-form key without opening a model proposal, including the
     /// first key. A rejected replacement leaves the previous saved key in place.
     func replaceKey(_ key: String, for account: ProviderAccount) async -> String? {
+        await store(key, for: account, proposing: false)?.message
+    }
+
+    /// `replaceKey` with the check's answer kept, so the onboarding can say
+    /// which refusal it was (`nil` status: not a provider's answer).
+    func replaceKeyReportingStatus(_ key: String, for account: ProviderAccount) async -> KeyStoreFailure? {
         await store(key, for: account, proposing: false)
     }
 
@@ -660,30 +678,30 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Key flow
 
-    private func store(_ rawKey: String, for account: ProviderAccount, proposing: Bool) async -> String? {
+    private func store(_ rawKey: String, for account: ProviderAccount, proposing: Bool) async -> KeyStoreFailure? {
         let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let server: ServerEndpoint?
         switch account {
         case .server(let id):
-            guard let endpoint = routing.server(id) else { return "This server was removed" }
+            guard let endpoint = routing.server(id) else { return KeyStoreFailure("This server was removed") }
             server = endpoint
         case .thisMac:
-            return "On this Mac needs no key"
+            return KeyStoreFailure("On this Mac needs no key")
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
-            guard !key.isEmpty else { return "Enter a key" }
+            guard !key.isEmpty else { return KeyStoreFailure("Enter a key") }
             server = nil
         }
-        guard let keychainAccount = account.keychainAccount(in: routing) else { return "This server was removed" }
+        guard let keychainAccount = account.keychainAccount(in: routing) else { return KeyStoreFailure("This server was removed") }
         let apiKey = key.nilIfEmpty
 
         // Checked before it is stored, so a key the provider turns down never
         // replaces anything.
         let status = await keyChecker.check(account, apiKey: apiKey, server: server, allowPaidProbe: true)
         if account == .openAI, status == .limited {
-            return "Allow model-list access for this OpenAI key, then try again."
+            return KeyStoreFailure("Allow model-list access for this OpenAI key, then try again.", status: status)
         }
         guard status == .valid || status == .limited else {
-            return Self.statusText(for: status, account: account)
+            return KeyStoreFailure(Self.statusText(for: status, account: account), status: status)
         }
         do {
             if let apiKey {
@@ -692,7 +710,7 @@ final class APIAndModelsViewModel: ObservableObject {
                 try keys.delete(account: keychainAccount)
             }
         } catch {
-            return "Couldn't save the key"
+            return KeyStoreFailure("Couldn't save the key")
         }
         keyStatuses.set(status, for: account, at: now())
         await catalogs.refresh(account, apiKey: apiKey, server: server)

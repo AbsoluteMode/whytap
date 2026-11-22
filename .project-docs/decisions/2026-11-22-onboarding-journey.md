@@ -150,9 +150,23 @@ window, Back and a progress bar.
   only pretends macOS granted it, a timer for the speech model download and
   a Simulate Drop button. It starts no hotkeys, event taps, stores or island
   and never touches `com.rootwise.sidekey`, the Keychain or the network.
-  Feature sessions do not launch it themselves (the shared workflow keeps
-  launching to the people and the builder); they build it and hand over the
-  command.
+  It is not a Whytap instance (no bundle, shared stores, hotkeys or taps),
+  so the one-running-copy rule does not cover it: the session that changed
+  the onboarding opens it for the maintainer after each change.
+- **Steps 1 and 2 in the wireframe language (draft, from the design pass):**
+  a laptop and a key drawn as depth-sorted wire solids on a softly lit
+  ground. Hover brings a figure forward; the other recedes, dimmer and
+  without its caption. Step 2 is "Connect your speech key.": a dark pill
+  field with the middle of the key masked, the speech providers only (with
+  their logos from `UsefulLinkIcons`), the provider's real offer, and a
+  quiet "Use your own server →" to Settings → API & Models. Only real key
+  prefixes pick the provider (ElevenLabs `sk_`, OpenAI `sk-` once offered;
+  Soniox and Deepgram keys have none). A refusal names one of five causes
+  without blame: the key's shape (checked before any request), a refused
+  key, an empty balance, a key without speech access, or no answer (with
+  Retry); the key check has no separate rate-limit answer. The wire key
+  turns in its lock when accepted and catches on a pin when refused. The
+  footer pill no longer says "Hold"; the pointer still holds the move.
 
 ## Rejected
 
@@ -191,6 +205,9 @@ window, Back and a progress bar.
 - `OnboardingJourneyTests` also covers the dwell controller: counting,
   latch and resume, commit now, review never firing, cancel, and the
   per-step dwell times.
+- `OnboardingPreviewTests` also names each of the five key problems
+  (and saves no refused key), accepts only real prefixes, keeps an
+  Anthropic key out of speech and masks the middle of a key.
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, the stubbed Tavily check, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its

@@ -9,8 +9,10 @@ import Foundation
 /// Isolated from the app: its settings live in their own defaults suite,
 /// emptied at every start and quit (never `com.rootwise.sidekey`); keys stay
 /// in memory (no Keychain); key checks, catalogs, model probes and the Tavily
-/// check are answered here without a network request (a key containing "bad"
-/// is refused); Allow only pretends macOS granted it; the speech model
+/// check are answered here without a network request; a word in the key
+/// picks the answer ("bad": refused, "credit": out of credit, "noaccess": no
+/// speech access, "offline": no answer; shorter than 16 characters fails the
+/// shape check before any request); Allow only pretends macOS granted it; the speech model
 /// "download" is a timer; Try Drop has a Simulate button. No hotkeys, event
 /// taps, stores or island are started.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -19,11 +21,16 @@ public enum OnboardingPreview {
     private static var session: OnboardingPreviewSession?
     private static var controller: OnboardingJourneyWindowController?
 
-    public static func run(fontsDirectory: URL?) {
+    /// `resources` is the checkout's Resources folder: its fonts and provider
+    /// logos stand in for the app bundle's.
+    public static func run(resources: URL?) {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         app.mainMenu = menu()
-        if let fontsDirectory { registerFonts(in: fontsDirectory) }
+        if let resources {
+            registerFonts(in: resources.appendingPathComponent("Fonts", isDirectory: true))
+            ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons", isDirectory: true))
+        }
         let session = OnboardingPreviewSession()
         let controller = OnboardingJourneyWindowController(model: session.model) {
             session.clear()
@@ -181,6 +188,15 @@ final class OnboardingPreviewTokenStore: TokenStore, @unchecked Sendable {
 struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching {
     static func refuses(_ key: String?) -> Bool { key?.lowercased().contains("bad") == true }
 
+    static func answer(_ key: String?) -> KeyStatus {
+        let key = key?.lowercased() ?? ""
+        if key.contains("bad") { return .rejected(.invalidKey) }
+        if key.contains("credit") { return .rejected(.outOfCredit) }
+        if key.contains("noaccess") { return .rejected(.missingSpeechPermission) }
+        if key.contains("offline") { return .unreachable }
+        return .valid
+    }
+
     func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
         func model(_ id: String, daysAgo: Double) -> CatalogModel {
             var model = CatalogModel(id: id, uses: [.chat, .chatWithTools], contextLength: 400_000, supportsTools: true)
@@ -196,7 +212,7 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
 
     func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
         try? await Task.sleep(nanoseconds: 700_000_000)
-        return Self.refuses(apiKey) ? .rejected(.invalidKey) : .valid
+        return Self.answer(apiKey)
     }
 
     func probe(_ route: ResolvedRoute, use: ModelUse, catalog: CatalogModel?) async -> ProbeOutcome { .passed }

@@ -30,7 +30,7 @@ struct OnboardingJourneyView: View {
                     .transition(.onboardingStep(direction: model.direction, reduceMotion: reduceMotion))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, OnboardingTheme.compactHorizontalInset)
+            .padding(.horizontal, Self.isWireframe(model.step) ? 0 : OnboardingTheme.compactHorizontalInset)
             .clipped()
             .contentShape(Rectangle())
             // The Dwell Latch: a pointer on the step holds the automatic move.
@@ -40,8 +40,22 @@ struct OnboardingJourneyView: View {
             footer
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .background(OnboardingTheme.bg)
+        .background(ground)
         .preferredColorScheme(.dark)
+    }
+
+    /// The first two steps draw on a softly lit ground (the wireframe pass);
+    /// its edge is the window's own colour, so nothing shows a seam.
+    static func isWireframe(_ step: OnboardingStep) -> Bool { step == .source || step == .speechKey }
+
+    private var ground: some View {
+        ZStack {
+            OnboardingTheme.bg
+            RadialGradient(colors: [OnboardingWireframeInk.groundCenter, OnboardingTheme.bg],
+                           center: UnitPoint(x: 0.5, y: 0.47), startRadius: 10, endRadius: 330)
+                .opacity(Self.isWireframe(model.step) ? 1 : 0)
+                .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion), value: model.step)
+        }
     }
 
     // MARK: - Header
@@ -75,7 +89,7 @@ struct OnboardingJourneyView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             leftAction
-            if let note = model.notes.first, model.step == .speechKey || model.step == .llmKey || model.step == .source {
+            if let note = model.notes.first, model.step == .llmKey {
                 Text(note)
                     .font(OnboardingTheme.sans(11))
                     .foregroundColor(OnboardingTheme.faint)
@@ -121,21 +135,9 @@ struct OnboardingJourneyView: View {
     private func stage(_ step: OnboardingStep) -> some View {
         switch step {
         case .source:
-            OnboardingJourneyStep(act: step.act, title: "Where should speech run?",
-                                  lede: "Change it any time in Settings → API & Models.") {
-                OnboardingSourceChoice(model: model, onDevice: model.onDevice)
-            }
+            OnboardingSourceStage(model: model, onDevice: model.onDevice)
         case .speechKey:
-            OnboardingJourneyStep(act: step.act, title: "Your speech key",
-                                  lede: "One key runs Drop, Agent voice, Voice search and Meetings.") {
-                OnboardingKeySlot(providers: Self.options(model.speechProviders),
-                                  selected: providerBinding(\.speechProvider),
-                                  outcome: model.outcome(.speechKey),
-                                  savedKey: model.keySaved(model.speechProvider)) { key in
-                    let provider = model.speechProvider
-                    Task { await model.useSpeechKey(key, provider: provider) }
-                }
-            }
+            OnboardingSpeechKeyStage(model: model)
         case .llmKey:
             OnboardingJourneyStep(act: step.act, title: "A language model",
                                   lede: "Optional. Smart dictation, meeting notes, the Agent and Translate.") {
@@ -313,57 +315,6 @@ struct OnboardingJourneyStep<Content: View>: View {
             content.padding(.top, 18)
         }
         .padding(.top, 14)
-    }
-}
-
-// MARK: - 1. Source
-
-struct OnboardingSourceChoice: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    @ObservedObject var onDevice: OnDeviceSpeechModelController
-
-    var body: some View {
-        let source = model.progress.source
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                if model.start.onDeviceSupported {
-                    OnboardingChoiceCard(title: "On this Mac", summary: "Free. Works offline. Your voice never leaves this Mac.",
-                                         spec: onDeviceSpec, isSelected: source == .onThisMac,
-                                         isDimmed: source == .yourKey, action: model.chooseOnThisMac) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "laptopcomputer").font(.system(size: 13, weight: .medium))
-                                .foregroundColor(OnboardingTheme.ink2)
-                            Spacer(minLength: 0)
-                            OnboardingBadge(text: "OFFLINE")
-                        }
-                    }
-                }
-                OnboardingChoiceCard(title: "Your API key", summary: "Soniox, Deepgram or ElevenLabs. You pay the provider for what you use.",
-                                     spec: "KEY STAYS IN YOUR KEYCHAIN", isSelected: source == .yourKey,
-                                     isDimmed: source == .onThisMac, action: model.chooseYourKey) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "key.horizontal").font(.system(size: 13, weight: .medium))
-                            .foregroundColor(OnboardingTheme.ink2)
-                        Spacer(minLength: 0)
-                        Text("SONIOX · DEEPGRAM · ELEVENLABS")
-                            .font(OnboardingTheme.mono(8.5, weight: .medium))
-                            .foregroundColor(OnboardingTheme.faint)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            if case .failed(let reason) = model.outcome(.source) {
-                OnboardingStageStatus(tone: .warning, text: reason)
-            }
-        }
-    }
-
-    private var onDeviceSpec: String {
-        switch onDevice.status {
-        case .ready: return "PARAKEET TDT V3 · DOWNLOADED"
-        case .downloading(let fraction): return "DOWNLOADING · \(Int((fraction * 100).rounded()))%"
-        case .notDownloaded, .failed: return "PARAKEET TDT V3 · 470 MB"
-        }
     }
 }
 

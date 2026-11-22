@@ -2,6 +2,47 @@ import AppKit
 import Combine
 import Foundation
 
+/// Why a pasted key was not taken: its shape, or the provider's answer.
+/// The key check tells apart a refused key, an empty balance, a key without
+/// speech access and no answer; a rate limit has no answer of its own.
+enum OnboardingKeyProblem: Equatable {
+    case format
+    case refused
+    case noCredit
+    case noSpeechAccess
+    case unreachable
+    case other(String)
+
+    init?(status: KeyStatus) {
+        switch status {
+        case .valid, .limited: return nil
+        case .rejected(.invalidKey): self = .refused
+        case .rejected(.outOfCredit): self = .noCredit
+        case .rejected(.missingSpeechPermission): self = .noSpeechAccess
+        case .unreachable: self = .unreachable
+        }
+    }
+
+    /// A key is one unbroken run of printable ASCII, at least 16 characters.
+    static func looksLikeAKey(_ key: String) -> Bool {
+        key.count >= 16 && key.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 32 && $0.value < 127 }
+    }
+
+    func message(provider: String) -> String {
+        switch self {
+        case .format: return "That doesn't look like a \(provider) key. Check for missing characters."
+        case .refused: return "\(provider) didn't accept this key. It may be mistyped or revoked."
+        case .noCredit: return "The key works, but this \(provider) account is out of credit."
+        case .noSpeechAccess: return "This \(provider) key has no Speech to Text access."
+        case .unreachable: return "Couldn't reach \(provider). Check your connection and try again."
+        case .other(let text): return text
+        }
+    }
+
+    /// No answer: the same key can simply be tried again.
+    var offersRetry: Bool { self == .unreachable }
+}
+
 /// Stand-ins for the system permission requests (the standalone preview).
 struct OnboardingPermissionRequests {
     var keyboard: () -> Void
@@ -45,6 +86,8 @@ final class OnboardingJourneyModel: ObservableObject {
     @Published private(set) var notes: [String] = []
     /// Bumped when routes change elsewhere, so captions re-read them.
     @Published private(set) var revision = 0
+    /// Why the speech or language model key was not taken, for its action.
+    @Published private(set) var keyProblems: [OnboardingStep: OnboardingKeyProblem] = [:]
     /// Permission steps whose Allow was pressed: they wait for macOS.
     @Published private(set) var requested: Set<OnboardingStep> = []
     /// Which way the last step change went, for the step transition.
@@ -315,8 +358,9 @@ final class OnboardingJourneyModel: ObservableObject {
         let problem = await saveOrCheck(key, account: account)
         // A newer speech choice answers for this step now; this key stays saved.
         guard isLatest(action, .speech) else { return }
+        keyProblems[.speechKey] = problem
         if let problem {
-            outcomes[.speechKey] = .failed(problem)
+            outcomes[.speechKey] = .failed(problem.message(provider: provider.displayName))
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)
@@ -353,8 +397,9 @@ final class OnboardingJourneyModel: ObservableObject {
         outcomes[.llmKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         guard isLatest(action, .llm) else { return }
+        keyProblems[.llmKey] = problem
         if let problem {
-            outcomes[.llmKey] = .failed(problem)
+            outcomes[.llmKey] = .failed(problem.message(provider: provider.displayName))
             return
         }
         // Saving the key loaded its catalog, so a catalog-only provider has a model now.
@@ -373,19 +418,23 @@ final class OnboardingJourneyModel: ObservableObject {
         succeed(.llmKey, model)
     }
 
-    /// A new key goes through Settings' save (check + Keychain); an empty one
-    /// means "use the key already saved", checked for free.
-    private func saveOrCheck(_ key: String, account: ProviderAccount) async -> String? {
+    /// A new key is checked for its shape here, then goes through Settings'
+    /// save (provider check + Keychain); an empty one means "use the key
+    /// already saved", checked for free.
+    private func saveOrCheck(_ key: String, account: ProviderAccount) async -> OnboardingKeyProblem? {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if candidate.isEmpty {
-            guard models.accountIsAvailableForSelection(account) else { return "Paste the key first" }
-            let status = await models.checkSavedKey(account)
-            if status == nil { return "Couldn't read the \(account.kind.displayName) key from the Keychain" }
-            if let refusal = models.keyRefusal(account) { return refusal }
+            guard models.accountIsAvailableForSelection(account) else { return .other("Paste the key first") }
+            guard let status = await models.checkSavedKey(account) else {
+                return .other("Couldn't read the \(account.kind.displayName) key from the Keychain")
+            }
+            if case .rejected = status { return OnboardingKeyProblem(status: status) ?? .refused }
             await models.refreshModels()
             return nil
         }
-        return await models.replaceKey(candidate, for: account)
+        guard OnboardingKeyProblem.looksLikeAKey(candidate) else { return .format }
+        guard let failure = await models.replaceKeyReportingStatus(candidate, for: account) else { return nil }
+        return failure.status.flatMap(OnboardingKeyProblem.init(status:)) ?? .other(failure.message)
     }
 
     func keySaved(_ provider: AIProviderKind) -> Bool {

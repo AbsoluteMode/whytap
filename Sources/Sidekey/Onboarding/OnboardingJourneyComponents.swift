@@ -121,9 +121,6 @@ struct OnboardingDwellPill: View {
                     Text("Next: \(next)")
                         .font(OnboardingTheme.sans(11.5, weight: .medium))
                         .foregroundColor(OnboardingTheme.muted)
-                    Text("Hold")
-                        .font(OnboardingTheme.mono(10, weight: .medium))
-                        .foregroundColor(OnboardingTheme.faint)
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 26)

@@ -2645,7 +2645,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here and every later read of the take's mode uses `DropTake`.
         let mode = UserPreferencesCache.shared.currentMode
         DropTake.shared.begin(mode: mode, route: AIRoutingStore.shared.route(for: .drop(mode)))
-        dropLearning.takeStarted()
+        // The target was remembered at hotkey-down. An Electron or web field
+        // gets its app's tree turned on now, so it can be captured at the
+        // paste. WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
+        dropLearning.takeStarted(targetPID: autoPasteEngine.currentDropTarget().pid)
         dropLearningVocabTransport = DropTake.shared.route.map { VocabularyTransport.realtime(for: $0.account) } ?? .none
         // Decided here for every take: one that follows an auto-stop take
         // never inherits its mode.

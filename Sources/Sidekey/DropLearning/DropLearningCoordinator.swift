@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// What the drops would show: one candidate, and whether Y may save it.
 struct DropLearningSuggestion: Equatable {
@@ -7,19 +7,50 @@ struct DropLearningSuggestion: Equatable {
     let dryRun: Bool
 }
 
-/// After a delivered Drop take, reads the same field once (5 s later), finds the
-/// user's corrections and counts them. A correction seen in two takes within 14
-/// days becomes one suggestion. Field text and candidates stay in memory; only
-/// salted hashes and day numbers are stored. No model, no network.
-/// WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+/// After a delivered Drop take, watches the same field until the user sends
+/// or clears it, leaves it, starts another take, or 2 minutes pass, and keeps
+/// the last text that still holds the take. That text is compared with what
+/// was pasted: a correction seen in two takes within 14 days becomes one
+/// suggestion. Field text stays in memory; only salted hashes and day numbers
+/// are stored. No keystrokes are recorded, no model, no network.
+/// WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
 @MainActor
 final class DropLearningCoordinator {
-    static let readDelay: Double = 5
-    /// Calibration keeps reading until the field holds still this long...
-    static let calibrationStableReads = 3
-    static let calibrationPollInterval: Double = 1
-    /// ...or this much time has passed since the paste.
-    static let calibrationMaxSeconds: Double = 30
+    /// Reads between AX notifications: apps that send none, a missed one.
+    static let pollInterval: Double = 0.5
+    /// The paste must show up in the field this soon, or it is not watched.
+    static let alignSeconds: Double = 5
+    /// The longest a field is watched after a paste.
+    static let maxObserveSeconds: Double = 120
+    /// Return may send the message: the field is read again this soon after.
+    static let returnSettleSeconds: Double = 0.15
+    /// A tree an app exposed for a take is turned off if no paste follows
+    /// (the longest take plus its delivery).
+    static let leaseSeconds: Double = 660
+
+    /// Why watching a field ended.
+    enum EndReason: String {
+        /// Sent or emptied: the text before it counts.
+        case cleared
+        /// Focus left the field or it went away: the last text counts.
+        case focusLeft, removed
+        case timeout
+        /// Another take starts: the last text counts before the new paste.
+        case newTake
+        /// The text no longer holds the take (a rewrite or another message).
+        case rewritten
+        /// The paste never showed up, or the field could not be read.
+        case notPasted, unreadable
+        /// Learning (or calibration) was switched off.
+        case switchedOff
+
+        var counts: Bool {
+            switch self {
+            case .cleared, .focusLeft, .removed, .timeout, .newTake: return true
+            case .rewritten, .notPasted, .unreadable, .switchedOff: return false
+            }
+        }
+    }
 
     /// Suggestions in the order one take offers them; one per take.
     static func priority(_ candidate: DropLearningCandidate) -> Int {
@@ -48,14 +79,40 @@ final class DropLearningCoordinator {
         var vocabulary: VocabularyCache
         var fillers: FillerTermsStore
         var replacements: DropReplacementStore
+        /// Calls back on Return or Enter while a field is watched; carries no
+        /// key data. Returns the stop.
+        var watchReturn: (@escaping @MainActor () -> Void) -> () -> Void = { _ in {} }
     }
 
     /// Set by the drops UI; until then suggestions only reach the journal.
     var onSuggestion: ((DropLearningSuggestion) -> Void)?
 
+    private final class Observation {
+        let take: DropLearningTake
+        let handle: DropEditFieldHandle
+        let calibrating: Bool
+        var elapsed: Double = 0
+        var reads = 0
+        /// The last text that still held the take (memory only).
+        var lastAligned: String?
+        var watch: DropEditFieldWatch?
+        var stopReturn: (() -> Void)?
+        var task: Task<Void, Never>?
+        var returnRead: Task<Void, Never>?
+
+        init(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool) {
+            self.take = take
+            self.handle = handle
+            self.calibrating = calibrating
+        }
+    }
+
     private let deps: Dependencies
-    private var pending: Task<Void, Never>?
+    private var observation: Observation?
+    private var lease: DropEditAccessibilityLease?
+    private var leaseTimer: Task<Void, Never>?
     private var maintenanceTimer: Timer?
+    private var terminationObserver: NSObjectProtocol?
 
     init(dependencies: Dependencies) { self.deps = dependencies }
 
@@ -81,13 +138,26 @@ final class DropLearningCoordinator {
             openVocabulary: openVocabulary,
             vocabulary: .shared,
             fillers: FillerTermsStore(),
-            replacements: DropReplacementStore()
+            replacements: DropReplacementStore(),
+            watchReturn: DropLearningReturnKey.watch
         ))
         coordinator.performMaintenance()
         coordinator.maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak coordinator] _ in
             MainActor.assumeIsolated { coordinator?.performMaintenance() }
         }
+        // Quitting mid-watch must not leave another app's tree turned on.
+        coordinator.terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak coordinator] _ in
+            MainActor.assumeIsolated { coordinator?.stopWatching() }
+        }
         return coordinator
+    }
+
+    /// Stops any watch without learning from it and undoes any exposure.
+    func stopWatching() {
+        end(.switchedOff)
+        releaseLease()
     }
 
     /// Ends calibration that expired or was switched off, deleting its
@@ -97,7 +167,7 @@ final class DropLearningCoordinator {
     }
 
     /// Is this kind of read still wanted? Checked before every read and every
-    /// journal write, so switching it off stops a read already scheduled.
+    /// journal write, so switching it off stops a field being watched.
     private func stillWanted(calibrating: Bool) -> Bool {
         calibrating ? settings.isCalibrating() : settings.isEnabled
     }
@@ -106,21 +176,38 @@ final class DropLearningCoordinator {
         DropLearningSettings(defaults: deps.defaults, now: deps.now, journal: deps.journal)
     }
 
-    /// A new take begins: the previous field may receive it, so the old read
-    /// would compare against the wrong text.
-    func takeStarted() {
-        pending?.cancel()
-        pending = nil
-    }
-
-    /// Called right before Cmd+V: the target app's focused field, if learning
-    /// is on and the gate allows it. Reads no text.
     /// Learning or calibration is on: only then is the field captured at the
     /// paste boundary. With both off the paste path is untouched.
     var capturesFields: Bool { settings.isEnabled || settings.isCalibrating() }
 
+    /// A new take begins. The field being watched counts with the text it
+    /// holds now, before the new paste can land in it. The target app is
+    /// asked to expose its fields if it does not yet (Electron, web views),
+    /// so the field can be captured at the paste a few seconds later.
+    func takeStarted(targetPID: pid_t? = nil) {
+        end(.newTake, keepLease: true)
+        guard capturesFields, let pid = targetPID else {
+            releaseLease()
+            return
+        }
+        if lease?.pid != pid {
+            releaseLease()
+            lease = deps.fieldAccess.exposeFields(pid: pid)
+        }
+        leaseTimer?.cancel()
+        leaseTimer = nil
+        guard lease != nil else { return }
+        leaseTimer = Task { [weak self] in
+            do { try await self?.deps.sleep(Self.leaseSeconds) } catch { return }
+            guard let self, !Task.isCancelled, self.observation == nil else { return }
+            self.releaseLease()
+        }
+    }
+
+    /// Called right before Cmd+V: the target app's focused field, if learning
+    /// is on and the gate allows it. Reads no text.
     func prepareDelivery(targetPID: pid_t?) -> DropEditFieldHandle? {
-        guard settings.isEnabled || settings.isCalibrating(), let pid = targetPID else { return nil }
+        guard capturesFields, let pid = targetPID else { return nil }
         return deps.fieldAccess.capture(pid: pid)
     }
 
@@ -128,66 +215,122 @@ final class DropLearningCoordinator {
     /// captured before Cmd+V must still be that app's focused field; a field
     /// focused during the paste delay is never read.
     func delivered(_ take: DropLearningTake, handle: DropEditFieldHandle?) {
-        pending?.cancel()
-        pending = nil
+        end(.newTake, keepLease: true)
         let calibrating = settings.isCalibrating()
-        guard settings.isEnabled || calibrating else { return }
+        guard settings.isEnabled || calibrating else { return releaseLease() }
         guard let handle, deps.fieldAccess.isStillFocused(handle) else {
             if calibrating { deps.journal.append(entry(event: "skipped", take: take, extra: ["reason": "field_not_readable"])) }
-            return
+            return releaseLease()
         }
-        pending = Task { [weak self] in
-            await self?.observe(take: take, handle: handle, calibrating: calibrating)
+        let observation = Observation(take: take, handle: handle, calibrating: calibrating)
+        self.observation = observation
+        leaseTimer?.cancel()
+        leaseTimer = nil
+        observation.watch = deps.fieldAccess.watch(handle) { [weak self, weak observation] change in
+            guard let self, let observation else { return }
+            switch change {
+            case .value, .focusLeft: self.sample(observation)
+            case .removed: if self.observation === observation { self.end(.removed) }
+            }
+        }
+        observation.stopReturn = deps.watchReturn { [weak self, weak observation] in
+            guard let self, let observation else { return }
+            self.returnPressed(observation)
+        }
+        observation.task = Task { [weak self, weak observation] in
+            guard let observation else { return }
+            await self?.poll(observation)
         }
     }
 
-    /// Exposed for tests: waits for the scheduled read.
-    func waitForPendingRead() async { await pending?.value }
+    /// Exposed for tests: waits until the field is no longer watched.
+    func waitForObservation() async {
+        while let task = observation?.task {
+            await task.value
+            if observation?.task == task { break }
+        }
+    }
 
-    private func observe(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool) async {
-        do { try await deps.sleep(Self.readDelay) } catch { return }
-        guard !Task.isCancelled, stillWanted(calibrating: calibrating) else { return }
-        let first = deps.fieldAccess.read(handle)
-        let lists = deps.lists()
-        let firstCandidates = first.map {
-            DropLearningClassifier.candidates(take: take, field: $0, lists: lists, lexicon: deps.lexicon)
-        } ?? []
-        guard calibrating else {
-            guard first != nil, stillWanted(calibrating: false) else { return }
-            finish(candidates: firstCandidates, ledger: DropLearningLedger(defaults: deps.defaults, now: deps.now), dryRun: false)
+    /// Return or Enter in the watched app: the message may be on its way.
+    /// The text is read now and again a moment later; Return itself is never
+    /// held or changed.
+    private func returnPressed(_ observation: Observation) {
+        sample(observation)
+        guard self.observation === observation else { return }
+        observation.returnRead?.cancel()
+        observation.returnRead = Task { [weak self, weak observation] in
+            do { try await self?.deps.sleep(Self.returnSettleSeconds) } catch { return }
+            guard let self, let observation, !Task.isCancelled else { return }
+            self.sample(observation)
+        }
+    }
+
+    private func poll(_ observation: Observation) async {
+        while self.observation === observation {
+            sample(observation)
+            guard self.observation === observation else { return }
+            do { try await deps.sleep(Self.pollInterval) } catch {
+                if self.observation === observation { end(.unreadable) }
+                return
+            }
+            guard self.observation === observation, !Task.isCancelled else { return }
+            observation.elapsed += Self.pollInterval
+            if observation.lastAligned == nil, observation.elapsed >= Self.alignSeconds { return end(.notPasted) }
+            if observation.elapsed >= Self.maxObserveSeconds { return end(.timeout) }
+        }
+    }
+
+    /// One bounded read of the watched field.
+    private func sample(_ observation: Observation) {
+        guard self.observation === observation else { return }
+        guard stillWanted(calibrating: observation.calibrating) else { return end(.switchedOff) }
+        guard let text = deps.fieldAccess.read(observation.handle) else {
+            return end(observation.lastAligned == nil ? .unreadable : .focusLeft)
+        }
+        observation.reads += 1
+        if DropEditDiff.diff(pasted: observation.take.pasted, field: text) != nil {
+            observation.lastAligned = text
             return
         }
-        guard stillWanted(calibrating: true) else { return }
-        deps.journal.append(entry(event: "read", take: take, extra: [
-            "seconds": Self.readDelay, "readable": first != nil, "candidates": describe(firstCandidates),
-            "hunks": first.flatMap { describeHunks(take.pasted, $0) } ?? [],
-        ]))
-        // Calibration: keep reading until the field holds still or 30 s.
-        var last = first
-        var stable = 0
-        var elapsed = Self.readDelay
-        while let current = last, stable < Self.calibrationStableReads, elapsed < Self.calibrationMaxSeconds {
-            do { try await deps.sleep(Self.calibrationPollInterval) } catch { return }
-            guard !Task.isCancelled, stillWanted(calibrating: true) else { return }
-            elapsed += Self.calibrationPollInterval
-            let next = deps.fieldAccess.read(handle)
-            if next == current { stable += 1 } else { stable = 0 }
-            last = next
-        }
-        guard stillWanted(calibrating: true) else { return }
-        let settled = last.map {
-            DropLearningClassifier.candidates(take: take, field: $0, lists: deps.lists(), lexicon: deps.lexicon)
+        // Until the paste lands the field may still hold its old text.
+        guard observation.lastAligned != nil else { return }
+        end(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .cleared : .rewritten)
+    }
+
+    private func releaseLease() {
+        leaseTimer?.cancel()
+        leaseTimer = nil
+        lease?.release()
+        lease = nil
+    }
+
+    /// Stops watching and, when the reason counts, learns from the last text
+    /// that held the take.
+    private func end(_ reason: EndReason, keepLease: Bool = false) {
+        guard let observation else { return }
+        self.observation = nil
+        observation.watch?.cancel()
+        observation.stopReturn?()
+        observation.task?.cancel()
+        observation.returnRead?.cancel()
+        if !keepLease { releaseLease() }
+        let calibrating = observation.calibrating
+        guard stillWanted(calibrating: calibrating) else { return }
+        let field = reason.counts ? observation.lastAligned : nil
+        let candidates = field.map {
+            DropLearningClassifier.candidates(take: observation.take, field: $0, lists: deps.lists(), lexicon: deps.lexicon)
         } ?? []
-        let ledger = DropLearningLedger(
-            defaults: deps.defaults, key: DropLearningSettings.calibrationLedgerKey, now: deps.now
-        )
-        let ready = finish(candidates: settled, ledger: ledger, dryRun: true)
-        deps.journal.append(entry(event: "settled", take: take, extra: [
-            "seconds": elapsed, "readable": last != nil, "candidates": describe(settled),
-            "hunks": last.flatMap { describeHunks(take.pasted, $0) } ?? [],
-            "missedByFirstRead": describe(settled.filter { candidate in
-                !firstCandidates.contains { $0.ledgerKey == candidate.ledgerKey }
-            }),
+        guard calibrating else {
+            guard field != nil else { return }
+            finish(candidates: candidates, ledger: DropLearningLedger(defaults: deps.defaults, now: deps.now), dryRun: false)
+            return
+        }
+        let ledger = DropLearningLedger(defaults: deps.defaults, key: DropLearningSettings.calibrationLedgerKey, now: deps.now)
+        let ready = field == nil ? nil : finish(candidates: candidates, ledger: ledger, dryRun: true)
+        deps.journal.append(entry(event: "observed", take: observation.take, extra: [
+            "reason": reason.rawValue, "seconds": observation.elapsed, "reads": observation.reads,
+            "readable": observation.lastAligned != nil, "candidates": describe(candidates),
+            "hunks": field.flatMap { describeHunks(observation.take.pasted, $0) } ?? [],
             "ready": describe(ready.map { [$0] } ?? []),
         ]))
     }
@@ -272,5 +415,22 @@ final class DropLearningCoordinator {
         DropEditDiff.diff(pasted: pasted, field: field)?.hunks.map {
             ["removed": DropLearningClassifier.phrase($0.removed), "inserted": DropLearningClassifier.phrase($0.inserted)]
         }
+    }
+}
+
+/// Return and Enter while a field is watched: a listen-only global key
+/// monitor that looks only at the key code and keeps nothing. It is installed
+/// for one observation (at most 2 minutes) and removed after.
+/// WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
+enum DropLearningReturnKey {
+    static let keyCodes: Set<UInt16> = [36, 76] // kVK_Return, kVK_ANSI_KeypadEnter
+
+    @MainActor
+    static func watch(_ onReturn: @escaping @MainActor () -> Void) -> () -> Void {
+        let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            guard keyCodes.contains(event.keyCode) else { return }
+            MainActor.assumeIsolated { onReturn() }
+        }
+        return { if let monitor { NSEvent.removeMonitor(monitor) } }
     }
 }

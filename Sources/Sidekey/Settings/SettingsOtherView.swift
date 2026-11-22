@@ -157,7 +157,7 @@ struct SettingsOtherView: View {
                         // WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
                         MacRow(
                             title: "Learn from my edits",
-                            subtitle: "When you fix the same word after Drop twice, Whytap offers to add it to Vocab, Replace or Filler. Answer with ⌃Y or ⌃N. Reads the field once, on this Mac."
+                            subtitle: "When you fix the same word after Drop twice, Whytap offers to add it to Vocab, Replace or Filler. Answer with ⌃Y or ⌃N. Watches that field until you send or leave it, on this Mac."
                         ) {
                             MacSwitch(isOn: dropLearningToggleBinding, label: "Learn from my edits")
                         }

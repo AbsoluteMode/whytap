@@ -9,10 +9,10 @@ struct DropEditFieldHandle {
     let element: AXUIElement
 }
 
-/// Captures and reads the field a take went into. Every check runs on the
-/// field's identity and security metadata before its text is touched; the text
-/// is read once, as a range bounded by the length the field reports, only from
-/// the element that still has keyboard focus. Reads stay in memory; nothing is
+/// Captures, watches and reads the field a take went into. Every check runs
+/// on the field's identity and security metadata before its text is touched;
+/// each read is a range bounded by the length the field reports, only from the
+/// element that still has keyboard focus. Reads stay in memory; nothing is
 /// logged.
 @MainActor
 protocol DropEditFieldAccess: AnyObject {
@@ -24,6 +24,43 @@ protocol DropEditFieldAccess: AnyObject {
     /// The field's text, or nil when it changed, closed, lost focus, became
     /// secure, is too long or cannot be read.
     func read(_ handle: DropEditFieldHandle) -> String?
+    /// Tells when the field's value changes, when focus leaves it and when it
+    /// goes away. Carries no text. nil when the app offers no notifications:
+    /// the observation then polls.
+    func watch(_ handle: DropEditFieldHandle,
+               onChange: @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch?
+    /// Electron and Chromium apps build their accessibility tree only on
+    /// request. When the target app's focused element is not a readable field,
+    /// asks that app (only it) to expose its fields; the lease undoes it.
+    func exposeFields(pid: pid_t) -> DropEditAccessibilityLease?
+}
+
+enum DropEditFieldChange: Equatable {
+    case value
+    case focusLeft
+    case removed
+}
+
+@MainActor
+protocol DropEditFieldWatch: AnyObject {
+    func cancel()
+}
+
+/// Undoes what `exposeFields` turned on. Releasing twice does nothing.
+@MainActor
+final class DropEditAccessibilityLease {
+    let pid: pid_t
+    private var undo: (() -> Void)?
+
+    init(pid: pid_t, undo: @escaping () -> Void) {
+        self.pid = pid
+        self.undo = undo
+    }
+
+    func release() {
+        undo?()
+        undo = nil
+    }
 }
 
 /// Upper bound on a field's text the learning step reads (UTF-16 units).
@@ -33,7 +70,7 @@ enum DropEditFieldLimits {
 
 @MainActor
 final class AXDropEditFieldAccess: DropEditFieldAccess {
-    static let messagingTimeout: Float = 0.25
+    nonisolated static let messagingTimeout: Float = 0.25
 
     /// The Accessibility and workspace calls the access makes; tests replace
     /// them. Each returns nil on any failure.
@@ -49,7 +86,19 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         var characterCount: (AXUIElement) -> Int?
         /// `AXStringForRange`: transfers only the requested range.
         var string: (AXUIElement, CFRange) -> String?
+        /// A Boolean attribute of the app element; nil when it cannot be read.
+        var appFlag: (pid_t, String) -> Bool?
+        /// Sets a Boolean attribute of the app element; true on success.
+        var setAppFlag: (pid_t, String, Bool) -> Bool
+        /// Whether the app lets that attribute be set.
+        var appFlagSettable: (pid_t, String) -> Bool
+        /// AX notifications on the field (value, removal) and on its app (focus).
+        var watch: @MainActor (DropEditFieldHandle, @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch?
     }
+
+    /// Electron answers `AXManualAccessibility`; Chromium browsers and other
+    /// web views `AXEnhancedUserInterface`. Tried in this order.
+    static let exposeAttributes = ["AXManualAccessibility", "AXEnhancedUserInterface"]
 
     private let system: System
 
@@ -94,6 +143,37 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
               // A field that lost focus during the transfer is not used.
               isStillFocused(handle) else { return nil }
         return text
+    }
+
+    func watch(_ handle: DropEditFieldHandle,
+               onChange: @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch? {
+        system.watch(handle, onChange)
+    }
+
+    // WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
+    func exposeFields(pid: pid_t) -> DropEditAccessibilityLease? {
+        guard system.frontmostPID() == pid else { return nil }
+        // Before its tree is on, an Electron app may report no focused
+        // element at all; the app itself is checked instead.
+        let element = focusedElement(ofFrontmost: pid) ?? AXUIElementCreateApplication(pid)
+        let facts = system.facts(element, pid)
+        // A readable field needs nothing; a field the gate refuses for its
+        // app, a password or an error never gets the app's tree turned on.
+        if DropEditFieldGate.allowsRead(facts) { return nil }
+        guard DropEditFieldGate.mayExpose(facts) else { return nil }
+        for attribute in Self.exposeAttributes {
+            // Only an attribute that is off now and that the app lets us set;
+            // one already on (VoiceOver, the user, another tool) stays theirs.
+            let current = system.appFlag(pid, attribute)
+            guard current != true, current == false || system.appFlagSettable(pid, attribute),
+                  system.setAppFlag(pid, attribute, true) else { continue }
+            return DropEditAccessibilityLease(pid: pid) { [system] in
+                // Undone only while it is still the value we set and the app runs.
+                guard system.isRunning(pid), system.appFlag(pid, attribute) != false else { return }
+                _ = system.setAppFlag(pid, attribute, false)
+            }
+        }
+        return nil
     }
 
     /// The system-wide focused element, only when it belongs to `pid` and
@@ -155,8 +235,30 @@ extension AXDropEditFieldAccess.System {
                     element, kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &value
                 ) == .success else { return nil }
                 return value as? String
-            }
+            },
+            appFlag: { pid, attribute in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(appElement(pid), attribute as CFString, &value) == .success
+                else { return nil }
+                return (value as? NSNumber)?.boolValue
+            },
+            setAppFlag: { pid, attribute, flag in
+                AXUIElementSetAttributeValue(appElement(pid), attribute as CFString,
+                                             (flag ? kCFBooleanTrue : kCFBooleanFalse) as CFTypeRef) == .success
+            },
+            appFlagSettable: { pid, attribute in
+                var settable = DarwinBoolean(false)
+                return AXUIElementIsAttributeSettable(appElement(pid), attribute as CFString, &settable) == .success
+                    && settable.boolValue
+            },
+            watch: { handle, onChange in AXDropEditFieldWatch(handle: handle, onChange: onChange) }
         )
+    }
+
+    private static func appElement(_ pid: pid_t) -> AXUIElement {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, AXDropEditFieldAccess.messagingTimeout)
+        return app
     }
 
     /// A string attribute; an attribute the element does not have is nil,
@@ -168,5 +270,66 @@ extension AXDropEditFieldAccess.System {
         case .noValue, .attributeUnsupported: return (nil, false)
         default: return (nil, true)
         }
+    }
+}
+
+/// AX notifications for one field: its value changed, it was removed, or the
+/// app's focused element changed. Runs on the main run loop; no text travels
+/// with a notification.
+@MainActor
+final class AXDropEditFieldWatch: DropEditFieldWatch {
+    private final class Sink {
+        let onChange: @MainActor (DropEditFieldChange) -> Void
+        init(_ onChange: @escaping @MainActor (DropEditFieldChange) -> Void) { self.onChange = onChange }
+    }
+
+    private var observer: AXObserver?
+    private let sink: Sink
+    private let field: AXUIElement
+    private let app: AXUIElement
+
+    init?(handle: DropEditFieldHandle, onChange: @escaping @MainActor (DropEditFieldChange) -> Void) {
+        sink = Sink(onChange)
+        field = handle.element
+        app = AXUIElementCreateApplication(handle.pid)
+        var created: AXObserver?
+        let callback: AXObserverCallback = { _, _, notification, refcon in
+            guard let refcon else { return }
+            let sink = Unmanaged<Sink>.fromOpaque(refcon).takeUnretainedValue()
+            let change: DropEditFieldChange
+            switch notification as String {
+            case kAXValueChangedNotification: change = .value
+            case kAXUIElementDestroyedNotification: change = .removed
+            default: change = .focusLeft
+            }
+            MainActor.assumeIsolated { sink.onChange(change) }
+        }
+        guard AXObserverCreate(handle.pid, callback, &created) == .success, let created else { return nil }
+        let refcon = Unmanaged.passUnretained(sink).toOpaque()
+        let added = [
+            AXObserverAddNotification(created, field, kAXValueChangedNotification as CFString, refcon),
+            AXObserverAddNotification(created, field, kAXUIElementDestroyedNotification as CFString, refcon),
+            AXObserverAddNotification(created, app, kAXFocusedUIElementChangedNotification as CFString, refcon),
+        ]
+        // Without value notifications the observation only polls.
+        guard added[0] == .success else {
+            Self.remove(created, field: field, app: app)
+            return nil
+        }
+        observer = created
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(created), .defaultMode)
+    }
+
+    func cancel() {
+        guard let observer else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+        Self.remove(observer, field: field, app: app)
+        self.observer = nil
+    }
+
+    private static func remove(_ observer: AXObserver, field: AXUIElement, app: AXUIElement) {
+        AXObserverRemoveNotification(observer, field, kAXValueChangedNotification as CFString)
+        AXObserverRemoveNotification(observer, field, kAXUIElementDestroyedNotification as CFString)
+        AXObserverRemoveNotification(observer, app, kAXFocusedUIElementChangedNotification as CFString)
     }
 }

@@ -422,6 +422,9 @@ private final class NoField: DropEditFieldAccess {
     func capture(pid: pid_t) -> DropEditFieldHandle? { nil }
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool { false }
     func read(_ handle: DropEditFieldHandle) -> String? { nil }
+    func watch(_ handle: DropEditFieldHandle,
+               onChange: @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch? { nil }
+    func exposeFields(pid: pid_t) -> DropEditAccessibilityLease? { nil }
 }
 
 @MainActor

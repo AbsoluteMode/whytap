@@ -2,7 +2,7 @@ import Foundation
 
 /// What the learning step knows about the field a take was pasted into: its
 /// identity and security metadata, read through Accessibility before the paste
-/// and again before the one read. Never derived from the field's text.
+/// and again before every read. Never derived from the field's text.
 struct DropEditFieldFacts: Equatable {
     var bundleID: String?
     var isOwnProcess: Bool
@@ -39,8 +39,19 @@ enum DropEditFieldGate {
         guard let bundleID = facts.bundleID, !deniedBundleIDs.contains(bundleID) else { return false }
         if let subrole = facts.subrole, secureSubroles.contains(subrole) { return false }
         guard let role = facts.role, textRoles.contains(role) else { return false }
-        // A field that does not expose its text as a string (Electron, some
-        // web composers) is skipped at the read.
+        // A field that does not expose its text as a string is skipped at
+        // the read; Electron and web views first get their tree turned on
+        // (`mayExpose`).
+        return true
+    }
+
+    /// The app may be asked to expose its fields: everything the read gate
+    /// checks except the role, which is what the app does not report yet.
+    /// WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
+    static func mayExpose(_ facts: DropEditFieldFacts) -> Bool {
+        guard !facts.accessibilityError, !facts.secureEventInput, !facts.isOwnProcess else { return false }
+        guard let bundleID = facts.bundleID, !deniedBundleIDs.contains(bundleID) else { return false }
+        if let subrole = facts.subrole, secureSubroles.contains(subrole) { return false }
         return true
     }
 }

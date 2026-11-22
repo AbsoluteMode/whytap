@@ -2,21 +2,19 @@ import Foundation
 
 /// The one switch that opens or closes Calendar for users.
 ///
-/// Calendar is shown with a "Soon" badge while it is closed: its tile, search
-/// row, Toolbox pane and Integrations card are visible but inert, no hotkey or
-/// `whytap://` link opens it, and nothing asks macOS for calendar access, signs
-/// in to a provider or reads events. The feature code is untouched; stored
-/// connections and settings stay on disk (and in backups) and work again when
-/// the switch is opened.
-///
-/// To open Calendar again, change `shipped` to `true`, nothing else.
+/// Calendar is open (released 2026-11-22). Setting `shipped` to `false` closes
+/// it again as "Soon": its tile, search row, Toolbox pane and Integrations card
+/// stay visible but inert, no hotkey or `whytap://` link opens it, and nothing
+/// asks macOS for calendar access, signs in to a provider or reads events.
+/// Stored connections and settings stay on disk (and in backups) either way.
 // WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
+// WHY: .project-docs/decisions/2026-11-22-calendar-release.md
 enum CalendarAvailability {
-    /// ← the single switch. `false` = "Soon".
-    static let shipped = false
+    /// ← the single switch. `true` = released, `false` = "Soon".
+    static let shipped = true
 
-    /// Tests that exercise the Calendar code itself open it for their duration
-    /// and restore it in tearDown. Never set outside tests.
+    /// Tests open or close Calendar for their duration and restore it in
+    /// tearDown. Never set outside tests.
     nonisolated(unsafe) static var testOverride: Bool?
 
     static var isOpen: Bool { testOverride ?? shipped }

@@ -188,8 +188,7 @@ final class DropLearningDropsTests: XCTestCase {
         model.setControlHeld(true)
         XCTAssertFalse(model.controlHeld)
         clock.advance(0.7)
-        model.setControlHeld(true)
-        XCTAssertTrue(model.controlHeld)
+        XCTAssertTrue(model.controlHeld, "Control remains held across the opening animation")
         model.answer(.no)
         XCTAssertFalse(model.controlHeld)
     }

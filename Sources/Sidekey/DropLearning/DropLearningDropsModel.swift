@@ -36,7 +36,7 @@ final class DropLearningDropsModel: ObservableObject {
     /// The pointer is on Y or N: that drop shows ✓/✕ instead of its letter.
     @Published private(set) var hoveredButton: Button?
     /// ⌃ is held while the drops are open: Y and N light up.
-    @Published private(set) var controlHeld = false
+    @Published private var controlModifierDown = false
     /// The icon drop swells once and shows ✓ (or ↗ for a full Vocab).
     @Published private(set) var confirmed = false
 
@@ -66,6 +66,7 @@ final class DropLearningDropsModel: ObservableObject {
     }
 
     var isVisible: Bool { stage != .hidden }
+    var controlHeld: Bool { stage == .open && controlModifierDown }
     var isReducedMotion: Bool { reduceMotion() }
 
     /// Shows a suggestion if nothing is on screen. Returns false when the
@@ -79,7 +80,7 @@ final class DropLearningDropsModel: ObservableObject {
         confirmed = false
         hovered = false
         hoveredButton = nil
-        controlHeld = false
+        controlModifierDown = false
         remaining = Timing.showSeconds
         stage = .emerging
         onVisibleChange?(true)
@@ -129,8 +130,7 @@ final class DropLearningDropsModel: ObservableObject {
     }
 
     func setControlHeld(_ held: Bool) {
-        let held = held && stage == .open
-        if controlHeld != held { controlHeld = held }
+        if controlModifierDown != held { controlModifierDown = held }
     }
 
     /// The island left idle (a new take, the agent, a failure): the drops go
@@ -166,7 +166,7 @@ final class DropLearningDropsModel: ObservableObject {
         stage = .retracting
         hovered = false
         hoveredButton = nil
-        controlHeld = false
+        controlModifierDown = false
         if reduceMotion() {
             dropsOut = 0
             after(Timing.fade) { $0.finishHidden() }
@@ -192,7 +192,7 @@ final class DropLearningDropsModel: ObservableObject {
         confirmed = false
         hovered = false
         hoveredButton = nil
-        controlHeld = false
+        controlModifierDown = false
         onVisibleChange?(false)
     }
 

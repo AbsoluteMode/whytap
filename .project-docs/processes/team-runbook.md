@@ -62,7 +62,7 @@ On 2026-11-22 the long `AGENTS.md` body moved, unchanged, to
 Architecture to Invariants) and to this runbook (the checkout paragraph and
 "Parallel development"). A branch made before that which edits the old
 `.project-docs/agent-context.md` must move its edit, with the same words, to
-the same paragraph in the new file, keep `agent-context.md` as the short
+the same paragraph in the new file, keep agent-context as the short
 entry and regenerate `AGENTS.md`/`CLAUDE.md`. The builder does this when it
 resolves such a conflict.
 

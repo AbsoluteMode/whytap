@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandTouchTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-island-beside-system-island.md]
+related: [2026-11-22-island-beside-system-island.md, 2026-11-22-island-touch-hover-paths.md]
 ---
 
 # A tap opens the island on a touch display

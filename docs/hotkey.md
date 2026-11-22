@@ -321,7 +321,9 @@ Whytap take them from macOS (`BrightnessKeys`, `BrightnessKeyEventTap`).
   search.
 - Two brightness-up presses at the maximum within 1.5 s, timed when the tap
   sees them, turn Extra on; the press that reaches the maximum and repeats
-  from holding the key do not count.
+  from holding the key do not count. On the built-in touch OLED (MacBook Pro
+  PROLED XDR) Extra is not offered yet, so the double press only keeps the
+  maximum (.project-docs/decisions/2026-11-22-island-touch-hover-paths.md).
 - With Extra on, the first intercepted brightness-down press only turns Extra
   off and leaves the backlight and slider unchanged, including repeats while
   held. The next press lowers brightness normally (also with ⌥⇧). A first

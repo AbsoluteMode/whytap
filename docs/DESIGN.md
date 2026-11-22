@@ -6,10 +6,23 @@
   does; the drawer then answers taps until a tap lands outside the island,
   the pointer moves, or eight seconds pass without a tap.
 - A tap on the agent wing or answer card acts on what it touches.
-- A long press does nothing on the island (it has no context menu).
+- A long press does nothing on the collapsed capsule; inside an open panel it
+  is a right click and opens only the menus that already exist (To-do rows,
+  Notify history and sources).
 - An idle-hidden island is not tappable; a hotkey or the pointer wakes it.
 - Verified with routing tests and target windows that were never shown. See
   the [decision](../.project-docs/decisions/2026-11-22-island-touch-tap.md).
+- Hover-only details by touch: the first tap on a History or To-do row shows
+  what hovering shows (preview, full-text bubble, "+"); the next tap copies or
+  completes. Small island buttons take touches within 36 pt without being
+  drawn larger. The drawer keeps its 310 pt width even if the camera cutout is
+  reported narrower.
+- A tap on the command of a Case approval shows all of it (a finger gets no
+  tooltip); a second tap folds it back.
+- Display: Extra is not offered on the built-in touch OLED until it is
+  measured there. A pointer and every screen without touch keep everything
+  as before. See the
+  [decision](../.project-docs/decisions/2026-11-22-island-touch-hover-paths.md).
 
 ## Island beside the system Dynamic Island — 2026-11-22
 

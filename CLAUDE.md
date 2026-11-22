@@ -986,8 +986,18 @@ Island touch (touch display, macOS 27):
   transparent area (consumed), real mouseMoved, the drawer closing, hide, or
   8 s without a tap; a drawer it opened closes with it. A pointer reaching a
   target hands the island back at once. Long press (right click) does
-  nothing. Screens without touch never get a target. WHY:
-  .project-docs/decisions/2026-11-22-island-touch-tap.md
+  nothing on targets and the collapsed capsule. Screens without touch never
+  get a target. WHY: .project-docs/decisions/2026-11-22-island-touch-tap.md
+  Inside a session (pointer unchanged): IslandTouchReveal makes the first tap
+  on a History or To-do row show its hover details (preview, full-text bubble,
+  "+") and the next tap act; IslandHoverHitBridge grows measured hit areas to
+  36 pt (IslandTouchHitGeometry: the drawn control wins, else the nearest).
+  A touch-capable screen keeps a 170 pt capsule middle (minimumCapsuleGap), so
+  a narrow cutout never shrinks the drawer. A tap on a Case approval command
+  shows all of it there (isCommandExpanded, reset per prompt). Long press
+  inside a panel opens only the existing To-do/Notify menus. Extra is off on
+  the built-in touch OLED (ScreenBrightnessDisplay.isTouchOLED) until
+  measured. WHY: .project-docs/decisions/2026-11-22-island-touch-hover-paths.md
 
 Now Playing:
   MediaRemoteNowPlayingSource runs the vendored adapter as a long-lived child

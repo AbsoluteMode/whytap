@@ -1051,6 +1051,22 @@ processing routes: never switch where existing users send audio or text. A
 retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
+Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
+above Subtitles; "Advanced · a model per feature" discloses the per-feature
+list. A shared pick writes every feature route of its kind
+(SharedModelKind.features): the same model where that feature's picker offers
+it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
+a feature it cannot serve (the Agent without tools, a provider without a
+recorded model, a server for the Agent) keeps its route and the row says why.
+A model the feature's picker rules out is refused even where a server takes
+a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
+never from full picker lists. One probe per pick (a tools probe also passes
+plain chat). The row is read
+from the saved routes, never stored: the model more than half of the routed
+features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
+re-picking asks before replacing custom models. app-control get_state has a
+read-only `shared`; set_model stays per feature. WHY:
+.project-docs/decisions/2026-11-22-shared-model-rows.md
 
 Costs: the local ai-usage.sqlite journal records only feature/provider/model,
 request ID, time, duration, currency and expense metadata from actual runtime

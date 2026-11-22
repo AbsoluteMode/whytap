@@ -22,6 +22,10 @@ struct APIAndModelsView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var highlighted: Set<AIFeature> = []
     @State private var expandedGroup: String?
+    /// The per-feature model menus under the shared Speech and LLM rows.
+    @State private var showAdvanced: Bool
+    /// A shared pick waiting for the answer about custom per-feature models.
+    @State private var pendingShared: PendingShared?
     @State private var section: APIAndModelsSection
     @StateObject private var usage: AIUsageCostsViewModel
     @FocusState private var focusedGroup: String?
@@ -38,8 +42,20 @@ struct APIAndModelsView: View {
         self._keyNotice = State(initialValue: initialKeyResult.map { KeyNotice(accepted: $0) })
         self._focusedFeature = focusedFeature
         self._expandedGroup = State(initialValue: initiallyExpandedGroup)
+        // A link to one feature's settings, or features that disagree
+        // (Mixed), open the per-feature list.
+        self._showAdvanced = State(initialValue: initiallyExpandedGroup != nil
+                                   || viewModel.sharedRows.contains(where: \.isMixed))
         self._section = State(initialValue: initialSection)
         self._usage = StateObject(wrappedValue: usageModel ?? AIUsageCostsViewModel(store: usageStore ?? .shared))
+    }
+
+    private struct PendingShared: Identifiable {
+        let kind: SharedModelKind
+        let account: ProviderAccount
+        let model: String
+        let custom: [AIFeature]
+        var id: String { "\(kind.rawValue)|\(account.storageID)|\(model)" }
     }
 
     /// Explicit model selection can still use a sheet. Key setup always opens
@@ -230,14 +246,171 @@ struct APIAndModelsView: View {
             }
             .padding(.bottom, viewModel.aliasGroups.isEmpty ? 0 : 10)
             VStack(spacing: 10) {
-                ForEach(viewModel.groups) { group in
+                ForEach(viewModel.sharedRows) { row in
+                    MacCard(needsSetup: row.needsSetup) {
+                        sharedRow(row)
+                    }
+                    .id("shared.\(row.kind.rawValue)")
+                }
+                ForEach(viewModel.groups.filter { $0.audioTranslate != nil }) { group in
                     MacCard(needsSetup: group.needsSetup) {
                         groupRow(group)
                     }
                     .id(group.id)
                 }
             }
+            advancedToggle
+            if showAdvanced {
+                VStack(spacing: 10) {
+                    ForEach(viewModel.groups.filter { $0.audioTranslate == nil }) { group in
+                        MacCard(needsSetup: group.needsSetup) {
+                            groupRow(group)
+                        }
+                        .id(group.id)
+                    }
+                }
+            }
         }
+        .confirmationDialog(
+            pendingShared.map { Self.replaceQuestion($0) } ?? "",
+            isPresented: Binding(get: { pendingShared != nil }, set: { if !$0 { pendingShared = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingShared
+        ) { pending in
+            Button("Keep custom models") { applyShared(pending, replaceCustom: false) }
+            Button("Replace them too") { applyShared(pending, replaceCustom: true) }
+            Button("Cancel", role: .cancel) { pendingShared = nil }
+        } message: { pending in
+            Text(pending.custom.map(\.title).joined(separator: ", "))
+        }
+    }
+
+    static func replaceQuestion(_ count: Int) -> String {
+        count == 1 ? "1 feature has its own model. Replace it too?"
+            : "\(count) features have their own model. Replace them too?"
+    }
+
+    private static func replaceQuestion(_ pending: PendingShared) -> String {
+        replaceQuestion(pending.custom.count)
+    }
+
+    // MARK: - Shared Speech / LLM
+
+    /// One model for every feature of its kind. Custom per-feature choices
+    /// live under Advanced; the row counts them and asks before replacing.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    private func sharedRow(_ row: SharedModelRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeometryReader { geometry in
+                let menuWidth = max(120, geometry.size.width - 28 - 116 - 12)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.kind.title)
+                            .font(.system(size: 13))
+                            .foregroundStyle(MacSettingsTheme.text)
+                        Text(Self.sharedCaption(row.kind))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(MacSettingsTheme.text3)
+                            .lineLimit(1)
+                    }
+                    .frame(width: 116, alignment: .leading)
+                    SharedModelMenu(viewModel: viewModel, kind: row.kind, label: row.label,
+                                    onAddKey: showKeySetup,
+                                    onPick: { account, model in pickShared(row, account: account, model: model) },
+                                    width: menuWidth)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: geometry.size.height)
+            }
+            .frame(height: 54)
+            sharedStatus(row)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(row.kind.title)
+        .accessibilityValue(row.needsSetup ? "\(row.label), Needs setup" : row.label)
+    }
+
+    static func sharedCaption(_ kind: SharedModelKind) -> String {
+        switch kind {
+        case .speech: return "Drop, voice, Meetings"
+        case .llm: return "Cleanup, notes, Agent"
+        }
+    }
+
+    @ViewBuilder
+    private func sharedStatus(_ row: SharedModelRow) -> some View {
+        let lines = Self.sharedStatusLines(row)
+        if row.isChecking || !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if row.isChecking {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("Checking…")
+                    }
+                    .foregroundStyle(MacSettingsTheme.text2)
+                }
+                ForEach(lines, id: \.self) { line in
+                    Text(line).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(MacSettingsTheme.orange)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 9)
+        }
+    }
+
+    /// Why the shared model does not reach every feature: what the last pick
+    /// left out, then features it cannot serve and that still have no model.
+    static func sharedStatusLines(_ row: SharedModelRow) -> [String] {
+        var lines = row.notes
+        for item in row.uncovered {
+            let line = "\(item.feature.title): \(item.skipReason ?? "not available") · choose in Advanced"
+            if !lines.contains(where: { $0.hasPrefix("\(item.feature.title):") }) { lines.append(line) }
+        }
+        return lines
+    }
+
+    private func pickShared(_ row: SharedModelRow, account: ProviderAccount, model: String) {
+        let pending = PendingShared(kind: row.kind, account: account, model: model, custom: row.custom)
+        if row.custom.isEmpty {
+            applyShared(pending, replaceCustom: false)
+        } else {
+            pendingShared = pending
+        }
+    }
+
+    private func applyShared(_ pending: PendingShared, replaceCustom: Bool) {
+        pendingShared = nil
+        Task { await viewModel.selectShared(model: pending.model, account: pending.account,
+                                            kind: pending.kind, replaceCustom: replaceCustom) }
+    }
+
+    private var advancedToggle: some View {
+        Button {
+            showAdvanced.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
+                Text("Advanced")
+                    .font(.system(size: 12, weight: .medium))
+                Text("· a model per feature")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text3)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(MacSettingsTheme.text2)
+            .padding(.horizontal, 6)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Advanced, a model per feature")
+        .accessibilityValue(showAdvanced ? "Expanded" : "Collapsed")
     }
 
     /// A quiet count beside the title; Show lights up the rows it counts.
@@ -539,6 +712,7 @@ struct APIAndModelsView: View {
     private func highlight(_ features: Set<AIFeature>, scrollTo target: AIFeature,
                            scroller: ScrollViewProxy, seconds: Double = 2.5) {
         guard let group = viewModel.groups.first(where: { $0.covers(target) }) else { return }
+        if group.audioTranslate == nil { showAdvanced = true }
         expandedGroup = group.id
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
             scroller.scrollTo(group.id, anchor: .center)

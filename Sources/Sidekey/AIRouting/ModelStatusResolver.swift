@@ -46,6 +46,20 @@ struct PickerSection: Equatable {
     var acceptsModelName = false
 }
 
+/// What a feature's picker does with one model (`ModelStatusResolver.pickerReach`).
+enum PickerReach: Equatable {
+    /// The account has no section for this feature (no key, or it can't serve it).
+    case noSection
+    /// `verdict` rules the model out for this feature.
+    case ruledOut(reason: String)
+    /// Listed: registry, catalog or the feature's own route.
+    case offered
+    /// Not listed, but the server section takes a typed model name.
+    case typed
+    /// The section neither lists it nor takes a typed name.
+    case notListed
+}
+
 /// One "Switch" action: several features sit on the same deprecated alias of
 /// the same account and can move to its replacement together.
 struct AliasGroupAction: Equatable {
@@ -146,18 +160,62 @@ struct ModelStatusResolver {
 
     // MARK: - Picker
 
-    func sections(for feature: AIFeature) -> [PickerSection] {
-        let selected = routing.route(for: feature)
-        let openRouterModels = Dictionary(
-            (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first })
+    /// The accounts with a picker section, in picker order.
+    func pickerAccounts() -> [ProviderAccount] {
         var accounts = Self.directAccounts.filter { credential(of: $0) != .missing }
         let servers = routing.state.servers.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
         accounts += servers.map { ProviderAccount.server($0.id) }
         if credential(of: .openRouter) != .missing { accounts.append(.openRouter) }
+        return accounts
+    }
 
+    /// What `feature`'s picker does with one model of one account, answered
+    /// without building the list: the shared Speech and LLM rows ask this for
+    /// a handful of routes whenever Settings recomputes, and a full section
+    /// of a large cached catalog (OpenRouter) costs seconds on the main actor.
+    /// The same rules as `sections(for:)`: the account needs a section, the
+    /// model must not be ruled out (`verdict`), and it is offered when the
+    /// registry or the catalog lists it or it is the feature's route;
+    /// otherwise a server section that takes a typed name accepts it.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    func pickerReach(model: String, account: ProviderAccount, for feature: AIFeature,
+                     accountsWithSection: [ProviderAccount]? = nil) -> PickerReach {
+        guard (accountsWithSection ?? pickerAccounts()).contains(account),
+              let use = feature.modelUse(on: account.kind) else { return .noSection }
+        if case .notSupported(let reason) = verdict(model: model, account: account, for: feature) {
+            return .ruledOut(reason: reason)
+        }
+        let selected = routing.route(for: feature)
+        if selected?.account == account, selected?.model == model { return .offered }
+        if ModelRegistry.models.contains(where: { $0.kind == account.kind && $0.id == model && $0.uses.contains(use) }) {
+            return .offered
+        }
+        let snapshot = catalogs.snapshot(for: account)
+        if let entry = snapshot?.models.first(where: { $0.id == model }), entry.aliasOf == nil,
+           !ModelRegistry.offersOnlyBuiltInModels(account.kind), !Self.isStale(entry, fetchedAt: snapshot?.fetchedAt) {
+            return .offered
+        }
+        guard account.kind == .openAICompatible else { return .notListed }
+        // Same rule as the section's acceptsModelName: no list, or nothing of
+        // this kind in it. A server's list is short.
+        let models = snapshot?.models ?? []
+        let listsThisKind = models.contains { entry in
+            if case .notSupported = verdict(model: entry.id, account: account, for: feature) { return false }
+            return true
+        } || selected?.account == account
+        return models.isEmpty || !listsThisKind ? .typed : .notListed
+    }
+
+    /// `only`: build just that account's section.
+    func sections(for feature: AIFeature, only: ProviderAccount? = nil) -> [PickerSection] {
+        let selected = routing.route(for: feature)
+        let openRouterModels = Dictionary(
+            (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        var accounts = pickerAccounts()
+        if let only { accounts = accounts.filter { $0 == only } }
         return accounts.compactMap { account in
             guard let use = feature.modelUse(on: account.kind) else { return nil }
             let snapshot = catalogs.snapshot(for: account)

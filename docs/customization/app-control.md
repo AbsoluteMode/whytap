@@ -24,10 +24,10 @@ set up with them. Other clients can invoke the CLI directly:
 
 | MCP tool | CLI subcommand | Behavior |
 | --- | --- | --- |
-| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route, the Agent workspace folder (`agentWorkspace`) |
+| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route, the shared Speech and LLM rows (`shared`: label, Mixed, the model most features follow, custom and unset features), the Agent workspace folder (`agentWorkspace`) |
 | `whytap_get_settings` | `settings` | Current supported settings and accepted values |
 | `whytap_list_models` | `models` | Search the app's cached compatible models; optional account and limit (1–100) |
-| `whytap_set_model` | `set-model` | Validate and select one account/model through Settings; preserve other routes |
+| `whytap_set_model` | `set-model` | Validate and select one account/model for one feature through Settings; preserve other routes. There is no shared write: set each feature of `shared.<kind>.features` the same way |
 | `whytap_list_providers` | `providers` | OpenRouter endpoints for the current model; free metadata request |
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |

@@ -35,6 +35,9 @@ struct AgentOtherSection: View {
     static let subtitle = "Ask by text or voice. Shortcuts in Hotkeys."
     static let actionsTitle = "Allow file edits and commands"
     static let actionsSubtitle = "Uses your Mac user’s permissions. Off blocks edits and shell commands."
+    /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    static let searchTitle = "Search the web with Tavily"
+    static let searchSubtitle = "Off: Anthropic, OpenAI and OpenRouter models use their own search, about $10 per 1,000 searches plus result tokens on that provider’s bill. On, or for a model without it: Tavily, with its key in API & Models."
 
     init(viewModel: AgentModeViewModel, settings: AgentSettingsStore, store: AgentProviderStore,
          agentEnabled: @escaping () -> Bool, onAgentToggle: @escaping (Bool) -> Void,
@@ -96,6 +99,10 @@ struct AgentOtherSection: View {
                 MacRowSeparator()
                 MacRow(title: Self.actionsTitle, subtitle: Self.actionsSubtitle) {
                     MacSwitch(isOn: $settings.openCodeAllowActions, label: Self.actionsTitle)
+                }
+                MacRowSeparator()
+                MacRow(title: Self.searchTitle, subtitle: Self.searchSubtitle) {
+                    MacSwitch(isOn: $settings.webSearchPrefersTavily, label: Self.searchTitle)
                 }
             }
         }

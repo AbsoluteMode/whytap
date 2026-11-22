@@ -38,6 +38,9 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// `capabilities.thinking.supported`.
     var supportsReasoning: Bool?
     var reasoning: OpenRouterReasoningCapabilities?
+    /// Anthropic's `capabilities.server_tools.web_search.supported`; `nil`
+    /// when the catalog does not say. Decides the Agent's built-in search.
+    var supportsWebSearch: Bool?
     var expiresAt: Date?
     /// Deepgram: the date of the model's newest version (`version` is
     /// `YYYY-MM-DD.N`). Pickers hide a model not updated for a year.
@@ -58,6 +61,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         supportsTools: Bool? = nil,
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
+        supportsWebSearch: Bool? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
         catalogDate: Date? = nil,
@@ -71,6 +75,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.supportsTools = supportsTools
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
+        self.supportsWebSearch = supportsWebSearch
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
         self.catalogDate = catalogDate
@@ -434,6 +439,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             let maxInputTokens: Int?
             let maxTokens: Int?
             let thinking: Bool?
+            let webSearch: Bool?
             let createdAt: String?
 
             enum CodingKeys: String, CodingKey {
@@ -446,7 +452,16 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
 
             private struct Capabilities: Decodable {
                 struct Support: Decodable { let supported: Bool? }
+                struct ServerTools: Decodable {
+                    let webSearch: Support?
+                    enum CodingKeys: String, CodingKey { case webSearch = "web_search" }
+                }
                 let thinking: Support?
+                let serverTools: ServerTools?
+                enum CodingKeys: String, CodingKey {
+                    case thinking
+                    case serverTools = "server_tools"
+                }
             }
 
             init(from decoder: Decoder) throws {
@@ -456,7 +471,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 maxInputTokens = try? container.decodeIfPresent(Int.self, forKey: .maxInputTokens)
                 maxTokens = try? container.decodeIfPresent(Int.self, forKey: .maxTokens)
                 // A capabilities object of another shape costs only the flag.
-                thinking = (try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities))?.thinking?.supported
+                let capabilities = try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
+                thinking = capabilities?.thinking?.supported
+                webSearch = capabilities?.serverTools?.webSearch?.supported
             }
         }
         let data: [Model]
@@ -481,6 +498,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 maxOutputTokens: model.maxTokens,
                 supportsTools: true,
                 supportsReasoning: model.thinking,
+                supportsWebSearch: model.webSearch,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
             )
         }

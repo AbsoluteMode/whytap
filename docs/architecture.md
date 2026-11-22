@@ -355,11 +355,30 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
+  Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
+  server-side tool when the model has it (Anthropic web_search_20250305 with
+  max_uses 2, OpenAI Responses web_search with max_tool_calls 2 and
+  web_search_call.action.sources, OpenRouter openrouter:web_search with
+  max_uses 2); else the Tavily web_search function when its key exists; else
+  no search tool and a prompt line telling the model to say so. Anthropic's
+  catalog flag capabilities.server_tools.web_search.supported decides when
+  present; a few OpenAI families without search are excluded by ID. The
+  Settings -> Other -> Agent switch agent.native.webSearchPrefersTavily (off by
+  default) chooses Tavily when its key exists. A 400 on the turn's first request
+  with built-in search retries once without it (nothing has run or been billed);
+  later failures are never retried. Anthropic server blocks, including
+  encrypted_content, are replayed verbatim; pause_turn and a search without a
+  function call continue the same turn (OpenAI/OpenRouter add a short user
+  "Continue" message). A finish_answer beside an Anthropic search whose result
+  has not arrived gets a tool result asking to wait. When finish_answer has no
+  source links, up to five provider citations (then results) become link cards.
+  Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
+  OpenRouter's reported cost includes search; OpenAI stays unpriced.
+  WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
   Settings -> API & Models -> API keys saves a separate Tavily key in Keychain
   (byok.tavily.search_api_key), after a GET /usage check without a search. The
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
-  No key means an actionable tool error, never an alternative search provider.
   Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
   structured finish_answer completion and Case key names. The existing action preference
   agent.opencode.allowActions is preserved: Allow file edits and commands is

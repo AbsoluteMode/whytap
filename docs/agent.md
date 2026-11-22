@@ -26,11 +26,30 @@ the answer.
 
 ## Web search
 
-Add a **Tavily** key in **Settings → API & Models → API keys**. Saving checks
-the key without running a search. Only the search query goes to Tavily (at
-most two searches per request); the returned excerpts and links go to your
-selected model. Without a key, search reports an error instead of using
-another service.
+When the Agent model is on **Anthropic**, **OpenAI** or **OpenRouter**, it
+searches with that provider's own web search tool: no extra key, billed by
+the same provider (at most two searches per request).
+
+| Agent route | Search | Price (checked 2026-11-22) |
+| --- | --- | --- |
+| Anthropic | Claude web search (`web_search_20250305`) | $10 per 1,000 searches plus the results as input tokens; failed searches are not billed. Included in the Agent's estimated cost |
+| OpenAI | Responses `web_search` | $10 per 1,000 calls plus search content tokens. OpenAI reports no charge, so the cost stays unknown |
+| OpenRouter | `openrouter:web_search` | the model's own search at its provider's price, otherwise Exa at about $7 per 1,000; included in the cost OpenRouter reports |
+
+The provider runs the search and sends its results to the model; Whytap
+never sees a separate search request. The pages the model cites appear as
+source cards. If the model lists none itself, Whytap shows the provider's
+citations (up to five).
+
+**Tavily** is the fallback. Add its key in **Settings → API & Models → API
+keys** (saving checks the key without running a search). It is used when the
+model has no web search of its own (the Anthropic catalog says so, a few old
+OpenAI models such as `gpt-4.1-nano`, or the provider rejects the search tool
+on the first request), or when **Search the web with Tavily** is on in
+**Settings → Other → Agent**. Only the search query goes to Tavily; the
+returned excerpts and links go to your selected model. With neither, the
+Agent has no search tool and says it could not check the web instead of
+inventing recent facts.
 
 ## Off by default; what it can do once on
 
@@ -43,7 +62,7 @@ tools:
 | --- | --- | --- |
 | `list_directory`, `read_file`, `search_files` | yes | yes |
 | `capture_screen` (when your request needs the screen) | yes | yes |
-| `web_search` (Tavily key), `fetch_url` (public HTTPS) | yes | yes |
+| web search (the provider's own, or a Tavily key), `fetch_url` (public HTTPS) | yes | yes |
 | `write_file`: create or replace a file | yes | removed and refused |
 | `run_command`: run a shell command | yes | removed and refused |
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |

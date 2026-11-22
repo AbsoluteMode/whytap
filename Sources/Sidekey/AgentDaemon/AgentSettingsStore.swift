@@ -18,6 +18,9 @@ final class AgentSettingsStore: ObservableObject {
     @Published var codexEffort: String?       { didSet { write(Keys.codexEffort, codexEffort) } }
     @Published var codexServiceTier: String?  { didSet { write(Keys.codexServiceTier, codexServiceTier) } }
     @Published var openCodeAllowActions: Bool { didSet { defaults.set(openCodeAllowActions, forKey: Keys.openCodeAllowActions) } }
+    /// Search with Tavily even when the Agent model has built-in web search.
+    /// Off by default. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    @Published var webSearchPrefersTavily: Bool { didSet { defaults.set(webSearchPrefersTavily, forKey: Keys.webSearchPrefersTavily) } }
 
     private enum Keys {
         static let claudeModel = "agent.claude.model"
@@ -26,6 +29,7 @@ final class AgentSettingsStore: ObservableObject {
         static let codexEffort = "agent.codex.effort"
         static let codexServiceTier = "agent.codex.serviceTier"
         static let openCodeAllowActions = "agent.opencode.allowActions"
+        static let webSearchPrefersTavily = "agent.native.webSearchPrefersTavily"
     }
 
     @Published private(set) var codexCatalog: [CodexModelOption] = []
@@ -47,6 +51,7 @@ final class AgentSettingsStore: ObservableObject {
         self.injectedRouting = routing
         self.injectedCatalogs = catalogs
         self.openCodeAllowActions = defaults.object(forKey: Keys.openCodeAllowActions) as? Bool ?? true
+        self.webSearchPrefersTavily = defaults.object(forKey: Keys.webSearchPrefersTavily) as? Bool ?? false
         // Property observers do not fire on initial assignment in init, so this
         // load does not write back.
         self.claudeModel = defaults.string(forKey: Keys.claudeModel)
@@ -82,7 +87,8 @@ final class AgentSettingsStore: ObservableObject {
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
                                    openRouterProvider: selectedOpenCodeProvider == .openRouter
-                                       ? routing.route(for: .agent)?.provider : nil)
+                                       ? routing.route(for: .agent)?.provider : nil,
+                                   preferTavilySearch: webSearchPrefersTavily)
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
@@ -130,7 +136,8 @@ final class AgentSettingsStore: ObservableObject {
         return OpenCodeModelSpec(toolCall: entry.supportsTools ?? true,
                                  reasoning: entry.supportsReasoning ?? false,
                                  contextLimit: context,
-                                 outputLimit: entry.maxOutputTokens ?? 16_384)
+                                 outputLimit: entry.maxOutputTokens ?? 16_384,
+                                 webSearch: entry.supportsWebSearch)
     }
 
     /// The user's explicit pick when it is a level this CLI accepts, else Low.

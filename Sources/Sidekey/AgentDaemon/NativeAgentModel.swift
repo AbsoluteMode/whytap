@@ -20,8 +20,23 @@ struct NativeAgentToolResult {
 struct NativeAgentModel {
     let options: AgentRunOptions
     let key: String
-    let system: String
+    var system: String
     var messages: [[String: Any]]
+    /// Adds the route provider's server-side web search to tool requests.
+    /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    var builtInSearch = false
+    /// Built-in searches the provider ran in the last response.
+    private(set) var searchesInLastResponse = 0
+    /// The last response stopped to be continued with no tool results:
+    /// Anthropic `pause_turn`, or a search with no function call after it.
+    private(set) var awaitingContinuation = false
+    /// Anthropic: a search was requested in the last response and its result
+    /// arrives only in the next request (search beside a function call).
+    private(set) var pendingSearch = false
+    private var citedSources: [NativeAgentWebSearch.Source] = []
+    private var resultSources: [NativeAgentWebSearch.Source] = []
+    /// Pages the provider's search cited or returned this turn, citations first.
+    var searchSources: [NativeAgentWebSearch.Source] { citedSources + resultSources }
     var http = NativeAgentHTTP()
     var usageSink: (AIUsageEvent) -> Void = AIUsageRecorder.record
     var diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
@@ -45,21 +60,31 @@ struct NativeAgentModel {
         var textSize = system.count
         func count(_ value: Any) {
             if let string = value as? String { if !string.hasPrefix("data:image/") { textSize += string.count } }
-            else if let object = value as? [String: Any] { for (k, v) in object where k != "data" { count(v) } }
+            // Opaque search state is replayed verbatim but is not model text.
+            else if let object = value as? [String: Any] {
+                for (k, v) in object where !["data", "encrypted_content", "encrypted_index"].contains(k) { count(v) }
+            }
             else if let array = value as? [Any] { array.forEach(count) }
         }
         count(messages)
         guard textSize < textBudget else { throw NativeAgentError.message("This task filled the agent’s context. Start a shorter request.") }
         let outputLimit = min(8192, options.openCodeModelSpec?.outputLimit ?? 8192)
         var request: URLRequest
+        let search = builtInSearch && !tools.isEmpty
+        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider)
         switch options.openCodeProvider {
         case .openAI:
-            request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: [
+            var body: [String: Any] = [
                 "model": model, "instructions": system, "input": messages, "store": false,
-                "include": ["reasoning.encrypted_content"], "max_output_tokens": outputLimit,
+                "include": ["reasoning.encrypted_content"] + (search ? ["web_search_call.action.sources"] : []),
+                "max_output_tokens": outputLimit,
                 "tools": tools.map { ["type": "function", "name": $0["name"]!, "description": $0["description"]!,
                                        "parameters": $0["parameters"]!, "strict": $0["strict"] as? Bool ?? false] }
-            ])
+                    + (search ? [searchTool] : [])
+            ]
+            // Caps built-in tool calls (searches) per response, not functions.
+            if search { body["max_tool_calls"] = NativeAgentWebSearch.maxSearches }
+            request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body)
         case .anthropic:
             request = try NativeAgentHTTP.request(url: URL(string: "https://api.anthropic.com/v1/messages")!, key: key, body: [
                 "model": model, "system": system, "messages": messages, "max_tokens": outputLimit,
@@ -67,14 +92,15 @@ struct NativeAgentModel {
                     var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]
                     if let strict = tool["strict"] as? Bool { result["strict"] = strict }
                     return result
-                }
+                } + (search ? [searchTool] : [])
             ])
             request.setValue(nil, forHTTPHeaderField: "Authorization")
             request.setValue(key, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         case .openRouter:
             var body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system]] + messages,
-                                      "max_tokens": outputLimit, "tools": tools.map { ["type": "function", "function": $0] }]
+                                      "max_tokens": outputLimit,
+                                      "tools": tools.map { ["type": "function", "function": $0] } + (search ? [searchTool] : [])]
             if let provider = options.openRouterProvider {
                 body["provider"] = ["only": [provider], "allow_fallbacks": false]
             }
@@ -156,6 +182,17 @@ struct NativeAgentModel {
     private mutating func accept(_ response: [String: Any]) throws -> (String, [NativeAgentToolCall]) {
         var text = ""
         var calls: [NativeAgentToolCall] = []
+        var searches = 0, paused = false
+        pendingSearch = false
+        func cite(_ annotations: Any?) {
+            for annotation in annotations as? [[String: Any]] ?? [] where annotation["type"] as? String == "url_citation" {
+                // OpenAI puts url/title on the annotation; OpenRouter nests them.
+                let fields = annotation["url_citation"] as? [String: Any] ?? annotation
+                if let source = NativeAgentWebSearch.Source(title: fields["title"] as? String, url: fields["url"] as? String) {
+                    citedSources.append(source)
+                }
+            }
+        }
         switch options.openCodeProvider {
         case .openAI:
             guard response["status"] as? String == "completed", let output = response["output"] as? [[String: Any]] else {
@@ -165,23 +202,61 @@ struct NativeAgentModel {
             for item in output {
                 if item["type"] as? String == "function_call" {
                     calls.append(try call(id: item["call_id"], name: item["name"], arguments: item["arguments"]))
+                } else if item["type"] as? String == "web_search_call" {
+                    let action = item["action"] as? [String: Any]
+                    if action?["type"] as? String ?? "search" == "search" { searches += 1 }
+                    for source in action?["sources"] as? [[String: Any]] ?? [] {
+                        if let page = NativeAgentWebSearch.Source(title: source["title"] as? String, url: source["url"] as? String) {
+                            resultSources.append(page)
+                        }
+                    }
                 } else if item["type"] as? String == "message" {
                     for block in item["content"] as? [[String: Any]] ?? [] {
                         text += block["text"] as? String ?? block["refusal"] as? String ?? ""
+                        cite(block["annotations"])
                     }
                 }
             }
         case .anthropic:
+            // pause_turn: a server tool (search) stopped a long turn; the
+            // paused content is sent back as-is to let the model continue.
             guard let content = response["content"] as? [[String: Any]],
-                  ["end_turn", "tool_use"].contains(response["stop_reason"] as? String ?? "") else {
+                  ["end_turn", "tool_use", "pause_turn"].contains(response["stop_reason"] as? String ?? "") else {
                 throw NativeAgentError.message("The model did not finish its response. Try a shorter request.")
             }
+            paused = response["stop_reason"] as? String == "pause_turn"
+            // Server tool blocks (with encrypted_content) stay verbatim: the
+            // provider rejects a continuation that changes them.
             messages.append(["role": "assistant", "content": content])
+            var requested = Set<String>(), answered = Set<String>()
             for block in content {
-                if block["type"] as? String == "tool_use" {
+                switch block["type"] as? String {
+                case "tool_use":
                     calls.append(try call(id: block["id"], name: block["name"], arguments: block["input"]))
-                } else { text += block["text"] as? String ?? "" }
+                case "server_tool_use":
+                    if block["name"] as? String == "web_search" {
+                        searches += 1
+                        if let id = block["id"] as? String { requested.insert(id) }
+                    }
+                case "web_search_tool_result":
+                    if let id = block["tool_use_id"] as? String { answered.insert(id) }
+                    // An error result is an object, not a list: no pages.
+                    for result in block["content"] as? [[String: Any]] ?? [] {
+                        if let page = NativeAgentWebSearch.Source(title: result["title"] as? String, url: result["url"] as? String) {
+                            resultSources.append(page)
+                        }
+                    }
+                default:
+                    text += block["text"] as? String ?? ""
+                    for citation in block["citations"] as? [[String: Any]] ?? []
+                        where citation["type"] as? String == "web_search_result_location" {
+                        if let page = NativeAgentWebSearch.Source(title: citation["title"] as? String, url: citation["url"] as? String) {
+                            citedSources.append(page)
+                        }
+                    }
+                }
             }
+            pendingSearch = !requested.subtracting(answered).isEmpty
         case .openRouter:
             guard let choice = (response["choices"] as? [[String: Any]])?.first,
                   ["stop", "tool_calls"].contains(choice["finish_reason"] as? String ?? ""),
@@ -189,6 +264,11 @@ struct NativeAgentModel {
                 throw NativeAgentError.message("The model did not finish its response. Try a shorter request.")
             }
             text = message["content"] as? String ?? message["refusal"] as? String ?? ""
+            let annotations = (message["annotations"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "url_citation" }
+            cite(annotations)
+            // OpenRouter runs its server tool inside the request; citations
+            // are the evidence a search ran. The exact count is not reported.
+            if !annotations.isEmpty { searches = 1 }
             let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
             for item in rawCalls {
                 let function = item["function"] as? [String: Any] ?? [:]
@@ -215,7 +295,15 @@ struct NativeAgentModel {
             } else if let reasoning = message["reasoning"] as? String ?? message["reasoning_content"] as? String {
                 replay["reasoning"] = reasoning
             }
+            // The search results reach a continuation only through these.
+            if !annotations.isEmpty { replay["annotations"] = annotations }
             messages.append(replay)
+        }
+        searchesInLastResponse = searches
+        awaitingContinuation = calls.isEmpty && (paused || (builtInSearch && searches > 0))
+        if awaitingContinuation, !paused, options.openCodeProvider != .anthropic {
+            // A request may not end on the assistant's own message everywhere.
+            messages.append(["role": "user", "content": "Continue: complete the turn with finish_answer using the search results."])
         }
         guard calls.count <= 12, Set(calls.map(\.id)).count == calls.count else {
             throw NativeAgentError.message("The model requested too many tools or repeated a call ID.")

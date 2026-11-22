@@ -53,6 +53,9 @@ struct OpenCodeModelSpec: Equatable, Sendable {
     let reasoning: Bool
     let contextLimit: Int
     let outputLimit: Int
+    /// The catalog's statement of built-in web search support (Anthropic's
+    /// Models API); `nil` when the catalog does not say.
+    var webSearch: Bool? = nil
 }
 
 /// Per-turn agent overrides chosen in Settings. A `nil` field means "send no
@@ -73,6 +76,8 @@ struct AgentRunOptions: Equatable {
     var screenMCPCommand: [String]?
     /// OpenRouter endpoint tag the agent's model is pinned to; `nil` is Auto.
     var openRouterProvider: String?
+    /// Search with Tavily even when the model has built-in web search.
+    var preferTavilySearch: Bool
 
     init(model: String? = nil, effort: String? = nil, serviceTier: String? = nil,
          workingDirectory: URL? = nil, allowActions: Bool = true,
@@ -80,7 +85,8 @@ struct AgentRunOptions: Equatable {
          openCodeProvider: OpenCodeModelProvider = .openRouter,
          caseMCPCommand: [String]? = nil,
          screenMCPCommand: [String]? = nil,
-         openRouterProvider: String? = nil) {
+         openRouterProvider: String? = nil,
+         preferTavilySearch: Bool = false) {
         self.model = model
         self.effort = effort
         self.serviceTier = serviceTier
@@ -91,5 +97,6 @@ struct AgentRunOptions: Equatable {
         self.caseMCPCommand = caseMCPCommand
         self.screenMCPCommand = screenMCPCommand
         self.openRouterProvider = openRouterProvider
+        self.preferTavilySearch = preferTavilySearch
     }
 }

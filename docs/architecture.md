@@ -1181,8 +1181,8 @@ first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/
 OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
 Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
 fields), a progress rail with one segment per step (a passed step reached by
-Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 11"
-("NN / 12" with the search step), one step at
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10"
+("NN / 11" with the search step), one step at
 a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
 (On this Mac or API keys, two wire figures), Speech key, Language model key
 (optional), Web search for the Agent (Tavily, only after a Self-hosted language
@@ -1192,7 +1192,7 @@ OnboardingLanguageStage, OnboardingGlobe; only the speech route's languages;
 English, Portuguese and Spanish offer variants, stored beside the language in
 PrivacyPreferences.selectedLanguageVariant while providers keep the base code;
 outlines from scripts/onboarding_globe_data.py), Keyboard control, Microphone, Input Monitoring (only when the Drop
-shortcut needs it), Screen Recording (optional), Try Drop, Shortcuts, Toolbox,
+shortcut needs it), Screen Recording (optional), Try Drop, Toolbox,
 and the last step (Enjoy Whytap, with whytap.ai and Finish); a step whose result already holds is left out. A step whose
 action succeeds moves on by itself after its dwell (OnboardingDwellController;
 1.15 s on the key steps so the padlock opens first) with no chip or Continue;
@@ -1241,7 +1241,7 @@ the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again
 (OnboardingJourneyModel.recheckPermissions; not while macOS's own microphone
 dialog is open); reaching the step again starts at Allow. Screen Recording has
-Skip for now under Allow instead of the footer's Skip. The last four steps
+Skip for now under Allow instead of the footer's Skip. The last three steps
 (OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
 key as a wire key and once as keys in the real field's header ("Hold Space
 and speak"); the field says "Your text will appear here", a take that brought
@@ -1256,15 +1256,19 @@ ends on release, focus loss, a 30 s limit or leaving the step); while Drop recor
 lede becomes soft waves that follow the voice, with no island chip; a take that
 ends with nothing in the field gets one calm line ("No speech heard - try
 again.", the text went to another field, or Drop's delivery failure) and a new
-take clears it. Shortcuts lists Drop, the Agent and the tools with a shortcut
-under three wire keys; Toolbox puts the whole Toolbox catalog (every tool but
-Settings, as Settings → Toolbox lists it) on a tilted ring around a card that
-names the tool under the pointer with HoverToolRegistry's description, or says
-what Toolbox is when none is; the last step, "Enjoy Whytap.", has no summary:
-the constellation of the earlier figures, one Ask line that opens whytap.ai for
-questions (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
-Shortcuts, Toolbox and the last step have no timer: they wait for Continue or
-Finish (or Return), and their progress segment does not fill by time.
+take clears it. There is no Shortcuts step (REV 64). Toolbox puts the whole
+Toolbox catalog (every tool but Settings, as Settings → Toolbox lists it) on a
+tilted ring of 38 pt tiles that turns slowly like a carousel
+(OnboardingCarousel, one round in 70 s, per display frame; still under Reduce
+Motion) around a small card; a pointed or focused tile stops the turn, lights
+and is named on the card with HoverToolRegistry's description, and the turn
+goes on when the pointer leaves. The last step, "Enjoy Whytap.", has no
+summary: a stack of real questions for the Ask agent (OnboardingQuestionStack)
+turns over every few seconds and opens into a list of four under the pointer;
+a click opens whytap.ai/?q=<question>, which the page asks on load; then one
+Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
+Toolbox and the last step have no timer: they wait for Continue or Finish (or
+Return), and their progress segment does not fill by time.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
 does not link. System Audio Recording, Automation and Calendar are asked at

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// The wire figures of the last four steps (design pass screens 05 to 09), in
-// the key, padlock and globe family: keycaps with a crisp legend, the
-// closing constellation, and the line that turns into voice waves.
+// The wire figures of the last three steps (design pass screens 05 to 09), in
+// the key, padlock and globe family: keycaps with a crisp legend and the
+// line that turns into voice waves.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 
 /// The glyph drawn on a keycap's dish.
@@ -91,77 +91,19 @@ enum OnboardingFinaleFigures {
     ]
 
     static func legend(for shortcut: HotkeyShortcut) -> OnboardingKeycapLegend {
-        let marks = OnboardingShortcutRow(id: "", title: "", symbol: "", shortcut: shortcut).modifiers
-        if marks[2] > 0 { return .command }
-        if marks[0] > 0 { return .option }
-        if marks[1] > 0 { return .shift }
+        let text = shortcut.contents.map { content -> String in
+            switch content {
+            case .text(let value): return value
+            case .symbol(let name, _): return name
+            case .prefixedGlyph(let prefix, let glyph, _): return prefix + glyph
+            }
+        }.joined() + shortcut.title
+        func has(_ marks: [String]) -> Bool { marks.contains { text.localizedCaseInsensitiveContains($0) } }
+        if has(["⌘", "command"]) { return .command }
+        if has(["⌥", "option"]) { return .option }
+        if has(["⇧", "shift"]) { return .shift }
         return .none
     }
-
-    /// Shortcuts: ⌥, ⌘ and ⇧ side by side, the ⌘ forward.
-    static let cluster = [OnboardingKeycapFigure(.option, offsetX: -1.36, offsetZ: -0.18, scale: 0.88),
-                          OnboardingKeycapFigure(.shift, offsetX: 1.36, offsetZ: -0.18, scale: 0.88),
-                          OnboardingKeycapFigure(.command, offsetX: 0, offsetZ: 0.22, scale: 0.96)]
-
-    /// Finish: a key, the open padlock, a globe and the ⌘ key, the figures
-    /// of the steps before.
-    static let keyMotif: OnboardingWireSolid = {
-        var b = Builder(norm: 1, shift: 0)
-        let bow = (0..<8).map { i -> Int in
-            let a = Double(i) / 8 * 2 * .pi
-            return b.point(-0.46 + 0.34 * cos(a), 0.34 * sin(a), 0, dot: i % 2 == 0)
-        }
-        for i in 0..<8 { b.edge(bow[i], bow[(i + 1) % 8]) }
-        b.edge(b.point(-0.12, 0, 0), b.point(0.78, 0, 0, dot: true))
-        b.edge(b.point(0.46, 0, 0), b.point(0.46, 0.28, 0, dot: true))
-        b.edge(b.point(0.70, 0, 0), b.point(0.70, 0.22, 0, dot: true))
-        return b.solid
-    }()
-
-    static let padlockMotif: OnboardingWireSolid = {
-        var b = Builder(norm: 0.95, shift: -0.08)
-        let w = 0.46, top = -0.02, bottom = 0.66, z = 0.16
-        let corners: [(Double, Double)] = [(-w, top), (w, top), (w, bottom), (-w, bottom)]
-        let front = corners.map { b.point($0.0, $0.1, z, dot: true) }
-        let back = corners.map { b.point($0.0, $0.1, -z) }
-        for i in 0..<4 {
-            b.edge(front[i], front[(i + 1) % 4]); b.edge(back[i], back[(i + 1) % 4]); b.edge(front[i], back[i])
-        }
-        let shackle = (0...8).map { s -> Int in
-            let a = Double.pi * Double(s) / 8
-            return b.point(-0.26 * cos(a), -0.28 - 0.34 * sin(a), 0, dot: s == 8)
-        }
-        for s in 0..<8 { b.edge(shackle[s], shackle[s + 1]) }
-        // One leg in the body, the other raised: open.
-        b.edge(b.point(-0.26, top, 0), shackle[0])
-        return b.solid
-    }()
-
-    static let globeMotif: OnboardingWireSolid = {
-        var b = Builder(norm: 1, shift: 0)
-        let segments = 14, r = 0.72
-        for (index, lat) in [-0.45, 0, 0.45].enumerated() {
-            let rl = sqrt(max(0, r * r - lat * lat))
-            let ring = (0..<segments).map { i -> Int in
-                let a = Double(i) / Double(segments) * 2 * .pi
-                return b.point(rl * cos(a), lat, rl * sin(a), dot: index == 1 && i % 4 == 0)
-            }
-            for i in 0..<segments { b.edge(ring[i], ring[(i + 1) % segments]) }
-        }
-        for m in 0..<3 {
-            let p = Double(m) / 3 * .pi
-            let ring = (0..<segments).map { i -> Int in
-                let a = Double(i) / Double(segments) * 2 * .pi
-                return b.point(r * sin(a) * cos(p), r * cos(a), r * sin(a) * sin(p))
-            }
-            for i in 0..<segments { b.edge(ring[i], ring[(i + 1) % segments]) }
-        }
-        _ = b.point(0, -r, 0, dot: true)
-        _ = b.point(0, r, 0, dot: true)
-        return b.solid
-    }()
-
-    static let commandMotif = OnboardingKeycapFigure(.command, scale: 1.08)
 }
 
 /// The thin line under Try Drop's lede: straight at rest, soft coloured waves

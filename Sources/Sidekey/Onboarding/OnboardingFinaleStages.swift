@@ -1,11 +1,10 @@
 import AppKit
 import SwiftUI
 
-// The last four steps after the design pass's screens 05 to 09 (approved
-// 2026-11-22; whytap.ai and Finish became one step in REV 61): Try Drop,
-// Shortcuts, Toolbox and Enjoy Whytap, in the
-// wire language of the steps before, with the person's own shortcuts and
-// tools. No island chip while Drop listens: the line under Try Drop's lede
+// The last three steps after the design pass's screens 05 to 09 (approved
+// 2026-11-22; whytap.ai and Finish became one step in REV 61, Shortcuts was
+// removed in REV 64): Try Drop, Toolbox and Enjoy Whytap, in the wire
+// language of the steps before, with the person's own shortcut and tools. No island chip while Drop listens: the line under Try Drop's lede
 // turns into soft waves that follow the voice and settles when it stops. No
 // summary table at the end.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -222,138 +221,14 @@ struct OnboardingTryDropStage: View {
     }
 }
 
-// MARK: - Shortcuts
-
-/// One shortcut row: what it opens and the person's own keys.
-struct OnboardingShortcutRow: Identifiable, Equatable {
-    let id: String
-    let title: String
-    let symbol: String
-    let shortcut: HotkeyShortcut
-    var note: String?
-
-    /// Drop, the Agent and the tools with a shortcut, up to six, from the
-    /// person's own configuration.
-    static func rows(_ configuration: HotkeyConfiguration, agentEnabled: Bool) -> [OnboardingShortcutRow] {
-        var rows = [OnboardingShortcutRow(id: "drop", title: "Drop", symbol: "mic", shortcut: configuration.dropVoiceShortcut),
-                    OnboardingShortcutRow(id: "agent", title: "Agent", symbol: "sparkle", shortcut: configuration.agentTextShortcut,
-                                          note: agentEnabled ? nil : "Off")]
-        let order: [HoverTool] = [.screenshot, .translate, .clipboard, .notes, .caseVault, .tasks, .subtitles, .meetingRecord,
-                                  .notifs, .monitor]
-        for tool in order where rows.count < 6 {
-            guard let shortcut = configuration.toolShortcuts[tool] else { continue }
-            let info = HoverToolRegistry.info(for: tool)
-            rows.append(OnboardingShortcutRow(id: tool.rawValue, title: info.title, symbol: info.sfSymbol, shortcut: shortcut))
-        }
-        return rows
-    }
-
-    /// Which of ⌥, ⇧ and ⌘ the shortcut holds (the keys over the list).
-    var modifiers: [Double] {
-        let text = shortcut.contents.map { content -> String in
-            switch content {
-            case .text(let value): return value
-            case .symbol(let name, _): return name
-            case .prefixedGlyph(let prefix, let glyph, _): return prefix + glyph
-            }
-        }.joined() + shortcut.title
-        func has(_ marks: [String]) -> Double { marks.contains { text.localizedCaseInsensitiveContains($0) } ? 1 : 0 }
-        return [has(["⌥", "option"]), has(["⇧", "shift"]), has(["⌘", "command"])]
-    }
-}
-
-/// Shortcuts: three wire keys over the person's shortcuts in two columns;
-/// the keys a row uses go down while the pointer is on it.
-struct OnboardingShortcutsStage: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    let configuration: HotkeyConfiguration
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var motion = OnboardingFinaleMotion()
-    @State private var hovered: String?
-
-    private var rows: [OnboardingShortcutRow] {
-        OnboardingShortcutRow.rows(configuration, agentEnabled: model.agentEnabled())
-    }
-
-    var body: some View {
-        let rows = self.rows
-        let goals = rows.first { $0.id == hovered }?.modifiers ?? [0, 0, 0]
-        VStack(spacing: 0) {
-            OnboardingWireTitle(title: "Every tool has a shortcut.",
-                                lede: "These are yours now. Change them in Settings → Hotkeys.")
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion, keys: goals)
-                    let sway = motion.sway(reduceMotion)
-                    let still = motion.still(reduceMotion)
-                    let center = CGPoint(x: size.width / 2, y: size.height / 2 + (still ? 0 : sin(motion.clock * 0.72) * 1.3))
-                    let angles = (ax: -0.52 + sway.x, ay: -0.34 + sway.y, az: 0.02)
-                    for (index, key) in OnboardingFinaleFigures.cluster.enumerated() {
-                        let press = motion.keys[index].value
-                        key.draw(in: &context, center: center, radius: 24, angles: angles, worldZ: motion.stage.value,
-                                 press: press, fade: motion.fade * (index == 2 ? 1 : 0.94), tint: OnboardingWireframeInk.rose,
-                                 strength: (index == 2 ? 0.68 : 0.58) + 0.36 * press, clock: motion.clock)
-                    }
-                }
-            }
-            .frame(height: 64)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 8) {
-                ForEach(rows) { row in
-                    rowView(row)
-                }
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 4)
-            OnboardingWirePill("Continue", isDefault: true, action: model.next)
-                .padding(.top, 14)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func rowView(_ row: OnboardingShortcutRow) -> some View {
-        let lit = hovered == row.id
-        return HStack(spacing: 10) {
-            Image(systemName: row.symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(OnboardingTheme.ink2)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.black.opacity(0.35)))
-            Text(row.title)
-                .font(OnboardingTheme.sans(14, weight: .semibold))
-                .foregroundColor(row.note == nil ? OnboardingTheme.ink : OnboardingTheme.muted)
-                .lineLimit(1)
-            if let note = row.note {
-                Text(note.uppercased())
-                    .font(OnboardingTheme.mono(9, weight: .semibold))
-                    .foregroundColor(OnboardingTheme.faint)
-            }
-            Spacer(minLength: 4)
-            OnboardingKeycaps(contents: row.shortcut.contents, held: lit).fixedSize()
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 40)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.white.opacity(lit ? 0.07 : 0.035)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Color.white.opacity(lit ? 0.16 : 0.08), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onHover { inside in
-            if inside { hovered = row.id } else if hovered == row.id { hovered = nil }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.title): \(row.shortcut.title)\(row.note.map { ", \($0)" } ?? "")")
-    }
-}
-
 // MARK: - Toolbox
 
 /// Toolbox: every tool of the Toolbox catalog on a ring, a circle tilted
-/// toward the person (the near tiles a little larger), and a card in its
-/// middle. The card names Toolbox and the tool under the pointer (or keyboard
-/// focus) with its short description; with none, a line about Toolbox.
+/// toward the person (the near tiles a little larger) that turns slowly like
+/// a carousel, and a small card in its middle. Pointing at a tile (or the
+/// keyboard focus) stops the turn, lights the tile and names it on the card
+/// with its short description; with none, the card says what Toolbox is and
+/// the ring turns on.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingToolboxStage: View {
     @ObservedObject var model: OnboardingJourneyModel
@@ -361,9 +236,9 @@ struct OnboardingToolboxStage: View {
     var shownTool: HoverTool?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var motion = OnboardingFinaleMotion()
+    @State private var carousel = OnboardingCarousel()
     @State private var shown = false
     @State private var hovered: HoverTool?
-    @State private var picked: HoverTool?
     @FocusState private var focused: HoverTool?
 
     init(model: OnboardingJourneyModel, shownTool: HoverTool? = nil) {
@@ -375,8 +250,8 @@ struct OnboardingToolboxStage: View {
     /// but Settings (always on the island), tools not out yet included.
     static var tools: [HoverTool] { HoverTool.allCases.filter { $0 != .settings } }
 
-    /// What the card says: the tool's title and short description, or `nil`
-    /// for the line about Toolbox.
+    /// What the card says: the tool's title and short description, or the
+    /// line about Toolbox.
     static func card(for tool: HoverTool?) -> (title: String, text: String) {
         guard let tool else {
             return ("Your quick tools", "Point at one to see what it does.")
@@ -386,9 +261,11 @@ struct OnboardingToolboxStage: View {
         return (info.title, info.description)
     }
 
-    static let tile: CGFloat = 30
+    static let tile: CGFloat = 38
+    /// The card in the middle: small, so the tiles carry the ring.
+    static let cardSize = CGSize(width: 176, height: 76)
 
-    private var selected: HoverTool? { hovered ?? focused ?? picked ?? shownTool }
+    private var selected: HoverTool? { hovered ?? focused ?? shownTool }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -404,12 +281,10 @@ struct OnboardingToolboxStage: View {
         .onAppear { shown = true }
     }
 
-    /// Radii of the ring in this area: the window is wide and low, so the
-    /// circle is seen tilted, about twice as wide as it is tall.
-    private static func radii(_ size: CGSize) -> (x: CGFloat, y: CGFloat) {
-        let y = max(40, size.height / 2 - tile * 0.55 - 1)
-        let x = min(size.width / 2 - tile / 2 - 22, y * 2.2)
-        return (x, y)
+    /// Radii of the ring in this area: as wide as the window allows and as
+    /// tall as the area, so the circle is seen tilted.
+    static func radii(_ size: CGSize) -> (x: CGFloat, y: CGFloat) {
+        (max(60, size.width / 2 - tile / 2 - 10), max(40, size.height / 2 - tile / 2 - 2))
     }
 
     /// The tilt: tiles on the near (lower) half of the ring a little larger.
@@ -417,9 +292,10 @@ struct OnboardingToolboxStage: View {
         0.9 + 0.1 * (spot.y - size.height / 2) / max(1, radii(size).y)
     }
 
-    /// The tiles' places, the first at the top, at equal steps along the
-    /// ring (equal angles would crowd its narrow ends).
-    static func spots(_ count: Int, in size: CGSize, spread: CGFloat = 1) -> [CGPoint] {
+    /// The tiles' places at equal steps along the ring (equal angles would
+    /// crowd its narrow ends), the first at the top when `turn` is 0; `turn`
+    /// (0 to 1, one full round) moves every tile along the ring.
+    static func spots(_ count: Int, in size: CGSize, spread: CGFloat = 1, turn: Double = 0) -> [CGPoint] {
         guard count > 0 else { return [] }
         let r = radii(size)
         let samples = 720
@@ -433,34 +309,41 @@ struct OnboardingToolboxStage: View {
             lengths.append(lengths[i - 1] + hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y))
         }
         let total = lengths[samples]
-        var spots: [CGPoint] = []
-        var j = 0
-        for index in 0..<count {
-            let goal = total * CGFloat(index) / CGFloat(count)
-            while j < samples, lengths[j + 1] < goal { j += 1 }
-            let part = (goal - lengths[j]) / max(0.0001, lengths[j + 1] - lengths[j])
-            spots.append(CGPoint(x: points[j].x + (points[j + 1].x - points[j].x) * part,
-                                 y: points[j].y + (points[j + 1].y - points[j].y) * part))
+        let offset = turn - floor(turn)
+        return (0..<count).map { index in
+            var fraction = Double(index) / Double(count) + offset
+            fraction -= floor(fraction)
+            let goal = total * CGFloat(fraction)
+            var low = 0, high = samples
+            while high - low > 1 {
+                let mid = (low + high) / 2
+                if lengths[mid] < goal { low = mid } else { high = mid }
+            }
+            let part = (goal - lengths[low]) / max(0.0001, lengths[high] - lengths[low])
+            return CGPoint(x: points[low].x + (points[high].x - points[low].x) * part,
+                           y: points[low].y + (points[high].y - points[low].y) * part)
         }
-        return spots
     }
 
     private var ring: some View {
         let tools = Self.tools
         let selected = self.selected
+        // A pointed (or focused) tile stops the carousel; it goes on when the
+        // pointer leaves. Offscreen renders and Reduce Motion stand still.
+        let paused = hovered != nil || focused != nil || shownTool != nil
         return GeometryReader { proxy in
             let size = proxy.size
-            let r = Self.radii(size)
-            // The card fills the middle and stays clear of the tiles.
-            let card = CGSize(width: max(150, r.x * 1.25), height: max(64, r.y * 2 - Self.tile * 2.2))
+            let card = Self.cardSize
             TimelineView(.animation) { timeline in
-                let _ = motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion,
-                                       fan: shown || shownTool != nil ? 1 : 0)
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                let _ = motion.advance(to: time, reduceMotion: reduceMotion, fan: shown || shownTool != nil ? 1 : 0)
+                let turn = carousel.advance(to: time, paused: paused, still: motion.still(reduceMotion))
                 let spread = 0.55 + 0.45 * max(0, min(1.04, motion.fan.value))
                 let fade = max(0, min(1, motion.fan.value))
-                let spots = Self.spots(tools.count, in: size, spread: spread)
+                let spots = Self.spots(tools.count, in: size, spread: spread, turn: turn)
                 ZStack(alignment: .topLeading) {
                     Canvas { context, size in
+                        let r = Self.radii(size)
                         let center = CGPoint(x: size.width / 2, y: size.height / 2)
                         let oval = CGRect(x: center.x - r.x * spread, y: center.y - r.y * spread,
                                           width: r.x * spread * 2, height: r.y * spread * 2)
@@ -472,8 +355,9 @@ struct OnboardingToolboxStage: View {
                         let dx = tip.x - center.x, dy = tip.y - center.y
                         let along = 0.5 / max(abs(dx) / card.width, abs(dy) / card.height, 0.001)
                         let from = CGPoint(x: center.x + dx * along, y: center.y + dy * along)
-                        let to = CGPoint(x: tip.x - dx / hypot(dx, dy) * (Self.tile / 2 + 3),
-                                         y: tip.y - dy / hypot(dx, dy) * (Self.tile / 2 + 3))
+                        let length = max(1, hypot(dx, dy))
+                        let to = CGPoint(x: tip.x - dx / length * (Self.tile / 2 + 3),
+                                         y: tip.y - dy / length * (Self.tile / 2 + 3))
                         context.stroke(Path { $0.move(to: from); $0.addLine(to: to) },
                                        with: .color(OnboardingWireframeInk.roseColor.opacity(0.55 * fade)), lineWidth: 1)
                         context.fill(Path(ellipseIn: CGRect(x: from.x - 1.8, y: from.y - 1.8, width: 3.6, height: 3.6)),
@@ -499,27 +383,28 @@ struct OnboardingToolboxStage: View {
 
     private func card(_ tool: HoverTool?) -> some View {
         let text = Self.card(for: tool)
-        return VStack(spacing: 5) {
+        return VStack(spacing: 3) {
             Text("TOOLBOX")
-                .font(OnboardingTheme.mono(10, weight: .medium))
-                .tracking(1.6)
+                .font(OnboardingTheme.mono(9, weight: .medium))
+                .tracking(1.4)
                 .foregroundColor(tool == nil ? OnboardingTheme.muted : OnboardingWireframeInk.roseColor)
             Text(text.title)
-                .font(OnboardingTheme.sans(15, weight: .semibold))
+                .font(OnboardingTheme.sans(13.5, weight: .semibold))
                 .foregroundColor(OnboardingTheme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Text(text.text)
-                .font(OnboardingTheme.sans(12))
+                .font(OnboardingTheme.sans(11))
                 .foregroundColor(OnboardingTheme.muted)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .minimumScaleFactor(0.9)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(red: 0.106, green: 0.106, blue: 0.122)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color(red: 0.106, green: 0.106, blue: 0.122)))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
             .strokeBorder(tool == nil ? Color.white.opacity(0.10) : OnboardingWireframeInk.roseColor.opacity(0.32), lineWidth: 1))
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
@@ -528,19 +413,19 @@ struct OnboardingToolboxStage: View {
     private func tile(_ tool: HoverTool, lit: Bool) -> some View {
         let info = HoverToolRegistry.info(for: tool)
         let soon = tool.isComingSoon
-        return Button { picked = tool } label: {
+        return Button {} label: {
             Image(systemName: info.sfSymbol)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundColor(lit ? OnboardingTheme.ink : OnboardingTheme.ink2.opacity(soon ? 0.5 : 0.9))
                 .frame(width: Self.tile, height: Self.tile)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .fill(lit ? Color(red: 0.19, green: 0.15, blue: 0.17) : Color(red: 0.13, green: 0.13, blue: 0.15)))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .strokeBorder(lit ? OnboardingWireframeInk.roseColor.opacity(0.8) : Color.white.opacity(soon ? 0.07 : 0.12),
                                   lineWidth: lit ? 1.3 : 1))
-                .scaleEffect(lit ? 1.14 : 1)
+                .scaleEffect(lit ? 1.1 : 1)
                 .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.7), value: lit)
-                .contentShape(RoundedRectangle(cornerRadius: 10))
+                .contentShape(RoundedRectangle(cornerRadius: 11))
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -553,73 +438,164 @@ struct OnboardingToolboxStage: View {
     }
 }
 
+/// The Toolbox ring's slow turn, stepped per display frame: one round in
+/// `period` seconds, held while a tile is pointed at and still under Reduce
+/// Motion or in offscreen renders.
+final class OnboardingCarousel {
+    var period: TimeInterval = 70
+    private(set) var turn = 0.0
+    private var last: TimeInterval?
+
+    func advance(to time: TimeInterval, paused: Bool, still: Bool) -> Double {
+        let dt = min(0.05, last.map { max(0, time - $0) } ?? 0)
+        last = time
+        if !paused, !still { turn = (turn + dt / period).truncatingRemainder(dividingBy: 1) }
+        return turn
+    }
+}
+
 // MARK: - Finish
 
-/// The last step: "Enjoy Whytap.", the figures of the steps before turning
-/// slowly on one ring, one line that sends questions to the agent on
-/// whytap.ai, and Finish. It took the place of a separate whytap.ai page.
+/// The last step: "Enjoy Whytap.", a stack of questions worth asking the
+/// agent on whytap.ai that turns over by itself and opens into a list under
+/// the pointer, the one Ask line, and Finish. It took the place of a separate
+/// whytap.ai page; the stack took the place of a constellation of figures.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingFinishStage: View {
     @ObservedObject var model: OnboardingJourneyModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Offscreen renders show the stack opened.
+    var shownOpen = false
     @Environment(\.openURL) private var openURL
-    @State private var motion = OnboardingFinaleMotion()
 
     static let site = URL(string: "https://whytap.ai")!
 
     var body: some View {
         VStack(spacing: 0) {
             OnboardingWireTitle(title: "Enjoy Whytap.", lede: "We hope you’ll love having it on your Mac.")
-            constellation.frame(height: 136).padding(.top, 4)
+            OnboardingQuestionStack(shownOpen: shownOpen) { openURL(OnboardingQuestionStack.link(for: $0)) }
+                .frame(height: 150)
+                .padding(.top, 8)
             OnboardingAskLine { openURL(Self.site) }
-                .padding(.top, 6)
+                .padding(.top, 8)
             OnboardingWirePill("Finish", disc: .finish, isDefault: true, action: model.finish)
-                .padding(.top, 18)
+                .padding(.top, 16)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
     }
+}
 
-    private var constellation: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion)
-                let still = motion.still(reduceMotion)
-                let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let rx = 128.0, ry = 27.0
-                context.stroke(Path(ellipseIn: CGRect(x: center.x - rx, y: center.y - ry, width: rx * 2, height: ry * 2)),
-                               with: .color(OnboardingWireframeInk.wireColor.opacity(0.15 * motion.fade)), lineWidth: 0.9)
-                let turn = still ? 0.36 : motion.clock * 0.32
-                let sway = motion.sway(reduceMotion)
-                let items = (0..<4).map { index in (index, turn + Double(index) / 4 * 2 * .pi) }.sorted { sin($0.1) < sin($1.1) }
-                for (index, angle) in items {
-                    let depth = sin(angle)
-                    let point = CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * depth)
-                    let radius = 21.5 + depth * 3.8
-                    let spin = still ? -0.38 : -0.35 + sin(motion.clock * 0.6 + Double(index)) * 0.25
-                    let angles = (ax: -0.30 + sway.x, ay: spin + sway.y, az: 0.05)
-                    let tint = index % 2 == 0 ? OnboardingWireframeInk.green : OnboardingWireframeInk.rose
-                    let fade = motion.fade * (0.64 + 0.36 * (depth + 1) / 2)
-                    let worldZ = motion.stage.value + depth * 0.28
-                    let style = OnboardingWireStrokes.style(fade: fade, tint: tint, strength: 0.9, clock: motion.clock)
-                    switch index {
-                    case 0: OnboardingFinaleFigures.keyMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
-                                                                  angles: angles, style: style)
-                    case 1: OnboardingFinaleFigures.padlockMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
-                                                                      angles: angles, style: style)
-                    case 2: OnboardingFinaleFigures.globeMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
-                                                                    angles: angles, style: style)
-                    default:
-                        let key = OnboardingFinaleFigures.commandMotif
-                        key.cap.draw(in: &context, center: point, worldZ: worldZ, radius: radius, angles: angles, style: style)
-                        OnboardingWireStrokes.draw(key.legend, in: &context, center: point, radius: radius, worldZ: worldZ,
-                                                   angles: angles, fade: fade, tint: tint, width: 1.05)
-                    }
+/// Questions a new person can ask the agent on whytap.ai, as cards in a
+/// stack: the front card turns over to the next every few seconds; under the
+/// pointer the stack opens into a list of four; a click asks that question on
+/// whytap.ai (`?q=` asks it as the page opens).
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+struct OnboardingQuestionStack: View {
+    /// Real questions the Ask agent answers (its eval pool), short enough for
+    /// one line.
+    static let questions = [
+        "Which models should I pick in API & Models to start?",
+        "Can I tap to start dictation and tap again to stop?",
+        "Can Whytap turn Russian speech into English text?",
+        "Can I teach Whytap custom words and names?",
+        "How do I let Claude Code use my Case keys safely?",
+        "Can I run Whytap fully local with Ollama?",
+        "How do I split my meeting transcript by speaker?",
+        "How do I pick which microphone Whytap uses?",
+    ]
+
+    /// whytap.ai with the question in the link; the page asks it on load.
+    static func link(for question: String) -> URL {
+        var parts = URLComponents(string: "https://whytap.ai/")!
+        parts.queryItems = [URLQueryItem(name: "q", value: question)]
+        return parts.url!
+    }
+
+    /// The `count` questions shown from `front` on, wrapping around.
+    static func shown(from front: Int, count: Int) -> [String] {
+        (0..<count).map { questions[(front + $0) % questions.count] }
+    }
+
+    var shownOpen = false
+    let ask: (String) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var front = 0
+    @State private var hovered = false
+    @FocusState private var focused: Int?
+
+    private static let rows = 4
+    private static let rowHeight: CGFloat = 30
+    private static let width: CGFloat = 404
+
+    private var open: Bool { shownOpen || hovered || focused != nil }
+
+    var body: some View {
+        let open = self.open
+        let count = Self.questions.count
+        ZStack {
+            // Every card keeps its identity: turning over sends the front card
+            // to the back and moves the others forward.
+            ForEach(0..<count, id: \.self) { index in
+                let depth = (index - front + count) % count
+                let visible = open ? depth < Self.rows : depth < 3
+                card(Self.questions[index], index: index, depth: depth, open: open)
+                    .offset(y: open ? (CGFloat(min(depth, Self.rows)) - CGFloat(Self.rows - 1) / 2) * (Self.rowHeight + 6)
+                                    : -CGFloat(min(depth, 3)) * 7 + 7)
+                    .scaleEffect(open ? 1 : 1 - CGFloat(min(depth, 3)) * 0.05)
+                    .opacity(visible ? (open ? 1 : 1 - Double(depth) * 0.3) : 0)
+                    .zIndex(Double(count - depth))
+            }
+        }
+        .frame(width: Self.width, height: 150)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.82), value: open)
+        .task {
+            // The front card turns over while the stack is closed.
+            guard !shownOpen else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_400_000_000)
+                guard !Task.isCancelled, !open else { continue }
+                if reduceMotion { front = (front + 1) % Self.questions.count } else {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { front = (front + 1) % Self.questions.count }
                 }
             }
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }
+
+    private func card(_ question: String, index: Int, depth: Int, open: Bool) -> some View {
+        let lit = (open && depth < Self.rows) || depth == 0
+        return Button { ask(question) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(OnboardingWireframeInk.roseColor.opacity(lit ? 0.9 : 0))
+                Text(question)
+                    .font(OnboardingTheme.sans(12.5))
+                    .foregroundColor(OnboardingTheme.ink.opacity(lit ? 0.92 : 0))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 6)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundColor(OnboardingTheme.muted.opacity(lit ? 1 : 0))
+            }
+            .padding(.horizontal, 14)
+            .frame(width: Self.width, height: Self.rowHeight)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(red: 0.12, green: 0.12, blue: 0.135)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(focused == index ? OnboardingTheme.accent : Color.white.opacity(0.10),
+                              lineWidth: focused == index ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .focused($focused, equals: index)
+        .allowsHitTesting(depth == 0 || (open && depth < Self.rows))
+        .disabled(!(depth == 0 || (open && depth < Self.rows)))
+        .accessibilityLabel("Ask on whytap.ai: \(question)")
+        .accessibilityHidden(!(depth == 0 || (open && depth < Self.rows)))
     }
 }
 

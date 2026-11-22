@@ -2,7 +2,7 @@
 id: onboarding-journey-2026-11-22
 type: decision
 title: The first-launch onboarding becomes a small window of single steps that move on by themselves
-summary: The five-page onboarding is replaced by one small window with a progress bar and up to thirteen single-purpose steps (speech source, speech key, optional language model, web search only after a self-hosted model, language, one screen per permission, Try Drop, shortcuts, Toolbox, and a closing step that points questions to whytap.ai); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
+summary: The five-page onboarding is replaced by one small window with a progress bar and up to twelve single-purpose steps (speech source, speech key, optional language model, web search only after a self-hosted model, language, one screen per permission, Try Drop, Toolbox, and a closing step that points questions to whytap.ai); a step whose action succeeds moves on after a short beat, steps done before the window opened are left out, Back keeps everything, and speech and the language model are set through the shared Speech and LLM rows.
 status: confirmed
 tags: [onboarding, first-launch, permissions, models, routing]
 canonical_for: [onboarding-journey]
@@ -61,7 +61,7 @@ window, Back and a progress bar.
 ## Decision
 
 - **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
-  progress rail and "NN / 11" on top ("NN / 12" with the search step); the act, a serif title and one line
+  progress rail and "NN / 10" on top ("NN / 11" with the search step); the act, a serif title and one line
   under it; the step's stage; a footer with Skip or Set up later on the left
   and Next on the right only when nothing moves on by itself. Back also answers ← and ⌘[ outside text
   fields. The visual and motion come from the design pass (dark raised
@@ -88,8 +88,8 @@ window, Back and a progress bar.
   8. Input Monitoring, only when the Drop shortcut reports it needs it.
   9. Screen Recording (optional).
   10. Try Drop (only when speech is on the way).
-  11. Shortcuts. 12. Toolbox. 13. Enjoy Whytap: questions to whytap.ai,
-  Finish (REV 61; it was two steps, Help and Thank you).
+  11. Toolbox. 12. Enjoy Whytap: questions to whytap.ai, Finish (REV 61;
+  it was two steps, Help and Thank you). Shortcuts was removed in REV 64.
 - **Moving on by itself, with no chip.** When a shown step's action
   succeeds (a key accepted and applied, a permission turning granted, a
   dictation inserted, a language picked, a source chosen) its segment fills
@@ -478,6 +478,30 @@ window, Back and a progress bar.
   to Allow again; and Shortcuts and Toolbox lost their footer "Open
   Hotkeys" and "Open Toolbox" buttons, since each lede already names its
   Settings tab.
+- **No Shortcuts step; Toolbox turns; the last step shows questions.** The
+  owner, REV 64, on the Shortcuts screen: "we'll remove this screen"; Try
+  Drop now leads straight to Toolbox and the rail has one segment fewer
+  ("NN / 10", "NN / 11" with the search step). REV 65, on the Toolbox ring:
+  "make the centre smaller, the icon frames bigger, and a carousel that
+  turns". The card is 176 by 76 pt with compact text, the tiles 38 pt
+  (were 30), the ring as wide as the window allows, and it turns one round
+  in 70 s, stepped per display frame (OnboardingCarousel); pointing at or
+  focusing a tile stops it, lights the tile and names it on the card, and
+  leaving lets it turn on; Reduce Motion and offscreen renders stand still.
+  Tests turn the ring through a full tile step at two area heights: tiles
+  never touch, never cover the card and never leave the area. REV 66, on
+  the last screen: use the middle for a carousel of questions worth asking
+  on the landing, a stack that shows example requests on hover. The
+  constellation is gone; OnboardingQuestionStack holds eight real questions
+  from the Ask agent's eval pool (models to start with, tap instead of
+  hold, Russian dictation into English, custom words, Case with Claude
+  Code, fully local with Ollama, meeting speakers, the microphone), one
+  line each (at most 52 characters); the front card turns over to the next every 3.4 s while
+  closed, the pointer (or focus) opens the stack into a list of four, and a
+  click opens whytap.ai/?q=<question>: the landing's Ask page reads `q`
+  and asks it once its scripts are in (site/ask/ask.js in the landing
+  repository; /ask/ keeps `?q=` too, and Ask caps a question at 300
+  characters). The Ask capsule and Finish stay.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -576,6 +600,18 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 64 to 66: the flow goes Try Drop, Toolbox, Enjoy Whytap with ten
+  segments by default; Try Drop's key keeps the Drop key's legend; the
+  Toolbox ring keeps every tile clear of the others, the card and the area
+  edges over a full tile step of its turn, and the carousel turns, holds
+  while pointed at, goes on, wraps and stands still under Reduce Motion;
+  the question stack has eight distinct one-line questions and each opens
+  whytap.ai with it as `q`; end to end, a real window with Try Drop on
+  screen gets Space through NSApp.sendEvent while the field holds the
+  keyboard, records instead of typing, and drops the text into the field
+  on release, and stops listening once the step is gone; offscreen renders
+  of Toolbox idle and lit, and of the last step closed and open.
 
 - REV 62 and 63: Try Drop's field says "Your text will appear here" and a
   failed take's line inside the field; the preview's Drop holds Space in

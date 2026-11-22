@@ -26,8 +26,6 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     case screenRecording
     /// Hold the Drop shortcut and dictate into a real field.
     case tryDrop
-    /// What the shortcuts do.
-    case hotkeys
     /// The tools hovering the island shows.
     case toolbox
     /// Enjoy Whytap; questions go to the agent on whytap.ai; Finish.
@@ -48,7 +46,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .source, .speechKey, .llmKey, .search, .language: return .engine
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return .access
         case .tryDrop: return .tryDrop
-        case .hotkeys, .toolbox, .thanks: return .island
+        case .toolbox, .thanks: return .island
         }
     }
 
@@ -65,14 +63,13 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .inputMonitoring: return "Keyboard access"
         case .screenRecording: return "Screen"
         case .tryDrop: return "Try Drop"
-        case .hotkeys: return "Shortcuts"
         case .toolbox: return "Toolbox"
         case .thanks: return "Finish"
         }
     }
 
     /// How long a success stays on screen before the next step (the dwell),
-    /// or `nil` for a step without an action: Shortcuts, Toolbox and the last
+    /// or `nil` for a step without an action: Toolbox and the last
     /// step wait for Continue or Finish (or Return) and never move on by time.
     var dwell: TimeInterval? {
         switch self {
@@ -86,7 +83,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return 1.05
         case .tryDrop: return 1.35
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-        case .hotkeys, .toolbox, .thanks: return nil
+        case .toolbox, .thanks: return nil
         }
     }
 
@@ -94,7 +91,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     /// Return), never after a pause or a success.
     var isInformational: Bool {
         switch self {
-        case .hotkeys, .toolbox, .thanks: return true
+        case .toolbox, .thanks: return true
         default: return false
         }
     }
@@ -179,7 +176,7 @@ enum OnboardingJourney {
             return !start.screenRecordingGranted
         case .tryDrop:
             return start.speechReady || progress.speechExpected
-        case .hotkeys, .toolbox, .thanks:
+        case .toolbox, .thanks:
             return true
         }
     }
@@ -274,7 +271,7 @@ extension OnboardingJourney {
         case .keyboard: return start.keyboardGranted
         case .microphone: return start.microphoneGranted
         case .screenRecording: return start.screenRecordingGranted
-        case .inputMonitoring, .tryDrop, .hotkeys, .toolbox, .thanks: return false
+        case .inputMonitoring, .tryDrop, .toolbox, .thanks: return false
         }
     }
 }

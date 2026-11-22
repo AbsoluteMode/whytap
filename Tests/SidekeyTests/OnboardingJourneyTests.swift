@@ -14,7 +14,7 @@ final class OnboardingJourneyTests: XCTestCase {
 
     func testACleanMacBeforeAnyChoiceSeesEveryStepButTheConditionalOnes() {
         XCTAssertEqual(steps(), [.source, .speechKey, .llmKey, .language, .keyboard, .microphone,
-                                 .screenRecording, .hotkeys, .toolbox, .thanks])
+                                 .screenRecording, .toolbox, .thanks])
     }
 
     func testOnThisMacSkipsTheSpeechKeyAndBringsTryDrop() {
@@ -64,7 +64,7 @@ final class OnboardingJourneyTests: XCTestCase {
     func testEverythingDoneBeforeShowsOnlyTheTour() {
         let done = OnboardingStart(speechReady: true, llmReady: true, searchReady: true, languageChosen: true,
                                    keyboardGranted: true, microphoneGranted: true, screenRecordingGranted: true)
-        XCTAssertEqual(steps(done), [.tryDrop, .hotkeys, .toolbox, .thanks])
+        XCTAssertEqual(steps(done), [.tryDrop, .toolbox, .thanks])
     }
 
     func testTryDropNeedsSpeechOnTheWay() {
@@ -112,7 +112,7 @@ final class OnboardingJourneyTests: XCTestCase {
         let segments = OnboardingJourney.segments(start: start, progress: progress, current: .language,
                                                   done: [.source])
         func state(_ step: OnboardingStep) -> OnboardingSegmentState? { segments.first { $0.step == step }?.state }
-        XCTAssertEqual(segments.count, 11, "Input Monitoring and search are not segments unless needed; whytap.ai is part of the last step")
+        XCTAssertEqual(segments.count, 10, "Input Monitoring and search are not segments unless needed; whytap.ai is part of the last step")
         XCTAssertEqual(state(.source), .completed)
         XCTAssertEqual(state(.speechKey), .bypassed, "On this Mac made the key unnecessary")
         XCTAssertEqual(state(.llmKey), .bypassed, "skipped, never a false done")
@@ -126,7 +126,7 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertEqual(OnboardingStep.speechKey.dwell, 1.15, "the padlock opens and settles before the move")
         XCTAssertEqual(OnboardingStep.llmKey.dwell, 1.15, "the language model key has the same padlock")
         XCTAssertEqual(OnboardingStep.tryDrop.dwell, 1.35)
-        for step in [OnboardingStep.hotkeys, .toolbox, .thanks] {
+        for step in [OnboardingStep.toolbox, .thanks] {
             XCTAssertNil(step.dwell, "\(step) waits for Continue: no timer")
         }
     }
@@ -189,7 +189,7 @@ final class OnboardingJourneyTests: XCTestCase {
 
     func testOptionalAndInformationalSteps() {
         XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .search, .screenRecording, .tryDrop])
-        XCTAssertEqual(OnboardingStep.allCases.filter(\.isInformational), [.hotkeys, .toolbox, .thanks])
+        XCTAssertEqual(OnboardingStep.allCases.filter(\.isInformational), [.toolbox, .thanks])
     }
 
     // MARK: - Helpers

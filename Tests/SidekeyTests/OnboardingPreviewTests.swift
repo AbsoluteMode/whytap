@@ -95,7 +95,7 @@ final class OnboardingPreviewTests: XCTestCase {
         voice.phaseChanged(.idle)
         XCTAssertTrue(model.outcome(.tryDrop).isDone)
         XCTAssertNotNil(model.tryDropSeconds, "the take's time from the press")
-        for expected in [OnboardingStep.hotkeys, .toolbox, .thanks] {
+        for expected in [OnboardingStep.toolbox, .thanks] {
             model.next()
             XCTAssertEqual(model.step, expected)
         }
@@ -798,26 +798,11 @@ final class OnboardingPreviewTests: XCTestCase {
         }
     }
 
-    /// Shortcuts shows the person's own keys: Drop and the Agent first, then
-    /// the tools that have a shortcut, six at most; the Agent says Off while
-    /// it is off; the keys over the list follow a row's modifiers (REV 58).
-    func testShortcutRowsComeFromTheConfiguration() {
-        var configuration = HotkeyPreferences(defaults: UserDefaults(suiteName: "OnboardingShortcuts-\(UUID().uuidString)")!)
-            .configuration
-        let rows = OnboardingShortcutRow.rows(configuration, agentEnabled: false)
-        XCTAssertEqual(rows.prefix(2).map(\.id), ["drop", "agent"])
-        XCTAssertEqual(rows[0].shortcut, configuration.dropVoiceShortcut)
-        XCTAssertEqual(rows[1].note, "Off")
-        XCTAssertNil(OnboardingShortcutRow.rows(configuration, agentEnabled: true)[1].note)
-        XCTAssertLessThanOrEqual(rows.count, 6)
-        for row in rows.dropFirst(2) {
-            let tool = HoverTool(rawValue: row.id)
-            XCTAssertNotNil(tool.flatMap { configuration.toolShortcuts[$0] }, "only tools with a shortcut")
-        }
-        configuration.toolShortcuts = [:]
-        XCTAssertEqual(OnboardingShortcutRow.rows(configuration, agentEnabled: true).count, 2)
-        let command = OnboardingShortcutRow(id: "x", title: "X", symbol: "x", shortcut: configuration.agentTextShortcut)
-        XCTAssertEqual(command.modifiers.count, 3)
+    /// Try Drop's wire key carries the legend of the person's Drop key.
+    func testTryDropsKeyShowsTheDropKeysLegend() {
+        XCTAssertEqual(OnboardingFinaleFigures.legend(for: .holdSpace), .none)
+        XCTAssertEqual(OnboardingFinaleFigures.legend(for: .modifier(.rightCommand)), .command)
+        XCTAssertEqual(OnboardingFinaleFigures.legend(for: .modifier(.rightOption)), .option)
     }
 
     /// Try Drop says which key to hold once, in the field's header: the
@@ -941,6 +926,54 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(takes.texts, [OnboardingPreviewDrop.text])
     }
 
+    /// End to end, in a real window: once Try Drop is on screen the preview
+    /// listens, Space sent through the app (with the field holding the
+    /// keyboard) records instead of typing, and letting go drops the text
+    /// into the field; once the step is gone nothing listens.
+    func testSpaceInThePreviewWindowDictatesIntoTheField() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        let drop = try XCTUnwrap(model.dropStandIn as? OnboardingPreviewDrop)
+        drop.transcribing = 0.01
+        drop.shortestTake = 0
+        let configuration = model.hotkeys.configuration
+        let stage = OnboardingTryDropStage(model: model, shortcut: configuration.dropVoiceShortcut,
+                                           gesture: configuration.normalizedDropGesture)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: stage)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        try await eventually { drop.isListening }
+        let field = try XCTUnwrap(Self.textView(in: host))
+        window.makeFirstResponder(field)
+        func send(_ type: NSEvent.EventType, isRepeat: Bool = false) {
+            let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                         windowNumber: window.windowNumber, context: nil, characters: " ",
+                                         charactersIgnoringModifiers: " ", isARepeat: isRepeat, keyCode: 49)!
+            NSApp.sendEvent(event)
+        }
+        send(.keyDown)
+        XCTAssertTrue(model.voice.recording, "Space starts the take")
+        send(.keyDown, isRepeat: true)
+        send(.keyUp)
+        XCTAssertFalse(model.voice.recording, "letting go ends it")
+        try await eventually { field.string == OnboardingPreviewDrop.text }
+        XCTAssertFalse(field.string.hasPrefix(" "), "Space never reached the field")
+        try await eventually { model.outcome(.tryDrop).isDone }
+        window.contentView = nil
+        window.close()
+        try await eventually { !drop.isListening }
+    }
+
+    private static func textView(in view: NSView) -> NSTextView? {
+        if let text = view as? NSTextView { return text }
+        for sub in view.subviews { if let found = textView(in: sub) { return found } }
+        return nil
+    }
+
     /// From any Try Drop state, Skip and Back leave the step, a take running
     /// included; the preview has its Drop stand-in and the app has none.
     func testTryDropCanAlwaysBeLeft() async throws {
@@ -958,13 +991,33 @@ final class OnboardingPreviewTests: XCTestCase {
         let before = model.steps[index - 1]
         model.voice.phaseChanged(.recording)
         model.next()
-        XCTAssertEqual(model.step, .hotkeys, "Skip while recording")
+        XCTAssertEqual(model.step, .toolbox, "Skip while recording; Shortcuts is gone (REV 64)")
         model.back()
         XCTAssertEqual(model.step, .tryDrop)
         model.voice.phaseChanged(.recording)
         model.back()
         XCTAssertEqual(model.step, before, "Back while recording")
         model.voice.phaseChanged(.idle)
+    }
+
+    /// The last step's stack holds real questions for the Ask agent, each
+    /// short enough for one line and under Ask's 300-character limit; a
+    /// click opens whytap.ai with the question in the link, which the page
+    /// asks on load (REV 66).
+    func testTheLastStepAsksRealQuestionsOnWhytapAI() throws {
+        let questions = OnboardingQuestionStack.questions
+        XCTAssertGreaterThanOrEqual(questions.count, 6)
+        XCTAssertEqual(Set(questions).count, questions.count)
+        for question in questions {
+            XCTAssertLessThanOrEqual(question.count, 52, "one line: \(question)")
+            XCTAssertTrue(question.hasSuffix("?"))
+        }
+        let url = OnboardingQuestionStack.link(for: "Can I run Whytap fully local with Ollama?")
+        XCTAssertEqual(url.host, "whytap.ai")
+        let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query, [URLQueryItem(name: "q", value: "Can I run Whytap fully local with Ollama?")])
+        XCTAssertEqual(OnboardingQuestionStack.shown(from: questions.count - 1, count: 2),
+                       [questions[questions.count - 1], questions[0]], "the stack wraps around")
     }
 
     /// The ring shows the whole Toolbox catalog Settings lists (every tool
@@ -983,16 +1036,46 @@ final class OnboardingPreviewTests: XCTestCase {
         if HoverTool.calendar.isComingSoon {
             XCTAssertEqual(OnboardingToolboxStage.card(for: .calendar).text, CalendarAvailability.message)
         }
-        // The whole catalog fits the ring in the window without tiles
-        // touching (at their tilted sizes), the first at the top.
+        // The whole catalog fits the ring at every point of its turn: tiles
+        // never touch each other, never cover the card, never leave the area.
         let sizes: [CGSize] = [CGSize(width: 520, height: 186), CGSize(width: 520, height: 210)]
+        let tile = Double(OnboardingToolboxStage.tile)
+        let card = OnboardingToolboxStage.cardSize
         for size in sizes {
-            let spots: [CGPoint] = OnboardingToolboxStage.spots(tools.count, in: size)
-            XCTAssertEqual(spots.count, tools.count)
-            XCTAssertEqual(Double(spots[0].x), Double(size.width) / 2, accuracy: 0.5)
-            XCTAssertLessThan(Double(spots[0].y), Double(size.height) / 2)
-            XCTAssertGreaterThan(Self.closestTiles(spots, in: size), 2, "tiles touch at \(size)")
+            XCTAssertEqual(Double(OnboardingToolboxStage.spots(tools.count, in: size)[0].x), Double(size.width) / 2,
+                           accuracy: 0.5, "the first tile starts at the top")
+            for step in 0..<40 {
+                let turn = Double(step) / 40 / Double(tools.count)
+                let spots: [CGPoint] = OnboardingToolboxStage.spots(tools.count, in: size, turn: turn)
+                XCTAssertEqual(spots.count, tools.count)
+                XCTAssertGreaterThan(Self.closestTiles(spots, in: size), 0, "tiles touch at \(size), turn \(turn)")
+                for spot in spots {
+                    let half = Double(OnboardingToolboxStage.tileScale(spot, in: size)) * tile / 2
+                    let x = Double(spot.x), y = Double(spot.y)
+                    XCTAssertGreaterThanOrEqual(x - half, 0); XCTAssertLessThanOrEqual(x + half, Double(size.width))
+                    XCTAssertGreaterThanOrEqual(y - half, 0); XCTAssertLessThanOrEqual(y + half, Double(size.height))
+                    let dx = abs(x - Double(size.width) / 2) - Double(card.width) / 2
+                    let dy = abs(y - Double(size.height) / 2) - Double(card.height) / 2
+                    XCTAssertGreaterThan(max(dx, dy), half + 4, "a tile covers the card at \(size), turn \(turn)")
+                }
+            }
         }
+    }
+
+    /// The ring turns slowly on its own, holds while a tile is pointed at and
+    /// stands still under Reduce Motion.
+    func testTheToolboxRingTurnsLikeACarousel() {
+        let carousel = OnboardingCarousel()
+        _ = carousel.advance(to: 100, paused: false, still: false)
+        let moving = carousel.advance(to: 100.04, paused: false, still: false)
+        XCTAssertGreaterThan(moving, 0)
+        XCTAssertEqual(carousel.advance(to: 100.08, paused: true, still: false), moving, "a pointed tile stops it")
+        XCTAssertGreaterThan(carousel.advance(to: 100.12, paused: false, still: false), moving, "and it goes on")
+        let held = carousel.turn
+        XCTAssertEqual(carousel.advance(to: 100.16, paused: false, still: true), held, "Reduce Motion stands still")
+        var turn = 0.0
+        for frame in 0..<(60 * 80) { turn = carousel.advance(to: 200 + Double(frame) / 60, paused: false, still: false) }
+        XCTAssertLessThan(turn, 1, "it wraps around")
     }
 
     /// The smallest clearance between two tiles at their tilted sizes.

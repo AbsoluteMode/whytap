@@ -67,7 +67,7 @@ struct OnboardingJourneyView: View {
     /// The steps with their own capsule (Continue, Finish) and Skip: the
     /// footer adds no Next or Skip of its own there.
     static func hasOwnActions(_ step: OnboardingStep) -> Bool {
-        [.tryDrop, .hotkeys, .toolbox, .thanks].contains(step)
+        [.tryDrop, .toolbox, .thanks].contains(step)
     }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
@@ -154,8 +154,8 @@ struct OnboardingJourneyView: View {
 
     @ViewBuilder private var leftAction: some View {
         let outcome = model.outcome(model.step)
-        // Shortcuts and Toolbox name their Settings tab in the lede; a second
-        // "Open …" button here said it twice.
+        // Toolbox names its Settings tab in the lede; a second "Open …"
+        // button here said it twice.
         if model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
                   !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
             // Step 1 has no skip: its two figures are the choice. Screen
@@ -214,8 +214,6 @@ struct OnboardingJourneyView: View {
         case .tryDrop:
             OnboardingTryDropStage(model: model, shortcut: hotkeys.configuration.dropVoiceShortcut,
                                    gesture: hotkeys.configuration.normalizedDropGesture)
-        case .hotkeys:
-            OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration)
         case .toolbox:
             OnboardingToolboxStage(model: model)
         case .thanks:

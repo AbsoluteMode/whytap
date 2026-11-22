@@ -560,17 +560,17 @@ final class OnboardingJourneyModelTests: XCTestCase {
     func testTourChaptersWaitForContinue() async throws {
         let env = try makeEnv(accessibility: true, microphone: .authorized)
         let model = try makeModel(env, hotkey: .ready)
-        while model.step != .tryDrop && model.step != .hotkeys { model.next() }
+        while model.step != .tryDrop && model.step != .toolbox { model.next() }
         if model.step == .tryDrop { model.next() }
-        XCTAssertEqual(model.step, .hotkeys)
-        XCTAssertFalse(model.dwell.isCounting, "Shortcuts has no timer")
+        XCTAssertEqual(model.step, .toolbox, "Try Drop leads straight to Toolbox (REV 64)")
+        XCTAssertFalse(model.dwell.isCounting, "Toolbox has no timer")
         env.beat.end()
         try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(model.step, .hotkeys, "it waits however long the person reads")
+        XCTAssertEqual(model.step, .toolbox, "it waits however long the person reads")
         model.next()
-        XCTAssertEqual(model.step, .toolbox)
+        XCTAssertEqual(model.step, .thanks)
         model.back()
-        XCTAssertEqual(model.dwell.state, .reviewing(next: "Toolbox"), "Back to a chapter offers Continue again")
+        XCTAssertEqual(model.dwell.state, .reviewing(next: "Finish"), "Back to a chapter offers Continue again")
     }
 
     // MARK: - Language
@@ -632,9 +632,10 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let model = try makeModel(env, hotkey: .ready)
         var finished = false
         model.onFinish = { finished = true }
-        while model.step != .hotkeys { model.next() }
-        XCTAssertEqual(model.steps.suffix(3), [.hotkeys, .toolbox, .thanks], "whytap.ai is part of the last step")
-        let tour: [OnboardingStep] = [.hotkeys, .toolbox]
+        while model.step != .toolbox { model.next() }
+        XCTAssertEqual(model.steps.suffix(2), [.toolbox, .thanks], "no Shortcuts; whytap.ai is part of the last step")
+        XCTAssertFalse(model.steps.contains(where: { $0.shortTitle == "Shortcuts" }))
+        let tour: [OnboardingStep] = [.toolbox]
         for step in tour {
             XCTAssertEqual(model.step, step)
             XCTAssertEqual(model.dwell.state, OnboardingDwellController.State.idle, "\(step) has no timer")
@@ -792,10 +793,10 @@ final class OnboardingJourneyModelTests: XCTestCase {
                                                         shownText: "Moving our sync to Thursday at 3. I’ll send the new invite tonight."))),
             ("try-failed", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
                                                           shownState: .failed(OnboardingJourneyModel.noSpeech)))),
-            ("shortcuts", AnyView(OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration))),
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
             ("finish", AnyView(OnboardingFinishStage(model: model))),
+            ("finish-open", AnyView(OnboardingFinishStage(model: model, shownOpen: true))),
         ]
         for (name, view) in finale {
             let stage = view

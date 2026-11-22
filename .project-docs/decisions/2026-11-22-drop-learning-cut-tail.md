@@ -100,9 +100,14 @@ Nothing showed which rule refused, because learning logs nothing.
   draft), the caret decides: each read also asks the field for its
   selection (`AXSelectedTextRange`, a position, never text), and right
   after Cmd+V it sits at the end of the new copy. The copy that ends at
-  the caret is watched. Without a caret, or with one at neither copy, the
-  take ends as `ambiguous`: nothing is learned and no words are
-  journaled. A single copy needs no caret.
+  the caret is watched. Only a collapsed selection counts, and only
+  between words (after the copy's last word, before the next one); a
+  caret inside a word or selected text proves nothing. Without such a
+  caret the take ends as `ambiguous`: nothing is learned and no words are
+  journaled. A single copy needs no caret, but if a further verbatim copy
+  appears after the paste was placed (a late paste next to an identical
+  draft that was seen first), the take ends as `ambiguous` too (builder
+  review, queue #459).
 - **Typed words at the edge.** With a known paste place, the typed word
   nearest the paste inside the watched region is still the word before or
   after the take, even when the whole typed run is longer than one edit,
@@ -176,7 +181,9 @@ Nothing showed which rule refused, because learning logs nothing.
   journal nothing (`end.ambiguous`); a filler typed back next to the paste
   with other words, before or after it, stops cutting; a skipped delivery
   is journaled with its app and mode; a read carries the caret and drops
-  an impossible one. The raw salvage call itself is in AppDelegate and is
+  an impossible one. From queue #459: a caret inside the older copy's
+  last word places nothing; a late paste after the identical draft was
+  seen alone teaches and journals nothing; a selection is not a caret. The raw salvage call itself is in AppDelegate and is
   covered by review, not by a test.
 - Not verified here: the built app. The acceptance is the same dictation
   in Claude desktop.
@@ -185,6 +192,8 @@ Nothing showed which rule refused, because learning logs nothing.
 
 - Prefer the last copy when the paste appears twice: the older draft may
   be after it, and its edits would be learned and journaled.
+- Re-place the paste on the caret when a second copy appears later: a
+  copy the user typed again would then be taken for the paste.
 - Read the field before the paste to find the new copy: one more read of
   the user's text, while the caret is only a position.
 - Raise the hunk limit above three words: it would let real rewrites

@@ -14,11 +14,15 @@ struct DropEditToken: Equatable {
     /// Words with letters or digits, keeping inner `'`, `-`, `.`, `+`, `#`
     /// ("don't", "Wi-Fi", "Node.js", "C++", "C#").
     static func tokenize(_ text: String) -> [DropEditToken] {
+        let ns = text as NSString
+        return ranges(text).map { DropEditToken(text: ns.substring(with: $0)) }
+    }
+
+    /// Where each word of `tokenize` sits (UTF-16 ranges).
+    static func ranges(_ text: String) -> [NSRange] {
         let pattern = "[\\p{L}\\p{N}_](?:[\\p{L}\\p{N}_'’\\-.]*[\\p{L}\\p{N}_])?[+#]*"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let ns = text as NSString
-        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-            .map { DropEditToken(text: ns.substring(with: $0.range)) }
+        return regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)).map(\.range)
     }
 }
 
@@ -208,11 +212,15 @@ enum DropEditDiff {
     }
 
     /// The number of field words before a caret position (UTF-16 offset):
-    /// the `end` of the place the caret sits right after.
+    /// the `end` of the place the caret sits right after. Only a caret
+    /// between words counts (after a word's last character, before the next
+    /// word's first); a caret inside a word proves no place.
     static func wordCount(_ field: String, before caret: Int) -> Int? {
         let ns = field as NSString
         guard caret >= 0, caret <= ns.length else { return nil }
-        return DropEditToken.tokenize(ns.substring(to: caret)).count
+        let ranges = DropEditToken.ranges(field)
+        if ranges.contains(where: { $0.location < caret && caret < NSMaxRange($0) }) { return nil }
+        return ranges.filter { NSMaxRange($0) <= caret }.count
     }
 
     /// An edge run rebuilt so that its changed pairs sit next to the kept

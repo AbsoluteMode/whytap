@@ -214,9 +214,11 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
               (text as NSString).length <= DropEditFieldLimits.maxFieldLength
         else { return stop(handle) ?? .unreadable }
         // Where the caret is tells a new paste from an identical older draft.
+        // Only a collapsed selection (a caret, no selected text) inside the
+        // text counts.
         let caret = system.selection?(handle.element).flatMap { range -> Int? in
-            let end = range.location + range.length
-            return range.location >= 0 && range.length >= 0 && end <= (text as NSString).length ? end : nil
+            range.length == 0 && range.location >= 0 && range.location <= (text as NSString).length
+                ? range.location : nil
         }
         // A field that lost focus during the transfer is not used.
         if let stop = stop(handle) { return stop }

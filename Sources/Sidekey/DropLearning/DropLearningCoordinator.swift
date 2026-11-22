@@ -117,6 +117,8 @@ final class DropLearningCoordinator {
         /// Where the paste sat in the field when it was first seen: later
         /// reads compare only the words between.
         var context: DropEditDiff.Context?
+        /// How many verbatim copies of the paste the field held when it was placed.
+        var copies = 0
         var watch: DropEditFieldWatch?
         var stopReturn: (() -> Void)?
         var task: Task<Void, Never>?
@@ -395,6 +397,14 @@ final class DropLearningCoordinator {
         }
         observation.reads += 1
         if let context = observation.context {
+            // Another verbatim copy appeared after the paste was placed (a
+            // late paste next to an identical older draft that was seen
+            // first): the placed copy may be the draft, so nothing of this
+            // take is attributed.
+            // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+            if DropEditDiff.exactPlaces(pasted: observation.take.pasted, field: text).count > observation.copies {
+                return end(.ambiguous)
+            }
             if DropEditDiff.diff(pasted: observation.take.pasted, field: text, context: context) != nil {
                 observation.lastAligned = text
                 return
@@ -412,6 +422,7 @@ final class DropLearningCoordinator {
                     .flatMap { end in places.first { $0.end == end } }
                 guard let place = places.count == 1 ? places.first : atCaret else { return end(.ambiguous) }
                 observation.context = place.context
+                observation.copies = places.count
                 observation.firstAligned = text
                 observation.lastAligned = text
                 return

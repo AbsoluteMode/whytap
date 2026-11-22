@@ -94,14 +94,18 @@ final class DropEditFieldAccessTests: XCTestCase {
         XCTAssertEqual(requestedRanges.first?.length, (text as NSString).length)
     }
 
-    /// The caret (end of the selection) comes with the text, so a new paste
+    /// The caret (a collapsed selection) comes with the text, so a new paste
     /// can be told from an identical older draft; an impossible one is dropped.
     func testAReadCarriesTheCaret() throws {
         let access = access()
         let handle = try XCTUnwrap(access.capture(pid: targetPID))
-        selection = CFRange(location: 3, length: 2)
+        selection = CFRange(location: 5, length: 0)
         XCTAssertEqual(access.read(handle), .text(text, caret: 5))
-        selection = CFRange(location: (text as NSString).length, length: 1)
+        selection = CFRange(location: 3, length: 2)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil), "selected text is not a caret")
+        selection = CFRange(location: (text as NSString).length + 1, length: 0)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil))
+        selection = CFRange(location: -1, length: 0)
         XCTAssertEqual(access.read(handle), .text(text, caret: nil))
     }
 

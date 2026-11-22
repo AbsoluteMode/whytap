@@ -1220,3 +1220,54 @@ extension DropLearningScenarioTests {
         XCTAssertTrue(log.contains("rawSalvage"))
     }
 }
+
+// MARK: - Builder review, queue #459
+
+extension DropLearningScenarioTests {
+    /// A caret inside the last word of the older copy proves nothing.
+    func testACaretInsideTheOlderCopyDoesNotPlaceThePaste() async {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        let paste = "Open model Jeb"
+        for _ in 0..<2 {
+            field.reads = [paste + " " + paste, "Open model Jev " + paste, ""]
+            field.carets = [(paste as NSString).length - 1]
+            await runReads(coordinator, take(pasted: paste))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 0)
+        let journal = (try? String(contentsOf: journalURL, encoding: .utf8)) ?? ""
+        XCTAssertFalse(journal.contains("Jev"))
+    }
+
+    /// The older identical draft is seen alone before the late paste lands:
+    /// once a second copy appears, nothing of the take is attributed.
+    func testALatePasteNextToAnIdenticalDraftSeenFirstTeachesNothing() async {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        let paste = "Open model Jeb"
+        let both = paste + " " + paste
+        for _ in 0..<2 {
+            field.reads = [paste, both, "Open model Jev " + paste, ""]
+            field.carets = [(paste as NSString).length, (both as NSString).length]
+            await runReads(coordinator, take(pasted: paste))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 0)
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["end.ambiguous"], 2)
+        let journal = (try? String(contentsOf: journalURL, encoding: .utf8)) ?? ""
+        XCTAssertFalse(journal.contains("Jev"))
+    }
+
+    /// Only a caret between words places a copy: after punctuation or a
+    /// space it still does, inside a word it does not.
+    func testACaretCountsOnlyBetweenWords() {
+        let text = "Open model Jeb. Open model Jeb"
+        XCTAssertEqual(DropEditDiff.wordCount(text, before: 14), 3)
+        XCTAssertEqual(DropEditDiff.wordCount(text, before: 15), 3)
+        XCTAssertEqual(DropEditDiff.wordCount(text, before: 16), 3)
+        XCTAssertNil(DropEditDiff.wordCount(text, before: 13))
+        XCTAssertEqual(DropEditDiff.wordCount(text, before: (text as NSString).length), 6)
+        XCTAssertNil(DropEditDiff.wordCount(text, before: (text as NSString).length + 1))
+    }
+}

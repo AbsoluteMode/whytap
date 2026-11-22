@@ -25,6 +25,19 @@ final class ServerExplicitModelsTests: XCTestCase {
         }
     }
 
+    private final class BuilderKeyCheck: ProviderKeyChecking, @unchecked Sendable {
+        var result: KeyStatus = .valid
+        var onCheck: (() async -> Void)?
+        /// The key and address each check was sent with.
+        var sent: [(apiKey: String?, baseURL: String?)] = []
+        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?,
+                   allowPaidProbe: Bool) async -> KeyStatus {
+            sent.append((apiKey, server?.baseURL))
+            await onCheck?()
+            return result
+        }
+    }
+
     private struct AcceptingKeys: ProviderKeyChecking {
         func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus { .valid }
     }
@@ -46,6 +59,18 @@ final class ServerExplicitModelsTests: XCTestCase {
         }
     }
 
+    private struct AddressScopedCatalog: ModelCatalogFetching {
+        var onChangedAddress: (@Sendable () async -> Void)? = nil
+
+        func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
+            guard server?.baseURL == "http://localhost:11434/v1" else {
+                await onChangedAddress?()
+                throw CatalogFetchError.http(503, code: nil)
+            }
+            return [CatalogModel(id: "original-server-model")]
+        }
+    }
+
     private struct Env {
         let defaults: UserDefaults
         let routing: AIRoutingStore
@@ -60,7 +85,7 @@ final class ServerExplicitModelsTests: XCTestCase {
         }
     }
 
-    private func makeEnv(catalog: [String]? = [], storedRouting: String? = nil) throws -> Env {
+    private func makeEnv(catalog: [String]? = [], storedRouting: String? = nil, keyChecker: ProviderKeyChecking = AcceptingKeys(), catalogFetcher: (any ModelCatalogFetching)? = nil) throws -> Env {
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
@@ -74,12 +99,12 @@ final class ServerExplicitModelsTests: XCTestCase {
         let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
         let checker = FakeChecker()
         let probe = Probe()
-        let catalogs = ModelCatalogStore(fileURL: file, fetcher: Catalog(models: catalog))
+        let catalogs = ModelCatalogStore(fileURL: file, fetcher: catalogFetcher ?? Catalog(models: catalog))
         let checks = ModelCheckStore(defaults: defaults)
         let keyStatuses = KeyStatusStore(defaults: defaults)
         let vm = APIAndModelsViewModel(
             routing: routing, keys: keys, catalogs: catalogs, checks: checks, keyStatuses: keyStatuses,
-            keyChecker: AcceptingKeys(), probe: probe, serverModelChecker: checker,
+            keyChecker: keyChecker, probe: probe, serverModelChecker: checker,
             inputLanguage: { nil }, onDevice: OnDeviceSpeechReadiness(isReady: { false })
         )
         let resolver = ModelStatusResolver(routing: routing, keys: keys, catalogs: catalogs, checks: checks,
@@ -88,19 +113,38 @@ final class ServerExplicitModelsTests: XCTestCase {
         return Env(defaults: defaults, routing: routing, keys: keys, checker: checker, probe: probe, vm: vm, resolver: resolver)
     }
 
-    /// Connects a server the way the form does and returns its account.
+    /// Connects a server directly (as an earlier build or a restore would) and returns its account.
     private func connect(_ env: Env, name: String = "Lab", key: String? = nil) async throws -> ProviderAccount {
         let failure = await env.vm.addServer(name: name, baseURL: "http://localhost:11434/v1", key: key, proposeModels: false)
         XCTAssertNil(failure)
         return try XCTUnwrap(env.vm.lastAddedServer)
     }
 
-    /// Adds a model the way the form does: check, then add from that check.
-    @discardableResult
-    private func add(_ env: Env, _ name: String, _ kind: ServerModel.Kind, to account: ProviderAccount) async -> ServerModelCheckResult {
-        let check = await env.vm.runServerModelCheck(name, kind: kind, on: account)
-        if check.result == .passed { XCTAssertNil(env.vm.addServerModel(after: check, to: account)) }
-        return check.result
+    /// Opens the server window the way a tile does; checks start without the typing pause.
+    private func sheet(_ env: Env, _ account: ProviderAccount? = nil) -> ServerSheetModel {
+        ServerSheetModel(viewModel: env.vm, account: account, delay: .zero)
+    }
+
+    /// Waits until no row is waiting for or running a check.
+    private func settle(_ model: ServerSheetModel) async {
+        for _ in 0..<200 {
+            let busy = model.draft.rows.contains { row in
+                row.status == .checking || (row.status == .pending && !row.name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if !busy { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    private func row(_ model: ServerSheetModel, _ index: Int = 0) -> ServerSheetDraft.Row { model.draft.rows[index] }
+
+    /// Types a model into the window's last empty row (adding one if needed).
+    private func type(_ model: ServerSheetModel, _ name: String, _ kind: ServerModel.Kind) async {
+        if model.draft.rows.last.map({ !$0.name.isEmpty }) ?? true { model.addRow() }
+        let id = model.draft.rows[model.draft.rows.count - 1].id
+        model.setName(name, of: id)
+        model.setKind(kind, of: id)
+        await settle(model)
     }
 
     private func keyAccount(_ env: Env, _ account: ProviderAccount) throws -> String {
@@ -116,9 +160,496 @@ final class ServerExplicitModelsTests: XCTestCase {
         env.routing.reloadFromDefaults()
     }
 
+    private static let ollama = "Ollama · localhost:11434"
+
+    // MARK: - One window: address, key and models, one Save
+
+    func test_a_new_server_is_saved_with_its_first_model_in_one_window() async throws {
+        let env = try makeEnv(catalog: ["qwen3:0.6b", "whisper-large-v3"])
+        let model = sheet(env)
+        XCTAssertTrue(model.draft.isNew)
+        XCTAssertEqual(model.draft.rows.count, 1, "the first model row is there from the start")
+        model.setBaseURL("http://localhost:11434/v1")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(row(model).status, .works)
+        XCTAssertEqual(env.checker.calls.map(\.model), ["ut-llm"])
+        XCTAssertNil(env.checker.calls.first?.apiKey, "a server without a key is checked without one")
+        XCTAssertTrue(env.routing.state.servers.isEmpty, "nothing is stored before Save")
+
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        let server = try XCTUnwrap(env.routing.state.servers.first)
+        XCTAssertEqual(server.name, Self.ollama, "the server is named after its address")
+        XCTAssertEqual(server.models, [ServerModel(name: "ut-llm", kind: .llm, checked: true)])
+        let account = ProviderAccount.server(server.id)
+        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.title, Self.ollama)
+        for feature in Self.textFeatures { XCTAssertEqual(env.offered(account, for: feature), ["ut-llm"], "\(feature)") }
+        for feature in Self.speechFeatures { XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)") }
+        XCTAssertNil(env.vm.sections(for: .agent).first { $0.account == account }, "a server still can't run the Agent")
+        for _ in 0..<200 where env.vm.modelSuggestions(for: account).isEmpty {
+            try? await Task.sleep(for: .milliseconds(2))  // the list loads after Save
+        }
+        XCTAssertEqual(env.vm.modelSuggestions(for: account), ["qwen3:0.6b", "whisper-large-v3"], "the list only suggests")
+    }
+
+    func test_save_needs_an_address_and_empty_rows_are_ignored() async throws {
+        let env = try makeEnv()
+        let model = sheet(env)
+        let saved = await model.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(model.saveError, "Enter the server's base URL")
+        model.setBaseURL("ftp://box")
+        let badURL = await model.save()
+        XCTAssertFalse(badURL)
+        XCTAssertEqual(model.saveError, "Enter an http or https URL")
+        model.setBaseURL("https://vllm.company.ru/v1")
+        model.addRow()
+        let empty = await model.save()
+        XCTAssertTrue(empty)
+        XCTAssertEqual(env.routing.state.servers.first?.name, "vllm.company.ru")
+        XCTAssertEqual(env.routing.state.servers.first?.models, [], "empty rows are not models")
+        XCTAssertTrue(env.checker.calls.isEmpty)
+    }
+
+    func test_qwen3_asr_chosen_from_the_server_is_preselected_and_saved_as_transcription() async throws {
+        let env = try makeEnv(catalog: ["qwen3-asr", "qwen3:0.6b"])
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        XCTAssertEqual(model.suggestions, ["qwen3-asr", "qwen3:0.6b"])
+        model.choose("qwen3-asr", for: row(model).id)
+        XCTAssertEqual(row(model).kind, .transcription, "the name preselects the type")
+        await settle(model)
+        XCTAssertEqual(env.checker.calls.first?.kind, .transcription)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        for feature in Self.speechFeatures { XCTAssertEqual(env.offered(account, for: feature), ["qwen3-asr"], "\(feature)") }
+        for feature in Self.textFeatures { XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)") }
+        XCTAssertEqual(env.resolver.verdict(model: "qwen3-asr", account: account, for: .translation),
+                       .notSupported(reason: "Not added to \(Self.ollama) as an LLM"))
+        // Picking it runs the ordinary live probe and sets the route.
+        await env.vm.select(model: "qwen3-asr", account: account, for: .dropFast)
+        XCTAssertEqual(env.probe.models, ["qwen3-asr"])
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: account, model: "qwen3-asr"))
+    }
+
+    func test_a_qwen_named_model_can_be_transcription_when_the_user_says_so() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        await type(model, "qwen-audio", .transcription)
+        XCTAssertEqual(ServerModelClassifier.suggestedKind(for: "qwen-audio"), .llm, "the guess says LLM")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(env.offered(account, for: .dropFast), ["qwen-audio"], "the user's type wins")
+    }
+
+    func test_one_name_can_be_both_types_but_each_type_once() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        await type(model, "qwen2.5-omni", .llm)
+        await type(model, "qwen2.5-omni", .transcription)
+        await type(model, "qwen2.5-omni", .llm)
+        let duplicate = await model.save()
+        XCTAssertFalse(duplicate)
+        XCTAssertEqual(row(model, 2).status, .failed("qwen2.5-omni is already listed as LLM"))
+        model.removeRow(row(model, 2).id)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models?.map(\.kind), [.llm, .transcription])
+        XCTAssertEqual(env.offered(account, for: .dropFast), ["qwen2.5-omni"])
+        XCTAssertEqual(env.offered(account, for: .translation), ["qwen2.5-omni"])
+        XCTAssertEqual(env.vm.modelSuggestions(for: account), [], "a name added for both types is no longer suggested")
+
+        // Removing one type in the window un-sets only the features of that type on it.
+        env.routing.setRoute(FeatureRoute(account: account, model: "qwen2.5-omni"), for: .dropFast)
+        env.routing.setRoute(FeatureRoute(account: account, model: "qwen2.5-omni"), for: .translation)
+        let edit = sheet(env, account)
+        XCTAssertEqual(edit.draft.rows.map(\.status), [.works, .works])
+        edit.removeRow(edit.draft.rows[1].id)
+        let removed = await edit.save()
+        XCTAssertTrue(removed)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        XCTAssertEqual(env.routing.route(for: .translation)?.model, "qwen2.5-omni")
+        XCTAssertEqual(env.offered(account, for: .dropFast), [])
+        XCTAssertEqual(env.vm.rows.first { $0.feature == .dropFast }?.message, "qwen2.5-omni was removed from \(Self.ollama)")
+    }
+
+    func test_a_failed_check_stops_save_once_then_save_anyway_keeps_it_not_checked() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        let refused = "Server answered 404 on /audio/transcriptions — this model can't transcribe here"
+        env.checker.result = .failed(refused)
+        let model = sheet(env, account)
+        model.setName("qwen3:0.6b", of: row(model).id)
+        model.setKind(.transcription, of: row(model).id)
+        // Save before the row's own check ran: it checks, and stops on the new failure.
+        let first = await model.save()
+        XCTAssertFalse(first)
+        XCTAssertEqual(row(model).status, .failed(refused))
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models, [], "nothing saved by itself")
+        let calls = env.checker.calls.count
+        // The failure is on screen: Save anyway keeps it, marked Not checked, without asking again.
+        let anyway = await model.save()
+        XCTAssertTrue(anyway)
+        XCTAssertEqual(env.checker.calls.count, calls)
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models,
+                       [ServerModel(name: "qwen3:0.6b", kind: .transcription, checked: false)])
+        XCTAssertEqual(env.offered(account, for: .dropFast), ["qwen3:0.6b"], "a Not checked model is still offered")
+        XCTAssertEqual(sheet(env, account).draft.rows.first?.status, .notChecked)
+    }
+
+    func test_an_unreachable_server_shows_why_and_saves_only_on_request() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        env.checker.result = .unreachable("Couldn't reach the server")
+        let model = sheet(env, account)
+        await type(model, "parakeet", .transcription)
+        XCTAssertEqual(row(model).status, .failed("Couldn't reach the server"))
+        let saved = await model.save()
+        XCTAssertTrue(saved, "the failure was on screen, so this Save is Save anyway")
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models?.first?.checked, false)
+    }
+
+    func test_cancel_changes_nothing() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        await type(model, "ut-llm", .llm)
+        model.setBaseURL("http://elsewhere:8000/v1")
+        model.cancel()
+        let server = try XCTUnwrap(env.routing.server(try XCTUnwrap(Self.id(account))))
+        XCTAssertEqual(server.baseURL, "http://localhost:11434/v1")
+        XCTAssertEqual(server.models, [])
+    }
+
+    func testBuilderAnUnsavedAddressCannotReceiveTheStoredCredential() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env, key: "synthetic-original-key")
+        let model = sheet(env, account)
+        await type(model, "model", .llm)
+        let before = env.checker.calls.count
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        await settle(model)
+        let forwarded = env.checker.calls.dropFirst(before).contains { $0.apiKey != nil }
+        XCTAssertFalse(forwarded, "editing a new host must not send the saved credential before Save")
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.baseURL, "http://localhost:11434/v1")
+        model.cancel()
+    }
+
+    func testBuilderSuggestionsDoNotIdentifyOldModelsAsBelongingToTheDraftServer() async throws {
+        let env = try makeEnv(catalog: ["only-on-the-original-server"])
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        XCTAssertEqual(model.suggestions, ["only-on-the-original-server"])
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        XCTAssertTrue(model.suggestions.isEmpty, "old server's catalog is not the draft server's catalog")
+    }
+
+    func testBuilderSavedKeyChangeDuringFinalKeyCheckCannotCommitCheckedRows() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env, key: "synthetic-original-key")
+        let keychain = try keyAccount(env, account)
+        let model = sheet(env, account)
+        model.setBaseURL("http://localhost:11434/other/v1")
+        await type(model, "model", .llm)
+        XCTAssertEqual(row(model).status, .works)
+        keyChecker.onCheck = {
+            await MainActor.run {
+                try? env.keys.save("synthetic-replacement-key", account: keychain)
+            }
+        }
+        let saved = await model.save()
+        let server = try XCTUnwrap(env.routing.server(try XCTUnwrap(Self.id(account))))
+        XCTAssertFalse(saved && server.models?.contains(where: { $0.checked }) == true,
+                       "a check under the obsolete credential cannot survive Save")
+    }
+
+    func testBuilderRejectedKeyNeverPublishesAnUnsavedServer() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let model = sheet(env)
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        await type(model, "model", .llm)
+        keyChecker.result = .rejected(.invalidKey)
+        keyChecker.onCheck = {
+            await MainActor.run {
+                XCTAssertTrue(env.routing.state.servers.isEmpty,
+                              "the draft must not enter stored routing before the final key check")
+            }
+        }
+        let saved = await model.save()
+        XCTAssertFalse(saved)
+        XCTAssertTrue(env.routing.state.servers.isEmpty)
+    }
+
+    // MARK: - The saved key stays with its address
+
+    func test_a_saved_key_is_not_sent_to_another_address_and_save_removes_it() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env, key: "synthetic-original-key")
+        let model = sheet(env, account)
+        XCTAssertFalse(model.keyWithheld)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        XCTAssertTrue(model.keyWithheld, "the window says the saved key is not used here")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(row(model).status, .works)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, nil, "the model check goes without the old key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(keyChecker.sent.last?.apiKey, nil, "the key check on Save goes without it too")
+        XCTAssertEqual(keyChecker.sent.last?.baseURL, "https://vllm.company.ru/v1")
+        XCTAssertEqual(env.keys.lookup(account: try keyAccount(env, account)), .absent,
+                       "the old address's key is not kept for the new one")
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.baseURL, "https://vllm.company.ru/v1")
+    }
+
+    func test_another_path_on_the_same_server_keeps_the_saved_key() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env, key: "synthetic-original-key")
+        let model = sheet(env, account)
+        model.setBaseURL("http://LOCALHOST:11434/openai/v1")
+        XCTAssertFalse(model.keyWithheld)
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-original-key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(keyChecker.sent.last?.apiKey, "synthetic-original-key")
+        XCTAssertEqual(env.keys.read(account: try keyAccount(env, account)), "synthetic-original-key")
+    }
+
+    func test_a_key_typed_for_the_new_address_is_used_and_saved() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env, key: "synthetic-original-key")
+        let model = sheet(env, account)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        model.setKey("synthetic-new-key")
+        XCTAssertFalse(model.keyWithheld)
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-new-key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(keyChecker.sent.last?.apiKey, "synthetic-new-key")
+        XCTAssertEqual(env.keys.read(account: try keyAccount(env, account)), "synthetic-new-key")
+    }
+
+    func test_suggestions_come_back_with_the_saved_address_and_a_new_server_has_none() async throws {
+        let env = try makeEnv(catalog: ["listed-model"])
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        XCTAssertEqual(model.suggestions, [])
+        model.setBaseURL("http://localhost:11434/v1")
+        XCTAssertEqual(model.suggestions, ["listed-model"])
+        XCTAssertEqual(sheet(env).suggestions, [])
+    }
+
+    func testBuilderAnOldAddressKeySyncedDuringAnAddressChangeIsNotRetainedForTheNewAddress() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env)
+        let keychain = try keyAccount(env, account)
+        let model = sheet(env, account)
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        await type(model, "fixture-model", .llm)
+        keyChecker.onCheck = {
+            await MainActor.run {
+                try? env.keys.save("synthetic-key-for-original-server", account: keychain)
+            }
+        }
+        let saved = await model.save()
+        XCTAssertNil(keyChecker.sent.last?.apiKey)
+        if saved {
+            XCTAssertTrue(env.keys.lookup(account: keychain) == .absent, "The new address must not retain a key that arrived for the old address")
+        } else {
+            XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.baseURL, "http://localhost:11434/v1")
+        }
+    }
+
+    func testBuilderARetypedKeyStaysWithTheDraftOriginItWasTypedFor() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        model.setBaseURL("https://first.example.invalid/v1")
+        model.setKey("synthetic-key-for-first-server")
+        await type(model, "fixture-model", .llm)
+        XCTAssertTrue(env.checker.calls.last?.apiKey != nil)
+        let before = env.checker.calls.count
+        model.setBaseURL("https://second.example.invalid/v1")
+        await settle(model)
+        XCTAssertFalse(env.checker.calls.dropFirst(before).contains { $0.apiKey != nil }, "The next origin must not receive the key typed for the previous one")
+        _ = await model.save()
+        XCTAssertFalse(keyChecker.sent.contains { $0.baseURL == "https://second.example.invalid/v1" && $0.apiKey != nil })
+    }
+
+    func testBuilderAnAddressChangeWithAFailedCatalogRefreshDoesNotReviveThePreviousCatalog() async throws {
+        let env = try makeEnv(catalogFetcher: AddressScopedCatalog())
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        XCTAssertEqual(model.suggestions, ["original-server-model"])
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        XCTAssertTrue(model.suggestions.isEmpty)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertTrue(sheet(env, account).suggestions.isEmpty, "A reopened sheet must not label the previous catalog as belonging to the new server")
+    }
+
+    func testBuilderSaveDoesNotReportSuccessAfterTheServerIsRemovedDuringCatalogRefresh() async throws {
+        let removal = CatalogRemoval()
+        let catalog = AddressScopedCatalog(onChangedAddress: { await removal.run() })
+        let env = try makeEnv(catalogFetcher: catalog)
+        let account = try await connect(env)
+        removal.action = { env.vm.remove(account) }
+        let model = sheet(env, account)
+        model.setBaseURL("https://separate-server.example.invalid/v1")
+        let saved = await model.save()
+        let existsAtReturn = env.routing.server(try XCTUnwrap(Self.id(account))) != nil
+        XCTAssertFalse(saved && !existsAtReturn, "Save cannot close as successful after the server was removed")
+    }
+
+    func test_a_typed_key_is_cleared_when_the_address_moves_after_it_was_sent() async throws {
+        let env = try makeEnv()
+        let model = sheet(env)
+        model.setBaseURL("https://first.example.invalid/v1")
+        model.setKey("synthetic-key-for-first-server")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key-for-first-server")
+        model.setBaseURL("https://first.example.invalid/openai/v1")
+        XCTAssertEqual(model.draft.apiKey, "synthetic-key-for-first-server", "another path on the same server keeps it")
+        model.setBaseURL("https://second.example.invalid/v1")
+        XCTAssertEqual(model.draft.apiKey, "")
+        XCTAssertTrue(model.typedKeyCleared, "the window says why the field is empty")
+        model.setKey("synthetic-key-for-second-server")
+        XCTAssertFalse(model.typedKeyCleared)
+        await settle(model)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key-for-second-server")
+    }
+
+    func test_a_key_typed_before_the_address_follows_it_until_it_is_sent() async throws {
+        let env = try makeEnv()
+        let model = sheet(env)
+        model.setKey("synthetic-key")
+        model.setBaseURL("https://vllm.company.ru")
+        model.setBaseURL("https://vllm.company.ru/v1")
+        XCTAssertEqual(model.draft.apiKey, "synthetic-key", "nothing was sent yet")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "synthetic-key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+    }
+
+    func test_save_returns_once_stored_and_the_list_loads_afterwards() async throws {
+        let env = try makeEnv(catalog: ["listed-model"])
+        let model = sheet(env)
+        let id = try XCTUnwrap(Self.id(model.account))
+        model.setBaseURL("http://localhost:11434/v1")
+        await type(model, "ut-llm", .llm)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertNotNil(env.routing.server(id))
+        for _ in 0..<200 where env.vm.modelSuggestions(for: model.account).isEmpty {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertEqual(env.vm.modelSuggestions(for: model.account), ["listed-model"])
+    }
+
+    @MainActor
+    private final class CatalogRemoval {
+        var action: (() -> Void)?
+        func run() { action?() }
+    }
+
+    // MARK: - Save writes everything at once, after the key check
+
+    func test_a_new_server_with_its_key_and_models_is_stored_only_after_the_key_check() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let model = sheet(env)
+        let id = try XCTUnwrap(Self.id(model.account))
+        let keychain = AIRoutingStore.serverKeyAccount(for: id)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        model.setKey("synthetic-new-key")
+        await type(model, "ut-llm", .llm)
+        keyChecker.onCheck = {
+            await MainActor.run {
+                XCTAssertNil(env.routing.server(id), "not listed while its key is checked")
+                XCTAssertEqual(env.keys.lookup(account: keychain), .absent, "and its key is not stored yet")
+            }
+        }
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        let server = try XCTUnwrap(env.routing.server(id))
+        XCTAssertEqual(server.models, [ServerModel(name: "ut-llm", kind: .llm, checked: true)])
+        XCTAssertEqual(server.keyAccount, keychain)
+        XCTAssertEqual(env.keys.read(account: keychain), "synthetic-new-key")
+    }
+
+    func test_a_refused_key_stores_neither_the_server_nor_the_key() async throws {
+        let keyChecker = BuilderKeyCheck()
+        keyChecker.result = .rejected(.invalidKey)
+        let env = try makeEnv(keyChecker: keyChecker)
+        let model = sheet(env)
+        let id = try XCTUnwrap(Self.id(model.account))
+        model.setBaseURL("https://vllm.company.ru/v1")
+        model.setKey("synthetic-wrong-key")
+        await type(model, "ut-llm", .llm)
+        let saved = await model.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(model.saveError, "Key not accepted")
+        XCTAssertNil(env.routing.server(id))
+        XCTAssertEqual(env.keys.lookup(account: AIRoutingStore.serverKeyAccount(for: id)), .absent)
+    }
+
+    func test_a_server_removed_during_the_key_check_is_not_brought_back() async throws {
+        let keyChecker = BuilderKeyCheck()
+        let env = try makeEnv(keyChecker: keyChecker)
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        await type(model, "ut-llm", .llm)
+        keyChecker.onCheck = { await MainActor.run { env.vm.remove(account) } }
+        let saved = await model.save()
+        XCTAssertFalse(saved)
+        XCTAssertNil(env.routing.server(try XCTUnwrap(Self.id(account))))
+    }
+
+    func test_a_changed_address_and_a_typed_key_are_saved_with_the_models() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env, key: "old-synthetic-credential")
+        env.routing.setRoute(FeatureRoute(account: account, model: "legacy"), for: .dropFast)
+        let model = sheet(env, account)
+        XCTAssertTrue(model.draft.hasStoredKey)
+        model.setBaseURL("https://vllm.company.ru/v1")
+        model.setKey("new-synthetic-credential")
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "new-synthetic-credential", "checks use the typed key")
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        let server = try XCTUnwrap(env.routing.server(try XCTUnwrap(Self.id(account))))
+        XCTAssertEqual(server.baseURL, "https://vllm.company.ru/v1")
+        XCTAssertEqual(server.name, "vllm.company.ru")
+        XCTAssertEqual(env.keys.read(account: try keyAccount(env, account)), "new-synthetic-credential")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.model, "legacy", "routes stay with the server")
+    }
+
+    func test_a_legacy_name_is_replaced_by_the_address() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env, name: "qwen3:0.6b")
+        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.title, Self.ollama, "the tile shows the address")
+        let model = sheet(env, account)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.name, Self.ollama, "and Save stores it")
+    }
+
     // MARK: - A check counts only for the server as it was checked
 
-    func test_a_pass_under_the_previous_key_adds_nothing() async throws {
+    func test_a_pass_under_the_previous_key_does_not_count() async throws {
         let env = try makeEnv()
         let account = try await connect(env, key: "old-synthetic-credential")
         let keychain = try keyAccount(env, account)
@@ -127,82 +658,92 @@ final class ServerExplicitModelsTests: XCTestCase {
             try? await MainActor.run { try env.keys.save("new-synthetic-credential", account: keychain) }
             return .passed
         }
-        let check = await env.vm.runServerModelCheck("example-model", kind: .llm, on: account)
-        XCTAssertTrue(check.stale)
-        XCTAssertEqual(check.result, .failed(APIAndModelsViewModel.serverChangedDuringCheck))
-        XCTAssertEqual(env.vm.addServerModel(after: check, to: account), APIAndModelsViewModel.serverChangedDuringCheck)
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels, [])
-        XCTAssertTrue(env.offered(account, for: .dropSmartCleanup).isEmpty)
-        // Checking again under the new key is what adds it.
-        env.checker.answer = nil
-        let retried = await add(env, "example-model", .llm, to: account)
-        XCTAssertEqual(retried, .passed)
+        let model = sheet(env, account)
+        await type(model, "example-model", .llm)
+        XCTAssertEqual(row(model).status, .pending, "the pass was for the key that is gone")
+        let saved = await model.save()
+        XCTAssertFalse(saved, "Save checks again under the new key, which refuses")
         XCTAssertEqual(env.checker.calls.last?.apiKey, "new-synthetic-credential")
-        XCTAssertEqual(env.offered(account, for: .dropSmartCleanup), ["example-model"])
+        XCTAssertEqual(row(model).status, .failed("Replacement key refused"))
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models, [])
+        XCTAssertTrue(env.offered(account, for: .dropSmartCleanup).isEmpty)
     }
 
-    func test_a_pass_on_the_previous_base_url_adds_nothing() async throws {
+    func test_an_address_synced_while_the_window_is_open_does_not_change_what_was_checked() async throws {
+        // The window saves the address it shows, and its checks ran against
+        // that address: a synced change elsewhere is replaced by this Save
+        // (the later edit wins), and the checked mark stays true for it.
         let env = try makeEnv()
         let account = try await connect(env)
         env.checker.answer = { server, _ in
-            guard server.baseURL == "http://localhost:11434/v1" else { return .unreachable("Replacement endpoint is down") }
+            guard server.baseURL == "http://localhost:11434/v1" else { return .unreachable("Wrong endpoint was checked") }
             try? await MainActor.run { try Self.syncBaseURL(env, account, to: "http://localhost:9999/v1") }
             return .passed
         }
-        let result = await add(env, "example-model", .transcription, to: account)
-        XCTAssertNotEqual(result, .passed)
-        XCTAssertTrue(env.offered(account, for: .dropFast).isEmpty)
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels, [])
+        let model = sheet(env, account)
+        await type(model, "example-model", .transcription)
+        XCTAssertEqual(row(model).status, .works)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
+        let server = try XCTUnwrap(env.routing.server(try XCTUnwrap(Self.id(account))))
+        XCTAssertEqual(server.baseURL, "http://localhost:11434/v1")
+        XCTAssertEqual(server.models, [ServerModel(name: "example-model", kind: .transcription, checked: true)])
     }
 
-    func test_save_without_check_is_refused_once_the_key_changed_after_the_refusal() async throws {
+    func test_typing_a_new_address_during_a_check_discards_its_result() async throws {
+        let env = try makeEnv()
+        let account = try await connect(env)
+        let model = sheet(env, account)
+        env.checker.answer = { server, _ in
+            if server.baseURL == "http://localhost:11434/v1" {
+                await MainActor.run { model.setBaseURL("http://gpu:8000/v1") }
+                return .passed
+            }
+            return .failed("Server answered 404 on /chat/completions — this model can't chat here")
+        }
+        await type(model, "ut-llm", .llm)
+        XCTAssertEqual(row(model).status, .failed("Server answered 404 on /chat/completions — this model can't chat here"),
+                       "only the check against the address now typed counts")
+    }
+
+    func test_a_failure_shown_under_the_old_key_is_checked_again_before_save_anyway() async throws {
         let env = try makeEnv()
         let account = try await connect(env, key: "old-synthetic-credential")
-        env.checker.result = .failed("Server answered 404 on /audio/transcriptions — this model can't transcribe here")
-        let refused = await env.vm.runServerModelCheck("parakeet", kind: .transcription, on: account)
-        XCTAssertFalse(refused.stale)
+        env.checker.result = .failed("Server refused the key (HTTP 401)")
+        let model = sheet(env, account)
+        await type(model, "parakeet", .transcription)
         try env.keys.save("new-synthetic-credential", account: try keyAccount(env, account))
-        XCTAssertEqual(env.vm.addServerModel(after: refused, to: account), APIAndModelsViewModel.serverChangedSinceCheck)
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels, [])
-        // A refusal under the current key still allows an explicit unchecked save.
-        let again = await env.vm.runServerModelCheck("parakeet", kind: .transcription, on: account)
-        XCTAssertNil(env.vm.addServerModel(after: again, to: account))
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels,
-                       [ServerModel(name: "parakeet", kind: .transcription, checked: false)])
+        let saved = await model.save()
+        XCTAssertFalse(saved, "the failure on screen was for another key: Save checks again and stops")
+        XCTAssertEqual(env.checker.calls.last?.apiKey, "new-synthetic-credential")
+        env.checker.result = .passed
+        model.setKind(.llm, of: row(model).id)
+        await settle(model)
+        let fixed = await model.save()
+        XCTAssertTrue(fixed)
+        XCTAssertEqual(env.routing.server(try XCTUnwrap(Self.id(account)))?.models,
+                       [ServerModel(name: "parakeet", kind: .llm, checked: true)])
     }
 
-    func test_save_without_check_is_refused_once_the_address_changed_after_the_refusal() async throws {
+    func test_a_server_removed_while_the_window_is_open_is_not_brought_back() async throws {
         let env = try makeEnv()
         let account = try await connect(env)
-        env.checker.result = .unreachable("Couldn't reach the server")
-        let refused = await env.vm.runServerModelCheck("ut-llm", kind: .llm, on: account)
-        try Self.syncBaseURL(env, account, to: "https://gateway.example/v1")
-        XCTAssertEqual(env.vm.addServerModel(after: refused, to: account), APIAndModelsViewModel.serverChangedSinceCheck)
-        XCTAssertTrue(env.offered(account, for: .meetingNotes).isEmpty)
+        let model = sheet(env, account)
+        await type(model, "ut-llm", .llm)
+        env.vm.remove(account)
+        let saved = await model.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(model.saveError, "This server was removed")
+        XCTAssertTrue(env.routing.state.servers.isEmpty)
     }
 
-    func test_a_server_removed_during_the_check_gets_nothing() async throws {
+    func test_remove_server_un_sets_its_features() async throws {
         let env = try makeEnv()
         let account = try await connect(env)
-        env.checker.answer = { _, _ in
-            await MainActor.run { env.vm.remove(account) }
-            return .passed
-        }
-        let check = await env.vm.runServerModelCheck("ut-llm", kind: .llm, on: account)
-        XCTAssertTrue(check.stale)
-        XCTAssertNotNil(env.vm.addServerModel(after: check, to: account))
-        XCTAssertFalse(env.routing.state.servers.contains { ProviderAccount.server($0.id) == account })
-        let after = await env.vm.runServerModelCheck("ut-llm", kind: .llm, on: account)
-        XCTAssertEqual(after.result, .failed("This server was removed"))
-    }
-
-    func test_a_check_for_another_server_is_not_added_here() async throws {
-        let env = try makeEnv()
-        let lab = try await connect(env, name: "Lab")
-        let other = try await connect(env, name: "Other")
-        let check = await env.vm.runServerModelCheck("ut-llm", kind: .llm, on: lab)
-        XCTAssertEqual(env.vm.addServerModel(after: check, to: other), APIAndModelsViewModel.serverChangedSinceCheck)
-        XCTAssertEqual(env.vm.chips.first { $0.account == other }?.serverModels, [])
+        env.routing.setRoute(FeatureRoute(account: account, model: "ut-llm"), for: .translation)
+        sheet(env, account).removeServer()
+        XCTAssertTrue(env.routing.state.servers.isEmpty)
+        XCTAssertNil(env.routing.route(for: .translation))
     }
 
     func test_the_key_digest_never_holds_the_key() {
@@ -212,133 +753,34 @@ final class ServerExplicitModelsTests: XCTestCase {
         XCTAssertNil(ServerModelTarget(account: .server(UUID()), baseURL: "http://h/v1", apiKey: "").keyDigest)
     }
 
-    // MARK: - The form runs one operation at a time
+    // MARK: - A server is called by its address
 
-    func test_a_model_check_blocks_key_save_and_remove_until_it_finishes() {
-        var activity = ServerFormActivity()
-        XCTAssertTrue(activity.beginModelCheck())
-        XCTAssertTrue(activity.busy)
-        XCTAssertFalse(activity.beginKeySave(), "Save is refused while a model is checked")
-        XCTAssertFalse(activity.canRemove, "Remove is refused while a model is checked")
-        XCTAssertFalse(activity.beginModelCheck(), "a second Add waits")
-        activity.finishKeySave()  // a late key-save completion releases nothing it does not own
-        XCTAssertTrue(activity.busy)
-        activity.finishModelCheck()
-        XCTAssertFalse(activity.busy)
-        XCTAssertTrue(activity.canRemove)
+    func test_a_server_is_named_after_its_address() {
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://localhost:11434/v1"), "Ollama · localhost:11434")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://127.0.0.1:1234/v1"), "LM Studio · 127.0.0.1:1234")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "https://vllm.company.ru/v1"), "vllm.company.ru")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "https://GPU.Example.com:8443/openai/v1"), "gpu.example.com:8443")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "wss://asr.lab:443/v1"), "asr.lab")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://box:80"), "box")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "vllm.company.ru:8000/v1"), "vllm.company.ru:8000")
+        XCTAssertNil(ServerEndpoint.displayName(for: ""))
+        XCTAssertNil(ServerEndpoint.displayName(for: "http:///v1"))
+        let legacy = ServerEndpoint(id: UUID(), name: "qwen3:0.6b", baseURL: "http://localhost:11434/v1", keyAccount: "k")
+        XCTAssertEqual(legacy.displayName, "Ollama · localhost:11434", "a name from before is replaced by the address")
     }
 
-    func test_a_key_save_blocks_a_model_check_and_overlapping_completions_keep_the_form_busy() {
-        var activity = ServerFormActivity()
-        XCTAssertTrue(activity.beginKeySave())
-        XCTAssertFalse(activity.beginModelCheck(), "Add is refused while the key is saved")
-        XCTAssertFalse(activity.canRemove)
-        activity.finishModelCheck()  // a stray model-check completion does not end the save
-        XCTAssertTrue(activity.busy)
-        activity.finishKeySave()
-        XCTAssertFalse(activity.busy)
-        XCTAssertTrue(activity.beginModelCheck())
-    }
+    // MARK: - Programmatic adds
 
-    // MARK: - Adding models
-
-    func test_a_new_server_offers_nothing_until_a_model_is_added() async throws {
-        let env = try makeEnv(catalog: ["qwen3:0.6b", "whisper-large-v3"])
-        let account = try await connect(env)
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels, [])
-        for feature in Self.speechFeatures + Self.textFeatures {
-            XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)")
-            XCTAssertNil(env.vm.sections(for: feature).first { $0.account == account }, "\(feature): no section")
-        }
-        // The server's list only suggests names.
-        XCTAssertEqual(env.vm.modelSuggestions(for: account), ["qwen3:0.6b", "whisper-large-v3"])
-    }
-
-    func test_ut_llm_added_as_llm_is_only_a_text_model() async throws {
-        let env = try makeEnv(catalog: [])
-        let account = try await connect(env, key: "lab-key")
-        XCTAssertEqual(ServerModelClassifier.suggestedKind(for: "ut-llm"), .llm)
-        let result = await add(env, "ut-llm", .llm, to: account)
-        XCTAssertEqual(result, .passed)
-        XCTAssertEqual(env.checker.calls.map(\.model), ["ut-llm"])
-        XCTAssertEqual(env.checker.calls.first?.kind, .llm)
-        XCTAssertEqual(env.checker.calls.first?.apiKey, "lab-key", "the check uses the server's own key")
-        for feature in Self.textFeatures { XCTAssertEqual(env.offered(account, for: feature), ["ut-llm"], "\(feature)") }
-        for feature in Self.speechFeatures { XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)") }
-        XCTAssertNil(env.vm.sections(for: .agent).first { $0.account == account }, "a server still can't run the Agent")
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels,
-                       [ServerModel(name: "ut-llm", kind: .llm, checked: true)])
-    }
-
-    func test_qwen3_asr_added_as_transcription_is_only_a_speech_model() async throws {
-        let env = try makeEnv(catalog: ["qwen3-asr"])
-        let account = try await connect(env)
-        XCTAssertEqual(ServerModelClassifier.suggestedKind(for: "qwen3-asr"), .transcription, "the name preselects")
-        XCTAssertEqual(ServerModelClassifier.suggestedKind(for: "qwen3:0.6b"), .llm)
-        let result = await add(env, "qwen3-asr", .transcription, to: account)
-        XCTAssertEqual(result, .passed)
-        for feature in Self.speechFeatures { XCTAssertEqual(env.offered(account, for: feature), ["qwen3-asr"], "\(feature)") }
-        for feature in Self.textFeatures { XCTAssertEqual(env.offered(account, for: feature), [], "\(feature)") }
-        XCTAssertEqual(env.resolver.verdict(model: "qwen3-asr", account: account, for: .translation),
-                       .notSupported(reason: "Not added to Lab as an LLM"))
-        // Picking it runs the ordinary live probe and sets the route.
-        await env.vm.select(model: "qwen3-asr", account: account, for: .dropFast)
-        XCTAssertEqual(env.probe.models, ["qwen3-asr"])
-        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: account, model: "qwen3-asr"))
-    }
-
-    func test_one_name_can_be_both_kinds_but_each_kind_once() async throws {
-        let env = try makeEnv()
-        let account = try await connect(env)
-        _ = await add(env, "qwen2.5-omni", .llm, to: account)
-        XCTAssertEqual(env.vm.serverModelProblem("qwen2.5-omni", kind: .llm, on: account),
-                       "qwen2.5-omni is already added as LLM")
-        XCTAssertEqual(env.vm.addServerModel("qwen2.5-omni", kind: .llm, checked: true, to: account),
-                       "qwen2.5-omni is already added as LLM")
-        XCTAssertNil(env.vm.serverModelProblem("qwen2.5-omni", kind: .transcription, on: account))
-        _ = await add(env, "qwen2.5-omni", .transcription, to: account)
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels?.map(\.kind), [.llm, .transcription])
-        XCTAssertEqual(env.offered(account, for: .dropFast), ["qwen2.5-omni"])
-        XCTAssertEqual(env.offered(account, for: .translation), ["qwen2.5-omni"])
-        XCTAssertEqual(env.vm.modelSuggestions(for: account), [], "a name added for both kinds is no longer suggested")
-
-        // Removing one kind un-sets only the features of that kind on it.
-        env.routing.setRoute(FeatureRoute(account: account, model: "qwen2.5-omni"), for: .dropFast)
-        env.routing.setRoute(FeatureRoute(account: account, model: "qwen2.5-omni"), for: .translation)
-        let cleared = env.vm.removeServerModel(ServerModel(name: "qwen2.5-omni", kind: .transcription, checked: true), from: account)
-        XCTAssertEqual(cleared, [.dropFast])
-        XCTAssertNil(env.routing.route(for: .dropFast))
-        XCTAssertEqual(env.routing.route(for: .translation)?.model, "qwen2.5-omni")
-        XCTAssertEqual(env.offered(account, for: .dropFast), [])
-        XCTAssertEqual(env.vm.rows.first { $0.feature == .dropFast }?.message, "qwen2.5-omni was removed from Lab")
-    }
-
-    func test_empty_names_are_refused_before_any_request() async throws {
+    func test_empty_and_repeated_names_are_refused_before_any_request() async throws {
         let env = try makeEnv()
         let account = try await connect(env)
         XCTAssertEqual(env.vm.serverModelProblem("  ", kind: .llm, on: account), "Enter the model's name")
         XCTAssertEqual(env.vm.addServerModel("", kind: .llm, checked: true, to: account), "Enter the model's name")
         XCTAssertEqual(env.vm.serverModelProblem("x", kind: .llm, on: .server(UUID())), "This server was removed")
         XCTAssertNil(env.vm.addServerModel("  spaced  ", kind: .llm, checked: true, to: account))
+        XCTAssertEqual(env.vm.addServerModel("spaced", kind: .llm, checked: true, to: account), "spaced is already added as LLM")
         XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels?.map(\.name), ["spaced"])
-    }
-
-    func test_a_failed_or_unreachable_check_saves_only_on_request_marked_not_checked() async throws {
-        let env = try makeEnv()
-        let account = try await connect(env)
-        let refused = "Server answered 404 on /audio/transcriptions — this model can't transcribe here"
-        env.checker.result = .failed(refused)
-        let result = await add(env, "qwen3:0.6b", .transcription, to: account)
-        XCTAssertEqual(result, .failed(refused))
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels, [], "nothing saved by itself")
-
-        env.checker.result = .unreachable("Couldn't reach the server")
-        let down = await add(env, "parakeet", .transcription, to: account)
-        XCTAssertEqual(down, .unreachable("Couldn't reach the server"))
-        XCTAssertNil(env.vm.addServerModel("parakeet", kind: .transcription, checked: false, to: account))
-        XCTAssertEqual(env.vm.chips.first { $0.account == account }?.serverModels,
-                       [ServerModel(name: "parakeet", kind: .transcription, checked: false)])
-        XCTAssertEqual(env.offered(account, for: .dropFast), ["parakeet"], "a Not checked model is still offered")
+        XCTAssertTrue(env.checker.calls.isEmpty)
     }
 
     // MARK: - Servers without /v1/models
@@ -346,10 +788,17 @@ final class ServerExplicitModelsTests: XCTestCase {
     func test_server_without_a_model_list_takes_typed_names() async throws {
         let env = try makeEnv(catalog: nil)
         let account = try await connect(env)
-        XCTAssertEqual(env.vm.modelSuggestions(for: account), [])
-        let result = await add(env, "ut-llm", .llm, to: account)
-        XCTAssertEqual(result, .passed)
+        let model = sheet(env, account)
+        XCTAssertEqual(model.suggestions, [])
+        await type(model, "ut-llm", .llm)
+        let saved = await model.save()
+        XCTAssertTrue(saved)
         XCTAssertEqual(env.offered(account, for: .meetingNotes), ["ut-llm"])
+    }
+
+    private static func id(_ account: ProviderAccount) -> UUID? {
+        if case .server(let id) = account { return id }
+        return nil
     }
 
     // MARK: - Servers from before (PR #393 and earlier)
@@ -409,7 +858,7 @@ final class ServerExplicitModelsTests: XCTestCase {
         XCTAssertEqual(env.offered(account, for: .dropFast), ["legacy-asr"])
         XCTAssertEqual(env.resolver.verdict(model: "legacy-asr", account: account, for: .dropFast), .new)
         XCTAssertEqual(env.resolver.verdict(model: "legacy-asr", account: account, for: .voiceSearch),
-                       .notSupported(reason: "Not added to Lab as a Transcription model"))
+                       .notSupported(reason: "Not added to \(Self.ollama) as a Transcription model"))
     }
 
     func test_launch_migration_adopts_old_servers() throws {

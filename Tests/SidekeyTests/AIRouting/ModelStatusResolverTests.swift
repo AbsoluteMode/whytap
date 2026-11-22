@@ -315,7 +315,7 @@ final class ModelStatusResolverTests: XCTestCase {
         )
         XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.openRouter])
         XCTAssertEqual(env.resolver.sections(for: .dropFast).first?.title, "Soniox")
-        XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "A-box")
+        XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "a:8000")
     }
 
     func test_every_keyed_llm_provider_has_a_section_and_openrouter_comes_last() throws {
@@ -339,7 +339,7 @@ final class ModelStatusResolverTests: XCTestCase {
         }
         XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.anthropic, .openAI, .openRouter])
         let sections = env.resolver.sections(for: .dropSmartCleanup)
-        XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama", "OpenRouter"])
+        XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama · localhost:11434", "OpenRouter"])
         XCTAssertTrue(sections.allSatisfy { $0.keyProblem == nil })
         // Search covers every section; the route itself is untouched.
         XCTAssertEqual(Set(ModelPickerSearch.results(in: sections, query: "").map(\.account)),

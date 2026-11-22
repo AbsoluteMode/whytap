@@ -1162,20 +1162,39 @@ written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
 .project-docs/decisions/2026-11-22-direct-model-list-prices.md
 A user's server offers only the models the user added (ServerEndpoint.models,
-in the routing document): its form under API keys has Server name, Base URL,
-the optional key and Models, where each model gets a name (typed or from the
-server's /v1/models, which only suggests names) and a required type, LLM or
-Transcription (ServerModel.Kind; the name only preselects it). Adding checks
-it once with the server's key (ServerModelChecker): a one-line
-/chat/completions request or 0.5 s of silence to /audio/transcriptions; a
-failure is shown at once ("Server answered 404 on /audio/transcriptions —
-this model can't transcribe here") and "Save without check" adds it marked
-Not checked. Pickers and the shared rows show a server model only for its
-own type; the same name may be added once per type. A route already on a
-model stays listed; removing a model un-sets that type's routes on it.
-Launch turns an earlier server's routes into added models and ignores the
-retired "Offer models for". WHY:
-.project-docs/decisions/2026-11-22-server-explicit-models.md
+in the routing document). The Custom server tile and each server's tile open
+one window (ServerSheet, ServerSheetModel): Base URL, the optional key and
+model rows, each a name (typed or from the server's /v1/models, which only
+suggests names), a required type, LLM or Transcription (ServerModel.Kind; a
+chosen name only preselects it), its check status and ×; one Save keeps it
+all. Each row is checked with the server's key (ServerModelChecker): a
+one-line /chat/completions request or 0.5 s of silence to
+/audio/transcriptions, 0.8 s after typing stops, at once on a type change, and
+again when the address or key changes; a result counts only for the name,
+type, address and key digest it was sent for (ServerModelTarget). A failure
+shows the server's reason under the row ("Server answered 404 on
+/audio/transcriptions — this model can't transcribe here"); Save checks what
+is stale, stops on a failure it found, and Save anyway keeps failed rows
+marked Not checked. The saved key goes only to the saved server's origin
+(scheme, host, port): for another origin no check gets it, Save removes it
+unless a key is typed (read when Save writes), and the window says so; a
+typed key, once sent, is cleared when the address moves to another origin.
+After the key check Save
+verifies the address and key digest are still what the rows were checked
+with, then writes the key and the server's address, name and models in one
+routing write (AIRoutingStore.insertServer / updateServer), so a new server is
+never listed before its key passed; Save returns there and loads /v1/models
+afterwards. ▾ suggests only the saved address's /v1/models: the cached list
+carries a digest of its address (CatalogSnapshot.source) and a list
+forgotten while a refresh was in flight is not written back. There is no name field: a server is shown as its address
+(ServerEndpoint.displayName: "Ollama · localhost:11434", "vllm.company.ru"),
+replacing names from earlier builds. Pickers and the shared rows show a server
+model only for its own type; the same name may be listed once per type. A
+route already on a model stays listed; a model taken off the list un-sets
+that type's routes on it. Launch turns an earlier server's routes into added
+models and ignores the retired "Offer models for". WHY:
+.project-docs/decisions/2026-11-22-server-explicit-models.md,
+.project-docs/decisions/2026-11-22-server-window.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which
@@ -1189,8 +1208,8 @@ equal dates and empty queries keep catalog order. Older caches refresh once for 
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
 Refresh models or Other model ID actions. Custom servers offer only the models
-added in their form, typed or from /models. API keys uses square provider tiles opening an
-inline Save/Remove form with no extra helper/status copy; a short Key accepted
+added in their window, typed or from /models. API keys uses square provider tiles opening an
+inline Save/Remove form (a server's tile opens its window instead) with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;
 .project-docs/decisions/2026-10-20-model-search.md

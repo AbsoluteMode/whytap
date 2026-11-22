@@ -1781,8 +1781,8 @@ Island History pastes several rows in one opening: with a paste target,
 ⌘-click marks rows in click order (a blue numbered badge; ⌘-click again
 unmarks), Enter pastes the marked rows instead of the hovered one and closes
 History, and Escape clears the marks. Plain click (copy) and plain Enter on
-one row are unchanged; the footer says "⌘-click for several", then "Enter to
-paste N to <app>   Esc to clear". HistoryPastePlan keeps mark order and merges
+one row are unchanged; the footer teaches ⌘-click (Select), then with marks
+Paste N to <app> and Esc Clear. HistoryPastePlan keeps mark order and merges
 neighbouring rows of a kind: files and images go out as one multi-item paste
 (one Cmd+V), texts as one paste a line each; text, files, text is three pastes
 400 ms apart, stopping at the first that fails. The whole series is bound to
@@ -1799,12 +1799,18 @@ is open and survive the Agent/Drop/Clipboard tabs. Marks work everywhere
 are marked copies all of them in mark order as one pasteboard
 (HistoryPasteboardWriter.writeAll: texts one string a line each, files and
 images one item each, mixed rows one item per group in order) and clears the
-marks; without a target Enter leaves the marks alone. Footer with marks:
-"Click to copy N   Enter to paste N to <app>   Esc to clear" (Toolbox:
-"⌘-click to unmark", it has no key monitor). Multi-row pastes and copies stay
-out of clipboard history. WHY:
+marks; without a target Enter leaves the marks alone. Whether Enter may paste
+marks follows the target name live: the island sets it in the same panelMode
+change that shows History, after the panel appeared. The footer is a row of
+HistoryHint blocks (HistoryHoverView.hints), each compact keycaps through
+HotkeyHintView(style: .keycaps) and a short action, hairlines between them:
+[click] Copy | [⌘][click] Select | [↩] Paste to <app>; with marks [click]
+Copy N | [↩] Paste N to <app> | [esc] Clear (Toolbox: [⌘][click] Unmark, it
+has no key monitor). Only the app name truncates. Multi-row pastes and copies
+stay out of clipboard history. WHY:
 .project-docs/decisions/2026-11-22-history-multi-paste.md,
-.project-docs/decisions/2026-11-22-history-multi-copy.md
+.project-docs/decisions/2026-11-22-history-multi-copy.md,
+.project-docs/decisions/2026-11-22-history-hint-keycaps.md
 The History connection sets secure_delete=ON, so cap evictions and agent
 trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in

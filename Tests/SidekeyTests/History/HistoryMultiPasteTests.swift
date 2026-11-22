@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -241,25 +242,56 @@ final class HistoryMultiPasteTests: XCTestCase {
     // MARK: - Hint and availability
 
     func testHintTeachesCommandClickAndCountsMarks() {
+        func spoken(_ hints: [HistoryHint]) -> [String] { hints.map(\.spokenText) }
         XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: "Telegram"),
-            "Click for copy   ⌘-click for several   Enter to paste to Telegram"
+            spoken(HistoryHoverView.hints(targetAppName: "Telegram")),
+            ["Click: Copy", "Command key Click: Select", "Return key: Paste to Telegram"]
         )
         XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: "Telegram", selectedCount: 3),
-            "Click to copy 3   Enter to paste 3 to Telegram   Esc to clear"
+            spoken(HistoryHoverView.hints(targetAppName: "Telegram", selectedCount: 3)),
+            ["Click: Copy 3", "Return key: Paste 3 to Telegram", "Escape key: Clear"]
         )
         XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: nil, selectedCount: 2),
-            "Click to copy 2   Esc to clear",
+            spoken(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2)),
+            ["Click: Copy 2", "Escape key: Clear"],
             "Without a target the marks are for copying"
         )
         XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: nil, selectedCount: 2, escapeClears: false),
-            "Click to copy 2   ⌘-click to unmark",
+            spoken(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2, escapeClears: false)),
+            ["Click: Copy 2", "Command key Click: Unmark"],
             "Toolbox has no key monitor: ⌘-click unmarks there"
         )
-        XCTAssertEqual(HistoryHoverView.hintText(targetAppName: nil), "Click for copy   ⌘-click for several")
+        XCTAssertEqual(
+            spoken(HistoryHoverView.hints(targetAppName: nil)),
+            ["Click: Copy", "Command key Click: Select"]
+        )
+        XCTAssertEqual(
+            spoken(HistoryHoverView.hints(targetAppName: "", selectedCount: 1)),
+            ["Click: Copy 1", "Escape key: Clear"],
+            "An empty app name is no target"
+        )
+    }
+
+    func testHintKeepsTheAppNameApartSoOnlyItShortens() {
+        let hints = HistoryHoverView.hints(targetAppName: "Microsoft Remote Desktop Beta", selectedCount: 2)
+        XCTAssertEqual(hints.compactMap(\.target), ["Microsoft Remote Desktop Beta"])
+        XCTAssertEqual(hints[1].action, "Paste 2 to")
+        XCTAssertEqual(hints[1].keys, [.returnKey])
+        XCTAssertTrue(hints.allSatisfy { !$0.action.contains("Microsoft") })
+    }
+
+    func testHintKeysAreKeycapsNotWords() {
+        let hints = HistoryHoverView.hints(targetAppName: "Telegram")
+        XCTAssertEqual(hints.map(\.keys), [[.click], [.command, .click], [.returnKey]])
+        XCTAssertEqual(HistoryHint.Key.command.keycap, .text(HotkeyGlyph.command))
+        XCTAssertEqual(HistoryHint.Key.click.keycap, .symbol("cursorarrow.click", accessibilityLabel: "Click"))
+        XCTAssertEqual(HistoryHint.Key.returnKey.keycap, .symbol("return", accessibilityLabel: "Return key"))
+        XCTAssertEqual(HistoryHint.Key.escape.keycap, .text("esc"))
+        for key in [HistoryHint.Key.click, .returnKey] {
+            if case .symbol(let name, _) = key.keycap {
+                XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), name)
+            }
+        }
     }
 
     func testEnterPastesOnlyWhereThereIsATarget() {
@@ -380,5 +412,64 @@ final class HistoryMultiPasteTests: XCTestCase {
         let clear = try XCTUnwrap(tail.range(of: "selection.clear()"))
         XCTAssertLessThan(copy.lowerBound, clear.lowerBound, "Copy first, then drop the marks")
         XCTAssertFalse(source.contains("multiSelectEnabled"), "Marks are no longer limited to a paste target")
+    }
+}
+
+/// The island opens History and captures the paste target in the same
+/// `panelMode` change, so the target can reach the panel after it appeared.
+/// Enter with marked rows must still paste then instead of passing the key
+/// on (AppKit beeps for an unhandled Return).
+@MainActor
+final class HistoryHoverTargetArrivalTests: XCTestCase {
+    private struct Host: View {
+        @State var target: String?
+        let next: String?
+        let probe: (HistoryHoverKeyMonitor) -> Void
+        let changed: () -> Void
+
+        var body: some View {
+            HistoryHoverView(
+                mode: .constant(.clipboard),
+                cards: [],
+                targetAppName: target,
+                onSelectMode: { _ in }, onCopy: { _ in }, onPreviewAnchorChange: { _, _ in },
+                onPaste: { _ in },
+                onKeyMonitorReady: probe
+            )
+            .task {
+                target = next
+                changed()
+            }
+        }
+    }
+
+    private func monitorAfterTargetChange(from first: String?, to next: String?) throws -> HistoryHoverKeyMonitor {
+        var monitor: HistoryHoverKeyMonitor?
+        var didChange = false
+        let host = NSHostingView(rootView: Host(target: first, next: next,
+                                                probe: { monitor = $0 }, changed: { didChange = true }))
+        host.frame = NSRect(x: 0, y: 0, width: 312, height: 260)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 312, height: 260),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { monitor?.stop(); window.contentView = nil; window.close() }
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while !didChange && Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        XCTAssertTrue(didChange)
+        return try XCTUnwrap(monitor)
+    }
+
+    func testTargetArrivingAfterThePanelAppearedLetsEnterPasteMarks() throws {
+        let monitor = try monitorAfterTargetChange(from: nil, to: "Telegram")
+        XCTAssertTrue(monitor.canPaste, "Enter with marks would pass on and beep")
+    }
+
+    func testTargetGoingAwayStopsEnterTakingMarks() throws {
+        let monitor = try monitorAfterTargetChange(from: "Telegram", to: nil)
+        XCTAssertFalse(monitor.canPaste)
     }
 }

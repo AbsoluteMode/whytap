@@ -43,13 +43,10 @@ final class HistoryHoverViewTests: XCTestCase {
 
     func testHintNamesCapturedTarget() {
         XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: "Telegram"),
-            "Click for copy   ⌘-click for several   Enter to paste to Telegram"
+            HistoryHoverView.hints(targetAppName: "Telegram").last,
+            HistoryHint(keys: [.returnKey], action: "Paste to", target: "Telegram")
         )
-        XCTAssertEqual(
-            HistoryHoverView.hintText(targetAppName: nil),
-            "Click for copy   ⌘-click for several"
-        )
+        XCTAssertNil(HistoryHoverView.hints(targetAppName: nil).compactMap(\.target).first)
     }
 
     func testDisplayTextUsesOnlyResultContent() {

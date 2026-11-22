@@ -85,10 +85,18 @@ Anthropic `end_turn` after a search) continues the turn; only `pause_turn` is
 replayed verbatim, the rest add the "Continue" user message because current
 Claude models reject prefill.
 
-Fallback evidence: a first-request 400 moves to Tavily only when its bounded
-body names the web search tool (`ErrorShape.rejectsWebSearch`, a keyword flag;
-the text is never kept) and is not a typed unrelated category such as
-`context_length_exceeded`.
+Fallback evidence: a first-request 400 moves to Tavily only on affirmative
+evidence (`ErrorShape.refusesWebSearch`; a flag, the text is never kept): no
+typed unrelated category (OpenRouter `invalid_prompt`, `context_length_exceeded`
+and the like, OpenAI `code` values other than unsupported/invalid value), no
+size or context wording, and either `param` naming the tools or a refusal
+phrase ("not supported", "disabled", "unavailable"...) within 60 characters of
+the tool's name. Limitation: a provider message that quotes user text saying
+"web search is not supported" next to the name cannot be told apart; the
+retry still runs once, on the first request, and Tavily is called only if the
+model asks for it. An Anthropic `web_search_tool_result` that arrives after
+its `server_tool_use` (search beside a function call) also counts as web work
+and continues to an answer, without counting the search twice.
 
 Support: Anthropic's Models API flag
 `capabilities.server_tools.web_search.supported` (now stored in the catalog)
@@ -98,7 +106,12 @@ Search row even when the catalog gives no token limits. OpenAI publishes no flag
 documented or known without search (`gpt-4.1-nano`, legacy GPT-3.5/4, audio,
 realtime, search-preview models) uses Tavily, and a **400 on the turn's first
 request** that names the web search tool retries once without it. OpenRouter's tool
-works for every model (its own search or Exa).
+works for every model: an `anthropic/` model keeps the default engine
+(Anthropic's own search, which honors `max_uses`), every other model gets
+`engine: "exa"`, which OpenRouter runs and caps before a search executes;
+other native engines ignore `max_uses`. Searches count from
+`usage.server_tool_use_details.web_search_requests`, else
+`tool_calls_executed` (search is the only server tool sent), else citations.
 
 Loop changes: Anthropic `pause_turn` and a response with web work but no
 function call continue the same turn (see Budget). Anthropic
@@ -164,9 +177,11 @@ unavailable, never 0.
   the Search menu works like Speech and LLM, so both choices are offered.
 - Removing Tavily: it is the only search for models without built-in search,
   and the planned one for own servers.
-- Falling back to Tavily on any first-request 400 (builder review): a context
-  length or format error would move the query to another service. Only an
-  error that names the web search tool qualifies.
+- Falling back to Tavily on any first-request 400, or on any 400 that merely
+  names web search (builder reviews #429, #431): a context length or prompt
+  error quoting the user's words would move the query to another service.
+- OpenRouter's default engine for every model: non-Anthropic native engines
+  ignore `max_uses`, so one request could exceed the turn's two searches.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

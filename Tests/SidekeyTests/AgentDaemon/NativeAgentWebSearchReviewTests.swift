@@ -211,4 +211,135 @@ extension NativeAgentWebSearchTests {
         SettingsSyncLiveReload.reload(items: ["key:" + TavilySearch.keychainAccount], defaults: defaults)
         wait(for: [notified], timeout: 1)
     }
+
+    // MARK: - Builder review, queue #431
+
+    /// The builder's fixtures: unrelated 400s that quote the user's "web search".
+    func testGeneric400QuotingSearchDoesNotSelectTavily() async throws {
+        let cases: [(OpenCodeModelProvider, String, String)] = [
+            (.anthropic, "claude-opus-5-5", #"{"type":"error","error":{"type":"invalid_request_error","message":"The prompt exceeds the maximum context length. Content begins: web search."}}"#),
+            (.openAI, "gpt-6.2-astra", #"{"error":{"type":"invalid_request_error","code":"context_length_exceeded","param":"input","message":"The input exceeds the context window. Content begins: web_search."}}"#),
+            (.openRouter, "openai/gpt-6.2-astra", #"{"error":{"code":400,"message":"Invalid prompt. User content begins: web search.","metadata":{"error_type":"invalid_prompt"}}}"#),
+        ]
+        for (route, modelID, error) in cases {
+            let (directory, keys, http) = try fixture()
+            try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+            try keys.save("fixture-anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+            try keys.save("fixture-openai-key", account: ProviderAccount.openAIKeychainAccount)
+            try keys.save("fixture-tavily-key", account: TavilySearch.keychainAccount)
+            var modelRequests = 0, tavilyRequests = 0
+            StubURLProtocol.handler = { request in
+                if request.url?.host == "api.tavily.com" { tavilyRequests += 1; return self.serve(["results": []]) }
+                modelRequests += 1
+                return (400, [:], Data(error.utf8))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            _ = await run(provider, "fixture web search", .init(model: modelID, openCodeProvider: route))
+            XCTAssertEqual(modelRequests, 1, "\(route): a search mention in an unrelated 400 is not a refusal")
+            XCTAssertEqual(tavilyRequests, 0, "\(route): an unrelated provider error never sends the query to Tavily")
+        }
+    }
+
+    func testRefusalEvidenceIsAffirmative() {
+        func refuses(_ json: String) -> Bool {
+            let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+            return NativeAgentDiagnostics.ErrorShape(object: object).rejectsWebSearch == true
+        }
+        XCTAssertTrue(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model.","type":"invalid_request_error"}}"#))
+        XCTAssertTrue(refuses(#"{"error":{"message":"Hosted tool web_search is unavailable for this model.","param":"tools[3].type","code":"unsupported_value"}}"#))
+        XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"Web search is disabled for this organization."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"web search","code":"context_length_exceeded"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Invalid prompt: web search","metadata":{"error_type":"invalid_prompt"}}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"The request is too large. It mentions web_search, which is not supported in this snippet."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Something went wrong."}}"#))
+        XCTAssertFalse(refuses("{}"))
+    }
+
+    func testOpenRouterExecutedCountContinuesAndSpendsBudget() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+        var modelRequests = 0
+        StubURLProtocol.handler = { _ in
+            modelRequests += 1
+            if modelRequests == 1 {
+                return self.serve([
+                    "choices": [["finish_reason": "stop", "message": ["role": "assistant", "content": "Search found no reliable results."]]],
+                    "usage": ["cost": 0.02, "server_tool_use_details": ["tool_calls_executed": 2, "tool_calls_requested": 2]],
+                ])
+            }
+            return self.serve(["choices": [["finish_reason": "tool_calls", "message": [
+                "role": "assistant", "content": NSNull(),
+                "tool_calls": [["id": "final", "type": "function", "function": [
+                    "name": "finish_answer", "arguments": self.arguments(self.final("Search found no reliable results.", status: "unverified"))
+                ]]]
+            ]]]])
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let events = await run(provider, "fixture", .init(model: "openai/gpt-6.2-astra"))
+        XCTAssertTrue(finalText(events)?.contains("Search found no reliable results.") == true)
+        XCTAssertEqual(modelRequests, 2, "A completion request follows two documented server-tool executions")
+        let tools = try XCTUnwrap(try body(1)["tools"] as? [[String: Any]])
+        XCTAssertFalse(tools.contains { $0["type"] as? String == "openrouter:web_search" }, "Both executions consumed the budget")
+    }
+
+    func testOpenRouterCapIsEnforcedBeforeASearchRuns() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+        for model in ["openai/gpt-6.2-astra", "anthropic/claude-opus-5-5"] {
+            StubURLProtocol.reset()
+            StubURLProtocol.handler = { _ in
+                self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
+                    "tool_calls": [["id": "f", "type": "function", "function": ["name": "finish_answer",
+                                                                                "arguments": self.arguments(self.final("A."))]]]]]]])
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            _ = await run(provider, "q", .init(model: model))
+            let tool = try XCTUnwrap((try body(0)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" })
+            let parameters = try XCTUnwrap(tool["parameters"] as? [String: Any])
+            XCTAssertEqual(parameters["max_uses"] as? Int, 2, model)
+            if model.hasPrefix("anthropic/") {
+                XCTAssertNil(parameters["engine"], "Anthropic's native search honors max_uses")
+            } else {
+                XCTAssertEqual(parameters["engine"] as? String, "exa", "Other native engines ignore max_uses; Exa is capped by OpenRouter")
+            }
+        }
+    }
+
+    func testAnthropicDeferredWebResultWithoutFunctionContinues() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("fixture-anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+        var modelRequests = 0
+        StubURLProtocol.handler = { _ in
+            modelRequests += 1
+            switch modelRequests {
+            case 1:
+                return self.serve(["stop_reason": "tool_use", "content": [
+                    ["type": "server_tool_use", "id": "srv", "name": "web_search", "input": ["query": "fixture"]],
+                    ["type": "tool_use", "id": "early", "name": "finish_answer", "input": self.final("Premature.")]
+                ]])
+            case 2:
+                return self.serve(["stop_reason": "end_turn", "content": [
+                    ["type": "web_search_tool_result", "tool_use_id": "srv", "content": [
+                        ["type": "web_search_result", "url": "https://fixture.example/page", "title": "Fixture", "encrypted_content": "fixture-replay"]
+                    ]],
+                    ["type": "text", "text": "Found the page."]
+                ], "usage": ["server_tool_use": ["web_search_requests": 1]]])
+            default:
+                return self.serve(["stop_reason": "tool_use", "content": [
+                    ["type": "tool_use", "id": "late", "name": "finish_answer", "input": self.final("Checked answer.")]
+                ]])
+            }
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let events = await run(provider, "fixture", .init(model: "claude-opus-5-5", openCodeProvider: .anthropic))
+        XCTAssertEqual(finalText(events), "Checked answer.")
+        XCTAssertEqual(modelRequests, 3, "An end_turn with the deferred search result needs one completion request")
+        let finalRequest = try body(2)
+        XCTAssertEqual((finalRequest["messages"] as? [[String: Any]])?.last?["role"] as? String, "user")
+        XCTAssertTrue(text(2).contains("fixture-replay"), "The result is replayed verbatim")
+        let tools = try XCTUnwrap(finalRequest["tools"] as? [[String: Any]])
+        XCTAssertEqual(tools.first { $0["type"] as? String == "web_search_20250305" }?["max_uses"] as? Int, 1,
+                       "The search is counted once, with its request")
+        XCTAssertEqual(links(events).first, .link(url: URL(string: "https://fixture.example/page")!, description: "Fixture", provider: nil))
+    }
 }

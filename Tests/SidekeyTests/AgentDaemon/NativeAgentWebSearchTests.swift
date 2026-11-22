@@ -145,7 +145,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(row(.anthropic, tavily: false, .tavily).current, .builtIn(.anthropic))
         // Prices are named, never a zero.
         XCTAssertTrue(row(.anthropic, tavily: false).current.priceNote.contains("$10 per 1,000 searches"))
-        XCTAssertTrue(row(.openRouter, tavily: false).current.priceNote.contains("Exa at about $7 per 1,000"))
+        XCTAssertTrue(row(.openRouter, tavily: false).current.priceNote.contains("Exa search, about $7 per 1,000 searches"))
         for state in [row(.anthropic, tavily: false), row(.openRouter, tavily: false), picked, off] {
             XCTAssertFalse(state.current.priceNote.contains("$0"))
         }

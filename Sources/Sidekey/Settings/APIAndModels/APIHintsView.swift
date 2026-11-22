@@ -67,7 +67,7 @@ struct APIHintsView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add keys in API keys. Choose language and speech models in Models. Agent searches the web with its model: on Anthropic or OpenAI about $10 per 1,000 searches plus result tokens, on OpenRouter the model's own search or Exa at about $7 per 1,000. Tavily serves other models, or when chosen in Models → Search.")
+            Text("Add keys in API keys. Choose language and speech models in Models. Agent searches the web with its model: on Anthropic or OpenAI about $10 per 1,000 searches plus result tokens, through OpenRouter Exa at about $7 per 1,000 (Claude models use Anthropic's search). Tavily serves other models, or when chosen in Models → Search.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
 

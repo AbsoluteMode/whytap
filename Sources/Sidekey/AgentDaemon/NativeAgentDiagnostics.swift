@@ -30,6 +30,40 @@ enum NativeAgentDiagnostics {
         /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
         let rejectsWebSearch: Bool?
 
+        /// Affirmative evidence only. A typed error that is about something
+        /// else (OpenRouter's categories, OpenAI's `code`), or any message about
+        /// size or context, never qualifies even when it quotes the user's
+        /// words "web search". Otherwise the provider must say the tool
+        /// itself is refused: `param` names the tools, or a refusal phrase sits
+        /// right beside the tool's name ("web_search is not supported",
+        /// "Web search is disabled").
+        static func refusesWebSearch(error: [String: Any]?, category: Category, text: String) -> Bool {
+            guard category == .unknown || category == .invalid_request else { return false }
+            if let code = error?["code"] as? String, !["unsupported_value", "invalid_value", "unsupported_parameter",
+                                                       "invalid_request_error", "tool_not_supported"].contains(code) {
+                return false
+            }
+            let size = ["context", "too long", "too large", "maximum", "exceeds", "exceeded", "token", "length"]
+            guard !size.contains(where: text.contains) else { return false }
+            let tool = ["web_search", "web search", "websearch", "openrouter:web_search", "server tool", "server_tool"]
+            guard tool.contains(where: text.contains) else { return false }
+            if let param = (error?["param"] as? String)?.lowercased(), param.hasPrefix("tools") { return true }
+            let refusals = ["not supported", "unsupported", "is disabled", "are disabled", "not enabled", "not available",
+                            "does not support", "doesn't support", "not allowed", "not permitted", "unknown tool",
+                            "invalid tool", "not recognized", "turned off"]
+            // The refusal must be about the tool: within a short window of its name.
+            for name in tool {
+                var start = text.startIndex
+                while let range = text.range(of: name, range: start..<text.endIndex) {
+                    let low = text.index(range.lowerBound, offsetBy: -60, limitedBy: text.startIndex) ?? text.startIndex
+                    let high = text.index(range.upperBound, offsetBy: 60, limitedBy: text.endIndex) ?? text.endIndex
+                    if refusals.contains(where: text[low..<high].contains) { return true }
+                    start = range.upperBound
+                }
+            }
+            return false
+        }
+
         enum Category: String, Codable {
             case context_length_exceeded, string_too_long, invalid_prompt, invalid_request
             case max_tokens_exceeded, token_limit_exceeded, provider_overloaded, provider_unavailable, rate_limit_exceeded, unknown
@@ -44,10 +78,7 @@ enum NativeAgentDiagnostics {
             let text = [error?["message"] as? String, metadata?["raw"] as? String]
                 .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
-            let unrelated: Set<Category> = [.context_length_exceeded, .string_too_long, .max_tokens_exceeded, .token_limit_exceeded,
-                                            .provider_overloaded, .provider_unavailable, .rate_limit_exceeded]
-            rejectsWebSearch = !unrelated.contains(category)
-                && ["web_search", "web search", "websearch", "server_tool", "server tool"].contains(where: text.contains)
+            rejectsWebSearch = Self.refusesWebSearch(error: error, category: category, text: text)
             self.truncated = truncated
             parsed = object != nil
             self.envelope = envelope

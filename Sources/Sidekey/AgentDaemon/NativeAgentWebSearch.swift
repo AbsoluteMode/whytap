@@ -51,15 +51,20 @@ enum NativeAgentWebSearch: Equatable {
     /// The provider tool added to the request's `tools`. The Anthropic basic
     /// version stays ZDR-eligible and needs no newer API version header.
     /// `limit`: searches still allowed (Anthropic: in its provider turn;
-    /// OpenRouter: in this request, which native engines other than
-    /// Anthropic ignore, so the app also stops offering the tool once the
-    /// turn's budget is spent).
-    static func providerTool(for provider: OpenCodeModelProvider, limit: Int = maxSearches) -> [String: Any] {
+    /// OpenRouter: in this request). OpenRouter forwards `max_uses` only to
+    /// Anthropic's native search; other native engines ignore it. So an
+    /// `anthropic/` model keeps the default engine (Anthropic's own search,
+    /// capped by max_uses) and every other model uses Exa, which OpenRouter
+    /// runs itself and caps before a search runs.
+    static func providerTool(for provider: OpenCodeModelProvider, limit: Int = maxSearches, model: String = "") -> [String: Any] {
         let limit = max(1, min(limit, maxSearches))
         switch provider {
         case .anthropic: return ["type": "web_search_20250305", "name": "web_search", "max_uses": limit]
         case .openAI: return ["type": "web_search"]
-        case .openRouter: return ["type": "openrouter:web_search", "parameters": ["max_results": 5, "max_uses": limit]]
+        case .openRouter:
+            var parameters: [String: Any] = ["max_results": 5, "max_uses": limit]
+            if !model.lowercased().hasPrefix("anthropic/") { parameters["engine"] = "exa" }
+            return ["type": "openrouter:web_search", "parameters": parameters]
         }
     }
 
@@ -95,7 +100,7 @@ enum NativeAgentWebSearch: Equatable {
     var priceNote: String {
         switch self {
         case .builtIn(.openRouter):
-            return "The model’s own search at its provider’s price, otherwise Exa at about $7 per 1,000 searches. Billed by OpenRouter."
+            return "Exa search, about $7 per 1,000 searches; Claude models use Anthropic’s search at about $10 per 1,000. Billed by OpenRouter."
         case .builtIn(let provider):
             return "About $10 per 1,000 searches plus result tokens. Billed by \(provider.displayName)."
         case .tavily:

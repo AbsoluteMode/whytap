@@ -851,7 +851,8 @@ Settings → API & Models → API keys содержит ключ Tavily в Keych
 Если модель Agent идёт через Anthropic, OpenAI или OpenRouter, агент ищет в вебе
 встроенным поиском этого провайдера: отдельный ключ не нужен, не больше двух поисков
 за запрос, счёт у того же провайдера (около $10 за 1000 поисков плюс токены
-результатов; у OpenRouter для моделей без своего поиска — Exa, около $7 за 1000).
+результатов; через OpenRouter — Exa, около $7 за 1000, а модели Claude ищут поиском Anthropic:
+только так лимит в два поиска соблюдается до выполнения запроса).
 Строка «Search» в API & Models → Models (под Speech и LLM) показывает, чем агент
 ищет сейчас: «Anthropic · built-in», «OpenAI · built-in», «OpenRouter · web»,
 «Tavily» или «Off — add a Tavily key», и цену под ней. Меню устроено как у Speech

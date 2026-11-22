@@ -34,14 +34,14 @@ the same provider (at most two searches per request).
 | --- | --- | --- |
 | Anthropic | Claude web search (`web_search_20250305`) | $10 per 1,000 searches plus the results as input tokens; failed searches are not billed. Included in the Agent's estimated cost |
 | OpenAI | Responses `web_search` | $10 per 1,000 calls plus search content tokens. OpenAI reports no charge, so the cost stays unknown |
-| OpenRouter | `openrouter:web_search` | the model's own search at its provider's price, otherwise Exa at about $7 per 1,000; included in the cost OpenRouter reports |
+| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. Included in the cost OpenRouter reports |
 
 The provider runs the search and sends its results to the model; Whytap
 never sees a separate search request. "Searching the web" appears once the
 provider's response reports a search, not while it runs. At most two built-in
 searches (OpenAI: web calls) per request you make, across all of the Agent's
-model calls for it; OpenRouter's own engines other than Anthropic's ignore the
-per-call cap, so the app stops offering the tool once two are spent. The pages the model cites appear as
+model calls for it; each provider enforces it before a search runs, and the
+app stops offering the tool once two are spent. The pages the model cites appear as
 source cards. If the model lists none itself, Whytap shows the provider's
 citations (up to five).
 

@@ -83,7 +83,7 @@ struct NativeAgentModel {
         let remaining = NativeAgentWebSearch.maxSearches
             - (options.openCodeProvider == .anthropic ? providerTurnBase : searchesUsed)
         let search = builtInSearch && !tools.isEmpty && remaining > 0
-        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining)
+        let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining, model: model)
         switch options.openCodeProvider {
         case .openAI:
             var body: [String: Any] = [
@@ -256,6 +256,10 @@ struct NativeAgentModel {
                         if let id = block["id"] as? String { requested.insert(id) }
                     }
                 case "web_search_tool_result":
+                    // A result can arrive in a later response than its
+                    // server_tool_use (search beside a function call): web work
+                    // that needs an answer, counted once with its request.
+                    webWork = true
                     if let id = block["tool_use_id"] as? String { answered.insert(id) }
                     // An error result is an object, not a list: no pages.
                     for result in block["content"] as? [[String: Any]] ?? [] {
@@ -286,7 +290,10 @@ struct NativeAgentModel {
             // OpenRouter runs its server tool inside the request. Its usage
             // reports the count; citations alone still show a search ran.
             let details = (response["usage"] as? [String: Any])?["server_tool_use_details"] as? [String: Any]
-            let reported = AIUsageNumber.nonnegative(details?["web_search_requests"]).map { Int(min($0, 1_000)) }
+            // web_search_requests when reported; otherwise the executed
+            // server-tool steps (web search is the only server tool sent).
+            let reported = (AIUsageNumber.nonnegative(details?["web_search_requests"])
+                ?? AIUsageNumber.nonnegative(details?["tool_calls_executed"])).map { Int(min($0, 1_000)) }
             searches = reported ?? (annotations.isEmpty ? 0 : 1)
             webWork = searches > 0 || !annotations.isEmpty
             let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []

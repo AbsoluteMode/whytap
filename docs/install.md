@@ -170,9 +170,11 @@ Whytap is free (MIT) and has no plans, accounts or credits of its own. It is
 built for people and teams who already have one of these:
 
 - **Provider keys**, billed by the provider per use: Soniox, Deepgram or
-  ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models
-  (they also run the Agent's web search, about $10 per 1,000 searches); Tavily
-  for web search with other models.
+  ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models.
+  They also run the Agent's web search: about $10 per 1,000 searches plus
+  result tokens on Anthropic and OpenAI, Exa at about $7 per 1,000 through
+  OpenRouter (Claude models there use Anthropic's search). Tavily is for an
+  Agent model without search, or when chosen in Models → Search.
 - **A ChatGPT or Claude plan with monthly API credits.** OpenAI gives ChatGPT
   Pro ($100, $200 or $500 a month, by tier) and Business seats API credit;
   Anthropic gives Claude Max ($100), Ultra ($200) and Team seats. Both must be

@@ -581,7 +581,13 @@ struct ModelStatusResolver {
             if registered?.diarization == true { return "with speakers" }
             // WHY: .project-docs/decisions/2026-11-21-on-device-everywhere.md
             return account == .thisMac ? "without speakers" : nil
-        case .dropFast, .dropSmart, .meetingNotes, .agent, .retiredMeetingText, .agentVoice, .voiceSearch, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
+        case .dropFast, .dropSmart, .agentVoice, .voiceSearch:
+            // A turn-based OpenAI model runs with server VAD: its text comes
+            // after each pause, not word by word.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            if account == .openAI, !ModelRegistry.openAIStreamsWithinTurn(model) { return "text after each pause" }
+            return nil
+        case .meetingNotes, .agent, .retiredMeetingText, .translation, .subtitlesTranslation, .subtitlesAudio, .retiredMeetingAudio:
             return nil
         }
     }

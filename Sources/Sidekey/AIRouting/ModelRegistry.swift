@@ -33,6 +33,42 @@ enum ModelRegistry {
         model == elevenLabsRetiredRealtimeModel || model.hasSuffix("_live") || model.hasSuffix("_realtime")
             ? elevenLabsRecordedModel : model
     }
+    /// OpenAI speech, on the shared OpenAI key. `gpt-live-transcribe` streams
+    /// words while the user speaks (OpenAI's recommended live model);
+    /// `gpt-realtime-whisper` streams too. Every other OpenAI transcription
+    /// model starts only after a committed turn, so it runs with server VAD
+    /// and shows text phrase by phrase. Recorded audio (Drop's batch rung and
+    /// Retry) goes to `/v1/audio/transcriptions` with `gpt-transcribe`.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static let openAILiveModel = "gpt-live-transcribe"
+    static let openAIRealtimeWhisperModel = "gpt-realtime-whisper"
+    static let openAIRecordedModel = "gpt-transcribe"
+
+    /// Whether an OpenAI transcription model streams text within one turn
+    /// (one commit when the take ends). The others need server VAD turns.
+    static func openAIStreamsWithinTurn(_ model: String) -> Bool {
+        model.hasPrefix(openAILiveModel) || model.hasPrefix(openAIRealtimeWhisperModel)
+    }
+
+    /// The model a finished take is sent with on OpenAI's file endpoint: the
+    /// live-only models map to `gpt-transcribe`, a file-capable one is kept.
+    static func openAIRecordedModel(for model: String) -> String {
+        openAIStreamsWithinTurn(model) ? openAIRecordedModel : model
+    }
+
+    /// OpenAI's published transcription prices, USD per audio minute
+    /// (developers.openai.com/api/docs/pricing, checked 2026-11-22). Costs
+    /// marks them ≈; an unknown model has no price, never zero.
+    static func openAISpeechUSDPerMinute(_ model: String) -> Double? {
+        switch model {
+        case openAILiveModel, openAIRealtimeWhisperModel: return 0.017
+        case openAIRecordedModel: return 0.0045
+        case "gpt-4o-transcribe", "whisper-1": return 0.006
+        case "gpt-4o-mini-transcribe": return 0.003
+        default: return nil
+        }
+    }
+
     /// The speech model the On this Mac provider downloads and runs.
     static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
@@ -82,6 +118,8 @@ extension ModelRegistry {
         RegistryModel(kind: .elevenLabs, id: elevenLabsRealtimeModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .openAI, id: openAILiveModel, uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .openAI, id: openAIRealtimeWhisperModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openAI, id: OpenAIRealtimeTranslateAdapter.model, uses: [.speechTranslation], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
@@ -154,8 +192,15 @@ extension ModelRegistry {
             case .dropFast, .dropSmart, .meetings, .agentVoice, .voiceSearch, .subtitlesAudio: return nil
             }
         case .openAI:
-            // The authenticated live catalog is the source of available IDs.
-            return nil
+            switch feature {
+            // Live speech: the streaming model. Meetings have no OpenAI model
+            // (no speaker labels; a long recording exceeds the 25 MB file limit).
+            case .dropFast, .dropSmart, .agentVoice, .voiceSearch: return openAILiveModel
+            // Text models: the authenticated live catalog is the source of IDs.
+            case .retiredMeetingText, .retiredMeetingAudio, .meetings, .subtitlesAudio,
+                 .dropSmartCleanup, .dropSmartDecision, .meetingNotes, .translation, .subtitlesTranslation, .agent:
+                return nil
+            }
         case .openAICompatible:
             return nil
         case .onDevice:

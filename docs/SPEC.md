@@ -47,7 +47,7 @@ Knowledge workers — разработчики, продакт-менеджер�
 - To-do — компактный локальный список в hover: ввод + Enter, нажатие завершает/возвращает задачу, завершённые уходят вниз до закрытия, затем доступны в History с датой и временем завершения. Длинный текст раскрывается нативной подсказкой при наведении; черновик сохраняется при закрытии. Calendar пока закрыт: плитка, строка поиска, панель Toolbox и карточка Integrations показывают Soon и ничего не делают (`CalendarAvailability.shipped = false`, `.project-docs/decisions/2026-11-21-calendar-soon.md`); дальше описано, как он будет работать после открытия. Calendar открывается внутри Hover на текущем дне. Повестка, полные подробности события (пузырь при наведении на блок, который что-то обрезает; блоки показывают название, время, описание и участников по мере высоты; Google/Outlook через Календарь macOS получают свой логотип), выбор видимых календарей и кнопка Connect остаются внутри Hover; повторное открытие возвращает сегодня. Connect и Settings → Integrations сразу запускают общий сценарий подключения Apple, Google, Outlook/Teams и Zoom Calendar Service: без промежуточной формы, имени аккаунта и Advanced setup. Браузер или системный запрос открываются только для разрешения доступа провайдеру; аккаунта Whytap нет. Внешние события доступны для чтения. Публичные Google/Zoom подключения остаются недоступны до проверки; живая авторизация проверяется отдельно. См. [Planner](planner.md).
 
 - macOS 14.2+, Swift + AppKit + SwiftUI; surface — Dynamic Island (status-bar item нет)
-- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) или On this Mac (Apple Silicon) → cleanup в Smart (OpenRouter, OpenAI или Anthropic ключом пользователя / custom OpenAI-compatible endpoint; Fast — без LLM) → Cmd+V (в собственные текстовые поля Whytap, например в ввод Translate, текст вставляется напрямую в выделение, без буфера обмена и Cmd+V)
+- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / OpenAI / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) или On this Mac (Apple Silicon) → cleanup в Smart (OpenRouter, OpenAI или Anthropic ключом пользователя / custom OpenAI-compatible endpoint; Fast — без LLM) → Cmd+V (в собственные текстовые поля Whytap, например в ввод Translate, текст вставляется напрямую в выделение, без буфера обмена и Cmd+V)
 - Agent flow: Right Cmd tap/hold → Whytap Agent → выбранная пользователем модель OpenRouter, OpenAI или Anthropic, ответ в острове. Agent выключен по умолчанию; после включения «Allow file edits and commands» включён и даёт модели `write_file` и `run_command` с правами пользователя — это не песочница (`docs/agent.md`)
 - Meeting Notes: always-on детектор → запись (mic + system audio) → BYOK-процессор (Soniox, Deepgram или ElevenLabs размечают спикеров; свой сервер и On this Mac — без спикеров; саммари — LLM пользователя) → notes window
 - App-aware форматирование (Notion/Linear/Slack/Telegram → markdown, остальное → plain)
@@ -503,12 +503,22 @@ Refresh повторяет чтение цен; при ошибке API изве
 
 **STT-провайдеры (Your key, выбор пользователя в Settings → API & Models для
 каждой фичи):** Soniox (`stt-rt-v6`, по умолчанию), Deepgram (`nova-3`),
-ElevenLabs (`scribe_v3_live`), self-hosted endpoint с протоколом OpenAI
-Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`) или
-On this Mac (Parakeet TDT v3, только Apple Silicon, без ключа). Сам
-OpenAI не предлагается: сохранённый выбор OpenAI читается как Soniox. Drop —
-realtime streaming, не batch; заметки встреч с Soniox идут через file API
-(`stt-async-v6`).
+ElevenLabs (`scribe_v3_live`), OpenAI или self-hosted endpoint с протоколом
+OpenAI Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`) или
+On this Mac (Parakeet TDT v3, только Apple Silicon, без ключа).
+OpenAI работает на общем OpenAI-ключе (тот же, что у LLM) и только на
+`api.openai.com`: `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper`
+стримят слова во время речи, а пофразовые модели каталога (`gpt-transcribe`,
+`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`) идут через server
+VAD и показывают текст после каждой паузы («text after each pause» в пикере,
+auto-stop для них не включается). Batch-восстановление и Retry отправляют дубль в
+`/v1/audio/transcriptions` (`gpt-transcribe` для live-моделей). Meetings у
+OpenAI нет: ни одна модель OpenAI не размечает спикеров (diarize-модель
+OpenAI выводит из оборота), а файл ограничен 25 MB. Старый сохранённый выбор
+OpenAI переносится на OpenAI со своей моделью, не на Soniox. Решение —
+[2026-11-22-openai-speech-provider](../.project-docs/decisions/2026-11-22-openai-speech-provider.md).
+Drop — realtime streaming, не batch; заметки встреч с Soniox идут через file
+API (`stt-async-v6`).
 
 **Input language** — отдельный от Smart Output language выбор. Явный язык
 передаётся STT-провайдеру: Soniox получает мягкие hints с добавлением английского,

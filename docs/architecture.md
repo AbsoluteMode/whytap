@@ -1208,7 +1208,10 @@ recorded model, a server for the Agent) keeps its route and the row says why.
 A model the feature's picker rules out is refused even where a server takes
 a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
 never from full picker lists. One probe per pick (a tools probe also passes
-plain chat). The row is read
+plain chat). The OpenAI tools probe uses the Responses API with one function
+tool, like the Agent; reasoning models such as gpt-6.2-sol refuse function
+tools on Chat Completions (adapter version 2; WHY:
+.project-docs/decisions/2026-11-22-openai-agent-probe-responses.md). The row is read
 from the saved routes, never stored: the model more than half of the routed
 features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
 re-picking asks before replacing custom models. app-control get_state has a

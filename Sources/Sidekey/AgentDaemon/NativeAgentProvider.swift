@@ -182,7 +182,12 @@ final class NativeAgentProvider: CLIProvider {
                 // cannot know whether a sibling write/command will succeed.
                 guard calls.count == 1 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 let final: NativeAgentFinalAnswer
-                do { final = try NativeAgentFinalAnswer(arguments: calls[0].arguments) }
+                do {
+                    final = try NativeAgentFinalAnswer(
+                        arguments: calls[0].arguments,
+                        openAICitations: options.openCodeProvider == .openAI
+                            || (options.openCodeProvider == .openRouter && options.model?.lowercased().hasPrefix("openai/") == true))
+                }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 let text = (changes + [final.visibleText]).joined(separator: "\n\n")
                 // Built-in search cited pages but the model listed no sources:

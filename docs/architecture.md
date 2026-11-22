@@ -933,8 +933,10 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   field must report its length (at most 20,000 UTF-16 units) and only that
   range is requested (AXStringForRange); no length means no read. Focus
   and the gate are confirmed again after the length query and after the
-  transfer; if another app takes focus during the capture, the paste engine
-  posts no Cmd+V and restores the clipboard.
+  transfer (focus is checked before and after the gate's metadata calls);
+  if another app takes focus during the capture, the paste engine posts no
+  Cmd+V and restores the clipboard. With learning and calibration off no
+  capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops a scheduled read. It
   compares with what reached the field (a rich paste's plainText), aligns the take inside the
   field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and

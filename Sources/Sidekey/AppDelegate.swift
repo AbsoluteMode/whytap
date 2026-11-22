@@ -1368,7 +1368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once later only if it is still the focused field of the frontmost
         // app. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
         var learningField: DropEditFieldHandle?
-        let wantsField = learning != nil && !autoPasteEngine.hasLocalDropTarget
+        let wantsField = learning != nil && !autoPasteEngine.hasLocalDropTarget && dropLearning.capturesFields
         let pasted = await deliverDropTranscript(cleaned, formatting: formatting, beforeCommandV: wantsField ? { [weak self] in
             learningField = self?.dropLearning.prepareDelivery(targetPID: targetPID)
         } : nil)

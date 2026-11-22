@@ -17,6 +17,7 @@ final class DropEditFieldAccessTests: XCTestCase {
     private var count: Int?
     private var duringLength: (() -> Void)?
     private var duringTransfer: (() -> Void)?
+    private var duringFacts: (() -> Void)?
     private var requestedRanges: [CFRange] = []
     private var text = "Скачай Whytap с сайта"
 
@@ -28,6 +29,7 @@ final class DropEditFieldAccessTests: XCTestCase {
         requestedRanges = []
         duringLength = nil
         duringTransfer = nil
+        duringFacts = nil
     }
 
     private func access() -> AXDropEditFieldAccess {
@@ -36,8 +38,9 @@ final class DropEditFieldAccessTests: XCTestCase {
             focusedElement: { [unowned self] in focused },
             elementPID: { [unowned self] element in CFEqual(element, field) ? targetPID : otherPID },
             isRunning: { _ in true },
-            facts: { _, _ in
-                DropEditFieldFacts(bundleID: "com.apple.Notes", isOwnProcess: false, role: "AXTextArea",
+            facts: { [unowned self] _, _ in
+                duringFacts?()
+                return DropEditFieldFacts(bundleID: "com.apple.Notes", isOwnProcess: false, role: "AXTextArea",
                                    subrole: nil, secureEventInput: false, accessibilityError: false)
             },
             characterCount: { [unowned self] _ in
@@ -104,6 +107,21 @@ final class DropEditFieldAccessTests: XCTestCase {
         duringLength = { [unowned self] in
             frontmost = otherPID
             focused = otherField
+        }
+        XCTAssertNil(access.read(handle))
+        XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    /// The gate's metadata calls block too: focus moving during them, after
+    /// the length query, stops the read before any text is requested.
+    func testFocusMovingDuringTheFinalMetadataCheckStopsBeforeTheTransfer() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        duringLength = { [unowned self] in
+            duringFacts = { [unowned self] in
+                frontmost = otherPID
+                focused = otherField
+            }
         }
         XCTAssertNil(access.read(handle))
         XCTAssertTrue(requestedRanges.isEmpty)

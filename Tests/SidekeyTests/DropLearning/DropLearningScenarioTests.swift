@@ -329,6 +329,19 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
     }
 
+    /// With learning and calibration off the paste engine gets no capture
+    /// callback at all, so its ordinary path is unchanged.
+    func testFieldsAreCapturedOnlyWhileLearningOrCalibrationIsOn() {
+        let coordinator = makeCoordinator()
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        XCTAssertFalse(coordinator.capturesFields)
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        XCTAssertTrue(coordinator.capturesFields)
+        defaults.set(false, forKey: DropLearningSettings.calibrationKey)
+        defaults.set(true, forKey: DropLearningSettings.enabledKey)
+        XCTAssertTrue(coordinator.capturesFields)
+    }
+
     func testTurningCalibrationOffDuringTheDelayStopsTheReadAndJournal() async {
         defaults.set(false, forKey: DropLearningSettings.enabledKey)
         defaults.set(true, forKey: DropLearningSettings.calibrationKey)

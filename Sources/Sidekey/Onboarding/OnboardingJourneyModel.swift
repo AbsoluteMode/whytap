@@ -103,6 +103,11 @@ final class OnboardingJourneyModel: ObservableObject {
     private let openScreenRecordingSettings: () -> Void
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
+    /// Step 1's own beat: the chosen figure's click motion plays, then the
+    /// step flows on. No pill; tests hold it like the dwell.
+    static let sourceBeat: TimeInterval = 0.34
+    private let pause: (TimeInterval) async -> Void
+    private var sourceMove: Task<Void, Never>?
     /// The Tavily search key, saved the way Settings -> API keys saves it.
     let tavily: TavilySettings
     /// The person's shortcuts, Toolbox and Agent switch for the tour steps.
@@ -169,6 +174,7 @@ final class OnboardingJourneyModel: ObservableObject {
         self.screenRecording = screenRecording
         self.openScreenRecordingSettings = openScreenRecordingSettings
         dwell = OnboardingDwellController(wait: dwellWait)
+        pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
         let tavily = tavily ?? models.makeTavilySettings()
         self.tavily = tavily
@@ -247,6 +253,7 @@ final class OnboardingJourneyModel: ObservableObject {
 
     private func show(_ next: OnboardingStep, direction: OnboardingNavDirection) {
         dwell.cancel()
+        sourceMove?.cancel()
         self.direction = direction
         step = next
         arrive(at: next)
@@ -290,10 +297,23 @@ final class OnboardingJourneyModel: ObservableObject {
     /// move on. A success of a step that is not shown is only recorded.
     private func succeed(_ done: OnboardingStep, _ text: String) {
         outcomes[done] = .done(text)
-        if done == .source, step == .source { next(); return }
+        if done == .source, step == .source { moveOnFromSource(); return }
         guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
         dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
+    }
+
+    /// Step 1 is its own Continue: after the click's beat the chosen key flies
+    /// on to step 2 in one motion, with no pill.
+    private func moveOnFromSource() {
+        sourceMove?.cancel()
+        let choice = progress.source
+        sourceMove = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.pause(Self.sourceBeat)
+            guard !Task.isCancelled, self.step == .source, self.progress.source == choice else { return }
+            self.next()
+        }
     }
 
     private func begin(_ kind: SharedModelKind) -> Int {

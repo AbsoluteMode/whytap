@@ -172,8 +172,6 @@ final class OnboardingJourneyModelTests: XCTestCase {
     /// Lets the success beat end and waits for the step it leads to.
     private func endBeat(_ env: Env, until step: OnboardingStep, in model: OnboardingJourneyModel,
                          file: StaticString = #filePath, line: UInt = #line) async throws {
-        // Step 1 has no beat: a choice moves on at once.
-        if model.step == step { return }
         try await eventually({ env.beat.count > 0 }, file: file, line: line)
         env.beat.end()
         try await eventually({ model.step == step }, file: file, line: line)
@@ -380,23 +378,37 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // MARK: - Dwell latch and review
 
-    func testAChoiceOnTheFirstStepMovesOnAtOnceWithoutAPill() async throws {
+    func testAChoiceOnTheFirstStepFlowsOnAfterItsBeatWithoutAPill() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
-        XCTAssertEqual(model.step, .speechKey, "the click is the Continue")
-        XCTAssertEqual(env.beat.count, 0, "no beat, no pill")
+        XCTAssertEqual(model.step, .source, "the click's motion plays first")
+        XCTAssertEqual(model.dwell.state, .idle, "no pill, no Hold")
+        try await endBeat(env, until: .speechKey, in: model)
         model.back()
         XCTAssertEqual(model.step, .source)
         XCTAssertEqual(model.dwell.state, .idle, "back on step 1 shows no Continue pill")
         model.chooseYourKey()
-        XCTAssertEqual(model.step, .speechKey)
+        try await endBeat(env, until: .speechKey, in: model)
+    }
+
+    func testASecondChoiceDuringStepOnesBeatWins() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await eventually { env.beat.count > 0 }
+        model.chooseOnThisMac()
+        try await eventually { env.beat.count > 1 }
+        env.beat.end()
+        try await eventually { model.step == .llmKey }
+        XCTAssertEqual(model.progress.source, .onThisMac, "only the last choice moves on")
     }
 
     func testBackToADoneStepWaitsInReviewUntilReturn() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
         try await endBeat(env, until: .llmKey, in: model)
         model.back()
@@ -413,6 +425,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
         try await eventually { env.beat.count > 0 }
         model.dwell.latch() // pointer entered the step
@@ -544,7 +557,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
         try await snap("source")
         model.chooseYourKey()
-        XCTAssertEqual(model.step, .speechKey)
+        try await snap("source-clicked", after: 160)
+        try await endBeat(env, until: .speechKey, in: model)
         // The same key flies from step 1 to its lock on step 2.
         try await snap("key-flight-1", after: 90)
         try await snap("key-flight-2", after: 90)

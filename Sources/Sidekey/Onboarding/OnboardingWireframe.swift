@@ -24,6 +24,35 @@ enum OnboardingWireframeInk {
     static let groundCenter = Color(red: 0.098, green: 0.098, blue: 0.118)
 }
 
+/// A fine static grain over the dark ground. Gradients this dark show bands
+/// on 8-bit displays; a ±1-level noise dithers them away, as the web page's
+/// own grain does.
+struct OnboardingGrain: View {
+    private static let tile: NSImage = {
+        let side = 128
+        var bytes = [UInt8](repeating: 0, count: side * side)
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for i in bytes.indices {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            bytes[i] = UInt8(truncatingIfNeeded: seed >> 56)
+        }
+        let image = bytes.withUnsafeMutableBytes { buffer -> CGImage? in
+            CGContext(data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)?.makeImage()
+        }
+        return image.map { NSImage(cgImage: $0, size: NSSize(width: side, height: side)) } ?? NSImage()
+    }()
+
+    var body: some View {
+        Image(nsImage: Self.tile)
+            .resizable(resizingMode: .tile)
+            .opacity(0.035)
+            .blendMode(.overlay)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 /// One damped spring (mass 1), integrated per frame like the prototype's
 /// `stepSpring`: a changed goal keeps the current velocity, so a hover that
 /// changes mid-flight bends the motion instead of restarting it.
@@ -90,19 +119,38 @@ struct OnboardingWireSolid {
     }
 
     /// The prototype's screen pulse: a sine travelling along the line.
-    func waveOffsets(amplitude: Double, clock: Double, speed: Double) -> [Int: Double] {
-        var offsets: [Int: Double] = [:]
+    func waveOffsets(amplitude: Double, clock: Double, speed: Double) -> [Int: Vec3] {
+        var moved: [Int: Vec3] = [:]
         for point in wave {
             let envelope = sin(point.f * .pi)
             let oscillation = sin(point.f * .pi * 2 * 2.5 - clock * speed)
-            offsets[point.index] = point.baseY + envelope * oscillation * amplitude * rawScale
+            var v = vertices[point.index]
+            v.y = point.baseY + envelope * oscillation * amplitude * rawScale
+            moved[point.index] = v
         }
-        return offsets
+        return moved
+    }
+
+    /// A padlock's shackle, opened by `amount` (0…1): it lifts out of the
+    /// body, then swings around its long leg.
+    func shackle(_ indices: [Int], open amount: Double) -> [Int: Vec3] {
+        guard amount > 0.001 else { return [:] }
+        let lift = 0.18 * rawScale * min(1, amount * 1.6)
+        let swing = max(0, amount - 0.35) / 0.65 * 1.15
+        let pivot = 0.36 * rawScale
+        var moved: [Int: Vec3] = [:]
+        for index in indices {
+            let v = vertices[index]
+            let dx = v.x - pivot
+            moved[index] = Vec3(x: pivot + dx * cos(swing) - v.z * sin(swing), y: v.y - lift,
+                                z: dx * sin(swing) + v.z * cos(swing))
+        }
+        return moved
     }
 
     /// Projects and draws back to front in depth buckets.
     func draw(in context: inout GraphicsContext, center: CGPoint, worldZ: Double, radius: Double,
-              angles: (ax: Double, ay: Double, az: Double), style: OnboardingWireStyle, waveY: [Int: Double] = [:]) {
+              angles: (ax: Double, ay: Double, az: Double), style: OnboardingWireStyle, moved: [Int: Vec3] = [:]) {
         guard style.fade > 0.01 else { return }
         let cx = cos(angles.ax), sx = sin(angles.ax)
         let cy = cos(angles.ay), sy = sin(angles.ay)
@@ -115,11 +163,10 @@ struct OnboardingWireSolid {
         var depths = [Double](repeating: 0, count: vertices.count)
         var meanX = 0.0, meanY = 0.0
         for i in vertices.indices {
-            let v = vertices[i]
-            let y = waveY[i] ?? v.y
-            let qx = m0 * v.x + m1 * y + m2 * v.z
-            let qy = m3 * v.x + m4 * y + m5 * v.z
-            let qz = m6 * v.x + m7 * y + m8 * v.z
+            let v = moved[i] ?? vertices[i]
+            let qx = m0 * v.x + m1 * v.y + m2 * v.z
+            let qy = m3 * v.x + m4 * v.y + m5 * v.z
+            let qz = m6 * v.x + m7 * v.y + m8 * v.z
             let k = Self.cameraDistance / max(1.2, Self.cameraDistance - (worldZ + qz * 0.55))
             points[i] = CGPoint(x: center.x + qx * k * radius, y: center.y + qy * k * radius)
             depths[i] = min(1, max(-1, qz * 0.78 + worldZ * 0.28))
@@ -296,32 +343,59 @@ enum OnboardingWireCatalog {
         return OnboardingWireSolid(rawVertices: v, edges: e, dotIndices: dots)
     }()
 
-    /// The lock cylinder the key turns in on step 2.
-    static let lock: OnboardingWireSolid = {
+    /// The padlock the key opens on step 2: a body with the keyhole on the
+    /// side facing the key, and a shackle (indices returned) that opens.
+    static let padlock: (solid: OnboardingWireSolid, shackle: [Int]) = {
         var v: [OnboardingWireSolid.Vec3] = []
         var e: [(Int, Int)] = []
         var dots: [Int] = []
-        func pt(_ x: Double, _ y: Double, _ z: Double, dot: Bool = false) -> Int {
-            v.append(.init(x: x, y: y, z: z))
+        var shackle: [Int] = []
+        func pt(_ x: Double, _ y: Double, _ z: Double, dot: Bool = false, moves: Bool = false) -> Int {
+            // The keyhole (y 0.36) is the origin: it sits on the key's line.
+            v.append(.init(x: x, y: y - 0.36, z: z))
             if dot { dots.append(v.count - 1) }
+            if moves { shackle.append(v.count - 1) }
             return v.count - 1
         }
-        let segs = 12, rOut = 0.72, rCore = 0.34, halfX = 0.32
-        var fOut: [Int] = [], bOut: [Int] = [], fCore: [Int] = [], bCore: [Int] = []
-        for i in 0..<segs {
-            let a = Double(i) / Double(segs) * .pi * 2
-            fOut.append(pt(-halfX, rOut * cos(a), rOut * sin(a), dot: i % 3 == 0))
-            bOut.append(pt(halfX, rOut * cos(a), rOut * sin(a), dot: i % 3 == 0))
-            fCore.append(pt(-halfX, rCore * cos(a), rCore * sin(a)))
-            bCore.append(pt(halfX, rCore * cos(a), rCore * sin(a)))
+        // The body: a box, its front face banded.
+        let hx = 0.56, y0 = 0.0, y1 = 0.80, hz = 0.24
+        let c = [pt(-hx, y0, -hz, dot: true), pt(hx, y0, -hz, dot: true), pt(hx, y0, hz, dot: true), pt(-hx, y0, hz, dot: true),
+                 pt(-hx, y1, -hz, dot: true), pt(hx, y1, -hz, dot: true), pt(hx, y1, hz, dot: true), pt(-hx, y1, hz, dot: true)]
+        for i in 0..<4 {
+            e.append((c[i], c[(i + 1) % 4]))
+            e.append((c[i + 4], c[(i + 1) % 4 + 4]))
+            e.append((c[i], c[i + 4]))
         }
-        for i in 0..<segs {
-            let n = (i + 1) % segs
-            e.append(contentsOf: [(fOut[i], fOut[n]), (bOut[i], bOut[n]), (fCore[i], fCore[n]), (bCore[i], bCore[n])])
-            if i % 3 == 0 { e.append(contentsOf: [(fOut[i], bOut[i]), (fCore[i], fOut[i])]) }
+        for band in [0.27, 0.54] {
+            e.append((pt(-hx, band, hz), pt(hx, band, hz)))
+            e.append((pt(-hx, band, -hz), pt(-hx, band, hz)))
         }
-        for x in [-0.16, 0.0, 0.16] { e.append((pt(x, -rCore, 0, dot: true), pt(x, -rOut * 0.92, 0, dot: true))) }
-        return OnboardingWireSolid(rawVertices: v, edges: e, dotIndices: dots)
+        // The keyhole on the side the key comes from.
+        var hole: [Int] = []
+        for i in 0..<8 {
+            let a = Double(i) / 8 * .pi * 2
+            hole.append(pt(-hx, 0.36 + 0.075 * sin(a), 0.075 * cos(a)))
+        }
+        for i in 0..<8 { e.append((hole[i], hole[(i + 1) % 8])) }
+        e.append((pt(-hx, 0.43, -0.03), pt(-hx, 0.56, -0.03)))
+        e.append((pt(-hx, 0.43, 0.03), pt(-hx, 0.56, 0.03)))
+        // The shackle: a U of two rails; the right leg is the long one.
+        for z in [-0.09, 0.09] {
+            var rail: [Int] = []
+            rail.append(pt(-0.36, 0.02, z, moves: true))
+            rail.append(pt(-0.36, -0.24, z, moves: true))
+            for s in 1..<8 {
+                let t = Double(s) / 8 * .pi
+                rail.append(pt(-0.36 * cos(t), -0.24 - 0.36 * sin(t), z, dot: s == 4, moves: true))
+            }
+            rail.append(pt(0.36, -0.24, z, moves: true))
+            rail.append(pt(0.36, 0.14, z, dot: true, moves: true))
+            for i in 0..<(rail.count - 1) { e.append((rail[i], rail[i + 1])) }
+        }
+        let rails = shackle.count / 2
+        for i in stride(from: 1, to: rails - 1, by: 3) { e.append((shackle[i], shackle[i + rails])) }
+        let solid = OnboardingWireSolid(rawVertices: v, edges: e, dotIndices: dots)
+        return (solid, shackle)
     }()
 }
 
@@ -370,6 +444,8 @@ final class OnboardingWireScene {
     private(set) var key = Actor(x: 0, y: 0, r: 0)
     private var stage = OnboardingSpring(0)
     private var lockFade = OnboardingSpring(0)
+    /// The padlock's shackle: opens once an accepted key has turned.
+    private var shackle = OnboardingSpring(0)
     private var pointer: CGPoint?
     private var lastPointer: CGPoint?
     private var pointerVelocity = CGVector.zero
@@ -381,6 +457,10 @@ final class OnboardingWireScene {
     /// Step 2 draws the prototype's 540 pt key stage at the key's radius.
     static let keyRadius = 50.0
     private static let keyScale = keyRadius / 54
+    /// The padlock stands to the key's right, its keyhole at the key's tip
+    /// once the key is in.
+    static let lockRadius = 40.0
+    static let lockOffset = 52.0
 
     // Step 1's layout: the prototype's 540 pt stage, scaled to the band.
     private var scale: Double { min(pageWidth / 540, 1) }
@@ -431,7 +511,10 @@ final class OnboardingWireScene {
                 $0.z = OnboardingSpring(t.z); $0.fade = OnboardingSpring(t.fade); $0.lit = OnboardingSpring(t.lit)
             }
         }
-        if onKeyStep { key.turn = OnboardingSpring(keyTargetTurn) }
+        if onKeyStep {
+            key.turn = OnboardingSpring(keyTargetTurn)
+            if keyPhase == .accepted { shackle = OnboardingSpring(1) }
+        }
     }
 
     private func update(_ figure: Figure, _ change: (inout Actor) -> Void) {
@@ -510,6 +593,9 @@ final class OnboardingWireScene {
         lastPointer = pointer
         stage.step(to: onKeyStep ? 1 : 0, stiffness: 135, damping: 19.5, dt: dt, still: still)
         lockFade.step(to: onKeyStep ? (keyPhase == .network ? 0.28 : 0.78) : 0, stiffness: 150, damping: 22, dt: dt, still: still)
+        // The shackle opens only after the accepted key has turned in the lock.
+        let opens = onKeyStep && keyPhase == .accepted && key.turn.value > 1.0
+        shackle.step(to: opens ? 1 : 0, stiffness: 120, damping: 16, dt: dt, still: still)
         let decay = exp(-dt * 2.4)
         for figure in [Figure.laptop, .key] {
             let t = target(figure)
@@ -588,10 +674,12 @@ final class OnboardingWireScene {
         }
         // The lock sits behind the key.
         if lockFade.value > 0.01 {
-            OnboardingWireCatalog.lock.draw(
-                in: &context, center: CGPoint(x: midX + 36 * s, y: keyBandY), worldZ: 0, radius: 34 * s,
+            let padlock = OnboardingWireCatalog.padlock
+            padlock.solid.draw(
+                in: &context, center: CGPoint(x: midX + Self.lockOffset, y: keyBandY), worldZ: 0, radius: Self.lockRadius,
                 angles: (-0.18 + swayX, -0.40 + swayY, 0.03),
-                style: OnboardingWireStyle(fade: lockFade.value, tint: tint, tintStrength: strength * 0.6 * b))
+                style: OnboardingWireStyle(fade: lockFade.value, tint: tint, tintStrength: strength * 0.6 * b),
+                moved: padlock.solid.shackle(padlock.shackle, open: shackle.value))
         }
         if onKeyStep, keyPhase == .network {
             // No answer: three quiet dots between the key and the lock.
@@ -613,7 +701,7 @@ final class OnboardingWireScene {
                     in: &context, center: CGPoint(x: laptop.x.value, y: laptop.y.value), worldZ: laptop.z.value,
                     radius: laptop.r.value, angles: laptopAngles(still: still),
                     style: OnboardingWireStyle(fade: laptop.fade.value, lit: laptop.lit.value),
-                    waveY: OnboardingWireCatalog.laptop.waveOffsets(amplitude: amplitude, clock: clock,
+                    moved: OnboardingWireCatalog.laptop.waveOffsets(amplitude: amplitude, clock: clock,
                                                                    speed: 2.2 + laptop.lit.value * 2))
                 drawCaption(in: &context, actor: laptop, text: laptopCaption, visible: captions)
             } else {

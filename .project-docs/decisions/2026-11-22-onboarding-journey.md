@@ -88,8 +88,13 @@ window, Back and a progress bar.
   going forward. Required steps keep a quiet "Set up later", optional ones
   "Skip"; a step that is done without a pending move offers Next.
   Step 1 is the exception (the owner asked to remove the pill, 2026-11-22): a
-  click on a figure, or Return on the figure in front, moves on at once,
-  with no dwell, no pill and no Next, also after Back.
+  click on a figure, or Return on the figure in front, is its Continue, with
+  no pill and no Next, also after Back. It is not an instant cut either (the
+  owner's clarification the same day): the click's own motion plays for
+  0.34 s (the key turns a quarter and dips), then the chosen key flies on to
+  step 2 while the page dissolves under it (the old page leaves in about
+  0.2 s, the new one settles 0.1 s later), and Back flies it home the same
+  way. A second choice during that beat wins.
 - **The page fills the whole window.** The window's content runs under its
   transparent title bar; inside the safe area the fixed 520×440 page was
   centred and its footer ran about 14 pt past the bottom edge on every step,
@@ -193,6 +198,14 @@ window, Back and a progress bar.
   and reappear. The steps report only their bands' vertical place (the step
   slide is sideways), and step 1's captions fade in the first third of the
   flight.
+- **A wire padlock, and a calm light.** Step 2's lock is a padlock with its
+  keyhole on the key's line: an accepted key goes in and turns a quarter,
+  then the shackle lifts and swings open; a refused key goes in, catches on
+  a pin and eases back. The ground keeps a wide, faint rose light low behind
+  the figures (no band on the field) and a ±1-level static grain over the
+  dark gradients so 8-bit displays show no banding. The design pass is
+  still refining the glow and the padlock; these follow its current
+  prototypes until then.
 - **Step 2's layout follows the design pass.** One centred axis: title, the
   key over its lock, the field ("Paste your API key…"), one quiet line under
   it (empty at rest), four monochrome provider marks of one optical height

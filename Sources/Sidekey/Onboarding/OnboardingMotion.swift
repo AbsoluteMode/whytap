@@ -36,6 +36,9 @@ enum OnboardingMotion {
     /// Key slot idle → checking → accepted, permission Allow → Waiting → Granted.
     static let slotMorph = Animation.spring(response: 0.30, dampingFraction: 0.88, blendDuration: 0)
     /// The horizontal glide between steps.
+    /// The page's dissolve while the key flies from step 1 to step 2; about
+    /// as long as the key's own spring takes to settle.
+    static let keyFlow = Animation.spring(response: 0.55, dampingFraction: 1.0)
     static let stepGlide = Animation.spring(response: 0.38, dampingFraction: 0.90, blendDuration: 0.06)
     /// Opacity alone, with the glide or under Reduce Motion.
     static let crossDissolve = Animation.timingCurve(0.22, 1.0, 0.36, 1.0, duration: 0.16)
@@ -56,6 +59,16 @@ enum OnboardingMotion {
 extension AnyTransition {
     /// The next step enters from +22 pt (Back: -22 pt) while the old one leaves
     /// 16 pt the other way; opacity only under Reduce Motion.
+    /// Steps 1 and 2 dissolve under the flying key: the old page leaves
+    /// quickly, the new one settles in a beat later, so the two titles barely
+    /// overlap.
+    static func onboardingKeyFlow(reduceMotion: Bool) -> AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.animation(OnboardingMotion.keyFlow.delay(0.10)),
+            removal: .opacity.animation(.spring(response: 0.22, dampingFraction: 1.0)))
+    }
+
     static func onboardingStep(direction: OnboardingNavDirection, reduceMotion: Bool) -> AnyTransition {
         if reduceMotion { return .opacity }
         let enter = CGFloat(direction.rawValue) * 22

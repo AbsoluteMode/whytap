@@ -29,7 +29,8 @@ struct OnboardingJourneyView: View {
             ZStack(alignment: .topLeading) {
                 stage(model.step)
                     .id(model.step)
-                    .transition(.onboardingStep(direction: model.direction, reduceMotion: reduceMotion))
+                    .transition(flowsWithTheKey ? .onboardingKeyFlow(reduceMotion: reduceMotion)
+                                : .onboardingStep(direction: model.direction, reduceMotion: reduceMotion))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, Self.isWireframe(model.step) ? 0 : OnboardingTheme.compactHorizontalInset)
@@ -37,7 +38,8 @@ struct OnboardingJourneyView: View {
             .contentShape(Rectangle())
             // The Dwell Latch: a pointer on the step holds the automatic move.
             .onHover { inside in inside ? dwell.latch() : dwell.resume() }
-            .animation(OnboardingMotion.resolve(OnboardingMotion.stepGlide, reduceMotion: reduceMotion, allowFade: true),
+            .animation(OnboardingMotion.resolve(flowsWithTheKey ? OnboardingMotion.keyFlow : OnboardingMotion.stepGlide,
+                                                reduceMotion: reduceMotion, allowFade: true),
                        value: model.step)
             footer
         }
@@ -62,6 +64,12 @@ struct OnboardingJourneyView: View {
     /// its edge is the window's own colour, so nothing shows a seam.
     static func isWireframe(_ step: OnboardingStep) -> Bool { step == .source || step == .speechKey }
 
+    /// Between steps 1 and 2 the key flies over the page; the rest of the
+    /// page flows under it as one slow dissolve, not a sideways slide.
+    private var flowsWithTheKey: Bool {
+        model.step == .source || (model.step == .speechKey && model.direction == .forward)
+    }
+
     static func wireSceneStep(_ step: OnboardingStep) -> OnboardingWireScene.Step? {
         switch step {
         case .source: return .source
@@ -73,10 +81,20 @@ struct OnboardingJourneyView: View {
     private var ground: some View {
         ZStack {
             OnboardingTheme.bg
-            RadialGradient(colors: [OnboardingWireframeInk.groundCenter, OnboardingTheme.bg],
-                           center: UnitPoint(x: 0.5, y: 0.47), startRadius: 10, endRadius: 330)
-                .opacity(Self.isWireframe(model.step) ? 1 : 0)
-                .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion), value: model.step)
+            Group {
+                RadialGradient(colors: [OnboardingWireframeInk.groundCenter, OnboardingTheme.bg],
+                               center: UnitPoint(x: 0.5, y: 0.47), startRadius: 10, endRadius: 330)
+                // A calm rose light low behind the figures, as on whytap.ai:
+                // wide and faint, never a band on the field.
+                RadialGradient(colors: [OnboardingWireframeInk.roseColor.opacity(0.055),
+                                        OnboardingWireframeInk.roseColor.opacity(0.018),
+                                        OnboardingWireframeInk.roseColor.opacity(0)],
+                               center: UnitPoint(x: 0.5, y: 0.52), startRadius: 0, endRadius: 250)
+                    .scaleEffect(x: 1.35, y: 0.8)
+            }
+            .opacity(Self.isWireframe(model.step) ? 1 : 0)
+            .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion), value: model.step)
+            OnboardingGrain()
         }
     }
 

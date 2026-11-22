@@ -1874,14 +1874,21 @@ struct OnboardingModelList: View {
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundColor(OnboardingTheme.muted)
                         .accessibilityHidden(true)
-                    TextField("", text: $query, prompt: Text("Search \(catalog.count) models").foregroundColor(OnboardingTheme.faint))
+                    // An empty field with the caret right after the glass, no
+                    // prompt text (the owner, REV 56: "caret on the left,
+                    // remove the text from the line").
+                    TextField("", text: $query)
                         .textFieldStyle(.plain)
                         .font(OnboardingTheme.sans(12.5))
                         .foregroundColor(OnboardingTheme.ink)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($searching)
                         .onSubmit { if typed, let first = shown.first { pick(first.id) } }
-                        .accessibilityLabel("Search models")
+                        .accessibilityLabel("Search \(catalog.count) models")
                 }
+                // As wide as the list: a narrow field sat centred, its caret mid-row.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .frame(height: 32)
                 .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.05)))

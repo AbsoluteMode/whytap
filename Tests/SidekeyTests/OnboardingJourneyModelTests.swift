@@ -4,6 +4,7 @@ import FluidAudio
 import SwiftUI
 import XCTest
 @testable import Sidekey
+@testable import OnboardingPreviewKit
 
 /// The new onboarding as a person goes through it: what each choice sets for
 /// every speech and language feature, the automatic move after a success,

@@ -71,9 +71,17 @@ let package = Package(
         // The onboarding as a standalone window with fake providers and
         // permissions, for review (scripts/onboarding-preview.sh). Never
         // packaged: build-dmg.sh builds only the Sidekey and whytap products.
+        // Its fake providers, catalogs and permissions, apart from the app's
+        // module so they can never reach a Whytap build; @testable for the
+        // app's internal protocols (debug builds only, like the tests).
+        .target(
+            name: "OnboardingPreviewKit",
+            dependencies: ["Sidekey"],
+            path: "Sources/OnboardingPreviewKit"
+        ),
         .executableTarget(
             name: "OnboardingPreview",
-            dependencies: ["Sidekey"],
+            dependencies: ["OnboardingPreviewKit"],
             path: "Sources/OnboardingPreview"
         ),
         .executableTarget(
@@ -88,7 +96,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SidekeyTests",
-            dependencies: ["Sidekey"],
+            dependencies: ["Sidekey", "OnboardingPreviewKit"],
             path: "Tests/SidekeyTests"
         )
     ],

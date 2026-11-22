@@ -2,6 +2,11 @@ import AppKit
 import CoreText
 import FluidAudio
 import Foundation
+// The fakes live outside the app's module: only the preview and the tests
+// link this target, so no fake catalog, key check or permission can reach a
+// Whytap build (the owner, REV 56).
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+@testable import Sidekey
 
 /// The whole onboarding as a standalone window, outside Whytap, to look at
 /// after each change (`scripts/onboarding-preview.sh`).

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import Sidekey
+@testable import OnboardingPreviewKit
 
 /// The standalone onboarding preview walks every step with its own fakes:
 /// keys in memory, offline checks (keys containing "bad" refused), pretend permissions
@@ -666,5 +667,32 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.chooseModel(unlisted.id, on: .llmKey)
         XCTAssertEqual(model.currentModel(.llmKey), unlisted.id, "a model found by search is set like any pick")
         XCTAssertEqual(model.checkedModel(.llmKey), unlisted.id)
+    }
+
+    /// REV 56: in the app "Choose model" lists the provider's real catalog
+    /// (the `APIAndModelsViewModel` that Settings -> Models uses, its
+    /// `ModelCatalog` and prices); the preview's fake catalogs, key checks and
+    /// permissions live in OnboardingPreviewKit, which the app does not link.
+    func testThePreviewsFakesNeverReachTheApp() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let app = root.appendingPathComponent("Sources/Sidekey")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil))
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(files.count, 100)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for fake in ["OnboardingPreviewProviders", "OnboardingPreviewSession", "OnboardingPreviewURLProtocol",
+                         "OnboardingPreviewTokenStore"] {
+                XCTAssertFalse(text.contains(fake), "\(file.lastPathComponent) names \(fake)")
+            }
+        }
+        let delegate = try String(contentsOf: app.appendingPathComponent("AppDelegate.swift"), encoding: .utf8)
+        XCTAssertTrue(delegate.contains("let model = OnboardingJourneyModel()"),
+                      "the app's onboarding builds on the default APIAndModelsViewModel, the Settings catalog")
+        let manifest = try String(contentsOf: root.appendingPathComponent("Package.swift"), encoding: .utf8)
+        let appTarget = try XCTUnwrap(manifest.range(of: #"name: "SidekeyApp",\s*dependencies: \["Sidekey"\]"#,
+                                                      options: .regularExpression), "the app links Sidekey only")
+        XCTAssertFalse(manifest[appTarget].contains("OnboardingPreviewKit"))
     }
 }

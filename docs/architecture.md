@@ -1230,7 +1230,8 @@ step change only after a new check passes; "Choose model" picks only on the
 accepted provider. Above ten models the list opens with a search over the
 provider's whole catalog (OnboardingModelSearch, modelCatalog).
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
-outside Whytap. System Audio Recording, Automation and Calendar are asked at
+outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
+does not link. System Audio Recording, Automation and Calendar are asked at
 first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
 or the former onboarding's key = ran before, never shown on update;
 sidekey.onboarding.pending.v1 brings it back after a quit until it is

@@ -1,6 +1,7 @@
 import simd
 import XCTest
 @testable import Sidekey
+@testable import OnboardingPreviewKit
 
 /// The language step's globe (REV 50): the typed text and a click on a
 /// country are equal ways to the same country and language, and only

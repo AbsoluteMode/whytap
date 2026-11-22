@@ -27,7 +27,7 @@ sources:
     reference: Sources/Sidekey/Onboarding/OnboardingJourneyComponents.swift
     confirmed_at: 2026-11-22
   - type: repository
-    reference: Sources/Sidekey/Onboarding/OnboardingPreview.swift
+    reference: Sources/OnboardingPreviewKit/OnboardingPreview.swift
     confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingWireframe.swift
@@ -364,10 +364,21 @@ window, Back and a progress bar.
   host). The Settings path of the first version
   (`SettingsWindowSelection.requestNewServer`) was removed with it, so this
   branch no longer touches the Custom server tile of PR 408.
+- **The preview's fakes are outside the app.** The owner asked that the
+  real catalog fill "Choose model" when the app is built. In the app the
+  list always comes from the provider's catalog through the same
+  `APIAndModelsViewModel` as Settings -> Models (prices from the same
+  catalogs); the preview's fake providers, catalogs, key checks, permissions
+  and URL protocol moved out of the app's module into `OnboardingPreviewKit`
+  (Sources/OnboardingPreviewKit), which only the OnboardingPreview
+  executable and the tests link, so a Whytap build cannot contain them.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
-  list opens with a search field ("Search 13 models"). Without text the list
+  list opens with a search field: an empty field with the glass and the
+  caret on the left, as wide as the list, no prompt text (the owner, REV
+  56: a narrow field sat centred with its caret mid-row and "Search 18
+  models" in it). Without text the list
   is the selection as before (Recommended and the picks; OpenRouter one
   flagship per author); with text it shows matches from the whole catalog
   (`modelCatalog`, OpenRouter's every model) by readable name and ID, words
@@ -459,6 +470,13 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 56: no file of the app's module names a preview fake (the fake
+  catalogs, key checks, permissions and URL protocol moved to
+  `OnboardingPreviewKit`, linked only by the preview and the tests), the
+  app's onboarding is built on the default `APIAndModelsViewModel` (the
+  catalog and prices Settings -> Models shows), and the app target links
+  Sidekey only.
 
 - REV 54: an accepted OpenAI speech key sets `gpt-live-transcribe` with no
   model list, no search, no pick reaching the speech row, and the step

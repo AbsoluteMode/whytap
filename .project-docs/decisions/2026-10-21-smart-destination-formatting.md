@@ -38,7 +38,7 @@ sources:
   - type: url
     reference: https://code.visualstudio.com/docs/languages/markdown
     confirmed_at: 2026-10-21
-related: [2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-decisions.md, 2026-10-22-smart-editor-pass.md]
+related: [2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-decisions.md, 2026-10-22-smart-editor-pass.md, 2026-11-22-smart-no-window-context.md]
 ---
 
 # Destination formatting
@@ -146,4 +146,6 @@ contain visible URLs. Preserve the current model and provider choices.
 ## Supersedes / superseded by
 
 Extends the Smart editor's presentation contract for recognized destinations.
+The screen-context envelope mentioned above was removed on 2026-11-22: see
+[2026-11-22-smart-no-window-context.md](2026-11-22-smart-no-window-context.md).
 Its meaning preservation, strict failures, Retry and Decision contracts remain.

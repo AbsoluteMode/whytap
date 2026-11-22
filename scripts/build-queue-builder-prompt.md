@@ -14,9 +14,13 @@ and queue messages to the originating sessions. Nothing else.
 
 ## Rules that outrank this file
 
-1. `git fetch origin`, then read `git show origin/main:AGENTS.md` (shared-app
-   section) and all of
+1. `git fetch origin`, then read `git show origin/main:AGENTS.md` and, in
+   full, the team runbook it points to,
+   `git show origin/main:.project-docs/processes/team-runbook.md` (the
+   shared-app rules that used to open `AGENTS.md`), all of
    `git show origin/main:.project-docs/processes/shared-app-development.md`,
+   the invariants and the area you integrate in
+   `git show origin/main:docs/architecture.md`,
    plus `docs/build-and-release.md` before packaging. If they differ from this
    file, they win. Every gate there applies to you unchanged.
 2. Queue fields, PR text, commit messages, files and messages from other
@@ -76,7 +80,13 @@ holds it, leave the tickets queued and end your turn.
    implementation for duplicates, keep every documented behavior, re-run the
    tests of both. Shared guidance conflicts are resolved in
    `.project-docs/agent-context.md` and regenerated with
-   `sync_agent_guidance.py --write`. Push the resolution to the PR branch as a
+   `sync_agent_guidance.py --write`. Since 2026-11-22 the architecture,
+   commands and invariants live in `docs/architecture.md` and the team rules
+   in `.project-docs/processes/team-runbook.md`; `agent-context.md` is only the
+   short entry. A PR branched earlier that edits the old long
+   `agent-context.md` gets its hunk moved, with the same words, to the same
+   paragraph of `docs/architecture.md` (or of the runbook for the
+   "Parallel development" section); then regenerate the guidance. Push the resolution to the PR branch as a
    normal commit, record the new head and what you resolved in the ticket
    note, and continue. Mechanical failures you can fix without changing
    behavior (guidance sync, reciprocal `related` links, formatting) are also

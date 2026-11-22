@@ -35,7 +35,6 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let result = try await processor.process(
             "raw text",
             targetApp: "Slack",
-            appContext: "Thread with Alice",
             language: "en",
             outputLanguage: "ru",
             transcriptionMode: "smart"
@@ -50,12 +49,40 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         XCTAssertEqual(openRouter.lastMessages.first?.role, "system")
         XCTAssertEqual(openRouter.lastMessages.first?.content, PostProcessor.systemPrompt)
         let userMessage = try XCTUnwrap(openRouter.lastMessages.last?.content)
-        XCTAssertTrue(userMessage.contains("Active app: Slack"))
-        XCTAssertTrue(userMessage.contains("Thread with Alice"))
-        XCTAssertTrue(userMessage.contains("<transcript>"))
-        XCTAssertTrue(userMessage.contains("raw text"))
-        XCTAssertTrue(userMessage.contains("Output language hint: ru"))
-        XCTAssertTrue(userMessage.contains("Transcription mode: smart"))
+        XCTAssertEqual(
+            userMessage,
+            "Active app: Slack\n\nInput language hint: en\n\nOutput language hint: ru\n\nTranscription mode: smart\n\n<transcript>\nraw text\n</transcript>",
+            "Smart sends the app name, its own hints and the transcript"
+        )
+    }
+
+    /// Scenario: the user dictates into a window full of private text (a chat
+    /// thread, a document). Smart's request to the provider carries the app's
+    /// name, Whytap's own instructions and hints and the dictated transcript,
+    /// never the window's text, whatever the destination format.
+    /// WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
+    func testSmartRequestCarriesOnlyTranscriptAndOwnPromptWhateverTheWindowShows() async throws {
+        let env = makeEnv()
+        try env.keys.save("or-key", account: OpenRouterLLMKeyStore.account)
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/auto"), for: .dropSmartCleanup)
+        for profile in [SmartFormattingProfile.plain, .slack, .telegram, .github, .commonMark] {
+            let client = FakeOpenRouterClient(completion: "Проверь импорт.")
+            _ = try await env.processor(client).processOutput(
+                "ну проверь импорт", targetApp: "Telegram", language: "ru", transcriptionMode: "smart", formatting: profile
+            )
+            XCTAssertEqual(client.lastMessages.count, 2)
+            XCTAssertEqual(client.lastMessages[0].role, "system")
+            XCTAssertEqual(
+                client.lastMessages[0].content,
+                profile.instructions.map { PostProcessor.systemPrompt + "\n\n" + $0 } ?? PostProcessor.systemPrompt
+            )
+            XCTAssertEqual(
+                client.lastMessages[1].content,
+                "Active app: Telegram\n\nInput language hint: ru\n\nTranscription mode: smart\n\n<transcript>\nну проверь импорт\n</transcript>"
+            )
+            let sent = client.lastMessages.map(\.content).joined(separator: "\n")
+            XCTAssertFalse(sent.contains("active_app_context"))
+        }
     }
 
     func test_openrouter_route_without_key_throws_missing_key() async throws {
@@ -64,7 +91,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let openRouter = FakeOpenRouterClient(completion: "unused")
 
         do {
-            _ = try await env.processor(openRouter).process("raw", targetApp: nil)
+            _ = try await env.processor(openRouter).process("raw")
             XCTFail("Expected missing key")
         } catch let error as OpenRouterLLMError {
             XCTAssertEqual(error, .missingKey)
@@ -77,7 +104,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let server = env.routing.addServer(name: "Test", baseURL: "http://localhost:8000/v1")
         env.routing.setRoute(FeatureRoute(account: .server(server.id), model: "selected-model"), for: .dropSmartCleanup)
         let client = FakeOpenRouterClient(completion: "Проверь `timeout_ms`, пожалуйста.")
-        let result = try await env.processor(client).process("Проверь timeout_ms", targetApp: "Obsidian", language: "ru", transcriptionMode: "smart", formatting: .commonMark)
+        let result = try await env.processor(client).process("Проверь timeout_ms", language: "ru", transcriptionMode: "smart", formatting: .commonMark)
         XCTAssertEqual(result, "Проверь `timeout_ms`, пожалуйста.")
         XCTAssertEqual(client.lastModel, "selected-model")
         XCTAssertTrue(client.lastMessages[0].content.contains("CommonMark"))
@@ -90,7 +117,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         env.routing.setRoute(FeatureRoute(account: .server(server.id), model: "llama/local"), for: .dropSmartCleanup)
         let openRouter = FakeOpenRouterClient(completion: "cleaned by custom llm")
 
-        let result = try await env.processor(openRouter).process("raw text", targetApp: "Notes")
+        let result = try await env.processor(openRouter).process("raw text")
 
         XCTAssertEqual(result, "cleaned by custom llm")
         XCTAssertEqual(openRouter.lastAPIKey, nil)
@@ -107,7 +134,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let output = "Проверь импорт, пожалуйста.\n\nНа staging:\n- мм, сохрани валидацию;\n- проверь возврат;\n- не трогай production."
         let client = FakeOpenRouterClient(completion: output)
         let result = try await DropOutputPolicy(mode: .smart).prepare(rawText: "messy speech", fillerTerms: ["мм"]) {
-            try await env.processor(client).process("messy speech", targetApp: "Slack", language: "ru", transcriptionMode: "smart")
+            try await env.processor(client).process("messy speech", language: "ru", transcriptionMode: "smart")
         }
         XCTAssertEqual(result, "Проверь импорт, пожалуйста.\n\nНа staging:\n- Сохрани валидацию;\n- проверь возврат;\n- не трогай production.")
         XCTAssertEqual(client.lastModel, "openai/gpt-6-sol")
@@ -120,7 +147,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         env.routing.setRoute(FeatureRoute(account: .server(server.id), model: "test-model"), for: .dropSmartCleanup)
         let output = "Please check the import.\n\nKeep validation enabled; do not change production."
         let client = FakeOpenRouterClient(completion: output)
-        let result = try await env.processor(client).process("Проверь импорт", targetApp: nil, language: "ru", outputLanguage: "en", transcriptionMode: "smart")
+        let result = try await env.processor(client).process("Проверь импорт", language: "ru", outputLanguage: "en", transcriptionMode: "smart")
         XCTAssertEqual(result, output)
         XCTAssertTrue(client.lastMessages.last?.content.contains("Output language hint: en") == true)
     }
@@ -132,7 +159,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let openRouter = FakeOpenRouterClient(completion: "unused")
 
         do {
-            _ = try await env.processor(openRouter).process("raw", targetApp: nil)
+            _ = try await env.processor(openRouter).process("raw")
             XCTFail("Expected missing base URL")
         } catch let error as OpenRouterLLMError {
             XCTAssertEqual(error, .missingBaseURL)
@@ -156,7 +183,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
                 checks: checks
             )
             do {
-                _ = try await processor.process("raw", targetApp: nil)
+                _ = try await processor.process("raw")
                 XCTFail("Expected the refusal to reach the caller")
             } catch let error as OpenRouterLLMError {
                 XCTAssertEqual(error, .unexpectedStatus(status, nil))
@@ -172,7 +199,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
             openRouterClient: RefusingOpenRouterClient(status: 401),
             checks: checks
         )
-        _ = try? await unauthorized.process("raw", targetApp: nil)
+        _ = try? await unauthorized.process("raw")
         XCTAssertEqual(checks.refusedModel(for: .dropSmartCleanup), "reset")
     }
 
@@ -191,7 +218,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
             openRouterClient: FakeOpenRouterClient(completion: "clean"),
             checks: checks
         )
-        _ = try await processor.process("raw", targetApp: nil)
+        _ = try await processor.process("raw")
 
         XCTAssertNil(checks.refusedModel(for: .dropSmartCleanup))
     }
@@ -205,7 +232,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let openRouter = FakeOpenRouterClient(completion: "unused")
 
         do {
-            _ = try await env.processor(openRouter).process("raw", targetApp: nil)
+            _ = try await env.processor(openRouter).process("raw")
             XCTFail("Expected notConfigured")
         } catch let error as OpenRouterLLMError {
             XCTAssertEqual(error, .notConfigured)
@@ -232,7 +259,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         addTeardownBlock { session.invalidateAndCancel() }
 
         let result = try await env.processor(OpenRouterLLMClient(session: session, profile: .dictation))
-            .process("raw", targetApp: nil)
+            .process("raw")
 
         XCTAssertEqual(result, "cleaned")
         XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)

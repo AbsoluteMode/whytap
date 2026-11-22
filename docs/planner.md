@@ -1,7 +1,12 @@
 # Whytap Planner
 
+> **Calendar is not available yet.** Its tile, search row, Toolbox pane and
+> Integrations card show **Soon** and do nothing; Whytap connects no calendar
+> and asks macOS for no calendar access. To-do works now. The Calendar parts
+> of this page describe how it will work once it opens.
+
 Open **Search all tools → To-do** for a compact list inside hover.
-**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
+Once available, **Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
 range and the calendar name. A Google or Outlook account synced through Calendar
@@ -107,7 +112,7 @@ Planner support preserve connections already configured on the target Mac.
 
 ## Unified calendar
 
-Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
+Not available yet (shown as Soon); this is how it will work. Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
 selection and the same connection flow used by Settings → Integrations. It does
 not create a Whytap account. Previous/next day and Today stay in the panel;
 opening Calendar again always returns to today. Hover an event whose block cuts

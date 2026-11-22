@@ -1,5 +1,13 @@
 # Spec: API & Models — реестр ключей и модель на каждую AI-фичу
 
+> **Это историческая постановка (октябрь–ноябрь 2026), а не описание текущего
+> поведения.** Текущее поведение — `docs/architecture.md` (разделы Voice flow и
+> Presentation) и `docs/SPEC.md`. Устаревшее ниже: агент на OpenCode (сейчас
+> встроенный Whytap Agent), API hints как лист с карточками (сейчас четвёртая
+> вкладка), Refresh models и Other model ID (убраны), вкладка Agents (убрана,
+> включение агента — Settings → Other), Subtitles со Speech и LLM (в следующей
+> версии после 2.2.26 — только OpenAI · gpt-realtime-translate).
+
 > Актуализация 21.10.2026: [плитки ключей и прямые LLM API](../../.project-docs/decisions/2026-10-21-provider-key-tiles.md) заменяют ряд чипов, ограничение Anthropic только агентом и ручные действия в футере выбора моделей. OpenAI и Anthropic доступны для всех LLM-маршрутов; прежние решения ниже сохранены как история исходной постановки.
 
 > Актуализация 22.11.2026: [OpenAI снова провайдер речи](../../.project-docs/decisions/2026-11-22-openai-speech-provider.md) на общем OpenAI-ключе: секция OpenAI в пикерах Speech (общая строка и Advanced) и чип OpenAI. `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper` стримят слова; `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` и `whisper-1` из каталога идут через server VAD с подсказкой «text after each pause». Meetings у OpenAI нет (Speech-строка пишет «OpenAI can't serve Meetings»), recorded-модель Drop — `gpt-transcribe`.
@@ -89,6 +97,10 @@ Whytap сам узнаёт у провайдера актуальный спис
 | `subtitlesAudio` | Subtitles audio | real-time | `LiveSubtitleModel`: только системный звук |
 | `subtitlesTranslation` | Subtitles translation | LLM | `LiveSubtitleModel`: перевод финальных фраз; в UI вместе с Speech в группе Subtitles |
 
+Только 2.2.26 и раньше: в следующей версии `subtitlesAudio` и
+`subtitlesTranslation` выведены из работы, сохранённые маршруты не читаются,
+а Subtitles идут только через OpenAI · gpt-realtime-translate
+(`.project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md`).
 У Subtitles два независимых выбора: Speech и LLM. При обновлении конфигурации
 версии 1 с настроенным `subtitlesAudio` текущий `translation` один раз копируется
 в `subtitlesTranslation`, включая выбранного провайдера; версия миграции становится
@@ -131,7 +143,8 @@ ElevenLabs со стриминговой моделью при запуске п
 ### On this Mac в Meetings и Subtitles audio
 
 С 2026-11-21 модель On this Mac выбирается в каждой строке с речью, включая
-Meetings и Subtitles audio. Обе идут через `OnDeviceStreamingAdapter`: поток
+Meetings и (только в 2.2.26) Subtitles audio; в следующей версии Subtitles
+работают только на OpenAI · gpt-realtime-translate, без On this Mac. Обе идут через `OnDeviceStreamingAdapter`: поток
 режется на фразы по паузам (700 мс) или по 12 с, каждая фраза расшифровывается
 на этом Mac один раз. У Meetings на этом Mac нет спикеров: в выборе модели
 подпись «without speakers». Решение:
@@ -425,7 +438,9 @@ Keychain есть непустой ключ.
 - **Drop без модели для текущего режима** (Fast или Smart) открывает API & Models
   на строке этой фичи. Сейчас он открывает Models. Режим и модель фиксируются на
   старте Drop.
-- **Smart без `dropSmartCleanup`** — как сейчас: вставляется результат без LLM.
+- **Smart без `dropSmartCleanup`** открывает API & Models на строке Drop Smart
+  cleanup; сырой текст не вставляется (строгий режим,
+  `.project-docs/decisions/2026-10-19-strict-drop-modes.md`).
 - **Митинг без модели** транскрибации или заметок — как сейчас: запись ждёт в
   staging. Текст `MeetingsCoordinator.processorNotConfiguredMessage` ведёт в
   API & Models.

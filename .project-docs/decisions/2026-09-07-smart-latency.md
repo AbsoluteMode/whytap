@@ -9,8 +9,8 @@ canonical_for: [smart-dictation-latency-policy]
 verified_at: 2026-09-07
 sources:
   - type: repository
-    reference: Sources/Sidekey/AXContextReader.swift
-    confirmed_at: 2026-09-07
+    reference: Sources/Sidekey/SmartFormattingMetadataReader.swift
+    confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Streaming/BYOK/OpenRouterReasoningPolicy.swift
     confirmed_at: 2026-09-07
@@ -23,7 +23,7 @@ sources:
   - type: url
     reference: https://soniox.com/docs/stt/rt/manual-finalization
     confirmed_at: 2026-09-07
-related: [../project.md]
+related: [../project.md, 2026-11-22-smart-no-window-context.md]
 ---
 
 # Smart dictation latency
@@ -78,7 +78,7 @@ latency from context extraction and insertion.
 
 ## Sources
 
-See frontmatter and the regression tests in `Tests/SidekeyTests/AXContextReaderTests.swift`,
+See frontmatter and the regression tests in `Tests/SidekeyTests/SmartFormattingTests.swift`,
 `Tests/SidekeyTests/OpenRouterLLMClientTests.swift`, and
 `Tests/SidekeyTests/Streaming/BYOK/SonioxBYOKAdapterTests.swift`.
 
@@ -116,4 +116,6 @@ an in-flight system call may outlive its caller until the next cancellation chec
 ## Supersedes / superseded by
 
 Clarifies the caller-deadline guarantee of the 2026-06-17 AX timeout decision.
-No superseding decision is known.
+The window-text collection was removed by
+[2026-11-22-smart-no-window-context.md](2026-11-22-smart-no-window-context.md);
+the deadline now bounds only the local formatting metadata read.

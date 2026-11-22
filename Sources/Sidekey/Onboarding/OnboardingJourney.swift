@@ -44,8 +44,50 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         }
     }
 
-    /// A step without an action of its own: it has Next instead of moving on
-    /// by itself.
+    /// The four acts of the progress bar: wider gaps separate them.
+    var act: OnboardingAct {
+        switch self {
+        case .source, .speechKey, .llmKey, .search, .language: return .engine
+        case .keyboard, .microphone, .inputMonitoring, .screenRecording: return .access
+        case .tryDrop: return .tryDrop
+        case .hotkeys, .toolbox, .help, .thanks: return .island
+        }
+    }
+
+    /// The step's name in the footer ("Next: Language") and for VoiceOver.
+    var shortTitle: String {
+        switch self {
+        case .source: return "Speech"
+        case .speechKey: return "Speech key"
+        case .llmKey: return "Language model"
+        case .search: return "Web search"
+        case .language: return "Language"
+        case .keyboard: return "Keyboard"
+        case .microphone: return "Microphone"
+        case .inputMonitoring: return "Keyboard access"
+        case .screenRecording: return "Screen"
+        case .tryDrop: return "Try Drop"
+        case .hotkeys: return "Shortcuts"
+        case .toolbox: return "Toolbox"
+        case .help: return "whytap.ai"
+        case .thanks: return "Finish"
+        }
+    }
+
+    /// How long a success stays on screen before the next step (the dwell),
+    /// or `nil` for the last step. Tour chapters move on after a reading pause.
+    var dwell: TimeInterval? {
+        switch self {
+        case .source, .language: return 0.62
+        case .speechKey, .llmKey, .search, .keyboard, .microphone, .inputMonitoring, .screenRecording: return 0.78
+        case .tryDrop: return 1.35
+        case .hotkeys, .toolbox, .help: return 4.2
+        case .thanks: return nil
+        }
+    }
+
+    /// A step without an action of its own: it moves on after a reading pause
+    /// (or Next), not after a success.
     var isInformational: Bool {
         switch self {
         case .hotkeys, .toolbox, .help, .thanks: return true
@@ -160,33 +202,72 @@ enum OnboardingJourney {
     }
 }
 
-/// The automatic move to the next step after a success. A step moves on
-/// only on a success event while it is shown (a key accepted, a permission
-/// turning granted, a dictation arriving), after a short beat that shows the
-/// success. Arriving at a step that is already done is not an event, so Back
-/// to a finished step stays there.
-// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-struct OnboardingAutoAdvance: Equatable {
-    /// How long the success is shown before the next step.
-    static let beat: TimeInterval = 0.9
+enum OnboardingAct: String, CaseIterable {
+    case engine = "ENGINE"
+    case access = "ACCESS"
+    case tryDrop = "TRY DROP"
+    case island = "ISLAND"
+}
 
-    private(set) var pending: OnboardingStep?
+/// One segment of the progress bar. A step left out because it was already
+/// done counts as completed; one a choice made unnecessary, or one skipped, is
+/// a hollow "bypassed" segment, never a false "done".
+enum OnboardingSegmentState: Equatable {
+    case upcoming
+    case current
+    case completed
+    case bypassed
+}
 
-    /// Call when `step`'s action succeeds. Returns `true` when the move should
-    /// be scheduled: only for the shown step, never twice.
-    mutating func succeeded(_ step: OnboardingStep, current: OnboardingStep) -> Bool {
-        guard step == current, !step.isInformational, pending == nil else { return false }
-        pending = step
-        return true
+struct OnboardingSegment: Equatable, Identifiable {
+    let step: OnboardingStep
+    let state: OnboardingSegmentState
+    var id: OnboardingStep { step }
+}
+
+extension OnboardingJourney {
+    /// Every step as a segment, in order; Input Monitoring only when it is on
+    /// the way. `done` lists the steps whose action succeeded in this window.
+    static func segments(start: OnboardingStart, progress: OnboardingProgress, current: OnboardingStep,
+                         done: Set<OnboardingStep>) -> [OnboardingSegment] {
+        let order = OnboardingStep.allCases
+        let currentIndex = order.firstIndex(of: current) ?? 0
+        return order.enumerated().compactMap { index, step in
+            let onTheWay = isOnTheWay(step, start: start, progress: progress)
+            if step == .inputMonitoring, !onTheWay { return nil }
+            let state: OnboardingSegmentState
+            if step == current {
+                state = .current
+            } else if done.contains(step) || (!onTheWay && doneAtStart(step, start)) {
+                state = .completed
+            } else if !onTheWay {
+                state = .bypassed
+            } else if index < currentIndex {
+                state = step.isInformational ? .completed : .bypassed
+            } else {
+                state = .upcoming
+            }
+            return OnboardingSegment(step: step, state: state)
+        }
     }
 
-    /// Call when the beat ends. Returns `true` when the move still applies:
-    /// Back or another step shown in between cancels it.
-    mutating func fire(current: OnboardingStep) -> Bool {
-        defer { pending = nil }
-        return pending == current && pending != nil
+    private static func doneAtStart(_ step: OnboardingStep, _ start: OnboardingStart) -> Bool {
+        switch step {
+        case .source, .speechKey: return start.speechReady
+        case .llmKey: return start.llmReady
+        case .search: return start.searchReady
+        case .language: return start.languageChosen
+        case .keyboard: return start.keyboardGranted
+        case .microphone: return start.microphoneGranted
+        case .screenRecording: return start.screenRecordingGranted
+        case .inputMonitoring, .tryDrop, .hotkeys, .toolbox, .help, .thanks: return false
+        }
     }
+}
 
-    /// Call whenever a step is shown by navigation.
-    mutating func cancel() { pending = nil }
+/// Which way a step change went: the next step slides in from the right,
+/// Back from the left.
+enum OnboardingNavDirection: Int, Equatable {
+    case forward = 1
+    case backward = -1
 }

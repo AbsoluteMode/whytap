@@ -20,6 +20,21 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/OnboardingJourneyModelTests.swift
     confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingDwell.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingJourneyComponents.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingPreview.swift
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-22 the maintainer asked, through the orchestrating session, to run the onboarding on its own, outside Whytap, and see all of it after every change.
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-22 the orchestrating session passed on a visual and motion pass by a separate design agent (Gemini 4 Carbon) as the base for the frame, not yet approved by the maintainer, with the instruction to move its components into the onboarding code and to check every text against what is true for all providers.
+    confirmed_at: 2026-11-22
 related: [2026-11-21-first-launch-onboarding.md]
 ---
 
@@ -36,10 +51,17 @@ window, Back and a progress bar.
 
 ## Decision
 
-- **One small window** (560 × 460 pt) with a progress bar, the step's name
-  and "N / M" on top, one step in the middle and a footer with Back on the
-  left. The final visual design and motion come from a separate design pass;
-  the model does not depend on them.
+- **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
+  progress rail and "NN / 13" on top; the act, a serif title and one line
+  under it; the step's stage; a footer with Skip or Set up later on the left
+  and the dwell pill on the right. Back also answers ← and ⌘[ outside text
+  fields. The visual and motion come from the design pass (dark raised
+  cards with a 1 pt top highlight, recessed key fields, near-critically
+  damped springs, nothing moving at rest, opacity only under Reduce Motion).
+- **Progress rail:** one equal micro-segment per step, a wider gap between
+  the four acts (Engine, Access, Try Drop, Island). Done steps are green,
+  the current one fills during the dwell and turns amber while held; a step
+  skipped or made unnecessary is hollow, never a false "done".
 - **Steps, in their only order** (`OnboardingStep`):
   1. Source: On this Mac or Your key (two cards).
   2. Speech key: Soniox, Deepgram or ElevenLabs.
@@ -53,13 +75,18 @@ window, Back and a progress bar.
   9. Screen Recording (optional).
   10. Try Drop (only when speech is on the way).
   11. Shortcuts. 12. Toolbox. 13. Help on whytap.ai. 14. Thank you.
-- **Moving on by itself.** A step moves on after a 0.9 s beat that shows
-  the success when its action succeeds while it is shown: a key accepted and
-  applied, a permission turning granted, a dictation inserted, a language
-  picked, a source chosen. Arriving at a step that is already done is not a
-  success, so Back to a finished step stays there. Back during the beat
-  cancels the move. Only the informational steps (11–14) have Next or Done.
-  Required steps have a quiet "Set up later", optional ones "Skip".
+- **Moving on by itself, and holding (Dwell Latch).** When a shown step's
+  action succeeds (a key accepted and applied, a permission turning granted,
+  a dictation inserted, a language picked, a source chosen) its segment
+  fills for the step's dwell (0.62 s for a choice, 0.78 s for a verified key
+  or grant, 1.35 s after Try Drop; Reduce Motion adds 0.22 s) and the
+  footer says "Next: …". The pointer over the stage, or the pill, holds it
+  ("Paused · Stay as long as you need"); leaving resumes, Return or the pill
+  goes on. Back to a step that is done, or to a tour step, shows "Continue ·
+  …" and never moves by itself; Back during the dwell cancels it. The tour
+  steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when reached
+  going forward. Required steps keep a quiet "Set up later", optional ones
+  "Skip"; a step that is done without a pending move offers Next.
 - **Done before means not shown.** Steps whose result already holds when the
   window opens (speech runs, an LLM is set, a Tavily key is saved, the
   language is chosen, a permission is granted) are left out; choices remove
@@ -97,6 +124,36 @@ window, Back and a progress bar.
   offers a Tavily key; afterwards it offers "your model's built-in search"
   first.
 
+- **Texts only say what holds for every provider** (corrections to the
+  design pass): the API card does not promise free credit (Soniox has no
+  free offer; Anthropic and OpenAI credits come with paid plans), so each
+  provider tab shows its own offer from API hints or nothing; no latency
+  claims for the local model, only "Free. Works offline." and its size; the
+  search step offers only Tavily; shortcuts, the Agent's state and the
+  Toolbox tiles come from the person's own HotkeyConfiguration, Agent switch
+  and saved layout; the help example is a real answer (Settings → Hotkeys →
+  Tools); the receipt reads the saved routes; nothing simulates dictation
+  with the mouse, Try Drop uses the real field and shortcut.
+
+- **OpenAI speech, once the app runs it.** The maintainer brought OpenAI
+  back as a speech provider (task #73, `gpt-4o-transcribe` and
+  `gpt-4o-mini-transcribe`). The speech key step offers OpenAI as a fourth
+  tab as soon as the registry names an OpenAI Drop model
+  (`OnboardingJourneyModel.offersOpenAISpeech`), with no separate switch.
+  One OpenAI key serves both steps: a key saved on one of them opens the
+  other on OpenAI with "Use saved", never asking for it again.
+- **A standalone preview** (`scripts/onboarding-preview.sh`, executable
+  target `OnboardingPreview`, never packaged) opens the whole onboarding from
+  step 1 in the same window and model, outside Whytap: its own defaults
+  suite emptied on start and quit, keys in memory, offline key checks,
+  catalogs and Tavily check (a key containing "bad" is refused), Allow that
+  only pretends macOS granted it, a timer for the speech model download and
+  a Simulate Drop button. It starts no hotkeys, event taps, stores or island
+  and never touches `com.rootwise.sidekey`, the Keychain or the network.
+  Feature sessions do not launch it themselves (the shared workflow keeps
+  launching to the people and the builder); they build it and hand over the
+  command.
+
 ## Rejected
 
 - Keeping Continue on every step: the maintainer asked for screens that move
@@ -106,6 +163,10 @@ window, Back and a progress bar.
 - A separate per-feature speech or LLM choice in the onboarding: the shared
   rows already do one pick for all, and Advanced in Settings keeps custom
   models.
+- A permanent Continue next to the automatic move: the pill appears only
+  while a move is pending, held or reviewed.
+- A move that cannot be stopped: the pointer on the stage holds it, so
+  reading a result is never cut off.
 - A Post Event screen: no separate System Settings pane on current macOS.
 - Asking for System Audio Recording and Automation in the onboarding: they
   are only needed by Meetings and Now Playing and are asked at first use.
@@ -127,9 +188,21 @@ window, Back and a progress bar.
   on, granted elsewhere do not; Input Monitoring only when the shortcut needs
   it; informational steps end with Done; an earlier speech key whose check
   finishes last does not replace the later choice.
-- Offscreen renders of every step of the frame.
+- `OnboardingJourneyTests` also covers the dwell controller: counting,
+  latch and resume, commit now, review never firing, cancel, and the
+  per-step dwell times.
+- `OnboardingPreviewTests`: the preview session walks every step with its
+  fakes (refused and accepted keys, the stubbed Tavily check, pretend
+  permissions, Simulate Drop, Back, finish) and writes routes only to its
+  own suite; On this Mac finishes its timed download.
+- OpenAI is not a speech tab until the registry has its speech model; an
+  OpenAI key saved on the LLM step opens the speech step on it, and one
+  saved for speech opens the LLM step on it.
+- Offscreen renders (520 × 440) of every step, including a refused key, an
+  accepted key while counting, a held step and Back to a reviewed step.
 
 Not verified: the real window with real permissions, real provider key
-checks and the final visual design.
+checks, the motion itself (offscreen renders are still frames) and the
+maintainer's approval of the visual.
 
 2026-11-22 · branch `feature/onboarding-v2`

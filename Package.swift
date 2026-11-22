@@ -68,6 +68,14 @@ let package = Package(
             dependencies: ["Sidekey"],
             path: "Sources/SidekeyApp"
         ),
+        // The onboarding as a standalone window with fake providers and
+        // permissions, for review (scripts/onboarding-preview.sh). Never
+        // packaged: build-dmg.sh builds only the Sidekey and whytap products.
+        .executableTarget(
+            name: "OnboardingPreview",
+            dependencies: ["Sidekey"],
+            path: "Sources/OnboardingPreview"
+        ),
         .executableTarget(
             name: "WhytapCLI",
             dependencies: ["WhytapCaseKit"],

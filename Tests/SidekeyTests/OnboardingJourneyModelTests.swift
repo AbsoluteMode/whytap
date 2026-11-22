@@ -128,7 +128,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     private func makeModel(_ env: Env, refusing: [ProviderAccount] = [], supportsOnDevice: Bool = true,
                            hotkey: DropHotkeyStatus = .accessibilityRequired,
-                           keyChecker: ProviderKeyChecking? = nil) throws -> OnboardingJourneyModel {
+                           keyChecker: ProviderKeyChecking? = nil,
+                           offersOpenAISpeech: Bool = false) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -157,7 +158,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             preferences: PrivacyPreferences(defaults: env.defaults),
             screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
             openScreenRecordingSettings: {}, defaultsChanges: NotificationCenter(),
-            beat: { _ in await beat.wait() })
+            dwellWait: { _ in await beat.wait() },
+            offersOpenAISpeech: offersOpenAISpeech)
         addTeardownBlock { model.stop() }
         return model
     }
@@ -178,6 +180,48 @@ final class OnboardingJourneyModelTests: XCTestCase {
     private let speechFeatures: [AIFeature] = [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .meetings]
     private let llmFeatures: [AIFeature] = [.dropSmartCleanup, .meetingNotes, .agent, .translation]
 
+    // MARK: - OpenAI for speech and text
+
+    func testOpenAIIsOfferedForSpeechOnlyOnceTheAppCanRunItsSpeechModels() throws {
+        let env = try makeEnv()
+        XCTAssertEqual(try makeModel(env).speechProviders, [.soniox, .deepgram, .elevenLabs],
+                       "until task #73 the registry has no OpenAI speech model")
+        XCTAssertEqual(OnboardingJourneyModel.offersOpenAISpeech,
+                       ModelRegistry.recommended(for: .dropFast, kind: .openAI) != nil, "the registry decides")
+        XCTAssertEqual(try makeModel(try makeEnv(), offersOpenAISpeech: true).speechProviders,
+                       [.soniox, .deepgram, .elevenLabs, .openAI])
+    }
+
+    func testAnOpenAIKeyFromTheLanguageModelStepIsNotAskedForAgainForSpeech() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, offersOpenAISpeech: true)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        model.next()
+        XCTAssertEqual(model.step, .llmKey, "speech set up later")
+        model.llmProvider = .openAI
+        await model.useLLMKey("sk-openai", provider: .openAI)
+        XCTAssertTrue(model.outcome(.llmKey).isDone)
+
+        model.back()
+        XCTAssertEqual(model.step, .speechKey)
+        XCTAssertEqual(model.speechProvider, .openAI, "the speech step opens on the key it already has")
+        XCTAssertTrue(model.keySaved(.openAI), "Use saved, no second paste")
+    }
+
+    func testASpeechKeyThatAlsoServesTextOpensTheLanguageModelStepOnIt() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, offersOpenAISpeech: true)
+        let problem = await model.models.replaceKey("sk-openai", for: try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .openAI)))
+        XCTAssertNil(problem)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        model.speechProvider = .openAI
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        XCTAssertEqual(model.llmProvider, .openAI, "the saved OpenAI key is offered, not asked again")
+    }
+
     // MARK: - Your key
 
     func testACleanMacWithASpeechKeyGetsSpeechEverywhereAndMovesOnByItself() async throws {
@@ -189,7 +233,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("sk-eleven", provider: .elevenLabs)
-        XCTAssertEqual(model.outcome(.speechKey), .done("Speech: ElevenLabs"))
+        XCTAssertEqual(model.outcome(.speechKey), .done(ModelRegistry.elevenLabsRealtimeModel), "the field shows the model it set")
         for feature in speechFeatures {
             XCTAssertEqual(env.routing.route(for: feature)?.account, .elevenLabs, "\(feature) follows the shared Speech")
         }
@@ -327,7 +371,48 @@ final class OnboardingJourneyModelTests: XCTestCase {
         env.beat.end()
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(model.step, .source, "the cancelled move does not happen")
-        XCTAssertEqual(model.outcome(.speechKey), .done("Speech: Soniox"), "what was done stays")
+        XCTAssertTrue(model.outcome(.speechKey).isDone, "what was done stays")
+    }
+
+    // MARK: - Dwell latch and review
+
+    func testBackToADoneStepWaitsInReviewUntilReturn() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        model.back()
+        XCTAssertEqual(model.step, .source)
+        XCTAssertEqual(model.dwell.state, .reviewing(next: "Speech key"), "Continue · Speech key, no jump forward")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.step, .source)
+        model.dwell.commitNow() // Return
+        XCTAssertEqual(model.step, .speechKey)
+    }
+
+    func testHoldingTheDwellKeepsTheStep() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await eventually { env.beat.count > 0 }
+        model.dwell.latch() // pointer entered the step
+        env.beat.end()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.step, .source, "held as long as the person needs")
+        model.dwell.resume() // pointer left
+        try await endBeat(env, until: .speechKey, in: model)
+    }
+
+    func testTourChaptersMoveOnAfterAReadingPauseOnlyGoingForward() async throws {
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        let model = try makeModel(env, hotkey: .ready)
+        while model.step != .tryDrop && model.step != .hotkeys { model.next() }
+        if model.step == .tryDrop { model.next() }
+        XCTAssertEqual(model.step, .hotkeys)
+        XCTAssertTrue(model.dwell.isCounting, "Shortcuts moves on by itself after the reading pause")
+        try await endBeat(env, until: .toolbox, in: model)
+        model.back()
+        XCTAssertEqual(model.dwell.state, .reviewing(next: "Toolbox"), "Back to a chapter does not run it again")
     }
 
     // MARK: - Language
@@ -449,11 +534,16 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("llm-key")
         await model.useLLMKey("sk-ant", provider: .anthropic)
         try await snap("llm-key-done")
-        try await endBeat(env, until: .search, in: model)
+        model.dwell.latch()
+        try await snap("llm-key-latched")
+        model.dwell.commitNow()
+        XCTAssertEqual(model.step, .search)
         while true {
             try await snap(model.step.rawValue)
             if model.step == .thanks { break }
             model.next()
         }
+        model.back()
+        try await snap("help-review")
     }
 }

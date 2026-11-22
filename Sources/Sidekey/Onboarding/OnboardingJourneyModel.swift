@@ -2,6 +2,13 @@ import AppKit
 import Combine
 import Foundation
 
+/// Stand-ins for the system permission requests (the standalone preview).
+struct OnboardingPermissionRequests {
+    var keyboard: () -> Void
+    var microphone: () -> Void
+    var inputMonitoring: () -> Void
+}
+
 /// What the shown step is doing: nothing yet, working, done (with what was
 /// set) or failed (with the reason, the step stays).
 enum OnboardingStepOutcome: Equatable {
@@ -15,7 +22,7 @@ enum OnboardingStepOutcome: Equatable {
 
 /// State of one onboarding: the way through its steps, the choices and what
 /// each step's action did. A successful action moves on by itself after a
-/// short beat; Back keeps everything done.
+/// short dwell the person can hold; Back keeps everything done.
 ///
 /// Speech and the language model are set through the shared Speech and LLM
 /// rows of Settings -> API & Models (`APIAndModelsViewModel.selectShared`):
@@ -38,6 +45,10 @@ final class OnboardingJourneyModel: ObservableObject {
     @Published private(set) var notes: [String] = []
     /// Bumped when routes change elsewhere, so captions re-read them.
     @Published private(set) var revision = 0
+    /// Permission steps whose Allow was pressed: they wait for macOS.
+    @Published private(set) var requested: Set<OnboardingStep> = []
+    /// Which way the last step change went, for the step transition.
+    @Published private(set) var direction: OnboardingNavDirection = .forward
 
     let start: OnboardingStart
     let models: APIAndModelsViewModel
@@ -47,11 +58,18 @@ final class OnboardingJourneyModel: ObservableObject {
     let screenRecording: ScreenRecordingAccess
     private let dropSpeech: OnboardingDropSpeech
     private let openScreenRecordingSettings: () -> Void
-    private let beat: (TimeInterval) async -> Void
+    /// The pause after a success, which the person can hold (Dwell Latch).
+    let dwell: OnboardingDwellController
     /// The Tavily search key, saved the way Settings -> API keys saves it.
     let tavily: TavilySettings
+    /// The person's shortcuts, Toolbox and Agent switch for the tour steps.
+    let hotkeys: HotkeyPreferences
+    let toolbox: HoverLayoutStore
+    let agentEnabled: () -> Bool
+    /// The standalone preview: nothing asks macOS, a button stands in for Drop.
+    let isPreview: Bool
+    private let requests: OnboardingPermissionRequests?
 
-    private var autoAdvance = OnboardingAutoAdvance()
     /// The latest speech and language model actions (a source picked, a key
     /// used, the download started). An answer that arrives after a newer
     /// action of its kind changes no route and moves nothing.
@@ -65,10 +83,14 @@ final class OnboardingJourneyModel: ObservableObject {
     var onFinish: () -> Void = {}
     var openSettings: (SettingsWindowTab, AIFeature?) -> Void = { _, _ in }
 
-    /// The speech providers of the speech key step (Drop runs on these) and the
-    /// language model providers of the LLM key step, in their card order.
-    static let speechProviders: [AIProviderKind] = OnboardingDropSpeech.keyProviders
+    /// The speech providers of the speech key step (Drop runs on these), in
+    /// their tab order. OpenAI joins them once the app can run its speech
+    /// models: the registry then names its Drop model (task #73).
+    let speechProviders: [AIProviderKind]
+    /// The language model providers of the LLM key step.
     static let llmProviders: [AIProviderKind] = [.anthropic, .openAI, .openRouter]
+
+    static var offersOpenAISpeech: Bool { ModelRegistry.recommended(for: .dropFast, kind: .openAI) != nil }
 
     init(
         models: APIAndModelsViewModel? = nil,
@@ -80,8 +102,17 @@ final class OnboardingJourneyModel: ObservableObject {
         screenRecording: ScreenRecordingAccess? = nil,
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         defaultsChanges: NotificationCenter = .default,
-        beat: @escaping (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+        dwellWait: ((TimeInterval) async -> Void)? = nil,
+        tavily: TavilySettings? = nil,
+        hotkeys: HotkeyPreferences? = nil,
+        toolbox: HoverLayoutStore? = nil,
+        agentEnabled: (() -> Bool)? = nil,
+        requests: OnboardingPermissionRequests? = nil,
+        isPreview: Bool = false,
+        offersOpenAISpeech: Bool? = nil
     ) {
+        let openAI = offersOpenAISpeech ?? Self.offersOpenAISpeech
+        speechProviders = OnboardingDropSpeech.keyProviders + (openAI ? [.openAI] : [])
         let models = models ?? APIAndModelsViewModel()
         let permissions = permissions ?? PermissionsSettingsViewModel(onComplete: {}, autoComplete: false)
         let preferences = preferences ?? .shared
@@ -94,10 +125,15 @@ final class OnboardingJourneyModel: ObservableObject {
         self.preferences = preferences
         self.screenRecording = screenRecording
         self.openScreenRecordingSettings = openScreenRecordingSettings
-        self.beat = beat
+        dwell = OnboardingDwellController(wait: dwellWait)
         language = preferences.selectedLanguage
-        let tavily = models.makeTavilySettings()
+        let tavily = tavily ?? models.makeTavilySettings()
         self.tavily = tavily
+        self.hotkeys = hotkeys ?? .shared
+        self.toolbox = toolbox ?? .shared
+        self.agentEnabled = agentEnabled ?? { UserPreferencesCache.shared.currentAgentEnabled }
+        self.requests = requests
+        self.isPreview = isPreview
 
         let llm = models.sharedRow(.llm)
         let snapshot = permissions.snapshot
@@ -134,17 +170,26 @@ final class OnboardingJourneyModel: ObservableObject {
     var canGoBack: Bool { OnboardingJourney.previous(before: step, in: steps) != nil }
     func outcome(_ step: OnboardingStep) -> OnboardingStepOutcome { outcomes[step] ?? .idle }
 
-    /// Next on informational steps, Set up later / Skip on the others.
+    /// The progress bar: every step, with skipped and unnecessary ones hollow.
+    var segments: [OnboardingSegment] {
+        let done = Set(outcomes.compactMap { $0.value.isDone ? $0.key : nil })
+        return OnboardingJourney.segments(start: start, progress: progress, current: step, done: done)
+    }
+
+    /// The step after this one, for "Next: Language".
+    var nextStep: OnboardingStep? { OnboardingJourney.next(after: step, in: steps) }
+
+    /// Next, Set up later, Skip, Return or the pill: go on now.
     func next() {
         guard let next = OnboardingJourney.next(after: step, in: steps) else { return finish() }
-        show(next)
+        show(next, direction: .forward)
     }
 
     /// Back, by button or ← / ⌘[. Only the step changes; a pending automatic
-    /// move is cancelled.
+    /// move is cancelled, and a step already done waits in review.
     func back() {
         guard let previous = OnboardingJourney.previous(before: step, in: steps) else { return }
-        show(previous)
+        show(previous, direction: .backward)
     }
 
     func finish() {
@@ -157,14 +202,22 @@ final class OnboardingJourneyModel: ObservableObject {
         stopPolling()
     }
 
-    private func show(_ next: OnboardingStep) {
-        autoAdvance.cancel()
+    private func show(_ next: OnboardingStep, direction: OnboardingNavDirection) {
+        dwell.cancel()
+        self.direction = direction
         step = next
         arrive(at: next)
+        let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
+        if direction == .backward, outcome(next).isDone || next.isInformational, next != .thanks {
+            dwell.review(next: following) { [weak self] in self?.next() }
+        } else if direction == .forward, next.isInformational, let seconds = next.dwell {
+            dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
+        }
     }
 
     private func arrive(at step: OnboardingStep) {
         if case .failed = outcome(step) { outcomes[step] = .idle }
+        offerSavedKey(on: step)
         switch step {
         case .keyboard, .microphone, .inputMonitoring, .screenRecording:
             permissions.refresh(restartRecoveryPolling: false)
@@ -174,16 +227,27 @@ final class OnboardingJourneyModel: ObservableObject {
         }
     }
 
-    /// The shown step's action succeeded: show it, wait the beat, move on.
+    /// One key serves both steps where its provider does speech and text
+    /// (OpenAI): a key saved on one step opens the other step's tab with
+    /// "Use saved", never asking for it again.
+    private func offerSavedKey(on step: OnboardingStep) {
+        switch step {
+        case .llmKey where Self.llmProviders.contains(speechProvider) && keySaved(speechProvider):
+            llmProvider = speechProvider
+        case .speechKey where speechProviders.contains(llmProvider) && keySaved(llmProvider) && !keySaved(speechProvider):
+            speechProvider = llmProvider
+        default:
+            break
+        }
+    }
+
+    /// The shown step's action succeeded: show it for the step's dwell, then
+    /// move on. A success of a step that is not shown is only recorded.
     private func succeed(_ done: OnboardingStep, _ text: String) {
         outcomes[done] = .done(text)
-        guard autoAdvance.succeeded(done, current: step) else { return }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.beat(OnboardingAutoAdvance.beat)
-            guard self.autoAdvance.fire(current: self.step) else { return }
-            self.next()
-        }
+        guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
+        let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
+        dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
     }
 
     private func begin(_ kind: SharedModelKind) -> Int {
@@ -263,7 +327,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.speechExpected = true
-        succeed(.speechKey, "Speech: \(provider.displayName)")
+        succeed(.speechKey, model)
     }
 
     // MARK: - 3. Language model key
@@ -306,7 +370,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.hasLanguageModel = true
-        succeed(.llmKey, "LLM: \(provider.displayName) \(model)")
+        succeed(.llmKey, model)
     }
 
     /// A new key goes through Settings' save (check + Keychain); an empty one
@@ -338,7 +402,7 @@ final class OnboardingJourneyModel: ObservableObject {
         if tavily.messageIsError || !tavily.configured {
             outcomes[.search] = .failed(tavily.message ?? "Key not accepted")
         } else {
-            succeed(.search, "Search: Tavily")
+            succeed(.search, "Tavily")
         }
     }
 
@@ -352,13 +416,28 @@ final class OnboardingJourneyModel: ObservableObject {
 
     // MARK: - 6–8. Permissions
 
-    func requestKeyboard() { permissions.requestAccessibility() }
-    func requestMicrophone() { permissions.requestMicrophone() }
-    func requestInputMonitoring() { permissions.requestInputMonitoring() }
+    func requestKeyboard() {
+        requested.insert(.keyboard)
+        if let requests { requests.keyboard() } else { permissions.requestAccessibility() }
+    }
+
+    func requestMicrophone() {
+        requested.insert(.microphone)
+        if let requests { requests.microphone() } else { permissions.requestMicrophone() }
+    }
+
+    func requestInputMonitoring() {
+        requested.insert(.inputMonitoring)
+        if let requests { requests.inputMonitoring() } else { permissions.requestInputMonitoring() }
+    }
+
+    /// Coming back from System Settings: check again at once.
+    func recheckPermissions() { permissions.refresh(restartRecoveryPolling: false) }
 
     /// One request per launch, shared with Shot; afterwards System Settings.
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
     func requestScreenRecording() {
+        requested.insert(.screenRecording)
         switch screenRecording.requestOnce() {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
         case .requested: break
@@ -415,7 +494,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func showPermissions() {
         progress.permissionsMissing = true
         let snapshot = permissions.snapshot
-        show(snapshot.accessibilityGranted ? .microphone : .keyboard)
+        show(snapshot.accessibilityGranted ? .microphone : .keyboard, direction: .forward)
     }
 
     // MARK: - 9. Try Drop
@@ -435,6 +514,22 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     // MARK: - Summary
+
+    /// The last step's receipt, from the saved routes and grants.
+    var receipt: (speech: String, llm: String, language: String, access: String) {
+        _ = revision
+        func label(_ kind: SharedModelKind) -> String {
+            guard let row = models.sharedRow(kind) else { return "Not set" }
+            if row.isMixed { return "Mixed" }
+            guard let choice = row.choice else { return "Not set" }
+            let provider = choice.account.kind == .onDevice ? "On this Mac" : choice.account.kind.displayName
+            return "\(provider) · \(choice.model)"
+        }
+        let snapshot = permissions.snapshot
+        let granted = [snapshot.accessibilityGranted, snapshot.microphoneGranted, permissions.screenRecordingGranted]
+            .filter { $0 }.count
+        return (label(.speech), label(.llm), language?.englishName ?? "Any language", "\(granted) / 3 allowed")
+    }
 
     /// "Speech: ElevenLabs · LLM: Anthropic claude-sonnet-5-5", from the
     /// saved shared rows; empty parts are left out.

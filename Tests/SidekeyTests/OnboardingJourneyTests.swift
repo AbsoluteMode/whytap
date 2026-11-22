@@ -4,6 +4,7 @@ import XCTest
 /// The way through the onboarding as a person meets it: which steps they see
 /// for what they already had and what they choose, Back, the progress bar and
 /// the automatic move after a success.
+@MainActor
 final class OnboardingJourneyTests: XCTestCase {
     private func steps(_ start: OnboardingStart = .cleanMac, _ progress: OnboardingProgress = .init()) -> [OnboardingStep] {
         OnboardingJourney.steps(start: start, progress: progress)
@@ -93,32 +94,106 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertEqual(values, values.sorted(), "the bar never goes back while moving forward")
     }
 
-    // MARK: - Moving on by itself
+    // MARK: - Segments
 
-    func testASuccessMovesOnOnceAfterTheBeat() {
-        var advance = OnboardingAutoAdvance()
-        XCTAssertTrue(advance.succeeded(.keyboard, current: .keyboard))
-        XCTAssertFalse(advance.succeeded(.keyboard, current: .keyboard), "a second report schedules nothing more")
-        XCTAssertTrue(advance.fire(current: .keyboard))
-        XCTAssertFalse(advance.fire(current: .keyboard))
+    func testSegmentsAreHonestAboutWhatWasDoneSkippedOrUnnecessary() {
+        var start = OnboardingStart.cleanMac
+        start.keyboardGranted = true
+        let progress = OnboardingProgress(source: .onThisMac, speechExpected: true)
+        let segments = OnboardingJourney.segments(start: start, progress: progress, current: .language,
+                                                  done: [.source])
+        func state(_ step: OnboardingStep) -> OnboardingSegmentState? { segments.first { $0.step == step }?.state }
+        XCTAssertEqual(segments.count, 13, "Input Monitoring is not a segment unless it is needed")
+        XCTAssertEqual(state(.source), .completed)
+        XCTAssertEqual(state(.speechKey), .bypassed, "On this Mac made the key unnecessary")
+        XCTAssertEqual(state(.llmKey), .bypassed, "skipped, never a false done")
+        XCTAssertEqual(state(.search), .bypassed, "no language model, no search")
+        XCTAssertEqual(state(.language), .current)
+        XCTAssertEqual(state(.keyboard), .completed, "granted before the window opened")
+        XCTAssertEqual(state(.microphone), .upcoming)
     }
 
-    func testBackDuringTheBeatCancelsTheMove() {
-        var advance = OnboardingAutoAdvance()
-        XCTAssertTrue(advance.succeeded(.microphone, current: .microphone))
-        advance.cancel() // Back
-        XCTAssertFalse(advance.fire(current: .keyboard))
+    func testEveryStepHasADwellButTheLast() {
+        XCTAssertEqual(OnboardingStep.source.dwell, 0.62)
+        XCTAssertEqual(OnboardingStep.speechKey.dwell, 0.78)
+        XCTAssertEqual(OnboardingStep.tryDrop.dwell, 1.35)
+        XCTAssertEqual(OnboardingStep.hotkeys.dwell, 4.2)
+        XCTAssertNil(OnboardingStep.thanks.dwell)
     }
 
-    func testASuccessOfAnotherStepOrAnInformationalStepDoesNotMove() {
-        var advance = OnboardingAutoAdvance()
-        XCTAssertFalse(advance.succeeded(.microphone, current: .keyboard),
-                       "a permission granted in System Settings while another step is shown")
-        XCTAssertFalse(advance.succeeded(.hotkeys, current: .hotkeys))
+    // MARK: - Dwell latch
+
+    func testTheDwellMovesOnOnceUnlessHeld() async throws {
+        let gate = Gate()
+        let dwell = OnboardingDwellController(wait: { _ in await gate.wait() }, reduceMotion: { false })
+        var moves = 0
+        dwell.schedule(0.78, next: "Language") { moves += 1 }
+        XCTAssertEqual(dwell.state, .counting(next: "Language", progress: 0))
+        try await waitUntil { gate.count > 0 }
+        gate.open()
+        try await waitUntil { moves == 1 }
+        XCTAssertEqual(dwell.state, .idle)
+    }
+
+    func testHoldingStopsTheMoveUntilThePointerLeaves() async throws {
+        let gate = Gate()
+        let dwell = OnboardingDwellController(wait: { _ in await gate.wait() }, reduceMotion: { false })
+        var moves = 0
+        dwell.schedule(0.78, next: "Language") { moves += 1 }
+        try await waitUntil { gate.count > 0 }
+        dwell.latch()
+        XCTAssertTrue(dwell.isLatched)
+        gate.open()
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(moves, 0, "held: no move however long")
+        dwell.resume()
+        try await waitUntil { gate.count > 0 }
+        gate.open()
+        try await waitUntil { moves == 1 }
+    }
+
+    func testReturnGoesOnAtOnceAndReviewNeverMovesByItself() async throws {
+        let dwell = OnboardingDwellController(wait: { _ in }, reduceMotion: { false })
+        var moves = 0
+        dwell.review(next: "Language") { moves += 1 }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(moves, 0)
+        XCTAssertEqual(dwell.state, .reviewing(next: "Language"))
+        dwell.commitNow()
+        XCTAssertEqual(moves, 1)
+        dwell.commitNow()
+        XCTAssertEqual(moves, 1, "nothing pending after the move")
+    }
+
+    func testCancelledDwellNeverMoves() async throws {
+        let gate = Gate()
+        let dwell = OnboardingDwellController(wait: { _ in await gate.wait() }, reduceMotion: { false })
+        var moves = 0
+        dwell.schedule(0.78, next: "Language") { moves += 1 }
+        try await waitUntil { gate.count > 0 }
+        dwell.cancel() // Back
+        gate.open()
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(moves, 0)
     }
 
     func testOptionalAndInformationalSteps() {
         XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.llmKey, .search, .screenRecording, .tryDrop])
         XCTAssertEqual(OnboardingStep.allCases.filter(\.isInformational), [.hotkeys, .toolbox, .help, .thanks])
+    }
+
+    // MARK: - Helpers
+
+    @MainActor
+    private final class Gate {
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        var count: Int { waiting.count }
+        func wait() async { await withCheckedContinuation { waiting.append($0) } }
+        func open() { let all = waiting; waiting = []; all.forEach { $0.resume() } }
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        for _ in 0..<200 where !condition() { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertTrue(condition(), "Condition never became true", file: file, line: line)
     }
 }

@@ -1,32 +1,42 @@
 import AppKit
 import SwiftUI
 
-/// The new onboarding's one small window: a progress bar, one step, a
-/// footer with Back. Layout and controls only; the final visual design and
-/// motion replace this frame without changing the model.
+/// The onboarding's one small window: a fixed Back slot, the grouped progress
+/// rail and the step count; one step on a stage; a footer with Skip or Set up
+/// later on the left and the dwell pill on the right. A successful action
+/// moves on by itself; the pointer over the stage holds it.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 struct OnboardingJourneyView: View {
     @ObservedObject var model: OnboardingJourneyModel
-    @ObservedObject var hotkeys = HotkeyPreferences.shared
+    @ObservedObject var dwell: OnboardingDwellController
+    @ObservedObject var hotkeys: HotkeyPreferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    static let size = CGSize(width: 560, height: 460)
+    static let size = OnboardingTheme.compactCanvas
+
+    init(model: OnboardingJourneyModel) {
+        self.model = model
+        self.dwell = model.dwell
+        self.hotkeys = model.hotkeys
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            ZStack {
-                content(model.step)
+            ZStack(alignment: .topLeading) {
+                stage(model.step)
                     .id(model.step)
-                    .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .opacity.combined(with: .offset(x: 24)),
-                        removal: .opacity.combined(with: .offset(x: -24))))
+                    .transition(.onboardingStep(direction: model.direction, reduceMotion: reduceMotion))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 32)
+            .padding(.horizontal, OnboardingTheme.compactHorizontalInset)
             .clipped()
-            .animation(reduceMotion ? .linear(duration: 0.12) : .easeOut(duration: 0.28), value: model.step)
+            .contentShape(Rectangle())
+            // The Dwell Latch: a pointer on the step holds the automatic move.
+            .onHover { inside in inside ? dwell.latch() : dwell.resume() }
+            .animation(OnboardingMotion.resolve(OnboardingMotion.stepGlide, reduceMotion: reduceMotion, allowFade: true),
+                       value: model.step)
             footer
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -37,393 +47,426 @@ struct OnboardingJourneyView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            OnboardingJourneyProgress(fraction: model.fraction)
-            HStack {
-                Text(Self.label(model.step).uppercased())
-                    .font(OnboardingTheme.mono(10, weight: .medium))
-                    .tracking(1.4)
-                    .foregroundColor(OnboardingTheme.faint)
-                Spacer()
-                if let index = model.steps.firstIndex(of: model.step) {
-                    Text("\(index + 1) / \(model.steps.count)")
-                        .font(OnboardingTheme.mono(10, weight: .medium))
-                        .foregroundColor(OnboardingTheme.faint)
-                        .accessibilityLabel("Step \(index + 1) of \(model.steps.count)")
-                }
-            }
+        HStack(spacing: 12) {
+            OnboardingBackButton(isVisible: model.canGoBack,
+                                 destination: OnboardingJourney.previous(before: model.step, in: model.steps)?.shortTitle,
+                                 action: model.back)
+            OnboardingProgressRail(segments: model.segments, dwellFraction: dwell.fraction, isLatched: dwell.isLatched)
+            Text(counter)
+                .font(OnboardingTheme.mono(10.5, weight: .medium))
+                .foregroundColor(OnboardingTheme.faint)
+                .monospacedDigit()
+                .frame(minWidth: 40, alignment: .trailing)
+                .accessibilityHidden(true)
         }
-        .padding(.horizontal, 32)
-        .padding(.top, 40)
-        .padding(.bottom, 18)
+        .padding(.horizontal, 16)
+        .frame(height: OnboardingTheme.compactHeaderHeight)
+        .padding(.top, 14)
     }
 
-    static func label(_ step: OnboardingStep) -> String {
-        switch step {
-        case .source: return "Speech"
-        case .speechKey: return "Speech key"
-        case .llmKey: return "Language model"
-        case .search: return "Search"
-        case .language: return "Language"
-        case .keyboard: return "Keyboard control"
-        case .microphone: return "Microphone"
-        case .inputMonitoring: return "Keyboard access"
-        case .screenRecording: return "Screen Recording"
-        case .tryDrop: return "Try Drop"
-        case .hotkeys: return "Shortcuts"
-        case .toolbox: return "Toolbox"
-        case .help: return "Help"
-        case .thanks: return "Done"
+    private var counter: String {
+        let segments = model.segments
+        let index = (segments.firstIndex { $0.state == .current } ?? 0) + 1
+        return String(format: "%02d / %02d", index, segments.count)
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            leftAction
+            if let note = model.notes.first, model.step == .speechKey || model.step == .llmKey || model.step == .source {
+                Text(note)
+                    .font(OnboardingTheme.sans(11))
+                    .foregroundColor(OnboardingTheme.faint)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(model.notes.joined(separator: "\n"))
+            }
+            Spacer(minLength: 0)
+            rightAction
+        }
+        .padding(.horizontal, OnboardingTheme.compactHorizontalInset)
+        .frame(height: OnboardingTheme.compactFooterHeight)
+        .padding(.bottom, 10)
+    }
+
+    @ViewBuilder private var leftAction: some View {
+        let outcome = model.outcome(model.step)
+        if model.step == .hotkeys {
+            OnboardingOutlineButton(title: "Open Hotkeys") { model.openSettings(.hotkeys, nil) }.fixedSize()
+        } else if model.step == .toolbox {
+            OnboardingOutlineButton(title: "Open Toolbox") { model.openSettings(.toolbox, nil) }.fixedSize()
+        } else if !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
+            Button(model.step.isOptional ? "Skip" : "Set up later", action: model.next)
+                .buttonStyle(.plain)
+                .font(OnboardingTheme.sans(12, weight: .medium))
+                .foregroundColor(OnboardingTheme.muted)
+                .help(model.step.isOptional ? "Skip this step" : "Continue without it; it's in Settings any time")
+        }
+    }
+
+    @ViewBuilder private var rightAction: some View {
+        if dwell.state != .idle {
+            OnboardingDwellPill(dwell: dwell)
+        } else if model.step != .thanks, model.step.isInformational || model.outcome(model.step).isDone {
+            OnboardingPrimaryButton(title: "Next", action: model.next)
+                .keyboardShortcut(.defaultAction)
         }
     }
 
     // MARK: - Steps
 
     @ViewBuilder
-    private func content(_ step: OnboardingStep) -> some View {
+    private func stage(_ step: OnboardingStep) -> some View {
         switch step {
-        case .source: OnboardingSourceStep(model: model, onDevice: model.onDevice)
+        case .source:
+            OnboardingJourneyStep(act: step.act, title: "Where should speech run?",
+                                  lede: "Change it any time in Settings → API & Models.") {
+                OnboardingSourceChoice(model: model, onDevice: model.onDevice)
+            }
         case .speechKey:
-            OnboardingKeyStep(model: model, step: .speechKey, title: "Your speech key",
-                              lede: "One key for Drop, Agent voice, Voice search and Meetings.",
-                              providers: OnboardingJourneyModel.speechProviders, selection: $model.speechProvider) { key, kind in
-                await model.useSpeechKey(key, provider: kind)
+            OnboardingJourneyStep(act: step.act, title: "Your speech key",
+                                  lede: "One key runs Drop, Agent voice, Voice search and Meetings.") {
+                OnboardingKeySlot(providers: Self.options(model.speechProviders),
+                                  selected: providerBinding(\.speechProvider),
+                                  outcome: model.outcome(.speechKey),
+                                  savedKey: model.keySaved(model.speechProvider)) { key in
+                    let provider = model.speechProvider
+                    Task { await model.useSpeechKey(key, provider: provider) }
+                }
             }
         case .llmKey:
-            OnboardingKeyStep(model: model, step: .llmKey, title: "A language model",
-                              lede: "Optional. Cleans up Smart dictation, writes meeting notes, runs the Agent and translates.",
-                              providers: OnboardingJourneyModel.llmProviders, selection: $model.llmProvider) { key, kind in
-                await model.useLLMKey(key, provider: kind)
+            OnboardingJourneyStep(act: step.act, title: "A language model",
+                                  lede: "Optional. Smart dictation, meeting notes, the Agent and Translate.") {
+                VStack(alignment: .leading, spacing: 10) {
+                    OnboardingKeySlot(providers: Self.options(OnboardingJourneyModel.llmProviders),
+                                      selected: providerBinding(\.llmProvider),
+                                      outcome: model.outcome(.llmKey),
+                                      savedKey: model.keySaved(model.llmProvider)) { key in
+                        let provider = model.llmProvider
+                        Task { await model.useLLMKey(key, provider: provider) }
+                    }
+                    if !model.outcome(.llmKey).isDone, let preselected = model.preselectedModel(model.llmProvider) {
+                        Text("Model: \(preselected) · change it later in Models")
+                            .font(OnboardingTheme.mono(10.5))
+                            .foregroundColor(OnboardingTheme.faint)
+                            .lineLimit(1)
+                    }
+                }
             }
-        case .search: OnboardingSearchStep(model: model)
+        case .search:
+            OnboardingJourneyStep(act: step.act, title: "Web search for the Agent",
+                                  lede: "Optional. A Tavily key lets the Agent look things up.") {
+                OnboardingKeySlot(providers: [Self.tavilyOption], selected: .constant(Self.tavilyOption.name),
+                                  outcome: model.outcome(.search), savedKey: false) { key in
+                    Task { await model.useSearchKey(key) }
+                }
+            }
         case .language:
-            OnboardingStepFrame(title: "Which language do you speak?", lede: "Auto works too: the provider listens for it.") {
-                OnboardingLanguageList(selected: model.language, rowsHeight: 120) { model.setLanguage($0) }
+            OnboardingJourneyStep(act: step.act, title: "Which language do you speak?",
+                                  lede: "Auto works too: the provider listens for it.") {
+                OnboardingLanguageList(selected: model.language, rowsHeight: 150) { model.setLanguage($0) }
             }
         case .keyboard:
-            OnboardingPermissionStep(model: model, step: step, icon: "keyboard", title: "Keyboard control",
-                                     lede: "To hear your Drop shortcut and type the text where your cursor is.",
-                                     action: model.requestKeyboard)
+            permission(step, icon: "keyboard", title: "Keyboard control",
+                       purpose: "To hear your Drop shortcut and type the text where your cursor is.",
+                       section: "PRIVACY & SECURITY › ACCESSIBILITY", request: model.requestKeyboard)
         case .microphone:
-            OnboardingPermissionStep(model: model, step: step, icon: "mic", title: "Microphone",
-                                     lede: "To hear you, only while you hold the shortcut.",
-                                     action: model.requestMicrophone)
+            permission(step, icon: "mic", title: "Microphone",
+                       purpose: "To hear you, only while Drop is recording.",
+                       section: "PRIVACY & SECURITY › MICROPHONE", request: model.requestMicrophone)
         case .inputMonitoring:
-            OnboardingPermissionStep(model: model, step: step, icon: "keyboard.badge.eye", title: "Keyboard access",
-                                     lede: "This Mac also asks for Input Monitoring before Drop can see its shortcut.",
-                                     action: model.requestInputMonitoring)
+            permission(step, icon: "keyboard.badge.eye", title: "Input Monitoring",
+                       purpose: "This Mac also asks for it before Drop can see its shortcut.",
+                       section: "PRIVACY & SECURITY › INPUT MONITORING", request: model.requestInputMonitoring)
         case .screenRecording:
-            OnboardingPermissionStep(model: model, step: step, icon: "rectangle.dashed.badge.record", title: "Screen Recording",
-                                     lede: "Optional. For Shot and when you ask the Agent about your screen.",
-                                     action: model.requestScreenRecording)
-        case .tryDrop: OnboardingTryStep(model: model, configuration: hotkeys.configuration)
+            permission(step, icon: "rectangle.dashed.badge.record", title: "Screen Recording",
+                       purpose: "Optional. For Shot, and when you ask the Agent about your screen.",
+                       section: "PRIVACY & SECURITY › SCREEN RECORDING", request: model.requestScreenRecording)
+        case .tryDrop: tryDropStage
         case .hotkeys:
-            OnboardingStepFrame(title: "Every tool has a shortcut", lede: "Give any tool its own keys in Settings → Hotkeys.") {
-                OnboardingOutlineButton(title: "Open Hotkeys") { model.openSettings(.hotkeys, nil) }
+            OnboardingJourneyStep(act: step.act, title: "Every tool has a shortcut",
+                                  lede: "These are yours now. Change them in Settings → Hotkeys.") {
+                OnboardingShortcutList(configuration: hotkeys.configuration, agentEnabled: model.agentEnabled())
             }
         case .toolbox:
-            OnboardingStepFrame(title: "Tools above the island", lede: "Hover the island to reach them. Pick yours in Settings → Toolbox.") {
-                OnboardingOutlineButton(title: "Open Toolbox") { model.openSettings(.toolbox, nil) }
+            OnboardingJourneyStep(act: step.act, title: "Tools above the island",
+                                  lede: "Hover the island at the top of the screen. Pick yours in Settings → Toolbox.") {
+                OnboardingToolboxPreview(slots: model.toolbox.slots)
             }
         case .help:
-            OnboardingStepFrame(title: "Questions?", lede: "The agent on whytap.ai answers them with step-by-step instructions.") {
-                Link("Open whytap.ai", destination: URL(string: "https://whytap.ai")!)
-                    .font(OnboardingTheme.sans(13, weight: .medium))
-                    .foregroundColor(OnboardingTheme.accent)
+            OnboardingJourneyStep(act: step.act, title: "Questions?",
+                                  lede: "The agent on whytap.ai answers with steps for your setup.") {
+                OnboardingHelpCard()
             }
         case .thanks:
-            OnboardingStepFrame(title: "Thank you for choosing Whytap", lede: model.summary) { EmptyView() }
+            OnboardingJourneyStep(act: step.act, title: "Thank you for choosing Whytap", lede: "") {
+                OnboardingThankYouCard(receipt: model.receipt,
+                                       hint: "Settings has everything you set here.",
+                                       finish: model.finish)
+            }
         }
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            OnboardingOutcomeLine(outcome: model.outcome(model.step), notes: model.notes)
-            HStack(spacing: 10) {
-                if model.canGoBack {
-                    OnboardingQuietButton(title: "Back", systemImage: "chevron.left", action: model.back)
-                        .help("Back (←)")
-                }
-                Spacer(minLength: 0)
-                if model.step.isInformational {
-                    OnboardingPrimaryButton(title: model.step == .thanks ? "Done" : "Next", action: model.next)
-                } else if !model.outcome(model.step).isDone {
-                    OnboardingQuietButton(title: model.step.isOptional ? "Skip" : "Set up later", action: model.next)
-                }
-            }
+    private var tryDropStage: some View {
+        let model = self.model
+        let problem: String? = { if case .failed(let reason) = model.outcome(.tryDrop) { return reason } else { return nil } }()
+        var simulate: (() -> Void)?
+        if model.isPreview { simulate = { model.noteDictated() } }
+        return OnboardingJourneyStep(act: OnboardingStep.tryDrop.act, title: "Try Drop", lede: "Your own shortcut, in a real text field.") {
+            OnboardingTryStage(shortcut: hotkeys.configuration.dropVoiceShortcut,
+                               gesture: hotkeys.configuration.normalizedDropGesture,
+                               dictated: model.outcome(.tryDrop).isDone,
+                               problem: problem,
+                               onDictated: model.noteDictated,
+                               simulate: simulate)
         }
-        .frame(height: 64, alignment: .bottom)
-        .padding(.horizontal, 32)
-        .padding(.bottom, 22)
+    }
+
+    private func permission(_ step: OnboardingStep, icon: String, title: String, purpose: String, section: String,
+                            request: @escaping () -> Void) -> some View {
+        let phase: OnboardingPermissionPhase = model.outcome(step).isDone ? .granted
+            : model.requested.contains(step) ? .awaitingSystem : .ready
+        return OnboardingJourneyStep(act: step.act, title: title, lede: "macOS asks once. Whytap waits here.") {
+            OnboardingPermissionCard(icon: icon, title: title, purpose: purpose, section: section, phase: phase,
+                                     request: request, recheck: model.recheckPermissions)
+        }
+    }
+
+    private func providerBinding(_ path: ReferenceWritableKeyPath<OnboardingJourneyModel, AIProviderKind>) -> Binding<String> {
+        Binding(get: { model[keyPath: path].displayName },
+                set: { name in
+                    if let kind = (model.speechProviders + OnboardingJourneyModel.llmProviders)
+                        .first(where: { $0.displayName == name }) { model[keyPath: path] = kind }
+                })
+    }
+
+    /// The provider strip with each provider's real offer from API hints;
+    /// a provider without a free offer shows none.
+    static func options(_ kinds: [AIProviderKind]) -> [OnboardingProviderOption] {
+        kinds.map { kind in
+            let hint = APIHintsView.hints.first { $0.provider == kind.displayName && $0.access == .noCard }
+            return OnboardingProviderOption(kind: kind, name: kind.displayName,
+                                            hint: hint.map { shortOffer($0) }, offerURL: hint?.url ?? signUpURL(kind))
+        }
+    }
+
+    static let tavilyOption: OnboardingProviderOption = {
+        let hint = APIHintsView.hints.first { $0.provider == "Tavily" }
+        return OnboardingProviderOption(kind: nil, name: "Tavily", hint: hint.map { shortOffer($0) },
+                                        offerURL: hint?.url ?? URL(string: "https://www.tavily.com")!)
+    }()
+
+    /// "$200 credit", "10,000 credits / mo", "50 free / day", "1,000 free / mo".
+    static func shortOffer(_ hint: APIHintsView.Hint) -> String {
+        let cadence = hint.cadence
+        if cadence.contains("one-time") { return "\(hint.allowance) credit" }
+        let parts = hint.allowance.components(separatedBy: " / ")
+        if parts.count == 2 { return "\(parts[0]) free / \(parts[1])" }
+        if cadence.contains("each month") { return "\(hint.allowance) free / mo" }
+        return "\(hint.allowance) free"
+    }
+
+    static func signUpURL(_ kind: AIProviderKind) -> URL? {
+        switch kind {
+        case .soniox: return URL(string: "https://console.soniox.com")
+        case .anthropic: return URL(string: "https://console.anthropic.com/settings/keys")
+        case .openAI: return URL(string: "https://platform.openai.com/api-keys")
+        case .openRouter: return URL(string: "https://openrouter.ai/keys")
+        case .deepgram: return URL(string: "https://console.deepgram.com")
+        case .elevenLabs: return URL(string: "https://elevenlabs.io/app/settings/api-keys")
+        default: return nil
+        }
     }
 }
 
-// MARK: - Pieces
+// MARK: - Step frame
 
-struct OnboardingJourneyProgress: View {
-    let fraction: Double
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(OnboardingTheme.surface3)
-                Capsule().fill(OnboardingTheme.accent)
-                    .frame(width: max(4, proxy.size.width * fraction))
-            }
-        }
-        .frame(height: 3)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: fraction)
-        .accessibilityElement()
-        .accessibilityLabel("Progress")
-        .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
-    }
-}
-
-struct OnboardingStepFrame<Content: View>: View {
+/// The act label, a serif title, an optional lede and the step's stage.
+struct OnboardingJourneyStep<Content: View>: View {
+    let act: OnboardingAct
     let title: String
     let lede: String
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text(act.rawValue)
+                .font(OnboardingTheme.mono(9.5, weight: .semibold))
+                .tracking(1.4)
+                .foregroundColor(OnboardingTheme.faint)
+                .accessibilityHidden(true)
             Text(title)
-                .font(OnboardingTheme.serif(34))
+                .font(OnboardingTheme.serif(30))
                 .foregroundColor(OnboardingTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+                .accessibilityAddTraits(.isHeader)
             if !lede.isEmpty {
                 Text(lede)
-                    .font(OnboardingTheme.sans(13))
+                    .font(OnboardingTheme.sans(12.5))
                     .foregroundColor(OnboardingTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
             }
-            content.padding(.top, 22)
+            content.padding(.top, 18)
         }
-    }
-}
-
-struct OnboardingOutcomeLine: View {
-    let outcome: OnboardingStepOutcome
-    let notes: [String]
-
-    var body: some View {
-        HStack(spacing: 6) {
-            switch outcome {
-            case .idle:
-                if let note = notes.first { text(note, OnboardingTheme.muted) }
-            case .working(let message):
-                ProgressView().controlSize(.mini)
-                text(message, OnboardingTheme.muted)
-            case .done(let message):
-                Image(systemName: "checkmark.circle.fill").foregroundColor(OnboardingTheme.green)
-                text(message, OnboardingTheme.ink2)
-            case .failed(let message):
-                Image(systemName: "exclamationmark.circle.fill").foregroundColor(OnboardingTheme.orange)
-                text(message, OnboardingTheme.orange)
-            }
-        }
-        .font(OnboardingTheme.sans(12))
-        .frame(minHeight: 16)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func text(_ string: String, _ color: Color) -> some View {
-        Text(string).foregroundColor(color).lineLimit(2).multilineTextAlignment(.trailing)
-    }
-}
-
-struct OnboardingChoiceCard: View {
-    let icon: String
-    let title: String
-    let detail: String
-    var selected = false
-    let action: () -> Void
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: icon).font(.system(size: 20, weight: .medium)).foregroundColor(OnboardingTheme.accent)
-                Text(title).font(OnboardingTheme.sans(15, weight: .semibold)).foregroundColor(OnboardingTheme.ink)
-                Text(detail).font(OnboardingTheme.sans(12)).foregroundColor(OnboardingTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(hovered ? OnboardingTheme.surface2 : OnboardingTheme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(selected ? OnboardingTheme.accent : OnboardingTheme.border, lineWidth: selected ? 1.2 : 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .padding(.top, 14)
     }
 }
 
 // MARK: - 1. Source
 
-struct OnboardingSourceStep: View {
+struct OnboardingSourceChoice: View {
     @ObservedObject var model: OnboardingJourneyModel
     @ObservedObject var onDevice: OnDeviceSpeechModelController
 
     var body: some View {
-        OnboardingStepFrame(title: "Where should speech run?", lede: "You can change it any time in Settings.") {
+        let source = model.progress.source
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                OnboardingChoiceCard(icon: "laptopcomputer", title: "On this Mac",
-                                     detail: onDevice.status == .ready ? "The model is here. Nothing leaves this Mac."
-                                                                       : "A 470 MB download. Nothing leaves this Mac.",
-                                     selected: model.progress.source == .onThisMac, action: model.chooseOnThisMac)
-                OnboardingChoiceCard(icon: "key", title: "Your key",
-                                     detail: "Soniox, Deepgram or ElevenLabs. Often more accurate, with free credit.",
-                                     selected: model.progress.source == .yourKey, action: model.chooseYourKey)
+                if model.start.onDeviceSupported {
+                    OnboardingChoiceCard(title: "On this Mac", summary: "Free. Works offline. Your voice never leaves this Mac.",
+                                         spec: onDeviceSpec, isSelected: source == .onThisMac,
+                                         isDimmed: source == .yourKey, action: model.chooseOnThisMac) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "laptopcomputer").font(.system(size: 13, weight: .medium))
+                                .foregroundColor(OnboardingTheme.ink2)
+                            Spacer(minLength: 0)
+                            OnboardingBadge(text: "OFFLINE")
+                        }
+                    }
+                }
+                OnboardingChoiceCard(title: "Your API key", summary: "Soniox, Deepgram or ElevenLabs. You pay the provider for what you use.",
+                                     spec: "KEY STAYS IN YOUR KEYCHAIN", isSelected: source == .yourKey,
+                                     isDimmed: source == .onThisMac, action: model.chooseYourKey) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "key.horizontal").font(.system(size: 13, weight: .medium))
+                            .foregroundColor(OnboardingTheme.ink2)
+                        Spacer(minLength: 0)
+                        Text("SONIOX · DEEPGRAM · ELEVENLABS")
+                            .font(OnboardingTheme.mono(8.5, weight: .medium))
+                            .foregroundColor(OnboardingTheme.faint)
+                            .lineLimit(1)
+                    }
+                }
             }
+            if case .failed(let reason) = model.outcome(.source) {
+                OnboardingStageStatus(tone: .warning, text: reason)
+            }
+        }
+    }
+
+    private var onDeviceSpec: String {
+        switch onDevice.status {
+        case .ready: return "PARAKEET TDT V3 · DOWNLOADED"
+        case .downloading(let fraction): return "DOWNLOADING · \(Int((fraction * 100).rounded()))%"
+        case .notDownloaded, .failed: return "PARAKEET TDT V3 · 470 MB"
         }
     }
 }
 
-// MARK: - 2–3. Keys
+// MARK: - 10. Shortcuts
 
-struct OnboardingKeyStep: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    let step: OnboardingStep
-    let title: String
-    let lede: String
-    let providers: [AIProviderKind]
-    @Binding var selection: AIProviderKind
-    let use: (String, AIProviderKind) async -> Void
-    @State private var key = ""
-    @FocusState private var focused: Bool
+/// Drop, Agent and Shot with the person's own keys from HotkeyConfiguration.
+struct OnboardingShortcutList: View {
+    let configuration: HotkeyConfiguration
+    let agentEnabled: Bool
 
     var body: some View {
-        let working: Bool = { if case .working = model.outcome(step) { return true } else { return false } }()
-        let saved = model.keySaved(selection)
-        OnboardingStepFrame(title: title, lede: lede) {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("Provider", selection: $selection) {
-                    ForEach(providers, id: \.self) { Text($0.displayName).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                HStack(spacing: 8) {
-                    SecureField(saved ? "Saved — press Use, or paste a new key" : "Paste your \(selection.displayName) key", text: $key)
-                        .textFieldStyle(.plain)
-                        .focused($focused)
-                        .onSubmit(submit)
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.surface))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(focused ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.borderStrong,
-                                          lineWidth: focused ? 1.2 : 0.75))
-                        .disabled(working)
-                    OnboardingOutlineButton(title: "Use", action: submit)
-                        .fixedSize()
-                        .disabled(working || (!saved && key.trimmingCharacters(in: .whitespaces).isEmpty))
-                }
-                if let hint = APIHintsView.hints.first(where: { $0.provider == selection.displayName }) {
-                    Link("Get a key · \(hint.allowance) \(hint.cadence)", destination: hint.url)
-                        .font(OnboardingTheme.sans(12))
-                        .foregroundColor(OnboardingTheme.accent)
-                }
-                if step == .llmKey, let model = self.model.preselectedModel(selection) {
-                    Text("Model: \(model)")
-                        .font(OnboardingTheme.mono(11))
+        let drop = OnboardingTryPage.Copy(shortcut: configuration.dropVoiceShortcut.title,
+                                          gesture: configuration.normalizedDropGesture)
+        VStack(spacing: 8) {
+            OnboardingInfoRow(title: "Drop", detail: "\(drop.pressVerb) in any text field and speak") {
+                OnboardingKeycaps(contents: configuration.dropVoiceShortcut.contents)
+            }
+            OnboardingInfoRow(title: "Agent", detail: agentEnabled
+                              ? "Tap to type a question, hold to ask by voice"
+                              : "Turn it on in Settings → Other") {
+                OnboardingKeycaps(contents: configuration.agentTextShortcut.contents)
+            }
+            OnboardingInfoRow(title: "Shot", detail: "Capture, mark up and copy part of the screen") {
+                if let shot = configuration.toolShortcuts[.screenshot] {
+                    OnboardingKeycaps(contents: shot.contents)
+                } else {
+                    Text("No shortcut yet")
+                        .font(OnboardingTheme.sans(11.5))
                         .foregroundColor(OnboardingTheme.faint)
                 }
             }
         }
-        .onChange(of: selection) { _ in key = "" }
-    }
-
-    private func submit() {
-        let candidate = key
-        let kind = selection
-        Task {
-            await use(candidate, kind)
-            if model.outcome(step).isDone { key = "" }
-        }
     }
 }
 
-// MARK: - 4. Search
+// MARK: - 11. Toolbox
 
-struct OnboardingSearchStep: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    @State private var key = ""
-
-    var body: some View {
-        OnboardingStepFrame(title: "Web search for the Agent",
-                            lede: "Optional. A free Tavily key lets the Agent look things up.") {
-            HStack(spacing: 8) {
-                SecureField("Paste your Tavily key", text: $key)
-                    .textFieldStyle(.plain)
-                    .onSubmit(submit)
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(OnboardingTheme.surface))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(OnboardingTheme.borderStrong, lineWidth: 0.75))
-                OnboardingOutlineButton(title: "Use", action: submit)
-                    .fixedSize()
-                    .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-    }
-
-    private func submit() {
-        let candidate = key
-        Task { await model.useSearchKey(candidate) }
-    }
-}
-
-// MARK: - 6–8. Permissions
-
-struct OnboardingPermissionStep: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    let step: OnboardingStep
-    let icon: String
-    let title: String
-    let lede: String
-    let action: () -> Void
+/// The person's own hover tools, in their saved order.
+struct OnboardingToolboxPreview: View {
+    let slots: [HoverTool]
 
     var body: some View {
-        let done = model.outcome(step).isDone
-        OnboardingStepFrame(title: title, lede: lede) {
-            HStack(spacing: 14) {
-                Image(systemName: done ? "checkmark.circle.fill" : icon)
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundColor(done ? OnboardingTheme.green : OnboardingTheme.accent)
-                    .frame(width: 40)
-                if !done {
-                    OnboardingPrimaryButton(title: "Allow", chevron: false, action: action)
+        let tools = slots.filter { $0 != .settings && !$0.isComingSoon }.prefix(6)
+        VStack(spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(Array(tools), id: \.self) { tool in
+                    let info = HoverToolRegistry.info(for: tool)
+                    VStack(spacing: 6) {
+                        Image(systemName: info.sfSymbol)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(OnboardingTheme.accent)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.white.opacity(0.92)))
+                        Text(info.title)
+                            .font(OnboardingTheme.sans(11, weight: .medium))
+                            .foregroundColor(OnboardingTheme.ink2)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 64)
+                    .onboardingElevatedCard(cornerRadius: 12)
+                    .help(info.description)
                 }
             }
         }
     }
 }
 
-// MARK: - 9. Try Drop
+// MARK: - 12. Help
 
-struct OnboardingTryStep: View {
-    @ObservedObject var model: OnboardingJourneyModel
-    let configuration: HotkeyConfiguration
-
+/// A real question and its real answer, then the link.
+struct OnboardingHelpCard: View {
     var body: some View {
-        let copy = OnboardingTryPage.Copy(shortcut: configuration.dropVoiceShortcut.title,
-                                          gesture: configuration.normalizedDropGesture)
-        OnboardingStepFrame(title: "Try Drop", lede: "\(copy.pressVerb) your shortcut and say a sentence.") {
-            VStack(alignment: .leading, spacing: 10) {
-                OnboardingKeycaps(contents: configuration.dropVoiceShortcut.contents)
-                OnboardingTryField(placeholder: copy.placeholder, onDictated: model.noteDictated)
-                    .padding(10)
-                    .frame(height: 120)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(OnboardingTheme.surface))
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Spacer()
+                    Text("How do I give Shot its own shortcut?")
+                        .font(OnboardingTheme.sans(12))
+                        .foregroundColor(OnboardingTheme.ink)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(OnboardingTheme.surface3))
+                }
+                Text("Open Settings → Hotkeys → Tools, click the field next to Shot and press the keys.")
+                    .font(OnboardingTheme.sans(12))
+                    .foregroundColor(OnboardingTheme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .onboardingRecessed(cornerRadius: 10)
             }
+            .padding(12)
+            .onboardingElevatedCard(cornerRadius: 13)
+            Link(destination: URL(string: "https://whytap.ai")!) {
+                HStack(spacing: 4) {
+                    Text("Ask on whytap.ai")
+                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+                }
+                .font(OnboardingTheme.sans(12.5, weight: .medium))
+                .foregroundColor(OnboardingTheme.accent)
+            }
+            .buttonStyle(.plain)
         }
     }
 }

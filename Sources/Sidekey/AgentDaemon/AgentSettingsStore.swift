@@ -3,6 +3,14 @@ import Foundation
 /// Per-provider model / reasoning / speed settings chosen in Settings,
 /// persisted in UserDefaults. Codex models and controls come from its registry;
 /// the same resolution feeds both the Settings UI and per-turn CLI flags.
+/// The Agent's web search pick in API & Models → Models → Search.
+enum AgentWebSearchChoice: String, Sendable {
+    /// The Agent model's built-in search; Tavily for a model without it.
+    case auto
+    /// Tavily, when its key exists; otherwise as `.auto`.
+    case tavily
+}
+
 @MainActor
 final class AgentSettingsStore: ObservableObject {
     static let shared = AgentSettingsStore()
@@ -18,6 +26,9 @@ final class AgentSettingsStore: ObservableObject {
     @Published var codexEffort: String?       { didSet { write(Keys.codexEffort, codexEffort) } }
     @Published var codexServiceTier: String?  { didSet { write(Keys.codexServiceTier, codexServiceTier) } }
     @Published var openCodeAllowActions: Bool { didSet { defaults.set(openCodeAllowActions, forKey: Keys.openCodeAllowActions) } }
+    /// API & Models → Models → Search. `.auto` (default): the Agent model's
+    /// built-in search, else Tavily. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    @Published var webSearchChoice: AgentWebSearchChoice { didSet { defaults.set(webSearchChoice.rawValue, forKey: Keys.webSearchChoice) } }
 
     private enum Keys {
         static let claudeModel = "agent.claude.model"
@@ -26,6 +37,7 @@ final class AgentSettingsStore: ObservableObject {
         static let codexEffort = "agent.codex.effort"
         static let codexServiceTier = "agent.codex.serviceTier"
         static let openCodeAllowActions = "agent.opencode.allowActions"
+        static let webSearchChoice = "agent.native.webSearch"
     }
 
     @Published private(set) var codexCatalog: [CodexModelOption] = []
@@ -47,6 +59,7 @@ final class AgentSettingsStore: ObservableObject {
         self.injectedRouting = routing
         self.injectedCatalogs = catalogs
         self.openCodeAllowActions = defaults.object(forKey: Keys.openCodeAllowActions) as? Bool ?? true
+        self.webSearchChoice = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
         // Property observers do not fire on initial assignment in init, so this
         // load does not write back.
         self.claudeModel = defaults.string(forKey: Keys.claudeModel)
@@ -82,7 +95,8 @@ final class AgentSettingsStore: ObservableObject {
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
                                    openRouterProvider: selectedOpenCodeProvider == .openRouter
-                                       ? routing.route(for: .agent)?.provider : nil)
+                                       ? routing.route(for: .agent)?.provider : nil,
+                                   preferTavilySearch: webSearchChoice == .tavily)
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,

@@ -2,7 +2,7 @@
 id: agent-provider-web-search-2026-11-22
 type: decision
 title: The native Agent searches with its model provider's own web search; Tavily is the fallback
-summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches only with the provider's server-side web search tool, even when a Tavily key exists; Tavily is only for models without built-in search, and with neither the Agent says it cannot check the web.
+summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches with the provider's server-side web search tool by default; a Search row in API & Models → Models shows and picks the search (built-in or Tavily), Tavily serves models without built-in search, and with neither the Agent answers in one line how to turn search on.
 status: confirmed
 tags: [agent, native-agent, web-search, tavily, anthropic, openai, openrouter, costs]
 canonical_for: [agent-web-search]
@@ -12,7 +12,7 @@ sources:
     reference: On 2026-11-22 the maintainer approved ("yes, do it") moving the Agent to the provider's built-in web search with Tavily as fallback (orchestrator task 78).
     confirmed_at: 2026-11-22
   - type: user-confirmed
-    reference: On 2026-11-22 the maintainer clarified that when search works without Tavily, Tavily is not used, and that no switch to prefer Tavily is needed.
+    reference: On 2026-11-22 the maintainer clarified that when search works without Tavily, Tavily is not used by default, and then agreed to a Search row on the Models screen beside Speech and LLM ("I would add search here"); Tavily stays for models and own servers without built-in search (orchestrator task 78, REV 1).
     confirmed_at: 2026-11-22
   - type: url
     reference: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
@@ -47,13 +47,24 @@ Anthropic's web search, OpenAI's Responses `web_search` and OpenRouter's
 
 Each turn resolves one search (`NativeAgentWebSearch.resolve`):
 
-1. **Built-in** when the route is Anthropic, OpenAI or OpenRouter and the model
-   has it. Then only the built-in search is used: the Tavily function is not
-   offered, and a call to it gets an "unavailable" tool result without
-   reaching Tavily, even when its key is saved.
-2. **Tavily** when its key exists and the model has no built-in search.
-3. **None** otherwise: no search tool is sent and a prompt line tells the model
-   to say it could not check the web and where search is enabled.
+1. **Tavily** when the user picked it in **API & Models → Models → Search**
+   (`agent.native.webSearch = tavily`) and its key exists.
+2. **Built-in** (the default) when the route is Anthropic, OpenAI or
+   OpenRouter and the model has it. The Tavily function is then not offered,
+   and a call to it gets an "unavailable" tool result without reaching
+   Tavily: a saved key alone never replaces built-in search.
+3. **Tavily** when its key exists and the model has no built-in search.
+4. **None** otherwise: no search tool is sent and a prompt line asks the
+   model, when the user wants a search or current facts, to answer in one line
+   that search is off for this model and that a Tavily key in API keys turns
+   it on.
+
+The **Search** row sits under Speech and LLM on the Models screen
+(`AgentSearchRow`). It shows the resolved search ("Anthropic · built-in",
+"OpenAI · built-in", "OpenRouter · web", "Tavily", "Off — add a Tavily key")
+with its price, and a menu like theirs: the Agent model's built-in search or
+Tavily (or "Add a Tavily key…"). Off draws the setup contour. Saving or
+removing the Tavily key notifies the row.
 
 Wire formats: Anthropic `web_search_20250305` with `max_uses: 2`; OpenAI
 `{"type":"web_search"}` with `max_tool_calls: 2` and
@@ -91,9 +102,10 @@ unavailable, never 0.
 - The Agent's most common "current facts" question worked only after the user
   found and connected a second service. The provider already has the user's
   key, billing and privacy terms.
-- The maintainer's rule: if search works without Tavily, Tavily is not used.
-  One path per model, no setting to explain; Tavily keeps models without
-  search useful.
+- The maintainer's rule: if search works without Tavily, Tavily is not used
+  by default. A visible Search row next to Speech and LLM says what is used and
+  what it costs, and keeps the choice where other models are chosen; Tavily
+  keeps models (and own servers) without search useful.
 - Anthropic's basic tool version stays ZDR-eligible and works with the
   existing `anthropic-version: 2023-06-01`; dynamic filtering (`_20260209`+)
   would need programmatic tool calling or `allowed_callers` and loses ZDR.
@@ -111,7 +123,9 @@ unavailable, never 0.
   search fee), a catalog-unsupported model falling back to Tavily, a rejected
   first request retrying once with Tavily, a later rejection not retried, no
   search at all (no tool, honest prompt line, unverified answer), Tavily never
-  called on a built-in route even with a key, a provider
+  called on a built-in route even with a key unless picked, the Search row's
+  labels, prices and menu, the row following the Agent route, Tavily key and
+  pick in the view model, a provider
   search error and a Tavily timeout, OpenAI and OpenRouter request shapes,
   OpenAI continuation after a search without a function call, model sources
   winning over provider citations.
@@ -123,9 +137,12 @@ unavailable, never 0.
 
 ## Rejected
 
-- A Settings switch to prefer Tavily over built-in search (first version of
-  this PR): the maintainer ruled that Tavily is not used when search works
-  without it.
+- A "Search the web with Tavily" switch in Settings → Other → Agent (first
+  version of this PR): replaced by the Search row, where models are chosen.
+- Never letting the user pick Tavily on a built-in route (second version):
+  the Search menu works like Speech and LLM, so both choices are offered.
+- Removing Tavily: it is the only search for own servers and models without
+  built-in search.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

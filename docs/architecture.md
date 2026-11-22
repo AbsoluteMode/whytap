@@ -362,10 +362,16 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   max_uses 2); else the Tavily web_search function when its key exists; else
   no search tool and a prompt line telling the model to say so. Anthropic's
   catalog flag capabilities.server_tools.web_search.supported decides when
-  present; a few OpenAI families without search are excluded by ID. With
-  built-in search Tavily is never called, even with a key: the function is not
-  offered and a call to it gets an "unavailable" tool result. There is no
-  switch to prefer Tavily. A 400 on the turn's first request
+  present; a few OpenAI families without search are excluded by ID. API &
+  Models -> Models -> Search (AgentSearchRow, under Speech and LLM) shows the
+  resolved search ("Anthropic · built-in", "OpenRouter · web", "Tavily",
+  "Off — add a Tavily key") and a menu of the built-in search or Tavily;
+  agent.native.webSearch is auto (default) or tavily, and tavily applies only
+  while its key exists. When the turn does not use Tavily, the function is not
+  offered and a call to it gets an "unavailable" tool result without reaching
+  Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
+  the row updates. Without any search the prompt asks for a one-line answer
+  pointing to a Tavily key in API keys. A 400 on the turn's first request
   with built-in search retries once without it (nothing has run or been billed);
   later failures are never retried. Anthropic server blocks, including
   encrypted_content, are replayed verbatim; pause_turn and a search without a
@@ -1092,7 +1098,8 @@ retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
 Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
-above Subtitles; "Advanced · a model per feature" discloses the per-feature
+then Search (the Agent's web search, AgentSearchRow; see the native Agent
+section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
 list. A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);

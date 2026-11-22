@@ -41,15 +41,22 @@ never sees a separate search request. The pages the model cites appear as
 source cards. If the model lists none itself, Whytap shows the provider's
 citations (up to five).
 
-**Tavily** is only for a model without web search of its own: the Anthropic
-catalog says so, a few old OpenAI models such as `gpt-4.1-nano`, or the
-provider rejects the search tool on the first request. When the provider can
-search, Tavily is never called, even with its key saved. Add the key in
-**Settings → API & Models → API keys** (saving checks the key without running
-a search). Only the search query goes to Tavily; the returned excerpts and
-links go to your selected model. With neither, the
-Agent has no search tool and says it could not check the web instead of
-inventing recent facts.
+**Settings → API & Models → Models → Search** (under Speech and LLM) shows
+what the Agent searches with now: *Anthropic · built-in*, *OpenAI · built-in*,
+*OpenRouter · web*, *Tavily* or *Off — add a Tavily key*, with the price
+below. Its menu works like the Speech and LLM menus: the built-in search of
+the Agent model (the default) or Tavily.
+
+**Tavily** serves a model without web search of its own (the Anthropic catalog
+says so, a few old OpenAI models such as `gpt-4.1-nano`, or the provider
+rejects the search tool on the first request) and anyone who picks it in
+Search; it also gives search to Agent models on your own servers once those
+can run the Agent. A saved Tavily key alone never replaces built-in search.
+Add the key in **Settings → API & Models → API keys** (saving checks the key
+without running a search). Only the search query goes to Tavily; the returned
+excerpts and links go to your selected model. With neither, the
+Agent has no search tool; asked to search, it answers in one line that web
+search is off for this model and that a Tavily key in API keys turns it on.
 
 ## Off by default; what it can do once on
 

@@ -1,8 +1,9 @@
 import Foundation
 
-/// How the native Agent searches the web in one turn. When the provider has
-/// its own search, only that is used, even with a Tavily key: Tavily is only
-/// for a model without built-in search (maintainer's rule, 2026-11-22).
+/// How the native Agent searches the web in one turn. By default the Agent
+/// model's provider searches (built-in); Tavily serves a model without it, or
+/// when the user picks Tavily in API & Models → Models → Search. A Tavily key
+/// alone never replaces built-in search.
 /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
 enum NativeAgentWebSearch: Equatable {
     /// The route provider's server-side search tool, billed by that provider.
@@ -14,9 +15,11 @@ enum NativeAgentWebSearch: Equatable {
 
     var isBuiltIn: Bool { if case .builtIn = self { return true }; return false }
 
-    /// The turn's search: built-in unless the model is known not to support
-    /// it; then Tavily with a key; else none.
+    /// The turn's search: Tavily when the user picked it and its key exists;
+    /// else built-in unless the model is known not to support it; then Tavily
+    /// with a key; else none.
     static func resolve(options: AgentRunOptions, tavilyConnected: Bool) -> Self {
+        if options.preferTavilySearch, tavilyConnected { return .tavily }
         if let model = options.model, supportsBuiltIn(provider: options.openCodeProvider, model: model,
                                                       catalogFlag: options.openCodeModelSpec?.webSearch) {
             return .builtIn(options.openCodeProvider)
@@ -65,9 +68,35 @@ enum NativeAgentWebSearch: Equatable {
             return "Web search: call the web_search function (Tavily) for current external facts, then put the URLs "
                 + "that support the answer into finish_answer.sources."
         case .none:
-            return "Web search is not available in this turn: this model has no built-in search and Tavily is not connected. "
-                + "For current or recent facts, say briefly that you could not check the web and that search can be enabled "
-                + "in Settings → API & Models; never present recent facts as checked."
+            return "Web search is off: this model has no built-in search and Tavily is not connected. When the request "
+                + "asks to search or needs current or recent facts, answer in one line that web search is off for this model "
+                + "and is turned on by adding a Tavily key in Settings → API & Models → API keys (status unverified); "
+                + "never present recent facts as checked."
+        }
+    }
+
+    /// What the Search row in API & Models → Models shows: "Anthropic ·
+    /// built-in", "OpenRouter · web", "Tavily", "Off — add a Tavily key".
+    var label: String {
+        switch self {
+        case .builtIn(.openRouter): return "OpenRouter · web"
+        case .builtIn(let provider): return "\(provider.displayName) · built-in"
+        case .tavily: return "Tavily"
+        case .none: return "Off — add a Tavily key"
+        }
+    }
+
+    /// What it costs and who bills it, checked 2026-11-22.
+    var priceNote: String {
+        switch self {
+        case .builtIn(.openRouter):
+            return "The model’s own search at its provider’s price, otherwise Exa at about $7 per 1,000 searches. Billed by OpenRouter."
+        case .builtIn(let provider):
+            return "About $10 per 1,000 searches plus result tokens. Billed by \(provider.displayName)."
+        case .tavily:
+            return "One Tavily credit per search; 1,000 free credits a month."
+        case .none:
+            return "This Agent model has no web search of its own. Add a Tavily key in API keys."
         }
     }
 
@@ -97,4 +126,40 @@ enum NativeAgentWebSearch: Equatable {
         }
         return links
     }
+}
+
+/// The Search row of API & Models → Models, beside Speech and LLM: what the
+/// Agent searches with now and what its menu offers.
+/// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+struct AgentSearchRow: Equatable {
+    /// What the next Agent turn uses.
+    let current: NativeAgentWebSearch
+    /// The Agent model's built-in search, `nil` when its route has none.
+    let builtIn: NativeAgentWebSearch?
+    let tavilyConnected: Bool
+    let choice: AgentWebSearchChoice
+
+    /// The same resolution an Agent turn makes (`NativeAgentWebSearch.resolve`).
+    init(agentProvider: OpenCodeModelProvider?, model: String?, catalogFlag: Bool?,
+         tavilyConnected: Bool, choice: AgentWebSearchChoice) {
+        let options = AgentRunOptions(
+            model: agentProvider == nil ? nil : model,
+            openCodeModelSpec: catalogFlag.map { OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 0, outputLimit: 0, webSearch: $0) },
+            openCodeProvider: agentProvider ?? .openRouter,
+            preferTavilySearch: choice == .tavily)
+        current = NativeAgentWebSearch.resolve(options: options, tavilyConnected: tavilyConnected)
+        let own = NativeAgentWebSearch.resolve(options: { var o = options; o.preferTavilySearch = false; return o }(),
+                                               tavilyConnected: false)
+        builtIn = own.isBuiltIn ? own : nil
+        self.tavilyConnected = tavilyConnected
+        self.choice = choice
+    }
+
+    /// The orange setup contour: the Agent cannot search at all.
+    var needsSetup: Bool { current == .none }
+}
+
+extension Notification.Name {
+    /// The Tavily key was saved or removed (it writes no preference).
+    static let whytapTavilyKeyChanged = Notification.Name("whytap.tavilyKeyChanged")
 }

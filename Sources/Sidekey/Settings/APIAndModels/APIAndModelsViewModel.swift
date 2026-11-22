@@ -147,6 +147,9 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Speech and LLM, read from the per-feature routes.
     // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
     @Published private(set) var sharedRows: [SharedModelRow] = []
+    /// The Agent's web search, shown under Speech and LLM.
+    @Published private(set) var searchRow = AgentSearchRow(agentProvider: nil, model: nil, catalogFlag: nil,
+                                                           tavilyConnected: false, choice: .auto)
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
     @Published private(set) var unsetBanner: String?
     @Published var proposal: AssignProposal?
@@ -158,6 +161,7 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
+    private let agentSettings: AgentSettingsStore
 
     func makeTavilySettings() -> TavilySettings { TavilySettings(keys: keys) }
     private let catalogs: ModelCatalogStore
@@ -193,9 +197,11 @@ final class APIAndModelsViewModel: ObservableObject {
         endpoints: any OpenRouterEndpointsFetching = OpenRouterEndpointsClient(),
         now: @escaping () -> Date = Date.init,
         inputLanguage: (@MainActor () -> String?)? = nil,
-        onDevice: OnDeviceSpeechReadiness = .live
+        onDevice: OnDeviceSpeechReadiness = .live,
+        agentSettings: AgentSettingsStore? = nil
     ) {
         self.onDevice = onDevice
+        self.agentSettings = agentSettings ?? .shared
         let routing = routing ?? .shared
         let catalogs = catalogs ?? .shared
         let checks = checks ?? .shared
@@ -225,6 +231,17 @@ final class APIAndModelsViewModel: ObservableObject {
                 MainActor.assumeIsolated { self?.recompute() }
             }
             .store(in: &observers)
+        NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.recompute() }
+            }
+            .store(in: &observers)
+    }
+
+    /// API & Models → Models → Search: the Agent model's search (`.auto`) or Tavily.
+    func selectSearch(_ choice: AgentWebSearchChoice) {
+        agentSettings.webSearchChoice = choice
+        recompute()
     }
 
     /// Kinds the Add key menu offers: built-in providers without a key (an
@@ -898,7 +915,21 @@ final class APIAndModelsViewModel: ObservableObject {
             return row
         }
         if self.sharedRows != shared { self.sharedRows = shared }
+        let search = makeSearchRow()
+        if self.searchRow != search { self.searchRow = search }
         if self.unsetBanner != banner { self.unsetBanner = banner }
+    }
+
+    private func makeSearchRow() -> AgentSearchRow {
+        let route = routing.route(for: .agent)
+        let provider = route.flatMap { OpenCodeModelProvider(account: $0.account) }
+        let model = route.map { OpenCodeEnvironment.normalizeModel($0.model) }
+        let flag = provider.flatMap { provider in
+            catalogs.snapshot(for: provider.account)?.models.first { OpenCodeEnvironment.normalizeModel($0.id) == model }?.supportsWebSearch
+        }
+        return AgentSearchRow(agentProvider: provider, model: model?.isEmpty == false ? model : nil, catalogFlag: flag,
+                              tavilyConnected: keys.read(account: TavilySearch.keychainAccount) != nil,
+                              choice: agentSettings.webSearchChoice)
     }
 
     private func row(for feature: AIFeature) -> FeatureRow {

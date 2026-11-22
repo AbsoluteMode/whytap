@@ -1175,24 +1175,25 @@ struct OnboardingKeyProvider: Equatable {
     }
 }
 
-/// Closes key-like input entirely, like a secure field: Latin letters,
-/// digits, "-" and "_", from the first character, with no visible start or
-/// end. Anything else (Cyrillic, spaces, punctuation) shows as typed, so a
-/// mistyped word is visible and named as a format problem. The mask keeps the
-/// length (one dot per character, in a monospaced font), so the caret stays
-/// where the typed character is.
+/// The key field is a secure field: any input (Latin, Cyrillic, digits,
+/// symbols, the Russian layout's "№") is dots from its first character,
+/// with no visible start or end. A wrong format is named only by the error
+/// text on Return; the input itself never shows. One dot per character in
+/// a monospaced font (Cyrillic and "№" have the same advance as a dot), so
+/// the caret stays where the typed character is.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 enum OnboardingKeyMask {
+    /// Characters a key is made of: Latin letters, digits, "-" and "_".
+    /// Used to recognise a provider's format, never to decide what shows.
     static func isKeyLike(_ raw: String) -> Bool {
         !raw.isEmpty && raw.unicodeScalars.allSatisfy {
             ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "-" || $0 == "_"
         }
     }
 
-    /// One dot per character; nil when the input is not key-like.
+    /// One dot per character; nil only for an empty field.
     static func masked(_ raw: String) -> String? {
-        guard isKeyLike(raw) else { return nil }
-        return String(repeating: "•", count: raw.count)
+        raw.isEmpty ? nil : String(repeating: "•", count: raw.count)
     }
 }
 

@@ -218,13 +218,16 @@ window, Back and a progress bar.
   The key and padlock use that prototype's ink (line width from the
   figure's size, full-strength dots in the vertices) and breathe slowly in
   depth and yaw, like the key on step 1.
-- **Key-like input is closed like a secure field.** Input made only of
-  Latin letters, digits, "-" and "_" is dots from its first character, at
-  any length, with no visible start or end (the owner asked for the whole
-  key closed; a 17-character string had shown in clear). Anything else
-  (Cyrillic, spaces, punctuation) shows as typed and is named as a format
-  problem; the owner had seen a typed Cyrillic word shown masked. The mask
-  keeps the length in the monospaced font, so the caret never moves.
+- **The key field is a secure field.** Every input (Latin, Cyrillic,
+  digits, symbols, the Russian layout's "№") is dots from its first
+  character, with no visible start or end. A wrong format is named only by
+  the error text on Return; the input never shows. The owner asked for the
+  whole key closed, then saw a 17-character string and then a Russian
+  layout's digits and symbols in clear, so no input is an exception. The
+  mask keeps the length in the monospaced font (Cyrillic and "№" have the
+  same advance as a dot), so the caret never moves. A native secure field
+  was not used: it turns on Secure Event Input, which blocks Drop's own
+  keyboard tap while focused.
 - **Only a key's own format names its provider.** A real prefix, the
   longest that matches across every provider Whytap knows ("sk-ant-"
   Anthropic, "sk-or-" OpenRouter, "sk-proj-"/"sk-" OpenAI, "sk_"
@@ -303,8 +306,9 @@ window, Back and a progress bar.
 - `OnboardingPreviewTests` also names each of the five key problems
   (and saves no refused key), names a provider only from a real format
   (random strings, short and Cyrillic input name nobody; Anthropic and
-  OpenRouter keys only on the language model step), masks key-like input
-  from its first character, calls an unnamed key a format problem until it
+  OpenRouter keys only on the language model step), masks every input from
+  its first character (Russian layout and symbols included, with the dots'
+  width equal to the typed text's), calls an unnamed key a format problem until it
   is edited, and opens and closes the server form (Back, Save, the name
   from the address).
 - `OnboardingPreviewTests`: the preview session walks every step with its

@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Sidekey
 
@@ -137,23 +138,34 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-0123", among: llm), "too short to be a key")
     }
 
-    /// Key-like input is closed like a secure field from the first character;
-    /// anything else shows as typed and is named as a format problem.
-    func testKeyLikeInputIsClosedFromTheFirstCharacterAndTypingKeepsTheCaret() async throws {
-        for typed in ["фывааф", "фыва", "key with spaces 0123456789", "фываолдж0123456789abcdef", "key.with.dots"] {
-            XCTAssertNil(OnboardingKeyMask.masked(typed), "\(typed) shows as typed")
+    /// The owner typed in the Russian layout and saw
+    /// "-2390234(№\");%)№(%;\"()№131" in clear: the field is a secure field,
+    /// every input is dots from the first character, a wrong format is only
+    /// the error text on Return.
+    func testEveryInputIsClosedLikeASecureFieldAndTypingKeepsTheCaret() async throws {
+        let russianLayout = "-2390234(№\");%)№(%;\"()№131"
+        for typed in [russianLayout, "фывааф", "ЙЦУКЕН", "key with spaces 0123456789", "фываолдж0123456789abcdef",
+                      "key.with.dots", "!@#$%^&*()", "adsfdsfasdfasfafa", "a", "№"] {
+            let masked = try XCTUnwrap(OnboardingKeyMask.masked(typed), typed)
+            XCTAssertEqual(masked, String(repeating: "•", count: typed.count), "\(typed) is dots only")
+            XCTAssertNil(OnboardingKeyProvider.detect(typed, among: [.soniox, .deepgram, .elevenLabs, .openAI]
+                .compactMap(OnboardingKeyProvider.of)), "\(typed) names no provider")
         }
-        XCTAssertEqual(OnboardingKeyMask.masked("adsfdsfasdfasfafa"), String(repeating: "•", count: 17))
-        XCTAssertEqual(OnboardingKeyMask.masked("a"), "•", "closed from the first character")
         XCTAssertNil(OnboardingKeyMask.masked(""))
-        // Typing a key by hand: closed at every length, one dot per character,
-        // so the caret stays where the typed character is.
-        let key = "sk_live0123456789abcdefWXYZ"
-        for length in 1...key.count {
-            let typed = String(key.prefix(length))
-            let masked = try XCTUnwrap(OnboardingKeyMask.masked(typed))
-            XCTAssertEqual(masked.count, typed.count, "same length, so the caret stays at \(length)")
-            XCTAssertTrue(masked.allSatisfy { $0 == "•" }, "no character of the key shows at \(length)")
+        // The dots have the same advance as the typed characters, so the
+        // field's caret stays over the right dot.
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        XCTAssertEqual(width(russianLayout), width(OnboardingKeyMask.masked(russianLayout)!), accuracy: 0.5)
+        XCTAssertEqual(width("фывааф"), width(OnboardingKeyMask.masked("фывааф")!), accuracy: 0.5)
+        // Typing by hand, one character at a time: dots at every length.
+        for text in ["sk_live0123456789abcdefWXYZ", russianLayout] {
+            for length in 1...text.count {
+                let typed = String(text.prefix(length))
+                let masked = try XCTUnwrap(OnboardingKeyMask.masked(typed))
+                XCTAssertEqual(masked.count, typed.count, "same length, so the caret stays at \(length)")
+                XCTAssertTrue(masked.allSatisfy { $0 == "•" }, "no character shows at \(length)")
+            }
         }
 
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
@@ -161,9 +173,12 @@ final class OnboardingPreviewTests: XCTestCase {
         let model = session.model
         model.chooseYourKey()
         try await eventually { model.step == .speechKey }
-        await model.useSpeechKey("фывааф", provider: .soniox)
-        XCTAssertEqual(model.keyProblems[.speechKey], .format, "a typed word is a calm format problem, no request")
-        XCTAssertEqual(model.outcome(.speechKey), .failed(OnboardingKeyProblem.format.message(provider: "Soniox")))
+        for typed in ["фывааф", russianLayout] {
+            await model.useSpeechKey(typed, provider: .soniox)
+            XCTAssertEqual(model.keyProblems[.speechKey], .format, "\(typed): a calm format problem, no request")
+            XCTAssertEqual(model.outcome(.speechKey), .failed(OnboardingKeyProblem.format.message(provider: "Soniox")))
+            XCTAssertFalse(model.keySaved(.soniox))
+        }
     }
 
     /// Return on a key that names nobody (no format, no picked mark) is a

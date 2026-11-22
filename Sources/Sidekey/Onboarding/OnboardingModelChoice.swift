@@ -81,6 +81,31 @@ enum OnboardingModelPick {
         }
     }
 
+    /// A model's name for people, from its ID: "claude-sonnet-5-5" and
+    /// "anthropic/claude-sonnet-5.5" read "Claude Sonnet 5.5", "gpt-6.2-sol"
+    /// reads "GPT-6.2 Sol", "deepseek/deepseek-v4" reads "DeepSeek V4". The
+    /// ID stays beside it, so nothing is hidden by the name.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    static func readableName(_ id: String) -> String {
+        let base = id.split(separator: "/").last.map(String.init) ?? id
+        let words: [String: String] = ["gpt": "GPT", "deepseek": "DeepSeek", "oss": "OSS", "ai": "AI",
+                                       "tts": "TTS", "stt": "STT", "xl": "XL", "mini": "mini", "nano": "nano"]
+        var parts: [String] = []
+        for token in base.split(separator: "-").map(String.init) {
+            let isNumber = !token.isEmpty && token.allSatisfy { $0.isNumber || $0 == "." }
+            if isNumber, let last = parts.last {
+                // "gpt", "6.2" -> "GPT-6.2"; "5", "5" -> "5.5".
+                if last == "GPT" { parts[parts.count - 1] = "GPT-\(token)"; continue }
+                if last.allSatisfy(\.isNumber) { parts[parts.count - 1] = "\(last).\(token)"; continue }
+            }
+            if let word = words[token.lowercased()] { parts.append(word); continue }
+            if isNumber { parts.append(token); continue }
+            // "v4", "k3": a letter and a version read as one capitalised word.
+            parts.append(token.prefix(1).uppercased() + token.dropFirst())
+        }
+        return parts.joined(separator: " ")
+    }
+
     /// "0.017", "0.0045": a per-minute speech price without trailing zeros.
     static func minutePrice(_ value: Double) -> String {
         var text = String(format: "%.4f", value)

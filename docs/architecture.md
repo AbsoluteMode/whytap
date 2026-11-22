@@ -1204,13 +1204,16 @@ named (format, refused, no credit or access, no answer with Retry; Tavily's
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
 generation, highest known output price). When the provider has several
-models a quiet "Choose model ⌄" opens their list with prices, the recommended
-one first and tagged (OnboardingModelMenu), and the step waits for a pick or
+models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
+names never cut (OnboardingModelPick.readableName) with the ID under each,
+prices, the recommended one first with a small tag; after a pick the button
+names the model. The step waits for a pick or
 Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
 through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
 "Use your own server →" turns the step's key field into Base URL, an optional
-key and one model with LLM | Transcription on the same step
-(OnboardingServerFields); Return adds the server and its checked model like
+key and one model on the same step (OnboardingServerFields): a transcription
+model on the speech step, an LLM on the language model step, and a server
+added on one comes back filled in on the other; Return adds the server and its checked model like
 Settings does (addServer, runServerModelCheck, addServerModel), sets the
 shared row and moves on; "‹ Back to keys" turns the fields back.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,

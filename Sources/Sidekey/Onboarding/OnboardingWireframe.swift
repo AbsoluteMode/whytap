@@ -1566,6 +1566,7 @@ struct OnboardingKeyStage: View {
                     Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
                     OnboardingModelMenu(choices: choices, selected: model.currentModel(step),
                                         recommended: model.recommendedModel(step),
+                                        picked: model.pickedModels.contains(step),
                                         busy: model.choosingModel == step,
                                         opened: { model.modelMenu(open: $0) }) { id in
                         Task { await model.chooseModel(id, on: step) }
@@ -1745,6 +1746,8 @@ struct OnboardingModelMenu: View {
     let selected: String?
     /// Marked "Recommended" in the line and the list.
     let recommended: String?
+    /// The person picked a model: the button names it instead of asking.
+    var picked = false
     let busy: Bool
     /// The list opened, or closed without a pick.
     var opened: (Bool) -> Void = { _ in }
@@ -1757,10 +1760,12 @@ struct OnboardingModelMenu: View {
         Button { open.toggle() } label: {
             // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
             // The owner: "after the key, Choose model, and there the
-            // Recommended tag". At rest only this; models, prices and the
-            // tag are in the list.
+            // Recommended tag"; once a model is picked the button names it
+            // ("Claude Sonnet 5.5 ⌄"), never cut and without its price.
             HStack(spacing: 6) {
-                Text("Choose model").foregroundColor(OnboardingTheme.ink)
+                Text(picked ? selected.map(OnboardingModelPick.readableName) ?? "Choose model" : "Choose model")
+                    .foregroundColor(OnboardingTheme.ink)
+                    .fixedSize()
                 Image(systemName: busy ? "ellipsis" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(OnboardingTheme.muted)
@@ -1780,23 +1785,39 @@ struct OnboardingModelMenu: View {
         .onChange(of: open) { _, isOpen in
             if isOpen { picking = false; opened(true) } else if !picking { opened(false) }
         }
-        .help("The recommended model is set; pick another of this provider's current models")
-        .accessibilityLabel("Choose model, \(selected ?? "none") set")
+        .help(picked ? (selected ?? "") : "The recommended model is set; pick another of this provider's current models")
+        .accessibilityLabel(picked ? "Model, \(selected.map(OnboardingModelPick.readableName) ?? "none")"
+                            : "Choose model, \(selected.map(OnboardingModelPick.readableName) ?? "none") set")
     }
 
     private var list: some View {
+        OnboardingModelList(choices: choices, selected: selected, recommended: recommended) { id in
+            picking = true
+            open = false
+            pick(id)
+        }
+    }
+}
+
+/// The "Choose model" list: readable names with the ID under each, the
+/// recommended one tagged, prices on the right.
+struct OnboardingModelList: View {
+    let choices: [OnboardingModelChoice]
+    let selected: String?
+    let recommended: String?
+    let pick: (String) -> Void
+
+    var body: some View {
         VStack(spacing: 1) {
             ForEach(choices) { choice in
                 OnboardingModelRow(choice: choice, isSelected: choice.id == selected,
-                                   isRecommended: choice.id == recommended) {
-                    picking = choice.id != selected
-                    open = false
-                    if picking { pick(choice.id) }
-                }
+                                   isRecommended: choice.id == recommended) { pick(choice.id) }
             }
         }
         .padding(6)
-        .frame(width: 330)
+        // As wide as the longest name needs, within the window.
+        .fixedSize()
+        .frame(minWidth: 280, maxWidth: 480)
         .background(Color(red: 0.086, green: 0.086, blue: 0.098))
         .preferredColorScheme(.dark)
     }
@@ -1811,32 +1832,46 @@ private struct OnboardingModelRow: View {
 
     var body: some View {
         Button(action: action) {
+            // The readable name never shortens; the ID sits small under it
+            // and "Recommended" is a small tag beside the name.
             HStack(spacing: 8) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(OnboardingTheme.ink)
                     .opacity(isSelected ? 1 : 0)
                     .frame(width: 12)
-                Text(choice.id)
-                    .font(OnboardingTheme.mono(12))
-                    .foregroundColor(OnboardingTheme.ink)
-                    .lineLimit(1)
-                if isRecommended {
-                    Text("Recommended")
-                        .font(OnboardingTheme.sans(10.5, weight: .medium))
-                        .foregroundColor(OnboardingTheme.muted)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(OnboardingModelPick.readableName(choice.id))
+                            .font(OnboardingTheme.sans(13, weight: .medium))
+                            .foregroundColor(OnboardingTheme.ink)
+                            .fixedSize()
+                        if isRecommended {
+                            Text("RECOMMENDED")
+                                .font(OnboardingTheme.sans(8.5, weight: .semibold))
+                                .tracking(0.4)
+                                .foregroundColor(OnboardingTheme.green)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(Capsule().fill(OnboardingTheme.green.opacity(0.14)))
+                                .fixedSize()
+                        }
+                    }
+                    Text(choice.id)
+                        .font(OnboardingTheme.mono(10.5))
+                        .foregroundColor(OnboardingTheme.faint)
                         .fixedSize()
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 16)
                 if let price = choice.price {
                     Text(price)
                         .font(OnboardingTheme.sans(11.5))
                         .foregroundColor(OnboardingTheme.muted)
-                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             .padding(.horizontal, 8)
-            .frame(height: 28)
+            .frame(height: 40)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovered ? 0.08 : 0)))
             .contentShape(Rectangle())
         }

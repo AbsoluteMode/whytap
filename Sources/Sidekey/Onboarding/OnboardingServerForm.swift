@@ -1,17 +1,12 @@
 import SwiftUI
 
 /// What the own-server fields hold: an address, an optional key and one
-/// model with what it is for.
+/// model. The step says what the model is for: Transcription on the speech
+/// step, LLM on the language model step.
 struct OnboardingServerDraft: Equatable {
-    enum Use: String, CaseIterable, Equatable {
-        case llm, transcription
-        var title: String { self == .llm ? "LLM" : "Transcription" }
-    }
-
     var address = ""
     var key = ""
     var model = ""
-    var use: Use = .llm
 
     /// The base URL: http(s) with a host; "localhost:11434/v1" gets http://.
     var url: URL? { Self.url(from: address) }
@@ -46,7 +41,8 @@ struct OnboardingServerDraft: Equatable {
 
 /// "Use your own server →" on a key step: the key field becomes three
 /// fields of the same family in the same place (Base URL, an optional key,
-/// one model with LLM or Transcription), over the same key and padlock.
+/// one model: a transcription model on the speech step, an LLM on the
+/// language model step), over the same key and padlock.
 /// Return moves down the fields and, on the model, adds the server; the
 /// padlock answers like it does for a key, and success moves straight on.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -74,7 +70,8 @@ struct OnboardingServerFields: View {
         self.scene = scene
         self.morph = morph
         _grown = grown
-        _draft = State(initialValue: OnboardingServerDraft(use: kind == .speech ? .transcription : .llm))
+        // The server added on the other key step comes back filled in.
+        _draft = State(initialValue: model.serverPrefill(for: kind) ?? OnboardingServerDraft())
     }
 
     private var step: OnboardingStep { kind.step }
@@ -109,14 +106,14 @@ struct OnboardingServerFields: View {
             .offset(y: grown ? 0 : -(Self.pillHeight + 6))
             pill(icon: "cube") {
                 TextField("", text: $draft.model,
-                          prompt: Text("Model · e.g. qwen3:8b").foregroundColor(OnboardingTheme.faint))
+                          prompt: Text(kind == .speech ? "Transcription model · e.g. whisper-large-v3-turbo"
+                                       : "LLM · e.g. qwen3:8b").foregroundColor(OnboardingTheme.faint))
                     .textFieldStyle(.plain)
                     .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.ink)
                     .focused($focus, equals: .model)
                     .onSubmit(save)
-                    .accessibilityLabel("Model name")
-                OnboardingUseToggle(use: $draft.use)
+                    .accessibilityLabel(kind == .speech ? "Transcription model name" : "LLM name")
                 trailing
             }
             .opacity(grown ? 1 : 0)
@@ -131,7 +128,7 @@ struct OnboardingServerFields: View {
         }
         .disabled(checking || accepted)
         .onChange(of: draft) { _, _ in model.keyEdited(on: step) }
-        .onAppear { focus = .address }
+        .onAppear { focus = draft.url == nil ? .address : .model }
     }
 
     @ViewBuilder private var line: some View {
@@ -206,31 +203,5 @@ struct OnboardingServerFields: View {
                 .onAppear { if first { scene.fieldY = y } }
                 .onChange(of: y) { _, new in if first { scene.fieldY = new } }
         })
-    }
-}
-
-/// LLM | Transcription, one quiet two-way switch.
-struct OnboardingUseToggle: View {
-    @Binding var use: OnboardingServerDraft.Use
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(OnboardingServerDraft.Use.allCases, id: \.self) { option in
-                Button { use = option } label: {
-                    Text(option.title)
-                        .font(OnboardingTheme.sans(11, weight: .medium))
-                        .foregroundColor(use == option ? OnboardingTheme.ink : OnboardingTheme.faint)
-                        .padding(.horizontal, 8)
-                        .frame(height: 22)
-                        .background(Capsule().fill(Color.white.opacity(use == option ? 0.12 : 0)))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(use == option ? [.isButton, .isSelected] : .isButton)
-            }
-        }
-        .padding(2)
-        .background(Capsule().fill(Color.white.opacity(0.04)))
-        .fixedSize()
     }
 }

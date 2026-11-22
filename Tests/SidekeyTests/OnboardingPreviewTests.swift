@@ -216,7 +216,8 @@ final class OnboardingPreviewTests: XCTestCase {
     /// "Use your own server →" turns the key field into the server's fields
     /// on the same step; Back returns to the key field, Save is the step done.
     func testOwnServerChangesTheStepAndComesBack() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
+        let session = OnboardingPreviewSession(suiteName: suite)
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -229,7 +230,7 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.outcome(.speechKey), .idle, "nothing was saved")
 
         model.useOwnServer(.speech)
-        var server = OnboardingServerDraft(address: "localhost:11434/v1", use: .transcription)
+        var server = OnboardingServerDraft(address: "localhost:11434/v1", key: "local-key")
         XCTAssertFalse(server.canSave, "a server needs a model")
         XCTAssertEqual(server.name, "Ollama", "the name comes from the address")
         server.model = "whisper-large-v3"
@@ -237,6 +238,22 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.outcome(.speechKey), .done("Ollama · whisper-large-v3"))
         XCTAssertEqual(model.step, .speechKey, "the fields stay until the step moves on")
         XCTAssertTrue(model.showsServerForm(.speech), "no return to the key field before the move")
+        func routes() -> AIRoutingStore { AIRoutingStore(defaults: UserDefaults(suiteName: suite)!) }
+        XCTAssertEqual(routes().route(for: .dropFast)?.model, "whisper-large-v3", "the speech step adds a transcription model")
+
+        // The language model step offers the same server filled in; only
+        // the LLM is new, and the server is not added twice.
+        try await eventually { model.step == .llmKey }
+        XCTAssertEqual(model.serverPrefill(for: .languageModel),
+                       OnboardingServerDraft(address: "http://localhost:11434/v1", key: "local-key"))
+        XCTAssertNil(model.serverPrefill(for: .speech), "nothing added on the LLM step yet")
+        model.useOwnServer(.languageModel)
+        var llm = try XCTUnwrap(model.serverPrefill(for: .languageModel))
+        llm.model = "qwen3:8b"
+        await model.saveServer(llm, on: .languageModel)
+        XCTAssertEqual(model.outcome(.llmKey), .done("Ollama · qwen3:8b"))
+        XCTAssertEqual(routes().state.servers.count, 1, "one server, two models")
+        XCTAssertEqual(routes().state.servers.first?.models?.map(\.kind).sorted { $0.rawValue < $1.rawValue }, [.llm, .transcription])
     }
 
     func testAServerIsNamedByItsAddress() {
@@ -311,6 +328,40 @@ final class OnboardingPreviewTests: XCTestCase {
         model.next()
         XCTAssertNotEqual(model.step, .llmKey)
         XCTAssertEqual(model.currentModel(.llmKey), "anthropic/claude-sonnet-5.5", "Next keeps the recommended model")
+    }
+
+    /// The owner read "claude-son…" and asked how to read it: the list and
+    /// the button show a readable name, never cut, with the ID beside it.
+    func testModelsHaveReadableNames() {
+        let names = [
+            "claude-sonnet-5-5": "Claude Sonnet 5.5", "anthropic/claude-sonnet-5.5": "Claude Sonnet 5.5",
+            "claude-fable-5-2": "Claude Fable 5.2", "claude-haiku-5-5": "Claude Haiku 5.5",
+            "gpt-6.2-sol": "GPT-6.2 Sol", "gpt-6-luna": "GPT-6 Luna", "openai/gpt-6.2-astra": "GPT-6.2 Astra",
+            "gpt-live-transcribe": "GPT Live Transcribe", "google/gemini-3.8-pro": "Gemini 3.8 Pro",
+            "deepseek/deepseek-v4": "DeepSeek V4", "qwen3:8b": "Qwen3:8b",
+        ]
+        for (id, name) in names { XCTAssertEqual(OnboardingModelPick.readableName(id), name, id) }
+    }
+
+    /// "Choose model" until the person picks one, the recommended one
+    /// included; then the button names the pick. A new key asks again.
+    func testThePickedModelIsNamedOnItsButton() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        model.next()
+        model.llmProvider = .anthropic
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        XCTAssertFalse(model.pickedModels.contains(.llmKey), "nothing picked yet: Choose model")
+        await model.chooseModel("claude-sonnet-5-5", on: .llmKey)
+        XCTAssertTrue(model.pickedModels.contains(.llmKey), "picking the recommended model counts")
+        XCTAssertEqual(model.currentModel(.llmKey), "claude-sonnet-5-5")
+        model.back()
+        model.next()
+        await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
+        XCTAssertFalse(model.pickedModels.contains(.llmKey), "a new key asks again")
     }
 
     func testAnthropicStartsOnTheCurrentSonnetWithItsPrice() async throws {

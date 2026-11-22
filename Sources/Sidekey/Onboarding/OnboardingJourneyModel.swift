@@ -418,6 +418,7 @@ final class OnboardingJourneyModel: ObservableObject {
         // The preview offers OpenAI before the app has a speech model for it.
         guard model != nil || isPreview else { return }
         let action = begin(.speech)
+        pickedModels.remove(.speechKey)
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         // A newer speech choice answers for this step now; this key stays saved.
@@ -475,10 +476,10 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The models a key step offers for its provider, newest first, each
     /// with a short price when the catalogs know it.
-    func modelChoices(_ step: OnboardingStep) -> [OnboardingModelChoice] {
+    func modelChoices(_ step: OnboardingStep, provider: AIProviderKind? = nil) -> [OnboardingModelChoice] {
         switch step {
-        case .speechKey: return choices(for: speechProvider, speech: true)
-        case .llmKey: return choices(for: llmProvider, speech: false)
+        case .speechKey: return choices(for: provider ?? speechProvider, speech: true)
+        case .llmKey: return choices(for: provider ?? llmProvider, speech: false)
         default: return []
         }
     }
@@ -528,6 +529,10 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The person picked another model on an accepted key step: it goes
     /// through the shared row like the first pick, then the step moves on.
+    /// Key steps where the person picked a model in "Choose model" (the
+    /// recommended one included): its button then names that model.
+    @Published private(set) var pickedModels: Set<OnboardingStep> = []
+
     /// "Choose model" opened or closed without a pick: the automatic move
     /// waits while the list is open and goes on from where it was.
     func modelMenu(open: Bool) {
@@ -537,6 +542,13 @@ final class OnboardingJourneyModel: ObservableObject {
     func chooseModel(_ id: String, on step: OnboardingStep) async {
         guard step == .speechKey || step == .llmKey, outcome(step).isDone, choosingModel == nil else { return }
         if step == self.step, dwell.isCounting || dwell.isLatched { dwell.cancel() }
+        // The model already set (the recommended one): picked, nothing to change.
+        if currentModel(step) == id {
+            pickedModels.insert(step)
+            outcomes[step] = .done(id)
+            moveOnAfterPick(step)
+            return
+        }
         let kind: SharedModelKind = step == .speechKey ? .speech : .llm
         let provider = step == .speechKey ? speechProvider : llmProvider
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
@@ -552,11 +564,15 @@ final class OnboardingJourneyModel: ObservableObject {
             outcomes[step] = .failed(notes.first ?? "\(provider.displayName) · \(id) could not be used")
             return
         }
+        pickedModels.insert(step)
         outcomes[step] = .done(id)
+        moveOnAfterPick(step)
+    }
+
+    private func moveOnAfterPick(_ step: OnboardingStep) {
         guard step == self.step, !dwell.isCounting, !dwell.isLatched else { return }
-        let seconds = Self.afterModelPick
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
-        dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
+        dwell.schedule(Self.afterModelPick, next: following) { [weak self] in self?.next() }
     }
 
     // MARK: - Key steps: the field and your own server
@@ -590,6 +606,14 @@ final class OnboardingJourneyModel: ObservableObject {
 
     func showsServerForm(_ kind: OnboardingKeyStageKind) -> Bool { serverForms.contains(kind) }
 
+    /// The server added on the other key step, its address and key filled in
+    /// so the person names only this step's model.
+    func serverPrefill(for kind: OnboardingKeyStageKind) -> OnboardingServerDraft? {
+        let other: OnboardingKeyStageKind = kind == .speech ? .languageModel : .speech
+        guard kind != .search, let added = addedServers[other] else { return nil }
+        return OnboardingServerDraft(address: added.address, key: added.key)
+    }
+
     /// "Use your own server →": the step's key field turns into the server's
     /// fields, in the same window and step, in the app and the preview alike.
     func useOwnServer(_ kind: OnboardingKeyStageKind) {
@@ -622,15 +646,17 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         let name = server.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { outcomes[step] = .failed("Enter the model's name"); return }
-        let shared: SharedModelKind = server.use == .llm ? .llm : .speech
+        let shared: SharedModelKind = kind == .speech ? .speech : .llm
         let action = begin(shared)
         keyProblems[step] = nil
         outcomes[step] = .working("Checking \(server.name)…")
         let address = url.absoluteString
         let key = server.key.trimmingCharacters(in: .whitespacesAndNewlines)
         let account: ProviderAccount
-        if let added = addedServers[kind], added.address == address, added.key == key {
+        // The same server from either key step is added once.
+        if let added = addedServers.values.first(where: { $0.address == address && $0.key == key }) {
             account = added.account
+            addedServers[kind] = added
         } else {
             if let problem = await models.addServer(name: server.name, baseURL: address, key: key, proposeModels: false) {
                 guard isLatest(action, shared) else { return }
@@ -641,7 +667,7 @@ final class OnboardingJourneyModel: ObservableObject {
             addedServers[kind] = (address, key, added)
             account = added
         }
-        let modelKind = ServerModel.Kind(rawValue: server.use.rawValue) ?? .llm
+        let modelKind: ServerModel.Kind = kind == .speech ? .transcription : .llm
         if !models.serverHasModel(name, kind: modelKind, on: account) {
             let check = await models.runServerModelCheck(name, kind: modelKind, on: account)
             guard isLatest(action, shared) else { return }
@@ -673,6 +699,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func useLLMKey(_ key: String, provider: AIProviderKind) async {
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
         let action = begin(.llm)
+        pickedModels.remove(.llmKey)
         outcomes[.llmKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         guard isLatest(action, .llm) else { return }

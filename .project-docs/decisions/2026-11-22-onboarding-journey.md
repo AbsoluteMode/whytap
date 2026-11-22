@@ -285,7 +285,14 @@ window, Back and a progress bar.
   model, and there the Recommended tag"; no model name or price at rest)
   opens a small dark list of up to eight current models with prices
   (OpenRouter: each major author's flagship), the recommended one first and
-  tagged (OpenRouter: `anthropic/claude-sonnet-5.5`). The recommended
+  tagged (OpenRouter: `anthropic/claude-sonnet-5.5`). The owner read a cut
+  "claude-son…" and asked how to read it, so each row shows a readable name
+  that is never cut ("Claude Sonnet 5.5", "GPT-6.2 Sol",
+  `OnboardingModelPick.readableName`), the ID small under it, a small
+  "Recommended" tag beside the name, and the list is as wide as its longest
+  row. The button says "Choose model ⌄" until the person picks a model (the
+  recommended one included) and then names it, without a price; the owner
+  asked why it still said "Choose model" after a pick. The recommended
   model is already set, and a step with a choice of models does not move on
   by itself: the owner was moved on before he could choose (2026-11-22). It
   waits, after the padlock opens, for a pick (through the shared row, then
@@ -325,8 +332,13 @@ window, Back and a progress bar.
   Settings) and a return to the key step before the move looked cobbled
   together. Now, in the app and the preview alike, the key field's capsule
   reshapes into the first of three fields of the same family (Base URL, an
-  optional key, one model with an LLM | Transcription switch) and the other
-  two unfold from it; the title reads "Your own server.", the wire key and
+  optional key, one model) and the other two unfold from it. The step says
+  what the model is for, with no switch (the owner: self-hosted
+  transcription on the speech step, an LLM on the language model step): a
+  transcription model such as `whisper-large-v3-turbo` on speech, an LLM such
+  as `qwen3:8b` on the language model step. A server added on one of them
+  comes back filled in (address and key) on the other and is added once,
+  with both models; the title reads "Your own server.", the wire key and
   padlock stay. "‹ Back to keys" (or Escape, or Back) folds them into the
   key field again. Return on the model adds the server the way Settings
   does (`addServer`: the address answers, the key if any is accepted), runs

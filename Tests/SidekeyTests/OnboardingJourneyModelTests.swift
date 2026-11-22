@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import FluidAudio
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -711,6 +712,20 @@ final class OnboardingJourneyModelTests: XCTestCase {
         }
         model.back()
         try await snap("help-review")
+
+        // The "Choose model" list (a popover, not in the window's image).
+        for provider in [AIProviderKind.anthropic] {
+            let list = OnboardingModelList(choices: model.modelChoices(.llmKey, provider: provider), selected: nil,
+                                           recommended: model.recommendedModel(.llmKey, provider: provider)) { _ in }
+            let host = NSHostingView(rootView: list)
+            host.frame = NSRect(origin: .zero, size: host.fittingSize)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-model-list-%@.png", index, provider.rawValue)))
+        }
 
         // A language model on your own server has no known web search, so
         // the Tavily step comes: the same key, padlock and lines.

@@ -60,7 +60,8 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(finalText(events), "Сейчас в Москве +1 °C и идёт небольшой снег.")
         XCTAssertEqual(links(events), [], "An API source without a URL is no link card")
         XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("Plain text."), "Plain text.")
-        XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("A\u{E200}cite\u{E202}turn0search0\u{E201} and \u{E203}b."), "A and b.")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("A\u{E200}cite\u{E202}turn0search0\u{E202}turn0news2\u{E201} and \u{E203}b."),
+                       "A and \u{E203}b.", "Several references in one mark; other private glyphs stay")
     }
 
     /// The Search row names the Agent model it follows, so an Agent that kept
@@ -73,5 +74,48 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(sol.current.label, "OpenAI · built-in")
         XCTAssertEqual(sol.agentLine, "Follows the Agent model: OpenAI · gpt-6.2-sol.")
         XCTAssertNil(AgentSearchRow(options: .init(), tavilyConnected: false).agentLine)
+    }
+
+    // MARK: - Builder #447: only the exact OpenAI citation markup is removed
+
+    private func finalAnswer(_ answer: String, insert: String = "", copy: String? = nil) throws -> NativeAgentFinalAnswer {
+        let actions = copy.map { [["type": "copy", "text": $0, "description": "Fixture"]] } ?? []
+        return try NativeAgentFinalAnswer(arguments: [
+            "status": "answered", "answer": answer, "insert_text": insert, "sources": [[String: Any]](), "actions": actions,
+        ])
+    }
+
+    private func copyText(_ item: ActionItem?) -> String? {
+        guard case let .copy(text, _) = item else { return nil }
+        return text
+    }
+
+    func testOnlyOpenAICitationMarkupIsRemovedEverywhereElseTextStaysLiteral() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        XCTAssertEqual(try finalAnswer("Verified \(mark).").answer, "Verified.")
+        let glyphs = "Private glyphs: \u{E000}\u{F8FF}."
+        XCTAssertEqual(try finalAnswer(glyphs).answer, glyphs)
+        let literalSpan = "Line 1 \u{E200}literal text\nline 2\u{E201} remains."
+        XCTAssertEqual(try finalAnswer(literalSpan).answer, literalSpan)
+        XCTAssertEqual(try finalAnswer("Text \u{E200} literal words, then cite \(mark).").answer, "Text \u{E200} literal words, then cite.")
+        let punctuation = "A \u{E234} B\n\nDo not join : spacing."
+        XCTAssertEqual(try finalAnswer(punctuation).answer, punctuation)
+
+        let action = try finalAnswer("There is a result.", insert: "Paste \(mark).", copy: "Copy \(mark).")
+        XCTAssertEqual(copyText(action.insert), "Paste.", "Insert payload")
+        XCTAssertEqual(copyText(action.actions.items.last), "Copy.", "Copy payload")
+        let literalInsert = try finalAnswer("Here.", insert: "printf '%s' '\u{E234}' \u{E200}x\u{E201}")
+        XCTAssertEqual(copyText(literalInsert.insert), "printf '%s' '\u{E234}' \u{E200}x\u{E201}", "Text the user asked for stays literal")
+
+        let path = "/tmp/fixture/part-\u{E234}.txt"
+        let pathFinal = try finalAnswer("Open `\(path)`.")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: pathFinal.visibleText, existing: pathFinal.actions)?.items.first?.insertText, path)
+        let command = "printf '%s' '\u{E234}'"
+        let commandFinal = try finalAnswer("Run this:\n\n```sh\n\(command)\n```")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: commandFinal.visibleText, existing: commandFinal.actions)?.items.first?.insertText, command)
+        let rawLink = "https://example.test/part-\u{E234}"
+        let linkFinal = try finalAnswer("Open [the fixture](\(rawLink)).")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: linkFinal.visibleText, existing: linkFinal.actions)?.items.first?.insertText,
+                       URL(string: rawLink)?.absoluteString)
     }
 }

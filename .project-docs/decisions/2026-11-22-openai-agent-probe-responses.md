@@ -54,10 +54,12 @@ it.
   again without any user step. An Agent that stayed on its old model after
   the refusal counts as "1 custom", so the next LLM pick asks before moving it,
   as for any custom model.
-- OpenAI's built-in search can leave internal citation marks in model text
-  (private-use characters around `cite` and `turn…`, shown as
-  "citeturn138346forecast0"). `NativeAgentFinalAnswer` removes them; source
-  cards still come from `sources` and the provider's citations.
+- OpenAI's built-in search can leave citation markup in model text
+  (`U+E200 cite U+E202 turn… U+E201`, shown as "citeturn138346forecast0").
+  `NativeAgentFinalAnswer` removes only that exact markup, with the spaces
+  right before it, from the answer, the Insert text and copy cards; any other
+  private-use glyph, delimiter, path, link or command stays literal (builder
+  #447). Source cards still come from `sources` and the provider's citations.
 - The Search row adds "Follows the Agent model: <provider> · <model>." The
   Agent can keep its own model while the LLM row shows another ("1 custom",
   or a model whose Agent check failed), and the row now says which one.
@@ -69,8 +71,8 @@ it.
   Agent and blocked a model that works.
 - Sending no `reasoning_effort` was not enough: OpenAI applies a default
   effort to this model on Chat Completions and still refuses function tools.
-- Removing only private-use characters is safe: they are never meant for
-  the user.
+- Only the exact markup is removed: a broad private-use cleanup changed a
+  file path, a link and a command in builder #447 fixtures.
 
 ## What we tested
 

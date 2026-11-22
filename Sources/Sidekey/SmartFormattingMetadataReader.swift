@@ -6,9 +6,9 @@ import Foundation
 /// (`SmartFormattingProfile.resolve`) on this Mac.
 ///
 /// Only these two values are read. No text of the window (values, titles,
-/// descriptions) is collected, and nothing read here goes into a model
-/// request: Smart sends the selected model only the dictated transcript and
-/// its own instructions.
+/// descriptions) is collected, and nothing read here goes into the cleanup
+/// request. The request carries the transcript, Whytap's instructions, the
+/// target app's name, and language and mode hints from the dictation path.
 /// WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
 ///
 /// Permission: reuses the **Accessibility** grant the app already holds for

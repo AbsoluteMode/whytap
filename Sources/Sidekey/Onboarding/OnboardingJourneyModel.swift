@@ -326,10 +326,12 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The shown step's action succeeded: show it for the step's dwell, then
     /// move on. A success of a step that is not shown is only recorded.
-    private func succeed(_ done: OnboardingStep, _ text: String) {
+    /// `holds`: the step has a model to choose, so it waits for the pick or
+    /// Next instead of moving on by itself.
+    private func succeed(_ done: OnboardingStep, _ text: String, holds: Bool = false) {
         outcomes[done] = .done(text)
         if done == .source, step == .source { moveOnFromSource(); return }
-        guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
+        guard !holds, done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
         dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
     }
@@ -432,7 +434,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.speechExpected = true
-        succeed(.speechKey, model)
+        succeed(.speechKey, model, holds: modelChoices(.speechKey).count > 1)
     }
 
     // MARK: - 3. Language model key
@@ -687,9 +689,10 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         progress.hasLanguageModel = true
         progress.languageModelSearches = OnboardingJourney.searchesTheWeb(provider)
-        // The recommended model is set, so the step moves on by itself;
-        // "Choose model" pauses it while its list is open.
-        succeed(.llmKey, model)
+        // With a choice of models the step waits for a pick or Next, which
+        // keeps the recommended model already set.
+        // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+        succeed(.llmKey, model, holds: modelChoices(.llmKey).count > 1)
     }
 
     /// A new key is checked for its shape here, then goes through Settings'

@@ -1202,10 +1202,10 @@ named (format, refused, no credit or access, no answer with Retry; Tavily's
 429 is "busy" with Retry). An accepted language model key starts on the
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
-generation, highest known output price), and moves on by itself; when the
-provider has several models a quiet "Choose model ⌄" opens their list with
-prices, the recommended one first and tagged (OnboardingModelMenu); an open
-list pauses the move and a pick moves on. Speech and the language model go
+generation, highest known output price). When the provider has several
+models a quiet "Choose model ⌄" opens their list with prices, the recommended
+one first and tagged (OnboardingModelMenu), and the step waits for a pick or
+Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
 through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
 "Use your own server →" turns the step's key field into Base URL, an optional
 key and one model with LLM | Transcription on the same step

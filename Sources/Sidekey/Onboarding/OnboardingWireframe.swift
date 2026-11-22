@@ -1561,7 +1561,7 @@ struct OnboardingKeyStage: View {
                 Text("Checking the key with \(name)…").foregroundColor(OnboardingTheme.muted)
             } else if accepted, choices.count > 1 {
                 // The key worked with the recommended model set; the step
-                // moves on unless the person opens "Choose model".
+                // waits for a pick in "Choose model" or Next.
                 VStack(spacing: 5) {
                     Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
                     OnboardingModelMenu(choices: choices, selected: model.currentModel(step),

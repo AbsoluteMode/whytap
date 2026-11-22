@@ -279,15 +279,38 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertLessThanOrEqual(ids.count, OnboardingModelPick.listLimit)
         XCTAssertEqual(model.modelChoices(.llmKey).first { $0.id == "gpt-6.2-astra" }?.price, "$8 / $40 per 1M")
 
-        // "Choose model" open: the automatic move waits for the list.
-        model.modelMenu(open: true)
+        // No automatic move: the step waits for a pick or Next.
         try await Task.sleep(for: .milliseconds(1_600))
-        XCTAssertEqual(model.step, .llmKey, "an open list pauses the move")
+        XCTAssertEqual(model.step, .llmKey, "with a choice of models the step waits")
         await model.chooseModel("gpt-6.2-astra", on: .llmKey)
         XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"))
         XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-astra", "the shared LLM row runs the person's pick")
         XCTAssertEqual(model.recommendedModel(.llmKey), "gpt-6.2-sol", "the recommendation stays marked")
         try await eventually { model.step != .llmKey }
+    }
+
+    /// OpenRouter: the recommended model is Anthropic's current Sonnet,
+    /// first in the list and set, and the step waits for a pick or Next.
+    func testOpenRouterRecommendsTheCurrentSonnetAndWaits() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        model.llmProvider = .openRouter
+        await model.useLLMKey("sk-or-v1-good-0123456789abcdef", provider: .openRouter)
+        XCTAssertEqual(model.recommendedModel(.llmKey), "anthropic/claude-sonnet-5.5")
+        XCTAssertEqual(model.outcome(.llmKey), .done("anthropic/claude-sonnet-5.5"))
+        let choices = model.modelChoices(.llmKey)
+        XCTAssertEqual(choices.first?.id, "anthropic/claude-sonnet-5.5", "\(choices.map(\.id))")
+        XCTAssertGreaterThan(choices.count, 1)
+        try await Task.sleep(for: .milliseconds(1_600))
+        XCTAssertEqual(model.step, .llmKey, "no automatic move with a choice of models")
+        model.next()
+        XCTAssertNotEqual(model.step, .llmKey)
+        XCTAssertEqual(model.currentModel(.llmKey), "anthropic/claude-sonnet-5.5", "Next keeps the recommended model")
     }
 
     func testAnthropicStartsOnTheCurrentSonnetWithItsPrice() async throws {
@@ -306,8 +329,8 @@ final class OnboardingPreviewTests: XCTestCase {
 
     /// OpenAI speech has more than one model: the speech step offers them
     /// too, with the per-minute price, the recommended one set and first, and
-    /// moves on by itself like every accepted key.
-    func testOpenAISpeechOffersItsModelsAndMovesOn() async throws {
+    /// waits; Next keeps the recommended model.
+    func testOpenAISpeechOffersItsModelsAndWaits() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
@@ -321,7 +344,11 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(choices.first { $0.id == ModelRegistry.openAILiveModel }?.price, "$0.017 / min")
         XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel)
         XCTAssertEqual(choices.first?.id, model.recommendedModel(.speechKey), "the recommended model is first")
-        try await eventually { model.step == .llmKey }
+        try await Task.sleep(for: .milliseconds(1_600))
+        XCTAssertEqual(model.step, .speechKey, "the step waits for a pick or Next")
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel, "Next keeps the recommended model")
     }
 
     func testTheFlagshipRuleAndTheListedModels() {

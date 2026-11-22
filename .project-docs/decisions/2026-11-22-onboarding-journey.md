@@ -281,10 +281,13 @@ window, Back and a progress bar.
   model, and there the Recommended tag"; no model name or price at rest)
   opens a small dark list of up to eight current models with prices
   (OpenRouter: each major author's flagship), the recommended one first and
-  tagged. The recommended model is already set, so the step moves on by
-  itself like any accepted key; an open list pauses the move, a pick goes
-  through the shared row and moves on. The speech step does the same when
-  its provider has more than one model (OpenAI: per-minute prices). A native
+  tagged (OpenRouter: `anthropic/claude-sonnet-5.5`). The recommended
+  model is already set, and a step with a choice of models does not move on
+  by itself: the owner was moved on before he could choose (2026-11-22). It
+  waits, after the padlock opens, for a pick (through the shared row, then
+  the move) or Next, which keeps the recommended model. The speech step does
+  the same when its provider has more than one model (OpenAI: per-minute
+  prices); steps without a choice move on by themselves as before. A native
   menu was not used: AppKit draws only one text of its label.
 - **One model is recommended: the provider's current Sonnet or Sol.** The
   owner asked on 2026-11-22 for "Sonnet / Sol, the current one" as the
@@ -380,7 +383,8 @@ window, Back and a progress bar.
   same step (the name from the address; a saved server keeps its fields
   until the move), starts the language model step on the recommended model
   of a realistic catalog listed first, lists only current text models with
-  prices, pauses while the list is open and applies a pick, offers OpenAI's speech models with
+  prices, waits for a pick or Next (OpenRouter on its current Sonnet too)
+  and applies a pick, offers OpenAI's speech models with
   per-minute prices, and checks the flagship rule on its own; the
   recommendation is the newest Sonnet or Sol. `OnboardingJourneyModelTests`
   add a server model with its check (a refused model keeps the fields, the

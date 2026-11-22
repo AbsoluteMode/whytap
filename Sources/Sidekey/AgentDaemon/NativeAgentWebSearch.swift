@@ -165,6 +165,10 @@ struct AgentSearchRow: Equatable {
     let builtIn: NativeAgentWebSearch?
     let tavilyConnected: Bool
     let choice: AgentWebSearchChoice
+    /// The Agent model the search follows ("Anthropic · claude-opus-5-5"):
+    /// the Agent can keep its own model while the LLM row shows another
+    /// ("1 custom", or a model whose Agent check failed).
+    let agentModel: String?
 
     /// The same options and resolution as the next Agent turn
     /// (`AgentSettingsStore.options(for: .native)`, `NativeAgentWebSearch.resolve`).
@@ -176,7 +180,11 @@ struct AgentSearchRow: Equatable {
         self.builtIn = builtIn.isBuiltIn ? builtIn : nil
         self.tavilyConnected = tavilyConnected
         choice = options.preferTavilySearch ? .tavily : .auto
+        agentModel = options.model.flatMap { $0.isEmpty ? nil : "\(options.openCodeProvider.displayName) · \($0)" }
     }
+
+    /// "Follows the Agent model: Anthropic · claude-opus-5-5."
+    var agentLine: String? { agentModel.map { "Follows the Agent model: \($0)." } }
 
     /// The orange setup contour: the Agent cannot search at all.
     var needsSetup: Bool { current == .none }

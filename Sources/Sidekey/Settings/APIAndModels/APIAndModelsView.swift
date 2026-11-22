@@ -374,6 +374,15 @@ struct APIAndModelsView: View {
                 .frame(height: geometry.size.height)
             }
             .frame(height: 54)
+            if let agentLine = row.agentLine {
+                Text(agentLine)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.text3)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 2)
+            }
             Text(row.current.priceNote)
                 .font(.system(size: 11.5))
                 .foregroundStyle(row.needsSetup ? MacSettingsTheme.orange : MacSettingsTheme.text2)

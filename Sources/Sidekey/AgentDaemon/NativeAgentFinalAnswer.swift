@@ -54,7 +54,7 @@ struct NativeAgentFinalAnswer {
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
-        let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = Self.withoutProviderCitationMarks(answer).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
         let insert: String
         switch arguments[Self.insertField] {
@@ -101,6 +101,19 @@ struct NativeAgentFinalAnswer {
 
     /// Plain paste text: surrounding whitespace removed and one enclosing
     /// Markdown fence unwrapped, so a fenced command does not paste backticks.
+    /// OpenAI's built-in search can leave its internal citation marks in model
+    /// text ("\u{E200}cite\u{E202}turn0search0\u{E201}", private-use
+    /// characters that render as "citeturn0search0"). They are not links; the
+    /// cards come from `sources` and the provider's citations.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
+    static func withoutProviderCitationMarks(_ text: String) -> String {
+        guard text.unicodeScalars.contains(where: { (0xE000...0xF8FF).contains($0.value) }) else { return text }
+        let marks = text.replacingOccurrences(of: "\u{E200}[^\u{E201}]*\u{E201}", with: "", options: .regularExpression)
+        let scalars = marks.unicodeScalars.filter { !(0xE000...0xF8FF).contains($0.value) }
+        return String(String.UnicodeScalarView(scalars))
+            .replacingOccurrences(of: "[ \t]+([.,;:!?])", with: "$1", options: .regularExpression)
+    }
+
     static func pasteText(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         var lines = text.components(separatedBy: "\n")

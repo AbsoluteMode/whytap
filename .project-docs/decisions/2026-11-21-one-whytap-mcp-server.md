@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: plugins/whytap/mcp.json
     confirmed_at: 2026-11-21
-related: [2026-10-21-app-control-plugin.md, 2026-10-21-case-connect-claude-code.md, 2026-11-20-harness-access.md]
+related: [2026-10-21-app-control-plugin.md, 2026-10-21-case-connect-claude-code.md, 2026-11-20-harness-access.md, 2026-11-22-connect-replaces-older-whytap-entries.md]
 ---
 
 ## Context
@@ -55,7 +55,10 @@ not because they need separate processes.
   `codex mcp add whytap -- <helper> mcp`, and its Case tools answer only for
   a registration kept from an earlier build. The Codex connector below serves
   such a kept registration (Disconnect) and follows the same rules.
-- **One rule: Whytap touches only what it writes itself.** Connect and
+- **One rule: Whytap touches only what it writes itself.** (Extended on
+  2026-11-22 to plain entries earlier Whytap versions wrote, which Connect
+  now replaces: see 2026-11-22-connect-replaces-older-whytap-entries.md. The
+  rest of this rule is unchanged.) Connect and
   Disconnect change an entry only when it is exactly the canonical form:
   `whytap` -> `{command: <helper>, args: ["mcp"]}` and the older
   `case` -> `{command: <helper>, args: ["case", "mcp"]}`, with nothing else

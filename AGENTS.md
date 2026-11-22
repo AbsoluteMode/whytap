@@ -1401,10 +1401,14 @@ authorized Case project/key names and descriptions (never values) of
 `whytap case mcp`; both older commands keep working for existing setups. Each
 Case tool call is the same broker request as before, so Case keeps its
 registrations, project scope and approvals; an unregistered client gets only
-the app tools. Case -> Connect writes this `whytap` entry and removes its older
-`case` entry; Disconnect removes only that older entry. Secret use stays in
+the app tools. Case -> Connect (also onboarding's Coding agents) writes this
+`whytap` entry, replacing a plain one an earlier Whytap wrote (`app mcp`,
+`case mcp`, the same flavor's Exodia-era path), and removes its older `case`
+entry; anything else is "Configured manually" and stays. Disconnect removes
+only that older entry. Secret use stays in
 `whytap case run` through the agent's own terminal. WHY:
-.project-docs/decisions/2026-11-21-one-whytap-mcp-server.md The app-control server reads
+.project-docs/decisions/2026-11-21-one-whytap-mcp-server.md,
+.project-docs/decisions/2026-11-22-connect-replaces-older-whytap-entries.md The app-control server reads
 live build/activity/route metadata and changes allowlisted models, provider pins,
 Drop mode, languages and idle
 auto-hide through existing app stores. Every write requires the current value;

@@ -5,24 +5,27 @@ import Foundation
 /// Only the helper path goes into a client config: never a value or token.
 ///
 /// One rule for every client: Whytap changes an entry only when it is exactly
-/// what Whytap itself writes (`CaseMCPEntryOwnership.isCanonical`). Any other
-/// `whytap` entry, whatever it holds, is the person's own and stays as it is,
-/// with "Configured manually — Whytap left it as is" shown; nothing is
-/// migrated.
-// WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
+/// what Whytap itself writes now or wrote in an earlier version
+/// (`CaseMCPEntryOwnership`). An earlier Whytap's `whytap` entry is replaced
+/// by the current one and an earlier `case` entry is removed. Any other entry,
+/// whatever it holds, is the person's own and stays as it is, with
+/// "Configured manually — Whytap left it as is" shown.
+// WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md,
+// .project-docs/decisions/2026-11-22-connect-replaces-older-whytap-entries.md
 protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
     /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
-    /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
-    /// read for certain, throws `.configuredManually` or `.unreadableConfig`
-    /// before anything changes, and our older `case` entry stays. With the
-    /// canonical `whytap` in place, our older `case` entry is removed when it
-    /// too is exactly what an earlier Whytap wrote, best effort.
+    /// entry: nothing to add. An entry an earlier Whytap wrote is replaced by
+    /// the canonical one. Any other `whytap` entry, or one that cannot be read
+    /// for certain, throws `.configuredManually` or `.unreadableConfig` before
+    /// anything changes, and the `case` entry stays. With the canonical
+    /// `whytap` in place, a `case` entry an earlier Whytap wrote is removed,
+    /// best effort.
     func install(helperPath: String) throws
-    /// Removes our older `case` entry when it is exactly what an earlier
-    /// Whytap wrote for `helperPath`. The `whytap` entry stays: it is the
+    /// Removes the `case` entry when it is exactly what an earlier Whytap
+    /// wrote (`CaseMCPEntryOwnership.isEarlierWhytap`). The `whytap` entry stays: it is the
     /// general Whytap server (also added by the plugin and the README line),
     /// and without a registration the broker already refuses its Case tools.
     func uninstall(helperPath: String?) throws
@@ -34,6 +37,26 @@ enum WhytapMCPEntry {
     static let arguments = ["mcp"]
     static let legacyName = "case"
     static let legacyArguments = ["case", "mcp"]
+    /// Subcommands earlier builds wrote: `app mcp` (the app-control server,
+    /// plugin and README line) and `case mcp` (Case Connect), plus today's.
+    static let earlierArguments: [[String]] = [["mcp"], ["app", "mcp"], ["case", "mcp"]]
+
+    /// Where a released build of each flavor keeps its helper, with the paths
+    /// the same flavor used before the Exodia -> Whytap rename (Sparkle
+    /// updates in place, so an older bundle name can still hold a new build).
+    /// Beta and prod are different apps (bundle, keychain, broker): one never
+    /// adopts the other's entries. A dev or moved build owns only its own path.
+    static let installedHelpers: [String: [String]] = [
+        "/Applications/Whytap.app/Contents/Helpers/whytap":
+            ["/Applications/Exodia.app/Contents/Helpers/whytap"],
+        "/Applications/Whytap-Beta.app/Contents/Helpers/whytap":
+            ["/Applications/Exodia-Beta.app/Contents/Helpers/whytap"],
+    ]
+
+    /// Helper paths whose entries the app running `helperPath` may replace.
+    static func ownHelperPaths(for helperPath: String) -> Set<String> {
+        Set([helperPath] + (installedHelpers[helperPath] ?? []))
+    }
 }
 
 enum CaseClientConnectorError: Error, Equatable {
@@ -58,7 +81,6 @@ enum CaseClientConnectorError: Error, Equatable {
     }
 }
 
-// MARK: Running client CLIs
 // MARK: Running client CLIs
 
 struct CaseCommandResult: Equatable {
@@ -187,19 +209,38 @@ enum CaseClientEnvironment {
     }
 }
 
-/// The one test for touching an entry: it is exactly what Whytap writes.
-/// JSON hosts: `{command: <helper>, args}` with nothing else, apart from
-/// `type: "stdio"` and an empty `env`, which Claude Code adds itself. The
-/// helper path is compared as written (no symlink or spelling variants).
+/// The one test for touching an entry: it is exactly what Whytap writes now
+/// or wrote before. JSON hosts: `{command: <helper>, args}` with nothing
+/// else, apart from `type: "stdio"` and an empty `env`, which Claude Code adds
+/// itself. Paths are compared as written (no symlink or spelling variants).
+// WHY: .project-docs/decisions/2026-11-22-connect-replaces-older-whytap-entries.md
 enum CaseMCPEntryOwnership {
-    static func isCanonical(_ entry: Any?, helperPath: String, arguments: [String]) -> Bool {
+    /// Plain `command` + `args`, or nil when the entry has anything else.
+    static func plainCommand(_ entry: Any?) -> (command: String, args: [String])? {
         guard let entry = entry as? [String: Any],
               Set(entry.keys).isSubset(of: ["type", "command", "args", "env"]),
-              entry["command"] as? String == helperPath,
-              entry["args"] as? [String] == arguments else { return false }
-        if let type = entry["type"], type as? String != "stdio" { return false }
-        if let env = entry["env"], (env as? [String: Any])?.isEmpty != true { return false }
-        return true
+              let command = entry["command"] as? String,
+              let args = entry["args"] as? [String] else { return nil }
+        if let type = entry["type"], type as? String != "stdio" { return nil }
+        if let env = entry["env"], (env as? [String: Any])?.isEmpty != true { return nil }
+        return (command, args)
+    }
+
+    static func isCanonical(_ entry: Any?, helperPath: String, arguments: [String]) -> Bool {
+        guard let plain = plainCommand(entry) else { return false }
+        return plain.command == helperPath && plain.args == arguments
+    }
+
+    /// Any plain entry Whytap wrote: this app's helper, or the same flavor's
+    /// helper at an earlier install path, running one of the MCP subcommands.
+    static func isEarlierWhytap(command: String, args: [String], helperPath: String) -> Bool {
+        WhytapMCPEntry.ownHelperPaths(for: helperPath).contains(command)
+            && WhytapMCPEntry.earlierArguments.contains(args)
+    }
+
+    static func isEarlierWhytap(_ entry: Any?, helperPath: String) -> Bool {
+        guard let plain = plainCommand(entry) else { return false }
+        return isEarlierWhytap(command: plain.command, args: plain.args, helperPath: helperPath)
     }
 }
 
@@ -256,8 +297,10 @@ struct CaseJSONConfigFile {
 // MARK: Claude Code
 
 /// `claude mcp add -s user whytap -- <helper> mcp` when there is no `whytap`
-/// entry, then removes our older user-scope `case` entry via `claude mcp
-/// remove`. When Claude's sandbox is on, the broker socket is
+/// entry. An earlier Whytap's `whytap` is removed and added again (the CLI
+/// cannot replace a name); if the add fails, the earlier entry is put back,
+/// which is exact because it was a plain command. Then our older user-scope
+/// `case` entry is removed via `claude mcp remove`. When Claude's sandbox is on, the broker socket is
 /// added to `sandbox.network.allowUnixSockets`. `~/.claude.json` is read with
 /// the system JSON parser (escapes in keys included); it is written only by
 /// `claude` itself.
@@ -298,16 +341,27 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
         let current = try settings.read()
         let servers = try userServers()
         let entry = servers[WhytapMCPEntry.name]
-        if entry != nil,
-           !CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments) {
+        let canonical = CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath,
+                                                          arguments: WhytapMCPEntry.arguments)
+        let earlier = canonical ? nil : CaseMCPEntryOwnership.plainCommand(entry).flatMap {
+            CaseMCPEntryOwnership.isEarlierWhytap(command: $0.command, args: $0.args, helperPath: helperPath) ? $0 : nil
+        }
+        if entry != nil, !canonical, earlier == nil {
             throw CaseClientConnectorError.configuredManually
         }
         let claude = try binary()
-        if entry == nil {
-            try check(run(claude, ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
+        let add = ["mcp", "add", "-s", "user", WhytapMCPEntry.name, "--"]
+        if let earlier {
+            try check(run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.name]))
+            let added = try? run(claude, add + [helperPath] + WhytapMCPEntry.arguments)
+            if added?.status != 0 {
+                _ = try? run(claude, add + [earlier.command] + earlier.args)
+                throw CaseClientConnectorError.commandFailed(status: added?.status ?? -1)
+            }
+        } else if entry == nil {
+            try check(run(claude, add + [helperPath] + WhytapMCPEntry.arguments))
         }
-        if CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
-                                             arguments: WhytapMCPEntry.legacyArguments) {
+        if CaseMCPEntryOwnership.isEarlierWhytap(servers[WhytapMCPEntry.legacyName], helperPath: helperPath) {
             _ = try? run(claude, ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName])
         }
         try updateSandbox(current, adding: true)
@@ -315,8 +369,7 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
 
     func uninstall(helperPath: String?) throws {
         if let helperPath, let servers = try? userServers(),
-           CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
-                                             arguments: WhytapMCPEntry.legacyArguments) {
+           CaseMCPEntryOwnership.isEarlierWhytap(servers[WhytapMCPEntry.legacyName], helperPath: helperPath) {
             try check(run(try binary(), ["mcp", "remove", "-s", "user", WhytapMCPEntry.legacyName]))
         }
         try updateSandbox(try settings.read(), adding: false)
@@ -424,11 +477,11 @@ enum CodexMCPEntry: Equatable {
     private static func isTrue(_ value: Any?) -> Bool { isBoolean(value) && (value as? Bool) == true }
 }
 
-/// `codex mcp add whytap -- <helper> mcp` when Codex has no `whytap`, then
-/// `codex mcp remove case` for our older entry. `codex mcp add` would replace
-/// any entry of that name, so each name is first read with `codex mcp get
-/// --json` through `reader` (read-only); a changing command runs only for an
-/// absent name or the exact canonical entry. Codex's sandbox settings are
+/// `codex mcp add whytap -- <helper> mcp` when Codex has no `whytap` or has
+/// one an earlier Whytap wrote (`codex mcp add` replaces it in one write),
+/// then `codex mcp remove case` for our older entry. Each name is first read
+/// with `codex mcp get --json` through `reader` (read-only); a changing
+/// command runs only for an absent name or an entry Whytap wrote. Codex's sandbox settings are
 /// never changed; `config.toml` is written only by codex.
 // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
 struct CodexCaseConnector: CaseClientConnector {
@@ -464,11 +517,15 @@ struct CodexCaseConnector: CaseClientConnector {
 
     func install(helperPath: String) throws {
         guard let codex = locate() else { throw CaseClientConnectorError.clientNotFound }
+        let add = ["mcp", "add", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments
         switch entry(WhytapMCPEntry.name, codex: codex) {
         case .absent:
-            try check(run(codex, ["mcp", "add", WhytapMCPEntry.name, "--", helperPath] + WhytapMCPEntry.arguments))
+            try check(run(codex, add))
         case .stdio(helperPath, WhytapMCPEntry.arguments):
             break
+        case .stdio(let command, let args)
+            where CaseMCPEntryOwnership.isEarlierWhytap(command: command, args: args, helperPath: helperPath):
+            try check(run(codex, add))
         case .uncertain:
             throw CaseClientConnectorError.unreadableConfig(".codex/config.toml")
         case .stdio, .customized, .other:
@@ -488,7 +545,8 @@ struct CodexCaseConnector: CaseClientConnector {
 
     /// Our older `case` entry exactly as an earlier Whytap wrote it.
     private func hasOurLegacyEntry(codex: URL, helperPath: String) -> Bool {
-        entry(WhytapMCPEntry.legacyName, codex: codex) == .stdio(command: helperPath, args: WhytapMCPEntry.legacyArguments)
+        guard case .stdio(let command, let args) = entry(WhytapMCPEntry.legacyName, codex: codex) else { return false }
+        return CaseMCPEntryOwnership.isEarlierWhytap(command: command, args: args, helperPath: helperPath)
     }
 
     private func run(_ binary: URL, _ arguments: [String]) throws -> CaseCommandResult {
@@ -504,8 +562,9 @@ struct CodexCaseConnector: CaseClientConnector {
 // MARK: Cursor
 
 /// `~/.cursor/mcp.json` → `mcpServers.whytap = {command, args: ["mcp"]}`
-/// when there is no `whytap`; our older `mcpServers.case` entry is removed in
-/// the same write when it is exactly what an earlier Whytap wrote. Cursor has
+/// when there is no `whytap` or an earlier Whytap wrote it; our older
+/// `mcpServers.case` entry is removed in the same write when it is exactly
+/// what an earlier Whytap wrote. Cursor has
 /// no CLI for this, so its JSON file is written directly (other keys kept).
 struct CursorCaseConnector: CaseClientConnector {
     static let appPath = "/Applications/Cursor.app"
@@ -537,17 +596,17 @@ struct CursorCaseConnector: CaseClientConnector {
         }
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
         let entry = servers[WhytapMCPEntry.name]
-        if entry != nil,
-           !CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments) {
+        let canonical = CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath,
+                                                          arguments: WhytapMCPEntry.arguments)
+        if entry != nil, !canonical, !CaseMCPEntryOwnership.isEarlierWhytap(entry, helperPath: helperPath) {
             throw CaseClientConnectorError.configuredManually
         }
         var changed = false
-        if entry == nil {
+        if !canonical {
             servers[WhytapMCPEntry.name] = ["command": helperPath, "args": WhytapMCPEntry.arguments]
             changed = true
         }
-        if CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
-                                             arguments: WhytapMCPEntry.legacyArguments) {
+        if CaseMCPEntryOwnership.isEarlierWhytap(servers[WhytapMCPEntry.legacyName], helperPath: helperPath) {
             servers[WhytapMCPEntry.legacyName] = nil
             changed = true
         }
@@ -560,8 +619,7 @@ struct CursorCaseConnector: CaseClientConnector {
         guard let helperPath,
               var root = try file.read(),
               var servers = root["mcpServers"] as? [String: Any],
-              CaseMCPEntryOwnership.isCanonical(servers[WhytapMCPEntry.legacyName], helperPath: helperPath,
-                                                arguments: WhytapMCPEntry.legacyArguments)
+              CaseMCPEntryOwnership.isEarlierWhytap(servers[WhytapMCPEntry.legacyName], helperPath: helperPath)
         else { return }
         servers[WhytapMCPEntry.legacyName] = nil
         root["mcpServers"] = servers

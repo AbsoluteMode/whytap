@@ -143,6 +143,9 @@ final class APIAndModelsViewModel: ObservableObject {
             )
         }
     }
+    /// Speech and LLM, read from the per-feature routes.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    @Published private(set) var sharedRows: [SharedModelRow] = []
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
     @Published private(set) var unsetBanner: String?
     @Published var proposal: AssignProposal?
@@ -169,6 +172,8 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private var checking: Set<AIFeature> = []
     private var messages: [AIFeature: String] = [:]
+    private var sharedChecking: Set<SharedModelKind> = []
+    private var sharedNotes: [SharedModelKind: [String]] = [:]
     private var observers: Set<AnyCancellable> = []
 
     /// The `.shared` stores and the input language are main-actor state, so
@@ -422,6 +427,118 @@ final class APIAndModelsViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Shared Speech / LLM
+
+    func sharedRow(_ kind: SharedModelKind) -> SharedModelRow? {
+        sharedRows.first { $0.kind == kind }
+    }
+
+    func sharedSections(_ kind: SharedModelKind) -> [PickerSection] {
+        resolver.sections(for: kind.pickerFeature)
+    }
+
+    /// Puts one model on every feature of `kind` it can serve: the same model,
+    /// or for Meetings the provider's recorded counterpart. Features set to
+    /// their own model (custom) keep it unless `replaceCustom`. A feature the
+    /// model cannot serve keeps its route, and the row says which. Every
+    /// distinct model and use that is not verified yet is checked once; a
+    /// passed tool-use check also covers plain text on the same model. Nothing
+    /// changes for a model whose check fails.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    @discardableResult
+    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool) async -> Bool {
+        guard !sharedChecking.contains(kind) else { return false }
+        let planner = makePlanner()
+        let before = planner.row(kind: kind, title: title(of:))
+        let choice = FeatureRoute(account: account, model: model)
+        let custom = Set(before.custom)
+        var notes: [String] = []
+        var targets: [(feature: AIFeature, route: FeatureRoute, current: FeatureRoute?)] = []
+        for item in planner.plan(choice, kind: kind) {
+            let current = routing.route(for: item.feature)
+            guard let planned = item.route else {
+                let kept = current.map { " · kept \($0.model)" } ?? ""
+                notes.append("\(item.feature.title): \(item.skipReason ?? "not available")\(kept)")
+                continue
+            }
+            if custom.contains(item.feature), !replaceCustom { continue }
+            if current?.account == planned.account, current?.model == planned.model { continue }
+            targets.append((item.feature, planned, current))
+        }
+
+        // One check per distinct model and use that is not verified yet.
+        struct Check { let route: FeatureRoute; let use: ModelUse; var features: [AIFeature] }
+        var pending: [Check] = []
+        for target in targets {
+            guard let use = target.feature.modelUse(on: target.route.account.kind) else { continue }
+            let failedBefore = resolver.hasStoredProbeFailure(model: target.route.model, account: target.route.account, for: target.feature)
+            let verdict = resolver.verdict(model: target.route.model, account: target.route.account,
+                                           for: target.feature, ignoringStoredFailure: true)
+            if case .verified = verdict, !failedBefore { continue }
+            if let index = pending.firstIndex(where: { $0.route == target.route && $0.use == use }) {
+                pending[index].features.append(target.feature)
+            } else {
+                pending.append(Check(route: target.route, use: use, features: [target.feature]))
+            }
+        }
+        // Tool use first: when it passes, plain text on that model needs no request.
+        pending.sort { ($0.use == .chatWithTools ? 0 : 1) < ($1.use == .chatWithTools ? 0 : 1) }
+        var passedTools: Set<String> = []
+        var refused: Set<AIFeature> = []
+        if !pending.isEmpty {
+            sharedChecking.insert(kind)
+            sharedNotes[kind] = nil
+            recompute()
+        }
+        for check in pending {
+            if check.use == .chat, passedTools.contains("\(check.route.account.storageID)|\(check.route.model)") {
+                checks.store(.passed, for: ModelCheckKey(account: check.route.account.storageID, model: check.route.model, use: .chat),
+                             adapterVersion: ModelRegistry.adapterVersion(check.route.account.kind, .chat), at: now())
+                continue
+            }
+            if await probePassed(check.route, for: check.features) {
+                if check.use == .chatWithTools { passedTools.insert("\(check.route.account.storageID)|\(check.route.model)") }
+            } else {
+                refused.formUnion(check.features)
+                let reason = check.features.first.flatMap { messages[$0] } ?? "the check failed"
+                notes.append("\(check.features.map(\.title).joined(separator: ", ")): \(reason)")
+            }
+        }
+        sharedChecking.remove(kind)
+        guard !Task.isCancelled else { recompute(); return false }
+
+        var assigned = 0
+        for target in targets where !refused.contains(target.feature) {
+            // A route changed meanwhile (Advanced, another window) is the user's newer choice.
+            guard routing.route(for: target.feature) == target.current else { continue }
+            assign(target.route, to: [target.feature])
+            assigned += 1
+        }
+        sharedNotes[kind] = notes.isEmpty ? nil : notes
+        recompute()
+        return refused.isEmpty && (assigned > 0 || targets.isEmpty)
+    }
+
+    private func makePlanner() -> SharedModelPlanner {
+        var cache: [String: PickerSection?] = [:]
+        let resolver = self.resolver
+        let routing = self.routing
+        return SharedModelPlanner(
+            section: { feature, account in
+                let key = "\(feature.rawValue)|\(account.storageID)"
+                if let hit = cache[key] { return hit }
+                let found = resolver.sections(for: feature, only: account).first
+                cache[key] = found
+                return found
+            },
+            route: { routing.route(for: $0) },
+            unsupportedReason: { model, account, feature in
+                if case .notSupported(let reason) = resolver.verdict(model: model, account: account, for: feature) { return reason }
+                return nil
+            }
+        )
+    }
+
     // MARK: - OpenRouter provider
 
     /// How long a loaded provider list (with its speed figures) is reused.
@@ -650,6 +767,14 @@ final class APIAndModelsViewModel: ObservableObject {
         if self.chips != chips { self.chips = chips }
         if self.rows != rows { self.rows = rows }
         if self.aliasGroups != groups { self.aliasGroups = groups }
+        let planner = makePlanner()
+        let shared = SharedModelKind.allCases.map { kind in
+            var row = planner.row(kind: kind, title: title(of:))
+            row.isChecking = sharedChecking.contains(kind)
+            row.notes = sharedNotes[kind] ?? []
+            return row
+        }
+        if self.sharedRows != shared { self.sharedRows = shared }
         if self.unsetBanner != banner { self.unsetBanner = banner }
     }
 

@@ -41,6 +41,8 @@ enum NativeAgentDiagnostics {
         ///   code or word, or the entry itself with the tool named as the
         ///   refusal's subject; never one of its options (`max_uses`,
         ///   `search_context_size`) or any other place;
+        /// - a message about an option, parameter, field, argument, property,
+        ///   setting or attribute never qualifies, even when it names the tool;
         /// - otherwise, with quoted text removed (a quoted tool identifier is
         ///   kept) and no size or context wording, the refusal must name the
         ///   tool's identifier in one clause ("Tool 'web_search' is not
@@ -57,6 +59,11 @@ enum NativeAgentDiagnostics {
             let plain = unquoted(message)
             let size = ["context", "too long", "too large", "maximum", "exceeds", "exceeded", "token", "length"]
             guard !size.contains(where: plain.contains) else { return false }
+            // An error about one of the tool's options or fields ("Unsupported
+            // tool 'web_search' option 'ranking'") is not a refusal of the tool,
+            // even when it names the tool: keep the original 400 (builder #441).
+            guard plain.range(of: #"\b(?:options?|parameters?|fields?|arguments?|propert(?:y|ies)|settings?|attributes?)\b"#,
+                              options: .regularExpression) == nil else { return false }
             if let path = (error?["param"] as? String)?.lowercased() ?? leadingPath(message) {
                 if let (index, field) = toolsLocation(path) {
                     guard index == searchToolIndex else { return false }

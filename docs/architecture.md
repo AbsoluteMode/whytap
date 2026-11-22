@@ -382,7 +382,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   request carried a search tool; no typed category or unrelated OpenAI code;
   a param or leading path must be the search tool's own index: its type with
   a refusal code or word, or the entry itself with the tool named as the
-  refusal's subject, never one of its options or any other location; otherwise, with quoted text removed and no
+  refusal's subject, never one of its options or any other location; a
+  message about an option, parameter, field or setting never qualifies, even
+  when it names the tool; otherwise, with quoted text removed and no
   size/context wording, the tool's identifier and a refusal in one clause, or
   a message opening with an account or model policy); an ambiguous error stays
   on the route and later failures are never retried. The two-search budget is per

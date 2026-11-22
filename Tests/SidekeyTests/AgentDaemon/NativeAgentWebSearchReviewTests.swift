@@ -586,4 +586,26 @@ extension NativeAgentWebSearchTests {
             XCTAssertEqual(tavilyRequests, 0, "\(route) \(status): \(error)")
         }
     }
+
+    /// Builder #441: an option error that names the tool is not a refusal of it.
+    func testToolOptionErrorIsNotAToolRefusal() {
+        let examples: [(String, String, String, Bool)] = [
+            ("tool refused", "Tool '{tool}' is not supported on this model.", "tools[2]", true),
+            ("tool type refused", "Unsupported tool type: '{tool}'.", "tools[2]", true),
+            ("ordinary unknown field", "Unknown field: ranking.", "tools[2]", false),
+            ("option with precise path", "Unsupported tool '{tool}' option 'ranking'. Use the default.", "tools[2].ranking", false),
+            ("option with coarse path", "Unsupported tool '{tool}' option 'ranking'. Use the default.", "tools[2]", false),
+            ("unknown option with coarse path", "Unknown tool '{tool}' option 'ranking'.", "tools[2]", false),
+            ("parameter with coarse path", "Tool '{tool}' parameter 'max_uses' is not supported.", "tools[2]", false),
+            ("setting without a path", "Unsupported tool {tool} setting: ranking.", "", false),
+        ]
+        for tool in ["web_search_20250305", "web_search", "openrouter:web_search"] {
+            for (label, message, parameter, expected) in examples {
+                var error: [String: Any] = ["message": message.replacingOccurrences(of: "{tool}", with: tool), "code": "unsupported_value"]
+                if !parameter.isEmpty { error["param"] = parameter }
+                let parsed = NativeAgentDiagnostics.ErrorShape(object: ["error": error], searchToolIndex: 2)
+                XCTAssertEqual(parsed.rejectsWebSearch, expected, "\(tool): \(label)")
+            }
+        }
+    }
 }

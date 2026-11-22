@@ -111,6 +111,9 @@ other tools' errors, so the rule is now structural:
   or a ranking option at that index does not: builder #439); one of its
   options (`max_uses`, `search_context_size`: builder #436), a message, input
   or another tool's index never qualifies;
+- a message about an option, parameter, field, argument, property, setting or
+  attribute keeps the original 400 even when it names the tool ("Unsupported
+  tool 'web_search' option 'ranking'": builder #441);
 - otherwise quoted text is removed (a quoted tool identifier such as
   `'web_search'` stays), size or context wording disqualifies, and the tool's
   identifier must sit in one clause with the refusal ("Tool 'web_search' is not

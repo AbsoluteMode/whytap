@@ -920,6 +920,57 @@ Input language offer:
   language code, the count and the offered codes are stored. WHY:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
+Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
+  the drops UI and its switch come after the visual is approved):
+  AutoPasteEngine.paste hands over the field at the paste boundary (after
+  focus restore, right before Cmd+V): the system-wide focused element of the
+  frontmost target app, metadata only, never Whytap's own editors.
+  DropLearningCoordinator reads it once 5 s later, only if that app is still
+  frontmost, the same element still has keyboard focus and DropEditFieldGate
+  allows it (metadata before any text, fail closed: AXSecureTextField, secure
+  event input, terminals and password managers by bundle ID, own process,
+  unknown app, non-text role, any AX error but a missing attribute). The
+  field must report its length (at most 20,000 UTF-16 units) and only that
+  range is requested (AXStringForRange); no length means no read. Focus
+  and the gate are confirmed again after the length query and after the
+  transfer (focus is checked before and after the gate's metadata calls);
+  if another app takes focus during the capture, the paste engine posts no
+  Cmd+V and restores the clipboard. With learning and calibration off no
+  capture callback is passed and the paste path is unchanged.
+  Switching learning or calibration off stops a scheduled read. It
+  compares with what reached the field (a rich paste's plainText), aligns the take inside the
+  field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  DropLearningClassifier turns edits into candidates without a model: a
+  sound-alike term -> Vocab (only if the wrong word is in the provider's raw
+  text); On this Mac / batch / Retry / recorder fallback, a full route list,
+  a term already in Vocab or a Smart-only error -> Replace (never for
+  dictionary words or grammar endings); full list without Replace -> Vocab
+  full with the route's limit (Y opens Vocab); undone replacement / Vocab
+  term written where not said -> remove; deleted spoken word -> Filler;
+  retyped cut filler -> Stop cutting. Translated takes teach nothing. The
+  same correction in two takes within 14 days becomes one suggestion; N is
+  forever, an expired one starts over; never while the island is not idle;
+  a new take cancels the pending read. DropLearningLedger stores only
+  HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
+  stay in memory until Y, which saves through VocabularyCache /
+  FillerTermsStore / DropReplacementStore (editors reload on their change
+  notification). Hidden calibration (sidekey.dropLearning.calibration):
+  reads until the field holds still (<=30 s), journals to Application
+  Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
+  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
+  links, ends
+  itself after 14 days (checked at launch, hourly and before every read) and
+  deletes its data. Fired fillers come from the same masked Filler pass.
+  Replace is its own DropOutputPolicy step after Smart and before Filler
+  (DropReplaceFilter: one pass, longest first, letter lookaround
+  boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
+  Vocabulary backup section). Vocab is one list of up to 1,000 terms x 50
+  chars; VocabularyBudget trims it per request in list order: Deepgram ~450
+  est. tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
+  Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
+  terms within 8 KB encoded. WHY:
+  .project-docs/decisions/2026-11-22-drop-edit-learning.md
+
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> Other -> "Show island on") -> screen with a real notch ->

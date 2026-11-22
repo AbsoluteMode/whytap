@@ -90,7 +90,8 @@ actor SonioxBYOKSession: BYOKUpstreamSession {
         if let language, !language.isEmpty { hints.append(language) }
         if !hints.contains("en") { hints.append("en") }
         config["language_hints"] = hints
-        if !terms.isEmpty { config["context"] = ["terms": terms] }
+        let sent = VocabularyBudget.terms(terms, for: .soniox)
+        if !sent.isEmpty { config["context"] = ["terms": sent] }
         let data = try JSONSerialization.data(withJSONObject: config)
         try await transport.send(.text(String(decoding: data, as: UTF8.self)))
         startReceiveLoop()

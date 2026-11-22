@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/InputLanguageSuggestionTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-20-meeting-ready-notifications.md, 2026-10-20-notification-cards-and-sounds.md, 2026-11-21-first-launch-onboarding.md]
+related: [2026-10-20-meeting-ready-notifications.md, 2026-10-20-notification-cards-and-sounds.md, 2026-11-21-first-launch-onboarding.md, 2026-11-22-drop-edit-learning.md]
 ---
 
 ## Context

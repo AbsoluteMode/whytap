@@ -168,6 +168,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// leaves captured audio stranded in memory.
     private var pendingRetryPCM: Data?
     private var pendingProcessingRetry: DropProcessingRetry?
+    /// Learning from the user's edits after a take (opt-in; calibration is a
+    /// hidden developer mode). WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    private lazy var dropLearning = DropLearningCoordinator.live { [weak self] in
+        self?.show(.hoverPanel(.vocabularyEditor))
+    }
+    /// How this take's speech request carried Vocab. Batch recovery, Retry
+    /// and the recorder fallback send none.
+    private var dropLearningVocabTransport: VocabularyTransport = .none
     private var pendingRetryTarget: (app: String?, pid: pid_t?)?
     /// True while a manual Retry's batch recovery is in flight. Gates
     /// `retryPendingDelivery` (via `shouldBeginRetry`) so a second press can't
@@ -366,6 +374,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Runs after this method returns, once the island and its actions exist.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Creating it runs calibration expiry and opt-out cleanup now and
+            // hourly. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+            _ = self.dropLearning
             self.acceptsLinkRequests = true
             if let request = self.pendingLinkRequest {
                 self.pendingLinkRequest = nil
@@ -1332,21 +1343,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliverDropTranscript(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
+    private func deliverDropTranscript(
+        _ text: String,
+        formatting: SmartFormattingProfile = .plain,
+        beforeCommandV: (() -> Void)? = nil
+    ) async -> Bool {
         guard !text.isEmpty else { return false }
 
-        return await autoPasteEngine.paste(text, formatting: formatting)
+        return await autoPasteEngine.paste(text, formatting: formatting, beforeCommandV: beforeCommandV)
     }
 
     private func finishDropDelivery(
         text: String,
         rawTranscript: String,
         targetApp: String?,
-        formatting: SmartFormattingProfile = .plain
+        formatting: SmartFormattingProfile = .plain,
+        learning: DropLearningTake? = nil,
+        targetPID: pid_t? = nil
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
-        let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
+        // Whytap's own editors are never read. The focused field is captured
+        // at the paste boundary, right before Cmd+V (metadata only), and read
+        // once later only if it is still the focused field of the frontmost
+        // app. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        var learningField: DropEditFieldHandle?
+        let wantsField = learning != nil && !autoPasteEngine.hasLocalDropTarget && dropLearning.capturesFields
+        let pasted = await deliverDropTranscript(cleaned, formatting: formatting, beforeCommandV: wantsField ? { [weak self] in
+            learningField = self?.dropLearning.prepareDelivery(targetPID: targetPID)
+        } : nil)
+        if pasted, !autoPasteEngine.hasLocalDropTarget, let learning {
+            dropLearning.delivered(learning, handle: learningField)
+        }
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
@@ -2610,6 +2638,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here and every later read of the take's mode uses `DropTake`.
         let mode = UserPreferencesCache.shared.currentMode
         DropTake.shared.begin(mode: mode, route: AIRoutingStore.shared.route(for: .drop(mode)))
+        dropLearning.takeStarted()
+        dropLearningVocabTransport = DropTake.shared.route.map { VocabularyTransport.realtime(for: $0.account) } ?? .none
         // Decided here for every take: one that follows an auto-stop take
         // never inherits its mode.
         endDropAutoStop()
@@ -2777,6 +2807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let startedAt = Date()
             do {
                 let prefs = PrivacyPreferences.shared
+                self.dropLearningVocabTransport = .none
                 let raw = try await dropBatchTranscriber.transcribe(
                     audio: wav,
                     language: prefs.selectedLanguage?.code
@@ -3206,8 +3237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetBundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
         if mode == .smart { AppState.shared.phase = .verifying }
         do {
-            let final = try await policy.prepare(
+            let prepared = try await policy.prepareDetailed(
                 rawText: rawText, fillerTerms: FillerTermsStore().terms(),
+                replacements: DropReplacementStore().replacements(),
                 preservingMarkdown: { formatting != .plain }
             ) { [self] in
                 guard let postProcessor else { throw OpenRouterLLMError.notConfigured }
@@ -3231,13 +3263,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return output.text
             }
             guard !Task.isCancelled, generation == streamingSetupGeneration else { return false }
+            let final = prepared.text
             os_log(
                 "drop processing ok turn_id=%{public}@ mode=%{public}@ chars=%{public}d latency_ms=%{public}d ax_ms=%{public}d cleanup_ms=%{public}d",
                 log: Self.log, type: .info, turnID, mode.rawValue, final.count,
                 Int((ProcessInfo.processInfo.systemUptime - processStartedAt) * 1000), contextMs,
                 mode == .smart ? Int((ProcessInfo.processInfo.systemUptime - cleanupStartedAt) * 1000) : 0
             )
-            await finishDropDelivery(text: final, rawTranscript: rawText, targetApp: targetApp, formatting: deliveryFormatting)
+            // What reaches the field: a rich paste's plain text in Slack and
+            // Telegram. The learning step compares the field with this.
+            let learning = DropLearningTake(
+                pasted: deliveryFormatting.usesRichPaste ? (SmartRichTextPaste.make(final)?.plainText ?? final) : final,
+                raw: rawText, mode: mode,
+                translated: outputLanguageCodeForDrop(mode: mode) != nil,
+                firedReplacements: prepared.firedReplacements, firedFillers: prepared.firedFillers,
+                vocabTransport: dropLearningVocabTransport
+            )
+            await finishDropDelivery(
+                text: final, rawTranscript: rawText, targetApp: targetApp, formatting: deliveryFormatting,
+                learning: learning, targetPID: targetPID
+            )
             return true
         } catch {
             guard !Task.isCancelled, generation == streamingSetupGeneration else { return false }
@@ -3380,6 +3425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prefs = PrivacyPreferences.shared
         let transcriber = dropBatchTranscriber
         let hasBatchTranscriber = await transcriber.isAvailable()
+        dropLearningVocabTransport = .none
         await Self.runBatchRecovery(
             pcm: pcm,
             hasBatchTranscriber: hasBatchTranscriber,
@@ -3411,8 +3457,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             capturedPCM: capturedPCM, lastPartial: partial,
             startedAt: startedAt,
             hasBatchTranscriber: hasBatchTranscriber,
-            transcribe: { pcm in
-                try await transcriber.transcribe(
+            transcribe: { [weak self] pcm in
+                await MainActor.run { self?.dropLearningVocabTransport = .none }
+                return try await transcriber.transcribe(
                     audio: pcm,
                     language: prefs.selectedLanguage?.code)
             },

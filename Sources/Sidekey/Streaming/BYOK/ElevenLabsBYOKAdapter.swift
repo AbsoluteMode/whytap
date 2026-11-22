@@ -45,7 +45,7 @@ enum ElevenLabsRealtimeURL {
         if let language, !language.isEmpty { items.append(URLQueryItem(name: "language_code", value: language)) }
         // ElevenLabs expects one `keyterms` query param per term (repeated), not
         // a comma-joined string — same shape as Deepgram's `keyterm`.
-        for term in terms { items.append(URLQueryItem(name: "keyterms", value: term)) }
+        for term in VocabularyBudget.terms(terms, for: .elevenLabsRealtime) { items.append(URLQueryItem(name: "keyterms", value: term)) }
         comps.queryItems = items
         return comps.url!
     }

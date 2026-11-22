@@ -289,7 +289,15 @@ final class AutoPasteEngine {
     /// they want the dictation back. On any step failure between
     /// snapshot and the final restore, the engine still restores so the
     /// user's clipboard is consistent with "no drop happened".
-    func paste(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
+    /// `beforeCommandV` runs on the main actor at the paste boundary: after
+    /// focus is back on the target and right before Cmd+V is posted. Learning
+    /// from edits captures the focused field there.
+    // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    func paste(
+        _ text: String,
+        formatting: SmartFormattingProfile = .plain,
+        beforeCommandV: (() -> Void)? = nil
+    ) async -> Bool {
         guard !text.isEmpty else {
             return false
         }
@@ -391,6 +399,22 @@ final class AutoPasteEngine {
         // Step 9: post Cmd+V. Explicit Command-down → V-down → V-up →
         // Command-up sequence with usleep gaps — `CGEvent.flags = .maskCommand`
         // alone is not enough on every app (friend's empirical note).
+        if let beforeCommandV {
+            // The capture makes blocking AX calls. If keyboard focus moved to
+            // another app meanwhile, Cmd+V would paste the dictation there:
+            // stop and restore the clipboard instead.
+            // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+            let recipient = frontmostAppInfo()?.pid
+            beforeCommandV()
+            guard let recipient, frontmostAppInfo()?.pid == recipient else {
+                logEmit(.error, "autopaste_failed step=recipient reason=focus_moved_during_capture")
+                pasteboardRestore(snapshot)
+                logEmit(.info, "autopaste_pasteboard_restored after=failure")
+                suppressClipboardThrough(currentChangeCount())
+                setClipboardSuppression(false)
+                return false
+            }
+        }
         postCmdV()
         logEmit(.info, "autopaste_posted_cmdv")
 

@@ -12,6 +12,7 @@ enum FeatureVideo: String, CaseIterable {
     case dropAutoStop = "drop-auto-stop"
     case screenshotProtection = "screen-protect"
     case autoHide = "auto-hide"
+    case dropLearning = "drop-learning"
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -26,6 +27,7 @@ enum FeatureVideo: String, CaseIterable {
         case .dropAutoStop: return "Stop Drop automatically"
         case .screenshotProtection: return "Screenshot protection"
         case .autoHide: return "Auto-hide island"
+        case .dropLearning: return "Learn from my edits"
         }
     }
 

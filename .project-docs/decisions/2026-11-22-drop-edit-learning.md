@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningScenarioTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md]
+related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md]
 ---
 
 ## Context
@@ -104,9 +104,9 @@ that rewrites what the provider keeps getting wrong.
 - **Y goes through the same stores** the editors use. The Vocab editor loads
   its list once and saves it whole, so `VocabularyCache` and `FillerTermsStore`
   post a change notification and the open editors reload.
-- **Opt-in** (`sidekey.dropLearning.enabled`, off). The switch and the drops
-  ship in the next step, after the visual is approved; until then the
-  coordinator only counts (when enabled) and journals (when calibrating).
+- **Opt-in** (`sidekey.dropLearning.enabled`, off; Settings, Other, "Learn
+  from my edits"). The drops that ask are described in
+  [the drops decision](2026-11-22-drop-learning-drops.md).
 - **Calibration** (`sidekey.dropLearning.calibration`, hidden): reads at 5 s and
   then every second until the field holds still for three reads or 30 s,
   journals each read (words of the edits, candidates, which ones the 5 s read
@@ -154,7 +154,8 @@ before Filler. Budget: per-route limits, Cyrillic, URL size, dedupe.
   be reproducible.
 - Reading until the field is stable in release: longer polling of a field the
   user types in; measured first in calibration.
-- Bare Y/N keys: the user is typing at that moment; answers are clicks only.
+- Bare Y/N keys: the user is typing at that moment; answers are clicks and
+  Control-Y / Control-N while the drops are shown.
 - LocalNotificationHub for the drops: it writes history before showing.
 - Storing candidates in plain text or in the History database: the words are a
   speech profile.

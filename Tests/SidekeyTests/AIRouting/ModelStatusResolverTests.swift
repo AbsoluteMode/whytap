@@ -300,6 +300,10 @@ final class ModelStatusResolverTests: XCTestCase {
         let env = try makeEnv(keyed: [.soniox, .openRouter])
         let b = env.routing.addServer(name: "b-box", baseURL: "http://b:8000/v1")
         let a = env.routing.addServer(name: "A-box", baseURL: "http://a:8000/v1")
+        for server in [a, b] {
+            env.routing.addModel(ServerModel(name: "whisper", kind: .transcription, checked: true), toServer: server.id)
+            env.routing.addModel(ServerModel(name: "qwen", kind: .llm, checked: true), toServer: server.id)
+        }
 
         XCTAssertEqual(
             env.resolver.sections(for: .dropFast).map(\.account),
@@ -325,6 +329,7 @@ final class ModelStatusResolverTests: XCTestCase {
         )
         for key in [ProviderAccount.anthropic, .openAI, .openRouter] { env.keyStatuses.set(.valid, for: key, at: Date()) }
         let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        env.routing.addModel(ServerModel(name: "qwen3:8b", kind: .llm, checked: true), toServer: server.id)
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "vendor/model-7"), for: .dropSmartCleanup)
 
         // A huge OpenRouter catalog never pushes the direct providers out of view.
@@ -338,7 +343,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertTrue(sections.allSatisfy { $0.keyProblem == nil })
         // Search covers every section; the route itself is untouched.
         XCTAssertEqual(Set(ModelPickerSearch.results(in: sections, query: "").map(\.account)),
-                       [.anthropic, .openAI, .openRouter])
+                       [.anthropic, .openAI, .server(server.id), .openRouter])
         let sonnet = ModelPickerSearch.results(in: sections, query: "sonnet")
         XCTAssertEqual(sonnet.first?.account, .anthropic, "the direct section leads the search results too")
         XCTAssertTrue(sonnet.contains { $0.account == .anthropic && $0.option.model == "claude-sonnet-5-5" })
@@ -382,6 +387,9 @@ final class ModelStatusResolverTests: XCTestCase {
         let pulled = Date(timeIntervalSince1970: 1_762_000_000)
         let env = try makeEnv(snapshots: [.openRouter: openRouterListing()], keyed: [.openRouter])
         let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        for name in ["qwen3:8b", "stamped", "undated", "gpt-5"] {
+            env.routing.addModel(ServerModel(name: name, kind: .llm, checked: true), toServer: server.id)
+        }
         var snapshot = CatalogSnapshot(models: [
             CatalogModel(id: "qwen3:8b", catalogDate: pulled),
             CatalogModel(id: "stamped", catalogDate: fetched.addingTimeInterval(-2)),

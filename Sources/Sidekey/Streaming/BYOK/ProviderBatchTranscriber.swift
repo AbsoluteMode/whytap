@@ -402,7 +402,7 @@ struct ProviderBatchTranscriber: BatchTranscribing {
 
     /// `AudioRecorder` hands over a canonical WAV, the delivery ladder raw
     /// PCM16. Providers get a WAV either way.
-    private static func wavFile(_ audio: Data) -> Data {
+    static func wavFile(_ audio: Data) -> Data {
         let isWAV = audio.prefix(4).elementsEqual("RIFF".utf8)
             && audio.dropFirst(8).prefix(4).elementsEqual("WAVE".utf8)
         return isWAV ? audio : TurnAudioBuffer.wav(fromPCM16: audio)
@@ -482,7 +482,7 @@ extension ProviderBatchTranscriber {
 }
 
 /// multipart/form-data with a random boundary.
-private struct MultipartFormBody {
+struct MultipartFormBody {
     private let boundary = "exodia-\(UUID().uuidString)"
     private var body = Data()
 

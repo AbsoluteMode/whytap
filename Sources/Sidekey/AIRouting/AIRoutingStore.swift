@@ -79,6 +79,7 @@ final class AIRoutingStore: ObservableObject {
         // all use the recorded model.
         // WHY: .project-docs/decisions/2026-11-21-recorded-meeting-models.md
         moveMeetingsToRecordedModelIfNeeded()
+        adoptExplicitServerModelsIfNeeded()
     }
 
     // MARK: - Routes
@@ -142,7 +143,8 @@ final class AIRoutingStore: ObservableObject {
         let id = UUID()
         let server = ServerEndpoint(
             id: id, name: name, baseURL: baseURL,
-            keyAccount: "byok.server.\(id.uuidString.lowercased()).api_key"
+            keyAccount: "byok.server.\(id.uuidString.lowercased()).api_key",
+            models: []
         )
         var updated = stateWithSubtitleSeparation
         updated.servers.append(server)
@@ -150,13 +152,57 @@ final class AIRoutingStore: ObservableObject {
         return server
     }
 
-    /// Which of the server's models the pickers offer. Routes stay as they
-    /// are: a feature already on one of its models keeps it.
-    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
-    func setModelKinds(_ kinds: ServerModelKinds, forServer id: UUID) {
+    /// Adds a model to the server's list. `false` when the server is gone or
+    /// already has this name as this kind; the same name may be added once
+    /// per kind (a model that both chats and transcribes).
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @discardableResult
+    func addModel(_ model: ServerModel, toServer id: UUID) -> Bool {
         var updated = stateWithSubtitleSeparation
-        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return }
-        updated.servers[index].modelKinds = kinds
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }),
+              !updated.servers[index].hasModel(model.name, kind: model.kind) else { return false }
+        updated.servers[index].models = (updated.servers[index].models ?? []) + [model]
+        commit(updated)
+        return true
+    }
+
+    /// Removes one model of one kind and un-sets the features of that kind
+    /// that ran on it, in registry order. None moves to another model.
+    @discardableResult
+    func removeModel(named name: String, kind: ServerModel.Kind, fromServer id: UUID) -> [AIFeature] {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return [] }
+        updated.servers[index].models = (updated.servers[index].models ?? []).filter { $0.name != name || $0.kind != kind }
+        let cleared = AIFeature.activeCases.filter { feature in
+            guard let route = updated.routes[feature.rawValue] else { return false }
+            return route.account == .server(id) && route.model == name && ServerModel.Kind(feature) == kind
+        }
+        for feature in cleared { updated.routes[feature.rawValue] = nil }
+        commit(updated)
+        return cleared
+    }
+
+    /// A server written before models were added explicitly gets, once, one
+    /// entry per model its features run on, with that feature's kind, marked
+    /// checked (it was in use). Its other `/v1/models` entries are no longer
+    /// offered until the user adds them. Runs at launch and after settings
+    /// sync, so a server restored from an older backup or synced from an older
+    /// Mac is converted too; a server that already has a list is left alone.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func adoptExplicitServerModelsIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for index in updated.servers.indices where updated.servers[index].models == nil {
+            let account = ProviderAccount.server(updated.servers[index].id)
+            var models: [ServerModel] = []
+            for feature in AIFeature.activeCases {
+                guard let route = updated.routes[feature.rawValue], route.account == account,
+                      let kind = ServerModel.Kind(feature),
+                      !models.contains(where: { $0.name == route.model && $0.kind == kind }) else { continue }
+                models.append(ServerModel(name: route.model, kind: kind, checked: true))
+            }
+            updated.servers[index].models = models
+        }
         commit(updated)
     }
 

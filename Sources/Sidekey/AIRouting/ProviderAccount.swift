@@ -94,24 +94,30 @@ struct ServerEndpoint: Codable, Equatable, Identifiable, Sendable {
     var name: String
     var baseURL: String
     let keyAccount: String
-    /// Which models the pickers offer, and for what. Absent from documents
-    /// written before the choice existed and for `.automatic`, so an
-    /// untouched server stores exactly what it did; an older build reading a
-    /// stored choice ignores it. A value from a newer build reads as
-    /// `.automatic` instead of dropping the server.
-    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
-    var modelKinds: ServerModelKinds = .automatic
+    /// The models the user added, each with its kind. `nil`: written before
+    /// models were added explicitly; launch turns such a server's routes into
+    /// entries (`AIRoutingStore.adoptExplicitServerModelsIfNeeded`). An older
+    /// build ignores the field; an entry this build cannot read is skipped
+    /// instead of dropping the server (backup validation decodes every
+    /// server strictly).
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    var models: [ServerModel]?
 
-    init(id: UUID, name: String, baseURL: String, keyAccount: String, modelKinds: ServerModelKinds = .automatic) {
+    init(id: UUID, name: String, baseURL: String, keyAccount: String, models: [ServerModel]? = nil) {
         self.id = id
         self.name = name
         self.baseURL = baseURL
         self.keyAccount = keyAccount
-        self.modelKinds = modelKinds
+        self.models = models
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, baseURL, keyAccount, modelKinds
+        case id, name, baseURL, keyAccount, models
+    }
+
+    private struct Lenient<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
     }
 
     init(from decoder: Decoder) throws {
@@ -120,8 +126,14 @@ struct ServerEndpoint: Codable, Equatable, Identifiable, Sendable {
         name = try container.decode(String.self, forKey: .name)
         baseURL = try container.decode(String.self, forKey: .baseURL)
         keyAccount = try container.decode(String.self, forKey: .keyAccount)
-        let raw = (try? container.decodeIfPresent(String.self, forKey: .modelKinds)) ?? nil
-        modelKinds = raw.flatMap(ServerModelKinds.init(rawValue:)) ?? .automatic
+        // The 2026-11-22 "Offer models for" choice (`modelKinds`) is not read:
+        // explicit models replace it.
+        if container.contains(.models) {
+            let entries = (try? container.decode([Lenient<ServerModel>].self, forKey: .models)) ?? []
+            models = entries.compactMap(\.value)
+        } else {
+            models = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -130,6 +142,6 @@ struct ServerEndpoint: Codable, Equatable, Identifiable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(baseURL, forKey: .baseURL)
         try container.encode(keyAccount, forKey: .keyAccount)
-        if modelKinds != .automatic { try container.encode(modelKinds, forKey: .modelKinds) }
+        try container.encodeIfPresent(models, forKey: .models)
     }
 }

@@ -177,9 +177,11 @@ struct ModelStatusResolver {
     /// of a large cached catalog (OpenRouter) costs seconds on the main actor.
     /// The same rules as `sections(for:)`: the account needs a section, the
     /// model must not be ruled out (`verdict`), and it is offered when the
-    /// registry or the catalog lists it or it is the feature's route;
-    /// otherwise a server section that takes a typed name accepts it.
-    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    /// registry or the catalog lists it or it is the feature's route. A
+    /// server offers only the models the user added for this kind, which
+    /// `verdict` already enforces.
+    // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md,
+    // .project-docs/decisions/2026-11-22-server-explicit-models.md
     func pickerReach(model: String, account: ProviderAccount, for feature: AIFeature,
                      accountsWithSection: [ProviderAccount]? = nil) -> PickerReach {
         guard (accountsWithSection ?? pickerAccounts()).contains(account),
@@ -189,6 +191,7 @@ struct ModelStatusResolver {
         }
         let selected = routing.route(for: feature)
         if selected?.account == account, selected?.model == model { return .offered }
+        if case .server = account { return .offered }
         if ModelRegistry.models.contains(where: { $0.kind == account.kind && $0.id == model && $0.uses.contains(use) }) {
             return .offered
         }
@@ -197,15 +200,7 @@ struct ModelStatusResolver {
            !ModelRegistry.offersOnlyBuiltInModels(account.kind), !Self.isStale(entry, fetchedAt: snapshot?.fetchedAt) {
             return .offered
         }
-        guard account.kind == .openAICompatible else { return .notListed }
-        // Same rule as the section's acceptsModelName: no list, or nothing of
-        // this kind in it. A server's list is short.
-        let models = snapshot?.models ?? []
-        let listsThisKind = models.contains { entry in
-            if case .notSupported = verdict(model: entry.id, account: account, for: feature) { return false }
-            return true
-        } || selected?.account == account
-        return models.isEmpty || !listsThisKind ? .typed : .notListed
+        return .notListed
     }
 
     /// `only`: build just that account's section.
@@ -227,12 +222,24 @@ struct ModelStatusResolver {
             for model in ModelRegistry.models where model.kind == account.kind && model.uses.contains(use) {
                 add(model.id)
             }
-            for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
-            where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind)
-                && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
-                add(model.id)
+            if case .server(let id) = account {
+                // Only what the user added for this kind; `/v1/models` only
+                // suggests names in the server's form.
+                // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+                if let kind = ServerModel.Kind(feature) {
+                    for model in routing.server(id)?.models(of: kind) ?? [] { add(model.name) }
+                }
+            } else {
+                for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
+                where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind)
+                    && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
+                    add(model.id)
+                }
             }
             if let selected, selected.account == account { add(selected.model) }
+            // A server with nothing of this kind has no section: its models are
+            // added in its API keys form, not typed into a picker.
+            if account.kind == .openAICompatible, ids.isEmpty { return nil }
 
             var options: [PickerOption] = []
             for id in ids {
@@ -263,12 +270,7 @@ struct ModelStatusResolver {
                 title: title(of: account),
                 options: options,
                 refreshFailed: snapshot?.lastRefreshFailed ?? false,
-                keyProblem: keyProblem(of: account),
-                // A server without a list, or whose list has nothing of this
-                // kind, takes a typed model name (it may serve more than it lists).
-                // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
-                acceptsModelName: account.kind == .openAICompatible
-                    && ((snapshot?.models.isEmpty ?? true) || options.isEmpty)
+                keyProblem: keyProblem(of: account)
             )
         }
     }
@@ -411,6 +413,9 @@ struct ModelStatusResolver {
         if let reason = ModelRegistry.knownUnsupportedReason(model, kind: kind, use: use) {
             return .notSupported(reason: reason)
         }
+        if let reason = notAddedReason(model: model, account: account, for: feature) {
+            return .notSupported(reason: reason)
+        }
         if let entry = judgedEntry(model: model, account: account, for: feature),
            let reason = contradiction(entry, feature: feature, use: use) {
             return .notSupported(reason: reason)
@@ -506,22 +511,24 @@ struct ModelStatusResolver {
         return false
     }
 
-    /// The catalog's entry as `verdict` judges it. A server's models serve
-    /// what the server's choice says (by default their names). The model a
-    /// feature already runs on is not judged by that guess: a route that
-    /// worked before the choice existed, or before the user changed it, keeps
-    /// working and stays offered; only the user moves it.
-    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
-    private func judgedEntry(model: String, account: ProviderAccount, for feature: AIFeature) -> CatalogModel? {
-        guard var entry = catalogs.snapshot(for: account)?.models.first(where: { $0.id == model }) else { return nil }
-        guard case .server(let id) = account else { return entry }
+    /// A server serves only the models the user added, each for its own
+    /// kind. The model a feature already runs on is exempt: a route saved
+    /// before models were added explicitly (or synced from an older Mac)
+    /// keeps working and stays offered; only the user moves it.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    private func notAddedReason(model: String, account: ProviderAccount, for feature: AIFeature) -> String? {
+        guard case .server(let id) = account, let kind = ServerModel.Kind(feature) else { return nil }
         let current = routing.route(for: feature)
-        if current?.account == account, current?.model == model {
-            entry.uses = nil
-        } else {
-            entry.uses = (routing.server(id)?.modelKinds ?? .automatic).uses(of: model)
-        }
-        return entry
+        if current?.account == account, current?.model == model { return nil }
+        guard let server = routing.server(id), !server.hasModel(model, kind: kind) else { return nil }
+        return "Not added to \(server.name) as \(kind == .llm ? "an LLM" : "a Transcription model")"
+    }
+
+    /// The catalog's entry as `verdict` judges it. A server's `/v1/models`
+    /// says nothing about what a model does: its kind is the user's entry.
+    private func judgedEntry(model: String, account: ProviderAccount, for feature: AIFeature) -> CatalogModel? {
+        if case .server = account { return nil }
+        return catalogs.snapshot(for: account)?.models.first(where: { $0.id == model })
     }
 
     /// Why the catalog's own description rules a model out for this use.

@@ -7,7 +7,8 @@ struct KeyChip: Equatable, Identifiable {
     let title: String
     let statusText: String
     let checkedAt: Date?
-    var modelKinds: ServerModelKinds? = nil
+    /// A server's added models, in the order added; `nil` for other accounts.
+    var serverModels: [ServerModel]? = nil
     var id: String { account.storageID }
 }
 
@@ -164,6 +165,7 @@ final class APIAndModelsViewModel: ObservableObject {
     private let keyStatuses: KeyStatusStore
     private let keyChecker: any ProviderKeyChecking
     private let probe: any ModelProbing
+    private let serverModelChecker: any ServerModelChecking
     private let endpoints: any OpenRouterEndpointsFetching
     private let now: () -> Date
     private let inputLanguage: @MainActor () -> String?
@@ -187,6 +189,7 @@ final class APIAndModelsViewModel: ObservableObject {
         keyStatuses: KeyStatusStore? = nil,
         keyChecker: any ProviderKeyChecking = ProviderKeyChecker(),
         probe: any ModelProbing = ModelProbe(),
+        serverModelChecker: any ServerModelChecking = ServerModelChecker(),
         endpoints: any OpenRouterEndpointsFetching = OpenRouterEndpointsClient(),
         now: @escaping () -> Date = Date.init,
         inputLanguage: (@MainActor () -> String?)? = nil,
@@ -204,6 +207,7 @@ final class APIAndModelsViewModel: ObservableObject {
         self.keyStatuses = keyStatuses
         self.keyChecker = keyChecker
         self.probe = probe
+        self.serverModelChecker = serverModelChecker
         self.endpoints = endpoints
         self.now = now
         self.inputLanguage = inputLanguage ?? { PrivacyPreferences.shared.selectedLanguage?.code }
@@ -303,6 +307,7 @@ final class APIAndModelsViewModel: ObservableObject {
         keyStatuses.set(status, for: account, at: now())
         await catalogs.refresh(account, apiKey: apiKey, server: server)
         if proposeModels { proposeSetup(for: account) }
+        lastAddedServer = account
         recompute()
         return nil
     }
@@ -313,18 +318,109 @@ final class APIAndModelsViewModel: ObservableObject {
         await store(key, for: account, proposing: false)
     }
 
-    /// Which of a server's models the pickers offer; `nil` for any other account.
-    private func modelKinds(of account: ProviderAccount) -> ServerModelKinds? {
+    // MARK: - Server models
+
+    /// The server the last successful `addServer` created, so its form can
+    /// open next and ask for the first model.
+    private(set) var lastAddedServer: ProviderAccount?
+
+    private func serverModels(of account: ProviderAccount) -> [ServerModel]? {
         guard case .server(let id) = account else { return nil }
-        return routing.server(id)?.modelKinds
+        return routing.server(id)?.models ?? []
     }
 
-    /// Changes only what pickers offer: routes already on the server stay.
-    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
-    func setModelKinds(_ kinds: ServerModelKinds, for account: ProviderAccount) {
-        guard case .server(let id) = account else { return }
-        routing.setModelKinds(kinds, forServer: id)
+    /// Names from the server's `/v1/models`, for the Model field: only
+    /// suggestions, the user can type any name. Names already added for both
+    /// kinds are left out.
+    func modelSuggestions(for account: ProviderAccount) -> [String] {
+        guard case .server(let id) = account, let server = routing.server(id) else { return [] }
+        let ids = (catalogs.snapshot(for: account)?.models ?? []).map(\.id)
+        return Array(Set(ids)).filter { name in
+            !ServerModel.Kind.allCases.allSatisfy { server.hasModel(name, kind: $0) }
+        }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Why `name` cannot be added as `kind`, before any request; `nil` when it can.
+    func serverModelProblem(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) -> String? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .server(let id) = account, let server = routing.server(id) else { return "This server was removed" }
+        if name.isEmpty { return "Enter the model's name" }
+        if server.hasModel(name, kind: kind) { return "\(name) is already added as \(kind.label)" }
+        return nil
+    }
+
+    /// What a check of `account` would run against now; `nil` when the
+    /// server was removed or its key cannot be read.
+    func serverModelTarget(_ account: ProviderAccount) -> ServerModelTarget? {
+        guard let access = access(account), let server = access.server else { return nil }
+        return ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+    }
+
+    /// One small request to the server: a one-word chat for an LLM, half a
+    /// second of silence for a transcription model. The result is bound to
+    /// the server's address and key when it started: if either changed while
+    /// it ran, it is reported as stale instead of passed.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func runServerModelCheck(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheck {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .server(let id) = account, routing.server(id) != nil else {
+            return ServerModelCheck(name: name, kind: kind, target: nil, result: .failed("This server was removed"))
+        }
+        guard let access = access(account), let server = access.server else {
+            return ServerModelCheck(name: name, kind: kind, target: nil,
+                                    result: .failed("Couldn't read this server's key from the Keychain"))
+        }
+        let target = ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+        let result = await serverModelChecker.check(name, kind: kind, on: server, apiKey: access.apiKey)
+        guard serverModelTarget(account) == target else {
+            return ServerModelCheck(name: name, kind: kind, target: target,
+                                    result: .failed(Self.serverChangedDuringCheck), stale: true)
+        }
+        return ServerModelCheck(name: name, kind: kind, target: target, result: result)
+    }
+
+    static let serverChangedDuringCheck = "The server's address or key changed during the check. Add the model again."
+    static let serverChangedSinceCheck = "The server's address or key changed since the check. Add the model again."
+
+    func checkServerModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheckResult {
+        await runServerModelCheck(name, kind: kind, on: account).result
+    }
+
+    /// Adds the model a check was for: checked when it passed, unchecked
+    /// ("Save without check") when it did not. Refused when the server's
+    /// address or key is no longer the one the check ran against, so a
+    /// result never carries over to another configuration.
+    @discardableResult
+    func addServerModel(after check: ServerModelCheck, to account: ProviderAccount) -> String? {
+        if check.stale { return Self.serverChangedDuringCheck }
+        guard let target = check.target else { return "This server was removed" }
+        guard target.account == account, serverModelTarget(account) == target else { return Self.serverChangedSinceCheck }
+        return addServerModel(check.name, kind: check.kind, checked: check.result == .passed, to: account)
+    }
+
+    /// Adds the model to the server; `checked` is false when the user saved it
+    /// without a passing check. `nil` on success, otherwise what to show.
+    @discardableResult
+    func addServerModel(_ name: String, kind: ServerModel.Kind, checked: Bool, to account: ProviderAccount) -> String? {
+        if let problem = serverModelProblem(name, kind: kind, on: account) { return problem }
+        guard case .server(let id) = account else { return "This server was removed" }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        routing.addModel(ServerModel(name: name, kind: kind, checked: checked), toServer: id)
         recompute()
+        return nil
+    }
+
+    /// Removes one model of one kind; the features of that kind that ran on
+    /// it become Not set, and nothing moves to another model.
+    /// Returns the features that became Not set, for the form to name them.
+    @discardableResult
+    func removeServerModel(_ model: ServerModel, from account: ProviderAccount) -> [AIFeature] {
+        guard case .server(let id) = account else { return [] }
+        let server = title(of: account)
+        let cleared = routing.removeModel(named: model.name, kind: model.kind, fromServer: id)
+        for feature in cleared { messages[feature] = "\(model.name) was removed from \(server)" }
+        recompute()
+        return cleared
     }
 
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
@@ -847,16 +943,16 @@ final class APIAndModelsViewModel: ObservableObject {
         if account == .thisMac {
             return KeyChip(account: account, title: title(of: account), statusText: "Model downloaded", checkedAt: nil)
         }
-        let kinds = modelKinds(of: account)
+        let models = serverModels(of: account)
         if lookup(account) == .unreadable {
             return KeyChip(account: account, title: title(of: account),
-                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil, modelKinds: kinds)
+                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil, serverModels: models)
         }
         let record = keyStatuses.record(for: account)
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt, modelKinds: kinds
+            checkedAt: record?.checkedAt, serverModels: models
         )
     }
 

@@ -12,6 +12,9 @@ enum NativeAgentWebSearch: Equatable {
     case tavily
     /// Neither is available: the model says so instead of guessing.
     case none
+    /// The provider refused its search on this turn's first request. The turn
+    /// goes on without search; an error never moves the query to Tavily.
+    case refused
 
     var isBuiltIn: Bool { if case .builtIn = self { return true }; return false }
 
@@ -88,6 +91,11 @@ enum NativeAgentWebSearch: Equatable {
                 + "asks to search or needs current or recent facts, answer in one line that web search is off for this model "
                 + "and is turned on by adding a Tavily key in Settings → API & Models → API keys (status unverified); "
                 + "never present recent facts as checked."
+        case .refused:
+            return "Web search is unavailable for this request: the provider refused its search tool. When the request "
+                + "needs current or recent facts, answer in one line that web search is unavailable for this model right now "
+                + "and that Tavily can be chosen in Settings → API & Models → Models → Search (status unverified); "
+                + "never present recent facts as checked."
         }
     }
 
@@ -99,6 +107,7 @@ enum NativeAgentWebSearch: Equatable {
         case .builtIn(let provider): return "\(provider.displayName) · built-in"
         case .tavily: return "Tavily"
         case .none: return "Off — add a Tavily key"
+        case .refused: return "Unavailable"
         }
     }
 
@@ -113,6 +122,8 @@ enum NativeAgentWebSearch: Equatable {
             return "One Tavily credit per search; 1,000 free credits a month."
         case .none:
             return "This Agent model has no web search of its own. Add a Tavily key in API keys."
+        case .refused:
+            return "The provider refused its web search for this request."
         }
     }
 

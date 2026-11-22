@@ -34,7 +34,7 @@ the same provider (at most two searches per request).
 | --- | --- | --- |
 | Anthropic | Claude web search (`web_search_20250305`) | $10 per 1,000 searches plus the results as input tokens; failed searches are not billed. Included in the Agent's estimated cost |
 | OpenAI | Responses `web_search` | $10 per 1,000 calls plus search content tokens. OpenAI reports no charge, so the cost stays unknown |
-| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. A workspace that locks out Exa refuses with 403; the Agent then retries once without OpenRouter's search (Tavily if its key is saved, else no search), because other engines cannot be capped. Included in the cost OpenRouter reports |
+| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. A workspace that locks out Exa refuses with 403; the Agent then retries once without OpenRouter's search and answers in text, because other engines cannot be capped. An error never switches the Agent to Tavily; pick Tavily in Search for that. Included in the cost OpenRouter reports |
 
 The provider runs the search and sends its results to the model; Whytap
 never sees a separate search request. "Searching the web" appears once the
@@ -52,9 +52,10 @@ below. Its menu works like the Speech and LLM menus: the built-in search of
 the Agent model (the default) or Tavily.
 
 **Tavily** serves a model without web search of its own (the Anthropic catalog
-says so, a few old OpenAI models such as `gpt-4.1-nano`, or the provider
-rejects the search tool on the first request) and anyone who picks it in
-Search. (The Agent runs only on Anthropic, OpenAI and OpenRouter today; Tavily
+says so, or a few old OpenAI models such as `gpt-4.1-nano`) and anyone who
+picks it in Search. If the provider refuses its own search on the first
+request, the Agent answers without search on the same provider and says so;
+it never switches to Tavily after an error. (The Agent runs only on Anthropic, OpenAI and OpenRouter today; Tavily
 would also serve your own servers if they become Agent routes.) A saved Tavily
 key alone never replaces built-in search.
 Add the key in **Settings → API & Models → API keys** (saving checks the key

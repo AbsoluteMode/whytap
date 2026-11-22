@@ -135,14 +135,16 @@ final class NativeAgentProvider: CLIProvider {
                                     && NativeAgentWebSearch.pinsEngine(model: options.model ?? ""))) {
                     // A model or account without the provider's search (or with
                     // it turned off by an admin) rejects the first request before
-                    // anything ran or was billed. Retry once with Tavily or none.
-                    // Any other 400 (context length, format) stays on this route.
-                    // OpenRouter: a workspace whose locked policy leaves Exa out
-                    // refuses with 403; no other engine is capped before it runs,
-                    // so the retry drops the search tool. A key or account 403
-                    // fails again on the retry, before any search.
+                    // anything ran or was billed. Retry once on the same route
+                    // without search; any other 400 (context length, format)
+                    // stays as it is. OpenRouter: a 403 on a request pinning Exa
+                    // may be a workspace policy that locks Exa out (or a budget
+                    // or guardrail: the body is not read); no other engine is
+                    // capped before it runs, so the retry drops the search tool.
+                    // An error never moves the query to Tavily: only the user's
+                    // choice or a known-unsupported model before the turn does.
                     // WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-                    search = tavilyConnected ? .tavily : .none
+                    search = .refused
                     model.builtInSearch = false
                     model.system = baseSystem + "\n" + search.promptLine
                     definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,

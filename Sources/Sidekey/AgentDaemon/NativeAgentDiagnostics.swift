@@ -37,9 +37,10 @@ enum NativeAgentDiagnostics {
         /// - the error is untyped: an OpenRouter category or an OpenAI `code`
         ///   outside the refusal codes is about something else;
         /// - a location (`param`, or a leading `messages[0]:`-style path)
-        ///   must be the search tool itself or its `type`, never one of its
-        ///   options (`max_uses`, `search_context_size`) or any other place,
-        ///   and the error must still refuse it (a refusal code or word);
+        ///   must be the search tool's own index: its `type` with a refusal
+        ///   code or word, or the entry itself with the tool named as the
+        ///   refusal's subject; never one of its options (`max_uses`,
+        ///   `search_context_size`) or any other place;
         /// - otherwise, with quoted text removed (a quoted tool identifier is
         ///   kept) and no size or context wording, the refusal must name the
         ///   tool's identifier in one clause ("Tool 'web_search' is not
@@ -58,11 +59,19 @@ enum NativeAgentDiagnostics {
             guard !size.contains(where: plain.contains) else { return false }
             if let path = (error?["param"] as? String)?.lowercased() ?? leadingPath(message) {
                 if let (index, field) = toolsLocation(path) {
-                    guard index == searchToolIndex, ["", ".type", "[type]"].contains(field) else { return false }
-                    let code = error?["code"] as? String
-                    return code == "unsupported_value" || code == "tool_not_supported"
-                        || plain.range(of: #"\b(?:not supported|unsupported|disabled|not enabled|not available|unavailable|not allowed|not permitted|turned off|unknown|does not support|doesn't support)\b"#,
-                                       options: .regularExpression) != nil
+                    guard index == searchToolIndex else { return false }
+                    // The tool's `type` itself was refused.
+                    if [".type", "[type]"].contains(field) {
+                        let code = error?["code"] as? String
+                        return code == "unsupported_value" || code == "tool_not_supported"
+                            || plain.range(of: #"\b(?:not supported|unsupported|disabled|not enabled|not available|unavailable|not allowed|not permitted|turned off|does not support|doesn't support)\b"#,
+                                           options: .regularExpression) != nil
+                    }
+                    // A coarse entry-level index: the message must name the tool
+                    // as the refusal's subject (an unknown field or a ranking
+                    // option at that index does not).
+                    guard field.isEmpty else { return false }
+                    return refusalPatterns.contains { plain.range(of: $0, options: .regularExpression) != nil }
                 }
                 if path != "tools" { return false }
             }

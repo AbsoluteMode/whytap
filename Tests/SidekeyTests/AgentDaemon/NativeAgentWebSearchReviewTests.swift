@@ -61,7 +61,7 @@ extension NativeAgentWebSearchTests {
             let events = await run(provider, "q", .init(model: model, openCodeProvider: route))
             XCTAssertEqual(calls, 2, "\(route)")
             XCTAssertFalse(text(1).contains("web_search_20250305") || text(1).contains("openrouter:web_search"), "\(route)")
-            XCTAssertTrue(text(1).contains("Web search is off"), "No Tavily key: the retry has no search")
+            XCTAssertTrue(text(1).contains("Web search is unavailable for this request"), "The retry has no search")
             XCTAssertNotNil(finalText(events))
         }
     }
@@ -248,7 +248,13 @@ extension NativeAgentWebSearchTests {
         // Refusals of the tool itself, in each response shape.
         XCTAssertTrue(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model.","type":"invalid_request_error"}}"#))
         XCTAssertTrue(refuses(#"{"error":{"message":"Hosted tool web_search is unavailable for this model.","param":"tools[3].type","code":"unsupported_value"}}"#))
-        XCTAssertTrue(refuses(#"{"error":{"message":"This model does not support this tool.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
+        XCTAssertTrue(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
+        // An entry-level index whose message is about something else (builder #439).
+        XCTAssertFalse(refuses(#"{"error":{"message":"This model does not support this tool.","param":"tools[3]","code":"invalid_value"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Unknown field: ranking.","param":"tools[3]","code":"invalid_value"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Unsupported ranking option.","param":"tools[3]","code":"unsupported_value"}}"#))
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.3: Extra inputs are not permitted"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"tools.3: unknown field `ranking` is not supported"}}"#))
         // The right entry, but no refusal: generic validation or one of its options.
         XCTAssertFalse(refuses(#"{"error":{"message":"Invalid value.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
         XCTAssertFalse(refuses(#"{"error":{"message":"Invalid search context size.","param":"tools[3].search_context_size","code":"invalid_value"}}"#))
@@ -443,7 +449,7 @@ extension NativeAgentWebSearchTests {
             XCTAssertEqual(searchTools.count, 2, "One unbilled 403, one retry")
             XCTAssertEqual((searchTools[0]?["parameters"] as? [String: Any])?["engine"] as? String, "exa")
             XCTAssertNil(searchTools[1], "No search tool whose count OpenRouter would not cap")
-            XCTAssertEqual(tavilyFunction, [false, tavily], "Tavily only with its key, after the refusal")
+            XCTAssertEqual(tavilyFunction, [false, false], "A 403 never moves the query to Tavily, key or not (tavily: \(tavily))")
         }
     }
 
@@ -530,5 +536,54 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(StubURLProtocol.capturedBodies.count, 1, "An allowed workspace runs pinned Exa in one request")
         let tool = try XCTUnwrap((try body(0)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" })
         XCTAssertEqual((tool["parameters"] as? [String: Any])?["engine"] as? String, "exa")
+    }
+
+    /// Builder #439: no error, 400 or 403, ever exposes Tavily; only the
+    /// user's choice or a known-unsupported model before the turn does.
+    func testNoErrorEverMovesTheQueryToTavily() async throws {
+        let cases: [(OpenCodeModelProvider, String, Int, String)] = [
+            (.anthropic, "claude-opus-5-5", 400, #"{"type":"error","error":{"type":"invalid_request_error","message":"Web search is disabled for this organization."}}"#),
+            (.openAI, "gpt-6.2-astra", 400, #"{"error":{"message":"Tool 'web_search' is not supported with this model.","type":"invalid_request_error"}}"#),
+            (.openRouter, "openai/gpt-6.2-astra", 400, #"{"error":{"message":"Tool type openrouter:web_search is not supported for this endpoint"}}"#),
+            (.anthropic, "claude-opus-5-5", 400, #"{"error":{"message":"tools.3: unknown field","param":"tools[3]"}}"#),
+            // An unrelated OpenRouter budget or guardrail 403 that a retry passes.
+            (.openRouter, "openai/gpt-6.2-astra", 403, #"{"error":{"code":403,"message":"Key budget window exceeded"}}"#),
+        ]
+        for (route, model, status, error) in cases {
+            let (directory, keys, http) = try fixture()
+            try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+            try keys.save("fixture-anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+            try keys.save("fixture-openai-key", account: ProviderAccount.openAIKeychainAccount)
+            try keys.save("fixture-tavily-key", account: TavilySearch.keychainAccount)
+            var modelRequests = 0, tavilyRequests = 0, tavilyOffered = false
+            StubURLProtocol.handler = { request in
+                if request.url?.host == "api.tavily.com" { tavilyRequests += 1; return self.serve(["results": []]) }
+                modelRequests += 1
+                let tools = try self.body(StubURLProtocol.capturedBodies.count - 1)["tools"] as? [[String: Any]] ?? []
+                // The Tavily function (Anthropic's built-in tool also carries name "web_search", with a type).
+                tavilyOffered = tavilyOffered || tools.contains {
+                    let type = $0["type"] as? String
+                    return (type == nil || type == "function")
+                        && ($0["name"] as? String ?? ($0["function"] as? [String: Any])?["name"] as? String) == "web_search"
+                }
+                if modelRequests == 1 { return (status, [:], Data(error.utf8)) }
+                let arguments = modelRequests == 2 ? ["query": "fixture"] : self.final("Text answer.", status: "unverified")
+                let name = modelRequests == 2 ? "web_search" : "finish_answer"
+                switch route {
+                case .anthropic:
+                    return self.serve(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "c\(modelRequests)", "name": name, "input": arguments]]])
+                case .openAI:
+                    return self.serve(["status": "completed", "output": [
+                        ["type": "function_call", "call_id": "c\(modelRequests)", "name": name, "arguments": self.arguments(arguments)]]])
+                case .openRouter:
+                    return self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
+                        "tool_calls": [["id": "c\(modelRequests)", "type": "function", "function": ["name": name, "arguments": self.arguments(arguments)]]]]]]])
+                }
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            _ = await run(provider, "fixture web search", .init(model: model, openCodeProvider: route))
+            XCTAssertFalse(tavilyOffered, "\(route) \(status): \(error)")
+            XCTAssertEqual(tavilyRequests, 0, "\(route) \(status): \(error)")
+        }
     }
 }

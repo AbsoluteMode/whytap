@@ -85,10 +85,18 @@ Anthropic `end_turn` after a search) continues the turn; only `pause_turn` is
 replayed verbatim, the rest add the "Continue" user message because current
 Claude models reject prefill.
 
-Fallback evidence: a first-request 400 moves to Tavily only on evidence
+No error moves the query to Tavily (builder #439). Tavily is used only when
+the user picks it in Search, or when the model is known before the turn to
+lack search (the catalog flag or the OpenAI list), with its key. A provider
+error proves at most that this request failed, never which service may get the
+query next, so a refusal retries once on the same route without search
+(`NativeAgentWebSearch.refused`: the model answers in one line that search is
+unavailable and that Tavily can be picked in Search). The data stays with the
+provider the user chose.
+
+Refusal evidence: a first-request 400 retries without search only on evidence
 specific to the search tool (`ErrorShape.refusesWebSearch`; a flag, the text
-is never kept). An ambiguous error stays on the selected route, because the
-retry is what can send the query to another service. Builder review #429,
+is never kept); any other 400 is shown as it is. Builder review #429,
 #431 and #433 showed that keyword windows keep matching quoted user text and
 other tools' errors, so the rule is now structural:
 - only the provider's own `message` is read (OpenRouter's `metadata.raw`
@@ -97,11 +105,12 @@ other tools' errors, so the rule is now structural:
   unsupported/invalid value, unsupported parameter, tool not supported) is
   about something else;
 - a location decides: `param` or a leading `messages[0]:` / `tools.3.type:`
-  path must be the search tool itself or its `type` at its own index in
-  `tools`, and the error must still refuse it (`unsupported_value`,
-  `tool_not_supported` or a refusal word); one of its options (`max_uses`,
-  `search_context_size`: builder #436), a message, input or another tool's
-  index never qualifies;
+  path must be the search tool's own index in `tools`: its `type` with a
+  refusal code (`unsupported_value`, `tool_not_supported`) or word, or the
+  entry itself with the tool named as the refusal's subject (an unknown field
+  or a ranking option at that index does not: builder #439); one of its
+  options (`max_uses`, `search_context_size`: builder #436), a message, input
+  or another tool's index never qualifies;
 - otherwise quoted text is removed (a quoted tool identifier such as
   `'web_search'` stays), size or context wording disqualifies, and the tool's
   identifier must sit in one clause with the refusal ("Tool 'web_search' is not
@@ -119,7 +128,7 @@ decides when present; capabilities decode independently, and the same flag
 Search row even when the catalog gives no token limits. OpenAI publishes no flag, so a short list of families
 documented or known without search (`gpt-4.1-nano`, legacy GPT-3.5/4, audio,
 realtime, search-preview models) uses Tavily, and a **400 on the turn's first
-request** that names the web search tool retries once without it. OpenRouter's tool
+request** that names the web search tool retries once without search. OpenRouter's tool
 works for every model: an `anthropic/` model keeps the default engine
 (Anthropic's own search, which honors `max_uses`), every other model gets
 `engine: "exa"`, which OpenRouter runs and caps before a search executes;
@@ -127,11 +136,11 @@ other native engines ignore `max_uses`, and OpenRouter documents no other cap
 that bounds them before they run (`max_tool_calls` is not stated to cover
 native search). A workspace whose locked Server Tools policy leaves Exa out
 refuses that first request with 403 before anything runs (builder #433). The
-turn then retries once without the search tool, like a refusal: Tavily when
-its key exists (bounded by Whytap), else no search and a text answer. An
-unbounded search tool is never sent (builder #436). Tavily is reached only if
-the retry succeeds, which shows the 403 was the search tool; a key or account
-403 fails again on the retry and is shown as before. Searches count from
+403 body is not read, so a budget or guardrail 403 looks the same: the turn
+retries once on the same route without the search tool and answers in text.
+An unbounded search tool is never sent (builder #436), and no 403 reaches
+Tavily (builder #439). A key or account 403 fails again on the retry and is
+shown as before. Searches count from
 `usage.server_tool_use_details.web_search_requests`, else
 `tool_calls_executed` (search is the only server tool sent), else citations.
 
@@ -177,7 +186,8 @@ unavailable, never 0.
 - Fake-provider scenarios in `NativeAgentWebSearchTests`: Anthropic without
   Tavily (pause_turn, verbatim encrypted replay, citation cards, cost with the
   search fee), a catalog-unsupported model falling back to Tavily, a rejected
-  first request retrying once with Tavily, a later rejection not retried, no
+  first request retrying once without search (never Tavily), a later
+  rejection not retried, no
   search at all (no tool, honest prompt line, unverified answer), Tavily never
   called on a built-in route even with a key unless picked, the Search row's
   labels, prices and menu, the row following the Agent route, Tavily key and
@@ -218,6 +228,10 @@ unavailable, never 0.
   ignore `max_uses`, so one request could exceed the turn's two searches.
 - Exa pinned with no way out (#431 version): a locked workspace without Exa
   refused every Agent request with 403, shown as a bad key (builder #433).
+- Retrying a refused first request with Tavily when its key exists (#429 to
+  #436 versions): no error proves the cause well enough to send the query to
+  another service; an entry-level validation error and an OpenRouter budget
+  403 both reached Tavily in builder #439 fixtures.
 - Retrying an OpenRouter 403 with the workspace's own engine (#433 version):
   a non-Anthropic native engine ignores `max_uses`, so one request could run
   more than the turn's two searches (builder #436).

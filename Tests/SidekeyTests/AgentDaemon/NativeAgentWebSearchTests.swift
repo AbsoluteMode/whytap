@@ -415,7 +415,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(links(events), [.link(url: URL(string: "https://tavily.example/r")!, description: "Tavily result", provider: nil)])
     }
 
-    func testRejectedBuiltInSearchRetriesOnceWithTavily() async throws {
+    func testRejectedBuiltInSearchRetriesOnceWithoutSearchNeverTavily() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("openai-key", account: ProviderAccount.openAIKeychainAccount)
         try keys.save("tavily-key", account: TavilySearch.keychainAccount)
@@ -434,8 +434,8 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(calls, 2, "One retry, no more")
         let retry = try XCTUnwrap(try body(1)["tools"] as? [[String: Any]])
         XCTAssertFalse(retry.contains { $0["type"] as? String == "web_search" })
-        XCTAssertTrue(retry.contains { $0["name"] as? String == "web_search" })
-        XCTAssertTrue((try body(1)["instructions"] as? String)?.contains("(Tavily)") == true)
+        XCTAssertFalse(retry.contains { $0["name"] as? String == "web_search" }, "An error never moves the query to Tavily")
+        XCTAssertTrue((try body(1)["instructions"] as? String)?.contains("Web search is unavailable for this request") == true)
         XCTAssertNil(try body(1)["max_tool_calls"])
         XCTAssertEqual(finalText(events), "Answer.")
         XCTAssertTrue(usage.allSatisfy { $0.amount == nil }, "A rejected request is never priced as 0")

@@ -26,7 +26,8 @@ struct CatalogTokenPrice: Codable, Equatable, Sendable {
 /// report stay `nil`.
 struct CatalogModel: Codable, Equatable, Sendable {
     let id: String
-    /// `nil`: the provider does not say (a user's server).
+    /// `nil`: the provider does not say. A user's server is guessed from the
+    /// model's name (`ServerModelClassifier`).
     var uses: Set<ModelUse>?
     /// Soniox `aliased_model_id`: the model this one is a deprecated alias of.
     var aliasOf: String?
@@ -497,8 +498,14 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         let data: [Model]
     }
 
+    /// A server lists IDs only: what each model serves is guessed from its
+    /// name. Pickers apply the server's own choice over this
+    /// (`ServerModelKinds`), so a cache written before it still sorts.
+    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
     static func parseServer(_ data: Data) throws -> [CatalogModel] {
-        try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id, catalogDate: $0.created?.date) }
+        try decode(ServerResponse.self, from: data).data.map {
+            CatalogModel(id: $0.id, uses: ServerModelClassifier.uses(of: $0.id), catalogDate: $0.created?.date)
+        }
     }
 
     /// OpenAI's list has IDs, not endpoint capabilities. Offer text families;

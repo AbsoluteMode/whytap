@@ -44,6 +44,9 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertTrue(steps(ready).contains(.search), "an LLM set before the onboarding offers search too")
         ready.searchReady = true
         XCTAssertFalse(steps(ready).contains(.search))
+        let searching = steps(.cleanMac, OnboardingProgress(source: .yourKey, hasLanguageModel: true,
+                                                            languageModelSearches: true))
+        XCTAssertFalse(searching.contains(.search), "a model that searches itself needs no Tavily key")
     }
 
     func testInputMonitoringOnlyWhenTheShortcutAsksForIt() {

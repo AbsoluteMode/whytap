@@ -132,6 +132,9 @@ struct OnboardingProgress: Equatable {
     var source: OnboardingSpeechSource?
     /// A language model route exists, before or during the onboarding.
     var hasLanguageModel = false
+    /// That language model's provider searches the web itself, so the
+    /// Agent needs no Tavily key and the search step is left out.
+    var languageModelSearches = false
     /// The Drop shortcut reports that it needs Input Monitoring.
     var needsInputMonitoring = false
     /// Speech is on the way: a working route, or the local model downloading.
@@ -149,6 +152,13 @@ enum OnboardingJourney {
         OnboardingStep.allCases.filter { isOnTheWay($0, start: start, progress: progress) }
     }
 
+    /// Providers whose models search the web themselves (Anthropic, OpenAI,
+    /// OpenRouter). The owner, 2026-11-22: when search works without Tavily,
+    /// the onboarding does not ask for it.
+    static func searchesTheWeb(_ provider: AIProviderKind) -> Bool {
+        [.anthropic, .openAI, .openRouter].contains(provider)
+    }
+
     static func isOnTheWay(_ step: OnboardingStep, start: OnboardingStart, progress: OnboardingProgress) -> Bool {
         switch step {
         case .source:
@@ -160,7 +170,9 @@ enum OnboardingJourney {
         case .llmKey:
             return !start.llmReady
         case .search:
+            // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
             return !start.searchReady && (start.llmReady || progress.hasLanguageModel)
+                && !progress.languageModelSearches
         case .language:
             return !start.languageChosen
         case .keyboard:

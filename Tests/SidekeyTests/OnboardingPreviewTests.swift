@@ -37,10 +37,18 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
-        XCTAssertEqual(model.step, .search)
-        await model.useSearchKey("tvly-bad")
-        XCTAssertFalse(model.outcome(.search).isDone, "the stubbed Tavily check refuses it")
-        await model.useSearchKey("tvly-preview")
+        XCTAssertEqual(model.step, .language, "Anthropic searches the web itself: no Tavily step")
+        model.back()
+        XCTAssertEqual(model.step, .llmKey)
+        model.useOwnServer(.languageModel)
+        var server = OnboardingServerDraft(address: "localhost:1234/v1")
+        server.models = [.init(name: "qwen3", use: .llm)]
+        model.saveServer(server)
+        model.next()
+        XCTAssertEqual(model.step, .search, "a server's model has no known search")
+        await model.useSearchKey("tvly-bad-0123456789abcdef")
+        XCTAssertEqual(model.keyProblems[.search], .refused, "the stubbed Tavily check refuses it")
+        await model.useSearchKey("tvly-preview-0123456789abcdef")
         XCTAssertTrue(model.outcome(.search).isDone, "the stubbed Tavily check passes without a network request")
 
         model.next()
@@ -117,25 +125,30 @@ final class OnboardingPreviewTests: XCTestCase {
     func testOnlyAKeysOwnFormatNamesItsProvider() throws {
         let speech = [AIProviderKind.soniox, .deepgram, .elevenLabs].compactMap(OnboardingKeyProvider.of)
         let elevenLabs = "sk_" + String(repeating: "0a", count: 24)
-        XCTAssertEqual(OnboardingKeyProvider.detect(elevenLabs, among: speech)?.kind, .elevenLabs)
-        XCTAssertEqual(OnboardingKeyProvider.detect(String(repeating: "0f", count: 20), among: speech)?.kind, .deepgram,
+        XCTAssertEqual(OnboardingKeyProvider.detect(elevenLabs, among: speech)?.kind, .provider(.elevenLabs))
+        XCTAssertEqual(OnboardingKeyProvider.detect(String(repeating: "0f", count: 20), among: speech)?.kind, .provider(.deepgram),
                        "Deepgram keys are 40 hexadecimal characters")
         for random in ["adsfdsfasdfasfafa", "adsfdsfasdfasfafaqwerty", "0123456789abcdef0123", "sk_short", "фываолдж0123456789abcdef"] {
             XCTAssertNil(OnboardingKeyProvider.detect(random, among: speech), "\(random) names nobody")
         }
         XCTAssertNil(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: speech), "OpenAI is not offered here")
         let withOpenAI = speech + [OnboardingKeyProvider.of(.openAI)!]
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: withOpenAI)?.kind, .openAI)
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: withOpenAI)?.kind, .provider(.openAI))
         XCTAssertNil(OnboardingKeyProvider.detect("adsfdsfasdfasfafaqwerty", among: withOpenAI), "no guess at OpenAI")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: withOpenAI), "an Anthropic key is not speech")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: withOpenAI), "an OpenRouter key is not speech")
 
         let llm = OnboardingJourneyModel.llmProviders.compactMap(OnboardingKeyProvider.of)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: llm)?.kind, .anthropic)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: llm)?.kind, .openRouter)
-        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: llm)?.kind, .openAI)
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: llm)?.kind, .provider(.anthropic))
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-or-v1-0123456789abcdef", among: llm)?.kind, .provider(.openRouter))
+        XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: llm)?.kind, .provider(.openAI))
         XCTAssertNil(OnboardingKeyProvider.detect(elevenLabs, among: llm), "a speech key is not a language model")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-0123", among: llm), "too short to be a key")
+
+        let search = [OnboardingKeyProvider.tavily]
+        XCTAssertEqual(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: search)?.kind, .tavily)
+        XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: search), "only Tavily's own format")
+        XCTAssertNil(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: llm), "a Tavily key is not a language model")
     }
 
     /// The owner typed in the Russian layout and saw
@@ -244,9 +257,10 @@ final class OnboardingPreviewTests: XCTestCase {
     // MARK: - The model, after a key is accepted
 
     /// The owner asked what the preselected "gpt-5.6 dinosaur" was (a fixed
-    /// name in the preview's catalog): the step now starts on the provider's
-    /// newest flagship from its catalog and lets the person pick another.
-    func testTheLanguageModelStepStartsOnTheNewestFlagshipAndWaitsForTheChoice() async throws {
+    /// name in the preview's catalog), then for "Sonnet / Sol, the current
+    /// one" as the recommendation: the step starts on the newest Sol from the
+    /// provider's catalog, marked Recommended, and lets the person pick another.
+    func testTheLanguageModelStepStartsOnTheRecommendedModelAndWaitsForTheChoice() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
@@ -257,9 +271,9 @@ final class OnboardingPreviewTests: XCTestCase {
 
         model.llmProvider = .openAI
         await model.useLLMKey("sk-proj-good-0123456789abcdef", provider: .openAI)
-        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"),
-                       "the newest generation's top tier by price, not the newest small or voice model")
-        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-astra")
+        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-sol"), "the newest Sol, not the newest voice model")
+        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-sol")
+        XCTAssertEqual(model.recommendedModel(.llmKey), "gpt-6.2-sol")
         let ids = model.modelChoices(.llmKey).map(\.id)
         XCTAssertEqual(ids.first, "gpt-6.2-sol", "newest first")
         XCTAssertTrue(ids.contains("gpt-6.2-astra"))
@@ -271,22 +285,24 @@ final class OnboardingPreviewTests: XCTestCase {
 
         try await Task.sleep(for: .milliseconds(1_600))
         XCTAssertEqual(model.step, .llmKey, "with a choice of models the step waits")
-        await model.chooseModel("gpt-6.2-sol", on: .llmKey)
-        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-sol"))
-        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-sol", "the shared LLM row runs the pick")
+        await model.chooseModel("gpt-6.2-astra", on: .llmKey)
+        XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"))
+        XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-astra", "the shared LLM row runs the person's pick")
+        XCTAssertEqual(model.recommendedModel(.llmKey), "gpt-6.2-sol", "the recommendation stays marked")
         try await eventually { model.step != .llmKey }
     }
 
-    func testAnthropicStartsOnItsNewestFlagshipWithItsPrice() async throws {
+    func testAnthropicStartsOnTheCurrentSonnetWithItsPrice() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
         model.llmProvider = .anthropic
         await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
-        XCTAssertEqual(model.outcome(.llmKey), .done("claude-fable-5-2"))
+        XCTAssertEqual(model.outcome(.llmKey), .done("claude-sonnet-5-5"))
+        XCTAssertEqual(model.recommendedModel(.llmKey), "claude-sonnet-5-5")
         let choices = model.modelChoices(.llmKey)
-        XCTAssertEqual(choices.first { $0.id == "claude-fable-5-2" }?.price, "$8 / $40 per 1M")
-        XCTAssertTrue(choices.contains { $0.id == "claude-sonnet-5-5" })
+        XCTAssertEqual(choices.first { $0.id == "claude-sonnet-5-5" }?.price, "$2 / $10 per 1M")
+        XCTAssertTrue(choices.contains { $0.id == "claude-fable-5-2" }, "the person can pick the flagship")
         XCTAssertFalse(choices.contains { $0.id == "claude-opus-4-5-20251101" })
     }
 
@@ -334,6 +350,19 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertNil(OnboardingModelPick.outputPrice("Free"))
         XCTAssertEqual(OnboardingModelPick.minutePrice(0.017), "0.017")
         XCTAssertEqual(OnboardingModelPick.minutePrice(0.0045), "0.0045")
+        // The recommendation is the family's newest, not a fixed ID.
+        let anthropic = [choice("claude-fable-5-2", 12, 40), choice("claude-sonnet-5-5", 55, 10),
+                         choice("claude-sonnet-5", 140, 10), choice("claude-sonnet-6-20270101", 1, 10)]
+        XCTAssertEqual(OnboardingModelPick.recommended(anthropic, provider: .anthropic)?.id, "claude-sonnet-5-5",
+                       "a dated snapshot is not the recommendation")
+        let openAI = [choice("gpt-6.2-astra", 21, 40), choice("gpt-6.2-sol", 18, 10), choice("gpt-6.1-sol", 54, 10),
+                      choice("gpt-6.2-sol-pro", 2, 10)]
+        XCTAssertEqual(OnboardingModelPick.recommended(openAI, provider: .openAI)?.id, "gpt-6.2-sol")
+        XCTAssertEqual(OnboardingModelPick.recommended([choice("gpt-6.2-astra", 21, 40)], provider: .openAI)?.id,
+                       "gpt-6.2-astra", "without a Sol the newest flagship stands in")
+        XCTAssertEqual(OnboardingModelPick.recommended([choice("anthropic/claude-sonnet-5.5", 55, 10),
+                                                        choice("anthropic/claude-fable-5.2", 12, 40)], provider: .openRouter)?.id,
+                       "anthropic/claude-sonnet-5.5")
         // OpenRouter: each major author's flagship, Anthropic first.
         let router = OnboardingModelPick.listed([choice("openai/gpt-6.2-astra", 3, 40), choice("openai/gpt-6.2-sol", 3, 10),
                                                  choice("anthropic/claude-fable-5.2", 12, 40), choice("anthropic/claude-haiku-5.5", 40, 0.5),

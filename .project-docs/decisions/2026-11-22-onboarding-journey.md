@@ -147,9 +147,10 @@ window, Back and a progress bar.
   user with one of those keys could search without a Tavily key. The native
   Agent cannot use it yet: it would have to round-trip server-tool blocks,
   handle `pause_turn` and mixed search/tool turns, and carry citations into
-  `finish_answer.sources`. Until a separate Agent change does that, step 4
-  offers a Tavily key; afterwards it offers "your model's built-in search"
-  first.
+  `finish_answer.sources`. That is a separate Agent change (session 78).
+  Superseded on 2026-11-22 (below, "Search is asked only when the model
+  cannot search"): the onboarding already leaves step 4 out for those
+  providers.
 
 - **Texts only say what holds for every provider** (corrections to the
   design pass): the API card does not promise free credit (Soniox has no
@@ -284,6 +285,33 @@ window, Back and a progress bar.
   than one model (OpenAI: per-minute prices), otherwise it moves on as
   before. A native menu was not used: AppKit draws only one text of its
   label, so the model and price disappeared.
+- **One model is recommended: the provider's current Sonnet or Sol.** The
+  owner asked on 2026-11-22 for "Sonnet / Sol, the current one" as the
+  onboarding's recommendation, replaceable by the person. The language model
+  step therefore starts on the newest member of the provider's balanced
+  family in its current catalog, chosen by name in one place
+  (`OnboardingModelPick.recommended`): Anthropic `claude-sonnet-*`, OpenAI
+  `gpt-*-sol`, OpenRouter `anthropic/claude-sonnet-*`. On 2026-11-22 that is
+  `claude-sonnet-5-5` and `gpt-6.2-sol` (OpenAI's live /v1/models list, as
+  cached by the app, lists `gpt-6.2-sol`, `gpt-6.1-sol` and `gpt-6-sol`). A
+  family, not an ID, so a newer Sonnet or Sol takes over without a code
+  change; a provider without that family falls back to the newest flagship.
+  The model line and the list mark it "Recommended"; any other pick replaces
+  it. The speech step recommends the registry's Drop model.
+- **Search is asked only when the model cannot search.** The owner,
+  2026-11-22: when search works without Tavily, Tavily is not asked for.
+  Anthropic, OpenAI and OpenRouter search the web themselves
+  (`OnboardingJourney.searchesTheWeb`), so with one of them as the language
+  model (picked on step 3 or set before the window opened) the search step
+  is left out; a language model on the person's own server keeps it. The
+  step is the key steps' screen: "Paste a Tavily key.", the wire key and
+  padlock, dots from the first character, a monochrome Tavily mark, no
+  chips, the same dwell and flow, "Optional · the Agent searches the web
+  with it" instead of the server link, and Skip. A key without Tavily's
+  `tvly-` prefix is a format problem; Tavily's answers name the other four:
+  401 or 403 refused, 432 or 433 (plan and pay-as-you-go limits) no credit,
+  429 busy with Retry, no answer unreachable with Retry. The Agent's use of
+  the providers' built-in search is session 78's change, not this one.
 - **"Use your own server →" shows the server form in the same window (the
   preview).** Base URL, an optional key (a secure field), the models with
   LLM or Transcription each, one Save; the name comes from the address
@@ -325,7 +353,7 @@ window, Back and a progress bar.
   offline key/model checks: a speech key sets all five speech features
   (Meetings on the recorded model) and moves on after the beat; a refused key
   stays with the reason and sets nothing; a saved key is reused; an LLM key
-  sets all four text features and brings the search step; skipping the LLM
+  sets all four text features (and, from Anthropic, leaves search out); skipping the LLM
   skips search; OpenAI preselects its newest usable catalog model; On this
   Mac with and without the model here; permissions granted while shown move
   on, granted elsewhere do not; Input Monitoring only when the shortcut needs
@@ -344,7 +372,12 @@ window, Back and a progress bar.
   from the address), starts the language model step on the newest flagship
   of a realistic catalog, lists only current text models with prices, waits
   for the choice and applies a pick, offers OpenAI's speech models with
-  per-minute prices, and checks the flagship rule on its own.
+  per-minute prices, and checks the flagship rule on its own; the
+  recommendation is the newest Sonnet or Sol. `OnboardingJourneyModelTests`
+  leave the search step out after an Anthropic key, keep it after a server
+  language model, and name Tavily's refused, no credit, busy and unreachable
+  answers and a foreign key's format; Tavily keys are recognised only on the
+  search step.
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, the stubbed Tavily check, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its

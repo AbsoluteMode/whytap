@@ -72,7 +72,7 @@ struct OnboardingJourneyView: View {
     /// Step 1 and the two key steps draw on a softly lit ground (the
     /// wireframe pass); its edge is the window's own colour, so nothing shows
     /// a seam.
-    static func isWireframe(_ step: OnboardingStep) -> Bool { step == .source || step == .speechKey || step == .llmKey }
+    static func isWireframe(_ step: OnboardingStep) -> Bool { [.source, .speechKey, .llmKey, .search].contains(step) }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
     /// to its lock, and the lock closes again for the language model key); the
@@ -89,7 +89,7 @@ struct OnboardingJourneyView: View {
     static func wireSceneStep(_ step: OnboardingStep) -> OnboardingWireScene.Step? {
         switch step {
         case .source: return .source
-        case .speechKey, .llmKey: return .speechKey
+        case .speechKey, .llmKey, .search: return .speechKey
         default: return nil
         }
     }
@@ -210,13 +210,7 @@ struct OnboardingJourneyView: View {
         case .llmKey:
             OnboardingKeyStage(kind: .languageModel, model: model, scene: wireScene)
         case .search:
-            OnboardingJourneyStep(act: step.act, title: "Web search for the Agent",
-                                  lede: "Optional. A Tavily key lets the Agent look things up.") {
-                OnboardingKeySlot(providers: [Self.tavilyOption], selected: .constant(Self.tavilyOption.name),
-                                  outcome: model.outcome(.search), savedKey: false) { key in
-                    Task { await model.useSearchKey(key) }
-                }
-            }
+            OnboardingKeyStage(kind: .search, model: model, scene: wireScene)
         case .language:
             OnboardingJourneyStep(act: step.act, title: "Which language do you speak?",
                                   lede: "Auto works too: the provider listens for it.") {
@@ -287,12 +281,6 @@ struct OnboardingJourneyView: View {
                                      request: request, recheck: model.recheckPermissions)
         }
     }
-
-    static let tavilyOption: OnboardingProviderOption = {
-        let hint = APIHintsView.hints.first { $0.provider == "Tavily" }
-        return OnboardingProviderOption(kind: nil, name: "Tavily", hint: hint.map { shortOffer($0) },
-                                        offerURL: hint?.url ?? URL(string: "https://www.tavily.com")!)
-    }()
 
     /// "$200 credit", "10,000 credits / mo", "50 free / day", "1,000 free / mo".
     static func shortOffer(_ hint: APIHintsView.Hint) -> String {

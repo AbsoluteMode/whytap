@@ -285,20 +285,35 @@ final class OnboardingPreviewSpeechModel: OnDeviceSpeechModelManaging, @unchecke
     func release() async {}
 }
 
-/// Answers every request of the preview's own URLSession locally: the
-/// Tavily usage check passes, or is refused for a key containing "bad".
+/// Answers every request of the preview's own URLSession locally, like
+/// Tavily's usage check: a key containing "bad" is refused (401), "credit"
+/// is over its plan (432), "busy" is rate limited (429), "offline" gets no
+/// answer; any other key passes.
 final class OnboardingPreviewURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    static func status(_ authorization: String?) -> Int? {
+        let key = authorization?.lowercased() ?? ""
+        if key.contains("offline") { return nil }
+        if key.contains("bad") { return 401 }
+        if key.contains("credit") { return 432 }
+        if key.contains("busy") { return 429 }
+        return 200
+    }
+
     override func startLoading() {
-        let refused = OnboardingPreviewProviders.refuses(request.value(forHTTPHeaderField: "Authorization"))
-        let body = Data((refused ? #"{"detail":{"error":"Unauthorized: invalid API key"}}"# : "{}").utf8)
+        let status = Self.status(request.value(forHTTPHeaderField: "Authorization"))
+        let body = Data((status == 200 ? "{}" : #"{"detail":{"error":"preview"}}"#).utf8)
         let response = HTTPURLResponse(url: request.url ?? URL(string: "https://preview.invalid")!,
-                                       statusCode: refused ? 401 : 200, httpVersion: "HTTP/1.1",
+                                       statusCode: status ?? 200, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
+            guard status != nil else {
+                self.client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+                return
+            }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             self.client?.urlProtocol(self, didLoad: body)
             self.client?.urlProtocolDidFinishLoading(self)

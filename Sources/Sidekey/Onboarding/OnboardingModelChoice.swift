@@ -37,6 +37,25 @@ enum OnboardingModelPick {
         return ["mini", "nano", "lite", "small", "tiny", "haiku", "flash"].contains { id.contains($0) }
     }
 
+    /// The model a key step recommends and sets first: the newest of the
+    /// provider's balanced family in its current catalog (Anthropic Sonnet,
+    /// OpenAI Sol, OpenRouter's Anthropic Sonnet). The owner asked for
+    /// "Sonnet / Sol, the current one" on 2026-11-22. A family is a name, not
+    /// a fixed ID, so a newer Sonnet or Sol takes over by itself; without
+    /// one the newest flagship stands in. The person can pick any other.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    static func recommended(_ choices: [OnboardingModelChoice], provider: AIProviderKind) -> OnboardingModelChoice? {
+        let family: (String) -> Bool
+        switch provider {
+        case .anthropic: family = { $0.hasPrefix("claude-sonnet-") }
+        case .openAI: family = { $0.hasPrefix("gpt-") && $0.hasSuffix("-sol") }
+        case .openRouter: family = { $0.hasPrefix("anthropic/claude-sonnet-") }
+        default: family = { _ in false }
+        }
+        let members = choices.filter { family($0.id.lowercased()) && isListed($0.id, speech: false) }
+        return members.max { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) } ?? flagship(choices)
+    }
+
     /// The newest flagship among `choices`, or nil when there is none.
     static func flagship(_ choices: [OnboardingModelChoice]) -> OnboardingModelChoice? {
         let candidates = choices.filter { !isSmallTier($0.id) }

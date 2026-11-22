@@ -83,7 +83,7 @@ toolchain and prerequisites.
 3. For runtime changes, `swift build` and `swift test` must pass locally.
    Documentation-only changes mark the Swift checks not applicable.
 4. Describe what changed and why in the PR body. Note any docs you updated
-   (`CLAUDE.md` architecture notes, `docs/hotkey.md`, `docs/build-and-release.md`).
+   (`docs/architecture.md`, `docs/hotkey.md`, `docs/build-and-release.md`).
 5. Maintainers squash-merge.
 
 Ready-made community builds and in-app updates are the main distribution path;

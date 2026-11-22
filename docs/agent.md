@@ -32,12 +32,49 @@ most two searches per request); the returned excerpts and links go to your
 selected model. Without a key, search reports an error instead of using
 another service.
 
-## Files and commands
+## Off by default; what it can do once on
 
-The agent can edit files and run commands by default. Turn off **Allow file
-edits and commands** in **Settings → Other → Agent** to block both. This is an action
-policy, not a sandbox. Commands stop after 30 seconds. Approval modes are a
-later phase.
+The Agent is off until you turn on **Agent** in **Settings → Other**. Turning
+it on keeps **Allow file edits and commands** (in the same place) at its
+default, on, so from the first request the model you chose can use these
+tools:
+
+| Tool | With "Allow file edits and commands" on (default) | Off |
+| --- | --- | --- |
+| `list_directory`, `read_file`, `search_files` | yes | yes |
+| `capture_screen` (when your request needs the screen) | yes | yes |
+| `web_search` (Tavily key), `fetch_url` (public HTTPS) | yes | yes |
+| `write_file`: create or replace a file | yes | removed and refused |
+| `run_command`: run a shell command | yes | removed and refused |
+| `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |
+| `whytap`: change Whytap's own settings, island tools and hotkeys, To-do (next version after 2.2.26) | yes | yes |
+
+Paths can be absolute or start with `~`; relative paths are inside the
+agent's folder. Nothing confines the agent to that folder: it acts with your
+macOS user's rights on any file you can read or write, and commands run as
+you, with a 30-second limit and bounded output. **This is an action policy,
+not a sandbox.** Turning the switch off removes writing and commands but
+keeps reading files, searching, web access and screen capture. There is no
+per-action approval yet; file contents, web pages and screenshots it reads
+go to your model provider. Leave the switch off unless you want the Agent to
+act on your Mac.
+
+## Agent, coding tools and Case are three different things
+
+- **Whytap Agent** (this page): Whytap's own model loop behind Right Command,
+  with the tools above. It does not ask before a file edit or a command.
+- **The Whytap MCP server** for coding tools you already use (Claude Code,
+  Codex, Cursor): it lets them read and change Whytap settings and To-do,
+  and Claude Code and Codex, after a one-time Yes in Whytap, read meeting
+  notes. Your coding tool's
+  own permission prompts and sandbox apply to everything else it does.
+  [Which client can use what](customization/app-control.md#which-client-can-use-what).
+- **Case**: a local secrets vault. A registered client sees key names, never
+  values, and `whytap case run` puts values only into the command it starts.
+  In **Accept** mode the island asks you before each such command (the
+  approval shown in the README demo); **Bypass** does not. That approval
+  covers only commands that use Case secrets through `whytap case run`, not
+  the Agent's other actions.
 
 ## Memory
 

@@ -114,40 +114,85 @@ replacing it. Keep one installed working copy: move the previous **Exodia.app**
 out of Applications as a rollback copy, then install **Whytap.app**. Do not run
 both copies together or delete Application Support data or Keychain items.
 
-The production bundle ID, Keychain services, storage paths, community signing
-certificate and Sparkle public key are unchanged. This rename does not require
+The production bundle ID, Keychain services, storage paths and Sparkle public
+key are unchanged; the signing identity changed once, to the Developer ID team
+described under [Download and open](#download-and-open). This rename does not require
 new privacy permissions. Existing Exodia GitHub links redirect to Whytap.
 Older Whytap builds using the retired update host still need one manual install;
 changing this GitHub repository does not migrate those feeds.
 
-## First dictation
+## First launch
 
-Whytap opens the island without a setup wizard. On the first launch on a Mac,
-**Settings → Permissions** also opens if access is missing. It appears once;
-you can return from the island's Settings control:
+The first launch on a Mac shows the island and opens a short setup window.
+Every page can be skipped, a page that is already done is hidden, and closing
+the window finishes it. It does not come back after updates.
 
-1. In **Permissions**, allow Microphone and Accessibility. macOS may open
-   **System Settings → Privacy & Security** to grant them. Reopen Whytap if
+1. **Speech:** choose how Drop recognizes speech. On Apple Silicon,
+   **Download and use for Drop** fetches the *On this Mac* model (about 470
+   MB) and needs no account or key. Or paste a speech provider's key (Soniox,
+   Deepgram, ElevenLabs); Whytap checks it, stores it in macOS Keychain and uses
+   that provider for Drop. On Intel there is no On this Mac model, so Drop needs
+   a provider key or your own server. **Restore from another Mac** applies a
+   Whytap backup instead.
+2. **Permissions:** allow Microphone and Keyboard control (Accessibility).
+   macOS may open **System Settings → Privacy & Security**; reopen Whytap if
    macOS asks you to quit after changing a permission.
-2. In **API & Models**, choose how speech is recognized. Without any account:
-   open **API keys**, click **On this Mac** and **Download** (Apple Silicon,
-   about 470 MB), then use it for Drop Fast. With a provider: click a speech
-   provider's tile and enter its API key; Whytap checks it and stores it in
-   macOS Keychain. Then pick a model for Drop Fast and Drop Smart.
-3. Optionally add OpenRouter, OpenAI, Anthropic or your own endpoint and pick
-   models for Smart cleanup and meeting summaries.
-4. Focus a text field, hold **Space**, speak, then release Space.
+3. **Try Drop:** focus the field on the page, hold **Space**, speak, release.
+4. **Optional features:** turn on Google search, Meeting Notes or the Agent;
+   a feature whose model is not set offers **Add a model**.
 
-Whytap is free. Your selected provider handles API billing; there are no Whytap
-accounts, plans or credits. Dictation can also run on this Mac with a downloaded speech
-model, for free and without a key. On-device text models were removed; if you
-used **Local** before, choose a speech model in **API & Models** to dictate
-again.
+The next version (after 2.2.26) redesigns this window into five pages: the
+speech page also lists language-model and Tavily keys with each provider's
+free offer and a searchable "I speak" language, Screen Recording (for Shot)
+becomes an optional row on the permissions page, a page introduces tool
+shortcuts and hover tools, and the last page can connect Claude Code and Codex.
 
-For the optional agent, add an OpenRouter, OpenAI or Anthropic key, choose the
-Agent model in **API & Models**, then turn on **Agent** in **Settings → Other**
-([Whytap Agent](agent.md)). Meeting recording may also request **System Audio
-Recording** permission.
+Later you can change everything in **Settings → API & Models** (keys, the On
+this Mac model, a model per feature) and **Settings → Permissions**. A feature
+without a model opens API & Models on its row when you use it; Whytap never
+picks another provider for you. If you used **Local** before October 2026,
+choose a speech model again: the old local models were removed.
+
+For the optional Agent, add an OpenRouter, OpenAI or Anthropic key, choose the
+Agent model in **API & Models**, then turn on **Agent** in **Settings → Other**.
+Read [Whytap Agent](agent.md) first: once on, it can edit files and run
+commands. Meeting recording also asks for **System Audio Recording**.
+
+## What it costs
+
+Whytap is free (MIT) and has no plans, accounts or credits of its own. It is
+built for people and teams who already have one of these:
+
+- **Provider keys**, billed by the provider per use: Soniox, Deepgram or
+  ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models;
+  Tavily for the Agent's web search.
+- **A ChatGPT or Claude plan with monthly API credits.** OpenAI gives ChatGPT
+  Pro ($100, $200 or $500 a month, by tier) and Business seats API credit;
+  Anthropic gives Claude Max ($100), Ultra ($200) and Team seats. Both must be
+  linked to an API organization you own, start after seven days on the plan
+  and expire at the end of each billing cycle. Check
+  [OpenAI's terms](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)
+  and [Anthropic's terms](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans);
+  they were last checked on 2026-11-22.
+- **Your own servers** speaking the OpenAI-compatible API (Ollama, LM Studio,
+  vLLM for text; a server with the OpenAI Realtime protocol or
+  `/v1/audio/transcriptions` for speech).
+- **An Apple Silicon Mac** for dictation on the Mac itself.
+
+| Feature | Without any key (Apple Silicon) | Needs |
+| --- | --- | --- |
+| Drop Fast | On this Mac | a speech provider or server on Intel |
+| Drop Smart | speech only | a language model for the cleanup |
+| Agent (text) | no | a language model (OpenRouter, OpenAI or Anthropic); Tavily for web search |
+| Agent voice, Voice search | On this Mac | a speech provider or server on Intel |
+| Meeting Notes | no: a meeting waits until both rows are set | a language model for the notes, plus speech (On this Mac gives no speaker labels; Soniox, Deepgram or ElevenLabs label speakers) |
+| Translate | no | a language model |
+| Subtitles | no | an OpenAI key, about $3 per hour of audio (from the version after 2.2.26; 2.2.26 uses a speech model plus a language model) |
+| Shot (OCR, blur), History, To-do, Case, Notify, Display | yes | nothing |
+
+The free tiers listed under API & Models → API hints and in the README are
+good for trying Whytap; heavier use is billed by your provider. Settings → API
+& Models → Costs shows what each feature has cost so far.
 
 ## Updates
 
@@ -188,8 +233,8 @@ while preserving local changes, then validate and rebuild. See
 - **The shortcut or paste does not work:** open **Whytap Settings → Permissions**,
   check the Drop shortcut status and click **Retry Shortcut** after granting
   the missing permission. Refresh and reopening Whytap also recheck the monitors.
-- **An unexpected copy opens:** Settings shows the actual version, channel and
-  application path. New builds allow one running copy across production and
+- **An unexpected copy opens:** Settings shows the version; a second copy's
+  alert names the running copy's version and path. New builds allow one running copy across production and
   beta; a second copy offers to activate the existing app. Quit the running
   copy before switching. Older binaries do not implement this coordination.
 - **The API key does not connect:** check the provider, key, endpoint/model and

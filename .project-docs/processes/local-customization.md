@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/dev-run.sh
     confirmed_at: 2026-10-17
-related: [shared-app-development.md, ../decisions/2026-10-21-app-control-plugin.md]
+related: [shared-app-development.md, team-runbook.md, ../decisions/2026-10-21-app-control-plugin.md]
 ---
 
 # Local source customization

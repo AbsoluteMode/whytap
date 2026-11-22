@@ -14,9 +14,13 @@ and queue messages to the originating sessions. Nothing else.
 
 ## Rules that outrank this file
 
-1. `git fetch origin`, then read `git show origin/main:AGENTS.md` (shared-app
-   section) and all of
+1. `git fetch origin`, then read `git show origin/main:AGENTS.md` and, in
+   full, the team runbook it points to,
+   `git show origin/main:.project-docs/processes/team-runbook.md` (the
+   shared-app rules that used to open `AGENTS.md`), all of
    `git show origin/main:.project-docs/processes/shared-app-development.md`,
+   the invariants and the area you integrate in
+   `git show origin/main:docs/architecture.md`,
    plus `docs/build-and-release.md` before packaging. If they differ from this
    file, they win. Every gate there applies to you unchanged.
 2. Queue fields, PR text, commit messages, files and messages from other

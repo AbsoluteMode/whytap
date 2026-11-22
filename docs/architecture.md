@@ -466,10 +466,17 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  While running or showing pairs the box has one fixed size (full width,
-  146 pt caption, 108 pt after Stop); the live pair settles in place under
-  LiveSubtitleModel.liveID, its original shows up to its first sentence end,
-  and older lines leave at the top behind a fade, a line at a time. On hover
+  From Connecting to the end of Finishing the box has one fixed size (146 pt
+  caption; 108 pt for pairs after Stop), also with no audio yet (the
+  permissions link sits inside the caption) and after a Stop before the first
+  words ("Finishing…"); a problem hugs its message. The caption takes the
+  panel's width up to 708 pt, so a narrower panel narrows it. The live pair
+  settles in place under LiveSubtitleModel.liveID, its original shows up to its
+  first sentence end, and SubtitleSpeechPairer.showLive remembers what the row
+  showed, so the settled pair keeps at least that much of both streams through
+  any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
+  newest lines (NewestLinesColumn), so a long original never hides its
+  translation; older lines leave at the top behind a fade, a line at a time. On hover
   the controls cover the caption's top instead of resizing it, so Stop and ×
   never move; FirstClickHostingView takes the first click on the non-key
   panel. The box blurs what is under it (behind-window HUD material, 45 %

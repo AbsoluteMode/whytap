@@ -26,6 +26,9 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SubtitleSteadyOverlayTests.swift
     confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Translation/SubtitleSpeechPairer.swift
+    confirmed_at: 2026-11-23
 related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md]
 ---
 
@@ -88,6 +91,30 @@ stability rules from it.
 - **Blur.** The box draws a behind-window `NSVisualEffectView` (HUD
   material) under a 45 % black tint, instead of a flat 60 % black.
 
+### After the build check
+
+The build queue's check of the first version found text that still moved and
+a box that still changed size. Added:
+
+- **Shown text stays in its row.** `SubtitleSpeechPairer.showLive` records how
+  much of each stream the live row showed. A pause, clause or sentence cut
+  then keeps at least that much in the settled pair. Before, an original that
+  ran ahead of a shorter translation lost its shown tail to the next row. A
+  long translation closed at an early clause and moved shown words below.
+- **Newest lines of a long column.** A column is at most
+  `SteadyPairsLayout.columnCap` high (the caption below its top fade). A taller
+  one shows its newest lines (`NewestLinesColumn`), and both columns then start
+  at the row's top. A 500-character original without punctuation no longer
+  pushes its translation out of sight.
+- **One size through the whole session.** From Connecting to the end of
+  Finishing the caption keeps its size (`TranslationView.overlayCaption`). The
+  audio permissions link moved inside the caption. A Stop before the first
+  words shows "Finishing…" instead of collapsing the box. A problem's message
+  is smaller and hugs its text, so it and its button fit the 190 pt panel.
+- **Narrow panels.** The panel can be resized down to 360 pt. The caption takes
+  the width it is given up to 708 pt (`SteadyPairsLayout.width(proposed:)`);
+  the columns still depend only on that width.
+
 ## Why
 
 - Text that moves while it is being read cannot be read: the reader loses
@@ -109,10 +136,16 @@ event and checks:
 - the live original stops at its first sentence end;
 - a long live original is not cut at the front;
 - the column split depends only on the width;
-- the overlay's content view accepts the first click.
+- the overlay's content view accepts the first click;
+- an original far ahead of its translation, and a long translation closed at
+  a clause, keep every shown word in their row (these fail without
+  `showLive`);
+- a long column stays within its cap with the translation at the row's top;
+- the caption keeps one size in every running phase and fits a narrow panel.
 
-Offscreen renders cover the overlay early, live and stopped, and the missing
-key state. Offscreen the blur has nothing under it, so only its tint shows.
+Offscreen renders cover the overlay early, live and stopped, the missing
+key state, silent start, Stop before any words, a long original, and a
+480 pt panel, each inside a red outline of the panel's edge. Offscreen the blur has nothing under it, so only its tint shows.
 Not checked: the installed app, a real pointer, and the blur over a playing
 video.
 
@@ -126,5 +159,9 @@ video.
   languages and ×.
 - A separate controls bar above the box: the box would lose hover while the
   pointer moved between them.
+- Bottom-aligning every row's columns: a settled pair would read from two
+  different heights, and its shorter column would move up with each new line.
+- Bringing back a sliding window for a long original: every word would move
+  on every update.
 
 2026-11-23 · branch claude/subtitles-stop-and-steady-text

@@ -177,19 +177,28 @@ struct TranslationView: View {
                 // one fixed size, so its controls never move and no text
                 // reflows. Idle without pairs, it hugs its controls.
                 // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+                // The caption takes the panel's width up to the usual box
+                // width, so a narrower panel narrows it instead of cutting it.
+                let shape = Self.overlayCaption(phase: subtitles.phase, hasRows: !rows.isEmpty,
+                                                hasIssue: subtitles.issue != nil)
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
                     if !subtitles.phase.isActive { subtitleControls }
-                    if subtitles.issue != nil || !rows.isEmpty
-                        || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
-                        caption(rows)
-                            .frame(width: Self.overlayContentWidth,
-                                   height: subtitles.phase.isActive ? Self.captionHeight : Self.stoppedCaptionHeight,
+                    if case .fixed(let height) = shape {
+                        caption(rows, height: height)
+                            .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
                                    alignment: .bottomLeading)
+                            .frame(height: height, alignment: .bottomLeading)
+                            // Inside the caption, so the box does not grow
+                            // and shrink while no audio arrives.
+                            .overlay(alignment: .bottomTrailing) { if waitingWithoutAudio { audioPermissionsButton } }
+                    } else if shape == .hugging {
+                        caption(rows, height: Self.stoppedCaptionHeight)
+                            .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
+                                   alignment: .leading)
                     }
                     if let feature = subtitles.issue?.feature {
                         Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
                     }
-                    if waitingWithoutAudio { audioPermissionsButton }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -241,6 +250,21 @@ struct TranslationView: View {
     /// The overlay panel is 760 pt wide: 10 pt outside and 16 pt inside the box.
     static let overlayContentWidth: CGFloat = 760 - 2 * 10 - 2 * 16
 
+    enum OverlayCaption: Equatable { case hidden, hugging, fixed(CGFloat) }
+
+    /// The overlay caption's shape. While a session runs, from Connecting to
+    /// the end of Finishing, it keeps one size whatever it shows (a status,
+    /// no audio yet, a Stop before the first words), so the box and its hover
+    /// controls never move. After Stop the pairs keep a shorter fixed caption
+    /// under the controls; a problem hugs its message; idle and empty, the
+    /// box is just its controls.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    static func overlayCaption(phase: SubtitlePhase, hasRows: Bool, hasIssue: Bool) -> OverlayCaption {
+        if hasIssue { return .hugging }
+        if phase.isActive { return .fixed(captionHeight) }
+        return hasRows ? .fixed(stoppedCaptionHeight) : .hidden
+    }
+
     private var waitingWithoutAudio: Bool {
         subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
     }
@@ -249,9 +273,9 @@ struct TranslationView: View {
     /// overlay the caption has a fixed size: pairs are bottom-anchored with a
     /// fixed column split, the live pair settles in place, and older lines
     /// leave at the top as new ones push them up. Toolbox keeps whole pairs.
-    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
+    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row], height: CGFloat = 0) -> some View {
         if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
-            captionText(status)
+            captionText(status, compact: subtitles.issue != nil)
         } else if embedded {
             NewestRowsLayout(spacing: 6, maxHeight: 150) {
                 ForEach(rows) { row in
@@ -267,23 +291,24 @@ struct TranslationView: View {
         } else {
             // Bottom-anchored, clipped at the top with a short fade: new text
             // pushes older lines up smoothly, a line at a time.
-            SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: Self.sourceFraction,
-                              size: CGSize(width: Self.overlayContentWidth,
-                                           height: subtitles.phase.isActive ? Self.captionHeight : Self.stoppedCaptionHeight),
-                              inset: Self.bandInset) {
+            let layout = SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: Self.sourceFraction,
+                                           size: CGSize(width: Self.overlayContentWidth, height: height),
+                                           inset: Self.bandInset)
+            layout {
                 ForEach(rows) { row in
                     Group {
                         RoundedRectangle(cornerRadius: 7)
                             .fill(.white.opacity(row.ordinal.isMultiple(of: 2) ? Self.bandOpacity : 0))
-                        sourceText(row)
-                        translationText(row)
+                        sourceText(row).modifier(NewestLinesColumn(cap: layout.columnCap))
+                        translationText(row).modifier(NewestLinesColumn(cap: layout.columnCap))
                     }
                     .transition(.opacity)
                 }
             }
             .clipped()
             .mask {
-                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.14)],
+                LinearGradient(stops: [.init(color: .clear, location: 0),
+                                       .init(color: .black, location: SteadyPairsLayout.topFade)],
                                startPoint: .top, endPoint: .bottom)
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: rows)
@@ -349,16 +374,17 @@ struct TranslationView: View {
         }
     }
 
-    private func captionText(_ value: String) -> some View {
+    /// `compact`: a problem's message, smaller, so it and its fix fit the panel.
+    private func captionText(_ value: String, compact: Bool = false) -> some View {
         // At most five lines; the box height hugs shorter text (its width spans
         // the panel, as in the original) and older words leave
         // at the top, so the newest line never moves.
         Text(value)
-            .font(.system(size: embedded ? 15 : 20, weight: .medium, design: .rounded))
+            .font(.system(size: embedded || compact ? 15 : 20, weight: .medium, design: .rounded))
             .foregroundStyle(.white)
             .multilineTextAlignment(.leading)
             .lineSpacing(3)
-            .lineLimit(5)
+            .lineLimit(compact ? 3 : 5)
             .truncationMode(.head)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

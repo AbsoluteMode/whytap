@@ -50,23 +50,31 @@ struct NewestRowsLayout: Layout {
 }
 
 /// The overlay's pairs, laid out so text already on screen never moves
-/// sideways or reflows: the column split is fixed (the original gets
-/// `sourceFraction` of the width, the translation the rest), the size is the
-/// box's fixed caption area, and the newest row sits at the bottom. Every row
-/// is placed; the ones above the area are clipped by the caller, so an old
-/// pair leaves at the top a line at a time as new lines push it up, like the
-/// RealtimeTranslator caption. Every row is three subviews: its band, its
-/// original, its translation.
+/// sideways or reflows: the column split is fixed for a given width (the
+/// original gets `sourceFraction` of it, the translation the rest), the height
+/// is the box's fixed caption area, and the newest row sits at the bottom.
+/// Every row is placed; the ones above the area are clipped by the caller, so
+/// an old pair leaves at the top a line at a time as new lines push it up,
+/// like the RealtimeTranslator caption. Every row is three subviews: its
+/// band, its original, its translation. Each column is at most `columnCap`
+/// high (`NewestLinesColumn`), so the newest row always fits below the top
+/// fade with both its original and its translation.
 // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 struct SteadyPairsLayout: Layout {
     var rowSpacing: CGFloat
     var columnSpacing: CGFloat
     var sourceFraction: CGFloat
+    /// The widest the caption gets, and its height.
     var size: CGSize
     /// Padding inside a row's band.
     var inset = CGSize.zero
 
+    /// The share of the caption's height that fades out at the top.
+    static let topFade: CGFloat = 0.14
+
     struct Columns: Equatable { var source: CGFloat; var translation: CGFloat }
+    struct Column: Equatable { var height: CGFloat; var firstBaseline: CGFloat }
+    struct Row: Equatable { var height: CGFloat; var sourceY: CGFloat; var translationY: CGFloat }
 
     /// Depends only on the width, never on the text.
     func columns(width: CGFloat) -> Columns {
@@ -75,21 +83,47 @@ struct SteadyPairsLayout: Layout {
         return Columns(source: source, translation: inner - source)
     }
 
+    /// The panel can be resized narrower than the box's usual width: the
+    /// caption takes the width it is given, up to `size.width`.
+    func width(proposed: CGFloat?) -> CGFloat {
+        guard let proposed, proposed.isFinite else { return size.width }
+        return max(0, min(proposed, size.width))
+    }
+
+    /// The tallest a column gets: the newest row then fits whole below the fade.
+    var columnCap: CGFloat { max(0, (size.height * (1 - Self.topFade)).rounded(.down) - 2 * inset.height) }
+
+    /// A row's columns share their first baseline. A column at its cap shows
+    /// only its newest lines, so its first baseline is cut off: then both
+    /// columns start at the top of the row.
+    static func row(source: Column, translation: Column, cap: CGFloat, inset: CGFloat) -> Row {
+        let clipped = source.height >= cap - 0.5 || translation.height >= cap - 0.5
+        let valid = source.firstBaseline > 0 && translation.firstBaseline > 0
+        guard !clipped, valid else {
+            return Row(height: max(source.height, translation.height) + 2 * inset, sourceY: 0, translationY: 0)
+        }
+        let baseline = max(source.firstBaseline, translation.firstBaseline)
+        let sourceY = baseline - source.firstBaseline
+        let translationY = baseline - translation.firstBaseline
+        return Row(height: max(sourceY + source.height, translationY + translation.height) + 2 * inset,
+                   sourceY: sourceY, translationY: translationY)
+    }
+
     private func groups(_ subviews: Subviews) -> [Range<Int>] {
         stride(from: 0, to: subviews.count - subviews.count % 3, by: 3).map { $0..<($0 + 3) }
     }
 
-    private func measure(_ subviews: Subviews, _ group: Range<Int>, _ columns: Columns)
-        -> (height: CGFloat, sourceY: CGFloat, translationY: CGFloat) {
+    private func measure(_ subviews: Subviews, _ group: Range<Int>, _ columns: Columns) -> Row {
         let a = subviews[group.lowerBound + 1].dimensions(in: ProposedViewSize(width: columns.source, height: nil))
         let b = subviews[group.lowerBound + 2].dimensions(in: ProposedViewSize(width: columns.translation, height: nil))
-        let baseline = max(a[VerticalAlignment.firstTextBaseline], b[VerticalAlignment.firstTextBaseline])
-        let sourceY = baseline - a[VerticalAlignment.firstTextBaseline]
-        let translationY = baseline - b[VerticalAlignment.firstTextBaseline]
-        return (max(sourceY + a.height, translationY + b.height) + 2 * inset.height, sourceY, translationY)
+        return Self.row(source: Column(height: a.height, firstBaseline: a[VerticalAlignment.firstTextBaseline]),
+                        translation: Column(height: b.height, firstBaseline: b[VerticalAlignment.firstTextBaseline]),
+                        cap: columnCap, inset: inset.height)
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize { size }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: width(proposed: proposal.width), height: size.height)
+    }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let columns = columns(width: bounds.width)
@@ -108,6 +142,22 @@ struct SteadyPairsLayout: Layout {
                 proposal: ProposedViewSize(width: columns.translation, height: nil))
             y -= rowSpacing
         }
+    }
+}
+
+/// A column of one overlay row, at most `cap` high: when the text is taller,
+/// its newest lines show at the bottom and the oldest are cut at the top, so
+/// a long unfinished original never pushes its translation out of sight.
+/// Lines move up only when a new one starts, as in RealtimeTranslator.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+struct NewestLinesColumn: ViewModifier {
+    var cap: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: cap, alignment: .bottomLeading)
+            .clipped()
     }
 }
 

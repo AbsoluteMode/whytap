@@ -326,7 +326,8 @@ final class LiveSubtitleModel: ObservableObject {
             liveID = UUID()
             if lines.count > 40 { lines.removeFirst() }
         }
-        if live != pairer.liveSourceHead { live = pairer.liveSourceHead }
-        if liveTranslation != pairer.liveTranslation { liveTranslation = pairer.liveTranslation }
+        let row = pairer.showLive()
+        if live != row.source { live = row.source }
+        if liveTranslation != row.translation { liveTranslation = row.translation }
     }
 }

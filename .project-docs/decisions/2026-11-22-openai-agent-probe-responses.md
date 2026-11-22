@@ -47,6 +47,13 @@ it.
   OpenAI stays on Chat Completions, as the text features call it.
 - `ModelRegistry.adapterVersion(.openAI, .chatWithTools)` is 2, so a failure
   stored by the old check is not shown again and the model is checked anew.
+  This covers the whole Sol family (gpt-6.2-sol, gpt-6.1-sol, gpt-6-sol: the
+  maintainer saw the same refusal for 6.1-sol). The stored failure also hid
+  6.2-sol from the Agent's own picker (`ModelStatusResolver` leaves out a
+  model whose verdict is "not supported"); with the new version it is listed
+  again without any user step. An Agent that stayed on its old model after
+  the refusal counts as "1 custom", so the next LLM pick asks before moving it,
+  as for any custom model.
 - OpenAI's built-in search can leave internal citation marks in model text
   (private-use characters around `cite` and `turn…`, shown as
   "citeturn138346forecast0"). `NativeAgentFinalAnswer` removes them; source
@@ -72,8 +79,14 @@ it.
   checks, plain text stays on Chat Completions, the new adapter version;
   citation marks removed from a Sol-like answer; an API-only search source
   (`oai-weather`, no URL) makes no link card; the Search row's Agent line.
+- `SharedModelRowsTests`: the maintainer's stored state (Sol refused for tool
+  use by adapter 1, plain text passed, the Agent on Anthropic) lists 6.2-sol,
+  6.1-sol and 6-sol again in the LLM and Agent pickers, and picking 6.2-sol
+  re-checks it and moves the Agent; with the old version 6.2-sol is missing
+  from the Agent picker (the test fails).
 - Live, with the maintainer's OpenAI key from Doppler, 2026-11-22, about
-  $0.05 in total: the new check passes for `gpt-6.2-sol`; the Agent on
+  $0.05 in total: the new check passes for `gpt-6.2-sol`, `gpt-6.1-sol` and
+  `gpt-6-sol`; the Agent on
   `gpt-6.2-sol` answered the Moscow weather question after OpenAI's
   built-in search with no error and no citation marks. The weather came from
   OpenAI's weather API, which has no page URL, so that answer has no link

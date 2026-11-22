@@ -325,6 +325,15 @@ final class ModelProbeTests: XCTestCase {
             let result = await probe.probe(route(.openAI, key: "sk-openai", feature: .agent), use: .chatWithTools, catalog: nil)
             XCTAssertEqual(result, expected, "openai responses \(status)")
         }
+        // The whole Sol family: the check never touches Chat Completions.
+        for model in ["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol"] {
+            let probe = httpProbe { request in
+                request.url?.path == "/v1/chat/completions" ? (400, [:], refusalOnChat) : (200, [:], Data(#"{"status":"completed"}"#.utf8))
+            }
+            let result = await probe.probe(route(.openAI, model: model, key: "sk-openai", feature: .agent), use: .chatWithTools, catalog: nil)
+            XCTAssertEqual(result, .passed, model)
+            XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.path }, ["/v1/responses"], model)
+        }
         let noKey = await httpProbe { _ in (200, [:], Data()) }
             .probe(route(.openAI, key: nil, feature: .agent), use: .chatWithTools, catalog: nil)
         XCTAssertEqual(noKey, .inconclusive(reason: "Key problem"))

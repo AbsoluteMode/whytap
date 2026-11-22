@@ -1030,7 +1030,10 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops the watch. It
   compares with what reached the field (a rich paste's plainText), aligns
-  the take inside the field word by word (DropEditDiff, semi-global, >50%
+  the take inside the field word by word (DropEditDiff: the paste counts
+  once it is seen verbatim, which records the field words around it; later
+  reads compare only the region between them and a changed surrounding is
+  not compared, so a draft around the paste never becomes an edit; >50%
   of the kept words changed = rewrite; words cut from either edge of the
   take, such as a made-up tail, are their own hunks and are not counted;
   WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md) and
@@ -1045,7 +1048,10 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   term written where not said -> remove; deleted spoken word -> Filler;
   DropLearningStats counts why each take did or did not teach anything as
   fixed reason names only (sidekey.dropLearning.stats.v1, local, not backed
-  up, deleted when learning and calibration are off);
+  up, deleted when learning and calibration are off; `suggested` only when
+  the drops really showed, else `suggestion.notShown`; a delivery with no
+  learnable paste is `delivery.<reason>`; a capture refusal such as
+  `axError` belongs to its own take);
   retyped cut filler -> Stop cutting. Translated takes teach nothing. The
   same correction in two takes within 14 days becomes one suggestion; N is
   forever, an expired one starts over; never while the island is not idle;
@@ -1056,8 +1062,10 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   notification). Hidden calibration (sidekey.dropLearning.calibration,
   `defaults write` only): the developer journal, Application
   Support/<bundle id>/drop-learning/calibration.jsonl (0600), one entry
-  per Drop with app, capture refusal or end reason, refusal reasons,
-  candidates with counts, the edited words and whether a drop was shown.
+  per Drop with app, capture refusal or end reason, whether the field was
+  readable and whether the paste aligned, refusal reasons, candidates with
+  counts, the edited words and whether a drop was shown; a watch that saw
+  calibration off is never journaled.
   With learning on it runs beside real learning; with learning off it is
   a dry run with a separate ledger and dry-run Y (WHY:
   .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md); 0700 folder / 0600 single-name file without following

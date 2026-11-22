@@ -138,7 +138,17 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
     func capture(pid: pid_t) -> DropEditFieldHandle? {
         lastRefusal = nil
         guard system.frontmostPID() == pid else { lastRefusal = "notFrontmost"; return nil }
-        guard let element = focusedElement(ofFrontmost: pid) else { lastRefusal = "noFocusedElement"; return nil }
+        let element: AXUIElement
+        switch lookupFocus() {
+        case .failed: lastRefusal = "axError"; return nil
+        case .none: lastRefusal = "noFocusedElement"; return nil
+        case .element(let focused):
+            guard system.elementPID(focused) == pid, system.frontmostPID() == pid else {
+                lastRefusal = "focusInOtherApp"
+                return nil
+            }
+            element = focused
+        }
         if let refusal = DropEditFieldGate.refusal(system.facts(element, pid)) {
             lastRefusal = refusal
             return nil

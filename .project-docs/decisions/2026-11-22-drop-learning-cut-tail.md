@@ -85,6 +85,35 @@ Nothing showed which rule refused, because learning logs nothing.
   without them. Ordinary users never have the switch on; for them the
   disk holds only the ledger hashes and the reason counters.
 
+- **Paste boundaries** (builder review, queue #449). The paste counts
+  only once it is seen verbatim in the field. That first sighting records
+  the field words before and after it, and every later read compares only
+  the region between them, with a global alignment. A read whose
+  surroundings changed is not compared (fail closed). So a draft around
+  the paste, or a draft left after the whole paste was deleted, never
+  becomes a correction, and a fix next to a cut head or before a cut tail
+  inside a draft is still found. Changed words sit next to the kept text;
+  cut pasted words and typed field words are outermost and are separate
+  hunks.
+- **Undo on whole words.** Undoing a whole fired Replace rule or a whole
+  Vocab term, hyphenated or not, is checked before the hyphen part is
+  taken, so it offers the removal of that rule or term.
+- **Real outcomes in counters and journal.** `suggested` is counted only
+  when the drops really showed; when they could not (an agent answer
+  holds the island) it is `suggestion.notShown`. `readable` (the field
+  was read) and `aligned` (the paste was found in it) are separate. A
+  failed accessibility query for the focused element at capture is
+  `axError`, not "no focused element". A capture refusal belongs to the
+  take that asked for it; the next take clears it. Refused deletions and
+  insertions have reasons (`del.*`, `ins.notACutFiller`). A delivery that
+  pasted no learnable text (Whytap's own editor, a failed paste, no
+  learning data) is counted and journaled as `delivery.<reason>`; a take
+  cancelled or failed before any text is not a delivery and is not
+  journaled.
+- **Switching calibration off mid-watch.** A watch that saw calibration
+  off at any read never writes a journal entry, even if calibration is
+  switched on again before the watch ends.
+
 ## Why
 
 - A made-up tail is a known provider failure, and cutting it is the most
@@ -115,6 +144,16 @@ Nothing showed which rule refused, because learning logs nothing.
   including the long cuts, counts against the threshold, the words, the
   drop shown, and a skipped take with its capture refusal). Without
   calibration nothing is journaled. A refused capture names its reason.
+- Builder probes from queue #449 as scenario tests: a fix next to a cut
+  head; a fix before a cut tail inside a draft; deleting the whole paste
+  while a draft survives teaches and journals nothing from the draft;
+  undoing a whole hyphenated Replace rule and Vocab term offers its
+  removal; counters say `suggestion.notShown` when an agent answer hides
+  the drops; refused deletions and insertions have reasons; a readable
+  field without the paste is readable but not aligned; an abandoned
+  capture refusal never explains a later delivery; an edit seen while
+  calibration was off is never journaled; a failed focus query at capture
+  is `axError`.
 - Not verified here: the built app. The acceptance is the same dictation
   in Claude desktop.
 

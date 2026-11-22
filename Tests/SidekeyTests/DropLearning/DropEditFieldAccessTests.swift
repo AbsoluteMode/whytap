@@ -720,3 +720,26 @@ final class DropEditFieldAccessTests: XCTestCase {
         XCTAssertTrue(flagWrites.isEmpty)
     }
 }
+
+// MARK: - Builder review #449 scenario
+
+
+extension DropEditFieldAccessTests {
+    func testCaptureTellsAnAXFailureFromNoFocusedElement() {
+        var focus: DropEditFocus = .failed
+        let access = AXDropEditFieldAccess(system: .init(
+            frontmostPID: { 4242 }, focusedElement: { nil }, elementPID: { _ in nil },
+            isRunning: { _ in true },
+            facts: { _, _ in fatalError("capture must not read metadata") },
+            characterCount: { _ in nil }, string: { _, _ in nil },
+            appFlag: { _, _ in nil }, setAppFlag: { _, _, _ in false },
+            processIdentity: { _ in "fixture@1" }, watch: { _, _ in nil },
+            focus: { focus }
+        ))
+        XCTAssertNil(access.capture(pid: 4242))
+        XCTAssertEqual(access.lastRefusal, "axError")
+        focus = .none
+        XCTAssertNil(access.capture(pid: 4242))
+        XCTAssertEqual(access.lastRefusal, "noFocusedElement")
+    }
+}

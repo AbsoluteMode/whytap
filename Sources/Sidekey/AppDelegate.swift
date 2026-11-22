@@ -1381,6 +1381,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } : nil)
         if pasted, !autoPasteEngine.hasLocalDropTarget, let learning {
             dropLearning.delivered(learning, handle: learningField)
+        } else {
+            // Counted and journaled (calibration) so every delivered Drop
+            // has an entry. WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+            dropLearning.deliverySkipped(
+                autoPasteEngine.hasLocalDropTarget ? "localEditor" : !pasted ? "pasteFailed" : "noLearningData",
+                take: learning
+            )
         }
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {

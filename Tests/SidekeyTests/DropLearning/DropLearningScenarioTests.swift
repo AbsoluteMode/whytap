@@ -1,4 +1,5 @@
 import ApplicationServices
+import Combine
 import XCTest
 @testable import Sidekey
 
@@ -115,7 +116,7 @@ final class DropLearningScenarioTests: XCTestCase {
             clock: { [unowned self] in now.timeIntervalSince1970 },
             appID: { _ in "com.anthropic.claudefordesktop" }
         ))
-        coordinator.onSuggestion = { [unowned self] in suggestions.append($0) }
+        coordinator.onSuggestion = { [unowned self] in suggestions.append($0); return true }
         return coordinator
     }
 
@@ -142,7 +143,23 @@ final class DropLearningScenarioTests: XCTestCase {
     private func runReads(_ coordinator: DropLearningCoordinator, _ take: DropLearningTake) async {
         let handle = coordinator.prepareDelivery(targetPID: 4242)
         coordinator.delivered(take, handle: handle)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
+    }
+
+    /// Waits for the watch to end, but fails instead of hanging: a test whose
+    /// clock is held never times the watch out on its own.
+    private func waitForObservation(_ coordinator: DropLearningCoordinator,
+                                    file: StaticString = #filePath, line: UInt = #line) async {
+        let watched = Task { await coordinator.waitForObservation() }
+        let deadline = Date().addingTimeInterval(5)
+        while coordinator.isObserving, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        if coordinator.isObserving {
+            XCTFail("the field is still watched", file: file, line: line)
+            coordinator.stopWatching()
+        }
+        await watched.value
     }
 
     /// Lets the observation's first read run.
@@ -597,7 +614,7 @@ final class DropLearningScenarioTests: XCTestCase {
             XCTAssertNotNil(pressReturn, "Return is watched only while a field is")
             field.reads = [""]
             pressReturn?()
-            await coordinator.waitForObservation()
+            await waitForObservation(coordinator)
             XCTAssertNil(pressReturn, "the Return watch is removed with the observation")
         }
         XCTAssertEqual(suggestions, [DropLearningSuggestion(candidate: .vocabAdd(term: "Claude"), dryRun: false)])
@@ -618,7 +635,7 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
         field.reads = [""]
         field.onChange?(.value)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
     }
 
@@ -633,7 +650,7 @@ final class DropLearningScenarioTests: XCTestCase {
         field.onChange?(.value)
         field.focusMovedAfterCapture = true
         field.onChange?(.focusLeft)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
         XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
     }
@@ -646,7 +663,7 @@ final class DropLearningScenarioTests: XCTestCase {
         field.reads = ["Позвони Claude"]
         field.onChange?(.value)
         field.onChange?(.removed)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
     }
 
@@ -678,7 +695,7 @@ final class DropLearningScenarioTests: XCTestCase {
         field.onChange?(.value)
         let reads = field.readCount
         coordinator.takeStarted(targetPID: 1)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
         XCTAssertEqual(field.readCount, reads, "nothing is read after the new take starts")
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
     }
@@ -697,7 +714,7 @@ final class DropLearningScenarioTests: XCTestCase {
             field.onChange?(.value)
             field.reads = [nil]
             field.onChange?(.value)
-            await coordinator.waitForObservation()
+            await waitForObservation(coordinator)
         }
         XCTAssertTrue(suggestions.isEmpty)
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
@@ -766,13 +783,13 @@ final class DropLearningScenarioTests: XCTestCase {
         let coordinator = makeCoordinator(sleep: Self.held)
         coordinator.takeStarted(targetPID: 4242)
         XCTAssertEqual(field.exposed, 1)
-        field.reads = ["Позвони Claude"]
+        field.reads = ["Позвони клоду"]
         coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
         await settle()
         XCTAssertEqual(field.released, 0, "on while the field is watched")
         field.reads = [""]
         field.onChange?(.value)
-        await coordinator.waitForObservation()
+        await waitForObservation(coordinator)
         XCTAssertEqual(field.released, 1)
     }
 
@@ -960,5 +977,155 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: DropLearningSettings.calibrationKey))
         XCTAssertNil(defaults.object(forKey: DropLearningSettings.calibrationLedgerKey))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+}
+
+// MARK: - Builder review #449 scenarios
+
+
+private final class NoDropKeys: DropLearningKeyCapturing {
+    func start(onAnswer: @escaping @MainActor (DropLearningDropsModel.Button) -> Void,
+               onControl: @escaping @MainActor (Bool) -> Void) {}
+    func stop() {}
+}
+
+extension DropLearningScenarioTests {
+    func testAFixNextToACutHeadCounts() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            await run(coordinator, take(pasted: "made up filler tokens Jeb keep model"), field: "Jev keep model")
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabAdd(term: "Jev")])
+    }
+
+    func testDeletingTheWholeTakeTeachesNothingFromTheDraftAroundIt() async {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        let original = "Open Kepler Jeb"
+        let draft = "Kepler Jev needs another report"
+        for _ in 0..<2 {
+            field.reads = [original + " " + draft, draft, ""]
+            await runReads(coordinator, take(pasted: original))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        let log = try? String(contentsOf: journalURL, encoding: .utf8)
+        XCTAssertFalse(log?.contains("Jev") ?? false, "no correction words come from a surviving draft")
+    }
+
+    func testAFixBeforeACutTailInsideADraftCounts() async {
+        let coordinator = makeCoordinator()
+        let original = "keep model Jeb made up filler tokens"
+        for _ in 0..<2 {
+            field.reads = ["earlier note " + original + " following draft sentence",
+                           "earlier note keep model Jev following draft sentence", ""]
+            await runReads(coordinator, take(pasted: original))
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabAdd(term: "Jev")])
+    }
+
+    func testUndoingAWholeHyphenatedRuleOffersItsRemoval() async {
+        let oldRule = DropReplacement(heard: "geff-model", wanted: "jev-model")
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            await run(coordinator,
+                      take(pasted: "Keep jev-model here", raw: "Keep geff-model here", fired: [oldRule]),
+                      field: "Keep geff-model here")
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.replaceRemove(oldRule)])
+    }
+
+    func testUndoingAWholeHyphenatedVocabTermOffersItsRemoval() async {
+        VocabularyCache(defaults: defaults).add("jev-model")
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            await run(coordinator, take(pasted: "Keep jev-model here"), field: "Keep geff-model here")
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabRemove(term: "jev-model")])
+    }
+
+    func testCountersSayNotShownWhenAnAgentAnswerHidesTheDrops() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        let model = DropLearningDropsModel(schedule: { _, _ in {} })
+        let controller = DropLearningDropsController(
+            coordinator: coordinator, model: model, keys: NoDropKeys(), present: { _ in },
+            phase: Just(AppPhase.idle).eraseToAnyPublisher(),
+            agentPhase: Just(AgentPhase.idle).eraseToAnyPublisher(),
+            agentAnswerVisible: Just(true).eraseToAnyPublisher()
+        )
+        for _ in 0..<2 {
+            await run(coordinator, take(pasted: "Open model Jeb"), field: "Open model Jev")
+        }
+        withExtendedLifetime(controller) { XCTAssertFalse(model.isVisible) }
+        let text = try String(contentsOf: journalURL, encoding: .utf8)
+        XCTAssertFalse(text.contains("\"shown\":\"suggested\""))
+        XCTAssertNil(DropLearningStats(defaults: defaults).counts["suggested"], "no UI was visible")
+    }
+
+    func testRefusedDeletionsAndInsertionsHaveReasons() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        await run(coordinator, take(pasted: "Open model 42 today"), field: "Open model today")
+        await run(coordinator, take(pasted: "Open model today"), field: "Open next model today")
+        let log = try String(contentsOf: journalURL, encoding: .utf8).split(separator: "\n")
+        for line in log {
+            let entry = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            let notes = try XCTUnwrap(entry["notes"] as? [String])
+            XCTAssertGreaterThan(notes.count, 1, "a changed hunk failed a classifier gate; the log must say why")
+        }
+    }
+
+    func testAReadableFieldWithoutThePasteIsReadableButNotAligned() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        field.reads = ["The editor is open and readable"]
+        await runReads(coordinator, take(pasted: "Open model Jeb"))
+        let text = try String(contentsOf: journalURL, encoding: .utf8)
+        XCTAssertTrue(text.contains("\"reason\":\"notPasted\""))
+        XCTAssertTrue(text.contains("\"readable\":true"), "the field transfer succeeded; alignment failed")
+    }
+}
+
+extension DropLearningScenarioTests {
+    func testAnAbandonedCaptureNeverExplainsALaterDelivery() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        field.capturable = false
+        _ = coordinator.prepareDelivery(targetPID: 4242)
+        // The first paste aborts after its capture hook. The next delivery
+        // had no hook (the preference was off at dispatch), then it enables.
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        defaults.set(false, forKey: DropLearningSettings.calibrationKey)
+        coordinator.takeStarted(targetPID: 4343)
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        coordinator.delivered(take(pasted: "Open model Jeb"), handle: nil)
+        let text = try String(contentsOf: journalURL, encoding: .utf8)
+        XCTAssertTrue(text.contains("\"reason\":\"noCapture\""))
+        XCTAssertFalse(text.contains("\"reason\":\"secureField\""))
+    }
+}
+
+extension DropLearningScenarioTests {
+    func testAnEditSeenWhileCalibrationWasOffIsNeverJournaled() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator(sleep: Self.held)
+        let original = "Open model Jeb"
+        field.reads = [original]
+        let handle = coordinator.prepareDelivery(targetPID: 4242)
+        coordinator.delivered(take(pasted: original), handle: handle)
+        await settle()
+        defaults.set(false, forKey: DropLearningSettings.calibrationKey)
+        coordinator.settingsChanged()
+        field.reads = ["Open model Jev"]
+        field.onChange?(.value)
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        coordinator.settingsChanged()
+        field.reads = [""]
+        field.onChange?(.value)
+        await waitForObservation(coordinator)
+        let text = (try? String(contentsOf: journalURL, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.contains("Jev"), "edits observed while calibration was off must not be journaled")
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 1,
+                       "ordinary learning remains enabled")
     }
 }

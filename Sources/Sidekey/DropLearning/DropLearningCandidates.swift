@@ -88,11 +88,14 @@ enum DropLearningClassifier {
     /// `note` hears why each edit did or did not become a candidate, as
     /// fixed reason names with no words (DropLearningStats).
     static func candidates(
-        take: DropLearningTake, field: String, lists: DropLearningLists, lexicon: DropWordLexicon,
-        note: (String) -> Void = { _ in }
+        take: DropLearningTake, field: String, context: DropEditDiff.Context? = nil,
+        lists: DropLearningLists, lexicon: DropWordLexicon, note: (String) -> Void = { _ in }
     ) -> [DropLearningCandidate] {
         guard !take.translated else { note("take.translated"); return [] }
-        guard let diff = DropEditDiff.diff(pasted: take.pasted, field: field) else { note("take.rewrite"); return [] }
+        guard let diff = DropEditDiff.diff(pasted: take.pasted, field: field, context: context) else {
+            note("take.rewrite")
+            return []
+        }
         if diff.hunks.isEmpty { note("take.unchanged") }
         let rawTokens = DropEditToken.tokenize(take.raw)
         let rawKeys = rawTokens.map(\.key)
@@ -105,7 +108,7 @@ enum DropLearningClassifier {
         }
         for hunk in diff.hunks {
             guard hunk.removed.count <= maxHunkWords, hunk.inserted.count <= maxHunkWords else {
-                note(hunk.inserted.isEmpty ? "cut.long" : "edit.tooLong")
+                note(hunk.inserted.isEmpty ? "cut.long" : hunk.removed.isEmpty ? "typed.long" : "edit.tooLong")
                 continue
             }
             switch (hunk.removed.isEmpty, hunk.inserted.isEmpty) {
@@ -113,16 +116,16 @@ enum DropLearningClassifier {
                 add(substitution(hunk, take: take, rawKeys: rawKeys, rawParts: rawParts, lists: lists,
                                  lexicon: lexicon, note: note))
             case (false, true):
-                add(deletion(hunk.removed, take: take, rawKeys: rawKeys, lists: lists))
+                add(deletion(hunk.removed, take: take, rawKeys: rawKeys, lists: lists, note: note))
             case (true, false):
-                add(insertion(hunk.inserted, take: take))
+                add(insertion(hunk.inserted, take: take, note: note))
             case (true, true):
                 break
             }
         }
         // A filler typed back right before or after the take.
         for edge in [diff.wordBefore, diff.wordAfter].compactMap({ $0 }) {
-            add(insertion([edge], take: take))
+            add(insertion([edge], take: take, note: { _ in }))
         }
         return result
     }
@@ -135,6 +138,12 @@ enum DropLearningClassifier {
     ) -> DropLearningCandidate? {
         var wrong = phrase(hunk.removed), right = phrase(hunk.inserted)
         var wrongInRaw = contains(rawKeys, phraseKeys: hunk.removed.map(\.key))
+        // Undoing our own change is judged on the whole words first: a rule
+        // or Vocab term may be a whole hyphenated word.
+        if let undo = undo(wrong: wrong, right: right, take: take, lists: lists) {
+            note("sub.undo")
+            return undo
+        }
         // One part of a hyphenated word fixed ("джефф-модели" ->
         // "jev-модели"): the term is that part ("jev").
         if let (part, fixed) = changedHyphenPart(wrong, right) {
@@ -147,13 +156,9 @@ enum DropLearningClassifier {
         guard !isInflection(wrongKey, rightKey) else { note("sub.inflection"); return nil }
         guard soundsAlike(wrong, right) else { note("sub.notSoundAlike"); return nil }
 
-        // The user undoes one of our replacements.
-        if let rule = take.firedReplacements.first(where: { DropEditToken.key($0.wanted) == wrongKey }) {
-            return .replaceRemove(rule)
-        }
-        // A Vocab term makes the provider write it where it was not said.
-        if let term = lists.vocabulary.first(where: { DropEditToken.key($0) == wrongKey }) {
-            return .vocabRemove(term: term)
+        if let undo = undo(wrong: wrong, right: right, take: take, lists: lists) {
+            note("sub.undo")
+            return undo
         }
         let replacement = replaceCandidate(heard: wrong, wanted: right, lists: lists, lexicon: lexicon)
         // Smart can make its own mistakes; Vocab only helps with what the
@@ -176,6 +181,22 @@ enum DropLearningClassifier {
         return .vocabFull(term: right, usage: usage)
     }
 
+    /// The user undoes one of our replacements, or a Vocab term made the
+    /// provider write it where it was not said.
+    private static func undo(
+        wrong: String, right: String, take: DropLearningTake, lists: DropLearningLists
+    ) -> DropLearningCandidate? {
+        let wrongKey = DropEditToken.key(wrong), rightKey = DropEditToken.key(right)
+        guard wrongKey != rightKey, !isInflection(wrongKey, rightKey), soundsAlike(wrong, right) else { return nil }
+        if let rule = take.firedReplacements.first(where: { DropEditToken.key($0.wanted) == wrongKey }) {
+            return .replaceRemove(rule)
+        }
+        if let term = lists.vocabulary.first(where: { DropEditToken.key($0) == wrongKey }) {
+            return .vocabRemove(term: term)
+        }
+        return nil
+    }
+
     /// Replace never rewrites an ordinary word: it would fire in every text.
     private static func replaceCandidate(
         heard: String, wanted: String, lists: DropLearningLists, lexicon: DropWordLexicon
@@ -190,24 +211,33 @@ enum DropLearningClassifier {
     // MARK: - Deletion: a filler the user keeps cutting
 
     private static func deletion(
-        _ removed: [DropEditToken], take: DropLearningTake, rawKeys: [String], lists: DropLearningLists
+        _ removed: [DropEditToken], take: DropLearningTake, rawKeys: [String], lists: DropLearningLists,
+        note: (String) -> Void
     ) -> DropLearningCandidate? {
         let term = phrase(removed).lowercased()
-        guard removed.count <= maxFillerWords, term.count <= maxFillerLength,
-              !term.contains(where: \.isNumber),
-              contains(rawKeys, phraseKeys: removed.map(\.key)),
-              !lists.vocabulary.contains(where: { DropEditToken.key($0) == DropEditToken.key(term) }),
-              !lists.fillers.contains(where: { DropEditToken.key($0) == DropEditToken.key(term) }),
-              !take.firedReplacements.contains(where: { DropEditToken.key($0.wanted) == DropEditToken.key(term) })
-        else { return nil }
+        let key = DropEditToken.key(term)
+        let refusal: String? =
+            removed.count > maxFillerWords || term.count > maxFillerLength ? "del.tooLong"
+            : term.contains(where: \.isNumber) ? "del.hasNumber"
+            : !contains(rawKeys, phraseKeys: removed.map(\.key)) ? "del.notInRaw"
+            : lists.vocabulary.contains(where: { DropEditToken.key($0) == key }) ? "del.inVocab"
+            : lists.fillers.contains(where: { DropEditToken.key($0) == key }) ? "del.alreadyFiller"
+            : take.firedReplacements.contains(where: { DropEditToken.key($0.wanted) == key }) ? "del.ourReplacement"
+            : nil
+        if let refusal { note(refusal); return nil }
         return .fillerAdd(term: term)
     }
 
     // MARK: - Insertion: a cut filler typed back
 
-    private static func insertion(_ inserted: [DropEditToken], take: DropLearningTake) -> DropLearningCandidate? {
+    private static func insertion(
+        _ inserted: [DropEditToken], take: DropLearningTake, note: (String) -> Void
+    ) -> DropLearningCandidate? {
         let key = DropEditToken.key(phrase(inserted))
-        guard let term = take.firedFillers.first(where: { DropEditToken.key($0) == key }) else { return nil }
+        guard let term = take.firedFillers.first(where: { DropEditToken.key($0) == key }) else {
+            note("ins.notACutFiller")
+            return nil
+        }
         return .fillerRemove(term: term)
     }
 

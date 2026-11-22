@@ -78,8 +78,8 @@ final class ProviderBatchRouteTests: XCTestCase {
     }
 
     // Breaks if a built-in provider could be reached without a key.
-    // OpenAI: the file endpoint on api.openai.com with the shared key; the
-    // live-only models map to gpt-transcribe, a file-capable one is kept.
+    // OpenAI: the file endpoint on api.openai.com with the shared key;
+    // recorded audio always goes to gpt-transcribe, whatever the route names.
     // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     func test_openAI_batch_uses_its_file_model_and_key() {
         XCTAssertEqual(
@@ -90,7 +90,7 @@ final class ProviderBatchRouteTests: XCTestCase {
             .openAI(apiKey: "oa-key", model: "gpt-transcribe"))
         XCTAssertEqual(
             ProviderBatchRoute.make(for: resolved(.openAI, model: "gpt-4o-mini-transcribe", apiKey: "oa-key")),
-            .openAI(apiKey: "oa-key", model: "gpt-4o-mini-transcribe"))
+            .openAI(apiKey: "oa-key", model: "gpt-transcribe"))
         XCTAssertEqual(ProviderBatchRoute.openAIEndpoint.absoluteString,
                        "https://api.openai.com/v1/audio/transcriptions")
     }

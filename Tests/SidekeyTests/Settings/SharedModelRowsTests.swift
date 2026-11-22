@@ -221,11 +221,13 @@ final class SharedModelRowsTests: XCTestCase {
         let env = try makeEnv(snapshots: [.openAI: fresh(catalog)], keyed: [.openAI])
         let vm = env.makeViewModel()
 
+        // One live model on offer, with its price; the catalog's other
+        // transcription models are not.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
         let section = try XCTUnwrap(vm.sections(for: SharedModelKind.speech.pickerFeature).first { $0.account == .openAI })
-        XCTAssertEqual(Set(section.options.map(\.model)),
-                       ["gpt-live-transcribe", "gpt-realtime-whisper", "gpt-4o-mini-transcribe"])
-        XCTAssertEqual(section.options.first { $0.model == "gpt-4o-mini-transcribe" }?.hint, "text after each pause")
-        XCTAssertNil(section.options.first { $0.model == "gpt-live-transcribe" }?.hint)
+        XCTAssertEqual(section.options.map(\.model), ["gpt-live-transcribe"])
+        XCTAssertNil(section.options.first?.hint)
+        XCTAssertEqual(section.options.first?.priceLabel, "$0.017 per min")
 
         let picked = await vm.selectShared(model: ModelRegistry.openAILiveModel, account: .openAI,
                                            kind: .speech, replaceCustom: false)

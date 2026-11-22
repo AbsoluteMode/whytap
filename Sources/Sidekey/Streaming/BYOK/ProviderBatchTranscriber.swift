@@ -42,9 +42,10 @@ enum ProviderBatchRoute: Equatable, Sendable {
         case .thisMac:
             return .onDevice(model: route.model)
         case .openAI:
-            // The live-only models are not served by the file endpoint.
+            // Recorded audio always goes to `gpt-transcribe`: the live model
+            // is not served by the file endpoint.
             guard let key else { return nil }
-            return .openAI(apiKey: key, model: ModelRegistry.openAIRecordedModel(for: route.model))
+            return .openAI(apiKey: key, model: ModelRegistry.openAIRecordedModel)
         case .openRouter, .anthropic:
             return nil
         }

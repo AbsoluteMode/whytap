@@ -381,6 +381,26 @@ final class AIRoutingStore: ObservableObject {
         commit(updated)
     }
 
+    /// OpenAI speech offers two models on the owner's decision: a route saved
+    /// on another OpenAI transcription model (`gpt-realtime-whisper`, the
+    /// deprecated `gpt-4o-*transcribe` and `whisper-1`, or `gpt-transcribe` on
+    /// a live feature) moves to `gpt-live-transcribe` on a live feature and to
+    /// `gpt-transcribe` on a recorded one, on the same account and key. Not
+    /// version-gated, so a route restored from an older backup moves too.
+    /// Text routes on OpenAI and every other provider stay as they are.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func narrowOpenAISpeechModelsIfNeeded() {
+        guard pendingBackup == nil else { return }
+        var updated = stateWithSubtitleSeparation
+        for (key, route) in updated.routes where route.account == .openAI {
+            guard let feature = AIFeature(rawValue: key),
+                  let newer = ModelRegistry.openAISpeechReplacement(for: route.model, mode: feature.mode)
+            else { continue }
+            updated.routes[key]?.model = newer
+        }
+        commit(updated)
+    }
+
     // MARK: - Persistence
 
     /// Reads entry by entry: a route or server this build does not know (an

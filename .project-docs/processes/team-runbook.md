@@ -137,4 +137,3 @@ feature sessions with regular checked integration and one working application.
   requirements; report incompatible product choices or unresolved risks.
 
 WHY: .project-docs/decisions/2026-10-19-shared-working-app.md
-

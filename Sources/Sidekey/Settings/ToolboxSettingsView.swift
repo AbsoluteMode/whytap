@@ -24,7 +24,7 @@ struct ToolboxSettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Live hotkey config so the Drop-mode caption names the real Drop
     // trigger (post-cutover: "Hold Space") instead of a hardcoded ⌥ /.
-    @ObservedObject private var hotkeys: HotkeyPreferences = .shared
+    @ObservedObject private var hotkeys: HotkeyPreferences
     let deps: ToolboxDeps
 
     @State private var selectedTool: HoverTool? = nil
@@ -36,10 +36,12 @@ struct ToolboxSettingsView: View {
     @State private var selectedInputLanguage: AppLanguage?
     @State private var selectedOutputLanguage: AppLanguage?
 
-    init(hoverStore: HoverLayoutStore, selection: SettingsWindowSelection, deps: ToolboxDeps) {
+    init(hoverStore: HoverLayoutStore, selection: SettingsWindowSelection, deps: ToolboxDeps,
+         hotkeys: HotkeyPreferences = .shared) {
         self.hoverStore = hoverStore
         self.selection = selection
         self.deps = deps
+        self.hotkeys = hotkeys
         _vocabVM = StateObject(wrappedValue: IslandVocabularyViewModel(
             vocabulary: deps.vocabulary()))
         _fillerVM = StateObject(wrappedValue: IslandFillerViewModel())
@@ -262,15 +264,23 @@ struct ToolboxSettingsView: View {
                 .tracking(0.9)
                 .foregroundStyle(MacSettingsTheme.text2)
 
-            ToolboxToolViewport {
+            VStack(alignment: .leading, spacing: 10) {
                 if let tool = selectedTool {
-                    rightPaneContent(for: tool)
+                    // Title and Hotkey stay pinned above the tool's own
+                    // panel, so the shortcut is visible without scrolling.
+                    toolHeader(for: tool)
+                    ToolboxHotkeyBlock(tool: tool, preferences: hotkeys)
+                    Divider()
+                        .background(MacSettingsTheme.hover)
+                    ToolboxToolViewport {
+                        rightPaneContent(for: tool)
+                    }
                 } else {
                     rightPanePlaceholder
                 }
             }
             .id(selectedTool)
-            .padding(16)
+            .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(MacSettingsTheme.bgCard)
@@ -294,41 +304,39 @@ struct ToolboxSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func toolHeader(for tool: HoverTool) -> some View {
+        let info = HoverToolRegistry.info(for: tool)
+        return HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(MacSettingsTheme.hover)
+                    .frame(width: 26, height: 26)
+                Image(systemName: info.sfSymbol)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(MacSettingsTheme.text)
+            }
+            Text(info.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text)
+            Spacer(minLength: 0)
+            if tool != .settings {
+                let added = hoverStore.slots.contains(tool)
+                Button {
+                    if added { hoverStore.removeTool(tool) }
+                    else { hoverStore.placeTool(tool, at: hoverStore.lockSlotIndex) }
+                } label: {
+                    Image(systemName: added ? "minus.circle" : "plus.circle")
+                }
+                .buttonStyle(.plain)
+                .help(added ? "Remove from hover" : "Add to hover")
+                .accessibilityLabel(added ? "Remove \(info.title) from hover" : "Add \(info.title) to hover")
+            }
+        }
+    }
+
     @ViewBuilder
     private func rightPaneContent(for tool: HoverTool) -> some View {
-        let info = HoverToolRegistry.info(for: tool)
-
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(MacSettingsTheme.hover)
-                        .frame(width: 32, height: 32)
-                    Image(systemName: info.sfSymbol)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(MacSettingsTheme.text)
-                }
-                Text(info.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text)
-                Spacer(minLength: 0)
-                if tool != .settings {
-                    let added = hoverStore.slots.contains(tool)
-                    Button {
-                        if added { hoverStore.removeTool(tool) }
-                        else { hoverStore.placeTool(tool, at: hoverStore.lockSlotIndex) }
-                    } label: {
-                        Image(systemName: added ? "minus.circle" : "plus.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .help(added ? "Remove from hover" : "Add to hover")
-                    .accessibilityLabel(added ? "Remove \(info.title) from hover" : "Add \(info.title) to hover")
-                }
-            }
-
-            Divider()
-                .background(MacSettingsTheme.hover)
-
+        VStack(alignment: .leading, spacing: 10) {
             switch tool {
             case .vocab:
                 IslandVocabularyEditorPanel(viewModel: vocabVM)
@@ -424,7 +432,7 @@ struct ToolboxSettingsView: View {
     }
 
     private var dropModePane: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Transcription speed for Drop (\(dropTriggerLabel)).")
                 .font(.system(size: 12))
                 .foregroundStyle(MacSettingsTheme.text2)
@@ -493,7 +501,7 @@ struct ToolboxSettingsView: View {
     }
 
     private func actionPane(_ tool: HoverTool, title: String, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(HoverToolRegistry.info(for: tool).description)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -540,13 +548,16 @@ struct ToolboxWorkspace<Header: View, Catalog: View, Tool: View>: View {
 
 /// Small Settings windows scroll the mini app instead of compressing its controls.
 struct ToolboxToolViewport<Content: View>: View {
+    /// Title and Hotkey sit above the viewport now, so the panel needs less.
+    static var minimumContentHeight: CGFloat { 260 }
     @ViewBuilder var content: Content
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView(.vertical) {
                 content
-                    .frame(maxWidth: .infinity, minHeight: max(330, geometry.size.height), alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: max(Self.minimumContentHeight, geometry.size.height),
+                           alignment: .top)
             }
         }
     }
@@ -694,6 +705,22 @@ struct ToolboxTileView: View {
     let onTap: () -> Void
 
     private static let tileSize: CGFloat = 56
+    private static let pressSlop: CGFloat = 4
+    @State private var isHovered = false
+    @GestureState private var isPressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Hover and press tint over the circle: MacButton's 10 % / 18 %.
+    static func highlightOpacity(hovered: Bool, pressed: Bool) -> Double {
+        pressed ? 0.18 : hovered ? 0.10 : 0
+    }
+    /// Accent wash behind the symbol of the selected tile.
+    static let selectedWashOpacity: Double = 0.2
+
+    private var symbolColor: Color {
+        if isSelected { return MacSettingsTheme.accent }
+        return isAdded ? MacSettingsTheme.text2 : MacSettingsTheme.text
+    }
 
     init(
         title: String,
@@ -721,22 +748,30 @@ struct ToolboxTileView: View {
         // trait restores VoiceOver semantics the Button gave us for free.
         VStack(spacing: 6) {
             ZStack {
+                // Selection is a soft accent wash, not an outline: the click
+                // used to leave the native focus ring as a thick rectangle
+                // around circle and caption on top of an accent stroke.
+                // WHY: .project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md
                 Circle()
                     .fill(isSelected
-                          ? MacSettingsTheme.selection
+                          ? MacSettingsTheme.accent.opacity(Self.selectedWashOpacity)
                           : MacSettingsTheme.hover)
                     .overlay(
                         Circle()
-                            .strokeBorder(isSelected
-                                          ? MacSettingsTheme.accent
-                                          : MacSettingsTheme.sepStrong,
-                                          lineWidth: 1)
+                            .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 1)
+                            .opacity(isSelected ? 0 : 1)
+                    )
+                    .overlay(
+                        // Hover and press over the whole tile tint the circle,
+                        // as MacButton does: selection and focus stay distinct.
+                        Circle().fill(MacSettingsTheme.text.opacity(Self.highlightOpacity(
+                            hovered: isHovered, pressed: isPressed)))
                     )
                     .frame(width: Self.tileSize, height: Self.tileSize)
 
                 Image(systemName: sfSymbol)
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(isAdded ? MacSettingsTheme.text2 : MacSettingsTheme.text)
+                    .foregroundStyle(symbolColor)
 
                 if let badge {
                     Text(badge)
@@ -770,17 +805,30 @@ struct ToolboxTileView: View {
             }
 
             Text(title.uppercased())
-                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                .font(.system(size: 8.5, weight: isSelected ? .semibold : .medium, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(isSelected ? MacSettingsTheme.text : MacSettingsTheme.text2)
+                .foregroundStyle(isSelected || isHovered ? MacSettingsTheme.text : MacSettingsTheme.text2)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .frame(width: Self.tileSize, height: 26)
         }
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
-        .focusable()
+        // Pressed state only: the gesture never completes, so the tap above
+        // still selects; release, or moving more than a few points (a drag),
+        // ends it and `@GestureState` resets the tint.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: .infinity, maximumDistance: Self.pressSlop)
+                .updating($isPressed) { pressing, state, _ in state = pressing }
+        )
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: isHovered)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: isPressed)
+        // Like a native button: reached by keyboard navigation, never focused
+        // by a click, and its focus ring follows the circle, not the tile.
+        .focusable(interactions: .activate)
+        .contentShape(.focusEffect, ToolboxTileFocusShape(diameter: Self.tileSize))
         .onKeyPress(.return) { onTap(); return .handled }
         .onKeyPress(.space) { onTap(); return .handled }
         .accessibilityAction { onTap() }
@@ -788,5 +836,15 @@ struct ToolboxTileView: View {
         .accessibilityLabel(title)
         .accessibilityValue(isAdded ? "Added to hover" : "")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// The tile's circle at the top of its frame: the shape of its focus ring.
+struct ToolboxTileFocusShape: Shape {
+    let diameter: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(ellipseIn: CGRect(x: rect.midX - diameter / 2, y: rect.minY,
+                               width: diameter, height: diameter))
     }
 }

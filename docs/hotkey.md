@@ -246,6 +246,10 @@ Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a
 shortcut beside a named function and Save; remove it with the clear button and
 Save. Escape cancels recording, Revert discards the draft, and Reset to defaults
 clears optional tool bindings. New installs do not reserve Option 1–5.
+Settings → Toolbox also sets the selected tool's shortcut in the Hotkey block
+at the top of its pane: Set, Change or remove, saved at once through the same
+`HotkeyPreferences.apply` path, conflict check and recorder
+(`HotkeyRecordingSession`); a conflicting key saves nothing and names its owner.
 
 Bindings use stable tool IDs in `HotkeyConfiguration.toolShortcuts` and
 `hotkeys.toolShortcuts.v1`. Moving or removing a tile never changes its shortcut;

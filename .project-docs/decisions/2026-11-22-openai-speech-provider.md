@@ -2,7 +2,7 @@
 id: openai-speech-provider-2026-11-22
 type: decision
 title: OpenAI is a speech provider again, on the shared OpenAI key and its own host
-summary: Drop, Agent voice and Voice search can run on OpenAI's realtime transcription (gpt-live-transcribe by default, gpt-realtime-whisper, and the turn-based catalog models through server VAD) with the key the OpenAI LLM routes already use; the batch rung uses /v1/audio/transcriptions; Meetings get no OpenAI model; a legacy OpenAI choice migrates to OpenAI instead of Soniox.
+summary: Drop, Agent voice and Voice search can run on OpenAI's realtime transcription with gpt-live-transcribe, the one live OpenAI model offered, with the key the OpenAI LLM routes already use; recorded audio goes to gpt-transcribe; routes on the other OpenAI transcription models move to these two; the batch rung uses /v1/audio/transcriptions; Meetings get no OpenAI model; a legacy OpenAI choice migrates to OpenAI instead of Soniox.
 status: confirmed
 tags: [byok, speech, openai, realtime, routing, privacy]
 canonical_for: [openai-speech-provider]
@@ -10,6 +10,9 @@ verified_at: 2026-11-22
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer asked why the OpenAI models were missing from the Speech picker, saying they needed to test how the models behave in the Dynamic Island, and then approved bringing OpenAI back, through the orchestrating session (ORCH-TASK 73).
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-22, after testing gpt-live-transcribe in build 1711 (very accurate and smooth, in his words), the maintainer approved narrowing OpenAI speech to gpt-live-transcribe for live dictation and gpt-transcribe for recorded audio, through the orchestrating session (ORCH-TASK 73, revision 3).
     confirmed_at: 2026-11-22
   - type: url
     reference: https://developers.openai.com/api/docs/guides/realtime-transcription (with the speech-to-text guide, deprecations and pricing pages), read 2026-11-22.
@@ -20,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/BYOK/OpenAIRealtimeAdapterTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-18-no-default-realtime-host.md, 2026-11-22-shared-model-rows.md]
+related: [2026-10-18-no-default-realtime-host.md, 2026-11-22-shared-model-rows.md, 2026-11-22-speech-model-prices.md]
 ---
 
 # OpenAI is a speech provider again
@@ -52,13 +55,23 @@ The maintainer wants to try OpenAI's speech models in the island.
   (`wss://api.openai.com/v1/realtime?intent=transcription`), only from a route
   on the OpenAI account. A server route keeps `openAIRealtime(baseURL:)`
   without a default host.
-- Models: `gpt-live-transcribe` (registry, recommended) and
-  `gpt-realtime-whisper` (registry) stream words within one turn: push-to-talk,
-  one commit when the take ends. The catalog's turn-based models
-  (`gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`,
-  `whisper-1`) run with server VAD: OpenAI commits a turn at every pause, so
-  text appears after each pause (the picker says "text after each pause"), and
-  the take's end commits the rest. The diarizing model is left out.
+- Models: two, on the maintainer's decision after testing the first build.
+  `gpt-live-transcribe` (registry) streams words within one turn for every
+  live feature: push-to-talk, one commit when the take ends. `gpt-transcribe`
+  (registry, recorded) takes Drop's batch rung and Retry. The pickers offer
+  only these (`ModelRegistry.offersOnlyBuiltInModels`); the catalog leaves
+  out `gpt-realtime-whisper`, the deprecated `gpt-4o-transcribe`,
+  `gpt-4o-mini-transcribe`, `whisper-1` and the diarizing model.
+- A saved route on any of those, or on `gpt-transcribe` for a live feature,
+  moves at every launch (`AIRoutingStore.narrowOpenAISpeechModelsIfNeeded`)
+  to `gpt-live-transcribe` on a live feature and `gpt-transcribe` on a
+  recorded one, on the same account and key; text routes on OpenAI stay. The
+  row then reads as a working one, with no check to repeat.
+- The adapter still runs a turn-based model with server VAD (OpenAI commits
+  a turn at every pause, text appears after each pause, the picker says
+  "text after each pause", the take's end commits the rest). The pickers no
+  longer offer one; the path stays for a route the launch move cannot rewrite
+  (a routing document waiting for its backup copy is not rewritten).
 - Session fields follow the model, per OpenAI's guide: `languages` and
   `keywords` for `gpt-live-transcribe`, `languages` and `prompt` for
   `gpt-transcribe`, no prompt for `gpt-realtime-whisper`, `language` and
@@ -92,18 +105,19 @@ The maintainer wants to try OpenAI's speech models in the island.
 - Logs name only allowlisted error codes and event types (`unlisted`,
   `other` otherwise): a server can put any text in those fields.
 - Batch rung, Retry and agent batch voice: `/v1/audio/transcriptions` on
-  api.openai.com with the shared key; the live-only models map to
-  `gpt-transcribe`, a file-capable model is kept.
+  api.openai.com with the shared key, always with `gpt-transcribe`.
 - Drop auto-stop does not start on a turn-based OpenAI model (its first words
   can arrive after more than five seconds), like a server.
-- A legacy OpenAI choice of the old Models tab migrates to the OpenAI account
-  with its stored model, only when the shared OpenAI key exists; Meetings stay
-  Not set. `selectedProvider` no longer reads it as Soniox.
+- A legacy OpenAI choice of the old Models tab migrates to the OpenAI account,
+  only when the shared OpenAI key exists, and then onto `gpt-live-transcribe`
+  by the move above; Meetings stay Not set. `selectedProvider` no longer reads it as Soniox.
 - Costs: OpenAI's published per-minute prices, marked ≈ (live models $0.017,
   `gpt-transcribe` $0.0045, `gpt-4o-transcribe` and `whisper-1` $0.006,
-  `gpt-4o-mini-transcribe` $0.003). The OpenAI key tile reads "Speech and
-  LLMs". The catalog cache version is 5, so OpenAI's list refreshes once and
-  shows the speech models.
+  `gpt-4o-mini-transcribe` $0.003; the older prices still price past
+  events). The pickers show the per-minute price
+  ([speech model prices](2026-11-22-speech-model-prices.md)). The OpenAI key
+  tile reads "Speech and LLMs". The catalog cache version is 6, so OpenAI's
+  list refreshes once with the two models.
 
 ## Why
 
@@ -111,6 +125,13 @@ The maintainer wants to try OpenAI's speech models in the island.
   models stream deltas as speech arrives, and the turn-based ones show text per
   phrase with server VAD. The silent pauses that tripped the stall detector are
   covered by the ping.
+- Two models: the maintainer tested `gpt-live-transcribe` in the island and
+  found it accurate and smooth. The other live models add choices without a
+  reason to pick them: `gpt-realtime-whisper` costs the same, and the
+  turn-based ones are deprecated and show text only after pauses.
+  `gpt-transcribe` is OpenAI's current file model, so recorded audio needs no
+  other. Moving saved routes by role keeps everyone dictating, with nothing
+  to fix by hand.
 - Invariant 3: audio goes only to the provider the user chose. Reading a stored
   OpenAI choice as Soniox broke it; keeping it OpenAI, or Not set without the
   OpenAI key, does not.
@@ -146,6 +167,14 @@ The maintainer wants to try OpenAI's speech models in the island.
   recovery, `credit_balance_exhausted` read as busy and raw error codes in
   public logs. All five are fixed and covered: the probes pass, the first one
   with the `cleared` answer OpenAI sends to the tail `clear`.
+- Two models: the OpenAI picker section lists only `gpt-live-transcribe`
+  with its price, the catalog leaves out the retired models, saved routes on
+  each of them (and `gpt-transcribe` on a live feature, a dated snapshot of a
+  retired model, `whisper-1` on Meetings) move by role and persist, the live
+  model, text routes, other providers and a server naming `whisper-1` stay,
+  a second launch writes nothing, and a moved route's row reads `.ok`
+  (`OpenAISpeechModelsTests`, `ModelStatusResolverTests`,
+  `SharedModelRowsTests`, `AIRoutingMigrationTests`).
 - Offline fixtures cover the allowlisted empty-commit error code and
   per-model request fields. Acceptance with a live OpenAI request in the
   island remains.
@@ -154,7 +183,10 @@ The maintainer wants to try OpenAI's speech models in the island.
 
 - Only `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` as first asked: they
   are deprecated (shutdown 2027-02-26) and with push-to-talk they are exactly
-  the June dead end. They stay available from the catalog, with server VAD.
+  the June dead end. They were first left available from the catalog with
+  server VAD; after testing, the maintainer chose the two current models.
+- Keeping every OpenAI transcription model in the pickers: more choices with
+  no reason to pick them, and deprecated ones among them.
 - Server VAD for every model: `gpt-live-transcribe` and `gpt-realtime-whisper`
   refuse turn detection.
 - OpenAI Meetings through the realtime adapter: one hour in a single turn

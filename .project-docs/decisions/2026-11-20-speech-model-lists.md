@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AIRouting/SpeechModelListTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-19-api-and-models.md, 2026-11-20-elevenlabs-scribe-v3.md]
+related: [2026-10-19-api-and-models.md, 2026-11-20-elevenlabs-scribe-v3.md, 2026-11-22-speech-model-prices.md]
 ---
 
 # Offer only Nova-3 for Deepgram and only v6 for Soniox

@@ -10,7 +10,9 @@
 
 > Актуализация 21.10.2026: [плитки ключей и прямые LLM API](../../.project-docs/decisions/2026-10-21-provider-key-tiles.md) заменяют ряд чипов, ограничение Anthropic только агентом и ручные действия в футере выбора моделей. OpenAI и Anthropic доступны для всех LLM-маршрутов; прежние решения ниже сохранены как история исходной постановки.
 
-> Актуализация 22.11.2026: [OpenAI снова провайдер речи](../../.project-docs/decisions/2026-11-22-openai-speech-provider.md) на общем OpenAI-ключе: секция OpenAI в пикерах Speech (общая строка и Advanced) и чип OpenAI. `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper` стримят слова; `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` и `whisper-1` из каталога идут через server VAD с подсказкой «text after each pause». Meetings у OpenAI нет (Speech-строка пишет «OpenAI can't serve Meetings»), recorded-модель Drop — `gpt-transcribe`.
+> Актуализация 22.11.2026: [OpenAI снова провайдер речи](../../.project-docs/decisions/2026-11-22-openai-speech-provider.md) на общем OpenAI-ключе: секция OpenAI в пикерах Speech (общая строка и Advanced) и чип OpenAI. Две модели: `gpt-live-transcribe` для живой речи и `gpt-transcribe` для записей (batch-ступень Drop и Retry); остальные модели транскрибации OpenAI в пикерах не показываются, сохранённые маршруты на них переезжают по роли. Meetings у OpenAI нет (Speech-строка пишет «OpenAI can't serve Meetings»).
+>
+> Актуализация 22.11.2026: [цены моделей речи](../../.project-docs/decisions/2026-11-22-speech-model-prices.md) — у моделей транскрибации Soniox, Deepgram, ElevenLabs и OpenAI в пикерах цена за минуту; неизвестная цена не показывается.
 
 > Вкладка называется «API & Models» (решение Максима 19.10; раньше в обсуждении — «Keys & models»).
 

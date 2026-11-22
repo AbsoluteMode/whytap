@@ -54,6 +54,7 @@ struct AIRoutingMigration {
         routing.retireMeetingRoutesIfNeeded()
         routing.upgradeElevenLabsScribeIfNeeded()
         routing.upgradeSonioxModelsIfNeeded()
+        routing.narrowOpenAISpeechModelsIfNeeded()
         routing.moveMeetingsToRecordedModelIfNeeded()
         routing.adoptExplicitServerModelsIfNeeded()
     }

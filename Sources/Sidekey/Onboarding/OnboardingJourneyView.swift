@@ -119,7 +119,7 @@ struct OnboardingJourneyView: View {
 
     private var counter: String {
         let segments = model.segments
-        let index = (segments.firstIndex { $0.state == .current } ?? 0) + 1
+        let index = (segments.firstIndex { $0.state == .current || $0.state == .revisited } ?? 0) + 1
         return String(format: "%02d / %02d", index, segments.count)
     }
 

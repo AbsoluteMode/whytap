@@ -246,10 +246,15 @@ final class OnboardingJourneyModel: ObservableObject {
     var canGoBack: Bool { OnboardingJourney.previous(before: step, in: steps) != nil }
     func outcome(_ step: OnboardingStep) -> OnboardingStepOutcome { outcomes[step] ?? .idle }
 
+    /// Steps the person went on from; one reached again by Back is passed.
+    private var leftSteps: Set<OnboardingStep> = []
+
     /// The progress bar: every step, with skipped and unnecessary ones hollow.
     var segments: [OnboardingSegment] {
         let done = Set(outcomes.compactMap { $0.value.isDone ? $0.key : nil })
-        return OnboardingJourney.segments(start: start, progress: progress, current: step, done: done)
+        let passed = leftSteps.contains(step) && (done.contains(step) || step.isInformational)
+        return OnboardingJourney.segments(start: start, progress: progress, current: step, done: done,
+                                          currentPassed: passed)
     }
 
     /// The step after this one, for "Next: Language".
@@ -286,6 +291,7 @@ final class OnboardingJourneyModel: ObservableObject {
         dwell.cancel()
         sourceMove?.cancel()
         self.direction = direction
+        if direction == .forward { leftSteps.insert(step) }
         step = next
         arrive(at: next)
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle

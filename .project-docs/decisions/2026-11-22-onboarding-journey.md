@@ -70,7 +70,11 @@ window, Back and a progress bar.
 - **Progress rail:** one equal micro-segment per step, a wider gap between
   the four acts (Engine, Access, Try Drop, Island). Done steps are green,
   the current one fills during the dwell and turns amber while held; a step
-  skipped or made unnecessary is hollow, never a false "done".
+  skipped or made unnecessary is hollow, never a false "done". A passed
+  step reached again by Back stays green and is only lit (a soft glow and a
+  light rim), never reset to white "in progress"; the owner asked for that
+  on 2026-11-22 (`OnboardingSegmentState.revisited`). The gaps between acts
+  stay.
 - **Steps, in their only order** (`OnboardingStep`):
   1. Source: On this Mac or Your key (two cards).
   2. Speech key: Soniox, Deepgram or ElevenLabs.

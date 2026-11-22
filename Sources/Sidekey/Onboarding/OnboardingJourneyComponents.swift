@@ -40,6 +40,12 @@ struct OnboardingProgressRail: View {
                     Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.22), lineWidth: 0.75)
                 case .completed:
                     Capsule(style: .continuous).fill(OnboardingTheme.green.opacity(0.82))
+                case .revisited:
+                    // Still done: full green, lifted by a soft glow and a
+                    // light rim, so it reads "you are here" without restarting.
+                    Capsule(style: .continuous).fill(OnboardingTheme.green)
+                        .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.55), lineWidth: 0.6))
+                        .shadow(color: OnboardingTheme.green.opacity(0.75), radius: 3.5)
                 case .current:
                     Capsule(style: .continuous).fill(Color.white.opacity(0.22))
                     Capsule(style: .continuous)
@@ -54,7 +60,7 @@ struct OnboardingProgressRail: View {
     }
 
     private var summary: String {
-        let index = (segments.firstIndex { $0.state == .current } ?? 0) + 1
+        let index = (segments.firstIndex { $0.state == .current || $0.state == .revisited } ?? 0) + 1
         return "Step \(index) of \(segments.count)"
     }
 }

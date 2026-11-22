@@ -1180,7 +1180,8 @@ First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
 OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
 Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
-fields), a progress rail with one segment per step and "NN / 13", one step at
+fields), a progress rail with one segment per step (a passed step reached by
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 13", one step at
 a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
 (On this Mac or API keys, two wire figures), Speech key, Language model key
 (optional), Search for the Agent (Tavily, only with a language model that

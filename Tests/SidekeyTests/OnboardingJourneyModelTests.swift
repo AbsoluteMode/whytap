@@ -518,15 +518,27 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
+        func state(_ step: OnboardingStep) -> OnboardingSegmentState? { model.segments.first { $0.step == step }?.state }
+        XCTAssertEqual(state(.speechKey), .current, "a fresh success fills the current segment during the beat")
         try await endBeat(env, until: .llmKey, in: model)
         model.back()
         XCTAssertEqual(model.step, .speechKey)
+        // The owner, 2026-11-22: a passed step reached by Back stays green
+        // and is only highlighted, never reset to "in progress".
+        XCTAssertEqual(state(.speechKey), .revisited)
+        XCTAssertEqual(state(.source), .completed)
         let following = OnboardingStep.llmKey.shortTitle
         XCTAssertEqual(model.dwell.state, .reviewing(next: following), "Continue · \(following), no jump forward")
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(model.step, .speechKey)
         model.dwell.commitNow() // Return
         XCTAssertEqual(model.step, .llmKey)
+        XCTAssertEqual(state(.speechKey), .completed)
+        model.back()
+        model.back()
+        XCTAssertEqual(model.step, .source)
+        XCTAssertEqual(state(.source), .revisited, "step 1 too")
+        XCTAssertEqual(state(.speechKey), .completed, "done steps after it stay green")
     }
 
     func testHoldingTheDwellKeepsTheStep() async throws {

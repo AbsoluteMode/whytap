@@ -232,6 +232,9 @@ enum OnboardingSegmentState: Equatable {
     case current
     case completed
     case bypassed
+    /// A passed step reached again by Back: it stays green and is only
+    /// highlighted as the one shown, never reset to "in progress".
+    case revisited
 }
 
 struct OnboardingSegment: Equatable, Identifiable {
@@ -244,7 +247,7 @@ extension OnboardingJourney {
     /// Every step as a segment, in order; Input Monitoring only when it is on
     /// the way. `done` lists the steps whose action succeeded in this window.
     static func segments(start: OnboardingStart, progress: OnboardingProgress, current: OnboardingStep,
-                         done: Set<OnboardingStep>) -> [OnboardingSegment] {
+                         done: Set<OnboardingStep>, currentPassed: Bool = false) -> [OnboardingSegment] {
         let order = OnboardingStep.allCases
         let currentIndex = order.firstIndex(of: current) ?? 0
         return order.enumerated().compactMap { index, step in
@@ -252,7 +255,8 @@ extension OnboardingJourney {
             if step == .inputMonitoring, !onTheWay { return nil }
             let state: OnboardingSegmentState
             if step == current {
-                state = .current
+                // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+                state = currentPassed ? .revisited : .current
             } else if done.contains(step) || (!onTheWay && doneAtStart(step, start)) {
                 state = .completed
             } else if !onTheWay {

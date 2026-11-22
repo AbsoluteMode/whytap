@@ -60,7 +60,7 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(finalText(events), "Сейчас в Москве +1 °C и идёт небольшой снег.")
         XCTAssertEqual(links(events), [], "An API source without a URL is no link card")
         XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("Plain text."), "Plain text.")
-        XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("A\u{E200}cite\u{E202}turn0search0\u{E202}turn0news2\u{E201} and \u{E203}b."),
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutProviderCitationMarks("A \u{E200}cite\u{E202}turn0search0\u{E202}turn0news2\u{E201} and \u{E203}b."),
                        "A and \u{E203}b.", "Several references in one mark; other private glyphs stay")
     }
 
@@ -117,5 +117,61 @@ extension NativeAgentWebSearchTests {
         let linkFinal = try finalAnswer("Open [the fixture](\(rawLink)).")
         XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: linkFinal.visibleText, existing: linkFinal.actions)?.items.first?.insertText,
                        URL(string: rawLink)?.absoluteString)
+    }
+
+    // MARK: - Builder #448: literal data keeps the same bytes; other providers untouched
+
+    func testCitationBytesInLiteralDataStayAndACitationOnlyCopyCardIsDropped() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        let literalCommand = "printf '%s' 'raw\(mark)'"
+        let literalPayload = try finalAnswer("Here is the exact text.", insert: literalCommand, copy: literalCommand)
+        XCTAssertEqual(copyText(literalPayload.insert), literalCommand, "explicit Insert")
+        XCTAssertTrue(literalPayload.actions.items.contains { copyText($0) == literalCommand }, "explicit Copy")
+        let codeFinal = try finalAnswer("Run this:\n\n```sh\n\(literalCommand)\n```")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: codeFinal.visibleText, existing: codeFinal.actions)?.items.first?.insertText,
+                       literalCommand, "shell fence")
+        let fencedProse = try finalAnswer("Example:\n\n```text\nSee \(mark).\n```")
+        XCTAssertTrue(fencedProse.answer.contains(mark), "nothing inside a code fence is changed")
+        let literalPath = "/tmp/fixture/part-\(mark).txt"
+        let pathFinal = try finalAnswer("Open `\(literalPath)`.")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: pathFinal.visibleText, existing: pathFinal.actions)?.items.first?.insertText,
+                       literalPath, "file name")
+        let literalLink = "https://example.test/part-\(mark)"
+        let linkFinal = try finalAnswer("Open [the fixture](\(literalLink)).")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: linkFinal.visibleText, existing: linkFinal.actions)?.items.first?.insertText,
+                       URL(string: literalLink)?.absoluteString, "URL")
+        let privateSequence = "Literal \u{E200}cite\u{E202}project-name\u{E201} stays."
+        XCTAssertEqual(try finalAnswer(privateSequence).answer, privateSequence, "not an OpenAI reference")
+
+        let citationOnly = try finalAnswer("Useful verified answer.", copy: mark)
+        XCTAssertEqual(citationOnly.answer, "Useful verified answer.")
+        XCTAssertFalse(citationOnly.actions.items.contains { copyText($0) != nil }, "the empty copy card is dropped")
+        XCTAssertThrowsError(try finalAnswer("Answer.", copy: "   "), "a genuinely empty card is still invalid")
+
+        // Other providers' output is never cleaned.
+        let anthropic = try NativeAgentFinalAnswer(arguments: [
+            "status": "answered", "answer": "Verified \(mark).", "insert_text": "", "sources": [[String: Any]](), "actions": [[String: Any]](),
+        ], openAICitations: false)
+        XCTAssertEqual(anthropic.answer, "Verified \(mark).")
+    }
+
+    func testOnlyOpenAIRoutesCleanCitationMarks() async throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        for (route, model, cleaned) in [(OpenCodeModelProvider.anthropic, "claude-opus-5-5", false),
+                                        (.openRouter, "openai/gpt-6.2-sol", true), (.openRouter, "vendor/model", false)] {
+            let (directory, keys, http) = try fixture()
+            try keys.save("router-key", account: OpenRouterLLMKeyStore.account)
+            try keys.save("anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+            let answer = final("Verified \(mark).")
+            StubURLProtocol.handler = { _ in
+                route == .anthropic
+                    ? self.serve(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "f", "name": "finish_answer", "input": answer]]])
+                    : self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
+                        "tool_calls": [["id": "f", "type": "function", "function": ["name": "finish_answer", "arguments": self.arguments(answer)]]]]]]])
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            let events = await run(provider, "q", .init(model: model, openCodeProvider: route))
+            XCTAssertEqual(finalText(events), cleaned ? "Verified." : "Verified \(mark).", "\(route) \(model)")
+        }
     }
 }

@@ -56,10 +56,15 @@ it.
   as for any custom model.
 - OpenAI's built-in search can leave citation markup in model text
   (`U+E200 cite U+E202 turn… U+E201`, shown as "citeturn138346forecast0").
-  `NativeAgentFinalAnswer` removes only that exact markup, with the spaces
-  right before it, from the answer, the Insert text and copy cards; any other
-  private-use glyph, delimiter, path, link or command stays literal (builder
-  #447). Source cards still come from `sources` and the provider's citations.
+  On OpenAI routes only (direct, or an `openai/` model on OpenRouter),
+  `NativeAgentFinalAnswer` removes that markup with the spaces before it where
+  it annotates prose: after whitespace or a line start, before a line end,
+  whitespace or punctuation, outside fenced code, with `turn<n><kind><n>`
+  references only. The same bytes inside a word, path, URL, quoted literal or
+  code fence stay, as does any other private-use glyph or sequence
+  (`project-name`). A copy card that was only a citation mark is dropped and
+  the answer kept (builder #447, #448). Source cards still come from
+  `sources` and the provider's citations.
 - The Search row adds "Follows the Agent model: <provider> · <model>." The
   Agent can keep its own model while the LLM row shows another ("1 custom",
   or a model whose Agent check failed), and the row now says which one.
@@ -71,8 +76,10 @@ it.
   Agent and blocked a model that works.
 - Sending no `reasoning_effort` was not enough: OpenAI applies a default
   effort to this model on Chat Completions and still refuses function tools.
-- Only the exact markup is removed: a broad private-use cleanup changed a
-  file path, a link and a command in builder #447 fixtures.
+- Only prose annotations are removed: a broad private-use cleanup changed a
+  file path, a link and a command (builder #447), and removing the exact
+  markup everywhere still erased it from quoted commands, paths and URLs and
+  rejected an answer whose only copy card was a mark (builder #448).
 
 ## What we tested
 

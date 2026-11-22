@@ -47,15 +47,19 @@ struct NativeAgentFinalAnswer {
                 ])]
     }
 
-    init(arguments: [String: Any]) throws {
+    /// `openAICitations`: the turn ran on OpenAI (directly or an `openai/`
+    /// model on OpenRouter), whose built-in search can leave its citation
+    /// markup in the text; other providers' output is never touched.
+    init(arguments: [String: Any], openAICitations: Bool = true) throws {
+        let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
-        let text = Self.withoutProviderCitationMarks(answer).trimmingCharacters(in: .whitespacesAndNewlines)
-        let insertField = (arguments[Self.insertField] as? String).map(Self.withoutProviderCitationMarks) ?? arguments[Self.insertField]
+        let text = clean(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+        let insertField = (arguments[Self.insertField] as? String).map(clean) ?? arguments[Self.insertField]
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
         let insert: String
         switch insertField {
@@ -87,9 +91,11 @@ struct NativeAgentFinalAnswer {
                       !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw Self.invalid() }
                 items.append(.path(path: path, description: label.isEmpty ? nil : label))
             case "copy":
-                guard Set(action.keys) == ["type", "text", "description"],
-                      let text = (action["text"] as? String).map(Self.withoutProviderCitationMarks),
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 32_000 else { throw Self.invalid() }
+                guard Set(action.keys) == ["type", "text", "description"], let raw = action["text"] as? String,
+                      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, raw.count <= 32_000 else { throw Self.invalid() }
+                let text = clean(raw)
+                // A copy card that was only a citation mark is dropped; the answer stays.
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                 items.append(.copy(text: text, description: label.isEmpty ? nil : label))
             default: throw Self.invalid()
             }
@@ -105,18 +111,40 @@ struct NativeAgentFinalAnswer {
     /// Markdown fence unwrapped, so a fenced command does not paste backticks.
     /// OpenAI's built-in search can leave its citation markup in model text:
     /// "\u{E200}cite\u{E202}turn0search0\u{E201}" (private-use characters
-    /// that render as "citeturn0search0"), with one or more references. Only
-    /// that exact markup is removed, with the spaces right before it; any
-    /// other private-use glyph, delimiter or whitespace stays as written, so
-    /// paths, links and commands the user asked for are unchanged. The
-    /// cards come from `sources` and the provider's citations.
+    /// that render as "citeturn0search0"), one or more `turn<n><kind><n>`
+    /// references. It is removed, with the spaces before it, only where it
+    /// annotates prose: after whitespace or at a line start, before the line
+    /// end, whitespace or punctuation, outside fenced code. The same bytes
+    /// inside a word, path, URL, quoted literal or code fence stay, as does
+    /// any other private-use glyph or sequence.
     /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
     static func withoutProviderCitationMarks(_ text: String) -> String {
-        guard text.unicodeScalars.contains("\u{E200}") else { return text }
-        return text.replacingOccurrences(of: citationMarkup, with: "", options: .regularExpression)
+        guard text.unicodeScalars.contains("\u{E200}"), let regex = citationMarkup else { return text }
+        var output: [String] = [], prose: [String] = [], fenced = false
+        func flush() {
+            guard !prose.isEmpty else { return }
+            let block = prose.joined(separator: "\n")
+            output.append(regex.stringByReplacingMatches(in: block, range: NSRange(block.startIndex..., in: block), withTemplate: ""))
+            prose.removeAll()
+        }
+        for line in text.components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                if !fenced { flush() }
+                fenced.toggle()
+                output.append(line)
+            } else if fenced {
+                output.append(line)
+            } else {
+                prose.append(line)
+            }
+        }
+        flush()
+        return output.joined(separator: "\n")
     }
 
-    private static let citationMarkup = "[ \\t]*\u{E200}cite(?:\u{E202}[A-Za-z0-9_.:-]+)+\u{E201}"
+    private static let citationMarkup = try? NSRegularExpression(
+        pattern: "(?:^|[ \\t]+)\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201}(?=$|[\\s.,;:!?)\\]])",
+        options: [.anchorsMatchLines])
 
     static func pasteText(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)

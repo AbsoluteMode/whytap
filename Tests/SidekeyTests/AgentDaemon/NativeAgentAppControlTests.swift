@@ -551,7 +551,6 @@ final class NativeAgentAppControlTests: XCTestCase {
             ("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "position": 9, "expected": defaultPinned], "invalid_position"),
             ("whytap_toolbox_set", ["tool": "monitor", "pinned": false, "position": 1, "expected": defaultPinned], "invalid_arguments"),
             ("whytap_hotkey_set", ["tool": "quit", "keys": "option+x", "expected": NSNull()], "hotkey_not_allowed"),
-            ("whytap_hotkey_set", ["tool": "calendar", "keys": "option+c", "expected": NSNull()], "hotkey_not_allowed"),
             ("whytap_hotkey_set", ["tool": "screenshot", "keys": "command+s", "expected": NSNull()], "invalid_hotkey"),
             ("whytap_hotkey_set", ["tool": "screenshot", "keys": "shift+s", "expected": NSNull()], "invalid_hotkey"),
             ("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+space", "expected": NSNull()], "invalid_hotkey"),

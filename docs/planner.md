@@ -1,12 +1,7 @@
 # Whytap Planner
 
-> **Calendar is not available yet.** Its tile, search row, Toolbox pane and
-> Integrations card show **Soon** and do nothing; Whytap connects no calendar
-> and asks macOS for no calendar access. To-do works now. The Calendar parts
-> of this page describe how it will work once it opens.
-
 Open **Search all tools → To-do** for a compact list inside hover.
-Once available, **Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
+**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button. The published 2.2.26 build shows Calendar as **Soon**.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
 range and the calendar name. A Google or Outlook account synced through Calendar
@@ -147,6 +142,15 @@ Disconnect removes local credentials/events, keeping the original provider data.
 **Apple Calendar:** Connect account → Apple Calendar requests the macOS calendar
 permission. It shows the calendars available through EventKit, including iCloud.
 macOS requires full event permission even for reading; Whytap only reads.
+macOS asks only when you press Connect, never when Whytap starts or Calendar
+opens. It asks once. After **Don't Allow** nothing is connected: Settings and the
+Connect page say to turn on Whytap in **System Settings → Privacy & Security →
+Calendars** (Full Access), with an **Open Privacy Settings** button; then press
+Connect again, which needs no second prompt. If access of a connected Apple
+Calendar is later turned off or limited to "Add Events Only", its events leave
+the day, its row reads **Access off** and opens System Settings, and the
+connection is kept: allowing access brings the events back. Calendar and Settings
+check the current permission when they open and when you return to Whytap.
 This connection does not require a Whytap backend or a new Apple OAuth client.
 When the same Google/Exchange account is also available through macOS, use the
 feed checkboxes to select the desired source. UID-based collapse cannot identify

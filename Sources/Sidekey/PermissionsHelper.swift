@@ -152,6 +152,13 @@ enum PermissionsHelper {
         NSWorkspace.shared.open(url)
     }
 
+    /// Opens Privacy & Security → Calendars. After one refusal macOS never asks
+    /// again, so Calendar sends the user here to allow Full Access.
+    static func openCalendarsSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     static func openInputMonitoringSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else { return }
         NSWorkspace.shared.open(url)

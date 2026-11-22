@@ -172,5 +172,10 @@ switched apps, and the journal writing through a hard link; the read now
 needs a length and requests only that range, focus is the system-wide
 focused element of the frontmost app captured inside the paste engine
 right before Cmd+V, and the journal refuses a file with more than one name.
+The third review (queue #415) found that focus could move during the
+blocking length query or during the capture itself; the read now confirms
+keyboard focus and the gate again after the length query and after the
+range transfer, and the paste engine posts no Cmd+V (and restores the
+clipboard) when another app took focus while the field was captured.
 
 2026-11-22 · ORCH-TASK 72 · PR #406: candidate logic (drops UI follows)

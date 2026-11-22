@@ -37,8 +37,6 @@ final class WhytapLinkTests: XCTestCase {
     // MARK: - Every tile and tab
 
     func test_every_tool_link_shows_the_place_its_tile_belongs_to() {
-        // Calendar ships as "Soon"; this contract describes the open catalog (see CalendarSoonTests).
-        openCalendarForThisTest()
         for tool in HoverTool.allCases {
             let parsed = destination("whytap://tool/\(tool.rawValue)")
             XCTAssertEqual(parsed, WhytapLink.destination(for: tool), "\(tool)")
@@ -76,8 +74,7 @@ final class WhytapLinkTests: XCTestCase {
         XCTAssertEqual(destination("whytap://tool/quit"), .settings(.quitRow))
         XCTAssertEqual(destination("whytap://tool/settings"), .settings(.tab(.apiAndModels)))
         XCTAssertEqual(destination("whytap://tool/tasks"), .hoverPanel(.tasks))
-        // Calendar ships closed ("Soon"): the link shows its Toolbox pane.
-        XCTAssertEqual(destination("whytap://tool/calendar"), .toolboxTool(.calendar))
+        XCTAssertEqual(destination("whytap://tool/calendar"), .hoverPanel(.calendar))
         XCTAssertEqual(destination("whytap://tool/translate"), .translation(.text))
         XCTAssertEqual(destination("whytap://tool/subtitles"), .translation(.subtitles))
     }
@@ -128,8 +125,6 @@ final class WhytapLinkTests: XCTestCase {
     }
 
     func test_no_link_runs_an_action_or_asks_for_authentication() {
-        // Calendar ships as "Soon"; this contract describes the open catalog (see CalendarSoonTests).
-        openCalendarForThisTest()
         let destinations = HoverTool.allCases.map(WhytapLink.destination(for:))
             + SettingsWindowTab.allCases.map(WhytapLink.destination(for:))
         for destination in destinations {

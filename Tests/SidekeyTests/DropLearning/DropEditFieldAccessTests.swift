@@ -15,6 +15,8 @@ final class DropEditFieldAccessTests: XCTestCase {
     private var frontmost: pid_t?
     private var focused: AXUIElement?
     private var count: Int?
+    private var duringLength: (() -> Void)?
+    private var duringTransfer: (() -> Void)?
     private var requestedRanges: [CFRange] = []
     private var text = "Скачай Whytap с сайта"
 
@@ -24,6 +26,8 @@ final class DropEditFieldAccessTests: XCTestCase {
         focused = field
         count = (text as NSString).length
         requestedRanges = []
+        duringLength = nil
+        duringTransfer = nil
     }
 
     private func access() -> AXDropEditFieldAccess {
@@ -36,9 +40,13 @@ final class DropEditFieldAccessTests: XCTestCase {
                 DropEditFieldFacts(bundleID: "com.apple.Notes", isOwnProcess: false, role: "AXTextArea",
                                    subrole: nil, secureEventInput: false, accessibilityError: false)
             },
-            characterCount: { [unowned self] _ in count },
+            characterCount: { [unowned self] _ in
+                duringLength?()
+                return count
+            },
             string: { [unowned self] _, range in
                 requestedRanges.append(range)
+                duringTransfer?()
                 return (text as NSString).substring(with: NSRange(location: range.location, length: range.length))
             }
         ))
@@ -86,6 +94,26 @@ final class DropEditFieldAccessTests: XCTestCase {
         count = nil
         XCTAssertNil(access.read(handle))
         XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    /// The length query blocks; focus moving to another app meanwhile stops
+    /// the read before any text is requested.
+    func testFocusMovingDuringTheLengthQueryStopsBeforeTheTransfer() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        duringLength = { [unowned self] in
+            frontmost = otherPID
+            focused = otherField
+        }
+        XCTAssertNil(access.read(handle))
+        XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    func testFocusMovingDuringTheTransferDiscardsTheText() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        duringTransfer = { [unowned self] in focused = otherField }
+        XCTAssertNil(access.read(handle))
     }
 
     func testAFieldLongerThanTheLimitIsNotTransferred() throws {

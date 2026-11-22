@@ -56,6 +56,18 @@ final class AutoPasteEngineTests: XCTestCase {
         XCTAssertEqual(env.postedEvents.count, 4)
     }
 
+    /// The capture blocks on Accessibility; if another app takes focus
+    /// meanwhile, no Cmd+V goes out and the clipboard is restored.
+    func testFocusMovingToAnotherAppDuringTheCaptureStopsThePaste() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        let result = await engine.paste("synthetic Drop text", beforeCommandV: { env.frontmost = Self.targetB })
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertTrue(env.logs.contains { $0.message.contains("autopaste_pasteboard_restored after=failure") })
+    }
+
     func testBeforeCommandVNeverRunsWhenNoCmdVIsPosted() async {
         let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true,
                           pasteboardWriteSucceeds: false)

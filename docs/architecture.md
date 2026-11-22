@@ -1341,8 +1341,9 @@ a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
 show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Meeting Notes, Google search, Agent, Screenshot protection,
-Auto-hide island); rows that are plain options have none. WHY:
+automatically, Learn from my edits, Meeting Notes, Google search, Agent,
+Screenshot protection, Auto-hide island); rows that are plain options have
+none. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

@@ -124,6 +124,13 @@ struct SettingsOtherView: View {
         [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents)]
     }
 
+    /// The clip dictates with the Drop key and answers with ⌃Y (fixed, not
+    /// remappable: DropLearningKeyCombos).
+    static func dropLearningVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
+        [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents),
+         FeatureVideoShortcut(label: "Yes", contents: DropLearningKeyCombos.yes.contents)]
+    }
+
     static func googleSearchVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
         [FeatureVideoShortcut(label: "Text", contents: configuration.googleSearchTextShortcut.contents),
          FeatureVideoShortcut(label: "Voice", contents: configuration.googleSearchVoiceShortcut.contents)]
@@ -159,6 +166,8 @@ struct SettingsOtherView: View {
                             title: "Learn from my edits",
                             subtitle: "When you fix the same word after Drop twice, Whytap offers to add it to Vocab, Replace or Filler. Answer with ⌃Y or ⌃N. Watches that field until you send or leave it, on this Mac."
                         ) {
+                            FeatureVideoButton(video: .dropLearning, shortcuts: { Self.dropLearningVideoShortcuts(hotkeys()) })
+                        } trailing: {
                             MacSwitch(isOn: dropLearningToggleBinding, label: "Learn from my edits")
                         }
                     }

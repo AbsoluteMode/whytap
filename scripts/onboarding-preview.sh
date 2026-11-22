@@ -2,7 +2,7 @@
 # Builds and opens the whole Whytap onboarding as a standalone window, outside
 # Whytap, for review after each change. Isolated: its own defaults suite
 # (emptied on start and quit), keys in memory, offline key checks (a key
-# containing "bad" is refused), pretend permissions, Simulate Drop. It never
+# containing "bad" is refused), pretend permissions, a held capsule for Drop. It never
 # touches /Applications/Whytap.app, com.rootwise.sidekey, the Keychain or the
 # network, and starts no hotkeys or event taps.
 # WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md

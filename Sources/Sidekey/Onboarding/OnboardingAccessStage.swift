@@ -119,6 +119,31 @@ enum OnboardingAccessFigures {
         var solid: OnboardingWireSolid { OnboardingWireSolid(normalized: vertices, edges: edges, dotIndices: dots) }
     }
 
+    /// The ⌘ glyph in a keycap's (x, z) plane: the square's sides run on
+    /// into four 270-degree loops that meet them at their tangents, as the
+    /// glyph does.
+    static func commandGlyph(side: Double, loop: Double, segments: Int = 14) -> [[(Double, Double)]] {
+        let reach = side + loop
+        var strokes: [[(Double, Double)]] = [
+            [(-side, -reach), (-side, reach)], [(side, -reach), (side, reach)],
+            [(-reach, -side), (reach, -side)], [(-reach, side), (reach, side)],
+        ]
+        for (sx, sz) in [(-1.0, -1.0), (1, -1), (1, 1), (-1, 1)] {
+            let cx = sx * reach, cz = sz * reach
+            let start = atan2(0, -sx), end = atan2(-sz, 0)
+            var delta = end - start
+            while delta <= -.pi { delta += 2 * .pi }
+            while delta > .pi { delta -= 2 * .pi }
+            // The long way round, away from the square.
+            let sweep = delta > 0 ? delta - 2 * .pi : delta + 2 * .pi
+            strokes.append((0...segments).map { s in
+                let a = start + sweep * Double(s) / Double(segments)
+                return (cx + cos(a) * loop, cz + sin(a) * loop)
+            })
+        }
+        return strokes
+    }
+
     static func octagon(_ w: Double, _ chamfer: Double) -> [(Double, Double)] {
         [(-w + chamfer, -w), (w - chamfer, -w), (w, -w + chamfer), (w, w - chamfer),
          (w - chamfer, w), (-w + chamfer, w), (-w, w - chamfer), (-w, -w + chamfer)]
@@ -173,27 +198,10 @@ enum OnboardingAccessFigures {
         /// the prototype's): the square's sides run on into four 270° loops
         /// that meet them at their tangents, as the glyph does.
         static let legend: [[Vec3]] = {
-            let y = dishY - 0.006, side = 0.085, loop = 0.072, segments = 14
-            func v(_ x: Double, _ z: Double) -> Vec3 { Vec3(x: x * norm, y: (y + shift) * norm, z: z * norm) }
-            let reach = side + loop
-            var strokes: [[Vec3]] = [
-                [v(-side, -reach), v(-side, reach)], [v(side, -reach), v(side, reach)],
-                [v(-reach, -side), v(reach, -side)], [v(-reach, side), v(reach, side)],
-            ]
-            for (sx, sz) in [(-1.0, -1.0), (1, -1), (1, 1), (-1, 1)] {
-                let cx = sx * reach, cz = sz * reach
-                let start = atan2(0, -sx), end = atan2(-sz, 0)
-                var delta = end - start
-                while delta <= -.pi { delta += 2 * .pi }
-                while delta > .pi { delta -= 2 * .pi }
-                // The long way round, away from the square.
-                let sweep = delta > 0 ? delta - 2 * .pi : delta + 2 * .pi
-                strokes.append((0...segments).map { s in
-                    let a = start + sweep * Double(s) / Double(segments)
-                    return v(cx + cos(a) * loop, cz + sin(a) * loop)
-                })
+            let y = dishY - 0.006
+            return commandGlyph(side: 0.085, loop: 0.072).map { stroke in
+                stroke.map { Vec3(x: $0.0 * norm, y: (y + shift) * norm, z: $0.1 * norm) }
             }
-            return strokes
         }()
 
         /// The text caret that rises beside the key once it is allowed.
@@ -502,7 +510,8 @@ struct OnboardingAccessFigure: View {
             let press = act * 0.16 * K.norm
             K.cap.draw(in: &context, center: center, worldZ: worldZ, radius: r, angles: angles,
                        style: style(fade, strength), moved: moved(K.cap) { _, v in .init(x: v.x, y: v.y + press, z: v.z) })
-            drawLegend(in: &context, center: center, worldZ: worldZ, angles: angles, press: press, fade: fade, tint: tint)
+            OnboardingWireStrokes.draw(K.legend, in: &context, center: center, radius: r, worldZ: worldZ, angles: angles,
+                                       lift: press, fade: fade, tint: tint)
             if act > 0.08 {
                 let lift = (1 - min(1, act)) * 0.18
                 K.caret.draw(in: &context, center: center, worldZ: worldZ, radius: r, angles: angles,
@@ -561,34 +570,6 @@ struct OnboardingAccessFigure: View {
             S.brackets.solid.draw(in: &context, center: center, worldZ: worldZ, radius: r, angles: angles,
                                   style: style(fade, strength * 1.05), moved: corners)
         }
-    }
-
-    /// The ⌘ on the cap: continuous strokes of one weight, tinted like the
-    /// light on the figure, so it reads at this size.
-    private func drawLegend(in context: inout GraphicsContext, center: CGPoint, worldZ: Double,
-                            angles: (ax: Double, ay: Double, az: Double), press: Double, fade: Double,
-                            tint: OnboardingWireframeInk.RGB) {
-        let m = OnboardingWireSolid.matrix(angles)
-        let camera = OnboardingWireSolid.cameraDistance
-        func project(_ v: OnboardingWireSolid.Vec3) -> CGPoint {
-            let y = v.y + press
-            let x = m[0] * v.x + m[1] * y + m[2] * v.z
-            let py = m[3] * v.x + m[4] * y + m[5] * v.z
-            let z = m[6] * v.x + m[7] * y + m[8] * v.z
-            let k = camera / max(1.2, camera - (worldZ + z * 0.55))
-            return CGPoint(x: center.x + x * k * Self.radius, y: center.y + py * k * Self.radius)
-        }
-        var path = Path()
-        for stroke in OnboardingAccessFigures.Keyboard.legend {
-            guard let first = stroke.first else { continue }
-            path.move(to: project(first))
-            for v in stroke.dropFirst() { path.addLine(to: project(v)) }
-        }
-        let base = OnboardingWireframeInk.wire, mix = 0.45
-        let color = Color(red: base.0 + (tint.0 - base.0) * mix, green: base.1 + (tint.1 - base.1) * mix,
-                          blue: base.2 + (tint.2 - base.2) * mix)
-        context.stroke(path, with: .color(color.opacity(0.92 * fade)),
-                       style: StrokeStyle(lineWidth: 1.35, lineCap: .round, lineJoin: .round))
     }
 }
 
@@ -676,120 +657,35 @@ struct OnboardingAccessStage: View {
     @ViewBuilder private var links: some View {
         HStack(spacing: 14) {
             if state == .waiting {
-                OnboardingAccessLink(title: "Open System Settings", arrow: "arrow.up.right") {
+                OnboardingWireLink(title: "Open System Settings", arrow: "arrow.up.right") {
                     motion.nudge()
                     model.openSystemSettings(for: kind.step)
                 }
             }
             if kind.isOptional, state != .granted {
-                OnboardingAccessLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
+                OnboardingWireLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
             }
         }
     }
 }
 
-/// The dark capsule with its white disc: Allow →, Waiting for System
-/// Settings… (no spinner), Allowed ✓, Allow again →.
+/// The access step's capsule: Allow →, Waiting for System Settings… (no
+/// spinner), Allowed ✓, Allow again →.
 struct OnboardingAccessPill: View {
     let kind: OnboardingAccessKind
     let state: OnboardingAccessState
     let action: () -> Void
-    @FocusState private var focused: Bool
-    @State private var hovered = false
-
-    private var label: String {
-        switch state {
-        case .rest: return "Allow"
-        case .waiting: return "Waiting for System Settings…"
-        case .granted: return "Allowed"
-        case .notOn: return "Allow again"
-        }
-    }
-
-    private var border: Color {
-        switch state {
-        case .rest: return Color.white.opacity(0.10)
-        case .waiting: return OnboardingWireframeInk.roseColor.opacity(0.30)
-        case .granted: return OnboardingWireframeInk.greenColor.opacity(0.55)
-        case .notOn: return OnboardingWireframeInk.amberColor.opacity(0.55)
-        }
-    }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Text(label)
-                    .font(OnboardingTheme.sans(14.5, weight: .semibold))
-                    .foregroundColor(state == .waiting ? OnboardingTheme.ink2 : OnboardingTheme.ink)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                disc
-            }
-            .padding(.leading, 22)
-            .padding(.trailing, state == .waiting ? 22 : 6)
-            .frame(minWidth: 196)
-            .frame(height: 46)
-            .fixedSize()
-            .background(Capsule(style: .continuous)
-                .fill(Color(red: 0.106, green: 0.106, blue: 0.122).opacity(hovered && state != .granted ? 0.75 : 1)))
-            .background(Capsule(style: .continuous).fill(Color.white.opacity(hovered && state != .granted ? 0.06 : 0)))
-            .overlay(Capsule(style: .continuous).strokeBorder(border, lineWidth: 1))
-            .overlay(Capsule(style: .continuous).strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        // Allowed stays bright (a disabled button would dim it); its tap does nothing.
-        .focusEffectDisabled()
-        .focused($focused)
-        .onHover { hovered = $0 }
-        .keyboardShortcut(state == .rest || state == .notOn ? .defaultAction : nil)
-        .accessibilityLabel(state == .rest ? "Allow \(kind.pane)" : label)
-    }
-
-    @ViewBuilder private var disc: some View {
         switch state {
+        case .rest:
+            OnboardingWirePill("Allow", isDefault: true, action: action).accessibilityLabel("Allow \(kind.pane)")
         case .waiting:
-            EmptyView()
+            OnboardingWirePill("Waiting for System Settings…", tone: .active, disc: .none, action: action)
         case .granted:
-            Image(systemName: "checkmark")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(OnboardingWireframeInk.greenColor)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(OnboardingWireframeInk.greenColor.opacity(0.16)))
-        case .rest, .notOn:
-            Image(systemName: "arrow.right")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.black)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(Color.white.opacity(hovered ? 0.88 : 0.96)))
+            OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
+        case .notOn:
+            OnboardingWirePill("Allow again", tone: .warn, isDefault: true, action: action)
         }
-    }
-}
-
-/// A quiet link under the capsule: Open System Settings ↗, Skip for now →.
-struct OnboardingAccessLink: View {
-    let title: String
-    let arrow: String
-    let action: () -> Void
-    @FocusState private var focused: Bool
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Text(title)
-                Image(systemName: arrow).font(.system(size: 10, weight: .semibold))
-            }
-            .font(OnboardingTheme.sans(13, weight: .medium))
-            .foregroundColor(hovered || focused ? OnboardingTheme.ink2 : OnboardingTheme.muted)
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .overlay(Capsule(style: .continuous).strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .focused($focused)
-        .onHover { hovered = $0 }
     }
 }

@@ -20,6 +20,7 @@ enum OnboardingWireframeInk {
     static let roseColor = Color(red: rose.0, green: rose.1, blue: rose.2)
     static let amberColor = Color(red: amber.0, green: amber.1, blue: amber.2)
     static let greenColor = Color(red: green.0, green: green.1, blue: green.2)
+    static let wireColor = Color(red: wire.0, green: wire.1, blue: wire.2)
     static let veil = Color(red: 0.071, green: 0.071, blue: 0.086)
     /// The ground: lighter at the centre, the window's own colour at the edge.
     static let groundCenter = Color(red: 0.098, green: 0.098, blue: 0.118)

@@ -78,6 +78,55 @@ struct OnboardingPermissionRequests {
     var openSettings: (OnboardingStep) -> Void = { _ in }
 }
 
+/// What Drop is doing while Try Drop is shown, from the app's own state: a
+/// take recording, its voice level (read per frame, not published), and
+/// whether the take reached the insert. The preview drives it by hand.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+@MainActor
+final class OnboardingVoiceSignal: ObservableObject {
+    /// Drop is recording.
+    @Published private(set) var recording = false
+    /// Drop is working on a take (recording, transcribing or inserting).
+    @Published private(set) var working = false
+    /// The latest voice level, 0 to 1.
+    private(set) var level = 0.0
+    /// When the latest take started.
+    private(set) var startedAt: Date?
+    /// The latest take reached the insert (its text went somewhere).
+    private(set) var inserted = false
+    /// The latest take ended in Drop's own delivery failure.
+    private(set) var failedDelivery = false
+    private var subscriptions: Set<AnyCancellable> = []
+
+    init(appState: AppState?) {
+        guard let appState else { return }
+        appState.$phase
+            .sink { [weak self] phase in self?.phaseChanged(phase) }
+            .store(in: &subscriptions)
+        appState.$audioLevels
+            .sink { [weak self] levels in self?.level = Double(levels.last ?? 0) }
+            .store(in: &subscriptions)
+    }
+
+    func phaseChanged(_ phase: AppPhase) {
+        let nowRecording = phase == .recording
+        if nowRecording, !recording {
+            startedAt = Date()
+            inserted = false
+            failedDelivery = false
+        }
+        if phase == .inserting { inserted = true }
+        if phase == .deliveryFailed { failedDelivery = true }
+        if !nowRecording { level = 0 }
+        if recording != nowRecording { recording = nowRecording }
+        let nowWorking = phase != .idle && phase != .deliveryFailed
+        if working != nowWorking { working = nowWorking }
+    }
+
+    /// The preview's stand-in for the microphone.
+    func setLevel(_ value: Double) { level = max(0, min(1, value)) }
+}
+
 /// Where an access step stands (the design pass's screen 04): Allow, then
 /// waiting for System Settings, then allowed and on to the next step; a
 /// return from System Settings with the switch still off is "not on yet",
@@ -186,6 +235,13 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The standalone preview: nothing asks macOS, a button stands in for Drop.
     let isPreview: Bool
     private let requests: OnboardingPermissionRequests?
+    /// Drop's take while Try Drop is shown.
+    let voice: OnboardingVoiceSignal
+    /// How long the take that reached the try field took, from the press.
+    @Published private(set) var tryDropSeconds: Double?
+    private var tryCheck: Task<Void, Never>?
+    /// The quiet after a take ends before Try Drop says nothing arrived.
+    static let tryQuiet: TimeInterval = 1.2
 
     /// The latest speech and language model actions (a source picked, a key
     /// used, the download started). An answer that arrives after a newer
@@ -225,6 +281,7 @@ final class OnboardingJourneyModel: ObservableObject {
         toolbox: HoverLayoutStore? = nil,
         agentEnabled: (() -> Bool)? = nil,
         requests: OnboardingPermissionRequests? = nil,
+        voice: OnboardingVoiceSignal? = nil,
         isPreview: Bool = false,
         offersOpenAISpeech: Bool? = nil
     ) {
@@ -253,6 +310,7 @@ final class OnboardingJourneyModel: ObservableObject {
         self.agentEnabled = agentEnabled ?? { UserPreferencesCache.shared.currentAgentEnabled }
         self.requests = requests
         self.isPreview = isPreview
+        self.voice = voice ?? OnboardingVoiceSignal(appState: isPreview ? nil : .shared)
 
         let llm = models.sharedRow(.llm)
         let snapshot = permissions.snapshot
@@ -274,6 +332,7 @@ final class OnboardingJourneyModel: ObservableObject {
         step = OnboardingJourney.steps(start: start, progress: progress).first ?? .thanks
 
         observePermissions()
+        observeVoice()
         defaultsChanges.publisher(for: UserDefaults.didChangeNotification)
             .merge(with: defaultsChanges.publisher(for: .sidekeyCapabilityFlagsChanged))
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
@@ -1083,36 +1142,54 @@ final class OnboardingJourneyModel: ObservableObject {
     // MARK: - 9. Try Drop
 
     func noteDictated() {
+        tryCheck?.cancel()
+        tryDropSeconds = voice.startedAt.map { max(0.1, Date().timeIntervalSince($0)) }
         succeed(.tryDrop, "That's Drop")
     }
+
+    /// A take on Try Drop that ends with nothing in the field says so calmly:
+    /// nothing heard, Drop's own delivery failed, or the text went to another
+    /// field. A new take clears it.
+    private func observeVoice() {
+        voice.$working
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] working in self?.dropWorkingChanged(working) }
+            .store(in: &subscriptions)
+    }
+
+    private func dropWorkingChanged(_ working: Bool) {
+        tryCheck?.cancel()
+        guard step == .tryDrop, !latest(.tryDrop).isDone else { return }
+        if working {
+            if case .failed = latest(.tryDrop) { outcomes[.tryDrop] = .idle }
+            return
+        }
+        let voice = self.voice
+        tryCheck = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.tryQuiet * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.step == .tryDrop, !voice.working,
+                  !self.latest(.tryDrop).isDone else { return }
+            if case .failed = self.latest(.tryDrop) { return }
+            self.outcomes[.tryDrop] = .failed(voice.failedDelivery ? "Drop couldn’t finish that take — try again."
+                                              : voice.inserted ? "The text went to another field — click this one and try again."
+                                              : Self.noSpeech)
+        }
+    }
+
+    static let noSpeech = "No speech heard — try again."
 
     /// Drop was pressed before its speech was set up (or while the model is
     /// still downloading): said on the try step instead of Settings over it.
     func noteDropSetupFailure(_ feature: AIFeature) {
         if case .downloading = onDevice.status {
-            outcomes[.tryDrop] = .failed("The speech model is still downloading")
+            outcomes[.tryDrop] = .failed("The speech model is still downloading — try again in a moment.")
         } else {
-            outcomes[.tryDrop] = .failed("\(feature.title) has no speech model yet")
+            outcomes[.tryDrop] = .failed("\(feature.title) has no speech model yet — set one in Settings.")
         }
     }
 
     // MARK: - Summary
-
-    /// The last step's receipt, from the saved routes and grants.
-    var receipt: (speech: String, llm: String, language: String, access: String) {
-        _ = revision
-        func label(_ kind: SharedModelKind) -> String {
-            guard let row = models.sharedRow(kind) else { return "Not set" }
-            if row.isMixed { return "Mixed" }
-            guard let choice = row.choice else { return "Not set" }
-            let provider = choice.account.kind == .onDevice ? "On this Mac" : choice.account.kind.displayName
-            return "\(provider) · \(choice.model)"
-        }
-        let snapshot = permissions.snapshot
-        let granted = [snapshot.accessibilityGranted, snapshot.microphoneGranted, permissions.screenRecordingGranted]
-            .filter { $0 }.count
-        return (label(.speech), label(.llm), language?.englishName ?? "Any language", "\(granted) / 3 allowed")
-    }
 
     /// "Speech: ElevenLabs · LLM: Anthropic claude-sonnet-5-5", from the
     /// saved shared rows; empty parts are left out.

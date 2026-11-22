@@ -162,8 +162,8 @@ window, Back and a progress bar.
   claims for the local model, only "Free. Works offline." and its size; shortcuts, the Agent's state and the
   Toolbox tiles come from the person's own HotkeyConfiguration, Agent switch
   and saved layout; the help example is a real answer (Settings → Hotkeys →
-  Tools); the receipt reads the saved routes; nothing simulates dictation
-  with the mouse, Try Drop uses the real field and shortcut.
+  Tools); nothing simulates dictation with the mouse in the app, Try Drop
+  uses the real field and shortcut.
 
 - **OpenAI speech, once the app runs it.** The maintainer brought OpenAI
   back as a speech provider (task #73, `gpt-4o-transcribe` and
@@ -177,8 +177,9 @@ window, Back and a progress bar.
   step 1 in the same window and model, outside Whytap: its own defaults
   suite emptied on start and quit, keys in memory, offline key checks,
   catalogs and server model checks (a key containing "bad" is refused), Allow that
-  only pretends macOS granted it, a timer for the speech model download and
-  a Simulate Drop button. It starts no hotkeys, event taps, stores or island
+  only pretends macOS granted it, a timer for the speech model download and,
+  on Try Drop, a capsule held to stand in for the Drop key (a short tap
+  brings nothing, a longer hold types a sample sentence). It starts no hotkeys, event taps, stores or island
   and never touches `com.rootwise.sidekey`, the Keychain or the network.
   It is not a Whytap instance (no bundle, shared stores, hotkeys or taps),
   so the one-running-copy rule does not cover it: the session that changed
@@ -390,6 +391,33 @@ window, Back and a progress bar.
   the system's check grants a step, as before. The progress rail and the
   step count stay the app's. Screen Recording, the one optional step, has
   Skip for now under Allow, so the footer shows no second Skip there.
+- **The last five steps follow the design pass's screens 05 to 09.** The
+  owner, REV 58: "great", after asking to remove the island and turn the
+  dividing line into waves while speaking, and to remove the summary table
+  and keep only a line that we hope they will like Whytap. Try Drop: the
+  title and lede, a thin line, a wire key with the legend of the person's
+  own Drop key, the real text field with the shortcut as keys, one line and
+  a capsule. No island or Listening chip: while Drop records, the line
+  turns into soft coloured waves that follow the voice level
+  (AppState.audioLevels) and straightens when the take ends. The capsule
+  is a status in the app (the take starts with the key itself, never with
+  the mouse) and Continue once the text arrived. A take that ends with
+  nothing in the field says so in one calm line after a short quiet: "No
+  speech heard - try again." when it never reached the insert, a line that
+  the text went to another field when it did, and one for Drop's own
+  delivery failure; a new take clears it (OnboardingVoiceSignal follows
+  AppState.phase). Shortcuts: three wire keys over the person's shortcuts
+  in two columns (Drop, the Agent marked Off while it is off, then the tools
+  that have a shortcut, six at most); a row's modifier keys go down while
+  the pointer is on it. Toolbox: the top of a display with the island on
+  it; hovering (or clicking) the island fans the person's own tools out
+  above it with thin leader lines, and the tool under the pointer is named
+  and described from HoverToolRegistry. whytap.ai: four small solids on a
+  ring over one Ask card with the real question and answer kept from
+  before. Finish: "You're all set.", the key, open padlock, globe and
+  Command key turning on one ring, "We hope you'll love having Whytap on
+  your Mac." and Finish; the receipt table is gone. Each of these steps has
+  its own capsule, so the footer adds no Next or Skip there.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -488,6 +516,15 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 58: on Try Drop a take with nothing in the field says "No speech
+  heard", the next take clears it, a take that reached the insert elsewhere
+  and Drop's delivery failure each have their own line, and a take that
+  arrived records its time; Shortcuts lists Drop and the Agent first, the
+  Agent Off while off, only tools with a shortcut, six at most; the island
+  shows the person's tools without Settings or tools not out yet;
+  offscreen renders of Try Drop in four states, Shortcuts, Toolbox idle and
+  open, whytap.ai and Finish, and the whole window on each step.
 
 - REV 57: each access step goes Allow, waiting, back with the switch off
   (Not on yet), Allow again, allowed, in the preview with its pretend

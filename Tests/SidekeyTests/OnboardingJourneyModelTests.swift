@@ -768,6 +768,43 @@ final class OnboardingJourneyModelTests: XCTestCase {
             }
         }
 
+        // The last five steps (REV 58), the springs landed.
+        OnboardingFinaleMotion.settlesAtOnce = true
+        defer { OnboardingFinaleMotion.settlesAtOnce = false }
+        let hotkeys = HotkeyPreferences(defaults: UserDefaults(suiteName: "OnboardingRender-\(UUID().uuidString)")!)
+        let drop = hotkeys.configuration.dropVoiceShortcut, gesture = hotkeys.configuration.normalizedDropGesture
+        let finale: [(String, AnyView)] = [
+            ("try-waiting", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture, shownState: .waiting))),
+            ("try-recording", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
+                                                             shownState: .recording, shownLevel: 0.7))),
+            ("try-done", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture, shownState: .done,
+                                                        shownText: "Moving our sync to Thursday at 3. I’ll send the new invite tonight."))),
+            ("try-failed", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
+                                                          shownState: .failed(OnboardingJourneyModel.noSpeech)))),
+            ("shortcuts", AnyView(OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration))),
+            ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model, slots: model.toolbox.slots))),
+            ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, slots: model.toolbox.slots,
+                                                            shownTool: OnboardingToolboxStage.tools(model.toolbox.slots).first))),
+            ("help", AnyView(OnboardingHelpStage(model: model))),
+            ("finish", AnyView(OnboardingFinishStage(model: model))),
+        ]
+        for (name, view) in finale {
+            let stage = view
+                .frame(width: 520, height: 320)
+                .background(OnboardingTheme.bg)
+                .preferredColorScheme(.dark)
+            let host = NSHostingView(rootView: stage)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-finale-%@.png", index, name)))
+        }
+
         // The "Choose model" list (a popover, not in the window's image).
         for provider in [AIProviderKind.anthropic] {
             let list = OnboardingModelList(choices: model.modelChoices(.llmKey, provider: provider), selected: nil,

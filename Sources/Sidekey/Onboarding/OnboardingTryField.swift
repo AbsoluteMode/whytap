@@ -9,6 +9,9 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 struct OnboardingTryField: NSViewRepresentable {
     var placeholder: String
+    /// The standalone preview's pretend take: typed in as Drop would, then
+    /// reported like Drop's own insertion.
+    var take: String? = nil
     var onDictated: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -48,7 +51,13 @@ struct OnboardingTryField: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.onDictated = onDictated
-        (scrollView.documentView as? OnboardingTryTextView)?.placeholder = placeholder
+        guard let textView = scrollView.documentView as? OnboardingTryTextView else { return }
+        textView.placeholder = placeholder
+        if let take, take != context.coordinator.lastTake {
+            context.coordinator.lastTake = take
+            textView.string = take
+            DispatchQueue.main.async { context.coordinator.onDictated() }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onDictated: onDictated) }
@@ -56,6 +65,7 @@ struct OnboardingTryField: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var onDictated: () -> Void
+        var lastTake: String?
         private var observation: NSObjectProtocol?
 
         init(onDictated: @escaping () -> Void) { self.onDictated = onDictated }
@@ -100,11 +110,10 @@ final class OnboardingTryTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            // The onboarding's italic serif, as in the pictured note.
-            .font: NSFont(name: "InstrumentSerif-Italic", size: 18) ?? font ?? .systemFont(ofSize: 15),
+            .font: font ?? .systemFont(ofSize: 15),
             .foregroundColor: NSColor.placeholderTextColor,
         ]
-        let origin = NSPoint(x: textContainerInset.width + 4, y: textContainerInset.height - 1)
+        let origin = NSPoint(x: textContainerInset.width, y: textContainerInset.height)
         (placeholder as NSString).draw(at: origin, withAttributes: attributes)
     }
 }

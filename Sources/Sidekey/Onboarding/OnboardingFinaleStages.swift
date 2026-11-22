@@ -1,0 +1,754 @@
+import AppKit
+import SwiftUI
+
+// The last five steps after the design pass's screens 05 to 09 (approved
+// 2026-11-22): Try Drop, Shortcuts, Toolbox, whytap.ai and Finish, in the
+// wire language of the steps before, with the person's own shortcuts and
+// tools. No island chip while Drop listens: the line under Try Drop's lede
+// turns into soft waves that follow the voice and settles when it stops. No
+// summary table at the end.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+
+/// The springs of a finale figure, stepped per frame like the prototype.
+final class OnboardingFinaleMotion {
+    /// Offscreen renders and tests: every spring lands at once.
+    static var settlesAtOnce = false
+
+    private(set) var clock = 2.08
+    private(set) var stage = OnboardingSpring(-0.35)
+    private(set) var press = OnboardingSpring(0)
+    private(set) var voice = OnboardingSpring(0)
+    private(set) var fan = OnboardingSpring(0)
+    private(set) var keys: [OnboardingSpring] = [OnboardingSpring(0), OnboardingSpring(0), OnboardingSpring(0)]
+    private var last: TimeInterval?
+
+    func still(_ reduceMotion: Bool) -> Bool { reduceMotion || Self.settlesAtOnce }
+
+    func advance(to time: TimeInterval, reduceMotion: Bool, press goal: Double = 0, voice voiceGoal: Double = 0,
+                 fan fanGoal: Double = 0, keys keyGoals: [Double] = [0, 0, 0]) {
+        let still = still(reduceMotion)
+        let dt = min(0.04, last.map { max(0, time - $0) } ?? 0.016)
+        last = time
+        if !still { clock += dt }
+        if still { stage = OnboardingSpring(0) } else { stage.value += (0 - stage.value) * (1 - exp(-dt * 9)) }
+        press.step(to: goal, stiffness: 210, damping: 13.5, dt: dt, still: still)
+        voice.step(to: voiceGoal, stiffness: 120, damping: 14, dt: dt, still: still)
+        fan.step(to: fanGoal, stiffness: 150, damping: 15, dt: dt, still: still)
+        for i in keys.indices {
+            keys[i].step(to: i < keyGoals.count ? keyGoals[i] : 0, stiffness: 210, damping: 13.5, dt: dt, still: still)
+        }
+    }
+
+    var fade: Double { max(0.15, min(1, 1 + stage.value * 1.4)) }
+
+    func sway(_ reduceMotion: Bool) -> (x: Double, y: Double) {
+        still(reduceMotion) ? (0, 0) : (cos(clock * 0.44) * 0.05, sin(clock * 0.56) * 0.10)
+    }
+}
+
+// MARK: - Try Drop
+
+/// Where Try Drop stands: waiting for a take, recording, the text arrived,
+/// or a calm line about a take that brought nothing.
+enum OnboardingTryState: Equatable {
+    case waiting
+    case recording
+    case done
+    case failed(String)
+
+    var tone: OnboardingWireTone {
+        switch self {
+        case .waiting: return .rest
+        case .recording: return .active
+        case .done: return .done
+        case .failed: return .warn
+        }
+    }
+}
+
+/// Try Drop: the person's shortcut as keys, a real text field Drop types
+/// into, and the line that becomes the voice while Drop listens.
+struct OnboardingTryDropStage: View {
+    @ObservedObject var model: OnboardingJourneyModel
+    @ObservedObject var voice: OnboardingVoiceSignal
+    let shortcut: HotkeyShortcut
+    let gesture: HotkeyGesture
+    /// Offscreen renders show a state without a take.
+    var shownState: OnboardingTryState?
+    var shownLevel: Double?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var motion = OnboardingFinaleMotion()
+    /// The preview's pretend take, typed into the field as Drop would.
+    @State private var take: String?
+    @State private var simulating = false
+
+    init(model: OnboardingJourneyModel, shortcut: HotkeyShortcut, gesture: HotkeyGesture,
+         shownState: OnboardingTryState? = nil, shownLevel: Double? = nil, shownText: String? = nil) {
+        self.model = model
+        voice = model.voice
+        self.shortcut = shortcut
+        self.gesture = gesture
+        self.shownState = shownState
+        self.shownLevel = shownLevel
+        _take = State(initialValue: shownText)
+    }
+
+    private var state: OnboardingTryState {
+        if let shownState { return shownState }
+        switch model.outcome(.tryDrop) {
+        case .done: return .done
+        case .failed(let reason): return voice.recording ? .recording : .failed(reason)
+        default: return voice.recording ? .recording : .waiting
+        }
+    }
+
+    private var key: String { shortcut.title }
+    private var holds: Bool { gesture == .hold }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OnboardingWireTitle(title: "Try Drop.", lede: "Your own shortcut, in a real text field.")
+            figure.frame(height: 84)
+            field
+                .padding(.horizontal, 44)
+            hint
+                .frame(height: 22)
+                .padding(.top, 7)
+            HStack(spacing: 14) {
+                pill
+                if case .done = state {} else if case .recording = state {} else {
+                    OnboardingWireLink(title: "Skip", arrow: "arrow.right", action: model.next)
+                }
+            }
+            .padding(.top, 6)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var figure: some View {
+        let state = self.state
+        let voice = self.voice
+        let level = shownLevel
+        let shortcut = self.shortcut
+        return TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                let recording = state == .recording
+                let heard = level ?? voice.level
+                motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion,
+                               press: recording ? 1 : 0, voice: recording ? min(1.1, 0.28 + heard * 1.5) : 0)
+                let still = motion.still(reduceMotion)
+                let energy = still ? 0.94 : min(1.08, 0.58 + 0.24 * abs(sin(motion.clock * 5.8))
+                                              + 0.18 * abs(cos(motion.clock * 9.3 + 0.8)) + heard * 0.3)
+                OnboardingVoiceLine.draw(in: &context, from: 64, to: size.width - 64, y: 18,
+                                         amplitude: motion.voice.value, energy: energy,
+                                         phase: still ? 2.08 : motion.clock, tone: state.tone)
+                let sway = motion.sway(reduceMotion)
+                let bob = still ? 0 : sin(motion.clock * 0.78) * 1.1
+                let key = OnboardingFinaleFigures.dropKeys[OnboardingFinaleFigures.legend(for: shortcut)]
+                    ?? OnboardingFinaleFigures.dropKeys[.none]!
+                key.draw(
+                    in: &context, center: CGPoint(x: size.width / 2, y: 57 + bob), radius: 26,
+                    angles: (ax: -0.50 + sway.x, ay: -0.52 + sway.y, az: 0.03), worldZ: motion.stage.value,
+                    press: max(-0.12, min(1.25, motion.press.value)), fade: motion.fade, tint: state.tone.tint,
+                    strength: state == .waiting ? 0.62 : state == .recording ? 0.94 : 0.9, clock: motion.clock)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var status: (String, Color) {
+        switch state {
+        case .waiting: return ("REAL TEXT FIELD", OnboardingTheme.faint)
+        case .recording: return ("LISTENING", OnboardingTheme.muted)
+        case .done:
+            let seconds = model.tryDropSeconds.map { String(format: "%.1fS · ", $0) } ?? ""
+            return ("\(seconds)ANY APP", OnboardingWireframeInk.greenColor)
+        case .failed: return ("TRY AGAIN", OnboardingWireframeInk.amberColor)
+        }
+    }
+
+    private var field: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(holds ? "Hold" : "Press")
+                OnboardingKeycaps(contents: shortcut.contents, held: state == .recording).fixedSize()
+                Text("and speak")
+                Spacer(minLength: 8)
+                Text(status.0)
+                    .font(OnboardingTheme.mono(10, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundColor(status.1)
+            }
+            .font(OnboardingTheme.sans(13))
+            .foregroundColor(OnboardingTheme.muted)
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .overlay(Rectangle().fill(OnboardingTheme.border).frame(height: 0.5), alignment: .bottom)
+            OnboardingTryField(placeholder: "Click here, \(holds ? "hold" : "press") \(key), and say a sentence…",
+                               take: take, onDictated: model.noteDictated)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54, alignment: .topLeading)
+        }
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color(red: 0.106, green: 0.106, blue: 0.122)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(state == .waiting ? OnboardingTheme.borderStrong : state.tone.border, lineWidth: 1))
+    }
+
+    private var hint: some View {
+        let text: String
+        switch state {
+        case .waiting:
+            text = holds ? "Hold \(key), speak, and let go." : "Press \(key), speak, and press it again."
+        case .recording:
+            text = holds ? "Speak now — release \(key) to drop the text at your cursor."
+                : "Speak now — press \(key) again to drop the text at your cursor."
+        case .done:
+            text = "That’s Drop — the same shortcut works in any app."
+        case .failed(let reason):
+            text = reason
+        }
+        return Text(text)
+            .font(OnboardingTheme.sans(13))
+            .foregroundColor(state.tone.lineColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 30)
+    }
+
+    @ViewBuilder private var pill: some View {
+        switch state {
+        case .done:
+            OnboardingWirePill("Continue", tone: .done, disc: .check, isDefault: true, action: model.next)
+        case .recording:
+            OnboardingWirePill(holds ? "Release \(key) to drop" : "Press \(key) again to drop", tone: .active,
+                               disc: .none, interactive: false, action: {})
+        case .waiting, .failed:
+            let title = "\(holds ? "Hold" : "Press") \(key) to \(state == .waiting ? "speak" : "try again")"
+            if model.isPreview {
+                // The preview has no Drop: holding the capsule stands in for the key.
+                OnboardingWirePill(title, tone: state.tone, disc: .arrow, interactive: false, action: {})
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { _ in startPretendTake() }
+                        .onEnded { _ in endPretendTake() })
+            } else {
+                // A status, not a button: the take starts with the key itself.
+                OnboardingWirePill(title, tone: state.tone, disc: .none, interactive: false, action: {})
+            }
+        }
+    }
+
+    private func startPretendTake() {
+        guard !simulating else { return }
+        simulating = true
+        voice.phaseChanged(.recording)
+        let voice = self.voice
+        Task { @MainActor in
+            var t = 0.0
+            while voice.recording {
+                t += 0.05
+                voice.setLevel(0.35 + 0.3 * abs(sin(t * 3.1)) + 0.15 * abs(sin(t * 7.3)))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+
+    private func endPretendTake() {
+        guard simulating else { return }
+        simulating = false
+        let voice = self.voice
+        let started = voice.startedAt ?? Date()
+        voice.phaseChanged(.transcribing)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            // A tap with no speech brings nothing, like a real empty take.
+            if Date().timeIntervalSince(started) < 0.6 {
+                voice.phaseChanged(.idle)
+                return
+            }
+            voice.phaseChanged(.inserting)
+            take = "Moving our sync to Thursday at 3. I’ll send the new invite tonight."
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            voice.phaseChanged(.idle)
+        }
+    }
+}
+
+// MARK: - Shortcuts
+
+/// One shortcut row: what it opens and the person's own keys.
+struct OnboardingShortcutRow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let symbol: String
+    let shortcut: HotkeyShortcut
+    var note: String?
+
+    /// Drop, the Agent and the tools with a shortcut, up to six, from the
+    /// person's own configuration.
+    static func rows(_ configuration: HotkeyConfiguration, agentEnabled: Bool) -> [OnboardingShortcutRow] {
+        var rows = [OnboardingShortcutRow(id: "drop", title: "Drop", symbol: "mic", shortcut: configuration.dropVoiceShortcut),
+                    OnboardingShortcutRow(id: "agent", title: "Agent", symbol: "sparkle", shortcut: configuration.agentTextShortcut,
+                                          note: agentEnabled ? nil : "Off")]
+        let order: [HoverTool] = [.screenshot, .translate, .clipboard, .notes, .caseVault, .tasks, .subtitles, .meetingRecord,
+                                  .notifs, .monitor]
+        for tool in order where rows.count < 6 {
+            guard let shortcut = configuration.toolShortcuts[tool] else { continue }
+            let info = HoverToolRegistry.info(for: tool)
+            rows.append(OnboardingShortcutRow(id: tool.rawValue, title: info.title, symbol: info.sfSymbol, shortcut: shortcut))
+        }
+        return rows
+    }
+
+    /// Which of ⌥, ⇧ and ⌘ the shortcut holds (the keys over the list).
+    var modifiers: [Double] {
+        let text = shortcut.contents.map { content -> String in
+            switch content {
+            case .text(let value): return value
+            case .symbol(let name, _): return name
+            case .prefixedGlyph(let prefix, let glyph, _): return prefix + glyph
+            }
+        }.joined() + shortcut.title
+        func has(_ marks: [String]) -> Double { marks.contains { text.localizedCaseInsensitiveContains($0) } ? 1 : 0 }
+        return [has(["⌥", "option"]), has(["⇧", "shift"]), has(["⌘", "command"])]
+    }
+}
+
+/// Shortcuts: three wire keys over the person's shortcuts in two columns;
+/// the keys a row uses go down while the pointer is on it.
+struct OnboardingShortcutsStage: View {
+    @ObservedObject var model: OnboardingJourneyModel
+    let configuration: HotkeyConfiguration
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var motion = OnboardingFinaleMotion()
+    @State private var hovered: String?
+
+    private var rows: [OnboardingShortcutRow] {
+        OnboardingShortcutRow.rows(configuration, agentEnabled: model.agentEnabled())
+    }
+
+    var body: some View {
+        let rows = self.rows
+        let goals = rows.first { $0.id == hovered }?.modifiers ?? [0, 0, 0]
+        VStack(spacing: 0) {
+            OnboardingWireTitle(title: "Every tool has a shortcut.",
+                                lede: "These are yours now. Change them in Settings → Hotkeys.")
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion, keys: goals)
+                    let sway = motion.sway(reduceMotion)
+                    let still = motion.still(reduceMotion)
+                    let center = CGPoint(x: size.width / 2, y: size.height / 2 + (still ? 0 : sin(motion.clock * 0.72) * 1.3))
+                    let angles = (ax: -0.52 + sway.x, ay: -0.34 + sway.y, az: 0.02)
+                    for (index, key) in OnboardingFinaleFigures.cluster.enumerated() {
+                        let press = motion.keys[index].value
+                        key.draw(in: &context, center: center, radius: 24, angles: angles, worldZ: motion.stage.value,
+                                 press: press, fade: motion.fade * (index == 2 ? 1 : 0.94), tint: OnboardingWireframeInk.rose,
+                                 strength: (index == 2 ? 0.68 : 0.58) + 0.36 * press, clock: motion.clock)
+                    }
+                }
+            }
+            .frame(height: 64)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 8) {
+                ForEach(rows) { row in
+                    rowView(row)
+                }
+            }
+            .padding(.horizontal, 40)
+            .padding(.top, 4)
+            OnboardingWirePill("Continue", isDefault: true, action: model.next)
+                .padding(.top, 14)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rowView(_ row: OnboardingShortcutRow) -> some View {
+        let lit = hovered == row.id
+        return HStack(spacing: 10) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(OnboardingTheme.ink2)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.black.opacity(0.35)))
+            Text(row.title)
+                .font(OnboardingTheme.sans(14, weight: .semibold))
+                .foregroundColor(row.note == nil ? OnboardingTheme.ink : OnboardingTheme.muted)
+                .lineLimit(1)
+            if let note = row.note {
+                Text(note.uppercased())
+                    .font(OnboardingTheme.mono(9, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.faint)
+            }
+            Spacer(minLength: 4)
+            OnboardingKeycaps(contents: row.shortcut.contents, held: lit).fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 40)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.white.opacity(lit ? 0.07 : 0.035)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Color.white.opacity(lit ? 0.16 : 0.08), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onHover { inside in
+            if inside { hovered = row.id } else if hovered == row.id { hovered = nil }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.title): \(row.shortcut.title)\(row.note.map { ", \($0)" } ?? "")")
+    }
+}
+
+// MARK: - Toolbox
+
+/// Toolbox: the top of a display with the island on it; hovering the island
+/// fans the person's tools out above it, and the tool under the pointer is
+/// named and described below.
+struct OnboardingToolboxStage: View {
+    @ObservedObject var model: OnboardingJourneyModel
+    let slots: [HoverTool]
+    /// Offscreen renders show the fan open on a tool.
+    var shownTool: HoverTool?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var motion = OnboardingFinaleMotion()
+    @State private var open = false
+    @State private var selected: HoverTool?
+
+    init(model: OnboardingJourneyModel, slots: [HoverTool], shownTool: HoverTool? = nil) {
+        self.model = model
+        self.slots = slots
+        self.shownTool = shownTool
+        _open = State(initialValue: shownTool != nil)
+        _selected = State(initialValue: shownTool)
+    }
+
+    /// The tools the island shows, in the person's order (up to six).
+    static func tools(_ slots: [HoverTool]) -> [HoverTool] {
+        Array(slots.filter { $0 != .settings && !$0.isComingSoon }.prefix(6))
+    }
+
+    private static let areaHeight: CGFloat = 196
+    private static let islandY: CGFloat = 84
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OnboardingWireTitle(title: "Tools above the island.",
+                                lede: "Hover the island at the top of the screen. Pick yours in Settings → Toolbox.")
+            area
+                .frame(height: Self.areaHeight)
+                .padding(.top, 4)
+            OnboardingWirePill("Continue", isDefault: true, action: model.next)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func target(_ index: Int, of count: Int, width: CGFloat) -> CGPoint {
+        let spacing: CGFloat = 70
+        let x = width / 2 + (CGFloat(index) - CGFloat(count - 1) / 2) * spacing
+        let edge = abs(CGFloat(index) - CGFloat(count - 1) / 2) / max(1, CGFloat(count - 1) / 2)
+        return CGPoint(x: x, y: 26 + edge * edge * 8)
+    }
+
+    private var area: some View {
+        let tools = Self.tools(slots)
+        let open = self.open
+        let selected = self.selected
+        return GeometryReader { proxy in
+            let width = proxy.size.width
+            let island = CGPoint(x: width / 2, y: Self.islandY)
+            TimelineView(.animation) { timeline in
+                let _ = motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion,
+                                       fan: open ? 1 : 0)
+                let fan = max(0, min(1.08, motion.fan.value))
+                ZStack(alignment: .topLeading) {
+                    Canvas { context, size in
+                        let sway = motion.sway(reduceMotion)
+                        OnboardingFinaleFigures.display.draw(
+                            in: &context, center: CGPoint(x: size.width / 2, y: Self.islandY + 62), worldZ: motion.stage.value,
+                            radius: 108, angles: (ax: -0.14 + sway.x * 0.45, ay: sway.y * 0.45, az: 0),
+                            style: OnboardingWireStrokes.style(fade: motion.fade * 0.92, tint: OnboardingWireframeInk.rose,
+                                                               strength: 0.48 + 0.38 * min(1, fan), clock: motion.clock))
+                        guard fan > 0.04 else { return }
+                        for (index, tool) in tools.enumerated() {
+                            let goal = target(index, of: tools.count, width: size.width)
+                            let tip = CGPoint(x: island.x + (goal.x - island.x) * fan, y: island.y - 12 + (goal.y + 26 - island.y + 12) * fan)
+                            let from = CGPoint(x: island.x + (CGFloat(index) - CGFloat(tools.count - 1) / 2) * 9, y: island.y - 12)
+                            let lit = tool == selected
+                            let color = lit ? OnboardingWireframeInk.roseColor.opacity(0.66 * min(1, fan))
+                                : OnboardingWireframeInk.wireColor.opacity(0.17 * min(1, fan))
+                            context.stroke(Path { $0.move(to: from); $0.addLine(to: tip) }, with: .color(color),
+                                           lineWidth: lit ? 1.15 : 0.82)
+                            let r: CGFloat = lit ? 1.8 : 1.25
+                            context.fill(Path(ellipseIn: CGRect(x: tip.x - r, y: tip.y - r, width: r * 2, height: r * 2)),
+                                         with: .color(color.opacity(lit ? 1 : 2)))
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    ForEach(Array(tools.enumerated()), id: \.element) { index, tool in
+                        let goal = target(index, of: tools.count, width: width)
+                        tile(tool)
+                            .scaleEffect(0.5 + 0.5 * min(1, fan))
+                            .opacity(min(1, fan))
+                            .position(x: island.x + (goal.x - island.x) * fan, y: island.y + (goal.y - island.y) * fan)
+                            .allowsHitTesting(fan > 0.6)
+                    }
+                    islandPill(tools: tools)
+                        .position(island)
+                    caption
+                        .frame(width: 300)
+                        .position(x: width / 2, y: Self.islandY + 66)
+                }
+            }
+        }
+    }
+
+    private func tile(_ tool: HoverTool) -> some View {
+        let info = HoverToolRegistry.info(for: tool)
+        let lit = tool == selected
+        return Button { selected = tool } label: {
+            VStack(spacing: 5) {
+                Image(systemName: info.sfSymbol).font(.system(size: 14, weight: .medium))
+                Text(info.title).font(OnboardingTheme.sans(11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .foregroundColor(OnboardingTheme.ink)
+            .frame(width: 60, height: 52)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(red: 0.13, green: 0.13, blue: 0.15)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(lit ? OnboardingWireframeInk.roseColor.opacity(0.75) : Color.white.opacity(0.12), lineWidth: lit ? 1.3 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { if $0 { selected = tool } }
+        .accessibilityLabel(info.title)
+        .accessibilityHint(info.description)
+    }
+
+    private func islandPill(tools: [HoverTool]) -> some View {
+        let name = selected.map { HoverToolRegistry.info(for: $0).title }
+        return Button {
+            open = true
+            if selected == nil { selected = tools.first }
+        } label: {
+            HStack(spacing: 9) {
+                Circle().fill(OnboardingWireframeInk.roseColor).frame(width: 6, height: 6)
+                Text(open ? "Toolbox · \(name ?? "")" : "Hover the island")
+                    .font(OnboardingTheme.mono(11.5, weight: .medium))
+                    .foregroundColor(OnboardingTheme.ink)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 28)
+            .background(Capsule(style: .continuous).fill(Color.black))
+            .overlay(Capsule(style: .continuous)
+                .strokeBorder(open ? OnboardingWireframeInk.roseColor.opacity(0.45) : Color.white.opacity(0.16), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { inside in
+            guard inside else { return }
+            open = true
+            if selected == nil { selected = tools.first }
+        }
+        .accessibilityLabel("Island")
+        .accessibilityHint("Shows the tools above it")
+    }
+
+    private var caption: some View {
+        let info = selected.map(HoverToolRegistry.info(for:))
+        return VStack(spacing: 4) {
+            Text(info?.title ?? "Top of your display")
+                .font(OnboardingTheme.sans(14, weight: .semibold))
+                .foregroundColor(OnboardingTheme.ink)
+            Text(info?.description ?? "Move your pointer onto the island above to fan out your quick tools.")
+                .font(OnboardingTheme.sans(12.5))
+                .foregroundColor(OnboardingTheme.muted)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - whytap.ai
+
+/// whytap.ai: four small solids on a ring over one Ask card with a real
+/// question and its real answer.
+struct OnboardingHelpStage: View {
+    @ObservedObject var model: OnboardingJourneyModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
+    @State private var motion = OnboardingFinaleMotion()
+
+    static let site = URL(string: "https://whytap.ai")!
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OnboardingWireTitle(title: "Questions?", lede: "The agent on whytap.ai answers with steps for your setup.")
+            orbit.frame(height: 58)
+            card.padding(.horizontal, 50)
+            OnboardingWirePill("Continue", isDefault: true, action: model.next)
+                .padding(.top, 10)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var orbit: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion)
+                let still = motion.still(reduceMotion)
+                let center = CGPoint(x: size.width / 2, y: 23)
+                let rx = 92.0, ry = 15.0
+                context.stroke(Path(ellipseIn: CGRect(x: center.x - rx, y: center.y - ry, width: rx * 2, height: ry * 2)),
+                               with: .color(OnboardingWireframeInk.wireColor.opacity(0.15 * motion.fade)), lineWidth: 0.85)
+                let rose = OnboardingWireframeInk.roseColor
+                context.stroke(Path { $0.move(to: CGPoint(x: center.x, y: center.y + ry + 10)); $0.addLine(to: CGPoint(x: center.x, y: size.height)) },
+                               with: .color(rose.opacity(0.45 * motion.fade)), lineWidth: 0.95)
+                let sway = motion.sway(reduceMotion)
+                let items = [Double.pi * 0.5, .pi * 1.05, .pi * 1.5, .pi * 1.95].enumerated().map { index, base -> (Int, Double) in
+                    (index, index == 0 || still ? base : base + sin(motion.clock * 0.45 + Double(index)) * 0.08)
+                }.sorted { sin($0.1) < sin($1.1) }
+                for (index, angle) in items {
+                    let depth = sin(angle)
+                    let point = CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * depth)
+                    let radius = index == 0 ? 14.0 : 10.5 + depth * 2
+                    let spin = still ? 0.5 : motion.clock * (0.38 + Double(index) * 0.09)
+                    OnboardingFinaleFigures.solids[index].draw(
+                        in: &context, center: point, worldZ: motion.stage.value + depth * 0.25, radius: radius,
+                        angles: (ax: -0.35 + sway.x, ay: spin + sway.y, az: 0.18 * Double(index)),
+                        style: OnboardingWireStrokes.style(fade: motion.fade * (0.62 + 0.38 * (depth + 1) / 2),
+                                                           tint: OnboardingWireframeInk.rose,
+                                                           strength: index == 0 ? 0.92 : 0.55, clock: motion.clock))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.muted)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
+                Text("How do I give Shot its own shortcut?")
+                    .font(OnboardingTheme.sans(13.5))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.black)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Color.white.opacity(0.95)))
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 36)
+            .background(Capsule(style: .continuous).fill(Color.black.opacity(0.35)))
+            .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(spacing: 5) {
+                    Circle().fill(OnboardingWireframeInk.greenColor).frame(width: 5, height: 5)
+                    Text("Yes").foregroundColor(OnboardingWireframeInk.greenColor)
+                }
+                (Text("Open ") + Text("Settings › Hotkeys › Tools").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                    + Text(", click the field next to Shot and press the keys."))
+                    .foregroundColor(OnboardingTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(OnboardingTheme.sans(12.5))
+            .padding(.horizontal, 4)
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            HStack {
+                Text(verbatim: "whytap.ai")
+                    .font(OnboardingTheme.mono(10.5))
+                    .foregroundColor(OnboardingTheme.faint)
+                Spacer()
+                OnboardingWireLink(title: "Ask on whytap.ai", arrow: "arrow.up.right") { openURL(Self.site) }
+            }
+            .padding(.leading, 4)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(red: 0.11, green: 0.11, blue: 0.125)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(OnboardingWireframeInk.roseColor.opacity(0.28), lineWidth: 1))
+    }
+}
+
+// MARK: - Finish
+
+/// Finish: the figures of the steps before turn slowly on one ring; one
+/// line, and Finish.
+struct OnboardingFinishStage: View {
+    @ObservedObject var model: OnboardingJourneyModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var motion = OnboardingFinaleMotion()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OnboardingWireTitle(title: "You’re all set.")
+            constellation.frame(height: 150).padding(.top, 8)
+            Text("We hope you’ll love having Whytap on your Mac.")
+                .font(OnboardingTheme.sans(14))
+                .foregroundColor(OnboardingTheme.muted)
+                .padding(.top, 10)
+            OnboardingWirePill("Finish", disc: .finish, isDefault: true, action: model.finish)
+                .padding(.top, 22)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var constellation: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion)
+                let still = motion.still(reduceMotion)
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                let rx = 128.0, ry = 27.0
+                context.stroke(Path(ellipseIn: CGRect(x: center.x - rx, y: center.y - ry, width: rx * 2, height: ry * 2)),
+                               with: .color(OnboardingWireframeInk.wireColor.opacity(0.15 * motion.fade)), lineWidth: 0.9)
+                let turn = still ? 0.36 : motion.clock * 0.32
+                let sway = motion.sway(reduceMotion)
+                let items = (0..<4).map { index in (index, turn + Double(index) / 4 * 2 * .pi) }.sorted { sin($0.1) < sin($1.1) }
+                for (index, angle) in items {
+                    let depth = sin(angle)
+                    let point = CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * depth)
+                    let radius = 21.5 + depth * 3.8
+                    let spin = still ? -0.38 : -0.35 + sin(motion.clock * 0.6 + Double(index)) * 0.25
+                    let angles = (ax: -0.30 + sway.x, ay: spin + sway.y, az: 0.05)
+                    let tint = index % 2 == 0 ? OnboardingWireframeInk.green : OnboardingWireframeInk.rose
+                    let fade = motion.fade * (0.64 + 0.36 * (depth + 1) / 2)
+                    let worldZ = motion.stage.value + depth * 0.28
+                    let style = OnboardingWireStrokes.style(fade: fade, tint: tint, strength: 0.9, clock: motion.clock)
+                    switch index {
+                    case 0: OnboardingFinaleFigures.keyMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
+                                                                  angles: angles, style: style)
+                    case 1: OnboardingFinaleFigures.padlockMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
+                                                                      angles: angles, style: style)
+                    case 2: OnboardingFinaleFigures.globeMotif.draw(in: &context, center: point, worldZ: worldZ, radius: radius,
+                                                                    angles: angles, style: style)
+                    default:
+                        let key = OnboardingFinaleFigures.commandMotif
+                        key.cap.draw(in: &context, center: point, worldZ: worldZ, radius: radius, angles: angles, style: style)
+                        OnboardingWireStrokes.draw(key.legend, in: &context, center: point, radius: radius, worldZ: worldZ,
+                                                   angles: angles, fade: fade, tint: tint, width: 1.05)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}

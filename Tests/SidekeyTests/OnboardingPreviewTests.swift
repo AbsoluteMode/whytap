@@ -72,8 +72,28 @@ final class OnboardingPreviewTests: XCTestCase {
         }
         model.next()
         XCTAssertEqual(model.step, .tryDrop)
+        // A take that brings nothing says so calmly; the next take clears it
+        // (REV 58). The preview drives Drop's phases by hand.
+        let voice = model.voice
+        voice.phaseChanged(.recording)
+        XCTAssertTrue(voice.recording)
+        voice.phaseChanged(.idle)
+        try await eventually { model.outcome(.tryDrop) == .failed(OnboardingJourneyModel.noSpeech) }
+        voice.phaseChanged(.recording)
+        XCTAssertEqual(model.outcome(.tryDrop), .idle, "a new take clears the line")
+        voice.phaseChanged(.transcribing)
+        voice.phaseChanged(.inserting)
+        voice.phaseChanged(.idle)
+        try await eventually { model.outcome(.tryDrop).failureText?.contains("another field") == true }
+        voice.phaseChanged(.recording)
+        voice.phaseChanged(.deliveryFailed)
+        try await eventually { model.outcome(.tryDrop).failureText?.contains("couldn’t finish") == true }
+        voice.phaseChanged(.recording)
+        voice.phaseChanged(.inserting)
         model.noteDictated()
+        voice.phaseChanged(.idle)
         XCTAssertTrue(model.outcome(.tryDrop).isDone)
+        XCTAssertNotNil(model.tryDropSeconds, "the take's time from the press")
         for expected in [OnboardingStep.hotkeys, .toolbox, .help, .thanks] {
             model.next()
             XCTAssertEqual(model.step, expected)
@@ -775,5 +795,39 @@ final class OnboardingPreviewTests: XCTestCase {
             }
             XCTAssertTrue(touches(first) && touches(last), "each loop starts and ends on a side's end")
         }
+    }
+
+    /// Shortcuts shows the person's own keys: Drop and the Agent first, then
+    /// the tools that have a shortcut, six at most; the Agent says Off while
+    /// it is off; the keys over the list follow a row's modifiers (REV 58).
+    func testShortcutRowsComeFromTheConfiguration() {
+        var configuration = HotkeyPreferences(defaults: UserDefaults(suiteName: "OnboardingShortcuts-\(UUID().uuidString)")!)
+            .configuration
+        let rows = OnboardingShortcutRow.rows(configuration, agentEnabled: false)
+        XCTAssertEqual(rows.prefix(2).map(\.id), ["drop", "agent"])
+        XCTAssertEqual(rows[0].shortcut, configuration.dropVoiceShortcut)
+        XCTAssertEqual(rows[1].note, "Off")
+        XCTAssertNil(OnboardingShortcutRow.rows(configuration, agentEnabled: true)[1].note)
+        XCTAssertLessThanOrEqual(rows.count, 6)
+        for row in rows.dropFirst(2) {
+            let tool = HoverTool(rawValue: row.id)
+            XCTAssertNotNil(tool.flatMap { configuration.toolShortcuts[$0] }, "only tools with a shortcut")
+        }
+        configuration.toolShortcuts = [:]
+        XCTAssertEqual(OnboardingShortcutRow.rows(configuration, agentEnabled: true).count, 2)
+        let command = OnboardingShortcutRow(id: "x", title: "X", symbol: "x", shortcut: configuration.agentTextShortcut)
+        XCTAssertEqual(command.modifiers.count, 3)
+    }
+
+    /// The island shows the person's tools in their order, without Settings
+    /// or tools that are not out yet, six at most.
+    func testToolboxShowsThePersonsTools() {
+        let all = HoverTool.allCases
+        let tools = OnboardingToolboxStage.tools(all)
+        XCTAssertLessThanOrEqual(tools.count, 6)
+        XCTAssertFalse(tools.contains(.settings))
+        XCTAssertFalse(tools.contains { $0.isComingSoon })
+        XCTAssertEqual(tools, Array(all.filter { $0 != .settings && !$0.isComingSoon }.prefix(6)))
+        XCTAssertEqual(OnboardingToolboxStage.tools([.translate, .settings, .screenshot]), [.translate, .screenshot])
     }
 }

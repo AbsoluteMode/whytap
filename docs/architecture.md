@@ -1240,7 +1240,18 @@ the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again
 (OnboardingJourneyModel.recheckPermissions; not while macOS's own microphone
 dialog is open); reaching the step again starts at Allow. Screen Recording has
-Skip for now under Allow instead of the footer's Skip.
+Skip for now under Allow instead of the footer's Skip. The last five steps
+(OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
+key as a wire key and as keys over the real field; while Drop records
+(OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
+lede becomes soft waves that follow the voice, with no island chip; a take that
+ends with nothing in the field gets one calm line ("No speech heard - try
+again.", the text went to another field, or Drop's delivery failure) and a new
+take clears it. Shortcuts lists Drop, the Agent and the tools with a shortcut
+under three wire keys; Toolbox fans the person's own tools out above a drawn
+island when it is hovered, with HoverToolRegistry's descriptions; whytap.ai is
+one Ask card under four small solids; Finish has no summary, only the
+constellation of the earlier figures, one line and Finish.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
 does not link. System Audio Recording, Automation and Calendar are asked at

@@ -20,7 +20,7 @@ import Foundation
 /// shape check before any request); the first Allow on an access step comes
 /// back without the switch on (Not on yet), Allow again or Open System
 /// Settings pretends macOS granted it; the speech model
-/// "download" is a timer; Try Drop has a Simulate button. No hotkeys, event
+/// "download" is a timer; on Try Drop, holding the capsule stands in for the Drop key. No hotkeys, event
 /// taps, stores or island are started.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor

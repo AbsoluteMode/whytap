@@ -62,9 +62,12 @@ struct OnboardingJourneyView: View {
     /// Step 1 and the two key steps draw on a softly lit ground (the
     /// wireframe pass); its edge is the window's own colour, so nothing shows
     /// a seam.
-    static func isWireframe(_ step: OnboardingStep) -> Bool {
-        [.source, .speechKey, .llmKey, .search, .language, .keyboard, .microphone, .inputMonitoring, .screenRecording]
-            .contains(step)
+    static func isWireframe(_ step: OnboardingStep) -> Bool { true }
+
+    /// The steps with their own capsule (Continue, Finish) and Skip: the
+    /// footer adds no Next or Skip of its own there.
+    static func hasOwnActions(_ step: OnboardingStep) -> Bool {
+        [.tryDrop, .hotkeys, .toolbox, .help, .thanks].contains(step)
     }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
@@ -155,10 +158,10 @@ struct OnboardingJourneyView: View {
             OnboardingOutlineButton(title: "Open Hotkeys") { model.openSettings(.hotkeys, nil) }.fixedSize()
         } else if model.step == .toolbox {
             OnboardingOutlineButton(title: "Open Toolbox") { model.openSettings(.toolbox, nil) }.fixedSize()
-        } else if model.step != .source, model.step != .screenRecording, !model.step.isInformational, !outcome.isDone,
-                  dwell.state == .idle {
+        } else if model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
+                  !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
             // Step 1 has no skip: its two figures are the choice. Screen
-            // Recording has its own Skip for now under Allow.
+            // Recording and Try Drop have their own Skip under the capsule.
             Button(model.step.isOptional ? "Skip" : "Set up later", action: model.next)
                 .buttonStyle(.plain)
                 .font(OnboardingTheme.sans(12, weight: .medium))
@@ -180,12 +183,12 @@ struct OnboardingJourneyView: View {
                 .frame(width: 0, height: 0)
                 .accessibilityLabel("Continue")
         case .reviewing:
-            if model.step != .source {
+            if model.step != .source, !Self.hasOwnActions(model.step) {
                 OnboardingPrimaryButton(title: "Next", action: dwell.commitNow)
                     .keyboardShortcut(.defaultAction)
             }
         case .idle:
-            if model.step != .thanks, model.step != .source,
+            if model.step != .source, !Self.hasOwnActions(model.step),
                model.step.isInformational || model.outcome(model.step).isDone {
                 OnboardingPrimaryButton(title: "Next", action: model.next)
                     .keyboardShortcut(.defaultAction)
@@ -210,43 +213,17 @@ struct OnboardingJourneyView: View {
             OnboardingLanguageStage(model: model)
         case .keyboard, .microphone, .inputMonitoring, .screenRecording:
             if let kind = OnboardingAccessKind(step: step) { OnboardingAccessStage(kind: kind, model: model) }
-        case .tryDrop: tryDropStage
+        case .tryDrop:
+            OnboardingTryDropStage(model: model, shortcut: hotkeys.configuration.dropVoiceShortcut,
+                                   gesture: hotkeys.configuration.normalizedDropGesture)
         case .hotkeys:
-            OnboardingJourneyStep(act: step.act, title: "Every tool has a shortcut",
-                                  lede: "These are yours now. Change them in Settings → Hotkeys.") {
-                OnboardingShortcutList(configuration: hotkeys.configuration, agentEnabled: model.agentEnabled())
-            }
+            OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration)
         case .toolbox:
-            OnboardingJourneyStep(act: step.act, title: "Tools above the island",
-                                  lede: "Hover the island at the top of the screen. Pick yours in Settings → Toolbox.") {
-                OnboardingToolboxPreview(slots: model.toolbox.slots)
-            }
+            OnboardingToolboxStage(model: model, slots: model.toolbox.slots)
         case .help:
-            OnboardingJourneyStep(act: step.act, title: "Questions?",
-                                  lede: "The agent on whytap.ai answers with steps for your setup.") {
-                OnboardingHelpCard()
-            }
+            OnboardingHelpStage(model: model)
         case .thanks:
-            OnboardingJourneyStep(act: step.act, title: "Thank you for choosing Whytap", lede: "") {
-                OnboardingThankYouCard(receipt: model.receipt,
-                                       hint: "Settings has everything you set here.",
-                                       finish: model.finish)
-            }
-        }
-    }
-
-    private var tryDropStage: some View {
-        let model = self.model
-        let problem: String? = { if case .failed(let reason) = model.outcome(.tryDrop) { return reason } else { return nil } }()
-        var simulate: (() -> Void)?
-        if model.isPreview { simulate = { model.noteDictated() } }
-        return OnboardingJourneyStep(act: OnboardingStep.tryDrop.act, title: "Try Drop", lede: "Your own shortcut, in a real text field.") {
-            OnboardingTryStage(shortcut: hotkeys.configuration.dropVoiceShortcut,
-                               gesture: hotkeys.configuration.normalizedDropGesture,
-                               dictated: model.outcome(.tryDrop).isDone,
-                               problem: problem,
-                               onDictated: model.noteDictated,
-                               simulate: simulate)
+            OnboardingFinishStage(model: model)
         }
     }
 
@@ -258,144 +235,5 @@ struct OnboardingJourneyView: View {
         if parts.count == 2 { return "\(parts[0]) free / \(parts[1])" }
         if cadence.contains("each month") { return "\(hint.allowance) free / mo" }
         return "\(hint.allowance) free"
-    }
-}
-
-// MARK: - Step frame
-
-/// The act label, a serif title, an optional lede and the step's stage.
-struct OnboardingJourneyStep<Content: View>: View {
-    let act: OnboardingAct
-    let title: String
-    let lede: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(act.rawValue)
-                .font(OnboardingTheme.mono(9.5, weight: .semibold))
-                .tracking(1.4)
-                .foregroundColor(OnboardingTheme.faint)
-                .accessibilityHidden(true)
-            Text(title)
-                .font(OnboardingTheme.serif(30))
-                .foregroundColor(OnboardingTheme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
-                .accessibilityAddTraits(.isHeader)
-            if !lede.isEmpty {
-                Text(lede)
-                    .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
-            content.padding(.top, 18)
-        }
-        .padding(.top, 14)
-    }
-}
-
-// MARK: - 10. Shortcuts
-
-/// Drop, Agent and Shot with the person's own keys from HotkeyConfiguration.
-struct OnboardingShortcutList: View {
-    let configuration: HotkeyConfiguration
-    let agentEnabled: Bool
-
-    var body: some View {
-        let drop = OnboardingTryPage.Copy(shortcut: configuration.dropVoiceShortcut.title,
-                                          gesture: configuration.normalizedDropGesture)
-        VStack(spacing: 8) {
-            OnboardingInfoRow(title: "Drop", detail: "\(drop.pressVerb) in any text field and speak") {
-                OnboardingKeycaps(contents: configuration.dropVoiceShortcut.contents)
-            }
-            OnboardingInfoRow(title: "Agent", detail: agentEnabled
-                              ? "Tap to type a question, hold to ask by voice"
-                              : "Turn it on in Settings → Other") {
-                OnboardingKeycaps(contents: configuration.agentTextShortcut.contents)
-            }
-            OnboardingInfoRow(title: "Shot", detail: "Capture, mark up and copy part of the screen") {
-                if let shot = configuration.toolShortcuts[.screenshot] {
-                    OnboardingKeycaps(contents: shot.contents)
-                } else {
-                    Text("No shortcut yet")
-                        .font(OnboardingTheme.sans(11.5))
-                        .foregroundColor(OnboardingTheme.faint)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - 11. Toolbox
-
-/// The person's own hover tools, in their saved order.
-struct OnboardingToolboxPreview: View {
-    let slots: [HoverTool]
-
-    var body: some View {
-        let tools = slots.filter { $0 != .settings && !$0.isComingSoon }.prefix(6)
-        VStack(spacing: 10) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(Array(tools), id: \.self) { tool in
-                    let info = HoverToolRegistry.info(for: tool)
-                    VStack(spacing: 6) {
-                        Image(systemName: info.sfSymbol)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(OnboardingTheme.accent)
-                            .frame(width: 28, height: 28)
-                            .background(Circle().fill(Color.white.opacity(0.92)))
-                        Text(info.title)
-                            .font(OnboardingTheme.sans(11, weight: .medium))
-                            .foregroundColor(OnboardingTheme.ink2)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 64)
-                    .onboardingElevatedCard(cornerRadius: 12)
-                    .help(info.description)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - 12. Help
-
-/// A real question and its real answer, then the link.
-struct OnboardingHelpCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Spacer()
-                    Text("How do I give Shot its own shortcut?")
-                        .font(OnboardingTheme.sans(12))
-                        .foregroundColor(OnboardingTheme.ink)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(OnboardingTheme.surface3))
-                }
-                Text("Open Settings → Hotkeys → Tools, click the field next to Shot and press the keys.")
-                    .font(OnboardingTheme.sans(12))
-                    .foregroundColor(OnboardingTheme.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .onboardingRecessed(cornerRadius: 10)
-            }
-            .padding(12)
-            .onboardingElevatedCard(cornerRadius: 13)
-            Link(destination: URL(string: "https://whytap.ai")!) {
-                HStack(spacing: 4) {
-                    Text("Ask on whytap.ai")
-                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
-                }
-                .font(OnboardingTheme.sans(12.5, weight: .medium))
-                .foregroundColor(OnboardingTheme.accent)
-            }
-            .buttonStyle(.plain)
-        }
     }
 }

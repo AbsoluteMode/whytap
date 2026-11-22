@@ -51,10 +51,12 @@ is a verifiable claim rather than a slogan.
 - Cached model catalogs (a file in the app's Caches folder) and the results of
   key and model checks (provider, model, status, time; never a key, audio or
   text) stay on the Mac.
-- Smart selects a formatting profile locally from the target application and
-  focused Accessibility field/document metadata. Document URLs used for that
-  selection are not separately attached to model requests or logged. The
-  existing bounded screen-context envelope can still contain visible URLs.
+- Smart sends the cleanup model you chose the transcript of your dictation,
+  the name of the app you dictate into, Whytap's own instructions and your
+  language settings. It does not read or send the text of that app's window.
+  To pick a destination format (Markdown, Slack, Telegram) it reads, on
+  the Mac, only the focused field's Accessibility role and the document's
+  address; these are not sent with the request or logged.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
 - Logs go to the unified system log (`os_log`, subsystem
@@ -135,8 +137,10 @@ Data-use policies depend on the selected provider and its account settings.
 ## Permissions
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
-  editable text field before recording and, only when Brightness keys is
-  switched on in Settings → Toolbox → Display, the Mac's brightness keys.
+  editable text field before recording, the focused field's role and
+  document address for Smart formatting (never the window's text) and, only
+  when Brightness keys is switched on in Settings → Toolbox → Display, the
+  Mac's brightness keys.
 - Microphone: dictation and meetings.
 - System Audio Recording: the other side of a call, only while a meeting is
   being recorded. The audio tap is created at recording start and torn down

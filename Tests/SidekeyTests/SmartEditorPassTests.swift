@@ -35,7 +35,7 @@ final class SmartEditorPassTests: XCTestCase {
         let (_, routing, keys) = try environment(), editor = Editor()
         editor.response = " \n" + PostProcessor.passMarker + "\n"
         let raw = "Проверь a*b*c, __literal__ и https://example.invalid/a_b."
-        let output = try await processor(routing, keys, editor).processOutput(raw, targetApp: "Telegram", formatting: .telegram)
+        let output = try await processor(routing, keys, editor).processOutput(raw, formatting: .telegram)
         XCTAssertEqual(output.text, raw)
         XCTAssertFalse(output.usedEditor)
         XCTAssertEqual(output.deliveryProfile(.telegram), .plain)
@@ -46,13 +46,13 @@ final class SmartEditorPassTests: XCTestCase {
     func testUsefulEditKeepsFormattingAndIdenticalOutputStaysPlain() async throws {
         let (_, routing, keys) = try environment(), editor = Editor()
         editor.response = "Исправленная мысль.\n\nЕщё одна тема."
-        let output = try await processor(routing, keys, editor).processOutput("broken speech", targetApp: "Slack", formatting: .slack)
+        let output = try await processor(routing, keys, editor).processOutput("broken speech", formatting: .slack)
         XCTAssertEqual(output.text, editor.response)
         XCTAssertTrue(output.usedEditor)
         XCTAssertEqual(output.deliveryProfile(.slack), .slack)
         let raw = "literal *word*"
         editor.response = raw
-        let unchanged = try await processor(routing, keys, editor).processOutput(raw, targetApp: "Slack", formatting: .slack)
+        let unchanged = try await processor(routing, keys, editor).processOutput(raw, formatting: .slack)
         XCTAssertEqual(unchanged.text, raw)
         XCTAssertFalse(unchanged.usedEditor)
     }
@@ -61,7 +61,7 @@ final class SmartEditorPassTests: XCTestCase {
         let (_, routing, keys) = try environment(), editor = Editor()
         for text in ["0", "pass", "PASS", "pass в Python", "Верни pass, если всё подходит."] {
             editor.response = text
-            let output = try await processor(routing, keys, editor).processOutput("Synthetic transcription", targetApp: nil)
+            let output = try await processor(routing, keys, editor).processOutput("Synthetic transcription")
             XCTAssertEqual(output.text, text)
             XCTAssertTrue(output.usedEditor)
         }
@@ -70,7 +70,7 @@ final class SmartEditorPassTests: XCTestCase {
     func testTranslationCannotPassAndMalformedControlOrEmptyOutputReachesRetry() async throws {
         let (_, routing, keys) = try environment(), editor = Editor()
         do {
-            _ = try await processor(routing, keys, editor).process("Привет", targetApp: nil, outputLanguage: "en")
+            _ = try await processor(routing, keys, editor).process("Привет", outputLanguage: "en")
             XCTFail("Translation must not silently use the transcript")
         } catch let error as OpenRouterLLMError {
             guard case .decoding = error else { return XCTFail("Unexpected error") }
@@ -78,13 +78,13 @@ final class SmartEditorPassTests: XCTestCase {
         for response in ["<WHYTAP_PASS> because it is clean", "<WHYTAP_PAS", " \n"] {
             editor.response = response
             do {
-                _ = try await processor(routing, keys, editor).process("Synthetic transcription", targetApp: nil)
+                _ = try await processor(routing, keys, editor).process("Synthetic transcription")
                 XCTFail("Malformed/empty output must reach Retry")
             } catch { XCTAssertTrue(error is OpenRouterLLMError) }
         }
         editor.error = URLError(.timedOut)
         do {
-            _ = try await processor(routing, keys, editor).process("Synthetic transcription", targetApp: nil)
+            _ = try await processor(routing, keys, editor).process("Synthetic transcription")
             XCTFail("An editor failure must reach Retry")
         } catch { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
     }
@@ -92,7 +92,7 @@ final class SmartEditorPassTests: XCTestCase {
     func testCancelledEditorCannotDeliverPassOrEditedText() async throws {
         let (_, routing, keys) = try environment(), editor = Editor()
         editor.cancels = true
-        let task = Task { try await processor(routing, keys, editor).process("Synthetic transcription", targetApp: nil) }
+        let task = Task { try await processor(routing, keys, editor).process("Synthetic transcription") }
         do { _ = try await task.value; XCTFail("Expected cancellation") }
         catch { XCTAssertTrue(error is CancellationError) }
     }

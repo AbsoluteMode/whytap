@@ -3207,7 +3207,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preservingMarkdown: { formatting != .plain }
             ) { [self] in
                 guard let postProcessor else { throw OpenRouterLLMError.notConfigured }
-                let snapshot = await AXContextReader.formattingSnapshot(forPID: targetPID)
+                // Local formatting metadata only; no window text reaches the model.
+                // WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
+                let snapshot = await SmartFormattingMetadataReader.snapshot(forPID: targetPID)
                 try Task.checkCancellation()
                 formatting = SmartFormattingProfile.resolve(
                     bundleID: targetBundleID, appName: targetApp,
@@ -3217,8 +3219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 contextMs = Int((cleanupStartedAt - processStartedAt) * 1000)
                 let prefs = PrivacyPreferences.shared
                 let output = try await postProcessor.processOutput(
-                    rawText, targetApp: targetApp, appContext: snapshot?.context,
-                    screenshot: nil, language: prefs.selectedLanguage?.code,
+                    rawText, targetApp: targetApp, screenshot: nil, language: prefs.selectedLanguage?.code,
                     outputLanguage: outputLanguageCodeForDrop(mode: mode),
                     transcriptionMode: mode.rawValue, formatting: formatting
                 )

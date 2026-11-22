@@ -10,9 +10,13 @@ import Foundation
 final class OnboardingModel: ObservableObject {
     @Published private(set) var pages: [OnboardingPage]
     @Published private(set) var page: OnboardingPage
-    /// The speech page's choice: a key form instead of the On this Mac card.
-    @Published var showsKeyForm: Bool
-    @Published var keyProvider: AIProviderKind = .soniox
+    /// The provider clicked on the key card; `nil` until one is.
+    @Published var keyTarget: OnboardingKeyTarget?
+    /// The dictation language; `nil` is Auto. The same value as the Input
+    /// Lang tool and Settings.
+    @Published private(set) var language: AppLanguage?
+    /// The clip the customize page shows.
+    @Published var customizeVideo: OnboardingVideo = .hotkeys
     /// Drop's speech route runs. Rechecked on every route change.
     @Published private(set) var dropReady: Bool
     /// The speech route the transcription session could not start.
@@ -27,8 +31,19 @@ final class OnboardingModel: ObservableObject {
     let onDevice: OnDeviceSpeechModelController
     let supportsOnDevice: Bool
     let speech: OnboardingDropSpeech
-    /// The key form's store of keys and routes; built when the form opens.
+    let preferences: PrivacyPreferences
+    let codingTools: OnboardingCodingTools
+    /// The launch's one Screen Recording request, shared with Shot.
+    let screenRecording: ScreenRecordingAccess
+    private let openScreenRecordingSettings: () -> Void
+    /// This launch already asked macOS for Screen Recording.
+    @Published private(set) var screenRecordingAsked: Bool
+    /// The silent Drop demo on the speech page.
+    let demo = OnboardingDropDemo()
+    /// The key card's store of keys and routes; built when the speech page shows.
     private(set) lazy var models: APIAndModelsViewModel = injectedModels ?? APIAndModelsViewModel()
+    /// The Tavily search key, saved the way Settings -> API keys saves it.
+    private(set) lazy var tavily: TavilySettings = models.makeTavilySettings()
     private let injectedModels: APIAndModelsViewModel?
     /// The user chose Set up later on the speech page.
     private var speechSkipped = false
@@ -46,6 +61,10 @@ final class OnboardingModel: ObservableObject {
         onDevice: OnDeviceSpeechModelController? = nil,
         supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
         models: APIAndModelsViewModel? = nil,
+        preferences: PrivacyPreferences? = nil,
+        codingTools: OnboardingCodingTools? = nil,
+        screenRecording: ScreenRecordingAccess? = nil,
+        openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         defaultsChanges: NotificationCenter = .default
     ) {
         injectedModels = models
@@ -58,9 +77,16 @@ final class OnboardingModel: ObservableObject {
         self.permissions = permissions
         self.onDevice = onDevice
         self.supportsOnDevice = supportsOnDevice
+        let preferences = preferences ?? .shared
+        let screenRecording = screenRecording ?? .shared
+        self.preferences = preferences
+        self.codingTools = codingTools ?? OnboardingCodingTools()
+        self.screenRecording = screenRecording
+        self.openScreenRecordingSettings = openScreenRecordingSettings
+        screenRecordingAsked = screenRecording.requested
+        language = preferences.selectedLanguage
         let ready = speech.isReady
         dropReady = ready
-        showsKeyForm = !supportsOnDevice
         let pages = OnboardingFlow.pages(for: OnboardingConditions(
             dropSpeechReady: ready, permissionsReady: permissions.allRequiredGranted))
         self.pages = pages
@@ -103,6 +129,7 @@ final class OnboardingModel: ObservableObject {
     /// The window closed: nothing keeps polling. A running download goes on.
     func stop() {
         stopPermissionPolling()
+        demo.stop()
     }
 
     private func show(_ next: OnboardingPage) {
@@ -138,10 +165,12 @@ final class OnboardingModel: ObservableObject {
     }
 
     /// A speech key was accepted and saved (or an existing one chosen).
+    /// A save that lands after the person moved on sets the route and stays
+    /// on the page they are on.
     func useKey(_ kind: AIProviderKind) {
         speech.use(provider: kind)
         routesChanged()
-        if dropReady { advance() }
+        if dropReady, page == .speech { advance() }
     }
 
     func keyAvailable(_ kind: AIProviderKind) -> Bool {
@@ -158,6 +187,12 @@ final class OnboardingModel: ObservableObject {
         openSettings(.backup, nil)
     }
 
+    /// The language Drop listens for; `nil` lets the provider detect it.
+    func setLanguage(_ language: AppLanguage?) {
+        preferences.selectedLanguage = language
+        self.language = preferences.selectedLanguage
+    }
+
     // MARK: - Permissions
 
     /// A Drop press during the onboarding found a permission missing. The
@@ -165,6 +200,20 @@ final class OnboardingModel: ObservableObject {
     func showPermissions() {
         pages = OnboardingFlow.addingPermissions(to: pages)
         show(.permissions)
+    }
+
+    /// Optional, for Shot. One request per launch, shared with Shot
+    /// (`ScreenRecordingAccess.requestOnce`); after it, a press opens System
+    /// Settings. On `.requested` nothing else is shown: macOS's dialog has its
+    /// own button to System Settings.
+    // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
+    func requestScreenRecording() {
+        switch screenRecording.requestOnce() {
+        case .granted: permissions.refresh(restartRecoveryPolling: false)
+        case .requested: break
+        case .alreadyRequested: openScreenRecordingSettings()
+        }
+        screenRecordingAsked = screenRecording.requested
     }
 
     private func permissionsCompleted() {
@@ -264,6 +313,11 @@ final class OnboardingModel: ObservableObject {
     func addModel(_ feature: AIFeature) {
         openSettings(.apiAndModels, feature)
     }
+
+    // MARK: - Customize
+
+    func openHotkeys() { openSettings(.hotkeys, nil) }
+    func openToolbox() { openSettings(.toolbox, nil) }
 
     // MARK: - Routes
 

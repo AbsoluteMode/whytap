@@ -345,6 +345,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
        -> validated finish_answer object -> text and typed cards in the island
   Native and CLI final text use compact Markdown. Comparisons adapt to the
   available width, and completed answers open with the conclusion at the top.
+  An ordered list keeps its first marker's number (CommonMark start), so a list
+  resumed after a non-marker line such as "3–4." continues at 5, not 1.
   WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
@@ -1181,29 +1183,43 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
 OnboardingWindowController, accessory app, no Dock icon) in place of the former
-Settings -> Permissions screen: up to four pages, each hidden when already done
-and each skippable, closing = Done. 1 Speech: On this Mac card ("Download and use
-for Drop", about 470 MB, download continues in the background; when it lands
-OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that cannot
-run, nothing else), "I have an API key" (Soniox/Deepgram/ElevenLabs, saving sets
-that provider for Drop), "Restore from another Mac"; Intel opens on the key form;
-hidden when Drop's speech route runs. 2 Two permissions: Microphone and Keyboard
-control on PermissionsSettingsViewModel, done at dropHotkeyStatus == .ready
-(DropShortcutStatusSection when both are granted but the shortcut is not
-installed); hidden when ready. 3 Hold Space and speak: the user's own shortcut,
-a native field, "That's Drop" only on DropLocalEditor's
-sidekeyDropInsertedIntoLocalEditor for that field; while the onboarding is
-visible a Drop press with no route says so on the page (no Settings over it)
-and one with a missing permission returns to page 2 (no repair window).
-4 Google search / Meeting Notes / Agent: switch and video each, "Add a model"
-when the feature's model does not run; Done. No Calendar. Screen Recording,
-System Audio Recording, Input Monitoring, Automation and Calendar are asked at
-first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
-or the former onboarding's key = ran before, never shown on update;
-sidekey.onboarding.pending.v1 brings it back after a quit until Done; neither key
-is in backups or sync. A first Drop press with the microphone never asked asks
-it and records nothing (DropHotkeyRecovery.startGate); Now Playing's Automation
-prompt waits while the onboarding is visible. To see it again on a Mac:
+Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
+onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
+word, a short left pane with the page's controls, a stage on the right), up to
+five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
+Lang setting; searchable list, English or native name, arrows and Return), On
+this Mac card ("Download and use for Drop", about 470 MB; when the download
+lands OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that
+cannot run, nothing else; hidden on Intel), and one tile per keyed provider
+(OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
+Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
+badge; a click opens the key field (the Settings save path) and Get offer, a
+speech key also sets that provider for Drop; "Restore from another Mac"; the
+stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
+and Keyboard control on PermissionsSettingsViewModel, done at
+dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
+the shortcut is not installed), plus an optional Screen Recording row for Shot
+(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
+never holds Continue); hidden when ready.
+3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
+DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
+onboarding is visible a Drop press with no route says so on the page (no
+Settings over it) and one with a missing permission returns to page 2.
+4 Make it yours: tool shortcuts and hover tools, each with a bundled clip
+(Resources/FeatureVideos/onboarding-hotkeys.mp4, onboarding-hover.mp4) and Open
+for Settings -> Hotkeys or Toolbox. 5 Turn on more: Google search / Meeting
+Notes / Agent with switch and clip, "Add a model" when the feature's model does
+not run, and Coding agents (OnboardingCodingTools: Claude Code and Codex when
+installed; Connect runs CaseClientSetup.connect, the Case -> Connect setup,
+without a Case registration); Done. No Calendar. System Audio Recording, Input
+Monitoring, Automation and Calendar are asked at first use. OnboardingLaunch:
+firstLaunchPresented (any launch since 2026-10-26) or the former onboarding's
+key = ran before, never shown on update; sidekey.onboarding.pending.v1 brings
+it back after a quit until Done; neither key is in backups or sync. A first
+Drop press with the microphone never asked asks it and records nothing
+(DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
+onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
 and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
@@ -1456,7 +1472,8 @@ meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
-only with a sole finish_answer call containing status, answer, sources and actions.
+only with a sole finish_answer call containing status, answer, insert_text, sources
+and actions.
 Strict tool schemas and application-required completion preserve the selected route.
 Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
 forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
@@ -1470,12 +1487,26 @@ Legacy CLI compatibility extractors remain separate from native completion.
 NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
 absolute/tilde paths into the same keyboard-action cards if the model omits
 card metadata in a valid final. Explicit metadata wins; destinations deduplicate and cap at 20.
-The fallback scans at most 32,000 characters, skips ordinary code/config fences,
+The fallback scans at most 32,000 characters, skips ordinary code/config fences
+(a closed shell fence's single command line becomes an Insert card),
 and does no network/file I/O or extra model call. It formats returned paths,
 not verifies their existence; nothing opens or inserts before user interaction. A
 folder answer provides the verified absolute path in a copyable code fence
 and a path action for open/insert. Simple answers use 1–2 short sentences;
 longer answers remain available when requested.
+Insert card: finish_answer.insert_text (required in the strict schema; absent or
+null from a lax endpoint means none) becomes the first, preselected copy card,
+whose Insert pastes into the field the user came from and replaces their
+selection. The prompt fills it with the complete result when the user gives
+text (selected or pasted) and asks to rewrite, shorten, translate, fix or
+reformat it or asks for a message, and with the one exact command for how to
+install/update/run questions, whose answer leads with that command; links
+only support it. Empty for plain questions. One enclosing fence is unwrapped.
+Cards are ordered insert text, the answer's own commands, other copy actions,
+paths, then sources.
+Without the field, a closed bash/sh/zsh/shell/fish/console/terminal fence with
+one command line (no script, continuation or heredoc; at most three) is the
+card. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
 The native capture_screen tool calls AgentScreenCapture directly, independent
 of Case and the edit/command switch. It uses the app's Screen Recording grant,
 selects the island display, and returns JPEG (long edge <=1920, <=2 MB) within
@@ -1485,6 +1516,25 @@ the provider may retain them according to its policy. Never substitute a vision
 model. The separate screen MCP helper remains for compatibility; the settings
 MCP scope does not accept capture. WHY:
 .project-docs/decisions/2026-10-22-native-agent.md
+Whytap controls in the Agent: the native Agent gets every operation of the
+plugin (AppControlMCPServer.tools) through ONE strict tool, whytap, with two
+required strings: operation (enum of the MCP names) and arguments (a JSON
+object string following that operation's MCP schema; descriptions and schemas
+are listed in the tool description). Separate strict tools broke Anthropic's
+limits (20 strict tools, 16 unions per request) and OpenAI's nesting depth; a
+test checks every route's first request. NativeAgentAppControl runs them in
+process through the broker's AppControlController (one allowlist, write lock
+and expected-value check). No MCP server or helper. An optional field's null
+that its schema does not accept means not given; the controller validates the
+rest. Each confirmed write becomes one app-owned line, built from the saved
+value, shown as the step label and above the answer ("Drop Smart cleanup →
+model"); todo_add's status saved on a reused task too, identical repeats stay
+quiet. Meetings need no harness prompt (the user is at this Mac) and stay
+untrusted content. No key values, clipboard or commands; the prompt paragraph
+is added only with the tool and never mentions the reply language. Offered
+only when the app installed the controller (packaged app), never in tests or
+swift run. The CLI providers are not reachable (only native connects). WHY:
+.project-docs/decisions/2026-11-22-native-agent-app-control.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
@@ -1512,9 +1562,17 @@ the target's process (CGEvent.postToPid), never the global HID stream, with the
 recipient checked before each of the four events; a lost recipient releases
 Command in the target and stops the rest. Single-row Enter keeps the global
 Cmd+V. Marks live only while the panel
-is open, survive the Agent/Drop/Clipboard tabs, and are off without a target
-and in Toolbox. Multi-row pastes stay out of clipboard history. WHY:
-.project-docs/decisions/2026-11-22-history-multi-paste.md
+is open and survive the Agent/Drop/Clipboard tabs. Marks work everywhere
+(island with or without a paste target, Toolbox): a plain click while rows
+are marked copies all of them in mark order as one pasteboard
+(HistoryPasteboardWriter.writeAll: texts one string a line each, files and
+images one item each, mixed rows one item per group in order) and clears the
+marks; without a target Enter leaves the marks alone. Footer with marks:
+"Click to copy N   Enter to paste N to <app>   Esc to clear" (Toolbox:
+"⌘-click to unmark", it has no key monitor). Multi-row pastes and copies stay
+out of clipboard history. WHY:
+.project-docs/decisions/2026-11-22-history-multi-paste.md,
+.project-docs/decisions/2026-11-22-history-multi-copy.md
 The History connection sets secure_delete=ON, so cap evictions and agent
 trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in

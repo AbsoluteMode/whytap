@@ -5,10 +5,17 @@ import Foundation
 /// WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
 struct NativeAgentFinalAnswer {
     static let toolName = "finish_answer"
-    static let actionWarning = " Earlier file edits or commands may have completed; check before retrying."
+    /// Text the user asked to use: shown first as an Insert card that pastes
+    /// into the field they came from. Required in the strict schema so the
+    /// model decides every turn; a missing value (endpoints that ignore strict
+    /// schemas) means none. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
+    static let insertField = "insert_text"
+    static let actionWarning = " Earlier file edits, commands or Whytap changes may have completed; check before retrying."
     enum Status: String { case answered, unverified, needs_clarification }
     let status: Status
     let answer: String
+    /// The explicit insert_text card, also first in `actions`; nil when none.
+    let insert: ActionItem?
     let actions: UsefulActionsBlock
 
     var visibleText: String {
@@ -34,13 +41,14 @@ struct NativeAgentFinalAnswer {
                                "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."],
                     "answer": ["type": "string", "description": "Direct, nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. Use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
                     "sources": ["type": "array", "items": source, "description": "Supporting public HTTP(S) links with short titles; empty when no sources are needed."],
+                    insertField: ["type": "string", "description": "Ready-to-paste plain text shown first as the Insert card, which pastes into the field the user came from and replaces their selection there. The complete result when the user gave text (selected or in the request) and asked to rewrite, shorten, translate, fix or reformat it, or asked for a message or reply to send; the one exact shell command when they asked how to install, update, run or configure something. No Markdown fence, quotes or commentary. Empty string when nothing is meant to be pasted."],
                     "actions": ["type": "array", "items": ["anyOf": [path, copy]],
-                                "description": "Verified absolute paths or copyable snippets with short descriptions; empty when none are needed."]
+                                "description": "Verified absolute paths, or further commands and snippets beyond insert_text, with short descriptions; empty when none are needed."]
                 ])]
     }
 
     init(arguments: [String: Any]) throws {
-        guard Set(arguments.keys) == ["status", "answer", "sources", "actions"],
+        guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
               let sources = arguments["sources"] as? [[String: Any]],
@@ -48,7 +56,15 @@ struct NativeAgentFinalAnswer {
               sources.count + actions.count <= 20 else { throw Self.invalid() }
         let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
-        var items: [ActionItem] = []
+        let insert: String
+        switch arguments[Self.insertField] {
+        case nil, is NSNull: insert = ""
+        case let value as String: insert = Self.pasteText(value)
+        default: throw Self.invalid()
+        }
+        guard insert.count <= 32_000 else { throw Self.invalid() }
+        var links: [ActionItem] = []
+        var items: [ActionItem] = insert.isEmpty ? [] : [.copy(text: insert, description: nil)]
         for source in sources {
             guard Set(source.keys) == ["title", "url"],
                   let title = source["title"] as? String, let raw = source["url"] as? String,
@@ -56,7 +72,7 @@ struct NativeAgentFinalAnswer {
                   raw.count <= 4096, !raw.contains(where: { $0.isWhitespace }),
                   let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
                   url.host?.isEmpty == false, url.user == nil, url.password == nil else { throw Self.invalid() }
-            items.append(.link(url: url, description: String(title.trimmingCharacters(in: .whitespacesAndNewlines)
+            links.append(.link(url: url, description: String(title.trimmingCharacters(in: .whitespacesAndNewlines)
                 .prefix(UsefulLink.maxDescriptionLength)), provider: nil))
         }
         for action in actions {
@@ -78,7 +94,20 @@ struct NativeAgentFinalAnswer {
         }
         self.status = status
         self.answer = text
-        self.actions = NativeAgentAnswerArtifacts.merging(nil, UsefulActionsBlock(items: items))
+        self.insert = insert.isEmpty ? nil : .copy(text: insert, description: nil)
+        // The requested result and actions come before supporting links.
+        self.actions = NativeAgentAnswerArtifacts.merging(nil, UsefulActionsBlock(items: items + links))
+    }
+
+    /// Plain paste text: surrounding whitespace removed and one enclosing
+    /// Markdown fence unwrapped, so a fenced command does not paste backticks.
+    static func pasteText(_ raw: String) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines = text.components(separatedBy: "\n")
+        guard lines.count >= 3, let first = lines.first, first.hasPrefix("```"), !first.dropFirst(3).contains("`"),
+              lines.last?.trimmingCharacters(in: .whitespaces) == "```" else { return text }
+        lines.removeFirst(); lines.removeLast()
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func invalid(actionsAttempted: Bool = false) -> NativeAgentError {

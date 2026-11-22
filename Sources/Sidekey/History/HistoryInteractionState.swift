@@ -41,6 +41,14 @@ final class HistoryInteractionState {
         }
     }
 
+    /// Copies several marked rows at once, in mark order, as one pasteboard
+    /// (`HistoryPasteboardWriter.writeAll`). One row is written as before.
+    func writeCardsToPasteboard(_ cards: [HistoryStripCard], assetsDirectory: URL) {
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: cards), to: .general, assetsDirectory: assetsDirectory
+        )
+    }
+
     /// Puts one paste of marked History rows on the general pasteboard.
     func writeGroupToPasteboard(_ group: HistoryPasteGroup, assetsDirectory: URL) {
         HistoryPasteboardWriter.write(group, to: .general, assetsDirectory: assetsDirectory)

@@ -354,8 +354,10 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Saves (or, with an empty key, reuses the saved) key of `provider`,
     /// checks it like Settings does and makes it the shared Speech.
     func useSpeechKey(_ key: String, provider: AIProviderKind) async {
-        guard let account = APIAndModelsViewModel.builtInAccount(for: provider),
-              let model = ModelRegistry.recommended(for: .dropFast, kind: provider) else { return }
+        guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
+        let model = ModelRegistry.recommended(for: .dropFast, kind: provider)
+        // The preview offers OpenAI before the app has a speech model for it.
+        guard model != nil || isPreview else { return }
         let action = begin(.speech)
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
@@ -364,6 +366,11 @@ final class OnboardingJourneyModel: ObservableObject {
         keyProblems[.speechKey] = problem
         if let problem {
             outcomes[.speechKey] = .failed(problem.message(provider: provider.displayName))
+            return
+        }
+        guard let model else {
+            progress.speechExpected = true
+            succeed(.speechKey, "\(provider.displayName) speech")
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)

@@ -325,78 +325,129 @@ enum OnboardingWireCatalog {
     }()
 }
 
-// MARK: - Step 1: the stage's motion
+// MARK: - Steps 1 and 2: one scene
 
-/// The prototype's frame loop for step 1, in the stage's own coordinates.
-/// Held by reference and stepped from the display-rate timeline; changing it
-/// never re-runs SwiftUI layout.
-final class OnboardingSourceMotion {
+/// The figures of steps 1 and 2 as one scene drawn above both steps, so the
+/// key chosen on step 1 is the same key that flies to its lock on step 2 (and
+/// back on Back), as in the prototype: never a fade between two drawings.
+/// The steps report where their figure bands are and what they show; the
+/// page's layer steps the springs every display frame and draws. Held by
+/// reference: changing it never re-runs SwiftUI layout.
+final class OnboardingWireScene {
+    static let space = "onboarding.wire"
+
     enum Figure: Equatable { case laptop, key }
+    enum Step: Equatable { case source, speechKey, beyond }
+    enum KeyPhase: Equatable { case empty, pasted, checking, accepted, refused, format, network }
 
     struct Actor {
-        var x: OnboardingSpring, y: OnboardingSpring, z = OnboardingSpring(0)
+        var x: OnboardingSpring, y: OnboardingSpring, z = OnboardingSpring(0), r: OnboardingSpring
         var fade = OnboardingSpring(1), lit = OnboardingSpring(0)
         var kx = 0.0, ky = 0.0, impulse = 0.0
         var turn = OnboardingSpring(0), targetTurn = 0.0
         var apparent = 0.0
-        init(x: Double, y: Double) { self.x = OnboardingSpring(x); self.y = OnboardingSpring(y) }
+        init(x: Double, y: Double, r: Double) {
+            self.x = OnboardingSpring(x); self.y = OnboardingSpring(y); self.r = OnboardingSpring(r)
+        }
     }
 
-    private(set) var laptop = Actor(x: 0, y: 0)
-    private(set) var key = Actor(x: 0, y: 0)
+    // Reported by the steps, in the page's coordinates.
+    var pageWidth = 520.0
+    var sourceTop = 0.0
+    var sourceHeight = 0.0
+    var keyBandY = 0.0
+    var step: Step = .source
+    var offersLaptop = true
     var hovered: Figure?
     var chosen: Figure?
-    var offersLaptop = true
+    var keyPhase: KeyPhase = .empty
+    /// Step 2's turn: a quarter when accepted, a catch on a pin when refused.
+    var keyTargetTurn = 0.0
+    var laptopCaption = ("", "")
+    var keyCaption = ("", "")
+
+    private(set) var laptop = Actor(x: 0, y: 0, r: 0)
+    private(set) var key = Actor(x: 0, y: 0, r: 0)
+    private var stage = OnboardingSpring(0)
+    private var lockFade = OnboardingSpring(0)
     private var pointer: CGPoint?
     private var lastPointer: CGPoint?
     private var pointerVelocity = CGVector.zero
     private(set) var clock = 1.35
     private var lastTime: TimeInterval?
-    private var size: CGSize = .zero
+    private var placed = false
+    private var catchGeneration = 0
 
-    /// The prototype's 540 pt stage, scaled to this one.
-    private var scale: Double { min(size.width / 540, 1) }
-    private var midX: Double { size.width / 2 }
-    private var homeY: Double { size.height * 0.40 }
-    var radius: Double { min(64, size.height * 0.24) }
+    /// Step 2 draws the prototype's 540 pt key stage at the key's radius.
+    static let keyRadius = 50.0
+    private static let keyScale = keyRadius / 54
+
+    // Step 1's layout: the prototype's 540 pt stage, scaled to the band.
+    private var scale: Double { min(pageWidth / 540, 1) }
+    private var midX: Double { pageWidth / 2 }
+    private var homeY: Double { sourceTop + sourceHeight * 0.40 }
+    var radius: Double { min(64, max(40, sourceHeight * 0.24)) }
+    private var onKeyStep: Bool { step != .source }
+
+    private var keyGoalX: Double {
+        switch keyPhase {
+        case .empty: return -30
+        case .pasted: return -20
+        case .checking, .accepted, .refused: return -4
+        case .format: return -34
+        case .network: return -26
+        }
+    }
 
     private func home(_ figure: Figure) -> CGPoint {
         guard offersLaptop else { return CGPoint(x: midX, y: homeY) }
         return CGPoint(x: midX + (figure == .laptop ? -112 : 112) * scale, y: homeY)
     }
 
-    private func target(_ figure: Figure) -> (x: Double, y: Double, z: Double, fade: Double, lit: Double) {
+    private func target(_ figure: Figure) -> (x: Double, y: Double, z: Double, r: Double, fade: Double, lit: Double) {
+        if onKeyStep {
+            // Step 2: the key over its lock; the laptop has receded away.
+            if figure == .key { return (midX + keyGoalX * Self.keyScale, keyBandY, 0, Self.keyRadius, 1, 0) }
+            return (midX - 106 * scale, homeY - 30, -1.5, radius * 0.8, 0, 0)
+        }
         let focus = hovered ?? chosen
         let h = home(figure)
-        if focus == figure { return (midX, homeY + 2, 0.68, 1, 1) }
+        if focus == figure { return (midX, homeY + 2, 0.68, radius, 1, 1) }
         if focus != nil, offersLaptop {
-            return (midX + (figure == .laptop ? -106 : 106) * scale, homeY - 30, -1.22, 0.28, 0)
+            return (midX + (figure == .laptop ? -106 : 106) * scale, homeY - 30, -1.22, radius, 0.28, 0)
         }
-        return (h.x, h.y, 0, 1, 0)
+        return (h.x, h.y, 0, radius, 1, 0)
     }
 
-    /// Lays the figures out at home the first time a size is known.
-    func prepare(size: CGSize) {
-        guard size != self.size, size.width > 0 else { return }
-        let first = self.size == .zero
-        self.size = size
-        guard first else { return }
+    private var layoutKnown: Bool { onKeyStep ? keyBandY > 0 : sourceHeight > 0 }
+
+    private func place() {
+        stage = OnboardingSpring(onKeyStep ? 1 : 0)
+        lockFade = OnboardingSpring(onKeyStep ? 0.78 : 0)
         for figure in [Figure.laptop, .key] {
             let t = target(figure)
-            update(figure) { $0 = Actor(x: t.x, y: t.y); $0.z = OnboardingSpring(t.z); $0.fade = OnboardingSpring(t.fade); $0.lit = OnboardingSpring(t.lit) }
+            update(figure) {
+                $0 = Actor(x: t.x, y: t.y, r: t.r)
+                $0.z = OnboardingSpring(t.z); $0.fade = OnboardingSpring(t.fade); $0.lit = OnboardingSpring(t.lit)
+            }
         }
+        if onKeyStep { key.turn = OnboardingSpring(keyTargetTurn) }
     }
 
     private func update(_ figure: Figure, _ change: (inout Actor) -> Void) {
         if figure == .laptop { change(&laptop) } else { change(&key) }
     }
 
+    // MARK: Input
+
     func pointerMoved(to point: CGPoint?) {
+        guard step == .source else { return }
         pointer = point
         guard let point else { hovered = nil; return }
         // The prototype's hit rules, with hysteresis once a figure is forward.
         let s = scale
-        guard point.y > size.height * 0.08, point.y < size.height * 0.98, point.x > 22, point.x < size.width - 22 else {
+        guard point.y > sourceTop + sourceHeight * 0.08, point.y < sourceTop + sourceHeight * 0.98,
+              point.x > 22, point.x < pageWidth - 22 else {
             hovered = nil
             return
         }
@@ -414,7 +465,7 @@ final class OnboardingSourceMotion {
         }
     }
 
-    /// A click: a small press dip, and the key turns a quarter.
+    /// A click on step 1: a small press dip, and the key turns a quarter.
     func select(_ figure: Figure, still: Bool) {
         chosen = figure
         hovered = figure
@@ -425,10 +476,31 @@ final class OnboardingSourceMotion {
         }
     }
 
-    func step(time: TimeInterval, still: Bool) {
+    /// A key that is not a key slides back a little (step 2).
+    func nudgeBack() { key.x.velocity -= 42 * Self.keyScale }
+
+    /// The key catches on a pin, then eases back (step 2).
+    func catchOnPin(_ angle: Double, still: Bool) {
+        guard !still else { return }
+        keyTargetTurn = angle
+        catchGeneration += 1
+        let generation = catchGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
+            guard let self, self.catchGeneration == generation,
+                  [.refused, .format, .network].contains(self.keyPhase) else { return }
+            self.keyTargetTurn = 0
+        }
+    }
+
+    // MARK: Frame
+
+    func advance(time: TimeInterval, still: Bool) {
         let dt = min(0.04, lastTime.map { max(0, time - $0) } ?? 0.016)
         lastTime = time
+        guard layoutKnown else { return }
+        if !placed { place(); placed = true }
         if !still { clock += dt }
+        if step != .source { pointer = nil; lastPointer = nil; hovered = nil }
         if dt > 0, let pointer {
             let previous = lastPointer ?? pointer
             let m = 1 - exp(-dt * 16)
@@ -436,18 +508,26 @@ final class OnboardingSourceMotion {
             pointerVelocity.dy += ((pointer.y - previous.y) / dt - pointerVelocity.dy) * m
         }
         lastPointer = pointer
+        stage.step(to: onKeyStep ? 1 : 0, stiffness: 135, damping: 19.5, dt: dt, still: still)
+        lockFade.step(to: onKeyStep ? (keyPhase == .network ? 0.28 : 0.78) : 0, stiffness: 150, damping: 22, dt: dt, still: still)
         let decay = exp(-dt * 2.4)
         for figure in [Figure.laptop, .key] {
             let t = target(figure)
+            let onLock = onKeyStep && figure == .key
             update(figure) { a in
-                // Pose: stiffness 135, damping 19.5; fade and light: 150, 22.
-                a.x.step(to: t.x, stiffness: 135, damping: 19.5, dt: dt, still: still)
+                // Pose: 135/19.5 (the key's slide on step 2: 140/20); fade and light 150/22.
+                a.x.step(to: t.x, stiffness: onLock ? 140 : 135, damping: onLock ? 20 : 19.5, dt: dt, still: still)
                 a.y.step(to: t.y, stiffness: 135, damping: 19.5, dt: dt, still: still)
                 a.z.step(to: t.z, stiffness: 135, damping: 19.5, dt: dt, still: still)
+                a.r.step(to: t.r, stiffness: 135, damping: 19.5, dt: dt, still: still)
                 a.fade.step(to: t.fade, stiffness: 150, damping: 22, dt: dt, still: still)
                 a.lit.step(to: t.lit, stiffness: 150, damping: 22, dt: dt, still: still)
-                a.turn.step(to: a.targetTurn, stiffness: 160, damping: 18, dt: dt, still: still)
-                a.apparent = OnboardingWireSolid.apparentRadius(radius, worldZ: a.z.value)
+                if onLock {
+                    a.turn.step(to: keyTargetTurn, stiffness: 175, damping: 19, dt: dt, still: still)
+                } else {
+                    a.turn.step(to: a.targetTurn, stiffness: 160, damping: 18, dt: dt, still: still)
+                }
+                a.apparent = OnboardingWireSolid.apparentRadius(a.r.value, worldZ: a.z.value)
                 // A pointer passing near gives the figure a small spin.
                 if let pointer, !still, a.fade.value > 0.35 {
                     let d = hypot(pointer.x - a.x.value, pointer.y - a.y.value)
@@ -465,7 +545,7 @@ final class OnboardingSourceMotion {
         }
     }
 
-    func laptopAngles(still: Bool) -> (Double, Double, Double) {
+    private func laptopAngles(still: Bool) -> (Double, Double, Double) {
         let focus = hovered ?? chosen
         let tiltY = focus == .laptop && pointer != nil && !still ? Double((pointer!.x - laptop.x.value) / 160) * 0.14 : 0
         let tiltX = focus == .laptop && pointer != nil && !still ? Double((pointer!.y - laptop.y.value) / 160) * -0.09 : 0
@@ -473,30 +553,135 @@ final class OnboardingSourceMotion {
                 0.40 + (still ? 0 : sin(clock * 0.62) * 0.14) + tiltY + laptop.ky, 0)
     }
 
-    func laptopWave(still: Bool) -> [Int: Double] {
-        let amplitude = still ? 0.045 : 0.032 + laptop.lit.value * 0.075 + laptop.impulse * 0.09
-        return OnboardingWireCatalog.laptop.waveOffsets(amplitude: amplitude, clock: clock, speed: 2.2 + laptop.lit.value * 2)
-    }
-
-    func keyAngles(still: Bool) -> (Double, Double, Double) {
+    /// Step 1's pose blended into step 2's by the same spring that moves it.
+    private func keyAngles(still: Bool) -> (Double, Double, Double) {
         let focus = hovered ?? chosen
         let tiltY = focus == .key && pointer != nil && !still ? Double((pointer!.x - key.x.value) / 160) * 0.15 : 0
-        return (-0.26 + (still ? 0 : cos(clock * 0.72 + 0.6) * 0.22) + key.turn.value + key.kx,
-                -0.44 + (still ? 0 : sin(clock * 0.56 + 1.4) * 0.15) + tiltY + key.ky,
-                0.38 + (still ? 0 : sin(clock * 0.41) * 0.04))
+        let first = (-0.26 + (still ? 0 : cos(clock * 0.72 + 0.6) * 0.22) + key.kx,
+                     -0.44 + (still ? 0 : sin(clock * 0.56 + 1.4) * 0.15) + tiltY + key.ky,
+                     0.38 + (still ? 0 : sin(clock * 0.41) * 0.04))
+        let second = (-0.20 + (still ? 0 : cos(clock * 0.46) * 0.05),
+                      -0.40 + (still ? 0 : sin(clock * 0.58) * 0.08), 0.03)
+        let b = min(1.1, max(-0.1, stage.value))
+        return (first.0 + (second.0 - first.0) * b + key.turn.value,
+                first.1 + (second.1 - first.1) * b,
+                first.2 + (second.2 - first.2) * b)
+    }
+
+    // MARK: Drawing
+
+    func draw(in context: inout GraphicsContext, still: Bool) {
+        guard placed else { return }
+        let b = min(1, max(0, stage.value))
+        let s = Self.keyScale
+        let swayY = still ? 0 : sin(clock * 0.58) * 0.08
+        let swayX = still ? 0 : cos(clock * 0.46) * 0.05
+        var tint: OnboardingWireframeInk.RGB?
+        var strength = 0.0
+        if onKeyStep {
+            switch keyPhase {
+            case .checking: tint = OnboardingWireframeInk.rose; strength = 0.65
+            case .accepted: tint = OnboardingWireframeInk.green; strength = 0.78
+            case .refused, .format, .network: tint = OnboardingWireframeInk.amber; strength = 0.68
+            case .empty, .pasted: break
+            }
+        }
+        // The lock sits behind the key.
+        if lockFade.value > 0.01 {
+            OnboardingWireCatalog.lock.draw(
+                in: &context, center: CGPoint(x: midX + 36 * s, y: keyBandY), worldZ: 0, radius: 34 * s,
+                angles: (-0.18 + swayX, -0.40 + swayY, 0.03),
+                style: OnboardingWireStyle(fade: lockFade.value, tint: tint, tintStrength: strength * 0.6 * b))
+        }
+        if onKeyStep, keyPhase == .network {
+            // No answer: three quiet dots between the key and the lock.
+            var dots = Path()
+            for d in 0..<3 {
+                let cx = midX + (12 + Double(d) * 6) * s
+                dots.addEllipse(in: CGRect(x: cx - 1.1, y: keyBandY + 2 * s - 1.1, width: 2.2, height: 2.2))
+            }
+            context.fill(dots, with: .color(OnboardingWireframeInk.amberColor.opacity(0.45 * b)))
+        }
+        // Captions belong to step 1: gone in the first third of the flight.
+        let captions = max(0, 1 - b * 3)
+        let figures: [Figure] = laptop.z.value <= key.z.value ? [.laptop, .key] : [.key, .laptop]
+        for figure in figures {
+            if figure == .laptop {
+                guard offersLaptop, laptop.fade.value > 0.01 else { continue }
+                let amplitude = still ? 0.045 : 0.032 + laptop.lit.value * 0.075 + laptop.impulse * 0.09
+                OnboardingWireCatalog.laptop.draw(
+                    in: &context, center: CGPoint(x: laptop.x.value, y: laptop.y.value), worldZ: laptop.z.value,
+                    radius: laptop.r.value, angles: laptopAngles(still: still),
+                    style: OnboardingWireStyle(fade: laptop.fade.value, lit: laptop.lit.value),
+                    waveY: OnboardingWireCatalog.laptop.waveOffsets(amplitude: amplitude, clock: clock,
+                                                                   speed: 2.2 + laptop.lit.value * 2))
+                drawCaption(in: &context, actor: laptop, text: laptopCaption, visible: captions)
+            } else {
+                let keyX = key.x.value
+                let waveX: Double? = onKeyStep && keyPhase == .checking && !still
+                    ? keyX + (-48 + (clock * 95).truncatingRemainder(dividingBy: 108)) * s : nil
+                OnboardingWireCatalog.key.draw(
+                    in: &context, center: CGPoint(x: keyX, y: key.y.value), worldZ: key.z.value,
+                    radius: key.r.value, angles: keyAngles(still: still),
+                    style: OnboardingWireStyle(fade: key.fade.value, lit: key.lit.value, tint: tint,
+                                               tintStrength: strength * b, dotWaveX: waveX))
+                drawCaption(in: &context, actor: key, text: keyCaption, visible: captions)
+            }
+        }
+    }
+
+    /// The title rides under its figure; a receded figure has no caption.
+    private func drawCaption(in context: inout GraphicsContext, actor: Actor, text: (String, String), visible base: Double) {
+        let visible = base * actor.fade.value * min(1, max(0, (actor.z.value + 0.6) / 0.5))
+        guard visible > 0.01, !text.0.isEmpty else { return }
+        let scale = min(1.04, max(0.86, 1 + actor.z.value * 0.08))
+        let top = actor.y.value + actor.apparent * 0.86 + 16
+        var caption = context
+        caption.opacity = visible
+        caption.translateBy(x: actor.x.value, y: top)
+        caption.scaleBy(x: scale, y: scale)
+        caption.draw(Text(text.0).font(OnboardingTheme.sans(14.5, weight: .medium)).foregroundColor(OnboardingTheme.ink),
+                     at: .zero, anchor: .top)
+        let detailOpacity = min(1, max(0, (actor.lit.value - 0.18) / 0.72))
+        guard detailOpacity > 0.01 else { return }
+        caption.opacity = visible * detailOpacity
+        caption.draw(Text(text.1).font(OnboardingTheme.sans(12.5)).foregroundColor(OnboardingTheme.muted),
+                     at: CGPoint(x: 0, y: 22 + (1 - detailOpacity) * 4), anchor: .top)
+    }
+}
+
+/// The page's layer for the scene: one canvas over steps 1 and 2 at the
+/// display's rate (30 fps under Reduce Motion, where every spring snaps).
+struct OnboardingWireSceneLayer: View {
+    let scene: OnboardingWireScene
+    let step: OnboardingWireScene.Step
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let scene = self.scene, step = self.step, still = reduceMotion
+        TimelineView(.animation(minimumInterval: still ? 1.0 / 30 : nil, paused: false)) { timeline in
+            Canvas { context, size in
+                scene.pageWidth = size.width
+                scene.step = step
+                scene.advance(time: timeline.date.timeIntervalSinceReferenceDate, still: still)
+                scene.draw(in: &context, still: still)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
 // MARK: - Step 1: how should Whytap hear you
 
-/// On this Mac or API keys as two wire figures on a display-rate timeline.
-/// Hover brings one forward; a click chooses it. Keyboard and VoiceOver use
-/// the two buttons over the figures.
+/// On this Mac or API keys as two wire figures of the shared scene. Hover
+/// brings one forward; a click chooses it and moves on. Keyboard and
+/// VoiceOver use the two buttons over the figures.
 struct OnboardingSourceStage: View {
     @ObservedObject var model: OnboardingJourneyModel
     @ObservedObject var onDevice: OnDeviceSpeechModelController
+    let scene: OnboardingWireScene
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var motion = OnboardingSourceMotion()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -507,7 +692,7 @@ struct OnboardingSourceStage: View {
                 .padding(.top, 6)
                 .accessibilityAddTraits(.isHeader)
             GeometryReader { proxy in
-                stage(proxy.size)
+                band(proxy.frame(in: .named(OnboardingWireScene.space)))
             }
             if case .failed(let reason) = model.outcome(.source) {
                 OnboardingStageStatus(tone: .warning, text: reason)
@@ -516,7 +701,7 @@ struct OnboardingSourceStage: View {
         }
     }
 
-    private var chosen: OnboardingSourceMotion.Figure? {
+    private var chosen: OnboardingWireScene.Figure? {
         switch model.progress.source {
         case .onThisMac: return .laptop
         case .yourKey: return .key
@@ -524,45 +709,19 @@ struct OnboardingSourceStage: View {
         }
     }
 
-    private func stage(_ size: CGSize) -> some View {
-        let motion = self.motion
-        let still = reduceMotion
+    /// Tells the scene where the figures stand and what they say. The step's
+    /// own sideways slide is not part of it: only the band's height counts.
+    private func band(_ frame: CGRect) -> some View {
+        let scene = self.scene
         let offersLaptop = model.start.onDeviceSupported
-        let chosen = self.chosen
-        let laptopText = (title: "On this Mac", detail: laptopDetail)
-        let keyText = (title: "API keys", detail: keyDetail)
+        scene.sourceTop = frame.minY
+        scene.sourceHeight = frame.height
+        scene.offersLaptop = offersLaptop
+        if scene.chosen != chosen, !(scene.chosen != nil && chosen == nil) { scene.chosen = chosen }
+        scene.laptopCaption = ("On this Mac", laptopDetail)
+        scene.keyCaption = ("API keys", keyDetail)
         return ZStack {
-            TimelineView(.animation(minimumInterval: still ? 1.0 / 30 : nil, paused: false)) { timeline in
-                Canvas { context, canvasSize in
-                    motion.offersLaptop = offersLaptop
-                    motion.prepare(size: canvasSize)
-                    if motion.chosen != chosen, !(motion.chosen != nil && chosen == nil) { motion.chosen = chosen }
-                    motion.step(time: timeline.date.timeIntervalSinceReferenceDate, still: still)
-                    let figures: [(OnboardingSourceMotion.Figure, OnboardingSourceMotion.Actor)] =
-                        motion.laptop.z.value <= motion.key.z.value
-                            ? [(.laptop, motion.laptop), (.key, motion.key)] : [(.key, motion.key), (.laptop, motion.laptop)]
-                    for (figure, actor) in figures {
-                        if figure == .laptop {
-                            guard offersLaptop else { continue }
-                            OnboardingWireCatalog.laptop.draw(
-                                in: &context, center: CGPoint(x: actor.x.value, y: actor.y.value), worldZ: actor.z.value,
-                                radius: motion.radius, angles: motion.laptopAngles(still: still),
-                                style: OnboardingWireStyle(fade: actor.fade.value, lit: actor.lit.value),
-                                waveY: motion.laptopWave(still: still))
-                        } else {
-                            OnboardingWireCatalog.key.draw(
-                                in: &context, center: CGPoint(x: actor.x.value, y: actor.y.value), worldZ: actor.z.value,
-                                radius: motion.radius, angles: motion.keyAngles(still: still),
-                                style: OnboardingWireStyle(fade: actor.fade.value, lit: actor.lit.value))
-                        }
-                        let text = figure == .laptop ? laptopText : keyText
-                        drawCaption(in: &context, actor: actor, title: text.title, detail: text.detail)
-                    }
-                }
-            }
-            .accessibilityHidden(true)
-
-            // Buttons for keyboard and VoiceOver; the pointer goes to the stage.
+            // Buttons for keyboard and VoiceOver; the pointer goes to the band.
             HStack(spacing: 0) {
                 if offersLaptop { choiceButton(.laptop, label: "On this Mac. \(laptopDetail)") }
                 choiceButton(.key, label: "API keys. \(keyDetail)")
@@ -570,7 +729,7 @@ struct OnboardingSourceStage: View {
             .allowsHitTesting(false)
             // Return chooses the figure in front, like a click; no pill shows.
             Button("") {
-                let figure = motion.hovered ?? chosen ?? (offersLaptop ? nil : .key)
+                let figure = scene.hovered ?? chosen ?? (offersLaptop ? nil : .key)
                 if let figure { choose(figure) }
             }
             .keyboardShortcut(.defaultAction)
@@ -578,38 +737,19 @@ struct OnboardingSourceStage: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
         }
-        .frame(width: size.width, height: size.height)
+        .frame(width: frame.width, height: frame.height)
         .contentShape(Rectangle())
-        .onContinuousHover { phase in
+        .onContinuousHover(coordinateSpace: .named(OnboardingWireScene.space)) { phase in
             switch phase {
-            case .active(let point): motion.pointerMoved(to: point)
-            case .ended: motion.pointerMoved(to: nil)
+            case .active(let point): scene.pointerMoved(to: point)
+            case .ended: scene.pointerMoved(to: nil)
             }
         }
-        .onTapGesture { point in
-            motion.pointerMoved(to: point)
-            let figure = motion.hovered ?? (offersLaptop && point.x < size.width / 2 ? .laptop : .key)
+        .onTapGesture(coordinateSpace: .named(OnboardingWireScene.space)) { point in
+            scene.pointerMoved(to: point)
+            let figure = scene.hovered ?? (offersLaptop && point.x < scene.pageWidth / 2 ? .laptop : .key)
             choose(figure)
         }
-    }
-
-    /// The title rides under its figure; a receded figure has no caption.
-    private func drawCaption(in context: inout GraphicsContext, actor: OnboardingSourceMotion.Actor, title: String, detail: String) {
-        let visible = actor.fade.value * min(1, max(0, (actor.z.value + 0.6) / 0.5))
-        guard visible > 0.01 else { return }
-        let scale = min(1.04, max(0.86, 1 + actor.z.value * 0.08))
-        let top = actor.y.value + actor.apparent * 0.86 + 16
-        var caption = context
-        caption.opacity = visible
-        caption.translateBy(x: actor.x.value, y: top)
-        caption.scaleBy(x: scale, y: scale)
-        caption.draw(Text(title).font(OnboardingTheme.sans(14.5, weight: .medium)).foregroundColor(OnboardingTheme.ink),
-                     at: .zero, anchor: .top)
-        let detailOpacity = min(1, max(0, (actor.lit.value - 0.18) / 0.72))
-        guard detailOpacity > 0.01 else { return }
-        caption.opacity = visible * detailOpacity
-        caption.draw(Text(detail).font(OnboardingTheme.sans(12.5)).foregroundColor(OnboardingTheme.muted),
-                     at: CGPoint(x: 0, y: 22 + (1 - detailOpacity) * 4), anchor: .top)
     }
 
     private var laptopDetail: String {
@@ -629,12 +769,12 @@ struct OnboardingSourceStage: View {
         return "\(list), or your own server."
     }
 
-    private func choose(_ figure: OnboardingSourceMotion.Figure) {
-        motion.select(figure, still: reduceMotion)
+    private func choose(_ figure: OnboardingWireScene.Figure) {
+        scene.select(figure, still: reduceMotion)
         figure == .laptop ? model.chooseOnThisMac() : model.chooseYourKey()
     }
 
-    private func choiceButton(_ figure: OnboardingSourceMotion.Figure, label: String) -> some View {
+    private func choiceButton(_ figure: OnboardingWireScene.Figure, label: String) -> some View {
         Button { choose(figure) } label: { Color.clear }
             .buttonStyle(.plain)
             .accessibilityLabel(label)
@@ -680,6 +820,10 @@ struct OnboardingSpeechKeyProvider: Equatable {
     static func detect(_ key: String, among providers: [OnboardingSpeechKeyProvider]) -> (provider: OnboardingSpeechKeyProvider, prefix: Int)? {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.hasPrefix("sk-ant-"), !key.hasPrefix("sk-or-") else { return nil }
+        // Deepgram keys have no prefix but are 40 hexadecimal characters.
+        if key.count == 40, key.allSatisfy(\.isHexDigit), let deepgram = providers.first(where: { $0.kind == .deepgram }) {
+            return (deepgram, 4)
+        }
         let candidates = providers.flatMap { provider in provider.prefixes.map { (provider, $0) } }
             .sorted { $0.1.count > $1.1.count }
         return candidates.first { key.hasPrefix($0.1) }.map { ($0.0, $0.1.count) }
@@ -699,22 +843,34 @@ enum OnboardingKeyMask {
     }
 }
 
-/// The speech key: a wire key over a dark pill field. Pasting a whole key
-/// checks it; Return or the arrow checks too. The key turns in its lock when
-/// accepted and catches gently on a refusal; the middle of the key is masked.
+/// The speech key, laid out like the design pass: the shared wire key over
+/// its lock, one pill field, a quiet line under it, four monochrome provider
+/// marks and one quiet link, all on one centred axis. Pasting a whole key
+/// checks it; Return or the arrow checks too. A mark shows its name on hover,
+/// when picked or when the pasted key is recognised; nothing is preselected.
 struct OnboardingSpeechKeyStage: View {
+    /// The field's side inset; the footer's secondary action lines up with it.
+    static let fieldInset: CGFloat = 44
+
     @ObservedObject var model: OnboardingJourneyModel
+    let scene: OnboardingWireScene
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     @State private var draft = ""
-    @State private var motion = OnboardingKeyMotion()
+    @State private var picked: AIProviderKind?
+    @State private var hoveredLogo: AIProviderKind?
 
     private var providers: [OnboardingSpeechKeyProvider] { model.speechProviders.compactMap(OnboardingSpeechKeyProvider.of) }
     private var detected: (provider: OnboardingSpeechKeyProvider, prefix: Int)? {
         OnboardingSpeechKeyProvider.detect(draft, among: providers)
     }
+    /// The provider the person or the key named; nil at rest.
+    private var known: OnboardingSpeechKeyProvider? {
+        detected?.provider ?? picked.flatMap(OnboardingSpeechKeyProvider.of)
+    }
+    /// The provider a check goes to.
     private var active: OnboardingSpeechKeyProvider {
-        detected?.provider ?? OnboardingSpeechKeyProvider.of(model.speechProvider) ?? providers[0]
+        known ?? OnboardingSpeechKeyProvider.of(model.speechProvider) ?? providers[0]
     }
     private var outcome: OnboardingStepOutcome { model.outcome(.speechKey) }
     private var checking: Bool { if case .working = outcome { return true } else { return false } }
@@ -724,32 +880,7 @@ struct OnboardingSpeechKeyStage: View {
     }
     private var saved: Bool { model.keySaved(active.kind) }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            Text("Connect your speech key.")
-                .font(OnboardingTheme.serifItalic(31))
-                .foregroundColor(OnboardingTheme.ink)
-                .padding(.top, 6)
-                .accessibilityAddTraits(.isHeader)
-            wireKey
-                .frame(height: 92)
-            field
-                .padding(.horizontal, 44)
-            feedback
-                .frame(minHeight: 34)
-                .padding(.horizontal, 36)
-                .padding(.top, 8)
-            Spacer(minLength: 4)
-            footer
-        }
-        .onChange(of: outcome) { _, new in react(to: new) }
-        .onAppear {
-            focused = true
-            motion.settle(phase: phase)
-        }
-    }
-
-    private var phase: OnboardingKeyMotion.Phase {
+    private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
         if accepted, draft.isEmpty { return .accepted }
         if let problem {
@@ -762,17 +893,53 @@ struct OnboardingSpeechKeyStage: View {
         return draft.isEmpty ? .empty : .pasted
     }
 
-    /// The key and the lock it turns in, stepped every display frame.
-    private var wireKey: some View {
-        let motion = self.motion
-        let phase = self.phase
-        let still = reduceMotion
-        return TimelineView(.animation(minimumInterval: still ? 1.0 / 30 : nil, paused: false)) { timeline in
-            Canvas { context, size in
-                motion.phase = phase
-                motion.step(time: timeline.date.timeIntervalSinceReferenceDate, still: still)
-                motion.draw(in: &context, size: size, still: still)
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Paste your speech key.")
+                .font(OnboardingTheme.serifItalic(31))
+                .foregroundColor(OnboardingTheme.ink)
+                .padding(.top, 6)
+                .accessibilityAddTraits(.isHeader)
+            keyBand
+                .frame(height: 108)
+            field
+                .padding(.horizontal, Self.fieldInset)
+                .padding(.top, 4)
+            feedback
+                .frame(height: 36, alignment: .top)
+                .padding(.horizontal, Self.fieldInset)
+                .padding(.top, 10)
+            Spacer(minLength: 4)
+            logos
+            Button { model.openSettings(.apiAndModels, .dropFast) } label: {
+                Text("Use your own server →")
+                    .font(OnboardingTheme.sans(12.5))
+                    .foregroundColor(OnboardingTheme.muted)
             }
+            .buttonStyle(.plain)
+            .help("Add an OpenAI-compatible speech server in Settings → API & Models")
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .onChange(of: outcome) { _, new in react(to: new) }
+        .onChange(of: phase) { _, new in scene.keyPhase = new }
+        .onAppear {
+            focused = true
+            scene.keyPhase = phase
+            scene.keyTargetTurn = accepted ? .pi * 0.5 : 0
+            if saved || accepted { picked = model.speechProvider }
+        }
+    }
+
+    /// Where the shared key and its lock stand; the scene draws them.
+    private var keyBand: some View {
+        let scene = self.scene
+        return GeometryReader { proxy in
+            let y = proxy.frame(in: .named(OnboardingWireScene.space)).midY
+            Color.clear
+                .onAppear { scene.keyBandY = y }
+                .onChange(of: y) { _, new in scene.keyBandY = new }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -780,15 +947,18 @@ struct OnboardingSpeechKeyStage: View {
 
     private var field: some View {
         HStack(spacing: 10) {
-            ProviderBrandIcon(assetName: active.assetName, size: 15, color: OnboardingTheme.ink2)
-                .frame(width: 18)
-                .accessibilityHidden(true)
+            if let known {
+                ProviderBrandIcon(assetName: known.assetName, size: 15, color: OnboardingTheme.ink2)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                    .transition(.opacity)
+            }
             ZStack(alignment: .leading) {
                 if draft.isEmpty {
                     Text(accepted ? "\(active.kind.displayName) key saved"
                          : saved ? "Saved \(active.kind.displayName) key · press Return to use it"
-                         : "Paste your \(active.kind.displayName) key")
-                        .font(OnboardingTheme.sans(13.5))
+                         : "Paste your API key…")
+                        .font(OnboardingTheme.sans(14))
                         .foregroundColor(OnboardingTheme.faint)
                         .lineLimit(1)
                 } else {
@@ -806,8 +976,8 @@ struct OnboardingSpeechKeyStage: View {
                     .disabled(checking)
                     .onSubmit(submit)
                     .onChange(of: draft) { old, new in
-                        motion.targetTurn = 0
-                        if detected == nil, let provider = OnboardingSpeechKeyProvider.detect(new, among: providers)?.provider {
+                        scene.keyTargetTurn = 0
+                        if let provider = OnboardingSpeechKeyProvider.detect(new, among: providers)?.provider {
                             model.speechProvider = provider.kind
                         }
                         // A whole key pasted at once is checked right away.
@@ -818,7 +988,7 @@ struct OnboardingSpeechKeyStage: View {
             .frame(maxWidth: .infinity)
             trailing
         }
-        .padding(.leading, 16)
+        .padding(.leading, known == nil ? 20 : 16)
         .padding(.trailing, 8)
         .frame(height: 50)
         .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098)))
@@ -828,6 +998,7 @@ struct OnboardingSpeechKeyStage: View {
         .shadow(color: .black.opacity(0.30), radius: 16, x: 0, y: 10)
         .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion), value: outcome)
         .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: focused)
+        .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: known?.kind)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -843,7 +1014,7 @@ struct OnboardingSpeechKeyStage: View {
             let ready = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saved
             Button(action: submit) {
                 Image(systemName: accepted ? "checkmark" : checking ? "ellipsis" : "arrow.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(accepted ? OnboardingTheme.green : ready && !checking ? .black : OnboardingTheme.muted)
                     .frame(width: 34, height: 34)
                     .background(Circle().fill(accepted ? OnboardingTheme.green.opacity(0.16)
@@ -855,6 +1026,7 @@ struct OnboardingSpeechKeyStage: View {
         }
     }
 
+    /// One quiet line under the field; empty at rest.
     @ViewBuilder private var feedback: some View {
         let name = active.kind.displayName
         Group {
@@ -875,79 +1047,93 @@ struct OnboardingSpeechKeyStage: View {
                     }
                 }
             } else if !draft.isEmpty {
-                Text("Press Return to check it with \(name).").foregroundColor(OnboardingTheme.muted)
+                Text(detected != nil ? "\(name) key recognized. Press Return to check it."
+                     : known != nil ? "Press Return to check it with \(name)."
+                     : "Press Return to check it with \(name), or pick its provider below.")
+                    .foregroundColor(OnboardingTheme.muted)
+            } else if let known, !saved {
+                Link(destination: known.keysURL) {
+                    Text(offerLine(known)).foregroundColor(OnboardingTheme.muted)
+                }
             } else {
-                Text("Paste a key. Whytap checks it with the provider in a second.").foregroundColor(OnboardingTheme.muted)
+                Color.clear.frame(height: 1)
             }
         }
         .font(OnboardingTheme.sans(12.5))
         .multilineTextAlignment(.center)
         .lineLimit(2)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
 
-    private var footer: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(providers, id: \.kind) { provider in
-                    let isActive = provider.kind == active.kind
-                    Button {
-                        draft = ""
-                        model.speechProvider = provider.kind
-                    } label: {
-                        HStack(spacing: 6) {
-                            ProviderBrandIcon(assetName: provider.assetName, size: 12,
-                                              color: isActive ? OnboardingTheme.ink : OnboardingTheme.muted)
-                            Text(provider.kind.displayName)
-                                .font(OnboardingTheme.sans(11.5, weight: isActive ? .semibold : .regular))
-                                .foregroundColor(isActive ? OnboardingTheme.ink : OnboardingTheme.muted)
-                        }
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Capsule().fill(isActive ? Color.white.opacity(0.08) : .clear))
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(checking)
-                    .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-                }
-            }
-            HStack(spacing: 14) {
-                Link(destination: active.keysURL) {
-                    Text(offerLine)
-                        .font(OnboardingTheme.sans(11.5, weight: .medium))
-                        .foregroundColor(OnboardingTheme.muted)
-                }
-                .buttonStyle(.plain)
-                Button("Use your own server →") { model.openSettings(.apiAndModels, .dropFast) }
-                    .buttonStyle(.plain)
-                    .font(OnboardingTheme.sans(11.5))
-                    .foregroundColor(OnboardingTheme.faint)
-                    .help("Add an OpenAI-compatible speech server in Settings → API & Models")
-            }
+    /// "Need a Soniox key? Get one · $200 credit ↗", with the provider's real
+    /// free offer if any.
+    private func offerLine(_ provider: OnboardingSpeechKeyProvider) -> String {
+        let name = provider.kind.displayName
+        let article = name.first.map { "AEIOU".contains($0) } == true ? "an" : "a"
+        if let hint = APIHintsView.hints.first(where: { $0.provider == name && $0.access == .noCard }) {
+            return "Need \(article) \(name) key? Get one · \(OnboardingJourneyView.shortOffer(hint)) ↗"
         }
-        .padding(.bottom, 2)
+        return "Need \(article) \(name) key? Get one on \(name) ↗"
     }
 
-    /// "Where do I get a key? ↗", with the provider's real free offer if any.
-    private var offerLine: String {
-        let name = active.kind.displayName
-        if let hint = APIHintsView.hints.first(where: { $0.provider == name && $0.access == .noCard }) {
-            return "Get your \(name) key · \(OnboardingJourneyView.shortOffer(hint)) ↗"
+    /// Monochrome marks of one optical height; the name opens on hover, when
+    /// picked, or when the key is recognised.
+    private var logos: some View {
+        HStack(spacing: 10) {
+            ForEach(providers, id: \.kind) { provider in
+                let open = known?.kind == provider.kind || hoveredLogo == provider.kind
+                let dimmed = detected != nil && !open
+                Button {
+                    picked = picked == provider.kind && draft.isEmpty ? nil : provider.kind
+                    model.speechProvider = provider.kind
+                    focused = true
+                } label: {
+                    HStack(spacing: 7) {
+                        ProviderBrandIcon(assetName: provider.assetName, size: 19, color: OnboardingTheme.ink)
+                            .frame(width: 20, height: 20)
+                            .opacity(open ? 1 : dimmed ? 0.24 : provider.kind == .openAI ? 0.58 : 0.46)
+                        if open {
+                            Text(provider.kind.displayName)
+                                .font(OnboardingTheme.sans(13, weight: .medium))
+                                .foregroundColor(OnboardingTheme.ink)
+                                .fixedSize()
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .padding(.leading, open ? 11 : 10)
+                    .padding(.trailing, open ? 13 : 10)
+                    .frame(height: 34)
+                    .background(Capsule().fill(Color.white.opacity(open ? 0.075 : 0)))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(open ? 0.10 : 0), lineWidth: 1))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(checking)
+                .onHover { inside in
+                    if inside { hoveredLogo = provider.kind } else if hoveredLogo == provider.kind { hoveredLogo = nil }
+                }
+                .accessibilityLabel(provider.kind.displayName)
+                .accessibilityAddTraits(known?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
+            }
         }
-        return "Where do I get a \(name) key? ↗"
+        .frame(height: 36)
+        .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
+                   value: hoveredLogo)
+        .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
+                   value: known?.kind)
     }
 
     private var border: Color {
         if accepted, draft.isEmpty { return OnboardingTheme.green.opacity(0.55) }
         if problem != nil { return OnboardingTheme.orange.opacity(0.50) }
         if checking { return OnboardingWireframeInk.roseColor.opacity(0.45) }
-        return focused ? Color.white.opacity(0.26) : Color.white.opacity(0.10)
+        return focused ? Color.white.opacity(0.22) : Color.white.opacity(0.10)
     }
 
     private var halo: Color {
         if checking { return OnboardingWireframeInk.roseColor.opacity(0.18) }
-        if focused, problem == nil, !accepted { return OnboardingWireframeInk.roseColor.opacity(0.10) }
+        if focused, problem == nil, !accepted { return OnboardingWireframeInk.roseColor.opacity(0.08) }
         return .clear
     }
 
@@ -959,120 +1145,31 @@ struct OnboardingSpeechKeyStage: View {
         model.speechProvider = provider
         Task {
             await model.useSpeechKey(key, provider: provider)
-            if model.outcome(.speechKey).isDone { draft = "" }
+            if model.outcome(.speechKey).isDone {
+                draft = ""
+                picked = provider
+            }
         }
     }
 
     private func react(to outcome: OnboardingStepOutcome) {
         switch outcome {
         case .done:
-            motion.targetTurn = .pi * 0.5
+            picked = model.speechProvider
+            scene.keyTargetTurn = .pi * 0.5
         case .failed:
+            // The mark of the provider that answered stays open.
+            picked = model.speechProvider
             guard let problem else { return }
             switch problem {
-            case .format: motion.nudgeBack()
-            case .refused, .noSpeechAccess: motion.catchOnPin(0.32, still: reduceMotion)
-            case .noCredit: motion.catchOnPin(0.48, still: reduceMotion)
+            case .format: scene.nudgeBack()
+            case .refused, .noSpeechAccess: scene.catchOnPin(0.32, still: reduceMotion)
+            case .noCredit: scene.catchOnPin(0.48, still: reduceMotion)
             default: break
             }
         case .idle, .working:
-            motion.targetTurn = 0
+            scene.keyTargetTurn = 0
         }
-    }
-}
-
-/// Step 2's frame loop, as in the prototype: the key slides toward the lock
-/// as the key goes in (stiffness 140, damping 20), turns a quarter when the
-/// provider accepts it (175, 19), and catches on a pin before easing back
-/// when it is refused. Positions are the prototype's 540 pt stage scaled to
-/// the key's radius.
-final class OnboardingKeyMotion {
-    enum Phase: Equatable { case empty, pasted, checking, accepted, refused, format, network }
-
-    var phase: Phase = .empty
-    var targetTurn = 0.0
-    private var x = OnboardingSpring(-30)
-    private var turn = OnboardingSpring(0)
-    private var clock = 1.1
-    private var lastTime: TimeInterval?
-    private var catchGeneration = 0
-
-    static let keyRadius = 40.0
-    private static let scale = keyRadius / 54
-
-    private var goalX: Double {
-        switch phase {
-        case .empty: return -30
-        case .pasted: return -20
-        case .checking, .accepted, .refused: return -4
-        case .format: return -34
-        case .network: return -26
-        }
-    }
-
-    /// Opening on a step already done shows the end pose at once.
-    func settle(phase: Phase) {
-        self.phase = phase
-        x = OnboardingSpring(goalX)
-        if phase == .accepted { targetTurn = .pi * 0.5; turn = OnboardingSpring(targetTurn) }
-    }
-
-    func nudgeBack() { x.velocity -= 42 }
-
-    func catchOnPin(_ angle: Double, still: Bool) {
-        guard !still else { return }
-        targetTurn = angle
-        catchGeneration += 1
-        let generation = catchGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
-            guard let self, self.catchGeneration == generation,
-                  [.refused, .format, .network].contains(self.phase) else { return }
-            self.targetTurn = 0
-        }
-    }
-
-    func step(time: TimeInterval, still: Bool) {
-        let dt = min(0.04, lastTime.map { max(0, time - $0) } ?? 0.016)
-        lastTime = time
-        if !still { clock += dt }
-        x.step(to: goalX, stiffness: 140, damping: 20, dt: dt, still: still)
-        turn.step(to: targetTurn, stiffness: 175, damping: 19, dt: dt, still: still)
-    }
-
-    func draw(in context: inout GraphicsContext, size: CGSize, still: Bool) {
-        let s = Self.scale
-        let mid = size.width / 2, y = size.height / 2
-        let swayY = still ? 0 : sin(clock * 0.58) * 0.08
-        let swayX = still ? 0 : cos(clock * 0.46) * 0.05
-        var tint: OnboardingWireframeInk.RGB?
-        var strength = 0.0
-        switch phase {
-        case .checking: tint = OnboardingWireframeInk.rose; strength = 0.65
-        case .accepted: tint = OnboardingWireframeInk.green; strength = 0.78
-        case .refused, .format, .network: tint = OnboardingWireframeInk.amber; strength = 0.68
-        case .empty, .pasted: break
-        }
-        let lockX = mid + 36 * s
-        OnboardingWireCatalog.lock.draw(
-            in: &context, center: CGPoint(x: lockX, y: y), worldZ: 0, radius: 34 * s,
-            angles: (-0.18 + swayX, -0.40 + swayY, 0.03),
-            style: OnboardingWireStyle(fade: phase == .network ? 0.28 : 0.78, tint: tint, tintStrength: strength * 0.6))
-        if phase == .network {
-            // No answer: three quiet dots between the key and the lock.
-            var dots = Path()
-            for d in 0..<3 {
-                let cx = mid + (12 + Double(d) * 6) * s
-                dots.addEllipse(in: CGRect(x: cx - 1.1, y: y + 2 * s - 1.1, width: 2.2, height: 2.2))
-            }
-            context.fill(dots, with: .color(OnboardingWireframeInk.amberColor.opacity(0.45)))
-        }
-        let keyX = mid + x.value * s
-        let waveX: Double? = phase == .checking && !still
-            ? keyX + (-48 + (clock * 95).truncatingRemainder(dividingBy: 108)) * s : nil
-        OnboardingWireCatalog.key.draw(
-            in: &context, center: CGPoint(x: keyX, y: y), worldZ: 0, radius: Self.keyRadius,
-            angles: (-0.20 + turn.value + swayX, -0.40 + swayY, 0.03),
-            style: OnboardingWireStyle(fade: 1, tint: tint, tintStrength: strength, dotWaveX: waveX))
     }
 }
 

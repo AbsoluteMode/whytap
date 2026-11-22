@@ -523,14 +523,14 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
-        let model = try makeModel(env, refusing: [.deepgram])
+        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true)
         let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
         let window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
         defer { window.contentViewController = nil; window.close() }
         var index = 0
-        func snap(_ name: String) async throws {
-            try await Task.sleep(for: .milliseconds(600))
+        func snap(_ name: String, after delay: Int = 600) async throws {
+            try await Task.sleep(for: .milliseconds(delay))
             let content = try XCTUnwrap(window.contentView)
             let frameView = try XCTUnwrap(content.superview)
             frameView.layoutSubtreeIfNeeded()
@@ -545,6 +545,10 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("source")
         model.chooseYourKey()
         XCTAssertEqual(model.step, .speechKey)
+        // The same key flies from step 1 to its lock on step 2.
+        try await snap("key-flight-1", after: 90)
+        try await snap("key-flight-2", after: 90)
+        try await snap("key-flight-3", after: 120)
         try await snap("speech-key")
         model.speechProvider = .deepgram
         await model.useSpeechKey("bad-0123456789abcdef", provider: .deepgram)

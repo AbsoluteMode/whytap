@@ -152,7 +152,9 @@ final class OnboardingPreviewSession {
                 keyboard: { system.grant { $0.accessibility = true } },
                 microphone: { system.grant { $0.microphone = true } },
                 inputMonitoring: { system.grant { _ in } }),
-            isPreview: true)
+            isPreview: true,
+            // OpenAI speech is shown here already; the app waits for its model.
+            offersOpenAISpeech: true)
     }
 
     /// Nothing of the run stays behind.

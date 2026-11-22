@@ -12,6 +12,8 @@ struct OnboardingJourneyView: View {
     @ObservedObject var dwell: OnboardingDwellController
     @ObservedObject var hotkeys: HotkeyPreferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Steps 1 and 2 share one scene, so the chosen key flies between them.
+    @State private var wireScene = OnboardingWireScene()
 
     static let size = OnboardingTheme.compactCanvas
 
@@ -39,6 +41,15 @@ struct OnboardingJourneyView: View {
                        value: model.step)
             footer
         }
+        .coordinateSpace(name: OnboardingWireScene.space)
+        .overlay {
+            if let sceneStep = Self.wireSceneStep(model.step) {
+                OnboardingWireSceneLayer(scene: wireScene, step: sceneStep)
+                    .transition(.opacity)
+            }
+        }
+        .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion),
+                   value: Self.isWireframe(model.step))
         .frame(width: Self.size.width, height: Self.size.height)
         .background(ground)
         // The page fills the window, title bar included: inside the safe area
@@ -50,6 +61,14 @@ struct OnboardingJourneyView: View {
     /// The first two steps draw on a softly lit ground (the wireframe pass);
     /// its edge is the window's own colour, so nothing shows a seam.
     static func isWireframe(_ step: OnboardingStep) -> Bool { step == .source || step == .speechKey }
+
+    static func wireSceneStep(_ step: OnboardingStep) -> OnboardingWireScene.Step? {
+        switch step {
+        case .source: return .source
+        case .speechKey: return .speechKey
+        default: return nil
+        }
+    }
 
     private var ground: some View {
         ZStack {
@@ -103,7 +122,9 @@ struct OnboardingJourneyView: View {
             Spacer(minLength: 0)
             rightAction
         }
-        .padding(.horizontal, OnboardingTheme.compactHorizontalInset)
+        // On the centred steps the secondary action lines up with the field.
+        .padding(.horizontal, Self.isWireframe(model.step) ? OnboardingSpeechKeyStage.fieldInset
+                                                           : OnboardingTheme.compactHorizontalInset)
         .frame(height: OnboardingTheme.compactFooterHeight)
         .padding(.bottom, 10)
     }
@@ -139,9 +160,9 @@ struct OnboardingJourneyView: View {
     private func stage(_ step: OnboardingStep) -> some View {
         switch step {
         case .source:
-            OnboardingSourceStage(model: model, onDevice: model.onDevice)
+            OnboardingSourceStage(model: model, onDevice: model.onDevice, scene: wireScene)
         case .speechKey:
-            OnboardingSpeechKeyStage(model: model)
+            OnboardingSpeechKeyStage(model: model, scene: wireScene)
         case .llmKey:
             OnboardingJourneyStep(act: step.act, title: "A language model",
                                   lede: "Optional. Smart dictation, meeting notes, the Agent and Translate.") {

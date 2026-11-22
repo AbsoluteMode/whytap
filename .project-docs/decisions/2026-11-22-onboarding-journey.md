@@ -164,7 +164,7 @@ window, Back and a progress bar.
 - **Steps 1 and 2 in the wireframe language (draft, from the design pass):**
   a laptop and a key drawn as depth-sorted wire solids on a softly lit
   ground. Hover brings a figure forward; the other recedes, dimmer and
-  without its caption. Step 2 is "Connect your speech key.": a dark pill
+  without its caption. Step 2 is "Paste your speech key.": a dark pill
   field with the middle of the key masked, the speech providers only (with
   their logos from `UsefulLinkIcons`), the provider's real offer, and a
   quiet "Use your own server →" to Settings → API & Models. Only real key
@@ -185,6 +185,24 @@ window, Back and a progress bar.
   pulse and checking light. Hover only updates the motion object, so no
   SwiftUI state or layout changes on pointer moves; captions are drawn in
   the same canvas. Reduce Motion snaps to the target and draws at 30 fps.
+- **One key across steps 1 and 2.** The figures of both steps are one scene
+  (`OnboardingWireScene`) drawn by one canvas above the page, so the key
+  chosen on step 1 turns and flies to its lock on step 2 (and back on Back)
+  on the same springs; only the steps' text and controls take the ordinary
+  step transition. Two drawings with a cross-fade made the key jump, vanish
+  and reappear. The steps report only their bands' vertical place (the step
+  slide is sideways), and step 1's captions fade in the first third of the
+  flight.
+- **Step 2's layout follows the design pass.** One centred axis: title, the
+  key over its lock, the field ("Paste your API key…"), one quiet line under
+  it (empty at rest), four monochrome provider marks of one optical height
+  with no preselected one (a mark shows its name on hover, when picked, or
+  when the key is recognised: ElevenLabs and OpenAI by prefix, Deepgram by
+  40 hexadecimal characters), then one quiet "Use your own server →". A
+  picked mark offers "Need a … key? Get one" with the provider's real offer.
+  "Set up later" stays in the footer like on every step, aligned with the
+  field's edge. The standalone preview already shows OpenAI as the fourth
+  provider; the app keeps it behind the registry until OpenAI speech lands.
 
 ## Rejected
 

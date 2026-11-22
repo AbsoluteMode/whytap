@@ -931,7 +931,10 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   event input, terminals and password managers by bundle ID, own process,
   unknown app, non-text role, any AX error but a missing attribute). The
   field must report its length (at most 20,000 UTF-16 units) and only that
-  range is requested (AXStringForRange); no length means no read.
+  range is requested (AXStringForRange); no length means no read. Focus
+  and the gate are confirmed again after the length query and after the
+  transfer; if another app takes focus during the capture, the paste engine
+  posts no Cmd+V and restores the clipboard.
   Switching learning or calibration off stops a scheduled read. It
   compares with what reached the field (a rich paste's plainText), aligns the take inside the
   field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and

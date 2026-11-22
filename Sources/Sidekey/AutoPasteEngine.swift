@@ -399,7 +399,22 @@ final class AutoPasteEngine {
         // Step 9: post Cmd+V. Explicit Command-down → V-down → V-up →
         // Command-up sequence with usleep gaps — `CGEvent.flags = .maskCommand`
         // alone is not enough on every app (friend's empirical note).
-        beforeCommandV?()
+        if let beforeCommandV {
+            // The capture makes blocking AX calls. If keyboard focus moved to
+            // another app meanwhile, Cmd+V would paste the dictation there:
+            // stop and restore the clipboard instead.
+            // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+            let recipient = frontmostAppInfo()?.pid
+            beforeCommandV()
+            guard let recipient, frontmostAppInfo()?.pid == recipient else {
+                logEmit(.error, "autopaste_failed step=recipient reason=focus_moved_during_capture")
+                pasteboardRestore(snapshot)
+                logEmit(.info, "autopaste_pasteboard_restored after=failure")
+                suppressClipboardThrough(currentChangeCount())
+                setClipboardSuppression(false)
+                return false
+            }
+        }
         postCmdV()
         logEmit(.info, "autopaste_posted_cmdv")
 

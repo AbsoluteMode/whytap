@@ -79,9 +79,14 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         // not report it, or cannot return a range, is not read at all.
         guard let length = system.characterCount(handle.element),
               length >= 0, length <= DropEditFieldLimits.maxFieldLength else { return nil }
+        // The length query can block; focus may move meanwhile. Confirm
+        // keyboard focus and the gate again right before the transfer.
+        guard isStillFocused(handle) else { return nil }
         if length == 0 { return "" }
         guard let text = system.string(handle.element, CFRange(location: 0, length: length)),
-              (text as NSString).length <= DropEditFieldLimits.maxFieldLength else { return nil }
+              (text as NSString).length <= DropEditFieldLimits.maxFieldLength,
+              // A field that lost focus during the transfer is not used.
+              isStillFocused(handle) else { return nil }
         return text
     }
 

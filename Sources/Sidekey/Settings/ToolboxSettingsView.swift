@@ -863,7 +863,11 @@ final class ToolboxTilePointerTracker: ObservableObject {
     @Published private(set) var isPressed = false
     /// Focus that a click gave the tile: no focus ring for it.
     @Published private(set) var focusFromPointer = false
-    private var buttonWentDown = false
+    /// AppKit moves focus on mouse down and SwiftUI reports it before the
+    /// mouse up is handled, so only focus gained while the button is held is
+    /// the click's. A finished click leaves nothing behind: a later Tab onto
+    /// the hovered tile shows the ring.
+    private var buttonIsDown = false
     private var monitor: Any?
 
     func setHovering(_ hovering: Bool, installsMonitor: Bool = true) {
@@ -877,25 +881,24 @@ final class ToolboxTilePointerTracker: ObservableObject {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
             isPressed = false
-            buttonWentDown = false
+            buttonIsDown = false
         }
     }
 
-    /// Mouse down arrives before AppKit moves focus to the clicked tile.
     func observe(_ type: NSEvent.EventType) {
         switch type {
         case .leftMouseDown:
             isPressed = true
-            buttonWentDown = true
+            buttonIsDown = true
         case .leftMouseUp:
             isPressed = false
+            buttonIsDown = false
         default:
             break
         }
     }
 
     func focusChanged(_ focused: Bool) {
-        focusFromPointer = focused && buttonWentDown
-        buttonWentDown = false
+        focusFromPointer = focused && buttonIsDown
     }
 }

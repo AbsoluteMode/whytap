@@ -71,11 +71,35 @@ final class ToolboxTileInteractionTests: XCTestCase {
         let tracker = ToolboxTilePointerTracker()
         tracker.observe(.leftMouseDown)
         tracker.focusChanged(true)
-        XCTAssertTrue(tracker.focusFromPointer, "a click's focus draws no ring")
+        XCTAssertTrue(tracker.focusFromPointer, "focus gained during a click draws no ring")
+        tracker.observe(.leftMouseUp)
         tracker.focusChanged(false)
         XCTAssertFalse(tracker.focusFromPointer)
         tracker.focusChanged(true)
         XCTAssertFalse(tracker.focusFromPointer, "Tab focus draws the ring")
+    }
+
+    /// Builder finding on 21b7abe9 (its probe, kept as written): a finished
+    /// click that moved no focus left its flag set, so the next Tab onto the
+    /// hovered tile showed no ring.
+    func test_keyboard_focus_after_a_mouse_sequence_that_did_not_focus_the_tile_shows_the_ring() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.setHovering(true, installsMonitor: false)
+        tracker.observe(.leftMouseDown)
+        tracker.observe(.leftMouseUp)
+        XCTAssertFalse(tracker.isPressed)
+        tracker.focusChanged(true)
+        XCTAssertFalse(tracker.focusFromPointer, "a completed mouse sequence must not hide later keyboard focus")
+    }
+
+    func test_leaving_the_tile_mid_press_never_marks_a_later_focus_as_a_click() {
+        let tracker = ToolboxTilePointerTracker()
+        tracker.setHovering(true, installsMonitor: false)
+        tracker.observe(.leftMouseDown)   // a drag starts; its mouse up is swallowed
+        tracker.setHovering(false)
+        tracker.focusChanged(true)
+        XCTAssertFalse(tracker.focusFromPointer)
+        XCTAssertFalse(tracker.isPressed)
     }
 
     func test_highlight_matches_mac_button() {

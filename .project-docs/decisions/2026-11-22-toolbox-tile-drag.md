@@ -43,9 +43,12 @@ or button-like activation, takes the same mouse sequence away from the drag.
   pressed, up clears it; leaving the tile clears it too (a drag session
   swallows the mouse up).
 - The system focus effect is off (`.focusEffectDisabled()`). The tile draws a
-  2 pt accent ring around its circle when focused, unless the focus came from
-  a click (the monitor sees the mouse down before AppKit moves focus), so a
-  click shows no ring and Tab does.
+  2 pt accent ring around its circle when focused, unless the focus arrived
+  while the mouse button was held: AppKit moves focus on mouse down and SwiftUI
+  reports it before the mouse up. A click therefore shows no ring, and a
+  finished click leaves nothing behind, so a later Tab onto the hovered tile
+  shows it. (The builder's review of the first head found a flag that
+  survived a click which moved no focus and hid the next Tab's ring.)
 - Selection wash, hotkey block, hover tint values (10 % / 18 %) are unchanged.
 
 # Why
@@ -61,7 +64,9 @@ it only reads events and exists only while hovered.
   `@GestureState`, Button or `focusable(interactions:)`; catalog and hover
   tiles keep `.draggable(tool.rawValue)`; the store accepts a catalog drop on
   Add and a reorder; the tracker's press follows down/up and resets on hover
-  exit; click focus has no ring, keyboard focus has it; a synthetic click still
+  exit; focus during a click has no ring, keyboard focus has it, including
+  Tab after a finished click (the builder's probe) and after a drag left the
+  tile; a synthetic click still
   selects (no `.draggable` in that window).
 - A real drag is not tested automatically: an attempted probe started a
   system drag session from a synthetic event that waited for the physical

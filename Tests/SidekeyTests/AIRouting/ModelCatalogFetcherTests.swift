@@ -193,7 +193,7 @@ final class ModelCatalogFetcherTests: XCTestCase {
             let models = try await fetcher.fetch(
                 account: .server(UUID()), apiKey: key, server: server("http://h:8000/v1"))
             XCTAssertEqual(models.map(\.id), ["qwen", "llama"])
-            XCTAssertNil(models[0].uses)
+            XCTAssertEqual(models[0].uses, ServerModelClassifier.languageUses)
             let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
         }

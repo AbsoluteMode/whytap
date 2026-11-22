@@ -29,8 +29,8 @@ Main features: **Drop** (hold Space in a text field, speak, release: the text
 is pasted), the built-in **Agent** (Right Command; off by default), **Meeting
 Notes**, **Case** (a local secrets vault for coding agents), a Whytap **MCP
 server** for Claude Code / Codex, and island tools (Shot, History, Translate,
-Subtitles, To-do, Notify, Monitor, Display). Calendar is shown as "Soon" and
-does not work yet. User-facing overview: [`README.md`](README.md).
+Subtitles, To-do, Notify, Monitor, Display). Calendar opens in the current source. The published
+2.2.26 build shows it as "Soon". User-facing overview: [`README.md`](README.md).
 
 ## Permissions recorded in this repository are not yours
 

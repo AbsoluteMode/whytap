@@ -31,7 +31,14 @@ final class CalendarHoverModel: ObservableObject {
     func begin() {
         guard CalendarAvailability.isOpen, !visible else { return }
         CalendarEventPreviewState.shared.clear()
-        visible = true; openToday(); activityChanged(true)
+        visible = true; recheckAppleAccess(); openToday(); activityChanged(true)
+    }
+    /// Live macOS calendar status (read only, no prompt): clears a stale refusal
+    /// once access is allowed and refreshes a saved Apple connection that recovered.
+    func recheckAppleAccess() {
+        guard CalendarAvailability.isOpen else { return }
+        if connections.checkAppleAccess() { refresh() }
+        connectionFlow.clearAppleRefusalIfAllowed()
     }
     func end() { visible = false; CalendarEventPreviewState.shared.clear(); activityChanged(false) }
     func openToday() {
@@ -49,7 +56,11 @@ final class CalendarHoverModel: ObservableObject {
     func connect(_ provider: CalendarProvider, info: [String: Any]?, onSuccess: @escaping () -> Void = {}) -> Bool {
         guard CalendarAvailability.isOpen, !connectionFlow.working else { return false }
         page = .providers
-        if provider == .apple && connections.appleEnabled { page = .agenda; return false }
+        if provider == .apple && connections.appleEnabled {
+            // A saved connection with access off: its row is the way to System Settings.
+            if connections.appleAccessOff { openPrivacySettings(); return false }
+            page = .agenda; return false
+        }
         return connectionFlow.startRegistered(provider: provider, info: info) { [self] in
             page = .agenda; refresh(); onSuccess()
         }
@@ -124,10 +135,11 @@ final class CalendarHoverModel: ObservableObject {
     }
 
     /// What a Connect row offers, shown on the row and spoken by VoiceOver.
-    enum ConnectState: Equatable { case connecting, connected, addAccount, connect }
+    enum ConnectState: Equatable { case connecting, connected, accessOff, addAccount, connect }
 
     func connectState(_ provider: CalendarProvider) -> ConnectState {
         if connectionFlow.working && connectionFlow.lastProvider == provider { return .connecting }
+        if provider == .apple && connections.appleEnabled && connections.appleAccessOff { return .accessOff }
         if !isConnected(provider) { return .connect }
         return provider == .apple ? .connected : .addAccount
     }
@@ -138,6 +150,7 @@ final class CalendarHoverModel: ObservableObject {
         switch connectState(provider) {
         case .connecting: return "Connecting \(name)"
         case .connected: return "\(name), connected"
+        case .accessOff: return "\(name), access off. Open Privacy Settings"
         case .addAccount: return "Add \(name) account"
         case .connect: return "Connect \(name)"
         }
@@ -162,6 +175,8 @@ final class CalendarHoverModel: ObservableObject {
 
     /// Opens URLs; tests replace it.
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Opens System Settings → Privacy & Security → Calendars; tests replace it.
+    var openPrivacySettings: () -> Void = { PermissionsHelper.openCalendarsSettings() }
 
     /// A click on an event: join its meeting, else open it in its own calendar.
     @discardableResult
@@ -219,6 +234,11 @@ struct CalendarHoverView: View {
                 guard liveUpdates, CalendarAvailability.isOpen else { return }
                 connections.refreshAppleIfEnabled(interval: model.interval)
             }
+        // Back from System Settings: pick up a changed calendar permission at once.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard liveUpdates else { return }
+            model.recheckAppleAccess()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in model.dayChanged() }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in model.dayChanged(); model.refresh() }
         .transaction { if reduceMotion { $0.disablesAnimations = true } }
@@ -413,6 +433,8 @@ struct CalendarHoverView: View {
                             case .connecting: ProgressView().controlSize(.small)
                             case .connected:
                                 Text("Connected").font(.system(size: 11)).foregroundStyle(.white.opacity(0.76))
+                            case .accessOff:
+                                Text("Access off").font(.system(size: 11, weight: .medium)).foregroundStyle(MacSettingsTheme.orange)
                             case .addAccount: Text("Add account").font(.system(size: 11, weight: .medium))
                             case .connect: Text("Connect").font(.system(size: 11, weight: .medium))
                             }
@@ -424,6 +446,11 @@ struct CalendarHoverView: View {
                         Text(error).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.orange)
                             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
                     }
+                }
+                if connections.appleAccessOff {
+                    CalendarHoverButton { model.openPrivacySettings() } label: {
+                        Text("Open Privacy Settings").font(.system(size: 11, weight: .medium)).padding(8)
+                    }.accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
                 }
                 if connectionFlow.working {
                     CalendarHoverButton { connectionFlow.cancel() } label: {

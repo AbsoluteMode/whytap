@@ -19,6 +19,11 @@ struct IslandScreenDescriptor: Equatable {
     let besideSystemIsland: Bool
     /// Width kept free for the system island, centered on the camera.
     let systemIslandReservedWidth: CGFloat
+    /// The island on this screen gets touch targets: it reports touch and the
+    /// report is not Apple's Sidecar caveat. Set by `IslandScreenResolver`;
+    /// false for raw screens. WHY:
+    /// .project-docs/decisions/2026-11-22-island-touch-tap.md
+    let acceptsTouchInput: Bool
 
     init(
         uuid: String?,
@@ -30,8 +35,10 @@ struct IslandScreenDescriptor: Equatable {
         isBuiltIn: Bool = false,
         isTouchCapable: Bool = false,
         besideSystemIsland: Bool = false,
-        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        acceptsTouchInput: Bool = false
     ) {
+        self.acceptsTouchInput = acceptsTouchInput
         self.isBuiltIn = isBuiltIn
         self.isTouchCapable = isTouchCapable
         self.besideSystemIsland = besideSystemIsland
@@ -71,7 +78,11 @@ struct IslandScreenDescriptor: Equatable {
     /// by `IslandSystemIslandPolicy`.
     var isBuiltInTouchDisplay: Bool { isBuiltIn && isTouchCapable }
 
-    func placing(besideSystemIsland: Bool, reservedWidth: CGFloat) -> IslandScreenDescriptor {
+    func placing(
+        besideSystemIsland: Bool,
+        reservedWidth: CGFloat,
+        acceptsTouchInput: Bool = false
+    ) -> IslandScreenDescriptor {
         IslandScreenDescriptor(
             uuid: uuid,
             frame: frame,
@@ -82,7 +93,8 @@ struct IslandScreenDescriptor: Equatable {
             isBuiltIn: isBuiltIn,
             isTouchCapable: isTouchCapable,
             besideSystemIsland: besideSystemIsland,
-            systemIslandReservedWidth: reservedWidth
+            systemIslandReservedWidth: reservedWidth,
+            acceptsTouchInput: acceptsTouchInput
         )
     }
 }
@@ -185,7 +197,12 @@ enum IslandScreenResolver {
                 screen: selected,
                 allScreens: descriptors
             ),
-            reservedWidth: reservedWidth
+            reservedWidth: reservedWidth,
+            acceptsTouchInput: IslandTouchRouting.acceptsTouch(
+                screenReportsTouch: selected.isTouchCapable,
+                allScreensReportTouch: descriptors.allSatisfy(\.isTouchCapable),
+                screenCount: descriptors.count
+            )
         )
     }
 

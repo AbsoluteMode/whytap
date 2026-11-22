@@ -2,7 +2,7 @@
 id: island-touch-tap-2026-11-22
 type: decision
 title: A tap opens the island on a touch display
-summary: On a screen that reports touch, transparent target windows cover the visible island surfaces while the island window ignores the mouse. A tap on the capsule opens the drawer, a tap on an agent surface is delivered through the island's measured dispatch, and a touch session keeps the island taking events until a tap lands outside, the pointer moves or eight seconds pass. Screens without touch never get a target.
+summary: On a screen whose touch report is trusted (not Apple's Sidecar caveat), transparent target windows cover every rendered island surface while the island window ignores the mouse. A tap on the capsule opens the drawer, any other tap is replayed through the island's measured dispatch, and the island window never claims its transparent area, so the system Dynamic Island beside it keeps its taps. A touch session only owns the drawer it opened. Screens without a trusted touch report never get a target.
 status: confirmed
 tags: [island, touch, macos-27, hover, input]
 canonical_for: [island-touch-tap, island-touch-session]
@@ -44,27 +44,34 @@ opened at all.
 
 ## Decision
 
-- On a screen whose `touchCapabilities` reports touch, while the island window
-  ignores the mouse and is shown, one transparent `IslandTouchTargetPanel` per
-  visible surface (the capsule unless idle-hidden, the agent wing, the answer
-  card) sits above it. Its view overrides `mouseDown`, which AppKit emulates
-  for a finger tap.
-- A tap starts an `IslandTouchSession`: the island window stops ignoring the
-  mouse and the targets leave. A tap on the collapsed capsule opens the drawer
-  (the same programmatic expansion as a tool hotkey, without its four-second
-  collapse); a tap on another surface is replayed as a click through the
-  island's `sendEvent`, the measured dispatch real clicks use.
-- The session ends on a tap over the island window's transparent area (that
-  tap is consumed, like a tap outside an open menu), on real pointer movement,
-  when the drawer it opened closes for another reason, when the island hides,
-  or after eight seconds without a tap inside. A drawer the session opened
-  closes with it.
-- A pointer reaching a target (trackpad on the same Mac, or any Mac with a
-  touch Sidecar connected) ends the session and hands the island back to the
-  pointer rules at once, so hover keeps working.
-- A long press arrives as a right click and does nothing on the island.
-- Screens that report no touch never get a target window, and without a
-  session every routing decision is the earlier one.
+- The island's screen gets targets only when it reports touch and the report
+  is trusted: with a touch Sidecar connected every display reports touch
+  (TN3212), so then no display gets targets
+  (`IslandScreenDescriptor.acceptsTouchInput`).
+- While the island is shown and its window ignores the mouse, one transparent
+  `IslandTouchTargetPanel` covers each rect the pointer routing would claim:
+  the capsule unless idle-hidden, an open drawer's surfaces (also one a hotkey
+  opened), the music strip, the notification slot, the agent wing and the
+  answer card. Its view overrides `mouseDown`, which AppKit emulates for a
+  finger tap. Targets are placed when the island is first shown and follow
+  every display change.
+- A tap on the collapsed capsule opens the drawer (the programmatic expansion
+  a tool hotkey uses, without its four-second collapse) and starts an
+  `IslandTouchSession`. Any other tap is replayed as a click through the
+  island's `sendEvent`, the measured dispatch real clicks use. A scroll over a
+  target goes to the island view under it.
+- The island window itself never claims more than the pointer rules give it:
+  its transparent area, which beside the system Dynamic Island covers the
+  camera band, stays click-through for touches too.
+- The session owns only the drawer it opened. It closes it on a second tap on
+  the capsule, after eight seconds without a tap on the island, on real
+  pointer movement, a display change, hide, or when the drawer closes for
+  another reason. A tap elsewhere goes to whatever is there.
+- A pointer reaching a target hands the island back to the pointer rules at
+  once, so hover keeps working.
+- A long press arrives as a right click and does nothing on a target.
+- Screens without a trusted touch report never get a target window, and every
+  pointer routing decision is the earlier one.
 
 ## Why
 
@@ -73,19 +80,26 @@ gathered by hit-testing, and a window that ignores the mouse is not
 hit-tested. Small target windows over visible content claim exactly what has
 something to tap, keep the transparent window click-through, and reuse the
 emulated click instead of adding a parallel touch path. Replaying into
-`sendEvent` keeps one dispatch for clicks and taps; if a replay ever misses,
-the session already lets the next tap through.
+`sendEvent` keeps one dispatch for clicks and taps. Claiming the whole
+window during a session would have consumed taps on the system island next to
+the capsule, so a tap outside no longer dismisses the drawer; a second tap on
+the capsule or the timeout does.
 
 ## What was tested
 
-- Pure routing: no targets for a screen without touch in every state, the
-  pointer decision unchanged without a session, targets only while the island
-  ignores the mouse, none over an idle-hidden capsule, tap actions, the
-  transparent-area rule and the session clock.
-- Target windows created without being shown: a tap reports its screen point,
-  a retired target reports nothing, pointer entry hands the island back, a
-  right click does nothing.
-- Island test groups (195 tests) pass.
+- Pure routing: no targets for a screen without touch, trusted reports for the
+  touch Mac alone, beside an external monitor, the external monitor itself and
+  under a Sidecar; targets for every rendered surface including a hotkey
+  drawer and the music strip; none while the island takes the pointer, while
+  hidden or over an idle-hidden capsule; none over the system island band on
+  the default touch geometry; tap actions and the session clock.
+- Target windows created without being shown: a tap and a scroll report their
+  screen point, a retired target reports nothing, pointer entry hands the
+  island back, a right click does nothing.
+- Island window wiring (source contract, the panel is a singleton): first
+  show places targets after the island counts as shown, a display change ends
+  the session before re-anchoring and refreshes the targets, the routing never
+  reads the session.
 
 ## Rejected
 
@@ -93,14 +107,19 @@ the session already lets the next tap through.
   ignores the mouse.
 - Keeping the island window always claimed on touch screens: its transparent
   area would eat every tap near the top of the screen.
+- Claiming the whole island window during a session (the first version):
+  beside the system Dynamic Island its transparent area covers the camera
+  band, so a tap on the system island would have been consumed.
+- Trusting every touch report: with a Sidecar connected, mouse-only displays
+  would get targets.
 - Waking an idle-hidden capsule by tap: an invisible target would eat taps on
   the menu bar under it; hotkeys and the pointer still wake it.
 
 ## Not verified
 
 Whether a touch reaches a `.screenSaver` non-activating panel, whether the
-emulated click reaches it the same way a mouse click does and how the replay
-behaves on real hardware need the MacBook or Sidecar with macOS 27.3 and
-iPadOS 27 (island shown on the iPad display).
+emulated click and the scroll reach it the same way a mouse does, how the
+replay behaves and how the windows stack with the system island need the
+MacBook. Sidecar cannot show it: under its caveat no display gets targets.
 
 2026-11-22, PR: https://github.com/AbsoluteMode/whytap/pull/396

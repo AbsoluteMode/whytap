@@ -5,14 +5,16 @@ import Foundation
 /// `mouseMoved` before a tap (Apple: "Adopting gesture recognizers in your
 /// app", TN3216). The island window claims mouse events only where the
 /// pointer already is, so a tap on the island fell through to the app
-/// underneath. On a touch-capable screen transparent target windows cover
-/// each visible island surface while the island window ignores the mouse; a
-/// tap there starts a touch session in which the island window takes every
-/// event in its frame until the session ends.
+/// underneath. On a screen whose touch report is trusted, transparent target
+/// windows cover each visible island surface (capsule, open drawer, music
+/// strip, notification slot, agent surfaces) while the island window ignores
+/// the mouse; a tap there is replayed into the island window. Nothing else is
+/// claimed, so the transparent rest of the island window, and the system
+/// Dynamic Island beside it, keep their taps.
 /// WHY: .project-docs/decisions/2026-11-22-island-touch-tap.md
 struct IslandTouchSession: Equatable {
-    /// No touch inside the island for this long ends the session (a finger
-    /// has no pointer exit to close a drawer it opened).
+    /// No touch on the island for this long ends the session and closes a
+    /// drawer it opened (a finger has no pointer exit to close it).
     static let idleTimeout: TimeInterval = 8
 
     private(set) var isActive = false
@@ -49,45 +51,42 @@ enum IslandTouchRouting {
         /// The compact capsule hides its tools and Update buttons until
         /// hovered; a tap reveals them the way hovering does.
         case openDrawer
+        /// A second tap on the capsule closes the drawer a tap opened.
+        case closeDrawer
         /// Any other surface already shows its controls: deliver the tap.
         case deliver
     }
 
-    /// While a touch session runs the island window takes every event in its
-    /// frame; otherwise the pointer decides exactly as before.
-    static func shouldIgnoreMouseEvents(pointerDecision: Bool, sessionActive: Bool) -> Bool {
-        sessionActive ? false : pointerDecision
+    /// Whether the island's screen gets touch targets at all: it reports
+    /// touch and the report is not Apple's Sidecar caveat (TN3212: with a
+    /// touch Sidecar connected every display reports touch, so no report can
+    /// be trusted and mouse-only displays must not get targets).
+    static func acceptsTouch(screenReportsTouch: Bool, allScreensReportTouch: Bool, screenCount: Int) -> Bool {
+        screenReportsTouch && !(screenCount > 1 && allScreensReportTouch)
     }
 
-    /// Rects the touch targets cover: every visible island surface while the
-    /// island window ignores the mouse on a touch-capable screen. Nothing on
-    /// any other screen, so a Mac without touch never gets a target window.
+    /// Rects the touch targets cover: every rendered island surface (the
+    /// same rects the pointer routing claims) while the island window
+    /// ignores the mouse on a touch screen. Nothing on any other screen.
     static func targetFrames(
         touchCapable: Bool,
         shown: Bool,
-        sessionActive: Bool,
         islandIgnoresMouse: Bool,
-        idleHidden: Bool,
-        compactFrame: NSRect,
-        agentSurfaceFrames: [NSRect]
+        activeFrames: [NSRect]
     ) -> [NSRect] {
-        guard touchCapable, shown, !sessionActive, islandIgnoresMouse else { return [] }
-        // An idle-hidden capsule is invisible: a target there would eat taps
-        // on whatever is under it.
-        var frames = idleHidden ? [] : [compactFrame]
-        frames += agentSurfaceFrames.filter { !$0.isEmpty }
-        return frames
+        guard touchCapable, shown, islandIgnoresMouse else { return [] }
+        return activeFrames.filter { !$0.isEmpty }
     }
 
-    static func action(for point: NSPoint, compactFrame: NSRect, drawerExpanded: Bool) -> TapAction {
-        compactFrame.contains(point) && !drawerExpanded ? .openDrawer : .deliver
-    }
-
-    /// A tap during the session over none of the rendered surfaces lands on
-    /// the island window's transparent area: it ends the session, the way a
-    /// tap outside an open menu closes it.
-    static func endsSession(tapAt point: NSPoint, activeFrames: [NSRect]) -> Bool {
-        !activeFrames.contains { $0.contains(point) }
+    static func action(
+        for point: NSPoint,
+        compactFrame: NSRect,
+        drawerExpanded: Bool,
+        sessionOpenedDrawer: Bool
+    ) -> TapAction {
+        guard compactFrame.contains(point) else { return .deliver }
+        if !drawerExpanded { return .openDrawer }
+        return sessionOpenedDrawer ? .closeDrawer : .deliver
     }
 }
 
@@ -99,6 +98,8 @@ final class IslandTouchTargets {
     private(set) var panels: [IslandTouchTargetPanel] = []
     private let presentsWindows: Bool
     var onTap: (NSPoint) -> Void = { _ in }
+    /// A scroll over a target (a finger panning the drawer's lists).
+    var onScroll: (NSEvent, NSPoint) -> Void = { _, _ in }
     /// The pointer (trackpad or mouse) reached a target: the island must take
     /// over at once, or the target would hide the island's hover from it.
     var onPointer: () -> Void = {}
@@ -116,6 +117,7 @@ final class IslandTouchTargets {
         while panels.count < frames.count {
             let panel = IslandTouchTargetPanel()
             panel.onTap = { [weak self] point in self?.onTap(point) }
+            panel.onScroll = { [weak self] event, point in self?.onScroll(event, point) }
             panel.onPointer = { [weak self] in self?.onPointer() }
             panels.append(panel)
         }
@@ -145,6 +147,7 @@ final class IslandTouchTargets {
 
 final class IslandTouchTargetPanel: NSPanel {
     var onTap: (NSPoint) -> Void = { _ in }
+    var onScroll: (NSEvent, NSPoint) -> Void = { _, _ in }
     var onPointer: () -> Void = {}
     /// A retired target never reports a tap.
     var isActiveTarget = false
@@ -166,6 +169,10 @@ final class IslandTouchTargetPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         let view = IslandTouchTargetView()
         view.onDown = { [weak self] event in self?.report(event) }
+        view.onScroll = { [weak self] event in
+            guard let self, self.isActiveTarget else { return }
+            self.onScroll(event, self.convertPoint(toScreen: event.locationInWindow))
+        }
         view.onPointer = { [weak self] in
             guard let self, self.isActiveTarget else { return }
             self.onPointer()
@@ -185,6 +192,7 @@ final class IslandTouchTargetPanel: NSPanel {
 
 final class IslandTouchTargetView: NSView {
     var onDown: (NSEvent) -> Void = { _ in }
+    var onScroll: (NSEvent) -> Void = { _ in }
     /// Pointer-only: a finger has no hover, so these never fire for touch.
     var onPointer: () -> Void = {}
     private var trackingArea: NSTrackingArea?
@@ -210,6 +218,7 @@ final class IslandTouchTargetView: NSView {
     /// click here.
     override func mouseDown(with event: NSEvent) { onDown(event) }
     override func mouseUp(with event: NSEvent) {}
+    override func scrollWheel(with event: NSEvent) { onScroll(event) }
     /// A long press arrives as a right click; the island has no context menu.
     override func rightMouseDown(with event: NSEvent) {}
 }

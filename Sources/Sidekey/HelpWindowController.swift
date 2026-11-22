@@ -111,6 +111,22 @@ enum HelpWindowContent {
                 prefix: nil,
                 contents: [.text(CaseApprovalKey.timed.keycap)]
             ),
+            // Learning suggestion drops: ⌃Y/⌃N, captured only while the drops
+            // are on screen. WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+            HelpHotkeyRowSpec(
+                title: "Suggestion — yes",
+                detail: "While a Vocab, Replace or Filler suggestion is shown right of the island, accept it. Plain Y still types.",
+                iconName: "checkmark",
+                prefix: nil,
+                contents: DropLearningKeyCombos.yes.contents
+            ),
+            HelpHotkeyRowSpec(
+                title: "Suggestion — no",
+                detail: "While a suggestion is shown, never offer it again. Plain N still types.",
+                iconName: "xmark",
+                prefix: nil,
+                contents: DropLearningKeyCombos.no.contents
+            ),
             HelpHotkeyRowSpec(
                 title: "History — paste",
                 detail: "Hover a card in the island’s History and press Return to paste it into the previously focused app. ⌘-click several cards first to paste them all in that order; a click then copies them all instead.",

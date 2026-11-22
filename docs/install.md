@@ -129,7 +129,12 @@ the window finishes it. It does not come back after updates.
 
 1. **Speech:** choose how Drop recognizes speech. On Apple Silicon,
    **Download and use for Drop** fetches the *On this Mac* model (about 470
-   MB) and needs no account or key. Or paste a speech provider's key (Soniox,
+   MB) and needs no account or key. It recognizes 25 European languages
+   (Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish,
+   French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese,
+   Polish, Portuguese, Romanian, Slovak, Slovenian, Spanish, Swedish, Russian
+   and Ukrainian); Chinese, Japanese, Arabic, Hindi and other languages need a
+   provider. Or paste a speech provider's key (Soniox,
    Deepgram, ElevenLabs); Whytap checks it, stores it in macOS Keychain and uses
    that provider for Drop. On Intel there is no On this Mac model, so Drop needs
    a provider key or your own server. **Restore from another Mac** applies a

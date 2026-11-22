@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AIRouting/ModelStatusResolverTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-17-openrouter-model-prices.md, 2026-11-22-server-model-kinds.md]
+related: [2026-11-17-openrouter-model-prices.md, 2026-11-22-server-model-kinds.md, 2026-11-22-speech-model-prices.md]
 ---
 
 # Every keyed LLM provider is visible in the model picker, with dates and list prices

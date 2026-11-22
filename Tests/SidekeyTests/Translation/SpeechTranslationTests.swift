@@ -398,11 +398,13 @@ final class SpeechTranslationRoutingTests: XCTestCase {
     func testOpenAISpeechModelsAreClassified() throws {
         let body = #"{"data":[{"id":"gpt-live-transcribe"},{"id":"gpt-realtime-whisper"},{"id":"gpt-transcribe"},{"id":"whisper-1"},{"id":"gpt-4o-transcribe-diarize"},{"id":"gpt-4o-mini-transcribe-2025-12-15"}]}"#
         let models = try ModelCatalogFetcher.parseOpenAI(Data(body.utf8))
+        // Two OpenAI speech models: live and recorded. The rest are left out.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
         XCTAssertEqual(models.first { $0.id == "gpt-live-transcribe" }?.uses, [.realtimeSTT])
-        XCTAssertEqual(models.first { $0.id == "gpt-realtime-whisper" }?.uses, [.realtimeSTT])
-        XCTAssertEqual(models.first { $0.id == "gpt-transcribe" }?.uses, [.realtimeSTT, .asyncSTT])
-        XCTAssertEqual(models.first { $0.id == "whisper-1" }?.uses, [.realtimeSTT, .asyncSTT])
-        XCTAssertEqual(models.first { $0.id == "gpt-4o-mini-transcribe-2025-12-15" }?.uses, [.realtimeSTT, .asyncSTT])
+        XCTAssertEqual(models.first { $0.id == "gpt-transcribe" }?.uses, [.asyncSTT])
+        for retired in ["gpt-realtime-whisper", "whisper-1", "gpt-4o-mini-transcribe-2025-12-15"] {
+            XCTAssertNil(models.first { $0.id == retired }, retired)
+        }
         XCTAssertNil(models.first { $0.id == "gpt-4o-transcribe-diarize" }, "no realtime speaker labels")
     }
 

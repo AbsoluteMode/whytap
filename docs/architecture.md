@@ -55,17 +55,19 @@ Voice flow (Drop / dictation):
             speaking the OpenAI Realtime protocol. OpenAI runs on the shared
             OpenAI key (byok.openai.llm_api_key, never the retired
             byok.openAI.api_key) to its explicit host
-            (BYOKRealtimeURL.openAIHosted): gpt-live-transcribe (default) and
-            gpt-realtime-whisper stream within one turn (one commit at the
-            end); a turn-based model (gpt-transcribe, gpt-4o-*-transcribe,
-            whisper-1) runs with server VAD and shows text after each pause,
-            so it starts no auto-stop take. Turns are tracked by item_id and
+            (BYOKRealtimeURL.openAIHosted) with two models: gpt-live-transcribe,
+            the only live one offered, streams within one turn (one commit at
+            the end), and gpt-transcribe takes recorded audio. A saved route
+            on another OpenAI transcription model moves to them by role at
+            launch (AIRoutingStore.narrowOpenAISpeechModelsIfNeeded); a
+            turn-based model the move could not rewrite still runs with server
+            VAD, shows text after each pause and starts no auto-stop take. Turns are tracked by item_id and
             finals kept in commit order; the take ends at the `cleared`
             answer to a clear sent after the final commit (server VAD), and
             only OpenAI's empty-commit refusal of that commit means nothing
             is left; a pong is stall progress; a refusal (providerRefused)
             degrades Drop to the batch rung (/v1/audio/transcriptions,
-            gpt-transcribe for the live-only models), which names it (credit
+            always gpt-transcribe), which names it (credit
             apart from a rate limit). A server keeps its plain commit,
             terminal refusal and no pings. Meetings have no OpenAI model. A legacy
             OpenAI choice migrates to OpenAI with its model, never to Soniox.
@@ -964,7 +966,7 @@ Input language offer:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
 Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
-  the drops UI and its switch come after the visual is approved):
+  Settings -> Other -> Recording -> Learn from my edits):
   AutoPasteEngine.paste hands over the field at the paste boundary (after
   focus restore, right before Cmd+V): the system-wide focused element of the
   frontmost target app, metadata only, never Whytap's own editors.
@@ -981,8 +983,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   Cmd+V and restores the clipboard. With learning and calibration off no
   capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops a scheduled read. It
-  compares with what reached the field (a rich paste's plainText), aligns the take inside the
-  field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  compares with what reached the field (a rich paste's plainText), aligns
+  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
   DropLearningClassifier turns edits into candidates without a model: a
   sound-alike term -> Vocab (only if the wrong word is in the provider's raw
   text); On this Mac / batch / Retry / recorder fallback, a full route list,
@@ -1001,9 +1003,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   reads until the field holds still (<=30 s), journals to Application
   Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
   ledger, dry-run Y, 0700 folder / 0600 single-name file without following
-  links, ends
-  itself after 14 days (checked at launch, hourly and before every read) and
-  deletes its data. Fired fillers come from the same masked Filler pass.
+  links, ends itself after 14 days (checked at launch, hourly and before
+  every read) and deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler
   (DropReplaceFilter: one pass, longest first, letter lookaround
   boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
@@ -1013,6 +1014,22 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
   terms within 8 KB encoded. WHY:
   .project-docs/decisions/2026-11-22-drop-edit-learning.md
+  A suggestion is asked by DropLearningDropsController: DropLearningDropsModel
+  (chain of four drops: list icon, action with +/- in a thin circle, Y, N;
+  budding 0.1 s apart, open at 0.7 s, reverse retract 0.6 s, 10 s open time
+  with no visible timer, hover pauses, one suggestion at a time) drawn by
+  DropLearningDropsView in DropLearningDropsPanel, a non-activating panel
+  right of the island just below its level, following the system
+  appearance. macOS 26 glassEffect in a GlassEffectContainer (blend spacing
+  5 pt < 7 pt gap: bridges only while a drop leaves its parent); thin
+  material on 14/15; opaque with Reduce Transparency; Reduce Motion fades.
+  Y/N are plain glass with a 0.75 pt green/red contour and soft glow only,
+  letters at rest, check/cross under the pointer. Answers: click, or
+  Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
+  the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
+  conflict check and listed in Help. An active Drop or Agent phase, an open
+  Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-drops.md
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
@@ -1191,7 +1208,13 @@ Anthropic and OpenAI rows show the price, and in Drop Smart cleanup "always
 reasons, slower", of the same model in that cached OpenRouter catalog
 (`openai/<id>` exactly; `anthropic/<id>`, also without the date suffix and with
 dots between version digits) and keep their own date. No OpenRouter catalog or
-no match shows nothing; no new request. Other providers show no price. Sections
+no match shows nothing; no new request. Speech rows (Soniox, Deepgram,
+ElevenLabs, OpenAI) show the published pay-as-you-go price per audio minute
+from the dated table `ModelRegistry.speechListPrice` (`$0.017 per min`;
+`From $0.0048 per min` where options billed extra raise it): the live price on
+a live feature, the recorded one on Meetings; unknown models, servers and On
+this Mac show none, never zero. WHY:
+.project-docs/decisions/2026-11-22-speech-model-prices.md. Sections
 come in this order: speech providers, Anthropic, OpenAI, the user's servers,
 OpenRouter last (its hundreds of models used to hide the direct sections below
 the visible rows); every keyed provider that can serve the feature has one,
@@ -1206,20 +1229,39 @@ written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
 .project-docs/decisions/2026-11-22-direct-model-list-prices.md
 A user's server offers only the models the user added (ServerEndpoint.models,
-in the routing document): its form under API keys has Server name, Base URL,
-the optional key and Models, where each model gets a name (typed or from the
-server's /v1/models, which only suggests names) and a required type, LLM or
-Transcription (ServerModel.Kind; the name only preselects it). Adding checks
-it once with the server's key (ServerModelChecker): a one-line
-/chat/completions request or 0.5 s of silence to /audio/transcriptions; a
-failure is shown at once ("Server answered 404 on /audio/transcriptions —
-this model can't transcribe here") and "Save without check" adds it marked
-Not checked. Pickers and the shared rows show a server model only for its
-own type; the same name may be added once per type. A route already on a
-model stays listed; removing a model un-sets that type's routes on it.
-Launch turns an earlier server's routes into added models and ignores the
-retired "Offer models for". WHY:
-.project-docs/decisions/2026-11-22-server-explicit-models.md
+in the routing document). The Custom server tile and each server's tile open
+one window (ServerSheet, ServerSheetModel): Base URL, the optional key and
+model rows, each a name (typed or from the server's /v1/models, which only
+suggests names), a required type, LLM or Transcription (ServerModel.Kind; a
+chosen name only preselects it), its check status and ×; one Save keeps it
+all. Each row is checked with the server's key (ServerModelChecker): a
+one-line /chat/completions request or 0.5 s of silence to
+/audio/transcriptions, 0.8 s after typing stops, at once on a type change, and
+again when the address or key changes; a result counts only for the name,
+type, address and key digest it was sent for (ServerModelTarget). A failure
+shows the server's reason under the row ("Server answered 404 on
+/audio/transcriptions — this model can't transcribe here"); Save checks what
+is stale, stops on a failure it found, and Save anyway keeps failed rows
+marked Not checked. The saved key goes only to the saved server's origin
+(scheme, host, port): for another origin no check gets it, Save removes it
+unless a key is typed (read when Save writes), and the window says so; a
+typed key, once sent, is cleared when the address moves to another origin.
+After the key check Save
+verifies the address and key digest are still what the rows were checked
+with, then writes the key and the server's address, name and models in one
+routing write (AIRoutingStore.insertServer / updateServer), so a new server is
+never listed before its key passed; Save returns there and loads /v1/models
+afterwards. ▾ suggests only the saved address's /v1/models: the cached list
+carries a digest of its address (CatalogSnapshot.source) and a list
+forgotten while a refresh was in flight is not written back. There is no name field: a server is shown as its address
+(ServerEndpoint.displayName: "Ollama · localhost:11434", "vllm.company.ru"),
+replacing names from earlier builds. Pickers and the shared rows show a server
+model only for its own type; the same name may be listed once per type. A
+route already on a model stays listed; a model taken off the list un-sets
+that type's routes on it. Launch turns an earlier server's routes into added
+models and ignores the retired "Offer models for". WHY:
+.project-docs/decisions/2026-11-22-server-explicit-models.md,
+.project-docs/decisions/2026-11-22-server-window.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which
@@ -1233,8 +1275,8 @@ equal dates and empty queries keep catalog order. Older caches refresh once for 
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
 Refresh models or Other model ID actions. Custom servers offer only the models
-added in their form, typed or from /models. API keys uses square provider tiles opening an
-inline Save/Remove form with no extra helper/status copy; a short Key accepted
+added in their window, typed or from /models. API keys uses square provider tiles opening an
+inline Save/Remove form (a server's tile opens its window instead) with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;
 .project-docs/decisions/2026-10-20-model-search.md

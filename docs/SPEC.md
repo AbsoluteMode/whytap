@@ -505,15 +505,18 @@ ElevenLabs (`scribe_v3_live`), OpenAI или self-hosted endpoint с прото�
 OpenAI Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`) или
 On this Mac (Parakeet TDT v3, только Apple Silicon, без ключа).
 OpenAI работает на общем OpenAI-ключе (тот же, что у LLM) и только на
-`api.openai.com`: `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper`
-стримят слова во время речи, а пофразовые модели каталога (`gpt-transcribe`,
-`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`) идут через server
-VAD и показывают текст после каждой паузы («text after each pause» в пикере,
-auto-stop для них не включается). Batch-восстановление и Retry отправляют дубль в
-`/v1/audio/transcriptions` (`gpt-transcribe` для live-моделей). Meetings у
+`api.openai.com`, с двумя моделями: `gpt-live-transcribe` стримит слова во
+время речи (живая диктовка, остров), `gpt-transcribe` берёт записи:
+batch-восстановление и Retry отправляют дубль в `/v1/audio/transcriptions`.
+Другие модели транскрибации OpenAI в выборе не показываются; сохранённый
+маршрут на них при запуске переезжает на `gpt-live-transcribe` (живые фичи)
+или `gpt-transcribe` (записи). В выборе моделей речи (Speech и Advanced) у
+модели с известной ценой стоит цена за минуту: OpenAI `$0.017` и `$0.0045`,
+Soniox, Deepgram и ElevenLabs по их прайсам (`From`, где опции стоят
+дороже); у своего сервера и On this Mac цены нет, нуля не бывает. Meetings у
 OpenAI нет: ни одна модель OpenAI не размечает спикеров (diarize-модель
 OpenAI выводит из оборота), а файл ограничен 25 MB. Старый сохранённый выбор
-OpenAI переносится на OpenAI со своей моделью, не на Soniox. Решение —
+OpenAI переносится на OpenAI (`gpt-live-transcribe`), не на Soniox. Решение —
 [2026-11-22-openai-speech-provider](../.project-docs/decisions/2026-11-22-openai-speech-provider.md).
 Drop — realtime streaming, не batch; заметки встреч с Soniox идут через file
 API (`stt-async-v6`).
@@ -576,6 +579,17 @@ Drop: Smart не отправляет модели ни скриншотов, н
 | **Reviewable learning inbox** | "Я заметил 4 повторяющиеся правки. Запомнить?" — пользователь подтверждает | Высокий |
 
 **Не делаем:** скрытый keylogger, "мы всё анализируем в фоне".
+
+**Сейчас (слой 2 + вопрос):** Settings → Other → «Learn from my edits», по
+умолчанию выключено. Через 5 с после Drop Whytap один раз читает то же поле;
+одна и та же правка в двух диктовках за 14 дней даёт одно предложение
+добавить или убрать слово в Vocab, Replace или Filler. Оно появляется
+стеклянными каплями справа от острова: иконка списка, действие со знаком
+«+» или «−», Y и N. 10 секунд без видимого таймера, наведение ставит паузу,
+ответ кликом или ⌃Y / ⌃N, голые Y/N печатаются в поле. N — больше не
+предлагать. Подробности:
+[правки после Drop](../.project-docs/decisions/2026-11-22-drop-edit-learning.md),
+[капли](../.project-docs/decisions/2026-11-22-drop-learning-drops.md).
 
 ---
 

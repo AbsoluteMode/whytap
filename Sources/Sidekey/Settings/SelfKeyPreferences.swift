@@ -32,7 +32,8 @@ enum BYOKProvider: String, CaseIterable, Codable {
     /// picked one yet).
     var defaultTranscriptionModel: String {
         switch self {
-        case .openAI, .selfHosted: return "gpt-4o-transcribe"
+        case .openAI: return ModelRegistry.openAILiveModel
+        case .selfHosted: return "gpt-4o-transcribe"
         case .deepgram: return "nova-3"
         case .soniox: return ModelRegistry.sonioxRealtimeModel
         case .elevenLabs: return ModelRegistry.elevenLabsRealtimeModel
@@ -44,7 +45,7 @@ enum BYOKProvider: String, CaseIterable, Codable {
     /// so it has no fixed list.
     var availableTranscriptionModels: [String] {
         switch self {
-        case .openAI: return ["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+        case .openAI: return [ModelRegistry.openAILiveModel]
         case .selfHosted: return []
         case .deepgram: return ["nova-3"]
         case .soniox: return [ModelRegistry.sonioxRealtimeModel]

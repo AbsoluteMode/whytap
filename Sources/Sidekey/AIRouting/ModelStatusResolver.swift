@@ -146,7 +146,9 @@ struct ModelStatusResolver {
 
     // MARK: - Picker
 
-    func sections(for feature: AIFeature) -> [PickerSection] {
+    /// `only`: build just that account's section (the shared rows ask about
+    /// one provider at a time and need not list OpenRouter's whole catalog).
+    func sections(for feature: AIFeature, only: ProviderAccount? = nil) -> [PickerSection] {
         let selected = routing.route(for: feature)
         let openRouterModels = Dictionary(
             (catalogs.snapshot(for: .openRouter)?.models ?? []).map { ($0.id, $0) },
@@ -158,6 +160,7 @@ struct ModelStatusResolver {
         accounts += servers.map { ProviderAccount.server($0.id) }
         if credential(of: .openRouter) != .missing { accounts.append(.openRouter) }
 
+        if let only { accounts = accounts.filter { $0 == only } }
         return accounts.compactMap { account in
             guard let use = feature.modelUse(on: account.kind) else { return nil }
             let snapshot = catalogs.snapshot(for: account)

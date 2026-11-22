@@ -100,6 +100,28 @@ final class AppControlControllerTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    /// get_state names the shared Speech and LLM rows (read-only): the model
+    /// most features follow, which features they are, and which differ or
+    /// have none, so a harness can set them one by one with set_model.
+    func test_state_reports_the_shared_rows_without_writing() async throws {
+        let e = try env()
+        let before = e.routing.state
+        let state = await e.controller.handle(AppControlRequest("get_state"))
+        let shared = try XCTUnwrap(state.data.object?["shared"]?.object)
+        let llm = try XCTUnwrap(shared["llm"]?.object)
+        XCTAssertEqual(llm["route"], .object(["account": .string("openRouter"), "model": .string("old-text")]))
+        XCTAssertEqual(llm["mixed"], .bool(false))
+        XCTAssertEqual(llm["features"], .array(SharedModelKind.llm.features.map { .string($0.rawValue) }))
+        XCTAssertEqual(llm["custom"], .array([]))
+        XCTAssertEqual(llm["unset"], .array(["meetingNotes", "agent", "translation"].map { .string($0) }))
+        XCTAssertEqual(llm["label"], .string("OpenRouter · old-text · 3 not set"))
+        let speech = try XCTUnwrap(shared["speech"]?.object)
+        XCTAssertEqual(speech["features"], .array(SharedModelKind.speech.features.map { .string($0.rawValue) }))
+        XCTAssertEqual(e.routing.state, before)
+        let calls = await e.probe.calls
+        XCTAssertEqual(calls, 0)
+    }
+
     func test_runtime_review_status_updates_without_exposing_the_session_configuration() async throws {
         var active = true
         let e = try env(googleReview: { active })

@@ -304,6 +304,9 @@ each confirmed change appears as one line above the answer, such as
 f" pins the tool and assigns the keys in one line,
 `Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)`; a hotkey the rules
 refuse or another action uses is reported with the nearest free keys, not
-moved. Meetings need no harness
+moved. For a task a Whytap tool does ("take a screenshot") the Agent reads the
+tools and suggests one with its hotkey, "Press ⌥S — that's Shot", instead of
+macOS shortcuts; without a hotkey it points to the hover or its search and
+offers to set one. It only suggests: no operation opens or starts a tool. Meetings need no harness
 prompt there: the request comes from you at this Mac. The Agent still cannot
 read key values, the clipboard or run commands through these tools.

@@ -1560,7 +1560,11 @@ is assigned with typesInTextFields (current layout, UCKeyTranslate). Both need
 the exact current value as expected; lines "Toolbox + Shot", "Toolbox −
 Monitor", "Hotkey: Shot — ⌥S", joined as "Toolbox + Shot · ⌥F (no longer
 types “<character>” in text fields)" in one turn; repeats are quiet. Descriptions call
-them hover tools / quick actions / Toolbox / menu. WHY:
+them hover tools / quick actions / Toolbox / menu. For a task a Whytap tool
+does, the Agent reads whytap_toolbox_get (HoverToolRegistry descriptions) and
+only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
+or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
+capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and

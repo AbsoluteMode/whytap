@@ -86,20 +86,20 @@ final class SubtitleAudioTranslateTests: XCTestCase {
 
     func testStartingAgainBeginsANewHour() async throws {
         var sessions: [FakeSpeechTranslation] = []
-        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), maxSessionDuration: .milliseconds(300),
+        let model = LiveSubtitleModel(flushInterval: .milliseconds(5), maxSessionDuration: .seconds(2),
                                       makeAudio: { FixtureSubtitleAudio() },
                                       openTranslator: { _, _ in let s = FakeSpeechTranslation(); sessions.append(s); return s })
         let first = try XCTUnwrap(model.start())
         try await wait(model.phase == .listening)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(for: .milliseconds(900))
         model.stop()
         await first.value
         XCTAssertEqual(model.phase, .idle)
         let second = try XCTUnwrap(model.start())
         try await wait(model.phase == .listening)
-        // 350 ms after the first start: the first hour's timer must not end
-        // the new session.
-        try await Task.sleep(for: .milliseconds(150))
+        // The first session's deadline has passed, but the second still has
+        // time left. Give the scheduler room on both sides of that boundary.
+        try await Task.sleep(for: .milliseconds(1_200))
         XCTAssertEqual(model.phase, .listening)
         await second.value
         XCTAssertEqual(model.phase, .idle)

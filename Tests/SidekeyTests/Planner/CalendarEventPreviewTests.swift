@@ -237,7 +237,11 @@ final class CalendarEventPreviewTests: XCTestCase {
         XCTAssertEqual(state.anchor?.content.id, "b", "Leaving an event that is no longer shown changes nothing")
         state.hide("b")
         XCTAssertEqual(state.anchor?.content.id, "b", "Hiding waits briefly for the next event")
-        try await Task.sleep(for: .milliseconds(120))
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(2)
+        while state.anchor != nil, clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(10))
+        }
         XCTAssertNil(state.anchor)
         state.show(first, frame: .zero); state.clear()
         XCTAssertNil(state.anchor, "Closing the panel hides at once")

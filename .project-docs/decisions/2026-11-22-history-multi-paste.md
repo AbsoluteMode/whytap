@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md]
+related: [2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md, 2026-11-22-history-hint-keycaps.md]
 ---
 
 # Context
@@ -42,7 +42,8 @@ shows each row's number and ⌘-click again unmarks it. Enter pastes the marked
 rows (instead of the hovered one) and closes History as before. Escape clears
 the marks; without marks it passes on as before. Plain click (copy) and plain
 Enter on one row are unchanged. The footer says "⌘-click for several" and,
-once rows are marked, "Enter to paste N to <app>   Esc to clear".
+once rows are marked, "Enter to paste N to <app>   Esc to clear" (later
+keycap blocks: `2026-11-22-history-hint-keycaps.md`).
 
 `HistoryPastePlan` keeps mark order and merges neighbouring rows of one kind:
 files and images become one pasteboard write with one item each (one Cmd+V,
@@ -96,6 +97,21 @@ target app accepts a process-addressed Cmd+V as it does a global one. Offscreen 
 the hint, three marked files and mixed rows. Not verified in the installed app:
 real ⌘-click delivery on the island panel and how particular apps treat a paste
 that mixes several file items.
+
+# Correction 2026-11-23: Enter with marks beeped
+
+The maintainer marked several images on the Clipboard tab, pressed Enter and
+heard the system beep; nothing was pasted. The key monitor copied
+`canPaste` once in `onAppear`, but `IslandView` sets the panel's target name
+in the same `panelMode` change that shows History, so the name can reach the
+panel after it appeared (on the first opening it was still nil, later the
+previous opening's value). Enter with marks then counted as "no target",
+passed the key on and AppKit beeped, while the footer, which reads the live
+name, already offered "Paste to <app>". A single hovered row does not
+consult `canPaste`, so it pasted. `canPaste` now follows the target name
+(`onChange(of:initial:)`). `HistoryHoverTargetArrivalTests` host the panel,
+change the name after it appeared and failed before the fix. Not verified in
+the installed app.
 
 # Rejected
 

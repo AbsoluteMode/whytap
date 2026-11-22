@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-history-multi-paste.md]
+related: [2026-11-22-history-multi-paste.md, 2026-11-22-history-hint-keycaps.md]
 ---
 
 # Context
@@ -47,6 +47,8 @@ it leaves the marks for a click. The footer with marks says "Click to copy N",
 then "Enter to paste N to <app>" where there is a target, then "Esc to clear"
 (island) or "⌘-click to unmark" (Toolbox, which has no key monitor). Like
 History's single copy, the multi-row copy is kept out of clipboard history.
+The footer's wording and layout later became keycap blocks
+(`2026-11-22-history-hint-keycaps.md`).
 
 # Why
 

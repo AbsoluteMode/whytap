@@ -9,6 +9,32 @@ the agent's configuration. The plugin requires a Whytap build that includes
 `whytap mcp`; with an older helper use the two older commands below. Source tests do not establish
 that the installed application or a host's plugin connection has been updated.
 
+## Which client can use what
+
+| Client | Settings, models, languages | To-do | Meetings | Case key names and `whytap case run` |
+| --- | --- | --- | --- | --- |
+| Claude Code | yes | yes | after a one-time Yes in Whytap | after **Case → Connect → Claude Code** |
+| Codex | yes | yes | after a one-time Yes in Whytap | no: Case → Connect does not offer Codex, so Case refuses it (access denied) |
+| Cursor | yes | yes | no (`unsupported_client`): only Claude Code and Codex are recognized | after **Case → Connect → Cursor** |
+| Whytap Agent (built in) | through its own `whytap` tool (next version after 2.2.26) | same | same, without the question (you are at the Mac) | after **Case → Connect → Whytap Agent** |
+| A script, terminal or other program | yes, through the CLI or MCP | yes | no (`unsupported_client`) | no |
+
+- Settings and model tools need Whytap running; To-do works while Whytap is
+  closed. Island tools and their hotkeys (`whytap_toolbox_*`,
+  `whytap_hotkey_set`) come with the next version after 2.2.26.
+- Meetings are recognized only when Claude Code or Codex started the server
+  itself (the helper's direct parent, checked by Apple-vouched signature). A
+  new Codex user can use meetings after the Yes but not Case.
+- The onboarding's **Coding agents** page (next version) and `claude mcp add`
+  / `codex mcp add` only add the MCP server; they do not register the client
+  in Case.
+- With Whytap 2.2.26 or older, use `whytap app mcp` (settings, To-do,
+  meetings) and `whytap case mcp` (Case) as two servers; `whytap mcp` arrives
+  with the next version.
+
+The built-in Whytap Agent is a different mechanism with its own tools,
+including file edits and commands: see [Whytap Agent](../agent.md).
+
 ## Commands
 
 The installed helper is `/Applications/Whytap.app/Contents/Helpers/whytap`.

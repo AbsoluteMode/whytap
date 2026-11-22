@@ -105,7 +105,7 @@ final class RetiredLocalRouteTests: XCTestCase {
                 openRouterClient: client
             )
             do {
-                let cleaned = try await processor.process("raw", targetApp: nil)
+                let cleaned = try await processor.process("raw")
                 XCTFail("expected no cleanup, got \(cleaned)")
             } catch let error as OpenRouterLLMError {
                 XCTAssertEqual(error, .notConfigured)

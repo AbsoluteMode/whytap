@@ -25,6 +25,11 @@ Only the latest release on the GitHub Releases page receives fixes.
   own service name and are sent only to the provider you selected.
 - Transcripts, meeting notes and history live in SQLite files under
   `~/Library/Application Support/`. They never leave the machine unless a
-  provider or endpoint you configured is involved.
+  provider or endpoint you configured is involved, or you turn on encrypted
+  Backup or settings sync to your own GitHub repository.
+- The built-in Agent is off by default. Once on, it can write files and run
+  shell commands as your user unless you turn off **Allow file edits and
+  commands**; this is an action policy, not a sandbox
+  ([Whytap Agent](docs/agent.md)).
 - Global hotkeys use a `CGEventTap` that reads key events only to detect the
   configured trigger key; key contents are never logged or persisted.

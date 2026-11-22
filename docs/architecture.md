@@ -986,9 +986,39 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   AutoPasteEngine.paste hands over the field at the paste boundary (after
   focus restore, right before Cmd+V): the system-wide focused element of the
   frontmost target app, metadata only, never Whytap's own editors.
-  DropLearningCoordinator reads it once 5 s later, only if that app is still
-  frontmost, the same element still has keyboard focus and DropEditFieldGate
-  allows it (metadata before any text, fail closed: AXSecureTextField, secure
+  DropLearningCoordinator then watches that field until it empties (sent),
+  focus leaves it, it goes away, another take starts or 120 s pass: AX
+  value/destroyed/focus notifications plus a bounded read every 0.5 s, and a
+  listen-only Return/Enter key-code monitor (only during the watch, keeps
+  nothing, never delays Return) that triggers a read. Both deadlines (5 s
+  to see the paste, 120 s in all) are monotonic clock times checked before
+  every read, whatever triggered it. The last text that still aligns with
+  the take counts, minus the corrections it already held when the field
+  first showed the paste (a draft is not an edit). A read reports text,
+  focus left (verified: other app, other element, process gone; the last
+  text counts) or unreadable (a failed or empty focus lookup, or still
+  focused but no length, over the bound, a failed transfer or the gate
+  now refuses it; nothing counts). Another
+  message (no alignment) or a paste not seen within 5 s counts nothing.
+  Electron and Chromium apps get AXManualAccessibility (else
+  AXEnhancedUserInterface) set on the target app only, at take start, only
+  when its focused element is not already a readable field and the
+  attribute reads as false (an unreadable attribute is never written). The
+  approval (same process by bundle ID and launch date, frontmost, the same
+  focused element or a confirmed absence, gate and secure input) is taken
+  again after the blocking flag read and must match, each pass confirming
+  focus after its metadata query; right before the write the flag must
+  still read false, focus, process and front app are confirmed again and a
+  fresh IsSecureEventInputEnabled sample, taken after the last blocking AX
+  call, must be false; a failed focus lookup exposes nothing. It is undone when the watch ends, the next take goes
+  elsewhere, 660 s pass without a paste, learning and calibration are
+  switched off (UserDefaults change) or Whytap quits; only for the same
+  process (checked again after the flag read), while the flag reads true
+  or still reads false after a write never seen applied (Electron applies
+  it about 2 s later, so the pending enable is cancelled) (WHY:
+  .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
+  happens only if that app is still frontmost, the same element still has
+  keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure
   event input, terminals and password managers by bundle ID, own process,
   unknown app, non-text role, any AX error but a missing attribute). The
   field must report its length (at most 20,000 UTF-16 units) and only that
@@ -998,7 +1028,7 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   if another app takes focus during the capture, the paste engine posts no
   Cmd+V and restores the clipboard. With learning and calibration off no
   capture callback is passed and the paste path is unchanged.
-  Switching learning or calibration off stops a scheduled read. It
+  Switching learning or calibration off stops the watch. It
   compares with what reached the field (a rich paste's plainText), aligns
   the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
   DropLearningClassifier turns edits into candidates without a model: a

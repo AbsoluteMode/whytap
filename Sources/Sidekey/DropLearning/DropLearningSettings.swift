@@ -2,7 +2,7 @@ import Foundation
 
 /// Learning from edits is on by default (Settings, Other, Drop, "Learn from my
 /// edits"); a user who switched it off stays off. Calibration is a hidden developer mode for tuning the
-/// rules on real dictation: it reads the field longer, writes a local journal
+/// rules on real dictation: it watches the field the same way, writes a local journal
 /// and saves nothing on Y. It switches itself off after 14 days and deletes the
 /// journal and its own counters.
 /// WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md

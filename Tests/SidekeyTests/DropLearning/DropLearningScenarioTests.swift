@@ -20,6 +20,8 @@ final class DropLearningScenarioTests: XCTestCase {
         /// What the field holds at each read, in order; the last value
         /// repeats. nil is a field still focused that cannot be read.
         var reads: [String?] = [] { didSet { position = 0 } }
+        /// The caret (UTF-16 offset) with each read; nil when the field does not tell.
+        var carets: [Int?] = []
         private var position = 0
         private(set) var readCount = 0
         private(set) var captureCount = 0
@@ -43,7 +45,8 @@ final class DropLearningScenarioTests: XCTestCase {
             if focusMovedAfterCapture { return .focusLeft }
             guard !reads.isEmpty else { return .unreadable }
             defer { position = min(position + 1, reads.count - 1) }
-            return reads[position].map { .text($0) } ?? .unreadable
+            let caret = position < carets.count ? carets[position] : nil
+            return reads[position].map { .text($0, caret: caret) } ?? .unreadable
         }
         func watch(_ handle: DropEditFieldHandle,
                    onChange: @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch? {
@@ -1127,5 +1130,93 @@ extension DropLearningScenarioTests {
         XCTAssertFalse(text.contains("Jev"), "edits observed while calibration was off must not be journaled")
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 1,
                        "ordinary learning remains enabled")
+    }
+}
+
+// MARK: - Builder review, queue #454
+
+extension DropLearningScenarioTests {
+    private static let copy = "Open model Jeb"
+
+    /// A new paste before an identical older draft: the caret right after
+    /// the new copy tells which one to watch, and its fix counts.
+    func testANewPasteBeforeAnIdenticalDraftIsFoundByTheCaret() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            field.reads = [Self.copy + " " + Self.copy, "Open model Jev " + Self.copy, ""]
+            field.carets = [(Self.copy as NSString).length]
+            await runReads(coordinator, take(pasted: Self.copy))
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabAdd(term: "Jev")])
+    }
+
+    /// A new paste after an identical older draft: the same, from the end.
+    func testANewPasteAfterAnIdenticalDraftIsFoundByTheCaret() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            let field2 = Self.copy + " " + Self.copy
+            field.reads = [field2, Self.copy + " Open model Jev", ""]
+            field.carets = [(field2 as NSString).length]
+            await runReads(coordinator, take(pasted: Self.copy))
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabAdd(term: "Jev")])
+    }
+
+    /// The old draft is edited and the caret is right after the new copy:
+    /// the draft's fix is not this take's edit.
+    func testAFixToTheOlderIdenticalDraftIsNotLearned() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            field.reads = [Self.copy + " " + Self.copy, "Open model Jev " + Self.copy, ""]
+            field.carets = [(Self.copy + " " + Self.copy as NSString).length]
+            await runReads(coordinator, take(pasted: Self.copy))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 0)
+    }
+
+    /// Two identical copies and no caret (or one that is not at either copy):
+    /// ambiguous, so nothing is learned and no words are journaled.
+    func testTwoIdenticalCopiesWithoutACaretTeachAndJournalNothing() async {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        for carets: [Int?] in [[], [2]] {
+            field.reads = [Self.copy + " " + Self.copy, "Open model Jev " + Self.copy, ""]
+            field.carets = carets
+            await runReads(coordinator, take(pasted: Self.copy))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 0)
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["end.ambiguous"], 2)
+        let log = (try? String(contentsOf: journalURL, encoding: .utf8)) ?? ""
+        XCTAssertFalse(log.contains("Jev"), "no words of an ambiguous take are journaled")
+        XCTAssertTrue(log.contains("ambiguous"))
+    }
+
+    /// A cut filler typed back right before the paste together with other
+    /// words still stops cutting; so does one right after it.
+    func testAFillerTypedBackAtTheEdgeWithOtherWordsStopsCutting() async {
+        for typed in ["Can you maybe um Open model today", "Open model today um before the meeting"] {
+            defaults.removeObject(forKey: DropLearningLedger.key)
+            suggestions = []
+            let coordinator = makeCoordinator()
+            for _ in 0..<2 {
+                await run(coordinator, take(pasted: "Open model today", fillers: ["um"]), field: typed)
+            }
+            XCTAssertEqual(suggestions.map(\.candidate), [.fillerRemove(term: "um")], typed)
+        }
+    }
+
+    /// A delivery with nothing to learn (a raw partial salvage) is still
+    /// journaled with its app and mode.
+    func testASkippedDeliveryIsJournaledWithItsAppAndMode() throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        coordinator.deliverySkipped("rawSalvage", take: nil, targetPID: 4242, mode: .fast)
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["delivery.rawSalvage"], 1)
+        let log = try String(contentsOf: journalURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("com.anthropic.claudefordesktop"))
+        XCTAssertTrue(log.contains("\"mode\":\"fast\""))
+        XCTAssertTrue(log.contains("rawSalvage"))
     }
 }

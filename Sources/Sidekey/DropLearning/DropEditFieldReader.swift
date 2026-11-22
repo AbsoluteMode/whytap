@@ -44,7 +44,10 @@ extension DropEditFieldAccess {
 }
 
 enum DropEditFieldRead: Equatable {
-    case text(String)
+    /// The field's text and, when the field reports it, the end of its
+    /// selection (the caret, UTF-16 offset): right after a paste it sits at
+    /// the end of the pasted text.
+    case text(String, caret: Int? = nil)
     case focusLeft
     case unreadable
 }
@@ -108,6 +111,8 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         var characterCount: (AXUIElement) -> Int?
         /// `AXStringForRange`: transfers only the requested range.
         var string: (AXUIElement, CFRange) -> String?
+        /// `AXSelectedTextRange`; nil when the field does not report it.
+        var selection: ((AXUIElement) -> CFRange?)? = nil
         /// A Boolean attribute of the app element; nil when it cannot be read.
         var appFlag: (pid_t, String) -> Bool?
         /// Sets a Boolean attribute of the app element; true on success.
@@ -208,9 +213,14 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         guard let text = system.string(handle.element, CFRange(location: 0, length: length)),
               (text as NSString).length <= DropEditFieldLimits.maxFieldLength
         else { return stop(handle) ?? .unreadable }
+        // Where the caret is tells a new paste from an identical older draft.
+        let caret = system.selection?(handle.element).flatMap { range -> Int? in
+            let end = range.location + range.length
+            return range.location >= 0 && range.length >= 0 && end <= (text as NSString).length ? end : nil
+        }
         // A field that lost focus during the transfer is not used.
         if let stop = stop(handle) { return stop }
-        return .text(text)
+        return .text(text, caret: caret)
     }
 
     func watch(_ handle: DropEditFieldHandle,
@@ -365,6 +375,14 @@ extension AXDropEditFieldAccess.System {
                     element, kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &value
                 ) == .success else { return nil }
                 return value as? String
+            },
+            selection: { element in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+                      let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+                var range = CFRange()
+                guard AXValueGetValue(value as! AXValue, .cfRange, &range) else { return nil }
+                return range
             },
             appFlag: { pid, attribute in
                 var value: CFTypeRef?

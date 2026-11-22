@@ -1031,7 +1031,9 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   Switching learning or calibration off stops the watch. It
   compares with what reached the field (a rich paste's plainText), aligns
   the take inside the field word by word (DropEditDiff: the paste counts
-  once it is seen verbatim, which records the field words around it; later
+  once it is seen verbatim, which records the field words around it; two
+  identical copies are told apart by the caret (AXSelectedTextRange, right
+  after the new copy), else the take is `ambiguous` and teaches nothing; later
   reads compare only the region between them and a changed surrounding is
   not compared, so a draft around the paste never becomes an edit; >50%
   of the kept words changed = rewrite; words cut from either edge of the

@@ -95,6 +95,19 @@ Nothing showed which rule refused, because learning logs nothing.
   inside a draft is still found. Changed words sit next to the kept text;
   cut pasted words and typed field words are outermost and are separate
   hunks.
+- **Identical copies** (builder review, queue #454). When the paste
+  appears verbatim more than once (a new paste next to an identical older
+  draft), the caret decides: each read also asks the field for its
+  selection (`AXSelectedTextRange`, a position, never text), and right
+  after Cmd+V it sits at the end of the new copy. The copy that ends at
+  the caret is watched. Without a caret, or with one at neither copy, the
+  take ends as `ambiguous`: nothing is learned and no words are
+  journaled. A single copy needs no caret.
+- **Typed words at the edge.** With a known paste place, the typed word
+  nearest the paste inside the watched region is still the word before or
+  after the take, even when the whole typed run is longer than one edit,
+  so a cut filler typed back next to the paste with other words stops
+  cutting. Words outside the region (an older draft) never count.
 - **Undo on whole words.** Undoing a whole fired Replace rule or a whole
   Vocab term, hyphenated or not, is checked before the hyphen part is
   taken, so it offers the removal of that rule or term.
@@ -107,7 +120,10 @@ Nothing showed which rule refused, because learning logs nothing.
   take that asked for it; the next take clears it. Refused deletions and
   insertions have reasons (`del.*`, `ins.notACutFiller`). A delivery that
   pasted no learnable text (Whytap's own editor, a failed paste, no
-  learning data) is counted and journaled as `delivery.<reason>`; a take
+  learning data, and the raw partial pasted when Fast mode recovery
+  salvages a failed take: `rawSalvage`, `rawSalvageFailed`) is counted
+  and journaled as `delivery.<reason>`, with the target app and the mode;
+  one entry per salvage, and a later Retry is its own delivery; a take
   cancelled or failed before any text is not a delivery and is not
   journaled.
 - **Switching calibration off mid-watch.** A watch that saw calibration
@@ -154,11 +170,23 @@ Nothing showed which rule refused, because learning logs nothing.
   capture refusal never explains a later delivery; an edit seen while
   calibration was off is never journaled; a failed focus query at capture
   is `axError`.
+- Builder probes from queue #454: a fix to a new paste before or after an
+  identical draft counts when the caret marks the new copy; a fix to the
+  older draft is not learned; two copies without a usable caret teach and
+  journal nothing (`end.ambiguous`); a filler typed back next to the paste
+  with other words, before or after it, stops cutting; a skipped delivery
+  is journaled with its app and mode; a read carries the caret and drops
+  an impossible one. The raw salvage call itself is in AppDelegate and is
+  covered by review, not by a test.
 - Not verified here: the built app. The acceptance is the same dictation
   in Claude desktop.
 
 ## Rejected
 
+- Prefer the last copy when the paste appears twice: the older draft may
+  be after it, and its edits would be learned and journaled.
+- Read the field before the paste to find the new copy: one more read of
+  the user's text, while the caret is only a position.
 - Raise the hunk limit above three words: it would let real rewrites
   through as substitutions.
 - Log the refusal reason to the system log: learning keeps nothing in

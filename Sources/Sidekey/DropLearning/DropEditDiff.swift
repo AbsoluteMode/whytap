@@ -172,12 +172,47 @@ enum DropEditDiff {
         hunk(tail.cut, [])
         hunk([], tail.typed)
         let resolved = context ?? Context(before: Array(bk[..<start]), after: Array(bk[end...]))
-        return Result(
-            hunks: hunks, pastedWordCount: n,
-            wordBefore: context == nil && start > 0 ? b[start - 1] : nil,
-            wordAfter: context == nil && end < m ? b[end] : nil,
-            context: resolved
-        )
+        // The word right next to the take: without a context, the field word
+        // outside the match; with one, the typed word nearest the take inside
+        // the watched region (typed since the paste, never an older draft),
+        // even when the whole typed run is too long to be one edit.
+        let before: DropEditToken? = context == nil
+            ? (start > 0 ? b[start - 1] : nil)
+            : lead.typed.last.map { b[$0] }
+        let after: DropEditToken? = context == nil
+            ? (end < m ? b[end] : nil)
+            : tail.typed.first.map { b[$0] }
+        return Result(hunks: hunks, pastedWordCount: n, wordBefore: before, wordAfter: after, context: resolved)
+    }
+
+    /// One place where the paste appears verbatim: its context and the index
+    /// of the field word right after it.
+    struct Place: Equatable {
+        let context: Context
+        let end: Int
+    }
+
+    /// Every place the paste appears verbatim in the field, in field order.
+    /// More than one (a new paste next to an identical older draft) is
+    /// ambiguous unless the caret tells which copy was just pasted.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+    static func exactPlaces(pasted: String, field: String) -> [Place] {
+        let ak = DropEditToken.tokenize(pasted).map(\.key)
+        let bk = DropEditToken.tokenize(field).map(\.key)
+        guard !ak.isEmpty, ak.count <= maxPastedWords, bk.count <= maxFieldWords, ak.count <= bk.count else { return [] }
+        return (0...(bk.count - ak.count)).compactMap { start in
+            guard Array(bk[start..<(start + ak.count)]) == ak else { return nil }
+            let end = start + ak.count
+            return Place(context: Context(before: Array(bk[..<start]), after: Array(bk[end...])), end: end)
+        }
+    }
+
+    /// The number of field words before a caret position (UTF-16 offset):
+    /// the `end` of the place the caret sits right after.
+    static func wordCount(_ field: String, before caret: Int) -> Int? {
+        let ns = field as NSString
+        guard caret >= 0, caret <= ns.length else { return nil }
+        return DropEditToken.tokenize(ns.substring(to: caret)).count
     }
 
     /// An edge run rebuilt so that its changed pairs sit next to the kept

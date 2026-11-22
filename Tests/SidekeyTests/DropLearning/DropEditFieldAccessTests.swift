@@ -47,7 +47,10 @@ final class DropEditFieldAccessTests: XCTestCase {
         settable = []
         flagWrites = []
         identity = "app@1"
+        selection = nil
     }
+
+    private var selection: CFRange?
 
     private func access() -> AXDropEditFieldAccess {
         AXDropEditFieldAccess(system: .init(
@@ -69,6 +72,7 @@ final class DropEditFieldAccessTests: XCTestCase {
                 duringTransfer?()
                 return (text as NSString).substring(with: NSRange(location: range.location, length: range.length))
             },
+            selection: { [unowned self] _ in selection },
             appFlag: { [unowned self] _, name in flags[name] },
             setAppFlag: { [unowned self] _, name, value in
                 guard flags[name] != nil || settable.contains(name) else { return false }
@@ -88,6 +92,17 @@ final class DropEditFieldAccessTests: XCTestCase {
         XCTAssertEqual(requestedRanges.count, 1)
         XCTAssertEqual(requestedRanges.first?.location, 0)
         XCTAssertEqual(requestedRanges.first?.length, (text as NSString).length)
+    }
+
+    /// The caret (end of the selection) comes with the text, so a new paste
+    /// can be told from an identical older draft; an impossible one is dropped.
+    func testAReadCarriesTheCaret() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        selection = CFRange(location: 3, length: 2)
+        XCTAssertEqual(access.read(handle), .text(text, caret: 5))
+        selection = CFRange(location: (text as NSString).length, length: 1)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil))
     }
 
     func testNothingIsCapturedWhenTheTargetIsNotFrontmost() {

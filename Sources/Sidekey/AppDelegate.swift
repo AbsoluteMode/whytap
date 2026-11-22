@@ -1386,7 +1386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // has an entry. WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
             dropLearning.deliverySkipped(
                 autoPasteEngine.hasLocalDropTarget ? "localEditor" : !pasted ? "pasteFailed" : "noLearningData",
-                take: learning
+                take: learning, targetPID: targetPID, mode: DropTake.shared.mode
             )
         }
         discardPendingRetry()
@@ -3413,6 +3413,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     AppState.shared.phase = .idle
                     self.noteDeliveredDropForLanguageOffer(raw)
                 }
+                // The raw partial is never learned from, but its outcome is
+                // counted and journaled like any delivery; one call per
+                // salvage, and a later Retry is its own delivery.
+                // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+                self.dropLearning.deliverySkipped(
+                    self.autoPasteEngine.hasLocalDropTarget ? "localEditor" : pasted ? "rawSalvage" : "rawSalvageFailed",
+                    take: nil, targetPID: targetPID, mode: mode
+                )
                 return pasted
             },
             saveUndeliveredPartial: { [weak self] raw in

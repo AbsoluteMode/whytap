@@ -43,11 +43,14 @@ final class DropLearningCoordinator {
         case notPasted, unreadable
         /// Learning (or calibration) was switched off.
         case switchedOff
+        /// The paste appears verbatim more than once (next to an identical
+        /// older draft) and the caret does not tell which copy is new.
+        case ambiguous
 
         var counts: Bool {
             switch self {
             case .cleared, .focusLeft, .removed, .timeout, .newTake: return true
-            case .rewritten, .notPasted, .unreadable, .switchedOff: return false
+            case .rewritten, .notPasted, .unreadable, .switchedOff, .ambiguous: return false
             }
         }
     }
@@ -270,16 +273,23 @@ final class DropLearningCoordinator {
     /// only counted and, with calibration on, journaled, so every delivered
     /// Drop has one entry. Takes cancelled or failed before any text are not
     /// deliveries and have none.
-    func deliverySkipped(_ reason: String, take: DropLearningTake?) {
+    func deliverySkipped(_ reason: String, take: DropLearningTake?, targetPID: pid_t? = nil,
+                         mode: TranscriptionMode? = nil) {
         end(.newTake, keepLease: true)
         pendingTarget = nil
         releaseLease()
         guard capturesFields else { return }
         stats.add(["delivery." + reason])
         guard settings.isCalibrating() else { return }
-        var record: [String: Any] = ["at": ISO8601DateFormatter().string(from: deps.now()),
-                                     "event": "skipped", "reason": reason]
-        if let take { record = entry(event: "skipped", take: take, extra: ["reason": reason]) }
+        let extra: [String: Any] = ["reason": reason, "app": targetPID.flatMap(deps.appID) ?? "-"]
+        var record: [String: Any]
+        if let take {
+            record = entry(event: "skipped", take: take, extra: extra)
+        } else {
+            record = ["at": ISO8601DateFormatter().string(from: deps.now()), "event": "skipped"]
+            if let mode { record["mode"] = mode.rawValue }
+            for (key, value) in extra { record[key] = value }
+        }
         deps.journal.append(record)
     }
 
@@ -375,9 +385,9 @@ final class DropLearningCoordinator {
         observation.elapsed = max(0, deps.clock() - observation.startedAt)
         if observation.elapsed >= Self.maxObserveSeconds { return end(.timeout) }
         if observation.lastAligned == nil, observation.elapsed >= Self.alignSeconds { return end(.notPasted) }
-        let text: String
+        let text: String, caret: Int?
         switch deps.fieldAccess.read(observation.handle) {
-        case .text(let value): text = value
+        case .text(let value, let at): text = value; caret = at
         // Focus verifiably moved: the last text counts.
         case .focusLeft: return end(.focusLeft)
         // Same field, but no read now: what was kept is not trusted.
@@ -389,13 +399,23 @@ final class DropLearningCoordinator {
                 observation.lastAligned = text
                 return
             }
-        } else if let found = DropEditDiff.diff(pasted: observation.take.pasted, field: text), found.isExact {
+        } else {
             // The paste is seen once it appears verbatim; its place in the
-            // field bounds every later comparison.
-            observation.context = found.context
-            observation.firstAligned = text
-            observation.lastAligned = text
-            return
+            // field bounds every later comparison. Two identical copies (a
+            // new paste next to an older draft) are told apart only by the
+            // caret, which a paste leaves right after the new copy; otherwise
+            // nothing of this take is learned or journaled.
+            // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+            let places = DropEditDiff.exactPlaces(pasted: observation.take.pasted, field: text)
+            if !places.isEmpty {
+                let atCaret = caret.flatMap { DropEditDiff.wordCount(text, before: $0) }
+                    .flatMap { end in places.first { $0.end == end } }
+                guard let place = places.count == 1 ? places.first : atCaret else { return end(.ambiguous) }
+                observation.context = place.context
+                observation.firstAligned = text
+                observation.lastAligned = text
+                return
+            }
         }
         // Until the paste lands the field may still hold its old text.
         guard observation.lastAligned != nil else { return }

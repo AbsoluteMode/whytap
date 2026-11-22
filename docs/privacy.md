@@ -68,7 +68,8 @@ is a verifiable claim rather than a slogan.
   web apps (Claude, Slack) it asks only that app to expose its text fields
   for that time and turns this off afterwards. Password fields,
   secure input, terminals, password managers, Whytap's own fields and fields
-  that do not expose their text are never read. The words of a correction stay
+  that do not expose their text are never read. Besides the text it asks
+  only where the caret is, to find the pasted words. The words of a correction stay
   in memory until you accept a suggestion; on disk there are only salted
   hashes and day counts, outside backups, settings sync and logs, plus counts
   of why takes taught nothing, as fixed reason names with no words; they are

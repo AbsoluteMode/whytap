@@ -85,16 +85,27 @@ Anthropic `end_turn` after a search) continues the turn; only `pause_turn` is
 replayed verbatim, the rest add the "Continue" user message because current
 Claude models reject prefill.
 
-Fallback evidence: a first-request 400 moves to Tavily only on affirmative
-evidence (`ErrorShape.refusesWebSearch`; a flag, the text is never kept): no
-typed unrelated category (OpenRouter `invalid_prompt`, `context_length_exceeded`
-and the like, OpenAI `code` values other than unsupported/invalid value), no
-size or context wording, and either `param` naming the tools or a refusal
-phrase ("not supported", "disabled", "unavailable"...) within 60 characters of
-the tool's name. Limitation: a provider message that quotes user text saying
-"web search is not supported" next to the name cannot be told apart; the
-retry still runs once, on the first request, and Tavily is called only if the
-model asks for it. An Anthropic `web_search_tool_result` that arrives after
+Fallback evidence: a first-request 400 moves to Tavily only on evidence
+specific to the search tool (`ErrorShape.refusesWebSearch`; a flag, the text
+is never kept). An ambiguous error stays on the selected route, because the
+retry is what can send the query to another service. Builder review #429,
+#431 and #433 showed that keyword windows keep matching quoted user text and
+other tools' errors, so the rule is now structural:
+- only the provider's own `message` is read (OpenRouter's `metadata.raw`
+  quotes upstream text), and only when the request carried a search tool;
+- a typed error (any OpenRouter `error_type`, an OpenAI `code` other than
+  unsupported/invalid value, unsupported parameter, tool not supported) is
+  about something else;
+- a location decides: `param` or a leading `messages[0]:` / `tools.3.type:`
+  path must be the search tool's own index in `tools`; a message, input or
+  another tool's index never qualifies;
+- otherwise quoted text is removed (a quoted tool identifier such as
+  `'web_search'` stays), size or context wording disqualifies, and the tool's
+  identifier must sit in one clause with the refusal ("Tool 'web_search' is not
+  supported", "does not support tool types: web_search_20250305"), or the
+  message must open with an account or model policy ("Web search is disabled
+  for this organization"). The plain words "web search" elsewhere in a message
+  never count. An Anthropic `web_search_tool_result` that arrives after
 its `server_tool_use` (search beside a function call) also counts as web work
 and continues to an answer, without counting the search twice.
 
@@ -109,7 +120,15 @@ request** that names the web search tool retries once without it. OpenRouter's t
 works for every model: an `anthropic/` model keeps the default engine
 (Anthropic's own search, which honors `max_uses`), every other model gets
 `engine: "exa"`, which OpenRouter runs and caps before a search executes;
-other native engines ignore `max_uses`. Searches count from
+other native engines ignore `max_uses`. A workspace whose locked Server Tools
+policy leaves Exa out refuses that request with 403 before anything runs
+(builder #433): the request is retried once, same provider and data, with the
+engine left to the workspace, and the rest of the turn keeps it. On that
+engine `max_uses` is still sent (Anthropic native and OpenRouter-run engines
+honor it) and the tool is dropped once the turn's two searches are spent;
+a non-Anthropic native engine there can run more than the remainder inside one
+request, which only the workspace's policy controls. A second 403 is the key
+or account, shown as before. Searches count from
 `usage.server_tool_use_details.web_search_requests`, else
 `tool_calls_executed` (search is the only server tool sent), else citations.
 
@@ -163,6 +182,13 @@ unavailable, never 0.
   search error and a Tavily timeout, OpenAI and OpenRouter request shapes,
   OpenAI continuation after a search without a function call, model sources
   winning over provider citations.
+- Builder fixtures from reviews #429, #431 and #433 kept as tests
+  (`NativeAgentWebSearchReviewTests`): refusal classification in all three
+  response shapes (quotes, neighboring terms, another tool's index, a message
+  location, typed errors, real refusals), and on the wire no Tavily request
+  for any of them; an OpenRouter workspace that locks out Exa answers after
+  one 403 and a retry with its own engine, while an allowed workspace keeps
+  Exa in one request and a repeated 403 is shown as a key error.
 - Not verified live: no paid request was made. In particular OpenAI's replay
   of `web_search_call` items with `store: false`, OpenRouter's server tool on
   Chat Completions with `tool_choice: "required"`, and the exact shape of
@@ -180,8 +206,15 @@ unavailable, never 0.
 - Falling back to Tavily on any first-request 400, or on any 400 that merely
   names web search (builder reviews #429, #431): a context length or prompt
   error quoting the user's words would move the query to another service.
+- A 60-character window around the tool name, or any `param` that starts
+  with `tools` (#431 version): quoted text and another tool's validation error
+  still matched (builder #433).
 - OpenRouter's default engine for every model: non-Anthropic native engines
   ignore `max_uses`, so one request could exceed the turn's two searches.
+- Exa pinned with no way out (#431 version): a locked workspace without Exa
+  refused every Agent request with 403, shown as a bad key (builder #433).
+- Dropping search on an OpenRouter 403: the workspace allows its own engine;
+  removing only the engine keeps search and the same data path.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

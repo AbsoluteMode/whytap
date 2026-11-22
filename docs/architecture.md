@@ -374,16 +374,22 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
   the row updates. Without any search the prompt asks for a one-line answer
   pointing to a Tavily key in API keys. A 400 on the turn's first request
-  with built-in search retries once without it only on affirmative evidence
-  (ErrorShape.refusesWebSearch from a bounded body read: no typed unrelated
-  category or OpenAI code, no size/context wording, and param naming the tools
-  or a refusal phrase within 60 characters of the tool's name); later failures are never retried. The two-search budget is per
+  with built-in search retries once without it only on tool-specific evidence
+  (ErrorShape.refusesWebSearch from a bounded body read of `message` only: the
+  request carried a search tool; no typed category or unrelated OpenAI code;
+  a param or leading path must be the search tool's own index, any other
+  location never qualifies; otherwise, with quoted text removed and no
+  size/context wording, the tool's identifier and a refusal in one clause, or
+  a message opening with an account or model policy); an ambiguous error stays
+  on the route and later failures are never retried. The two-search budget is per
   turn: Anthropic's max_uses counts across its provider turn (pause_turn and
   tool_result continuations), so the tool stays unchanged there and a new
   provider turn (the app's "Continue" message) gets what is left; OpenAI
   (max_tool_calls, counting every web_search_call action) and OpenRouter
   (max_uses; engine exa except for anthropic/ models, because other native
-  engines ignore max_uses) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
+  engines ignore max_uses; a 403 from a workspace whose locked Server Tools
+  policy excludes Exa retries that request once with the workspace's engine,
+  kept for the rest of the turn) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
   (an OpenAI open_page, OpenRouter usage.server_tool_use_details
   web_search_requests or tool_calls_executed without citations, Anthropic
   end_turn after a search or after a deferred web_search_tool_result)

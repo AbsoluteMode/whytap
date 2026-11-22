@@ -241,18 +241,80 @@ extension NativeAgentWebSearchTests {
     }
 
     func testRefusalEvidenceIsAffirmative() {
-        func refuses(_ json: String) -> Bool {
+        func refuses(_ json: String, index: Int? = 3) -> Bool {
             let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
-            return NativeAgentDiagnostics.ErrorShape(object: object).rejectsWebSearch == true
+            return NativeAgentDiagnostics.ErrorShape(object: object, searchToolIndex: index).rejectsWebSearch == true
         }
+        // Refusals of the tool itself, in each response shape.
         XCTAssertTrue(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model.","type":"invalid_request_error"}}"#))
         XCTAssertTrue(refuses(#"{"error":{"message":"Hosted tool web_search is unavailable for this model.","param":"tools[3].type","code":"unsupported_value"}}"#))
+        XCTAssertTrue(refuses(#"{"error":{"message":"Invalid value.","param":"tools[3]","code":"invalid_value","type":"invalid_request_error"}}"#))
         XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"Web search is disabled for this organization."}}"#))
+        XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"'claude-x' does not support tool types: web_search_20250305."}}"#))
+        XCTAssertTrue(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.3.type: unsupported tool type"}}"#))
+        XCTAssertTrue(refuses(#"{"error":{"code":400,"message":"Tool type openrouter:web_search is not supported for this endpoint"}}"#))
+        // Typed or size errors.
         XCTAssertFalse(refuses(#"{"error":{"message":"web search","code":"context_length_exceeded"}}"#))
         XCTAssertFalse(refuses(#"{"error":{"message":"Invalid prompt: web search","metadata":{"error_type":"invalid_prompt"}}}"#))
         XCTAssertFalse(refuses(#"{"error":{"message":"The request is too large. It mentions web_search, which is not supported in this snippet."}}"#))
+        // Quotes of the user's words or of another text.
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"Invalid user content: 'web_search is not supported in the example'."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Invalid input \"web_search is disabled\"."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Invalid user content: web search is not supported in the example."}}"#))
+        // A location that is not the search tool.
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"messages[0]: web_search is not supported."}}"#))
+        XCTAssertFalse(refuses(#"{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.input_schema: web_search is not supported."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"web_search is not supported.","param":"tools[0].parameters","code":"invalid_value"}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"web_search is not supported.","param":"input","code":"invalid_value"}}"#))
+        // A neighboring term or another tool.
+        XCTAssertFalse(refuses(#"{"error":{"message":"list_directory is not supported. Other tool types in this request: web_search."}}"#))
+        XCTAssertFalse(refuses(#"{"error":{"message":"Function web_search_helper is not supported."}}"#))
+        // No search tool in the request, or nothing about it.
+        XCTAssertFalse(refuses(#"{"error":{"message":"Tool 'web_search' is not supported with this model."}}"#, index: nil))
         XCTAssertFalse(refuses(#"{"error":{"message":"Something went wrong."}}"#))
         XCTAssertFalse(refuses("{}"))
+    }
+
+    /// Builder #433: unrelated validation errors and quoted refusals.
+    func testUnrelatedToolValidationOrQuotedRefusalDoesNotSelectTavily() throws {
+        let fixtures = [
+            ("Anthropic generic request error quoting the rejected text",
+             #"{"type":"error","error":{"type":"invalid_request_error","message":"messages[0]: invalid user content: 'web search is not supported in the example'."}}"#),
+            ("OpenAI error points to a local function schema",
+             #"{"error":{"type":"invalid_request_error","code":"invalid_value","param":"tools[0].parameters","message":"Invalid schema for list_directory. Other tool types in this request: web_search."}}"#),
+            ("OpenRouter generic validation error quotes a different rejected tool description",
+             #"{"error":{"code":400,"message":"Provider rejected request","metadata":{"error_type":"invalid_request","raw":"Invalid function description: 'web search is not allowed in this example'."}}}"#),
+        ]
+        for (label, data) in fixtures {
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any])
+            XCTAssertNotEqual(NativeAgentDiagnostics.ErrorShape(object: object, searchToolIndex: 9).rejectsWebSearch, true, label)
+        }
+    }
+
+    /// Builder #433: a quoted refusal reaches the provider path and never Tavily.
+    func testQuotedRefusalOnTheWireStaysOnTheRoute() async throws {
+        let cases: [(OpenCodeModelProvider, String, String)] = [
+            (.anthropic, "claude-opus-5-5", #"{"type":"error","error":{"type":"invalid_request_error","message":"messages[0]: invalid user content: 'web_search is not supported'."}}"#),
+            (.openAI, "gpt-6.2-astra", #"{"error":{"type":"invalid_request_error","code":"invalid_value","param":"tools[0].parameters","message":"web_search is not supported here."}}"#),
+            (.openRouter, "openai/gpt-6.2-astra", #"{"error":{"code":400,"message":"Provider rejected request","metadata":{"error_type":"invalid_request","raw":"web_search is not supported"}}}"#),
+        ]
+        for (route, modelID, error) in cases {
+            let (directory, keys, http) = try fixture()
+            try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+            try keys.save("fixture-anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+            try keys.save("fixture-openai-key", account: ProviderAccount.openAIKeychainAccount)
+            try keys.save("fixture-tavily-key", account: TavilySearch.keychainAccount)
+            var modelRequests = 0, tavilyRequests = 0
+            StubURLProtocol.handler = { request in
+                if request.url?.host == "api.tavily.com" { tavilyRequests += 1; return self.serve(["results": []]) }
+                modelRequests += 1
+                return (400, [:], Data(error.utf8))
+            }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+            _ = await run(provider, "fixture", .init(model: modelID, openCodeProvider: route))
+            XCTAssertEqual(modelRequests, 1, "\(route)")
+            XCTAssertEqual(tavilyRequests, 0, "\(route)")
+        }
     }
 
     func testOpenRouterExecutedCountContinuesAndSpendsBudget() async throws {
@@ -341,5 +403,61 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(tools.first { $0["type"] as? String == "web_search_20250305" }?["max_uses"] as? Int, 1,
                        "The search is counted once, with its request")
         XCTAssertEqual(links(events).first, .link(url: URL(string: "https://fixture.example/page")!, description: "Fixture", provider: nil))
+    }
+
+    // MARK: - OpenRouter workspace engine policy (builder #433)
+
+    func testOpenRouterLockedWorkspaceWithoutExaStillAnswers() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+        var engines: [String?] = []
+        StubURLProtocol.handler = { _ in
+            let index = StubURLProtocol.capturedBodies.count - 1
+            let tool = (try self.body(index)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" }
+            let engine = (tool?["parameters"] as? [String: Any])?["engine"] as? String
+            engines.append(engine)
+            if engine == "exa" {
+                return (403, [:], Data(#"{"error":{"message":"The selected web search engine is disabled for this workspace."}}"#.utf8))
+            }
+            if engines.count == 2 {
+                return self.serve(["choices": [["finish_reason": "stop", "message": ["role": "assistant", "content": "Looked it up."]]],
+                                   "usage": ["cost": 0.01, "server_tool_use_details": ["web_search_requests": 1]]])
+            }
+            return self.serve(["choices": [["finish_reason": "tool_calls", "message": [
+                "role": "assistant", "content": NSNull(),
+                "tool_calls": [["id": "final", "type": "function", "function": [
+                    "name": "finish_answer", "arguments": self.arguments(self.final("Four."))
+                ]]]
+            ]]]])
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let events = await run(provider, "What is two plus two?", .init(model: "openai/gpt-6.2-astra"))
+        XCTAssertEqual(finalText(events), "Four.", "A workspace engine restriction does not break the Agent")
+        XCTAssertEqual(engines, ["exa", nil, nil], "One unbilled 403, then the workspace's engine for the rest of the turn")
+        let tool = try XCTUnwrap((try body(2)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" })
+        XCTAssertEqual((tool["parameters"] as? [String: Any])?["max_uses"] as? Int, 1, "The budget still counts what ran")
+    }
+
+    func testOpenRouterDefaultWorkspaceKeepsExaAndASecond403IsTheKey() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("fixture-router-key", account: OpenRouterLLMKeyStore.account)
+        var calls = 0
+        StubURLProtocol.handler = { _ in calls += 1; return (403, [:], Data()) }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let events = await run(provider, "q", .init(model: "openai/gpt-6.2-astra"))
+        XCTAssertEqual(calls, 2, "One retry without the engine, no more")
+        XCTAssertNil(finalText(events))
+        XCTAssertTrue(events.contains { if case .error(_, let message, _) = $0 { return message.contains("API key") }; return false })
+
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { _ in
+            self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
+                "tool_calls": [["id": "f", "type": "function", "function": ["name": "finish_answer",
+                                                                            "arguments": self.arguments(self.final("A."))]]]]]]])
+        }
+        _ = await run(provider, "q", .init(model: "openai/gpt-6.2-astra"))
+        XCTAssertEqual(StubURLProtocol.capturedBodies.count, 1, "An allowed workspace runs pinned Exa in one request")
+        let tool = try XCTUnwrap((try body(0)["tools"] as? [[String: Any]])?.first { $0["type"] as? String == "openrouter:web_search" })
+        XCTAssertEqual((tool["parameters"] as? [String: Any])?["engine"] as? String, "exa")
     }
 }

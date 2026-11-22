@@ -50,7 +50,8 @@ struct NativeAgentHTTP {
             }
             try Task.checkCancellation()
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw Self.serviceError(status: http.statusCode, object: object, truncated: truncated)
+            throw Self.serviceError(status: http.statusCode, object: object, truncated: truncated,
+                                    searchToolIndex: http.statusCode == 400 ? Self.searchToolIndex(in: request) : nil)
         }
         if response.expectedContentLength > limit { throw NativeAgentError.message("The service response is too large.") }
         var data = Data()
@@ -79,10 +80,12 @@ struct NativeAgentHTTP {
     // Do not relax this to a regex: a syntactically valid code can be a secret.
     // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Provider continuations)
     private static func serviceError(status: Int, object: [String: Any]?, truncated: Bool = false,
-                                     envelope: NativeAgentDiagnostics.Envelope = .http) -> NativeAgentError {
+                                     envelope: NativeAgentDiagnostics.Envelope = .http,
+                                     searchToolIndex: Int? = nil) -> NativeAgentError {
         func failure(_ message: String) -> NativeAgentError {
             .service(message: message, status: status,
-                     diagnostics: .init(object: object, truncated: truncated, envelope: envelope))
+                     diagnostics: .init(object: object, truncated: truncated, envelope: envelope,
+                                        searchToolIndex: searchToolIndex))
         }
         let error = object?["error"] as? [String: Any]
         let metadata = error?["metadata"] as? [String: Any]
@@ -113,6 +116,14 @@ struct NativeAgentHTTP {
         case 200: return failure("The selected provider returned an error. Try again.")
         default: return failure("The service returned HTTP \(status). Try again.")
         }
+    }
+
+    /// Where the provider's own search tool sits in the request's `tools`, so a
+    /// refusal can be matched to that tool and not to another one.
+    static func searchToolIndex(in request: URLRequest) -> Int? {
+        guard let data = request.httpBody,
+              let tools = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["tools"] as? [[String: Any]] else { return nil }
+        return tools.firstIndex { ["web_search", "web_search_20250305", "openrouter:web_search"].contains($0["type"] as? String ?? "") }
     }
 
     static func request(url: URL, key: String, body: [String: Any]? = nil) throws -> URLRequest {

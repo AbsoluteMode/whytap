@@ -34,7 +34,7 @@ the same provider (at most two searches per request).
 | --- | --- | --- |
 | Anthropic | Claude web search (`web_search_20250305`) | $10 per 1,000 searches plus the results as input tokens; failed searches are not billed. Included in the Agent's estimated cost |
 | OpenAI | Responses `web_search` | $10 per 1,000 calls plus search content tokens. OpenAI reports no charge, so the cost stays unknown |
-| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. Included in the cost OpenRouter reports |
+| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. A workspace that locks out Exa refuses with 403; the Agent then retries once with the workspace's own engine. Included in the cost OpenRouter reports |
 
 The provider runs the search and sends its results to the model; Whytap
 never sees a separate search request. "Searching the web" appears once the

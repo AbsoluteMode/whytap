@@ -54,18 +54,34 @@ enum NativeAgentWebSearch: Equatable {
     /// OpenRouter: in this request). OpenRouter forwards `max_uses` only to
     /// Anthropic's native search; other native engines ignore it. So an
     /// `anthropic/` model keeps the default engine (Anthropic's own search,
-    /// capped by max_uses) and every other model uses Exa, which OpenRouter
-    /// runs itself and caps before a search runs.
-    static func providerTool(for provider: OpenCodeModelProvider, limit: Int = maxSearches, model: String = "") -> [String: Any] {
+    /// capped by max_uses) and every other model asks for Exa, which
+    /// OpenRouter runs itself and caps before a search runs. `pinEngine`
+    /// false leaves the engine to the workspace: a locked Server Tools policy
+    /// without Exa refuses the pinned request with 403 (NativeAgentModel).
+    static func providerTool(for provider: OpenCodeModelProvider, limit: Int = maxSearches, model: String = "",
+                             pinEngine: Bool = true) -> [String: Any] {
         let limit = max(1, min(limit, maxSearches))
         switch provider {
         case .anthropic: return ["type": "web_search_20250305", "name": "web_search", "max_uses": limit]
         case .openAI: return ["type": "web_search"]
         case .openRouter:
             var parameters: [String: Any] = ["max_results": 5, "max_uses": limit]
-            if !model.lowercased().hasPrefix("anthropic/") { parameters["engine"] = "exa" }
+            if pinEngine, !model.lowercased().hasPrefix("anthropic/") { parameters["engine"] = "exa" }
             return ["type": "openrouter:web_search", "parameters": parameters]
         }
+    }
+
+    /// The same request with the OpenRouter search tool's engine left to the
+    /// workspace; `nil` when the request pins no engine.
+    static func withoutEngine(_ body: Data?) -> Data? {
+        guard let body, var object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              var tools = object["tools"] as? [[String: Any]],
+              let index = tools.firstIndex(where: { $0["type"] as? String == "openrouter:web_search" }),
+              var parameters = tools[index]["parameters"] as? [String: Any],
+              parameters.removeValue(forKey: "engine") != nil else { return nil }
+        tools[index]["parameters"] = parameters
+        object["tools"] = tools
+        return try? JSONSerialization.data(withJSONObject: object)
     }
 
     /// One line added to the system prompt for this turn.

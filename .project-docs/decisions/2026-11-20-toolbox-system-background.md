@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/ToolboxPaneBackgroundTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-20-toolbox-mini-apps.md]
+related: [2026-10-20-toolbox-mini-apps.md, 2026-11-22-toolbox-tool-hotkey.md]
 ---
 
 ## Context

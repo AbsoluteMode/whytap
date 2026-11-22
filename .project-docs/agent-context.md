@@ -200,8 +200,13 @@ Voice flow (Drop / dictation):
        requests stay requests; known names are always corrected. The prompt
        does not change selected routes. WHY:
        .project-docs/decisions/2026-11-20-smart-ready-text.md
+       The cleanup request carries Whytap's instructions, the target app's
+       name, the language and mode hints and the transcript; no text of the
+       target window is read or sent, with no setting to add it. WHY:
+       .project-docs/decisions/2026-11-22-smart-no-window-context.md
        SmartFormattingProfile selects destination syntax from app identity and
-       focused AX role/document metadata (within the same 1.5s context deadline).
+       the focused element's AX role and document URL, read on this Mac by
+       SmartFormattingMetadataReader (1.5s deadline) and never sent.
        Markdown editors/recognized web composers use a fixed syntax subset;
        IDEs require a real Markdown file, and single-line/unknown fields stay plain.
        Slack/Telegram use local RTF + semantic HTML + plain clipboard fallback;
@@ -211,8 +216,8 @@ Voice flow (Drop / dictation):
        Smart uses the lowest supported OpenRouter reasoning effort (or off
        when optional), discovered from the cached model catalog, and asks
        OpenRouter to sort providers of the selected model by throughput. Meeting
-       summaries and custom endpoints retain their own defaults. AX context
-       has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
+       summaries and custom endpoints retain their own defaults. The
+       formatting metadata read has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
        timings/counts/IDs only. WHY: docs/decisions/2026-09-07-smart-latency.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->

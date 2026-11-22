@@ -68,6 +68,18 @@ Settings → Hotkeys.
   quick actions, Toolbox or menu, and say "option f" means option+f, so
   "add Shot to my quick actions (hover) and set the hotkey option f" (the
   maintainer's acceptance request, asked in Russian) maps to these operations.
+- **Suggesting Whytap's tools (maintainer: "only suggest").** Build 1712
+  answered "can you take a screenshot of my screen?" with a capture it could
+  not save and macOS's Shift-Command-3/4. The Agent prompt now says Whytap's
+  own tools come first: for a task a tool may do it reads
+  `whytap_toolbox_get`, chooses by the titles and descriptions there
+  (`HoverToolRegistry`, so no invented tool) and suggests the tool with its
+  current hotkey ("Press ⌥S — that's Shot"). Without a hotkey it points to the
+  island's hover (pinned) or the hover's search and offers to pin it or set a
+  hotkey, changing nothing until the user agrees. It does not recommend
+  Shift-Command-3/4 for what Whytap does and never uses `capture_screen` to
+  take a screenshot for the user. No operation opens or starts a tool; the
+  catalog still has none.
 - **Expected values.** Every write needs the exact current value: the pinned
   list for the Toolbox, the tool's keys (any modifier order) for a hotkey. A
   stale value is a `conflict`.
@@ -103,6 +115,12 @@ unknown tool, Settings removal, stale expected values, a bad position, Quit
 and Calendar (Soon), ⌘/⇧/Space keys and wrong types; clearing with the keys in
 another order. The first request on Anthropic, OpenAI and OpenRouter stays
 within the strict limits and its operation enum has the three operations.
+The screenshot request from build 1712: one `toolbox_get` read, no change
+line or store change, Shot's registry description and hotkey in the read,
+and the rule in the system prompt; the read lists every registry tool with its
+own description and an unassigned Shot as unpinned without a hotkey; no
+operation opens, starts or captures. These check what the model receives,
+not what a live model answers.
 `AppControlMCPServerTests` lists the three MCP tools with their annotations
 and forwards a call. Not tested: the installed app, a live provider.
 

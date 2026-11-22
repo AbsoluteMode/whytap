@@ -578,6 +578,67 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(result.finalText, "Hotkey: Shot — none\n\nСнял.")
     }
 
+    // MARK: Suggesting Whytap's own tools
+
+    /// Build 1712: "Можешь сделать скриншот моего экрана?" got ⇧⌘3/⇧⌘4. The
+    /// Agent reads the island's tools and suggests Shot with its own hotkey;
+    /// it only suggests, nothing opens or changes.
+    func testScreenshotRequestSuggestsShotWithItsHotkey() async throws {
+        let e = try env()
+        XCTAssertEqual(e.hotkeys.assignToolShortcut(combo("option+s"), to: .screenshot), .saved)
+        let layout = e.layout.slots, hotkeys = e.hotkeys.configuration
+        let result = try await turn(e, "Можешь сделать скриншот моего экрана?", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            final("Нажми ⌥S — это Shot.")
+        ])
+        XCTAssertEqual(result.finalText, "Нажми ⌥S — это Shot.", "a read adds no change line")
+        XCTAssertEqual(result.labels.first, "Reading Whytap tools")
+        XCTAssertEqual(e.layout.slots, layout)
+        XCTAssertEqual(e.hotkeys.configuration, hotkeys)
+        // The read names Shot by the registry's own description and hotkey.
+        let shot = try XCTUnwrap(toolEntry(result.toolResults().first, "screenshot"))
+        XCTAssertEqual(shot["title"] as? String, "Shot")
+        XCTAssertEqual(shot["description"] as? String, HoverToolRegistry.info(for: .screenshot).description)
+        XCTAssertEqual((shot["hotkey"] as? [String: Any])?["display"] as? String, "⌥S")
+        // The rule that makes the model do it, and only suggest.
+        let first = try XCTUnwrap(result.bodies.first)
+        let system = (first["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.contains("Whytap's own tools come first"))
+        XCTAssertTrue(system.contains("\"Press ⌥S — that's Shot\""))
+        XCTAssertTrue(system.contains("Do not recommend macOS shortcuts such as ⇧⌘3 or ⇧⌘4"))
+        XCTAssertTrue(system.contains("never capture the screen to take a screenshot"))
+        XCTAssertTrue(system.contains("Only suggest"))
+    }
+
+    /// No hotkey and not in the island: the read says so, so the Agent can
+    /// point to the hover's search and offer a hotkey instead of a key.
+    func testToolboxReadListsEveryRegistryToolForSuggestions() async throws {
+        let e = try env()
+        let response = await e.controller.handle(AppControlRequest("toolbox_get"))
+        XCTAssertTrue(response.ok)
+        let text = String(decoding: try JSONEncoder().encode(response), as: UTF8.self)
+        let tools = try XCTUnwrap(((try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["data"]
+            as? [String: Any])?["tools"] as? [[String: Any]])
+        XCTAssertEqual(tools.compactMap { $0["tool"] as? String }, HoverTool.allCases.map(\.rawValue))
+        for entry in tools {
+            let tool = try XCTUnwrap(HoverTool(rawValue: entry["tool"] as? String ?? ""))
+            XCTAssertEqual(entry["description"] as? String, HoverToolRegistry.info(for: tool).description, tool.rawValue)
+        }
+        let shot = try XCTUnwrap(toolEntry(text, "screenshot"))
+        XCTAssertEqual(shot["pinned"] as? Bool, false)
+        XCTAssertTrue(shot["hotkey"] is NSNull)
+        XCTAssertEqual(shot["hotkeyAssignable"] as? Bool, true)
+        // Suggesting never launches: no operation starts or opens a tool.
+        let operations = NativeAgentAppControl.tools.map(\.operation)
+        XCTAssertFalse(operations.contains { ["open_tool", "start", "launch", "run", "capture"].contains(where: $0.contains) }, "\(operations)")
+    }
+
+    private func toolEntry(_ result: String?, _ id: String) -> [String: Any]? {
+        guard let result, let object = try? JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any],
+              let tools = (object["data"] as? [String: Any])?["tools"] as? [[String: Any]] else { return nil }
+        return tools.first { $0["tool"] as? String == id }
+    }
+
     // MARK: Catalog contract
 
     func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {

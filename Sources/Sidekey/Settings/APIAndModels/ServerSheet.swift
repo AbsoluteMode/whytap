@@ -1,0 +1,322 @@
+import SwiftUI
+
+/// Everything about one of the user's servers in one window: its name,
+/// address, optional key and the models it runs, each with its type and
+/// the result of its check. One Save keeps it all.
+// WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+struct ServerSheetDraft: Equatable {
+    struct Row: Identifiable, Equatable {
+        enum Status: Equatable {
+            /// Not checked yet: new, or its name or type just changed.
+            case pending
+            case checking
+            case works
+            case failed(String)
+            /// Saved earlier without a passing check.
+            case notChecked
+        }
+
+        let id: UUID
+        var name: String
+        var kind: ServerModel.Kind
+        var status: Status
+
+        init(id: UUID = UUID(), name: String = "", kind: ServerModel.Kind = .llm, status: Status = .pending) {
+            self.id = id
+            self.name = name
+            self.kind = kind
+            self.status = status
+        }
+    }
+
+    var isNew: Bool
+    var name: String
+    var baseURL: String
+    /// Typed into the key field; empty keeps the stored key (if any).
+    var apiKey: String
+    var hasStoredKey: Bool
+    var rows: [Row]
+    /// A better server name when the current one is a model's name
+    /// (servers named before models were added).
+    var nameSuggestion: String?
+}
+
+@MainActor
+struct ServerSheet: View {
+    @Binding var draft: ServerSheetDraft
+    /// Names from the server's `/v1/models`, offered in each model field.
+    var suggestions: [String] = []
+    var saving = false
+    var onRemove: () -> Void = {}
+    var onCancel: () -> Void = {}
+    var onSave: () -> Void = {}
+
+    private static let labelWidth: CGFloat = 88
+    private static let typeWidth: CGFloat = 176
+    private static let statusWidth: CGFloat = 104
+
+    private var checking: Int { draft.rows.filter { $0.status == .checking }.count }
+    private var failed: [ServerSheetDraft.Row] {
+        draft.rows.filter { if case .failed = $0.status { return true } else { return false } }
+    }
+    private var namedRows: [ServerSheetDraft.Row] {
+        draft.rows.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+    private var canSave: Bool {
+        !saving && checking == 0
+            && !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !draft.baseURL.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+            connection
+            models
+            footer
+        }
+        .padding(22)
+        .frame(width: 600, alignment: .topLeading)
+        .background(MacSettingsTheme.bgContent)
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(draft.isNew ? "Add your server" : draft.name)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text)
+                .lineLimit(1)
+            Text("An OpenAI-compatible server: Ollama, vLLM, LM Studio or your company's gateway.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+        }
+    }
+
+    // MARK: - Connection
+
+    private var connection: some View {
+        group {
+            labeled("Name") {
+                VStack(alignment: .leading, spacing: 6) {
+                    MacField(placeholder: "For example, Ollama · localhost", text: $draft.name)
+                    if let suggestion = draft.nameSuggestion, suggestion != draft.name {
+                        HStack(spacing: 6) {
+                            Text("This is a model's name. Name the server “\(suggestion)”?")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(MacSettingsTheme.text2)
+                            Button("Use") { draft.name = suggestion }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(MacSettingsTheme.accent)
+                        }
+                    }
+                }
+            }
+            divider
+            labeled("Base URL") {
+                MacField(placeholder: "http://localhost:11434/v1", text: $draft.baseURL, monospaced: true)
+            }
+            divider
+            labeled("API key") {
+                MacField(placeholder: draft.hasStoredKey ? "Saved · type to replace" : "Optional",
+                         text: $draft.apiKey, isSecure: true)
+            }
+        }
+    }
+
+    // MARK: - Models
+
+    private var models: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Models")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .padding(.leading, 14)
+            group {
+                ForEach(Array(draft.rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { divider }
+                    modelRow(index)
+                }
+                divider
+                Button {
+                    draft.rows.append(.init())
+                } label: {
+                    Label("Add model", systemImage: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MacSettingsTheme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(APIModelFeedbackStyle(cornerRadius: 0))
+            }
+            Text("Each model shows up only where its type fits: an LLM in text features, Transcription in dictation and meetings. Whytap checks it once with a short request.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+        }
+    }
+
+    private func modelRow(_ index: Int) -> some View {
+        let row = draft.rows[index]
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                nameField(index)
+                Picker("Type", selection: $draft.rows[index].kind) {
+                    ForEach(ServerModel.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: Self.typeWidth)
+                .accessibilityLabel("Type of \(row.name)")
+                status(row.status)
+                    .frame(width: Self.statusWidth, alignment: .leading)
+                Button {
+                    draft.rows.remove(at: index)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(APIModelFeedbackStyle(cornerRadius: 5))
+                .help("Remove \(row.name)")
+                .accessibilityLabel("Remove \(row.name)")
+            }
+            if case .failed(let message) = row.status {
+                Text(message)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Check failed: \(message)")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func nameField(_ index: Int) -> some View {
+        HStack(spacing: 4) {
+            TextField("Model name", text: $draft.rows[index].name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(MacSettingsTheme.text)
+                .padding(.leading, 10)
+                .padding(.vertical, 6)
+            if !suggestions.isEmpty {
+                Menu {
+                    Section("On this server") {
+                        ForEach(suggestions, id: \.self) { name in
+                            Button(name) {
+                                draft.rows[index].name = name
+                                draft.rows[index].kind = ServerModelClassifier.suggestedKind(for: name)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .frame(width: 24, height: 24)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Models this server lists")
+                .accessibilityLabel("Models this server lists")
+            }
+        }
+        .padding(.trailing, 4)
+        .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .strokeBorder(MacSettingsTheme.switchBorder, lineWidth: 0.5))
+    }
+
+    @ViewBuilder
+    private func status(_ status: ServerSheetDraft.Row.Status) -> some View {
+        switch status {
+        case .pending:
+            // Keeps the column so rows line up before their first check.
+            Color.clear.frame(height: 1)
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Checking…").foregroundStyle(MacSettingsTheme.text2)
+            }
+            .font(.system(size: 12))
+        case .works:
+            Label("Works", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(MacSettingsTheme.green)
+        case .failed:
+            Label("Failed", systemImage: "xmark.octagon.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(MacSettingsTheme.red)
+        case .notChecked:
+            Label("Not checked", systemImage: "exclamationmark.circle")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(MacSettingsTheme.orange)
+        }
+    }
+
+    // MARK: - Footer
+
+    private var summary: String? {
+        if checking > 0 { return checking == 1 ? "Checking 1 model…" : "Checking \(checking) models…" }
+        if failed.count == 1, let name = failed.first?.name {
+            return "\(name) didn't pass. Save anyway keeps it, marked Not checked."
+        }
+        if failed.count > 1 { return "\(failed.count) models didn't pass. Save anyway keeps them, marked Not checked." }
+        if !draft.isNew, namedRows.isEmpty { return "Without a model the server isn't offered anywhere." }
+        return nil
+    }
+
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if !draft.isNew {
+                APIModelAction(title: "Remove server", style: .danger, isEnabled: !saving, action: onRemove)
+            }
+            if let summary {
+                Text(summary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(checking == 0 && !failed.isEmpty ? MacSettingsTheme.red : MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if saving { ProgressView().controlSize(.small) }
+            APIModelAction(title: "Cancel", style: .default, isEnabled: !saving, action: onCancel)
+            APIModelAction(title: failed.isEmpty ? "Save" : "Save anyway", style: .primary,
+                           isEnabled: canSave, action: onSave)
+        }
+    }
+
+    // MARK: - Pieces
+
+    private var divider: some View {
+        Rectangle().fill(MacSettingsTheme.rowSeparator).frame(height: 1).padding(.horizontal, 14)
+    }
+
+    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0, content: content)
+            .background(MacSettingsTheme.bgCard, in: RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard))
+            .overlay(RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard)
+                .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.5))
+    }
+
+    private func labeled<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(MacSettingsTheme.text)
+                .frame(width: Self.labelWidth, alignment: .leading)
+            content()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}

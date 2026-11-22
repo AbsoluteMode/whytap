@@ -375,6 +375,49 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
+    /// The one server window: a new server, a server with an LLM and a
+    /// transcription model, a refused check, and a server named after a model.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func test_render_server_sheet() async throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
+        }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suggestions = ["qwen3:0.6b", "qwen3-asr", "whisper-large-v3-turbo"]
+        let states: [(String, ServerSheetDraft)] = [
+            ("1-new", .init(isNew: true, name: "", baseURL: "", apiKey: "", hasStoredKey: false,
+                            rows: [.init()], nameSuggestion: nil)),
+            ("2-two-models", .init(isNew: false, name: "Ollama · localhost", baseURL: "http://localhost:11434/v1",
+                                   apiKey: "", hasStoredKey: true,
+                                   rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
+                                          .init(name: "whisper-large-v3-turbo", kind: .transcription, status: .works)],
+                                   nameSuggestion: nil)),
+            ("3-check-failed", .init(isNew: false, name: "Ollama · localhost", baseURL: "http://localhost:11434/v1",
+                                     apiKey: "", hasStoredKey: false,
+                                     rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
+                                            .init(name: "qwen3:0.6b", kind: .transcription, status: .failed(
+                                                "Server answered 400 on /audio/transcriptions — this model can't transcribe here (\"qwen3:0.6b\" does not support audio input)")),
+                                            .init(name: "ut-llm", kind: .llm, status: .notChecked)],
+                                     nameSuggestion: nil)),
+            ("4-named-after-model", .init(isNew: false, name: "qwen3:0.6b", baseURL: "http://localhost:11434/v1",
+                                          apiKey: "", hasStoredKey: false,
+                                          rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
+                                                 .init(name: "qwen3-asr", kind: .transcription, status: .checking)],
+                                          nameSuggestion: "Ollama · localhost")),
+        ]
+        for dark in [false, true] {
+            for (label, draft) in states {
+                var state = draft
+                let binding = Binding(get: { state }, set: { state = $0 })
+                try await render(ServerSheet(draft: binding, suggestions: suggestions)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
+                    size: NSSize(width: 600, height: 560), dark: dark,
+                    to: directory.appendingPathComponent("server-sheet-\(label)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     /// The server form: a new server, an empty model list, models of both
     /// kinds with Not checked, and a refused check offering Save without check.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md

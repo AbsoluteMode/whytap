@@ -9,6 +9,8 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 struct OnboardingTryField: NSViewRepresentable {
     var placeholder: String
+    /// A failed take's line is drawn in its tone; nil is the quiet grey.
+    var placeholderColor: NSColor? = nil
     /// The standalone preview's pretend take: typed in as Drop would, then
     /// reported like Drop's own insertion.
     var take: String? = nil
@@ -25,6 +27,7 @@ struct OnboardingTryField: NSViewRepresentable {
 
         let textView = OnboardingTryTextView(frame: .zero)
         textView.placeholder = placeholder
+        textView.placeholderColor = placeholderColor
         textView.isEditable = true
         textView.isSelectable = true
         textView.isRichText = false
@@ -53,6 +56,7 @@ struct OnboardingTryField: NSViewRepresentable {
         context.coordinator.onDictated = onDictated
         guard let textView = scrollView.documentView as? OnboardingTryTextView else { return }
         textView.placeholder = placeholder
+        textView.placeholderColor = placeholderColor
         if let take, take != context.coordinator.lastTake {
             context.coordinator.lastTake = take
             textView.string = take
@@ -88,7 +92,8 @@ struct OnboardingTryField: NSViewRepresentable {
 /// right away already has a target, and draws a quiet placeholder.
 @MainActor
 final class OnboardingTryTextView: NSTextView {
-    var placeholder = "" { didSet { needsDisplay = true } }
+    var placeholder = "" { didSet { if placeholder != oldValue { needsDisplay = true } } }
+    var placeholderColor: NSColor? { didSet { if placeholderColor != oldValue { needsDisplay = true } } }
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -111,9 +116,11 @@ final class OnboardingTryTextView: NSTextView {
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font ?? .systemFont(ofSize: 15),
-            .foregroundColor: NSColor.placeholderTextColor,
+            .foregroundColor: placeholderColor ?? NSColor.placeholderTextColor,
         ]
-        let origin = NSPoint(x: textContainerInset.width, y: textContainerInset.height)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        // Wraps: a failed take's line can be longer than the field.
+        let rect = NSRect(x: textContainerInset.width, y: textContainerInset.height,
+                          width: max(0, bounds.width - textContainerInset.width * 2), height: bounds.height)
+        (placeholder as NSString).draw(with: rect, options: [.usesLineFragmentOrigin], attributes: attributes)
     }
 }

@@ -1244,10 +1244,14 @@ dialog is open); reaching the step again starts at Allow. Screen Recording has
 Skip for now under Allow instead of the footer's Skip. The last four steps
 (OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
 key as a wire key and once as keys in the real field's header ("Hold Space
-and speak"); the placeholder, the line under the field and the capsule never
-repeat it (the line shows only a take that runs, arrived or failed, the capsule
-only Continue; the standalone preview alone has a "Preview take" capsule that
-stands in for the key); while Drop records
+and speak"); the field says "Your text will appear here", a take that brought
+nothing says so inside the field (no line under it), and Continue sits under
+the field from the start and works once a take arrived, with Skip beside it;
+in the app Drop itself listens, while the standalone preview, which starts no
+hotkeys, listens for the person's Drop shortcut in its own window
+(OnboardingDropStandIn, implemented by OnboardingPreviewKit's
+OnboardingPreviewDrop: swallowed so Space is never typed, and a take always
+ends on release, focus loss, a 30 s limit or leaving the step); while Drop records
 (OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
 lede becomes soft waves that follow the voice, with no island chip; a take that
 ends with nothing in the field gets one calm line ("No speech heard - try

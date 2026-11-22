@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import XCTest
 @testable import Sidekey
@@ -6,7 +7,7 @@ import XCTest
 
 /// The standalone onboarding preview walks every step with its own fakes:
 /// keys in memory, offline checks (keys containing "bad" refused), pretend permissions
-/// and a Simulate Drop button, all in its own defaults suite. No window shows.
+/// and the Drop shortcut held in its window, all in its own defaults suite. No window shows.
 /// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingPreviewTests: XCTestCase {
@@ -705,7 +706,7 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertGreaterThan(files.count, 100)
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
-            for fake in ["OnboardingPreviewProviders", "OnboardingPreviewSession", "OnboardingPreviewURLProtocol",
+            for fake in ["OnboardingPreviewProviders", "OnboardingPreviewSession", "OnboardingPreviewURLProtocol", "OnboardingPreviewDrop",
                          "OnboardingPreviewTokenStore"] {
                 XCTAssertFalse(text.contains(fake), "\(file.lastPathComponent) names \(fake)")
             }
@@ -820,20 +821,150 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     /// Try Drop says which key to hold once, in the field's header: the
-    /// placeholder, the line under the field and the capsule do not repeat it.
+    /// field says only where the text appears, and a take that brought
+    /// nothing says so inside the field, not on a line under it (REV 63).
     func testTryDropSaysTheKeyOnce() {
-        let placeholder = OnboardingTryDropStage.placeholder.lowercased()
-        XCTAssertFalse(placeholder.contains("hold") || placeholder.contains("press") || placeholder.contains("space"))
-        for holds in [true, false] {
-            XCTAssertEqual(OnboardingTryDropStage.hint(.waiting, holds: holds), "", "no line at rest")
-            let states: [OnboardingTryState] = [.waiting, .recording, .done, .failed(OnboardingJourneyModel.noSpeech)]
-            for state in states {
-                let line = OnboardingTryDropStage.hint(state, holds: holds)
-                XCTAssertFalse(line.hasPrefix("Hold") || line.contains("Space"), "\(state) repeats the instruction")
-            }
+        XCTAssertEqual(OnboardingTryDropStage.placeholder, "Your text will appear here")
+        let quiet = OnboardingTryDropStage.emptyText(.waiting)
+        XCTAssertEqual(quiet.text, OnboardingTryDropStage.placeholder)
+        XCTAssertFalse(quiet.failed)
+        XCTAssertEqual(OnboardingTryDropStage.emptyText(.recording).text, OnboardingTryDropStage.placeholder)
+        let failed = OnboardingTryDropStage.emptyText(.failed(OnboardingJourneyModel.noSpeech))
+        XCTAssertEqual(failed.text, "No speech heard — try again.")
+        XCTAssertTrue(failed.failed)
+    }
+
+    // MARK: - The preview's Drop on Try Drop
+
+    private final class Takes { var texts: [String] = [] }
+
+    private func previewDrop(_ shortcut: HotkeyShortcut = .holdSpace, gesture: HotkeyGesture = .hold)
+        -> (OnboardingPreviewDrop, OnboardingVoiceSignal, Takes, () -> Void) {
+        let drop = OnboardingPreviewDrop()
+        drop.transcribing = 0.01
+        var clock = Date()
+        drop.now = { clock }
+        let voice = OnboardingVoiceSignal(appState: nil)
+        let takes = Takes()
+        drop.attach(shortcut: shortcut, gesture: gesture, voice: voice) { takes.texts.append($0) }
+        return (drop, voice, takes, { clock = clock.addingTimeInterval(1.5) })
+    }
+
+    private func key(_ type: NSEvent.EventType, _ code: UInt16, _ characters: String = " ",
+                     flags: NSEvent.ModifierFlags = [], isRepeat: Bool = false) -> NSEvent {
+        NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                         characters: characters, charactersIgnoringModifiers: characters, isARepeat: isRepeat,
+                         keyCode: code)!
+    }
+
+    /// Holding Space anywhere in the preview's window records and letting go
+    /// drops the text; Space never reaches the field, other keys do.
+    func testThePreviewHoldsTheDropKeyInItsWindow() async throws {
+        let (drop, voice, takes, later) = previewDrop()
+        defer { drop.detach() }
+        XCTAssertNotNil(drop.handle(key(.keyDown, 0, "a")), "other keys still type")
+        XCTAssertNil(drop.handle(key(.keyDown, 49)), "Space is swallowed, not typed")
+        XCTAssertTrue(voice.recording)
+        XCTAssertNil(drop.handle(key(.keyDown, 49, isRepeat: true)))
+        XCTAssertTrue(voice.recording, "a held key's repeats change nothing")
+        later()
+        XCTAssertNil(drop.handle(key(.keyUp, 49)))
+        XCTAssertFalse(voice.recording, "letting go ends the take")
+        try await eventually { !voice.working }
+        XCTAssertEqual(takes.texts, [OnboardingPreviewDrop.text])
+    }
+
+    func testAQuickTapBringsNothing() async throws {
+        let (drop, voice, takes, _) = previewDrop()
+        defer { drop.detach() }
+        _ = drop.handle(key(.keyDown, 49))
+        _ = drop.handle(key(.keyUp, 49))
+        XCTAssertFalse(voice.recording)
+        try await eventually { !voice.working }
+        XCTAssertEqual(takes.texts, [], "like a real empty take")
+    }
+
+    /// A key released while the window is not in front never arrives: the
+    /// take ends when the window or the app loses focus.
+    func testLosingFocusEndsTheTake() async throws {
+        for name in [NSWindow.didResignKeyNotification, NSApplication.didResignActiveNotification] {
+            let (drop, voice, _, later) = previewDrop()
+            _ = drop.handle(key(.keyDown, 49))
+            XCTAssertTrue(voice.recording)
+            later()
+            NotificationCenter.default.post(name: name, object: nil)
+            XCTAssertFalse(voice.recording, "\(name.rawValue) ends the take")
+            try await eventually { !voice.working }
+            drop.detach()
         }
-        XCTAssertEqual(OnboardingTryDropStage.hint(.failed(OnboardingJourneyModel.noSpeech), holds: true),
-                       OnboardingJourneyModel.noSpeech)
+    }
+
+    func testATakeEndsByItselfAfterItsLongestLength() async throws {
+        let (drop, voice, _, _) = previewDrop()
+        defer { drop.detach() }
+        drop.longestTake = 0.15
+        _ = drop.handle(key(.keyDown, 49))
+        XCTAssertTrue(voice.recording)
+        try await eventually({ !voice.recording }, timeout: 2)
+        try await eventually { !voice.working }
+    }
+
+    /// Continue, Skip or Back mid-take: the take is dropped and nothing
+    /// arrives afterwards.
+    func testLeavingTryDropEndsTheTake() async throws {
+        let (drop, voice, takes, later) = previewDrop()
+        _ = drop.handle(key(.keyDown, 49))
+        later()
+        drop.detach()
+        XCTAssertFalse(voice.recording)
+        XCTAssertFalse(voice.working)
+        XCTAssertNotNil(drop.handle(key(.keyDown, 49)), "nothing listens once the step is gone")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(takes.texts, [])
+    }
+
+    /// A tap shortcut (a combo here) starts with one press and ends with the
+    /// next; a combo needs its modifiers.
+    func testATapShortcutTogglesTheTake() async throws {
+        let combo = HotkeyTapCombo(keyCode: 2, modifiers: UInt32(cmdKey | shiftKey), keyTitle: "D")
+        let (drop, voice, takes, later) = previewDrop(.combo(combo), gesture: .tap)
+        defer { drop.detach() }
+        XCTAssertNotNil(drop.handle(key(.keyDown, 2, "d")), "without its modifiers it is just a letter")
+        XCTAssertFalse(voice.recording)
+        XCTAssertNil(drop.handle(key(.keyDown, 2, "d", flags: [.command, .shift])))
+        XCTAssertNil(drop.handle(key(.keyUp, 2, "d", flags: [.command, .shift])))
+        XCTAssertTrue(voice.recording, "a tap shortcut keeps recording after the key comes up")
+        later()
+        _ = drop.handle(key(.keyDown, 2, "d", flags: [.command, .shift]))
+        XCTAssertFalse(voice.recording)
+        try await eventually { !voice.working }
+        XCTAssertEqual(takes.texts, [OnboardingPreviewDrop.text])
+    }
+
+    /// From any Try Drop state, Skip and Back leave the step, a take running
+    /// included; the preview has its Drop stand-in and the app has none.
+    func testTryDropCanAlwaysBeLeft() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        XCTAssertTrue(model.dropStandIn is OnboardingPreviewDrop)
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        await model.useSpeechKey("sk-preview-0123456789abcdef", provider: .elevenLabs)
+        var guardSteps = 0
+        while model.step != .tryDrop, guardSteps < 30 { model.next(); guardSteps += 1 }
+        XCTAssertEqual(model.step, .tryDrop)
+        let index = try XCTUnwrap(model.steps.firstIndex(of: .tryDrop))
+        let before = model.steps[index - 1]
+        model.voice.phaseChanged(.recording)
+        model.next()
+        XCTAssertEqual(model.step, .hotkeys, "Skip while recording")
+        model.back()
+        XCTAssertEqual(model.step, .tryDrop)
+        model.voice.phaseChanged(.recording)
+        model.back()
+        XCTAssertEqual(model.step, before, "Back while recording")
+        model.voice.phaseChanged(.idle)
     }
 
     /// The ring shows the whole Toolbox catalog Settings lists (every tool

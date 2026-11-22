@@ -20,8 +20,9 @@ import Foundation
 /// shape check before any request); the first Allow on an access step comes
 /// back without the switch on (Not on yet), Allow again or Open System
 /// Settings pretends macOS granted it; the speech model
-/// "download" is a timer; on Try Drop, holding the capsule stands in for the Drop key. No hotkeys, event
-/// taps, stores or island are started.
+/// "download" is a timer; on Try Drop, holding the person's Drop shortcut in this window
+/// (Space by default) makes a pretend take (OnboardingPreviewDrop). No
+/// hotkeys, event taps, stores or island are started.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 public enum OnboardingPreview {
@@ -190,6 +191,7 @@ final class OnboardingPreviewSession {
                     default: break
                     }
                 }),
+            dropStandIn: OnboardingPreviewDrop(),
             isPreview: true,
             // OpenAI speech is shown here already; the app waits for its model.
             offersOpenAISpeech: true)

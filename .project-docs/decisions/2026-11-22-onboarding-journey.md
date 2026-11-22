@@ -452,11 +452,24 @@ window, Back and a progress bar.
   ("Your words land here"); the line under the field is empty at rest and
   only reports a take (let go to drop it, "No speech heard - try again.",
   "That's Drop - the same shortcut works in any app."); the header's right
-  label no longer says "real text field" (the lede does) or "try again"
-  (the line does). In the app there is no capsule until the text arrives,
-  then Continue; Skip stays. The standalone preview has no Drop, so it keeps
-  one capsule, "Preview take" with a microphone, that stands in for the
-  key while held and names what it is, not what to do. The other steps were
+  label no longer says "real text field" (the lede does) or "try again".
+  REV 63, the owner's exact choices: remove the line under the field
+  entirely ("No speech heard - try again." shows inside the empty field, in
+  amber); the field says only "Your text will appear here"; the button
+  under it is Continue, there from the start and active once a take
+  arrived, with Skip beside it. The preview's "Preview take" capsule of REV
+  62 is gone. It also had a bug the owner hit: the take started on the
+  capsule's drag gesture, the capsule was swapped for another view as the
+  take began, the gesture was torn down and its end never came, so the step
+  stayed recording; and Space did nothing in the preview, which starts no
+  hotkeys. Now the preview listens for the person's own Drop shortcut in
+  its window with a local event monitor (OnboardingPreviewDrop in
+  OnboardingPreviewKit, behind the app's OnboardingDropStandIn protocol, so
+  nothing of it is in the app), whatever has the focus, and swallows it so
+  Space is never typed into the field; hold starts a take and letting go
+  ends it (a tap shortcut toggles), and a take always ends: on release, on
+  the window or the app losing focus, after 30 s, and when the step goes
+  away. Skip and Back work during a take. The other steps were
   checked the same way: an access step's waiting copy no longer names
   System Settings three times ("Turn on Whytap, then come back here.", the
   pane's path, a "Waiting..." capsule, Open System Settings); its allowed
@@ -564,11 +577,15 @@ window, Back and a progress bar.
 
 ## What was tested
 
-- REV 62: Try Drop's placeholder names no key, the line under the field is
-  empty at rest and no state's line repeats the key instruction, and the
-  no-speech line is the failure itself; offscreen renders of Try Drop
-  waiting (preview capsule), recording, done and failed, and of every
-  access step in each state.
+- REV 62 and 63: Try Drop's field says "Your text will appear here" and a
+  failed take's line inside the field; the preview's Drop holds Space in
+  its window (swallowed, other keys pass, repeats ignored), letting go
+  drops the text, a quick tap brings nothing, a tap combo toggles and needs
+  its modifiers, losing the window or app focus and the 30 s limit end a
+  take, leaving the step ends it with nothing arriving later; Skip and Back
+  leave Try Drop while recording; the app's sources name no preview Drop;
+  offscreen renders of Try Drop waiting, recording, done and failed, and of
+  every access step in each state.
 
 - REV 61: the flow ends Shortcuts, Toolbox, Enjoy Whytap with no Help
   step (eleven segments by default), the last step has no timer and

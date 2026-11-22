@@ -81,7 +81,6 @@ struct OnboardingTryDropStage: View {
     @State private var motion = OnboardingFinaleMotion()
     /// The preview's pretend take, typed into the field as Drop would.
     @State private var take: String?
-    @State private var simulating = false
 
     init(model: OnboardingJourneyModel, shortcut: HotkeyShortcut, gesture: HotkeyGesture,
          shownState: OnboardingTryState? = nil, shownLevel: Double? = nil, shownText: String? = nil) {
@@ -111,23 +110,33 @@ struct OnboardingTryDropStage: View {
             figure.frame(height: 84)
             field
                 .padding(.horizontal, 44)
-            hint
-                .frame(height: 22)
-                .padding(.top, 7)
-            // The capsule is only a result (Continue); the field's header is
-            // the one place that says which key to hold.
+            // The field's header is the one place that says which key to
+            // hold; no line under the field. Continue is there from the
+            // start and works once a take arrived; Skip leaves any time,
+            // a take running included.
             // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
             HStack(spacing: 14) {
-                pill
-                if case .done = state {} else if case .recording = state {} else {
+                let done = state == .done
+                OnboardingWirePill("Continue", tone: done ? .done : .rest, disc: done ? .check : .arrow,
+                                   isDefault: done, interactive: done, action: model.next)
+                    .opacity(done ? 1 : 0.4)
+                    .accessibilityHint(done ? "" : "Available after your first take")
+                if !done {
                     OnboardingWireLink(title: "Skip", arrow: "arrow.right", action: model.next)
                 }
             }
             .frame(height: 46)
-            .padding(.top, 6)
+            .padding(.top, 22)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
+        // The standalone preview has no Drop: its stand-in listens for the
+        // person's Drop shortcut in the window while the step is shown.
+        .onAppear {
+            guard shownState == nil else { return }
+            model.dropStandIn?.attach(shortcut: shortcut, gesture: gesture, voice: voice) { text in take = text }
+        }
+        .onDisappear { model.dropStandIn?.detach() }
     }
 
     private var figure: some View {
@@ -188,7 +197,8 @@ struct OnboardingTryDropStage: View {
             .padding(.horizontal, 14)
             .frame(height: 36)
             .overlay(Rectangle().fill(OnboardingTheme.border).frame(height: 0.5), alignment: .bottom)
-            OnboardingTryField(placeholder: Self.placeholder,
+            OnboardingTryField(placeholder: Self.emptyText(state).text,
+                               placeholderColor: Self.emptyText(state).failed ? NSColor(OnboardingWireframeInk.amberColor) : nil,
                                take: take, onDictated: model.noteDictated)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -201,87 +211,14 @@ struct OnboardingTryDropStage: View {
     }
 
     /// The field's empty text: where the words go, not which key to hold.
-    static let placeholder = "Your words land here"
+    static let placeholder = "Your text will appear here"
 
-    /// The line under the field: only for a take that runs, arrived or
-    /// failed. Nothing at rest: the field's header already says which key.
-    static func hint(_ state: OnboardingTryState, holds: Bool) -> String {
-        switch state {
-        case .waiting: return ""
-        case .recording:
-            return holds ? "Let go to drop the text at your cursor." : "Press it again to drop the text at your cursor."
-        case .done: return "That’s Drop — the same shortcut works in any app."
-        case .failed(let reason): return reason
-        }
-    }
-
-    private var hint: some View {
-        Text(Self.hint(state, holds: holds))
-            .font(OnboardingTheme.sans(13))
-            .foregroundColor(state.tone.lineColor)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
-            .padding(.horizontal, 30)
-    }
-
-    @ViewBuilder private var pill: some View {
-        switch state {
-        case .done:
-            OnboardingWirePill("Continue", tone: .done, disc: .check, isDefault: true, action: model.next)
-        case .recording:
-            // The standalone preview keeps its capsule under the pointer
-            // while it is held; the app shows nothing here.
-            if model.isPreview { previewTake }
-        case .waiting, .failed:
-            // The app shows no capsule: the take starts with the key itself.
-            if model.isPreview { previewTake }
-        }
-    }
-
-    /// Only in the standalone preview, which has no Drop: holding this
-    /// capsule stands in for the key. It names what it is, not what to do.
-    private var previewTake: some View {
-        OnboardingWirePill(tone: state.tone, disc: .none, interactive: false, action: {}) {
-            Label("Preview take", systemImage: "mic")
-        }
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { _ in startPretendTake() }
-            .onEnded { _ in endPretendTake() })
-    }
-
-    private func startPretendTake() {
-        guard !simulating else { return }
-        simulating = true
-        voice.phaseChanged(.recording)
-        let voice = self.voice
-        Task { @MainActor in
-            var t = 0.0
-            while voice.recording {
-                t += 0.05
-                voice.setLevel(0.35 + 0.3 * abs(sin(t * 3.1)) + 0.15 * abs(sin(t * 7.3)))
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
-        }
-    }
-
-    private func endPretendTake() {
-        guard simulating else { return }
-        simulating = false
-        let voice = self.voice
-        let started = voice.startedAt ?? Date()
-        voice.phaseChanged(.transcribing)
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            // A tap with no speech brings nothing, like a real empty take.
-            if Date().timeIntervalSince(started) < 0.6 {
-                voice.phaseChanged(.idle)
-                return
-            }
-            voice.phaseChanged(.inserting)
-            take = "Moving our sync to Thursday at 3. I’ll send the new invite tonight."
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            voice.phaseChanged(.idle)
-        }
+    /// What the empty field says: the placeholder, or a take that brought
+    /// nothing here ("No speech heard - try again."), inside the field
+    /// instead of a line under it.
+    static func emptyText(_ state: OnboardingTryState) -> (text: String, failed: Bool) {
+        if case .failed(let reason) = state { return (reason, true) }
+        return (placeholder, false)
     }
 }
 

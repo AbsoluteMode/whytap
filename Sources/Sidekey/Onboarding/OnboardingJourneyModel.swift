@@ -127,6 +127,20 @@ final class OnboardingVoiceSignal: ObservableObject {
     func setLevel(_ value: Double) { level = max(0, min(1, value)) }
 }
 
+/// The standalone preview's stand-in for Drop on Try Drop (it lives in
+/// OnboardingPreviewKit, which the app does not link). The app has none:
+/// there Drop itself listens and inserts into the field.
+@MainActor
+protocol OnboardingDropStandIn: AnyObject {
+    /// Try Drop is shown: listen for the person's Drop shortcut, drive
+    /// `voice` like Drop's phases and hand over the take's text.
+    func attach(shortcut: HotkeyShortcut, gesture: HotkeyGesture, voice: OnboardingVoiceSignal,
+                deliver: @escaping (String) -> Void)
+    /// Try Drop is gone (Continue, Skip, Back or the window): stop listening
+    /// and end a take that is still running.
+    func detach()
+}
+
 /// Where an access step stands (the design pass's screen 04): Allow, then
 /// waiting for System Settings, then allowed and on to the next step; a
 /// return from System Settings with the switch still off is "not on yet",
@@ -237,6 +251,8 @@ final class OnboardingJourneyModel: ObservableObject {
     private let requests: OnboardingPermissionRequests?
     /// Drop's take while Try Drop is shown.
     let voice: OnboardingVoiceSignal
+    /// The standalone preview's Drop on Try Drop; nil in the app.
+    let dropStandIn: OnboardingDropStandIn?
     /// How long the take that reached the try field took, from the press.
     @Published private(set) var tryDropSeconds: Double?
     private var tryCheck: Task<Void, Never>?
@@ -282,6 +298,7 @@ final class OnboardingJourneyModel: ObservableObject {
         agentEnabled: (() -> Bool)? = nil,
         requests: OnboardingPermissionRequests? = nil,
         voice: OnboardingVoiceSignal? = nil,
+        dropStandIn: OnboardingDropStandIn? = nil,
         isPreview: Bool = false,
         offersOpenAISpeech: Bool? = nil
     ) {
@@ -311,6 +328,7 @@ final class OnboardingJourneyModel: ObservableObject {
         self.requests = requests
         self.isPreview = isPreview
         self.voice = voice ?? OnboardingVoiceSignal(appState: isPreview ? nil : .shared)
+        self.dropStandIn = dropStandIn
 
         let llm = models.sharedRow(.llm)
         let snapshot = permissions.snapshot

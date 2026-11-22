@@ -88,46 +88,52 @@ struct SharedModelRow: Equatable, Identifiable {
     var needsSetup: Bool { (choice == nil && !isMixed) || !unset.isEmpty }
 }
 
-/// Pure planning over the picker sections of each feature, so whatever the
-/// pickers offer (key status, catalog capabilities, a server's speech/LLM
-/// split) also decides what a shared choice reaches.
+/// Pure planning over what each feature's picker offers, so whatever the
+/// pickers allow (key status, catalog capabilities, a server's speech/LLM
+/// split, a typed name) also decides what a shared choice reaches. It asks
+/// one model at a time (`ModelStatusResolver.pickerReach`) and never builds
+/// a picker list: Settings recomputes the rows on every preference change.
 @MainActor
 struct SharedModelPlanner {
-    /// The picker section of one account for one feature (memoized by the caller).
-    let section: (AIFeature, ProviderAccount) -> PickerSection?
+    /// What `feature`'s picker does with `model` of `account` (memoized by the caller).
+    let reach: (String, ProviderAccount, AIFeature) -> PickerReach
     let route: (AIFeature) -> FeatureRoute?
-    /// Why the resolver rules a model out for a feature, if it does.
-    let unsupportedReason: (String, ProviderAccount, AIFeature) -> String?
 
     /// The route a shared `choice` gives `feature`: the chosen model where the
     /// feature's picker offers it; for recorded speech (Meetings) the
     /// provider's recorded counterpart (ElevenLabs Scribe v3 for v3 Live,
-    /// Soniox's async model); otherwise nothing, with the reason. An LLM is
+    /// Soniox's async model); otherwise nothing, with the reason. A model the
+    /// feature's picker rules out is never taken, typed or not (a server set
+    /// to Language models gives its LLM to no speech feature). An LLM is
     /// never swapped for another model: a feature it cannot serve keeps its
     /// own route.
     func plan(_ choice: FeatureRoute, for feature: AIFeature) -> SharedPlanItem {
         let provider = choice.account.kind.displayName
-        guard let section = section(feature, choice.account) else {
+        func taken(_ model: String) -> SharedPlanItem {
+            SharedPlanItem(feature: feature, route: FeatureRoute(account: choice.account, model: model), skipReason: nil)
+        }
+        let direct = reach(choice.model, choice.account, feature)
+        switch direct {
+        case .noSection:
             return SharedPlanItem(feature: feature, route: nil, skipReason: "\(provider) can't serve \(feature.title)")
+        case .offered:
+            return taken(choice.model)
+        case .ruledOut, .typed, .notListed:
+            break
         }
-        func offered(_ model: String) -> Bool {
-            section.options.contains { option in
-                guard option.model == model else { return false }
-                if case .notSupported = option.state { return false }
-                return true
-            }
+        if feature.mode == .recorded, let counterpart = Self.recordedCounterpart(of: choice),
+           counterpart != choice.model, reach(counterpart, choice.account, feature) == .offered {
+            return taken(counterpart)
         }
-        if offered(choice.model) || (section.acceptsModelName && section.options.isEmpty) {
-            return SharedPlanItem(feature: feature, route: FeatureRoute(account: choice.account, model: choice.model), skipReason: nil)
-        }
-        if feature.mode == .recorded, let counterpart = Self.recordedCounterpart(of: choice), offered(counterpart) {
-            return SharedPlanItem(feature: feature, route: FeatureRoute(account: choice.account, model: counterpart), skipReason: nil)
-        }
-        if let reason = unsupportedReason(choice.model, choice.account, feature) {
+        switch direct {
+        case .ruledOut(let reason):
             return SharedPlanItem(feature: feature, route: nil, skipReason: reason)
+        case .typed:
+            return taken(choice.model)
+        default:
+            let what = feature.mode == .recorded ? "no recorded-audio model" : "doesn't offer \(choice.model) here"
+            return SharedPlanItem(feature: feature, route: nil, skipReason: "\(provider) has \(what)")
         }
-        let what = feature.mode == .recorded ? "no recorded-audio model" : "doesn't offer \(choice.model) here"
-        return SharedPlanItem(feature: feature, route: nil, skipReason: "\(provider) has \(what)")
     }
 
     func plan(_ choice: FeatureRoute, kind: SharedModelKind) -> [SharedPlanItem] {

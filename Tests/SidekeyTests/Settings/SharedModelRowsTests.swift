@@ -247,6 +247,60 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(notes.contains { $0.contains("answered 404") }, "\(notes)")
     }
 
+    /// Build queue 397: a server set to Language models has an empty speech
+    /// list, so the shared Speech picker takes a typed name. Typing its LLM
+    /// there must be refused like Advanced refuses it, before any check or
+    /// write; a name the server does not list stays allowed.
+    func test_typed_model_on_a_language_only_server_is_refused_like_in_advanced() async throws {
+        let env = try makeEnv(keyed: [])
+        let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:11434/v1")
+        env.routing.setModelKinds(.language, forServer: server.id)
+        let account = ProviderAccount.server(server.id)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        try JSONEncoder().encode([account.storageID: fresh([CatalogModel(id: "qwen3:8b")])]).write(to: file)
+        let env2 = Env(routing: env.routing, keys: env.keys, catalogs: ModelCatalogStore(fileURL: file, fetcher: Offline()),
+                       checks: env.checks, keyStatuses: env.keyStatuses)
+        let vm = env2.makeViewModel()
+        let speechSection = try XCTUnwrap(vm.sharedSections(.speech).first { $0.account == account })
+        XCTAssertTrue(speechSection.acceptsModelName, "the empty speech list takes a typed name")
+        XCTAssertTrue(speechSection.options.isEmpty)
+
+        // Advanced refuses it without a check.
+        await vm.select(model: "qwen3:8b", account: account, for: .dropFast)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+
+        let applied = await vm.selectShared(model: "qwen3:8b", account: account, kind: .speech, replaceCustom: false)
+        XCTAssertFalse(applied)
+        XCTAssertTrue(env2.probe.calls.isEmpty, "\(env2.probe.calls)")
+        XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { env.routing.route(for: $0) == nil })
+        let notes = try row(.speech, vm).notes
+        XCTAssertEqual(notes.count, SharedModelKind.speech.features.count)
+        XCTAssertTrue(notes.allSatisfy { $0.contains("not a speech model") }, "\(notes)")
+
+        // A model the server does not list is still the user's to type.
+        let typed = await vm.selectShared(model: "parakeet-rt", account: account, kind: .speech, replaceCustom: false)
+        XCTAssertTrue(typed)
+        XCTAssertEqual(env2.probe.calls.map(\.model), ["parakeet-rt"])
+        for feature in SharedModelKind.speech.features {
+            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: account, model: "parakeet-rt"), "\(feature)")
+        }
+    }
+
+    /// Build queue 397: the rows are recomputed when Settings opens and on
+    /// every preference change, so they must not build picker lists. A
+    /// 2,500-model OpenRouter cache cost 3.7 s on the main actor when they did.
+    func test_rows_stay_fast_with_a_large_cached_catalog() throws {
+        let models = (0..<2_500).map { llm("vendor/model-\($0)") }
+        let env = try makeEnv(snapshots: [.openRouter: fresh(models)], keyed: [.openRouter])
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "vendor/model-1200"), for: .dropSmartCleanup)
+        let start = Date()
+        let vm = env.makeViewModel()
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(try row(.llm, vm).label, "OpenRouter · vendor/model-1200 · 3 not set")
+        XCTAssertLessThan(elapsed, 1.0, "view model init took \(elapsed) s")
+    }
+
     // MARK: - Offscreen renders
 
     /// The top of Models in three states: nothing set, both rows filled, and

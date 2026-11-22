@@ -1,10 +1,11 @@
 # Customize Whytap with your coding agent
 
 Use a local source checkout with Claude Code, Codex, OpenCode or another coding
-harness. Each reads the same architecture, commands and contracts in `AGENTS.md`
-or `CLAUDE.md`. The helpers below do not depend on a particular agent provider.
+harness. Each starts from the same short `AGENTS.md` (or `CLAUDE.md`) and the
+architecture, commands and contracts in [`docs/architecture.md`](../architecture.md). The helpers below do not depend on a particular agent provider.
 
 For the maintainer's parallel feature sessions, first read
+[the team runbook](../../.project-docs/processes/team-runbook.md) and
 [Parallel development, one working Whytap](../../.project-docs/processes/shared-app-development.md).
 Workers build/test in their own worktrees; one integrator updates the shared
 installed app and reports its included features and acceptance steps. The
@@ -54,7 +55,8 @@ target is `Sources/SidekeyApp/`; `Sidekey` is the internal module name.
 
 ## Edit, check, inspect
 
-1. Read `AGENTS.md`, the focused guide and any `// WHY:` document beside the code.
+1. Read `AGENTS.md`, the section of `docs/architecture.md` for the area, the
+   focused guide and any `// WHY:` document beside the code.
 2. Make the requested change on a branch. Preserve unrelated local changes.
 3. Run focused tests and compile the native app without launching it:
 

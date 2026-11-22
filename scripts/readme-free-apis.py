@@ -114,7 +114,16 @@ def card(o, theme):
 # as approximate; Maxim chose the figure on 2026-11-21.
 PAID_YEARLY = "$600"  # shown struck through; the caption and alt say it is approximate
 WIDTH = {"wide": 860, "phone": 300}  # shown 100% wide, like the code blocks
-QUOTAS = "Everyday use fits in the free quotas."
+# The app is free; usage is not. Whytap is for people who already have
+# provider keys, API credits from a ChatGPT or Claude plan, or their own
+# servers: the free tiers below are for trying it, not a promise that
+# everyday use stays free (the earlier "Everyday use fits in the free quotas"
+# was removed on 2026-11-22).
+# WHY: .project-docs/decisions/2026-11-21-free-api-report.md
+QUOTAS = "Whytap is free. Your providers bill your own keys."
+QUOTAS_PHONE = "Providers bill your own keys."
+INTRO = ("Whytap itself costs nothing. It runs on keys, API credits or servers you already have; "
+         "the free tiers below are for trying it out.")
 # Ways to run Whytap without paying for a subscription (CLAUDE.md: BYOK, the
 # On this Mac speech model on Apple Silicon, OpenAI-compatible self-hosted
 # servers for text and realtime speech). The phone banner uses shorter words.
@@ -174,7 +183,7 @@ def banner(theme, layout, checked):
     items = facts(checked)
     lines = [" · ".join(items)] if wide else [" · ".join(items[:2]), items[2]]
     y_quota = y_rule + (34 if wide else 24)
-    rows.append(_text(mid, y_quota, 16 if wide else 12, c["ink"], QUOTAS, "600"))
+    rows.append(_text(mid, y_quota, 16 if wide else 12, c["ink"], QUOTAS if wide else QUOTAS_PHONE, "600"))
     step = 23 if wide else 16
     rows += [_text(mid, y_quota + step * (i + 1), 13.5 if wide else 10.5, c["sub"], line) for i, line in enumerate(lines)]
     y_rule2 = y_quota + step * len(lines) + (22 if wide else 16)
@@ -370,6 +379,8 @@ def section():
            + ", ".join(facts(newest)) + f". Similar paid apps cost about {PAID_YEARLY} a year; Whytap is $0.")
     return "\n".join([
         HEADING,
+        "",
+        f"<p align=\"center\">{INTRO}</p>",
         "",
         f"<p align=\"center\">{responsive('summary', alt, '100%')}</p>",
         "",

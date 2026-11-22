@@ -694,6 +694,10 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Shared Speech / LLM
 
+    /// The route a feature runs on now (onboarding reads it to leave a
+    /// newer choice alone).
+    func currentRoute(for feature: AIFeature) -> FeatureRoute? { routing.route(for: feature) }
+
     func sharedRow(_ kind: SharedModelKind) -> SharedModelRow? {
         sharedRows.first { $0.kind == kind }
     }
@@ -710,8 +714,12 @@ final class APIAndModelsViewModel: ObservableObject {
     /// passed tool-use check also covers plain text on the same model. Nothing
     /// changes for a model whose check fails.
     // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    /// `stillWanted` is asked once the checks are done, right before any
+    /// route changes: a caller whose person moved on (onboarding's Skip)
+    /// answers false and nothing is assigned.
     @discardableResult
-    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool) async -> Bool {
+    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool,
+                      stillWanted: @MainActor () -> Bool = { true }) async -> Bool {
         guard !sharedChecking.contains(kind) else { return false }
         let planner = makePlanner()
         let before = planner.row(kind: kind, title: title(of:))
@@ -771,7 +779,7 @@ final class APIAndModelsViewModel: ObservableObject {
             }
         }
         sharedChecking.remove(kind)
-        guard !Task.isCancelled else { recompute(); return false }
+        guard !Task.isCancelled, stillWanted() else { recompute(); return false }
 
         var assigned = 0
         for target in targets where !refused.contains(target.feature) {

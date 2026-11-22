@@ -1535,12 +1535,8 @@ struct OnboardingKeyStage: View {
     @ViewBuilder private var trailing: some View {
         if let problem, problem.offersRetry {
             Button("Retry", action: submit)
-                .buttonStyle(.plain)
+                .buttonStyle(OnboardingFeedbackButtonStyle(shape: .capsule))
                 .font(OnboardingTheme.sans(12, weight: .semibold))
-                .foregroundColor(OnboardingTheme.ink)
-                .padding(.horizontal, 13)
-                .frame(height: 32)
-                .background(Capsule().fill(Color.white.opacity(0.12)))
         } else {
             let ready = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saved
             Button(action: submit) {
@@ -1551,7 +1547,7 @@ struct OnboardingKeyStage: View {
                     .background(Circle().fill(accepted ? OnboardingTheme.green.opacity(0.16)
                                               : checking ? Color.clear : ready ? Color.white : Color.white.opacity(0.08)))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(OnboardingFeedbackButtonStyle(shape: .circle))
             .disabled(!ready || checking || accepted)
             .accessibilityLabel(accepted ? "Key accepted" : checking ? "Checking" : "Check key")
         }
@@ -2052,4 +2048,73 @@ private struct OnboardingModelRow: View {
 
 extension OnboardingStepOutcome {
     var failureText: String? { if case .failed(let text) = self { return text } else { return nil } }
+}
+
+
+/// Hover, press, focus and unavailable states for onboarding's small
+/// controls (footer Skip / Set up later, a key's Submit and Retry): the
+/// pointer over an available control lights it and shows the pointing hand,
+/// a press sinks it, keyboard focus rings it, an unavailable one stays quiet
+/// and ignores the pointer.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+struct OnboardingFeedbackButtonStyle: ButtonStyle {
+    enum Shape { case text, capsule, circle }
+    let shape: Shape
+
+    func makeBody(configuration: Configuration) -> some View {
+        Styled(configuration: configuration, shape: shape)
+    }
+
+    private struct Styled: View {
+        let configuration: Configuration
+        let shape: Shape
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.isFocused) private var focused
+        @State private var hovered = false
+
+        private var lit: Bool { hovered && enabled }
+
+        var body: some View {
+            styled
+                .scaleEffect(configuration.isPressed && enabled ? 0.95 : lit && shape == .circle ? 1.05 : 1)
+                .animation(.easeOut(duration: 0.12), value: lit)
+                .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+                .onHover { inside in
+                    hovered = inside
+                    if inside, enabled { NSCursor.pointingHand.set() } else if !inside { NSCursor.arrow.set() }
+                }
+                .onChange(of: enabled) { _, now in if !now, hovered { NSCursor.arrow.set() } }
+        }
+
+        @ViewBuilder private var styled: some View {
+            switch shape {
+            case .text:
+                configuration.label
+                    .foregroundColor(lit ? OnboardingTheme.ink : OnboardingTheme.muted)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.12 : lit ? 0.07 : 0)))
+                    .overlay(Capsule().strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
+                    .contentShape(Capsule())
+                    .opacity(enabled ? 1 : 0.45)
+            case .capsule:
+                configuration.label
+                    .foregroundColor(OnboardingTheme.ink)
+                    .padding(.horizontal, 13)
+                    .frame(height: 32)
+                    .background(Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.26 : lit ? 0.2 : 0.12)))
+                    .overlay(Capsule().strokeBorder(focused ? OnboardingTheme.accent
+                                                    : Color.white.opacity(lit ? 0.18 : 0), lineWidth: focused ? 2 : 1))
+                    .contentShape(Capsule())
+                    .opacity(enabled ? 1 : 0.45)
+            case .circle:
+                configuration.label
+                    .brightness(configuration.isPressed && enabled ? -0.12 : 0)
+                    .overlay(Circle().strokeBorder(focused ? OnboardingTheme.accent
+                                                   : Color.white.opacity(lit ? 0.55 : 0), lineWidth: focused ? 2 : 1.5))
+                    .shadow(color: Color.white.opacity(lit ? 0.22 : 0), radius: 6)
+                    .contentShape(Circle())
+            }
+        }
+    }
 }

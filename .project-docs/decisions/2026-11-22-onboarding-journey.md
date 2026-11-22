@@ -135,7 +135,16 @@ window, Back and a progress bar.
 - **The latest choice wins.** As on the 2026-11-21 speech page, every speech
   or language model action takes a new number; a key check, model check or
   download that answers after a newer action of its kind changes no route and
-  moves nothing, and a late key save keeps only the key.
+  moves nothing, and a late key save keeps only the key. Skip and Set up
+  later are such an action too (the builder's review of ticket 421/457: a
+  key check or model check still running after Skip set the skipped route):
+  `skip()` takes a new number for the step's kind, and `selectShared` asks
+  the caller once its checks are done, right before any route changes
+  (`stillWanted`), so a check that ends after Skip assigns nothing; a key it
+  saved stays saved. On this Mac's download holds the onboarding model until
+  it lands (it held it weakly, so closing the window mid-download lost the
+  route), and it applies the route only if no newer speech choice came
+  meanwhile, here or in Settings (the pickerFeature route is unchanged).
 - **LLM preselection:** the Agent's registry model when there is one
   (Anthropic `claude-sonnet-5-5`, OpenRouter `anthropic/claude-sonnet-5.5`);
   OpenAI has none, so the newest model in its live catalog that the Agent
@@ -145,7 +154,15 @@ window, Back and a progress bar.
   the focused-field check and Escape; the microphone gates Drop, Agent voice
   and meetings; Input Monitoring is only the tap's fallback; Post Event has
   no separate pane on current macOS and the paste engine no longer gates on
-  it; System Audio Recording and Automation stay asked at first use.
+  it; System Audio Recording and Automation stay asked at first use. A
+  switch turned off after it was granted takes the step back out of
+  "allowed" (and stops its move), and a fresh grant completes it again; a
+  step's state follows the system's answer both ways, not only up.
+- **Small controls answer the pointer.** Footer Skip / Set up later and a
+  key's Submit and Retry use `OnboardingFeedbackButtonStyle`: a lit fill or
+  ring and the pointing hand on hover, a sink on press, an accent ring on
+  keyboard focus; an unavailable control stays quiet and ignores the
+  pointer (the builder's review: they had a static look).
 - **Search, step 4.** Anthropic (Messages `web_search` server tool), OpenAI
   (Responses `web_search`) and OpenRouter (`openrouter:web_search`) each have
   built-in search at about $10 per 1,000 searches plus result tokens, so a
@@ -632,6 +649,12 @@ window, Back and a progress bar.
 
 ## What was tested
 
+- Builder findings (ticket 421/457): Skip during a speech or language
+  model key check and during the model check sets no route; On this Mac
+  sets the route after the window closes mid-download, lets the model go
+  afterwards and leaves a newer speech choice alone; revoking Keyboard
+  control, Microphone, Input Monitoring and Screen Recording clears each
+  step's allowed state and a new grant restores it.
 - REV 69: the question pool has at least sixteen distinct one-line
   questions; four rows in full at rest and after each whole row, a fifth
   rising in mid-step, the last row leading back to the first, every

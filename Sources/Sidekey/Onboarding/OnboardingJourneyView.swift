@@ -160,10 +160,9 @@ struct OnboardingJourneyView: View {
                   !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
             // Step 1 has no skip: its two figures are the choice. Screen
             // Recording and Try Drop have their own Skip under the capsule.
-            Button(model.step.isOptional ? "Skip" : "Set up later", action: model.next)
-                .buttonStyle(.plain)
+            Button(model.step.isOptional ? "Skip" : "Set up later", action: model.skip)
+                .buttonStyle(OnboardingFeedbackButtonStyle(shape: .text))
                 .font(OnboardingTheme.sans(12, weight: .medium))
-                .foregroundColor(OnboardingTheme.muted)
                 .help(model.step.isOptional ? "Skip this step" : "Continue without it; it's in Settings any time")
         }
     }

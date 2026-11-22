@@ -42,9 +42,14 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     private actor FakeStore: OnDeviceSpeechModelManaging {
         let present: Box<Bool>
-        init(present: Box<Bool>) { self.present = present }
+        /// While true, a download waits (the test lets it land).
+        let held: Box<Bool>
+        init(present: Box<Bool>, held: Box<Bool> = Box(false)) { self.present = present; self.held = held }
         func status() -> OnDeviceSpeechModelStatus { present.value ? .ready : .notDownloaded }
-        func download(progress: (@Sendable (Double) -> Void)?) async throws { present.value = true }
+        func download(progress: (@Sendable (Double) -> Void)?) async throws {
+            while held.value { try await Task.sleep(nanoseconds: 5_000_000) }
+            present.value = true
+        }
         func delete() async throws { present.value = false }
         func acquire() async throws -> AsrManager { throw NoModel() }
         func release() {}
@@ -71,6 +76,17 @@ final class OnboardingJourneyModelTests: XCTestCase {
         }
         func probe(_ route: ResolvedRoute, use: ModelUse, catalog: CatalogModel?) async -> ProbeOutcome { .passed }
         func endpoints(model: String, apiKey: String) async throws -> [OpenRouterEndpoint] { [] }
+    }
+
+    /// A model check that waits while `held` is true, then passes.
+    private struct HeldProbe: ModelProbing {
+        let held: Box<Bool>
+        let started: Box<Int>
+        func probe(_ route: ResolvedRoute, use: ModelUse, catalog: CatalogModel?) async -> ProbeOutcome {
+            started.value += 1
+            while held.value { try? await Task.sleep(nanoseconds: 5_000_000) }
+            return .passed
+        }
     }
 
     /// A key check that waits for the test for the listed key values.
@@ -112,6 +128,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let modelPresent: Box<Bool>
         let snapshot: Box<PermissionsHelper.Snapshot>
         let screen: Box<Bool>
+        let downloadHeld = Box(false)
         let beat = Beat()
     }
 
@@ -132,7 +149,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            hotkey: DropHotkeyStatus = .accessibilityRequired,
                            keyChecker: ProviderKeyChecking? = nil,
                            offersOpenAISpeech: Bool = false, isPreview: Bool = false,
-                           realCatalogs: Bool = false) throws -> OnboardingJourneyModel {
+                           realCatalogs: Bool = false, probe: ModelProbing? = nil,
+                           heldForTeardown: Bool = true) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -151,7 +169,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             catalogs: ModelCatalogStore(fileURL: catalogURL,
                                         fetcher: realCatalogs ? OnboardingPreviewProviders() as ModelCatalogFetching : offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
-            keyChecker: keyChecker ?? offline, probe: offline, serverModelChecker: OnboardingPreviewProviders(),
+            keyChecker: keyChecker ?? offline, probe: probe ?? offline, serverModelChecker: OnboardingPreviewProviders(),
             endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
         let snapshot = env.snapshot
         let screen = env.screen
@@ -166,7 +184,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let tavily = TavilySettings(keys: env.keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
         let model = OnboardingJourneyModel(
             models: models, permissions: permissions,
-            onDevice: OnDeviceSpeechModelController(store: FakeStore(present: env.modelPresent)),
+            onDevice: OnDeviceSpeechModelController(store: FakeStore(present: env.modelPresent, held: env.downloadHeld)),
             dropSpeech: OnboardingDropSpeech(routing: env.routing, keys: env.keys, onDevice: readiness, mode: { .fast }),
             supportsOnDevice: supportsOnDevice,
             preferences: PrivacyPreferences(defaults: env.defaults),
@@ -176,7 +194,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             tavily: tavily,
             isPreview: isPreview,
             offersOpenAISpeech: offersOpenAISpeech)
-        addTeardownBlock { model.stop() }
+        if heldForTeardown { addTeardownBlock { model.stop() } }
         return model
     }
 
@@ -348,6 +366,106 @@ final class OnboardingJourneyModelTests: XCTestCase {
             XCTAssertEqual(env.routing.route(for: feature)?.account, .elevenLabs, "\(feature) keeps the later choice")
         }
         XCTAssertTrue(model.keySaved(.soniox), "the earlier key stays saved")
+    }
+
+    // MARK: - Skip while a check runs (builder findings, ticket 421/457)
+
+    /// Skip leaves a step's routes as they were: a key check still running
+    /// answers for nobody, though the key it saved stays saved.
+    func testSkippingDuringASpeechKeyCheckSetsNoRoute() async throws {
+        let env = try makeEnv()
+        let checker = GatedChecker(gated: ["sk-soniox-0123456789abcdef"])
+        let model = try makeModel(env, keyChecker: checker)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        let check = Task { await model.useSpeechKey("sk-soniox-0123456789abcdef", provider: .soniox) }
+        try await eventually { checker.isWaiting("sk-soniox-0123456789abcdef") }
+        model.skip()
+        XCTAssertNotEqual(model.step, .speechKey)
+        checker.release("sk-soniox-0123456789abcdef")
+        await check.value
+        for feature in speechFeatures {
+            XCTAssertNil(env.routing.route(for: feature), "\(feature): skipped, so unset")
+        }
+        XCTAssertNotEqual(model.outcome(.speechKey), .working("Checking the Soniox key…"))
+    }
+
+    func testSkippingDuringALanguageModelKeyCheckSetsNoRoute() async throws {
+        let env = try makeEnv()
+        let checker = GatedChecker(gated: ["sk-ant-api03-0123456789abcdef"])
+        let model = try makeModel(env, keyChecker: checker)
+        while model.step != .llmKey { model.next() }
+        let check = Task { await model.useLLMKey("sk-ant-api03-0123456789abcdef", provider: .anthropic) }
+        try await eventually { checker.isWaiting("sk-ant-api03-0123456789abcdef") }
+        model.skip()
+        checker.release("sk-ant-api03-0123456789abcdef")
+        await check.value
+        for feature in llmFeatures {
+            XCTAssertNil(env.routing.route(for: feature), "\(feature): skipped, so unset")
+        }
+    }
+
+    /// Skip during the model check that follows an accepted key: nothing is
+    /// assigned when the check ends. (Speech models need no such check.)
+    func testSkippingDuringTheModelCheckSetsNoRoute() async throws {
+        for kind in [SharedModelKind.llm] {
+            let env = try makeEnv()
+            let held = Box(true), started = Box(0)
+            let model = try makeModel(env, probe: HeldProbe(held: held, started: started))
+            let task: Task<Void, Never>
+            if kind == .speech {
+                model.chooseYourKey()
+                try await endBeat(env, until: .speechKey, in: model)
+                task = Task { await model.useSpeechKey("sk-soniox-0123456789abcdef", provider: .soniox) }
+            } else {
+                while model.step != .llmKey { model.next() }
+                task = Task { await model.useLLMKey("sk-ant-api03-0123456789abcdef", provider: .anthropic) }
+            }
+            try await eventually { started.value > 0 }
+            model.skip()
+            held.value = false
+            await task.value
+            for feature in kind == .speech ? speechFeatures : llmFeatures {
+                XCTAssertNil(env.routing.route(for: feature), "\(kind) \(feature): skipped during the model check")
+            }
+        }
+    }
+
+    // MARK: - On this Mac outlives the window
+
+    /// Closing onboarding mid-download still sets the route once the model
+    /// lands, and the model is let go afterwards.
+    func testOnThisMacSetsTheRouteAfterTheWindowCloses() async throws {
+        let env = try makeEnv()
+        env.downloadHeld.value = true
+        weak var released: OnboardingJourneyModel?
+        do {
+            let model = try makeModel(env, heldForTeardown: false)
+            model.chooseOnThisMac()
+            model.stop()
+            released = model
+        }
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        XCTAssertNotNil(released, "the download holds the model while it runs")
+        env.downloadHeld.value = false
+        try await eventually { env.routing.route(for: .dropFast)?.account == .thisMac }
+        // The test's beat stands in for step 1's short pause; let it end.
+        env.beat.end()
+        try await eventually { released == nil }
+    }
+
+    /// A speech choice made meanwhile (Settings, say) is newer and stays.
+    func testOnThisMacLeavesANewerSpeechChoiceAlone() async throws {
+        let env = try makeEnv()
+        env.downloadHeld.value = true
+        let model = try makeModel(env)
+        model.chooseOnThisMac()
+        let newer = FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRealtimeModel)
+        env.routing.setRoute(newer, for: .dropFast)
+        env.downloadHeld.value = false
+        try await eventually { env.modelPresent.value }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(env.routing.route(for: .dropFast), newer)
     }
 
     // MARK: - Language model and search
@@ -603,6 +721,41 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.permissions.refresh(restartRecoveryPolling: false)
         try await endBeat(env, until: .screenRecording, in: model)
         XCTAssertFalse(model.steps.contains(.inputMonitoring))
+    }
+
+    /// A switch turned off after it was granted: the step no longer says
+    /// allowed; turned on again, it is allowed again.
+    func testARevokedPermissionClearsItsGrantedState() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, hotkey: .inputMonitoringRequired)
+        let refresh = { model.permissions.refresh(restartRecoveryPolling: false) }
+        func grant(keyboard: Bool, microphone: Bool) {
+            env.snapshot.value = .init(accessibilityGranted: keyboard, microphoneStatus: microphone ? .authorized : .denied)
+        }
+        grant(keyboard: true, microphone: true)
+        env.screen.value = true
+        refresh()
+        AppState.shared.dropHotkeyStatus = .ready
+        try await eventually {
+            [.keyboard, .microphone, .screenRecording, .inputMonitoring].allSatisfy { model.accessState($0) == .granted }
+        }
+        grant(keyboard: false, microphone: false)
+        env.screen.value = false
+        refresh()
+        AppState.shared.dropHotkeyStatus = .inputMonitoringRequired
+        try await eventually {
+            [.keyboard, .microphone, .screenRecording, .inputMonitoring].allSatisfy { model.accessState($0) != .granted }
+        }
+        for step in [OnboardingStep.keyboard, .microphone, .screenRecording, .inputMonitoring] {
+            XCTAssertFalse(model.outcome(step).isDone, "\(step) no longer says allowed")
+        }
+        grant(keyboard: true, microphone: true)
+        env.screen.value = true
+        refresh()
+        AppState.shared.dropHotkeyStatus = .ready
+        try await eventually {
+            [.keyboard, .microphone, .screenRecording, .inputMonitoring].allSatisfy { model.accessState($0) == .granted }
+        }
     }
 
     func testAPermissionGrantedWhileAnotherStepShowsDoesNotMove() async throws {

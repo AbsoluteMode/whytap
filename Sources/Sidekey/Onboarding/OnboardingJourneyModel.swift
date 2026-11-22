@@ -424,6 +424,19 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The step after this one, for "Next: Language".
     var nextStep: OnboardingStep? { OnboardingJourney.next(after: step, in: steps) }
 
+    /// Skip or Set up later: go on and leave this step's route as it was. A
+    /// key or model check still running answers for nobody now (a key it
+    /// saved stays saved, but no route changes).
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    func skip() {
+        let kinds: [OnboardingStep: SharedModelKind] = [.speechKey: .speech, .llmKey: .llm]
+        if let kind = kinds[step] {
+            _ = begin(kind)
+            if case .working = latest(step) { outcomes[step] = .idle }
+        }
+        next()
+    }
+
     /// Next, Set up later, Skip, Return or the pill: go on now.
     func next() {
         guard let next = OnboardingJourney.next(after: step, in: steps) else { return finish() }
@@ -535,7 +548,10 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// On this Mac: download the model (or use the downloaded one) and give it
     /// every speech feature it serves. The download and the route outlive the
-    /// window, like before.
+    /// window, like before: the download's task holds this model until it
+    /// lands, so closing onboarding mid-download still sets the route, unless
+    /// a newer speech choice came first (here, or in Settings meanwhile).
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
     func chooseOnThisMac() {
         let action = begin(.speech)
         progress.source = .onThisMac
@@ -546,10 +562,12 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         outcomes[.source] = .working("Downloading the speech model…")
         let controller = onDevice
-        Task { @MainActor [weak self] in
+        let speech = SharedModelKind.speech.pickerFeature
+        let before = models.currentRoute(for: speech)
+        Task { @MainActor in
             let landed = await controller.download()
-            guard let self else { return }
             guard self.isLatest(action, .speech) else { return }
+            guard self.models.currentRoute(for: speech) == before else { return }
             if landed { await self.applyOnDevice(advance: false, action: action) } else { self.outcomes[.source] = .failed("The download did not finish. Try again or use your key.") }
         }
         // Starting the download is this step's success; it goes on in the background.
@@ -559,7 +577,8 @@ final class OnboardingJourneyModel: ObservableObject {
     private func applyOnDevice(advance: Bool, action: Int) async {
         guard isLatest(action, .speech) else { return }
         let applied = await models.selectShared(model: OnDeviceSpeechModel.parakeetTdtV3.rawValue, account: .thisMac,
-                                                kind: .speech, replaceCustom: false)
+                                                kind: .speech, replaceCustom: false,
+                                                stillWanted: { self.isLatest(action, .speech) })
         guard isLatest(action, .speech) else { return }
         notes = models.sharedRow(.speech)?.notes ?? []
         if applied || dropSpeech.isReady {
@@ -602,7 +621,8 @@ final class OnboardingJourneyModel: ObservableObject {
             succeed(.speechKey, "\(provider.displayName) speech", route: .provider(provider))
             return
         }
-        let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)
+        let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false,
+                                                stillWanted: { [weak self] in self?.isLatest(action, .speech) ?? false })
         guard isLatest(action, .speech) else { return }
         notes = models.sharedRow(.speech)?.notes ?? []
         guard applied || dropSpeech.isReady else {
@@ -754,7 +774,8 @@ final class OnboardingJourneyModel: ObservableObject {
         choosingModel = step
         defer { if choosingModel == step { choosingModel = nil } }
         if step == .llmKey { llmModel = id }
-        let applied = await models.selectShared(model: id, account: account, kind: kind, replaceCustom: false)
+        let applied = await models.selectShared(model: id, account: account, kind: kind, replaceCustom: false,
+                                                stillWanted: { [weak self] in self?.isLatest(action, kind) ?? false })
         guard isLatest(action, kind) else { return }
         notes = models.sharedRow(kind)?.notes ?? []
         revision += 1
@@ -886,7 +907,8 @@ final class OnboardingJourneyModel: ObservableObject {
                 outcomes[step] = .failed(problem); return
             }
         }
-        let applied = await models.selectShared(model: name, account: account, kind: shared, replaceCustom: false)
+        let applied = await models.selectShared(model: name, account: account, kind: shared, replaceCustom: false,
+                                                stillWanted: { [weak self] in self?.isLatest(action, shared) ?? false })
         guard isLatest(action, shared) else { return }
         notes = models.sharedRow(shared)?.notes ?? []
         guard applied || models.sharedRow(shared)?.choice != nil else {
@@ -922,7 +944,8 @@ final class OnboardingJourneyModel: ObservableObject {
             outcomes[.llmKey] = .failed("\(provider.displayName) lists no model the Agent can use")
             return
         }
-        let applied = await models.selectShared(model: model, account: account, kind: .llm, replaceCustom: false)
+        let applied = await models.selectShared(model: model, account: account, kind: .llm, replaceCustom: false,
+                                                stillWanted: { [weak self] in self?.isLatest(action, .llm) ?? false })
         guard isLatest(action, .llm) else { return }
         notes = models.sharedRow(.llm)?.notes ?? []
         guard applied || models.sharedRow(.llm)?.choice != nil else {
@@ -1126,16 +1149,33 @@ final class OnboardingJourneyModel: ObservableObject {
     private func permissionsChanged(snapshot: PermissionsHelper.Snapshot, screen: Bool, hotkey: DropHotkeyStatus) {
         let needsInputMonitoring = hotkey == .inputMonitoringRequired
         if needsInputMonitoring, !progress.needsInputMonitoring { progress.needsInputMonitoring = true }
-        let now: [(OnboardingStep, Bool, String)] = [
-            (.keyboard, snapshot.accessibilityGranted, "Keyboard control allowed"),
-            (.microphone, snapshot.microphoneGranted, "Microphone allowed"),
-            (.inputMonitoring, progress.needsInputMonitoring && !needsInputMonitoring && hotkey == .ready, "Keyboard access allowed"),
-            (.screenRecording, screen, "Screen Recording allowed"),
+        // Granted, revoked (a switch turned off in System Settings), the step's text.
+        let now: [(OnboardingStep, Bool, Bool, String)] = [
+            (.keyboard, snapshot.accessibilityGranted, !snapshot.accessibilityGranted, "Keyboard control allowed"),
+            (.microphone, snapshot.microphoneGranted, !snapshot.microphoneGranted, "Microphone allowed"),
+            (.inputMonitoring, progress.needsInputMonitoring && !needsInputMonitoring && hotkey == .ready,
+             needsInputMonitoring, "Keyboard access allowed"),
+            (.screenRecording, screen, !screen, "Screen Recording allowed"),
         ]
-        for (permission, isGranted, text) in now where isGranted && !granted.contains(permission) {
-            granted.insert(permission)
-            succeed(permission, text)
+        for (permission, isGranted, isRevoked, text) in now {
+            if isGranted, !granted.contains(permission) {
+                granted.insert(permission)
+                succeed(permission, text)
+            } else if isRevoked, granted.contains(permission) {
+                revoked(permission)
+            }
         }
+    }
+
+    /// A permission turned off after it was granted: the step no longer says
+    /// it is allowed (nor moves on), and a fresh grant completes it again.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    private func revoked(_ permission: OnboardingStep) {
+        granted.remove(permission)
+        requested.remove(permission)
+        if latest(permission).isDone { outcomes[permission] = .idle }
+        accepted[permission] = nil
+        if permission == step, dwell.isCounting || dwell.isLatched { dwell.cancel() }
     }
 
     private func startPolling() {

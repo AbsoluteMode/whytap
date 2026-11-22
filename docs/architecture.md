@@ -1462,6 +1462,11 @@ Motion); the pointer on the list stops the drift and lights the row under it
 (brighter fill, rose outline, bright ↗, pointing-hand cursor); a click opens
 whytap.ai/?q=<question>, which the page asks on load; then one
 Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
+Skip / Set up later invalidate a running key or model check of that step (`OnboardingJourneyModel.skip`,
+`selectShared(stillWanted:)`), so no route changes after a skip; On this Mac's download keeps the model alive
+until it lands and then applies its route unless a newer speech choice came first; a permission revoked after
+it was granted clears the step's allowed state. Footer Skip and a key's Submit/Retry use
+OnboardingFeedbackButtonStyle (hover, press, focus, unavailable).
 Toolbox and the last step have no timer: they wait for Continue or Finish (or
 Return), and their progress segment does not fill by time.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,

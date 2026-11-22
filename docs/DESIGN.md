@@ -97,8 +97,10 @@ See the [shared model rows decision](../.project-docs/decisions/2026-11-22-share
 - The menu offers the Agent model's built-in search (when it has one) and
   Tavily, with a checkmark on the current one; without a Tavily key it offers
   "Add a Tavily key…", which opens API keys.
-- One secondary line under the menu names the price and who bills it. Off
-  keeps the orange setup contour and turns that line orange.
+- Under the menu, "Follows the Agent model: <provider> · <model>." names the
+  model the search follows (the Agent can keep its own model while the LLM row
+  shows another), then one line names the price and who bills it. Off keeps
+  the orange setup contour and turns the price line orange.
 
 See the [provider web search decision](../.project-docs/decisions/2026-11-22-agent-provider-web-search.md).
 

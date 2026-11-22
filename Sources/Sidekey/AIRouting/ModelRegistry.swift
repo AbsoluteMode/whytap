@@ -275,8 +275,12 @@ extension ModelRegistry {
 
     /// Bumped when an adapter changes in a way that makes an earlier "checked
     /// when picked" result stale. Every adapter is at 1 for now.
+    /// A stored check counts only for the adapter version that made it. OpenAI
+    /// tool use is 2: its check moved to the Responses API, so a model refused
+    /// on Chat Completions (newer reasoning models) is checked again.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
     static func adapterVersion(_ kind: AIProviderKind, _ use: ModelUse) -> Int {
-        1
+        kind == .openAI && use == .chatWithTools ? 2 : 1
     }
 
     /// Why the app cannot run a model it can see in a catalog, or `nil`.

@@ -43,6 +43,14 @@ enum DropEditFieldRead: Equatable {
     case unreadable
 }
 
+/// The system-wide focus lookup, with a confirmed absence told apart from a
+/// failed query (timeout, IPC error).
+enum DropEditFocus {
+    case element(AXUIElement)
+    case none
+    case failed
+}
+
 enum DropEditFieldChange: Equatable {
     case value
     case focusLeft
@@ -103,6 +111,9 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         var processIdentity: (pid_t) -> String?
         /// AX notifications on the field (value, removal) and on its app (focus).
         var watch: @MainActor (DropEditFieldHandle, @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch?
+        /// The focus lookup with a failed query told apart from no focused
+        /// element. Without it, `focusedElement` nil counts as none.
+        var focus: (() -> DropEditFocus)? = nil
     }
 
     /// Electron answers `AXManualAccessibility`; Chromium browsers and other
@@ -130,15 +141,29 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
     /// metadata calls can block; focus is confirmed both before and after
     /// them, so the last thing checked is keyboard focus.
     private func stop(_ handle: DropEditFieldHandle) -> DropEditFieldRead? {
-        guard system.isRunning(handle.pid), hasFocus(handle) else { return .focusLeft }
+        if let lost = focusLoss(handle) { return lost }
         let gate = allowed(handle.element, pid: handle.pid)
-        guard hasFocus(handle) else { return .focusLeft }
+        if let lost = focusLoss(handle) { return lost }
         return gate ? nil : .unreadable
     }
 
-    private func hasFocus(_ handle: DropEditFieldHandle) -> Bool {
-        guard let current = focusedElement(ofFrontmost: handle.pid) else { return false }
-        return CFEqual(current, handle.element)
+    /// nil while the field has keyboard focus. Focus left only when that is
+    /// verified: the process is gone, another app is in front, or another
+    /// element has focus. A lookup that fails or reports no focused element
+    /// proves nothing, so it is unreadable and the kept text is dropped.
+    private func focusLoss(_ handle: DropEditFieldHandle) -> DropEditFieldRead? {
+        guard system.isRunning(handle.pid) else { return .focusLeft }
+        guard let front = system.frontmostPID() else { return .unreadable }
+        guard front == handle.pid else { return .focusLeft }
+        switch lookupFocus() {
+        case .element(let current): return CFEqual(current, handle.element) ? nil : .focusLeft
+        case .none, .failed: return .unreadable
+        }
+    }
+
+    private func lookupFocus() -> DropEditFocus {
+        if let focus = system.focus { return focus() }
+        return system.focusedElement().map { .element($0) } ?? .none
     }
 
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
@@ -168,51 +193,83 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
 
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
     func exposeFields(pid: pid_t) -> DropEditAccessibilityLease? {
-        guard system.frontmostPID() == pid, let identity = system.processIdentity(pid) else { return nil }
-        // Before its tree is on, an Electron app may report no focused
-        // element at all; the app itself is checked instead.
-        let focused = focusedElement(ofFrontmost: pid)
-        let element = focused ?? AXUIElementCreateApplication(pid)
-        let facts = system.facts(element, pid)
-        // A readable field needs nothing; a field the gate refuses for its
-        // app, a password or an error never gets the app's tree turned on.
-        if DropEditFieldGate.allowsRead(facts) { return nil }
-        guard DropEditFieldGate.mayExpose(facts) else { return nil }
+        guard let approved = exposureTarget(pid) else { return nil }
         for attribute in Self.exposeAttributes {
             // Only an attribute known to be off. One already on (VoiceOver,
             // the user, another tool) stays theirs; one that cannot be read
             // is never changed, so there is no guessed value to restore.
             guard system.appFlag(pid, attribute) == false else { continue }
-            // The metadata and flag calls can block: the same process must
-            // still be in front right before the write, and focus must not
-            // have moved: the gate judged that element.
-            guard system.frontmostPID() == pid, system.processIdentity(pid) == identity,
-                  Self.same(focusedElement(ofFrontmost: pid), focused) else { return nil }
+            // The flag read can block: the approval is taken again from
+            // scratch (process, focus, gate, front) and must be the same.
+            guard let now = exposureTarget(pid), now.same(as: approved) else { return nil }
             guard system.setAppFlag(pid, attribute, true) else { continue }
+            // Electron accepts the request and turns its tree on a moment
+            // later; until then the attribute still reads off.
+            let seenOn = system.appFlag(pid, attribute) == true
+            let identity = approved.identity
             return DropEditAccessibilityLease(pid: pid) { [system] in
-                // Undone only for the same process and only while it still
-                // holds exactly the value set here.
-                guard system.processIdentity(pid) == identity, system.appFlag(pid, attribute) == true else { return }
+                // Undone only for the same process, checked again after the
+                // blocking read, and only while the value is still Whytap's:
+                // on, or an accepted enable that was never seen applied
+                // (writing off cancels it). Off after it was on means someone
+                // else turned it off; unreadable means unknown. Both stay.
+                guard system.processIdentity(pid) == identity else { return }
+                let value = system.appFlag(pid, attribute)
+                guard system.processIdentity(pid) == identity else { return }
+                guard value == true || (value == false && !seenOn) else { return }
                 _ = system.setAppFlag(pid, attribute, false)
             }
         }
         return nil
     }
 
+    /// What the exposure approval rests on: the frontmost process, its
+    /// focused element (or a confirmed absence of one) and the gate.
+    private struct ExposureTarget {
+        let identity: String
+        let focused: AXUIElement?
+
+        func same(as other: ExposureTarget) -> Bool {
+            guard identity == other.identity else { return false }
+            switch (focused, other.focused) {
+            case (nil, nil): return true
+            case let (a?, b?): return CFEqual(a, b)
+            default: return false
+            }
+        }
+    }
+
+    /// nil unless every check passes; the frontmost process is confirmed
+    /// again after the blocking focus and metadata queries.
+    private func exposureTarget(_ pid: pid_t) -> ExposureTarget? {
+        guard system.frontmostPID() == pid, let identity = system.processIdentity(pid) else { return nil }
+        let focused: AXUIElement?
+        switch lookupFocus() {
+        // A failed lookup is not "no field": nothing is changed.
+        case .failed: return nil
+        // Before its tree is on, an Electron app may report no focused
+        // element at all; the app itself is checked instead.
+        case .none: focused = nil
+        case .element(let element):
+            guard system.elementPID(element) == pid else { return nil }
+            focused = element
+        }
+        let facts = system.facts(focused ?? AXUIElementCreateApplication(pid), pid)
+        // A readable field needs nothing; a field the gate refuses for its
+        // app, a password, secure input or an error never gets the app's
+        // tree turned on.
+        if DropEditFieldGate.allowsRead(facts) { return nil }
+        guard DropEditFieldGate.mayExpose(facts) else { return nil }
+        guard system.frontmostPID() == pid, system.processIdentity(pid) == identity else { return nil }
+        return ExposureTarget(identity: identity, focused: focused)
+    }
+
     /// The system-wide focused element, only when it belongs to `pid` and
     /// that app is frontmost: the element that has keyboard focus now.
     private func focusedElement(ofFrontmost pid: pid_t) -> AXUIElement? {
-        guard system.frontmostPID() == pid, let element = system.focusedElement(),
+        guard system.frontmostPID() == pid, case .element(let element) = lookupFocus(),
               system.elementPID(element) == pid else { return nil }
         return element
-    }
-
-    private static func same(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
-        switch (a, b) {
-        case (nil, nil): return true
-        case let (a?, b?): return CFEqual(a, b)
-        default: return false
-        }
     }
 
     private func allowed(_ element: AXUIElement, pid: pid_t) -> Bool {
@@ -225,15 +282,8 @@ extension AXDropEditFieldAccess.System {
         Self(
             frontmostPID: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
             focusedElement: {
-                let systemWide = AXUIElementCreateSystemWide()
-                // A busy app must not stall the main thread for AX's default 6 s.
-                AXUIElementSetMessagingTimeout(systemWide, AXDropEditFieldAccess.messagingTimeout)
-                var ref: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &ref) == .success,
-                      let raw = ref, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
-                let element = raw as! AXUIElement
-                AXUIElementSetMessagingTimeout(element, AXDropEditFieldAccess.messagingTimeout)
-                return element
+                if case .element(let element) = liveFocus() { return element }
+                return nil
             },
             elementPID: { element in
                 var owner: pid_t = 0
@@ -281,8 +331,25 @@ extension AXDropEditFieldAccess.System {
                 guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
                 return "\(app.bundleIdentifier ?? "-")@\(app.launchDate?.timeIntervalSince1970 ?? 0)"
             },
-            watch: { handle, onChange in AXDropEditFieldWatch(handle: handle, onChange: onChange) }
+            watch: { handle, onChange in AXDropEditFieldWatch(handle: handle, onChange: onChange) },
+            focus: liveFocus
         )
+    }
+
+    private static func liveFocus() -> DropEditFocus {
+        let systemWide = AXUIElementCreateSystemWide()
+        // A busy app must not stall the main thread for AX's default 6 s.
+        AXUIElementSetMessagingTimeout(systemWide, AXDropEditFieldAccess.messagingTimeout)
+        var ref: CFTypeRef?
+        switch AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &ref) {
+        case .success:
+            guard let raw = ref, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return .failed }
+            let element = raw as! AXUIElement
+            AXUIElementSetMessagingTimeout(element, AXDropEditFieldAccess.messagingTimeout)
+            return .element(element)
+        case .noValue: return .none
+        default: return .failed
+        }
     }
 
     private static func appElement(_ pid: pid_t) -> AXUIElement {

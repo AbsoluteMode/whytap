@@ -64,10 +64,12 @@ it.
 - **What a watch trusts** (after the builder's review of the first head):
   - A read reports one of three things. Text. Focus left, verified: another
     app in front, another element focused, or the process is gone; the
-    kept text counts. Unreadable: the same field still has focus but gives
-    no length, is over the bound, fails the transfer or the gate now
-    refuses it; the kept text is dropped, because the field may have
-    become something that must not be learned from.
+    kept text counts. Unreadable: the same app is in front but the focus
+    lookup fails or reports no focused element, or the same field still
+    has focus but gives no length, is over the bound, fails the transfer
+    or the gate now refuses it; the kept text is dropped, because focus is
+    unknown or the field may have become something that must not be
+    learned from.
   - Both deadlines (5 s to see the paste, 2 minutes in all) are monotonic
     clock times, checked before every read: the poll, each AX
     notification and both Return reads. A late poll cannot extend them.
@@ -90,15 +92,21 @@ it.
   sets `AXManualAccessibility` (Electron) or, when the app does not answer
   that, `AXEnhancedUserInterface` (Chromium browsers), and only if the
   attribute reads as off now. An attribute that cannot be read is never
-  written, since there would be no known value to restore. Right before
-  the write the same process (bundle ID and launch date) must still be
-  frontmost with the same focused element, because the metadata calls
-  block. It is turned off again when the field is no longer watched, when
+  written, since there would be no known value to restore. The approval
+  (frontmost process by bundle ID and launch date, its focused element or
+  a confirmed absence of one, the gate including secure input) is taken
+  once, and again from scratch after the blocking flag read; the write
+  happens only if both match. A focus lookup that fails is not treated as
+  "no field" and exposes nothing. It is turned off again when the field is no longer watched, when
   the next take goes to another app, 11 minutes after a take start that
   produced no paste, when learning and calibration are switched off, and
-  when Whytap quits. It is turned off only for the same process and only
-  while the attribute still reads back as on; a reused pid, a value that
-  became unreadable or one another tool changed is left alone. An
+  when Whytap quits. It is turned off only for the same process, checked
+  before and after the blocking flag read. It is turned off while the
+  attribute reads on, and also while it reads off if it was never seen on
+  after the write: Electron accepts the request and applies it about two
+  seconds later, so an early release must cancel the pending enable. A
+  reused pid, a value that became unreadable, or one that was on and
+  another tool turned off is left alone. An
   attribute already on (VoiceOver, the user, another tool) is never
   touched.
 - **Calibration** journals one `observed` entry per take with the reason
@@ -149,7 +157,14 @@ it.
     stops the write;
   - an attribute whose value is unknown is never written;
   - release writes nothing when the value became unreadable or the pid
-    now belongs to another process.
+    now belongs to another process, also when that changes during the
+    flag read;
+  - the approval is rechecked after the flag read (front app changing
+    during the focus query, secure input starting);
+  - an accepted but still pending Electron enable is cancelled by an
+    early release;
+  - a failed focus lookup exposes nothing and reads as unreadable, never
+    as focus left.
 - Not verified here: real Electron, Slack, Telegram and browser fields need
   the built app, because a feature session does not launch it. These are
   the acceptance checks for the builder and the maintainer.

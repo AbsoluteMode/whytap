@@ -12,6 +12,7 @@ final class DropEditFieldAccessTests: XCTestCase {
     private lazy var field = AXUIElementCreateApplication(4242)
     private lazy var otherField = AXUIElementCreateApplication(4343)
 
+    private var exposureFocusQueryShouldMoveFrontmost = false
     private var frontmost: pid_t?
     private var focused: AXUIElement?
     private var count: Int?
@@ -331,5 +332,214 @@ final class DropEditFieldAccessTests: XCTestCase {
         frontmost = otherPID
         XCTAssertNil(access().exposeFields(pid: targetPID))
         XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    // MARK: - Builder review #437 scenarios
+
+    func testAFailedFocusLookupIsUnreadableNotFocusLeft() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        // Same frontmost process. AX failed to return its focused element.
+        focused = nil
+        XCTAssertEqual(access.read(handle), .unreadable)
+        XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    func testExposureRechecksTheFrontAppWhenThereWasNoFocusedElement() {
+        let system = AXDropEditFieldAccess.System(
+            frontmostPID: { [unowned self] in frontmost },
+            focusedElement: { [unowned self] in
+                if exposureFocusQueryShouldMoveFrontmost {
+                    frontmost = otherPID
+                    return otherField
+                }
+                return nil
+            },
+            elementPID: { [unowned self] _ in otherPID },
+            isRunning: { _ in true },
+            facts: { _, _ in
+                DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false,
+                                   role: "AXApplication", subrole: nil,
+                                   secureEventInput: false, accessibilityError: false)
+            },
+            characterCount: { _ in nil },
+            string: { _, _ in nil },
+            appFlag: { [unowned self] _, _ in
+                exposureFocusQueryShouldMoveFrontmost = true
+                return false
+            },
+            setAppFlag: { [unowned self] _, attribute, value in
+                flagWrites.append((attribute, value))
+                return true
+            },
+            processIdentity: { _ in "app@1" },
+            watch: { _, _ in nil }
+        )
+        XCTAssertNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertEqual(frontmost, otherPID)
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    func testReleaseRechecksTheProcessAfterTheBlockingFlagRead() throws {
+        let system = AXDropEditFieldAccess.System(
+            frontmostPID: { [unowned self] in frontmost },
+            focusedElement: { [unowned self] in focused },
+            elementPID: { [unowned self] _ in targetPID },
+            isRunning: { _ in true },
+            facts: { _, _ in
+                DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false,
+                                   role: "AXWebArea", subrole: nil,
+                                   secureEventInput: false, accessibilityError: false)
+            },
+            characterCount: { _ in nil },
+            string: { _, _ in nil },
+            appFlag: { [unowned self] _, _ in
+                // The flag query returns a value from the old process just
+                // as it exits and a new process is assigned the PID.
+                if !flagWrites.isEmpty {
+                    identity = "app@2"
+                    return true
+                }
+                return false
+            },
+            setAppFlag: { [unowned self] _, attribute, value in
+                flagWrites.append((attribute, value))
+                return true
+            },
+            processIdentity: { [unowned self] _ in identity },
+            watch: { _, _ in nil }
+        )
+        let lease = try XCTUnwrap(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        lease.release()
+        XCTAssertEqual(identity, "app@2")
+        XCTAssertEqual(flagWrites.map(\.1), [true])
+    }
+
+    func testReleaseCancelsAnAcceptedEnableThatIsStillPending() throws {
+        var flagIsOn = false
+        var pendingEnable = false
+        let system = AXDropEditFieldAccess.System(
+            frontmostPID: { [unowned self] in frontmost },
+            focusedElement: { [unowned self] in focused },
+            elementPID: { [unowned self] _ in targetPID },
+            isRunning: { _ in true },
+            facts: { _, _ in
+                DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false,
+                                   role: "AXWebArea", subrole: nil,
+                                   secureEventInput: false, accessibilityError: false)
+            },
+            characterCount: { _ in nil },
+            string: { _, _ in nil },
+            appFlag: { _, _ in flagIsOn },
+            setAppFlag: { _, _, value in
+                pendingEnable = value
+                if !value { flagIsOn = false }
+                return true
+            },
+            processIdentity: { _ in "app@1" },
+            watch: { _, _ in nil }
+        )
+        let lease = try XCTUnwrap(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertTrue(pendingEnable)
+        XCTAssertFalse(flagIsOn)
+        // Opt-out while Electron has accepted the request but has yet to
+        // apply it. Its debounced enable becomes visible later.
+        lease.release()
+        if pendingEnable { flagIsOn = true }
+        XCTAssertFalse(flagIsOn)
+    }
+
+    func testExposureRechecksSecureInputAfterTheFlagRead() {
+        let system = AXDropEditFieldAccess.System(
+            frontmostPID: { [unowned self] in frontmost },
+            focusedElement: { [unowned self] in focused },
+            elementPID: { [unowned self] _ in targetPID },
+            isRunning: { _ in true },
+            facts: { [unowned self] _, _ in
+                DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false,
+                                   role: "AXWebArea", subrole: nil,
+                                   secureEventInput: secureInput, accessibilityError: false)
+            },
+            characterCount: { _ in nil },
+            string: { _, _ in nil },
+            appFlag: { [unowned self] _, _ in
+                // Focus is unchanged. A secure input session began during AX IPC.
+                secureInput = true
+                return false
+            },
+            setAppFlag: { [unowned self] _, attribute, value in
+                flagWrites.append((attribute, value))
+                return true
+            },
+            processIdentity: { _ in "app@1" },
+            watch: { _, _ in nil }
+        )
+        XCTAssertNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    /// A focus query that fails is not "no field": nothing is exposed.
+    func testAFailedFocusLookupNeverExposes() {
+        role = "AXApplication"
+        flags = ["AXManualAccessibility": false]
+        var system = systemForFocus { .failed }
+        system.facts = { [unowned self] _, _ in
+            DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false, role: role,
+                               subrole: nil, secureEventInput: false, accessibilityError: false)
+        }
+        XCTAssertNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
+
+    /// A confirmed absence of a focused element (Electron before its tree is
+    /// on) still lets the app be exposed.
+    func testAConfirmedAbsentFocusStillExposesTheApp() {
+        role = "AXApplication"
+        flags = ["AXManualAccessibility": false]
+        let system = systemForFocus { .none }
+        XCTAssertNotNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertEqual(flagWrites.map(\.1), [true])
+    }
+
+    /// Same app in front, the field's focus query reports nothing: unknown,
+    /// so the watch must drop its kept text rather than count it.
+    func testNoFocusedElementReportedIsUnreadableNotFocusLeft() throws {
+        var lookup: DropEditFocus = .element(field)
+        let access = AXDropEditFieldAccess(system: systemForFocus { lookup })
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        lookup = .none
+        XCTAssertEqual(access.read(handle), .unreadable)
+        lookup = .failed
+        XCTAssertEqual(access.read(handle), .unreadable)
+        lookup = .element(otherField)
+        XCTAssertEqual(access.read(handle), .focusLeft)
+        XCTAssertTrue(requestedRanges.isEmpty)
+    }
+
+    private func systemForFocus(_ focus: @escaping () -> DropEditFocus) -> AXDropEditFieldAccess.System {
+        AXDropEditFieldAccess.System(
+            frontmostPID: { [unowned self] in frontmost },
+            focusedElement: { nil },
+            elementPID: { [unowned self] element in CFEqual(element, field) ? targetPID : otherPID },
+            isRunning: { _ in true },
+            facts: { [unowned self] _, _ in
+                DropEditFieldFacts(bundleID: bundleID, isOwnProcess: false, role: role,
+                                   subrole: nil, secureEventInput: secureInput, accessibilityError: false)
+            },
+            characterCount: { [unowned self] _ in count },
+            string: { [unowned self] _, range in
+                requestedRanges.append(range)
+                return (text as NSString).substring(with: NSRange(location: range.location, length: range.length))
+            },
+            appFlag: { [unowned self] _, name in flags[name] },
+            setAppFlag: { [unowned self] _, name, value in
+                flagWrites.append((name, value))
+                flags[name] = value
+                return true
+            },
+            processIdentity: { [unowned self] _ in identity },
+            watch: { _, _ in nil },
+            focus: focus
+        )
     }
 }

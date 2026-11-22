@@ -939,18 +939,23 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   the take counts, minus the corrections it already held when the field
   first showed the paste (a draft is not an edit). A read reports text,
   focus left (verified: other app, other element, process gone; the last
-  text counts) or unreadable (still focused but no length, over the bound,
-  a failed transfer or the gate now refuses it; nothing counts). Another
+  text counts) or unreadable (a failed or empty focus lookup, or still
+  focused but no length, over the bound, a failed transfer or the gate
+  now refuses it; nothing counts). Another
   message (no alignment) or a paste not seen within 5 s counts nothing.
   Electron and Chromium apps get AXManualAccessibility (else
   AXEnhancedUserInterface) set on the target app only, at take start, only
   when its focused element is not already a readable field and the
   attribute reads as false (an unreadable attribute is never written). The
-  same process (bundle ID and launch date), frontmost, with the same
-  focused element, is confirmed right before the write. It is undone when
-  the watch ends, the next take goes elsewhere, 660 s pass without a paste,
-  learning and calibration are switched off (UserDefaults change) or Whytap
-  quits, and only while the same process still reads back true (WHY:
+  approval (same process by bundle ID and launch date, frontmost, the same
+  focused element or a confirmed absence, gate and secure input) is taken
+  again after the blocking flag read and must match; a failed focus lookup
+  exposes nothing. It is undone when the watch ends, the next take goes
+  elsewhere, 660 s pass without a paste, learning and calibration are
+  switched off (UserDefaults change) or Whytap quits; only for the same
+  process (checked again after the flag read), while the flag reads true
+  or still reads false after a write never seen applied (Electron applies
+  it about 2 s later, so the pending enable is cancelled) (WHY:
   .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
   happens only if that app is still frontmost, the same element still has
   keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure

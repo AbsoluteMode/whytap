@@ -1207,8 +1207,9 @@ named (format, refused, no credit or access, no answer with Retry; Tavily's
 429 is "busy" with Retry). An accepted language model key starts on the
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
-generation, highest known output price). When the provider has several
-models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
+generation, highest known output price). On the language model step only
+(the speech step sets the provider's one Settings speech model and moves on),
+when the provider has several models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
 names never cut (OnboardingModelPick.readableName) with the ID under each,
 prices, the recommended one first with a small tag; no model is checked
 until the person picks one, then the list checks it and the button names it. The step waits for a pick or

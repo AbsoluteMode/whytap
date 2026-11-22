@@ -385,10 +385,11 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertFalse(choices.contains { $0.id == "claude-opus-4-5-20251101" })
     }
 
-    /// OpenAI speech has more than one model: the speech step offers them
-    /// too, with the per-minute price, the recommended one set and first, and
-    /// waits; Next keeps the recommended model.
-    func testOpenAISpeechOffersItsModelsAndWaits() async throws {
+    /// The owner on the speech step with OpenAI and "Choose model": "no model
+    /// choice, we have only one model there" (REV 54). An accepted speech key
+    /// sets the one model Settings -> Speech uses for the provider and the
+    /// step moves on by itself; no list, no pick, no wait.
+    func testTheSpeechStepHasNoModelChoice() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
@@ -397,16 +398,15 @@ final class OnboardingPreviewTests: XCTestCase {
         model.speechProvider = .openAI
         await model.useSpeechKey("sk-proj-good-0123456789abcdef", provider: .openAI)
         XCTAssertTrue(model.outcome(.speechKey).isDone)
-        let choices = model.modelChoices(.speechKey)
-        XCTAssertGreaterThan(choices.count, 1, "\(choices.map(\.id))")
-        XCTAssertEqual(choices.first { $0.id == ModelRegistry.openAILiveModel }?.price, "$0.017 / min")
-        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel)
-        XCTAssertEqual(choices.first?.id, model.recommendedModel(.speechKey), "the recommended model is first")
-        try await Task.sleep(for: .milliseconds(1_600))
-        XCTAssertEqual(model.step, .speechKey, "the step waits for a pick or Next")
-        model.next()
-        XCTAssertEqual(model.step, .llmKey)
-        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel, "Next keeps the recommended model")
+        XCTAssertTrue(model.modelChoices(.speechKey).isEmpty, "no Choose model on the speech step")
+        XCTAssertTrue(model.modelCatalog(.speechKey).isEmpty, "and no search")
+        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel, "the model Settings uses")
+        await model.chooseModel("gpt-transcribe", on: .speechKey)
+        XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel, "a pick never reaches speech")
+        try await eventually { model.step == .llmKey }
+        for provider in [AIProviderKind.soniox, .deepgram, .elevenLabs] {
+            XCTAssertTrue(model.modelChoices(.speechKey, provider: provider).isEmpty, "\(provider)")
+        }
     }
 
     func testTheFlagshipRuleAndTheListedModels() {

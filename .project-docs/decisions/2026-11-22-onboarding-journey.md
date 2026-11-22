@@ -298,9 +298,13 @@ window, Back and a progress bar.
   model is already set, and a step with a choice of models does not move on
   by itself: the owner was moved on before he could choose (2026-11-22). It
   waits, after the padlock opens, for a pick (through the shared row, then
-  the move) or Next, which keeps the recommended model. The speech step does
-  the same when its provider has more than one model (OpenAI: per-minute
-  prices); steps without a choice move on by themselves as before. A native
+  the move) or Next, which keeps the recommended model. Only the
+  language model step offers a model (REV 54): the owner saw "Choose
+  model" on the speech step with OpenAI and said there is only one model
+  there; a speech key sets the one model Settings -> Speech uses for its
+  provider (`ModelRegistry.recommended(for: .dropFast)`, OpenAI
+  `gpt-live-transcribe`) and the step moves on by itself, with no list, no
+  search and no wait; a pick never reaches the speech row. A native
   menu was not used: AppKit draws only one text of its label.
 - **One model is recommended: the provider's current Sonnet or Sol.** The
   owner asked on 2026-11-22 for "Sonnet / Sol, the current one" as the
@@ -455,6 +459,10 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 54: an accepted OpenAI speech key sets `gpt-live-transcribe` with no
+  model list, no search, no pick reaching the speech row, and the step
+  moves on; Soniox, Deepgram and ElevenLabs offer no list either.
 
 - REV 52: the model search finds by readable name and ID, words in any
   order, nothing for blank or unknown text, a field only above ten models;

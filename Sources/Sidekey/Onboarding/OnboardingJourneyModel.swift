@@ -517,8 +517,10 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         progress.speechExpected = true
         pickedModels.remove(.speechKey)
-        succeed(.speechKey, model, holds: modelChoices(.speechKey, provider: provider).count > 1,
-                route: .provider(provider))
+        // One speech model per provider, the one Settings -> Speech sets: no
+        // choice here, the step moves on (the owner, REV 54).
+        // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+        succeed(.speechKey, model, route: .provider(provider))
     }
 
     // MARK: - 3. Language model key
@@ -554,8 +556,9 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The models a key step offers for its provider, newest first, each
     /// with a short price when the catalogs know it.
     func modelChoices(_ step: OnboardingStep, provider: AIProviderKind? = nil) -> [OnboardingModelChoice] {
+        // Only the language model step offers a choice: speech has one model
+        // per provider (REV 54).
         switch step {
-        case .speechKey: return choices(for: provider ?? speechProvider, speech: true)
         case .llmKey: return choices(for: provider ?? llmProvider, speech: false)
         default: return []
         }
@@ -565,7 +568,6 @@ final class OnboardingJourneyModel: ObservableObject {
     /// "Choose model" (the list itself shows a selection).
     func modelCatalog(_ step: OnboardingStep, provider: AIProviderKind? = nil) -> [OnboardingModelChoice] {
         switch step {
-        case .speechKey: return allChoices(for: provider ?? speechProvider, speech: true)
         case .llmKey:
             return allChoices(for: provider ?? llmProvider, speech: false).filter { OnboardingModelPick.isListed($0.id, speech: false) }
         default: return []
@@ -636,7 +638,7 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     func chooseModel(_ id: String, on step: OnboardingStep) async {
-        guard step == .speechKey || step == .llmKey, choosingModel == nil else { return }
+        guard step == .llmKey, choosingModel == nil else { return }
         // Only the accepted provider's list picks: a provider whose key was
         // not checked here never gets the route by a model pick.
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md

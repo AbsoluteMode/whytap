@@ -65,10 +65,16 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
     /// it. An app keeps its own focused element while another app is in
     /// front, so that alone is not focus.
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool {
-        guard system.isRunning(handle.pid),
-              let current = focusedElement(ofFrontmost: handle.pid),
-              CFEqual(current, handle.element) else { return false }
-        return allowed(current, pid: handle.pid)
+        // The gate's metadata calls can block; focus is confirmed both before
+        // and after them, so the last thing checked is keyboard focus.
+        guard system.isRunning(handle.pid), hasFocus(handle),
+              allowed(handle.element, pid: handle.pid), hasFocus(handle) else { return false }
+        return true
+    }
+
+    private func hasFocus(_ handle: DropEditFieldHandle) -> Bool {
+        guard let current = focusedElement(ofFrontmost: handle.pid) else { return false }
+        return CFEqual(current, handle.element)
     }
 
     // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md

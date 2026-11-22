@@ -176,6 +176,11 @@ The third review (queue #415) found that focus could move during the
 blocking length query or during the capture itself; the read now confirms
 keyboard focus and the gate again after the length query and after the
 range transfer, and the paste engine posts no Cmd+V (and restores the
-clipboard) when another app took focus while the field was captured.
+clipboard) when another app took focus while the field was captured. The
+fourth review (queue #417) found focus could still move during the gate's
+own metadata calls after the length query, and that the capture callback
+ran with learning off; focus is now checked before and after the gate, so
+keyboard focus is the last thing confirmed before the range request, and
+the callback is passed only while learning or calibration is on.
 
 2026-11-22 · ORCH-TASK 72 · PR #406: candidate logic (drops UI follows)

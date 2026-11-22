@@ -115,6 +115,10 @@ final class DropLearningCoordinator {
 
     /// Called right before Cmd+V: the target app's focused field, if learning
     /// is on and the gate allows it. Reads no text.
+    /// Learning or calibration is on: only then is the field captured at the
+    /// paste boundary. With both off the paste path is untouched.
+    var capturesFields: Bool { settings.isEnabled || settings.isCalibrating() }
+
     func prepareDelivery(targetPID: pid_t?) -> DropEditFieldHandle? {
         guard settings.isEnabled || settings.isCalibrating(), let pid = targetPID else { return nil }
         return deps.fieldAccess.capture(pid: pid)

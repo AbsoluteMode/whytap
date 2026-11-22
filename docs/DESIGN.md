@@ -1729,7 +1729,9 @@ Speech: the language picker (a dark label opening a searchable list), the On
 this Mac card with its white button, and a card of seven provider tiles in a
 4-column grid (muted badge, logo, name, offer). Selected tiles get the accent
 outline; the key field and Save appear under the grid and Get offer beside the
-card title. Permissions: two cards with Allow / Open Settings / a green check,
+card title. The saved speech key Drop will use says For Drop in the accent with
+the same outline; the footer's right place is Continue with "Drop will use X"
+(or the refusal in orange) on its own line above, else the quiet Set up later. Permissions: two cards with Allow / Open Settings / a green check,
 and a dashed secondary row for Screen Recording ("Optional · for Shot").
 Try: three numbered italic verbs, the real field in a note window. Make it
 yours and Turn on more: selectable cards (accent outline) that pick the stage's

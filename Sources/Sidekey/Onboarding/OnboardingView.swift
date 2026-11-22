@@ -182,6 +182,55 @@ struct OnboardingIconTile: View {
 
 // MARK: - 1. Speech
 
+/// One place on the right of the speech page's footer: Continue when Drop has
+/// a way to run (a saved speech key or the downloaded model), with what Drop
+/// will use above it, else the quiet Set up later.
+// WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+@MainActor
+struct OnboardingSpeechFooter: View {
+    @ObservedObject var model: OnboardingModel
+    @ObservedObject var models: APIAndModelsViewModel
+    @ObservedObject var onDevice: OnDeviceSpeechModelController
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            caption
+            HStack(spacing: 10) {
+                OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
+                Spacer(minLength: 0)
+                if model.speechCanContinue {
+                    OnboardingPrimaryButton(title: model.dropCheck == .checking ? "Checking…" : "Continue",
+                                            isEnabled: model.dropCheck != .checking,
+                                            action: model.continueFromSpeech)
+                    // No default-button Return: the page's key and search
+                    // fields submit with Return.
+                } else {
+                    OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// One line above the buttons: what Continue sets, or why it could not.
+    @ViewBuilder private var caption: some View {
+        Group {
+            if case .failed(let choice, let reason) = model.dropCheck {
+                Text("\(choice.name): \(reason)")
+                    .foregroundColor(OnboardingTheme.orange)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let choice = model.chosenDrop {
+                Text("Drop will use \(choice.name)")
+                    .foregroundColor(OnboardingTheme.muted)
+                    .lineLimit(1)
+            }
+        }
+        .font(OnboardingTheme.sans(12))
+    }
+}
+
 /// One page for both ways to get speech: the model on this Mac or the
 /// person's own key, plus the language they dictate in. The stage plays Drop.
 @MainActor
@@ -253,14 +302,7 @@ struct OnboardingSpeechPage: View {
                     .padding(.top, 10)
             }
         } footer: {
-            OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
-            Spacer(minLength: 0)
-            // Back here after choosing: the choice is done, so the page goes on.
-            if model.dropReady {
-                OnboardingPrimaryButton(title: "Continue", action: model.advance)
-            } else {
-                OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
-            }
+            OnboardingSpeechFooter(model: model, models: model.models, onDevice: onDevice)
         } stage: {
             ZStack {
                 OnboardingStageBackdrop(corner: UnitPoint(x: 0.85, y: 0.1))
@@ -555,7 +597,9 @@ struct OnboardingKeyCard: View {
                         tile(offer, selected: offer.target == model.keyTarget)
                     }
                 }
-                if let selected { actions(selected) }
+                // A saved speech key needs no panel: its tile says For Drop and
+                // the footer says what Continue sets. A refusal still shows.
+                if let selected, !quietlySaved(selected.target) { actions(selected) }
             }
         }
         .onChange(of: model.keyTarget) { _, _ in self.failure = nil; key = "" }
@@ -572,8 +616,12 @@ struct OnboardingKeyCard: View {
 
     private func tile(_ offer: OnboardingKeyOffer, selected: Bool) -> some View {
         let hasKey = isSaved(offer.target)
+        let refusal = offer.target.speechKind.flatMap(model.keyRefusal)
+        let forDrop = offer.target.speechKind.map { model.chosenDrop == .provider($0) } ?? false
         return Button {
             model.keyTarget = selected ? nil : offer.target
+            // A saved speech key is a choice for Drop, applied by Continue.
+            if hasKey, refusal == nil, let kind = offer.target.speechKind { model.pickDrop(.provider(kind)) }
         } label: {
             VStack(spacing: 2) {
                 Text(offer.category.rawValue)
@@ -594,7 +642,12 @@ struct OnboardingKeyCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Group {
-                    if hasKey {
+                    if hasKey, refusal != nil {
+                        Text("Key refused").foregroundColor(OnboardingTheme.orange)
+                    } else if forDrop {
+                        Label("For Drop", systemImage: "mic.fill").labelStyle(.titleAndIcon)
+                            .foregroundColor(OnboardingTheme.accent)
+                    } else if hasKey {
                         Label("Saved", systemImage: "checkmark").labelStyle(.titleAndIcon)
                             .foregroundColor(OnboardingTheme.green)
                     } else if let short = offer.short {
@@ -612,10 +665,10 @@ struct OnboardingKeyCard: View {
             .padding(.vertical, 5)
             .padding(.horizontal, 3)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
+                .fill(selected || forDrop ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(selected ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
-                              lineWidth: selected ? 1.2 : 0.75))
+                .strokeBorder(selected || forDrop ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
+                              lineWidth: selected || forDrop ? 1.2 : 0.75))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -623,7 +676,8 @@ struct OnboardingKeyCard: View {
         .help(offer.detail ?? offer.target.name)
         .accessibilityLabel("\(offer.target.name), \(offer.category.rawValue.lowercased())"
                             + (offer.short.map { ", \($0)" } ?? ""))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityValue(forDrop ? "Drop will use it" : (refusal ?? ""))
+        .accessibilityAddTraits(selected || forDrop ? .isSelected : [])
     }
 
     @ViewBuilder private func actions(_ offer: OnboardingKeyOffer) -> some View {
@@ -631,16 +685,11 @@ struct OnboardingKeyCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if isSaved(target) {
                 HStack(spacing: 10) {
-                    Text(target.speechKind == nil
-                         ? "Saved. Pick its models in Settings → API & Models."
-                         : "Your \(target.name) key is saved.")
+                    Text(savedText(target))
                         .font(OnboardingTheme.sans(11.5))
                         .foregroundColor(OnboardingTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    if let kind = target.speechKind {
-                        OnboardingOutlineButton(title: "Use for Drop") { model.useKey(kind) }
-                    }
                 }
             } else {
                 HStack(spacing: 8) {
@@ -667,6 +716,17 @@ struct OnboardingKeyCard: View {
             }
             if let failure, failureTarget == target { OnboardingStageStatus(tone: .warning, text: failure) }
         }
+    }
+
+    private func quietlySaved(_ target: OnboardingKeyTarget) -> Bool {
+        guard let kind = target.speechKind else { return false }
+        return isSaved(target) && model.keyRefusal(kind) == nil && failureTarget != target
+    }
+
+    private func savedText(_ target: OnboardingKeyTarget) -> String {
+        guard let kind = target.speechKind else { return "Saved. Pick its models in Settings → API & Models." }
+        if let refusal = model.keyRefusal(kind) { return refusal }
+        return "Your \(target.name) key is saved."
     }
 
     /// The same checks and Keychain saves as Settings -> API keys

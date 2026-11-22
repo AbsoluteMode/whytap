@@ -17,6 +17,9 @@ sources:
   - type: user-confirmed
     reference: Trying build 1700 with clean data on 2026-11-22, the maintainer found no way back from Customize and approved adding Back.
     confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: Trying build 1701 with Whytap's data cleared and keys left in the Keychain on 2026-11-22, the maintainer saw every tile marked Saved but no Continue and asked to merge Continue with Set up later; the orchestrator relayed one footer place, saved speech keys as a choice with a preselection rule, the free key check before use and footer renders.
+    confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingFlow.swift
     confirmed_at: 2026-11-21
@@ -114,6 +117,23 @@ Every page can be skipped. Set up later on the speech page also passes over the
 try page when nothing is on its way to dictate with. Closing the window counts
 as Done.
 
+The speech page's footer has one place on the right: Continue when Drop has a
+way to run, else the quiet Set up later. A way to run is a saved speech key
+(Soniox, Deepgram, ElevenLabs: the providers Drop runs on; OpenAI is not one)
+that the provider has not refused, or the downloaded On this Mac model. Saved
+keys are a choice, not only a status: one is preselected (the provider Drop
+already runs on, else Soniox, Deepgram, ElevenLabs in that order, Soniox being
+Whytap's default, else On this Mac), its tile says For Drop with the accent
+outline, a tap on another saved speech tile picks it, and the line above
+Continue says "Drop will use ElevenLabs". Continue on a provider Drop does not
+run on yet first runs Settings' free key check (`checkSavedKey`, no paid
+probe); a refusal stays on the page with the provider's reason in that line and
+the tile reads Key refused, and the next saved key, if any, takes its place.
+Then both Drop rows get the choice (`OnboardingDropSpeech.choose`; a row
+already on that account keeps its model) and the page moves on. Saving a speech
+key on the page and Use for Drop on a downloaded model are the same choice.
+AI and search keys alone keep Set up later.
+
 Every page but the first has a quiet Back on the left of its footer; ← and ⌘[
 (physical keys) do the same while no text field has the keyboard, where the
 arrow moves the caret (`OnboardingBackKey`, a local key monitor of the
@@ -178,6 +198,14 @@ Two runtime fixes ship with it:
 
 # What was tested
 
+2026-11-22 speech footer: scenario tests for no keys (Set up later as
+before), one saved speech key (Continue sets both Drop rows), several (Soniox
+preselected, a tile changes it, the running provider preferred and replaced by
+a pick), only AI keys (no Continue), a key the check refuses (stays with the
+reason, no route, then no longer offered), a refusal falling back to the next
+key and the downloaded model as a choice; offscreen renders of Continue with
+every key saved, a picked tile, a refusal and Set up later.
+
 2026-11-22 Back: scenario tests walk Back from every page to the first (which
 has none) with the counter following, with the speech and permissions pages
 hidden, after Set up later skipped the try page, keeping every page's result,
@@ -217,6 +245,10 @@ behavior beside System Settings; those are acceptance in the installed app.
 - A separate key page behind "I have an API key": the maintainer wanted the
   download, every key and the language visible at once.
 - A colour per badge kind: only offers stay coloured.
+- Continue beside Set up later on the speech page: two ways forward for one
+  question; one place that changes with the state reads at once.
+- Continue without a key check: a key left from an earlier install can be
+  revoked; the free check costs nothing and names the refusal.
 - Back in the title bar or as a bare ‹ arrow: the footer keeps every page's
   actions in one place, and a word reads at once.
 - A separate page for the coding-agent plugin: one row on the last page is

@@ -336,6 +336,27 @@ final class APIAndModelsViewModel: ObservableObject {
         recompute()
     }
 
+    /// The free check Settings runs on opening, now, for a saved key about to
+    /// be used (the onboarding's Continue). `nil` without a readable key. A
+    /// free "limited" does not clear a recorded refusal, as on opening.
+    func checkSavedKey(_ account: ProviderAccount) async -> KeyStatus? {
+        guard let access = access(account) else { return nil }
+        let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: false)
+        if status == .limited, case .rejected(let reason) = keyStatuses.record(for: account)?.status {
+            return .rejected(reason)
+        }
+        keyStatuses.set(status, for: account, at: now())
+        recompute()
+        return status
+    }
+
+    /// Why a saved key was refused, in the API keys tile's words; `nil` when
+    /// it was not.
+    func keyRefusal(_ account: ProviderAccount) -> String? {
+        guard let status = keyStatuses.record(for: account)?.status, case .rejected = status else { return nil }
+        return Self.statusText(for: status, account: account)
+    }
+
     // MARK: - On this Mac
 
     /// The model was downloaded or removed. A fresh download offers it for

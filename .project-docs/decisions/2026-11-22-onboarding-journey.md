@@ -167,6 +167,16 @@ window, Back and a progress bar.
   Retry); the key check has no separate rate-limit answer. The wire key
   turns in its lock when accepted and catches on a pin when refused. The
   footer pill no longer says "Hold"; the pointer still holds the move.
+- **The wire figures move per display frame, not by SwiftUI animation.**
+  Values a `Canvas` captures are not interpolated by `.animation`, so the
+  first draft jumped between poses, and it drew at 30 fps. The stages now
+  step the prototype's own damped springs (pose 135/19.5, fade and light
+  150/22, key turn 160/18 on step 1; slide 140/20, turn 175/19 on step 2)
+  on `TimelineView(.animation)` at the display's rate, keeping velocity
+  when the hover target changes, with its pointer spin, hover tilt, screen
+  pulse and checking light. Hover only updates the motion object, so no
+  SwiftUI state or layout changes on pointer moves; captions are drawn in
+  the same canvas. Reduce Motion snaps to the target and draws at 30 fps.
 
 ## Rejected
 

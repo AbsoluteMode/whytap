@@ -1053,7 +1053,10 @@ list. A shared pick writes every feature route of its kind
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
 a feature it cannot serve (the Agent without tools, a provider without a
 recorded model, a server for the Agent) keeps its route and the row says why.
-One probe per pick (a tools probe also passes plain chat). The row is read
+A model the feature's picker rules out is refused even where a server takes
+a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
+never from full picker lists. One probe per pick (a tools probe also passes
+plain chat). The row is read
 from the saved routes, never stored: the model more than half of the routed
 features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
 re-picking asks before replacing custom models. app-control get_state has a

@@ -477,7 +477,8 @@ final class APIAndModelsViewModel: ObservableObject {
         let custom = Set(before.custom)
         var notes: [String] = []
         var targets: [(feature: AIFeature, route: FeatureRoute, current: FeatureRoute?)] = []
-        for item in planner.plan(choice, kind: kind) {
+        let plan = planner.plan(choice, kind: kind)
+        for item in plan {
             let current = routing.route(for: item.feature)
             guard let planned = item.route else {
                 let kept = current.map { " · kept \($0.model)" } ?? ""
@@ -539,26 +540,29 @@ final class APIAndModelsViewModel: ObservableObject {
         }
         sharedNotes[kind] = notes.isEmpty ? nil : notes
         recompute()
+        // A model no feature of the kind can take (an LLM typed into Speech)
+        // changed nothing: not a success, the notes say why.
+        guard plan.contains(where: { $0.route != nil }) else { return false }
         return refused.isEmpty && (assigned > 0 || targets.isEmpty)
     }
 
+    /// Answers are memoized for one planner (one recompute or one pick); the
+    /// accounts with a section are read once, not per question.
     private func makePlanner() -> SharedModelPlanner {
-        var cache: [String: PickerSection?] = [:]
+        var cache: [String: PickerReach] = [:]
+        var accounts: [ProviderAccount]?
         let resolver = self.resolver
         let routing = self.routing
         return SharedModelPlanner(
-            section: { feature, account in
-                let key = "\(feature.rawValue)|\(account.storageID)"
+            reach: { model, account, feature in
+                let key = "\(feature.rawValue)|\(account.storageID)|\(model)"
                 if let hit = cache[key] { return hit }
-                let found = resolver.sections(for: feature, only: account).first
+                if accounts == nil { accounts = resolver.pickerAccounts() }
+                let found = resolver.pickerReach(model: model, account: account, for: feature, accountsWithSection: accounts)
                 cache[key] = found
                 return found
             },
-            route: { routing.route(for: $0) },
-            unsupportedReason: { model, account, feature in
-                if case .notSupported(let reason) = resolver.verdict(model: model, account: account, for: feature) { return reason }
-                return nil
-            }
+            route: { routing.route(for: $0) }
         )
     }
 

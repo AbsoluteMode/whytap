@@ -48,7 +48,13 @@ users want the same speech model and the same LLM everywhere.
   feature is offered. Each feature is then planned against its own picker
   sections (`SharedModelPlanner`), so key status, catalog capabilities, the
   Agent's tool/context needs and a server's speech/LLM split decide coverage
-  exactly as they do in Advanced.
+  exactly as they do in Advanced. The planner asks one model at a time
+  (`ModelStatusResolver.pickerReach`, the same rules as `sections(for:)`)
+  and never builds a picker list; the full list is built only when a picker
+  opens. A model the feature's picker rules out (`verdict`) is refused even
+  where a server section takes a typed name, so an LLM typed into Speech on a
+  server set to Language models reaches no speech feature, as in Advanced; a
+  name the server does not list can still be typed.
 - One check per pick: targets that need a probe are grouped by route and use;
   a passed tool-calling probe also counts as the plain-text check of the same
   model. A refused check changes no route and its reason appears under the row.
@@ -94,6 +100,12 @@ probe, in-memory keys, cached catalogs):
 - a self-hosted server: speech everywhere with one live check, text for
   cleanup/notes/translation, the Agent not set;
 - a failed check changes nothing and shows the reason;
+- build queue 397 found two problems in the first version, both now covered:
+  a typed LLM on a Language-models server was probed and saved for speech
+  (now refused without a check, like Advanced; an unlisted typed name still
+  works), and deriving the rows built full picker sections on the main actor
+  (3.7 s with a 2,500-model OpenRouter cache in the builder's debug fixture;
+  the view model now initializes in about 20 ms with the same catalog);
 - offscreen renders (empty, filled, with an override) differ as expected.
 
 `AppControlControllerTests.test_state_reports_the_shared_rows_without_writing`

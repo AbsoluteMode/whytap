@@ -104,6 +104,25 @@ final class AppControlMCPServerTests: XCTestCase {
         return try XCTUnwrap(JSONDecoder().decode(AppControlValue.self, from: Data(reply.utf8)).object?["result"]?.object)
     }
 
+    // MARK: Island tools and hotkeys
+
+    func test_toolbox_and_hotkey_tools_are_listed_and_sent_to_the_app() throws {
+        var sent: [AppControlRequest] = []
+        let server = AppControlMCPServer { request in sent.append(request); return .success(.object(["changed": .bool(true)])) }
+        let listing = try XCTUnwrap(server.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#))
+        let tools = try JSONDecoder().decode(AppControlValue.self, from: Data(listing.utf8))
+            .object?["result"]?.object?["tools"]?.array?.compactMap(\.object) ?? []
+        for (name, required) in [("whytap_toolbox_get", [String]()), ("whytap_toolbox_set", ["tool", "pinned", "expected"]),
+                                 ("whytap_hotkey_set", ["tool", "keys", "expected"])] {
+            let tool = try XCTUnwrap(tools.first { $0["name"] == .string(name) }, name)
+            XCTAssertEqual(tool["inputSchema"]?.object?["required"], .array(required.map(AppControlValue.string)), name)
+            XCTAssertEqual(tool["annotations"]?.object?["readOnlyHint"], .bool(name == "whytap_toolbox_get"), name)
+        }
+        let arguments: AppControlValue = .object(["tool": .string("screenshot"), "keys": .string("option+s"), "expected": .null])
+        XCTAssertEqual(try toolCall(server, "whytap_hotkey_set", arguments)["isError"], .bool(false))
+        XCTAssertEqual(sent, [AppControlRequest("hotkey_set", arguments: arguments.object!)])
+    }
+
     // MARK: Meetings and the access prompt
 
     func test_meeting_tools_are_listed_and_sent_to_the_app_with_their_arguments() throws {

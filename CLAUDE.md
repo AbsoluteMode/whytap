@@ -1120,6 +1120,15 @@ stamp the request time); servers have no price. Caches
 written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
 .project-docs/decisions/2026-11-22-direct-model-list-prices.md
+A server's /v1/models lists IDs only: ServerModelClassifier sorts each by name
+into speech (whisper, transcribe, parakeet, canary, stt, asr…: Speech pickers),
+other (embed, rerank, tts…: no picker) or language (anything else: Text
+pickers). The server's form under API keys has "Offer models for" (By model
+name, Language models, Speech recognition, Both; ServerModelKinds, stored on
+the server in the routing document only when not automatic), which wins over
+the name. The model a feature already runs on is never judged by either, so a
+saved route keeps working; a section with nothing of the feature's kind takes
+a typed model name. WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which

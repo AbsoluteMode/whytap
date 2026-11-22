@@ -201,7 +201,12 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
             guard system.appFlag(pid, attribute) == false else { continue }
             // The flag read can block: the approval is taken again from
             // scratch (process, focus, gate, front) and must be the same.
-            guard let now = exposureTarget(pid), now.same(as: approved) else { return nil }
+            // That pass blocks too, so the flag must still read off (another
+            // client may have turned it on: then it is theirs) and the same
+            // focus, process and front app are confirmed once more, last.
+            guard let now = exposureTarget(pid), now.same(as: approved),
+                  system.appFlag(pid, attribute) == false,
+                  stillHolds(approved, pid: pid) else { return nil }
             guard system.setAppFlag(pid, attribute, true) else { continue }
             // Electron accepts the request and turns its tree on a moment
             // later; until then the attribute still reads off.
@@ -223,8 +228,8 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         return nil
     }
 
-    /// What the exposure approval rests on: the frontmost process, its
-    /// focused element (or a confirmed absence of one) and the gate.
+    /// What the exposure approval rests on: the frontmost process and its
+    /// focused element, or a confirmed absence of one (nil).
     private struct ExposureTarget {
         let identity: String
         let focused: AXUIElement?
@@ -239,29 +244,40 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         }
     }
 
-    /// nil unless every check passes; the frontmost process is confirmed
-    /// again after the blocking focus and metadata queries.
-    private func exposureTarget(_ pid: pid_t) -> ExposureTarget? {
-        guard system.frontmostPID() == pid, let identity = system.processIdentity(pid) else { return nil }
-        let focused: AXUIElement?
+    /// The focus of `pid` for exposure: `.some(element)`, `.some(nil)` for a
+    /// confirmed absence (Electron before its tree is on reports none), or
+    /// nil when the lookup failed or focus is in another process. A failed
+    /// lookup is never taken as "no field".
+    private func exposureFocus(_ pid: pid_t) -> AXUIElement?? {
         switch lookupFocus() {
-        // A failed lookup is not "no field": nothing is changed.
         case .failed: return nil
-        // Before its tree is on, an Electron app may report no focused
-        // element at all; the app itself is checked instead.
-        case .none: focused = nil
-        case .element(let element):
-            guard system.elementPID(element) == pid else { return nil }
-            focused = element
+        case .none: return .some(nil)
+        case .element(let element): return system.elementPID(element) == pid ? .some(element) : nil
         }
+    }
+
+    /// Focus (element or confirmed absence), process and front app are
+    /// still those of `target`, checked in that order so the front app is
+    /// the last thing confirmed.
+    private func stillHolds(_ target: ExposureTarget, pid: pid_t) -> Bool {
+        guard let focused = exposureFocus(pid),
+              ExposureTarget(identity: target.identity, focused: focused).same(as: target) else { return false }
+        return system.processIdentity(pid) == target.identity && system.frontmostPID() == pid
+    }
+
+    /// nil unless every check passes. The metadata query blocks, so focus,
+    /// process and the front app are confirmed again after it.
+    private func exposureTarget(_ pid: pid_t) -> ExposureTarget? {
+        guard system.frontmostPID() == pid, let identity = system.processIdentity(pid),
+              let focused = exposureFocus(pid) else { return nil }
         let facts = system.facts(focused ?? AXUIElementCreateApplication(pid), pid)
         // A readable field needs nothing; a field the gate refuses for its
         // app, a password, secure input or an error never gets the app's
         // tree turned on.
         if DropEditFieldGate.allowsRead(facts) { return nil }
         guard DropEditFieldGate.mayExpose(facts) else { return nil }
-        guard system.frontmostPID() == pid, system.processIdentity(pid) == identity else { return nil }
-        return ExposureTarget(identity: identity, focused: focused)
+        let target = ExposureTarget(identity: identity, focused: focused)
+        return stillHolds(target, pid: pid) ? target : nil
     }
 
     /// The system-wide focused element, only when it belongs to `pid` and

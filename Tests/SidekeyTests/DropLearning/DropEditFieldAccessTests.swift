@@ -542,4 +542,90 @@ final class DropEditFieldAccessTests: XCTestCase {
             focus: focus
         )
     }
+
+    // MARK: - Builder review #440 scenarios
+
+    /// During the second, blocking metadata read focus moves to another
+    /// element of the same app, or another client turns the flag on. Either
+    /// way nothing is written, at acquisition or at release.
+    func testTheSecondMetadataReadChangingFocusOrTheFlagWritesNothing() {
+        for attribute in AXDropEditFieldAccess.exposeAttributes {
+            for change in ["focus moves within the app", "another client turns it on"] {
+                let pid = targetPID
+                let original = AXUIElementCreateApplication(pid)
+                let replacement = AXUIElementCreateApplication(4243)
+                var focusedNow = original
+                var flag = false
+                var metadataReads = 0
+                var writes: [Bool] = []
+                let access = AXDropEditFieldAccess(system: .init(
+                    frontmostPID: { pid },
+                    focusedElement: { focusedNow },
+                    elementPID: { _ in pid },
+                    isRunning: { _ in true },
+                    facts: { element, _ in
+                        metadataReads += 1
+                        if metadataReads == 2 {
+                            if change == "focus moves within the app" { focusedNow = replacement } else { flag = true }
+                        }
+                        let isOriginal = CFEqual(element, original)
+                        return DropEditFieldFacts(bundleID: "com.example.SyntheticHost", isOwnProcess: false,
+                                                  role: isOriginal ? "AXWebArea" : "AXTextField",
+                                                  subrole: isOriginal ? nil : "AXSecureTextField",
+                                                  secureEventInput: false, accessibilityError: false)
+                    },
+                    characterCount: { _ in nil },
+                    string: { _, _ in nil },
+                    appFlag: { _, name in name == attribute ? flag : nil },
+                    setAppFlag: { _, _, value in
+                        writes.append(value)
+                        flag = value
+                        return true
+                    },
+                    processIdentity: { _ in "synthetic@1" },
+                    watch: { _, _ in nil },
+                    focus: { .element(focusedNow) }
+                ))
+                let lease = access.exposeFields(pid: pid)
+                lease?.release()
+                XCTAssertNil(lease, "\(attribute): \(change)")
+                XCTAssertEqual(writes, [], "\(attribute): \(change)")
+            }
+        }
+    }
+
+    /// With nothing changing during the reads the same setup is exposed and
+    /// restored, so the test above fails only for the race.
+    func testTheSameSetupWithoutARaceIsExposedAndRestored() throws {
+        for attribute in AXDropEditFieldAccess.exposeAttributes {
+            let pid = targetPID
+            let original = AXUIElementCreateApplication(pid)
+            var flag = false
+            var writes: [Bool] = []
+            let access = AXDropEditFieldAccess(system: .init(
+                frontmostPID: { pid },
+                focusedElement: { original },
+                elementPID: { _ in pid },
+                isRunning: { _ in true },
+                facts: { _, _ in
+                    DropEditFieldFacts(bundleID: "com.example.SyntheticHost", isOwnProcess: false, role: "AXWebArea",
+                                       subrole: nil, secureEventInput: false, accessibilityError: false)
+                },
+                characterCount: { _ in nil },
+                string: { _, _ in nil },
+                appFlag: { _, name in name == attribute ? flag : nil },
+                setAppFlag: { _, _, value in
+                    writes.append(value)
+                    flag = value
+                    return true
+                },
+                processIdentity: { _ in "synthetic@1" },
+                watch: { _, _ in nil },
+                focus: { .element(original) }
+            ))
+            let lease = try XCTUnwrap(access.exposeFields(pid: pid), attribute)
+            lease.release()
+            XCTAssertEqual(writes, [true, false], attribute)
+        }
+    }
 }

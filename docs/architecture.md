@@ -949,8 +949,10 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   attribute reads as false (an unreadable attribute is never written). The
   approval (same process by bundle ID and launch date, frontmost, the same
   focused element or a confirmed absence, gate and secure input) is taken
-  again after the blocking flag read and must match; a failed focus lookup
-  exposes nothing. It is undone when the watch ends, the next take goes
+  again after the blocking flag read and must match, each pass confirming
+  focus after its metadata query; right before the write the flag must
+  still read false and focus, process and front app are confirmed last; a
+  failed focus lookup exposes nothing. It is undone when the watch ends, the next take goes
   elsewhere, 660 s pass without a paste, learning and calibration are
   switched off (UserDefaults change) or Whytap quits; only for the same
   process (checked again after the flag read), while the flag reads true

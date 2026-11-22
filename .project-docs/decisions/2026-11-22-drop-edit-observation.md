@@ -96,8 +96,12 @@ it.
   (frontmost process by bundle ID and launch date, its focused element or
   a confirmed absence of one, the gate including secure input) is taken
   once, and again from scratch after the blocking flag read; the write
-  happens only if both match. A focus lookup that fails is not treated as
-  "no field" and exposes nothing. It is turned off again when the field is no longer watched, when
+  happens only if both match. Each pass confirms focus, process and front
+  app again after its own blocking metadata query. Right before the write
+  the flag must still read off (another client turning it on during the
+  checks makes it theirs) and focus, process and front app are confirmed
+  once more, last. A focus lookup that fails is not treated as "no field"
+  and exposes nothing. It is turned off again when the field is no longer watched, when
   the next take goes to another app, 11 minutes after a take start that
   produced no paste, when learning and calibration are switched off, and
   when Whytap quits. It is turned off only for the same process, checked
@@ -164,7 +168,10 @@ it.
   - an accepted but still pending Electron enable is cancelled by an
     early release;
   - a failed focus lookup exposes nothing and reads as unreadable, never
-    as focus left.
+    as focus left;
+  - focus moving within the app, or another client turning the flag on,
+    during the second metadata read writes nothing, for both attributes;
+    the same setup without the race is exposed and restored.
 - Not verified here: real Electron, Slack, Telegram and browser fields need
   the built app, because a feature session does not launch it. These are
   the acceptance checks for the builder and the maintainer.

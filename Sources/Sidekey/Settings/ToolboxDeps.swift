@@ -9,7 +9,7 @@ struct ToolboxDeps {
     /// Current Drop transcription mode.
     var currentDropMode: () -> TranscriptionMode = { .fast }
     var historyCards: (HistoryStripMode) async -> [HistoryStripCard] = { _ in [] }
-    var copyHistoryCard: (HistoryStripCard) -> Void = { _ in }
+    var copyHistoryCards: ([HistoryStripCard]) -> Void = { _ in }
     var toggleMeetingRecord: () -> Void = {}
     var openScreenshot: () -> Void = {}
     /// Show an inline tool in this process, without LaunchServices scheme lookup.

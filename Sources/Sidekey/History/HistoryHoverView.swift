@@ -64,6 +64,8 @@ enum HistoryHoverVisualStyle {
 final class HistoryHoverKeyMonitor: ObservableObject {
     var hoveredCard: HistoryStripCard?
     var selectedCards: () -> [HistoryStripCard] = { [] }
+    /// False without a paste target: Enter then never takes marked rows.
+    var canPaste = true
     var onClearSelection: () -> Void = {}
     var onPaste: ([HistoryStripCard]) -> Void = { _ in }
     private var monitor: Any?
@@ -78,7 +80,8 @@ final class HistoryHoverKeyMonitor: ObservableObject {
             switch HistoryKeyDecision.action(
                 keyCode: event.keyCode,
                 hovered: self.hoveredCard,
-                selection: self.selectedCards()
+                selection: self.selectedCards(),
+                canPaste: self.canPaste
             ) {
             case .paste(let cards):
                 let paste = self.onPaste
@@ -134,7 +137,8 @@ struct HistoryHoverView: View {
     let cards: [HistoryStripCard]
     let targetAppName: String?
     let onSelectMode: (HistoryStripMode) -> Void
-    let onCopy: (HistoryStripCard) -> Void
+    /// Copies the clicked row, or every ⌘-click-marked row in mark order.
+    let onCopy: ([HistoryStripCard]) -> Void
     /// Reports the hovered row (and its frame in the island hover-zone
     /// space) when that row's content deserves a preview bubble; reports a
     /// `nil` frame on hover exit so the owner can clear matching state.
@@ -149,23 +153,31 @@ struct HistoryHoverView: View {
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
     @StateObject private var selection = HistoryPasteSelection()
 
-    static func hintText(targetAppName: String?, selectedCount: Int = 0) -> String {
-        guard let targetAppName, !targetAppName.isEmpty else {
-            return "Click for copy"
+    /// Footer. Without marks it teaches the gestures; with marks it says what
+    /// a click and Enter will do with them. `escapeClears` is false where no
+    /// key monitor runs (Toolbox): there ⌘-click unmarks.
+    static func hintText(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> String {
+        let target = (targetAppName?.isEmpty == false) ? targetAppName : nil
+        guard selectedCount > 0 else {
+            guard let target else { return "Click for copy   ⌘-click for several" }
+            return "Click for copy   ⌘-click for several   Enter to paste to \(target)"
         }
-        if selectedCount > 0 {
-            return "Enter to paste \(selectedCount) to \(targetAppName)   Esc to clear"
-        }
-        return "Click for copy   ⌘-click for several   Enter to paste to \(targetAppName)"
+        var parts = ["Click to copy \(selectedCount)"]
+        if let target { parts.append("Enter to paste \(selectedCount) to \(target)") }
+        parts.append(escapeClears ? "Esc to clear" : "⌘-click to unmark")
+        return parts.joined(separator: "   ")
     }
 
-    /// ⌘-click marks rows only where Enter can paste them.
-    static func allowsMultiSelect(allowsKeyboardPaste: Bool, targetAppName: String?) -> Bool {
+    /// Enter pastes only where a target was captured; marks and copy work everywhere.
+    static func canPaste(allowsKeyboardPaste: Bool, targetAppName: String?) -> Bool {
         allowsKeyboardPaste && !(targetAppName ?? "").isEmpty
     }
 
-    private var multiSelectEnabled: Bool {
-        Self.allowsMultiSelect(allowsKeyboardPaste: allowsKeyboardPaste, targetAppName: targetAppName)
+    /// What a plain click copies: every marked row in mark order when there
+    /// are marks (the clicked row need not be one of them), else the row.
+    // WHY: .project-docs/decisions/2026-11-22-history-multi-copy.md
+    static func cardsToCopy(clicked: HistoryStripCard, marked: [HistoryStripCard]) -> [HistoryStripCard] {
+        marked.isEmpty ? [clicked] : marked
     }
 
     var body: some View {
@@ -189,7 +201,9 @@ struct HistoryHoverView: View {
             keyMonitor.onPaste = onPaste
             keyMonitor.selectedCards = { [selection] in selection.cards }
             keyMonitor.onClearSelection = { [selection] in selection.clear() }
-            if multiSelectEnabled { initialSelection.forEach(selection.toggle) }
+            keyMonitor.canPaste = Self.canPaste(allowsKeyboardPaste: allowsKeyboardPaste,
+                                                targetAppName: targetAppName)
+            initialSelection.forEach(selection.toggle)
             if allowsKeyboardPaste { keyMonitor.start() }
         }
         .onDisappear {
@@ -248,11 +262,13 @@ struct HistoryHoverView: View {
                             isHovered: hoveredCard == card,
                             selectionPosition: selection.position(of: card),
                             onCopy: {
-                                if multiSelectEnabled,
-                                   NSEvent.modifierFlags.contains(.command) {
+                                if NSEvent.modifierFlags.contains(.command) {
                                     selection.toggle(card)
                                 } else {
-                                    onCopy(card)
+                                    // A plain click with marks copies them all,
+                                    // then the marks are done.
+                                    onCopy(Self.cardsToCopy(clicked: card, marked: selection.cards))
+                                    selection.clear()
                                 }
                             },
                             onAnchorChange: { frame in
@@ -319,7 +335,8 @@ struct HistoryHoverView: View {
     private var hintRow: some View {
         Text(Self.hintText(
             targetAppName: targetAppName,
-            selectedCount: multiSelectEnabled ? selection.count : 0
+            selectedCount: selection.count,
+            escapeClears: allowsKeyboardPaste
         ))
             .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(IslandInk.color.opacity(0.55))

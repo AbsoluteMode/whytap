@@ -1785,7 +1785,9 @@ is open and survive the Agent/Drop/Clipboard tabs. Marks work everywhere
 are marked copies all of them in mark order as one pasteboard
 (HistoryPasteboardWriter.writeAll: texts one string a line each, files and
 images one item each, mixed rows one item per group in order) and clears the
-marks; without a target Enter leaves the marks alone. The footer is a row of
+marks; without a target Enter leaves the marks alone. Whether Enter may paste
+marks follows the target name live: the island sets it in the same panelMode
+change that shows History, after the panel appeared. The footer is a row of
 HistoryHint blocks (HistoryHoverView.hints), each compact keycaps through
 HotkeyHintView(style: .keycaps) and a short action, hairlines between them:
 [click] Copy | [⌘][click] Select | [↩] Paste to <app>; with marks [click]

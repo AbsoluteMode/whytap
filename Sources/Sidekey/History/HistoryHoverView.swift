@@ -148,6 +148,8 @@ struct HistoryHoverView: View {
     var allowsKeyboardPaste = true
     /// Rows already marked when the panel appears (offscreen review renders).
     var initialSelection: [HistoryStripCard] = []
+    /// Test seam: receives the panel's key monitor when the panel appears.
+    var onKeyMonitorReady: ((HistoryHoverKeyMonitor) -> Void)? = nil
 
     @State private var hoveredCard: HistoryStripCard?
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
@@ -211,10 +213,9 @@ struct HistoryHoverView: View {
             keyMonitor.onPaste = onPaste
             keyMonitor.selectedCards = { [selection] in selection.cards }
             keyMonitor.onClearSelection = { [selection] in selection.clear() }
-            keyMonitor.canPaste = Self.canPaste(allowsKeyboardPaste: allowsKeyboardPaste,
-                                                targetAppName: targetAppName)
             initialSelection.forEach(selection.toggle)
             if allowsKeyboardPaste { keyMonitor.start() }
+            onKeyMonitorReady?(keyMonitor)
         }
         .onDisappear {
             keyMonitor.stop()
@@ -222,6 +223,15 @@ struct HistoryHoverView: View {
         }
         .onChange(of: hoveredCard) { _, newValue in
             keyMonitor.hoveredCard = newValue
+        }
+        // The island captures the paste target in the same panelMode change
+        // that shows this panel, so the name can arrive after onAppear. A
+        // copy taken only at appear left Enter with marks passing the key on
+        // (AppKit beeped) while the footer already offered the paste.
+        // WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+        .onChange(of: targetAppName, initial: true) { _, name in
+            keyMonitor.canPaste = Self.canPaste(allowsKeyboardPaste: allowsKeyboardPaste,
+                                                targetAppName: name)
         }
     }
 

@@ -98,6 +98,21 @@ the hint, three marked files and mixed rows. Not verified in the installed app:
 real ⌘-click delivery on the island panel and how particular apps treat a paste
 that mixes several file items.
 
+# Correction 2026-11-23: Enter with marks beeped
+
+The maintainer marked several images on the Clipboard tab, pressed Enter and
+heard the system beep; nothing was pasted. The key monitor copied
+`canPaste` once in `onAppear`, but `IslandView` sets the panel's target name
+in the same `panelMode` change that shows History, so the name can reach the
+panel after it appeared (on the first opening it was still nil, later the
+previous opening's value). Enter with marks then counted as "no target",
+passed the key on and AppKit beeped, while the footer, which reads the live
+name, already offered "Paste to <app>". A single hovered row does not
+consult `canPaste`, so it pasted. `canPaste` now follows the target name
+(`onChange(of:initial:)`). `HistoryHoverTargetArrivalTests` host the panel,
+change the name after it appeared and failed before the fix. Not verified in
+the installed app.
+
 # Rejected
 
 - ⌥Enter pastes and keeps History open: the panel must give up key for Cmd+V

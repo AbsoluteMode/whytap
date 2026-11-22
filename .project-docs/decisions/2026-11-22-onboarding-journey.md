@@ -73,6 +73,10 @@ window, Back and a progress bar.
   counterpart) and a feature it cannot serve keeps its route and is named in
   one line. Existing custom per-feature choices are kept. Local speech goes
   on every speech feature, as the maintainer confirmed.
+- **The latest choice wins.** As on the 2026-11-21 speech page, every speech
+  or language model action takes a new number; a key check, model check or
+  download that answers after a newer action of its kind changes no route and
+  moves nothing, and a late key save keeps only the key.
 - **LLM preselection:** the Agent's registry model when there is one
   (Anthropic `claude-sonnet-5-5`, OpenRouter `anthropic/claude-sonnet-5.5`);
   OpenAI has none, so the newest model in its live catalog that the Agent
@@ -121,7 +125,8 @@ window, Back and a progress bar.
   skips search; OpenAI preselects its newest usable catalog model; On this
   Mac with and without the model here; permissions granted while shown move
   on, granted elsewhere do not; Input Monitoring only when the shortcut needs
-  it; informational steps end with Done.
+  it; informational steps end with Done; an earlier speech key whose check
+  finishes last does not replace the later choice.
 - Offscreen renders of every step of the frame.
 
 Not verified: the real window with real permissions, real provider key

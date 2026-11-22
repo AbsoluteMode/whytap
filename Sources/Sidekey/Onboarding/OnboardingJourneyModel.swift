@@ -52,6 +52,11 @@ final class OnboardingJourneyModel: ObservableObject {
     let tavily: TavilySettings
 
     private var autoAdvance = OnboardingAutoAdvance()
+    /// The latest speech and language model actions (a source picked, a key
+    /// used, the download started). An answer that arrives after a newer
+    /// action of its kind changes no route and moves nothing.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    private var latest: [SharedModelKind: Int] = [:]
     private var granted: Set<OnboardingStep> = []
     private var pollTimer: Timer?
     private var pollBudget = DropHotkeyRecoveryPollBudget()
@@ -181,16 +186,25 @@ final class OnboardingJourneyModel: ObservableObject {
         }
     }
 
+    private func begin(_ kind: SharedModelKind) -> Int {
+        let action = (latest[kind] ?? 0) + 1
+        latest[kind] = action
+        return action
+    }
+
+    private func isLatest(_ action: Int, _ kind: SharedModelKind) -> Bool { latest[kind] == action }
+
     // MARK: - 1. Source
 
     /// On this Mac: download the model (or use the downloaded one) and give it
     /// every speech feature it serves. The download and the route outlive the
     /// window, like before.
     func chooseOnThisMac() {
+        let action = begin(.speech)
         progress.source = .onThisMac
         progress.speechExpected = true
         if onDevice.status == .ready {
-            Task { @MainActor [weak self] in await self?.applyOnDevice(advance: true) }
+            Task { @MainActor [weak self] in await self?.applyOnDevice(advance: true, action: action) }
             return
         }
         outcomes[.source] = .working("Downloading the speech model…")
@@ -198,15 +212,18 @@ final class OnboardingJourneyModel: ObservableObject {
         Task { @MainActor [weak self] in
             let landed = await controller.download()
             guard let self else { return }
-            if landed { await self.applyOnDevice(advance: false) } else { self.outcomes[.source] = .failed("The download did not finish. Try again or use your key.") }
+            guard self.isLatest(action, .speech) else { return }
+            if landed { await self.applyOnDevice(advance: false, action: action) } else { self.outcomes[.source] = .failed("The download did not finish. Try again or use your key.") }
         }
         // Starting the download is this step's success; it goes on in the background.
         succeed(.source, "Speech on this Mac")
     }
 
-    private func applyOnDevice(advance: Bool) async {
+    private func applyOnDevice(advance: Bool, action: Int) async {
+        guard isLatest(action, .speech) else { return }
         let applied = await models.selectShared(model: OnDeviceSpeechModel.parakeetTdtV3.rawValue, account: .thisMac,
                                                 kind: .speech, replaceCustom: false)
+        guard isLatest(action, .speech) else { return }
         notes = models.sharedRow(.speech)?.notes ?? []
         if applied || dropSpeech.isReady {
             if advance { succeed(.source, "Speech on this Mac") } else { outcomes[.source] = .done("Speech on this Mac") }
@@ -216,6 +233,7 @@ final class OnboardingJourneyModel: ObservableObject {
     }
 
     func chooseYourKey() {
+        _ = begin(.speech)
         progress.source = .yourKey
         progress.speechExpected = dropSpeech.isReady
         succeed(.source, "Your key")
@@ -228,12 +246,17 @@ final class OnboardingJourneyModel: ObservableObject {
     func useSpeechKey(_ key: String, provider: AIProviderKind) async {
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider),
               let model = ModelRegistry.recommended(for: .dropFast, kind: provider) else { return }
+        let action = begin(.speech)
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
-        if let problem = await saveOrCheck(key, account: account) {
+        let problem = await saveOrCheck(key, account: account)
+        // A newer speech choice answers for this step now; this key stays saved.
+        guard isLatest(action, .speech) else { return }
+        if let problem {
             outcomes[.speechKey] = .failed(problem)
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .speech, replaceCustom: false)
+        guard isLatest(action, .speech) else { return }
         notes = models.sharedRow(.speech)?.notes ?? []
         guard applied || dropSpeech.isReady else {
             outcomes[.speechKey] = .failed(notes.first ?? "\(provider.displayName) could not be used for speech")
@@ -262,8 +285,11 @@ final class OnboardingJourneyModel: ObservableObject {
 
     func useLLMKey(_ key: String, provider: AIProviderKind) async {
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
+        let action = begin(.llm)
         outcomes[.llmKey] = .working("Checking the \(provider.displayName) key…")
-        if let problem = await saveOrCheck(key, account: account) {
+        let problem = await saveOrCheck(key, account: account)
+        guard isLatest(action, .llm) else { return }
+        if let problem {
             outcomes[.llmKey] = .failed(problem)
             return
         }
@@ -273,6 +299,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .llm, replaceCustom: false)
+        guard isLatest(action, .llm) else { return }
         notes = models.sharedRow(.llm)?.notes ?? []
         guard applied || models.sharedRow(.llm)?.choice != nil else {
             outcomes[.llmKey] = .failed(notes.first ?? "\(provider.displayName) · \(model) could not be used")

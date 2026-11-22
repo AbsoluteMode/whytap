@@ -71,6 +71,30 @@ final class OnboardingJourneyModelTests: XCTestCase {
         func endpoints(model: String, apiKey: String) async throws -> [OpenRouterEndpoint] { [] }
     }
 
+    /// A key check that waits for the test for the listed key values.
+    private final class GatedChecker: ProviderKeyChecking, @unchecked Sendable {
+        private let lock = NSLock()
+        private var gated: Set<String>
+        private var waiting: [(key: String, resume: CheckedContinuation<Void, Never>)] = []
+        init(gated: Set<String>) { self.gated = gated }
+        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
+            if let apiKey, lock.withLock({ gated.contains(apiKey) }) {
+                await withCheckedContinuation { resume in lock.withLock { waiting.append((apiKey, resume)) } }
+            }
+            return .valid
+        }
+        func isWaiting(_ key: String) -> Bool { lock.withLock { waiting.contains { $0.key == key } } }
+        func release(_ key: String) {
+            let resumes: [CheckedContinuation<Void, Never>] = lock.withLock {
+                gated.remove(key)
+                let found = waiting.filter { $0.key == key }.map(\.resume)
+                waiting.removeAll { $0.key == key }
+                return found
+            }
+            resumes.forEach { $0.resume() }
+        }
+    }
+
     /// The success beat, held until the test lets it end.
     private final class Beat {
         private var waiting: [CheckedContinuation<Void, Never>] = []
@@ -103,7 +127,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
     }
 
     private func makeModel(_ env: Env, refusing: [ProviderAccount] = [], supportsOnDevice: Bool = true,
-                           hotkey: DropHotkeyStatus = .accessibilityRequired) throws -> OnboardingJourneyModel {
+                           hotkey: DropHotkeyStatus = .accessibilityRequired,
+                           keyChecker: ProviderKeyChecking? = nil) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -115,7 +140,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             routing: env.routing, keys: env.keys,
             catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
-            keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
+            keyChecker: keyChecker ?? offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
         let snapshot = env.snapshot
         let screen = env.screen
         let permissions = PermissionsSettingsViewModel(
@@ -197,6 +222,24 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("", provider: .deepgram)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+    }
+
+    func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {
+        let env = try makeEnv()
+        let checker = GatedChecker(gated: ["sk-soniox"])
+        let model = try makeModel(env, keyChecker: checker)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        let first = Task { await model.useSpeechKey("sk-soniox", provider: .soniox) }
+        try await eventually { checker.isWaiting("sk-soniox") }
+        await model.useSpeechKey("sk-eleven", provider: .elevenLabs)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+        checker.release("sk-soniox")
+        await first.value
+        for feature in speechFeatures {
+            XCTAssertEqual(env.routing.route(for: feature)?.account, .elevenLabs, "\(feature) keeps the later choice")
+        }
+        XCTAssertTrue(model.keySaved(.soniox), "the earlier key stays saved")
     }
 
     // MARK: - Language model and search

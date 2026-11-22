@@ -88,6 +88,9 @@ struct OnboardingWireStyle {
     /// Hover: a dark veil behind and slightly stronger wires.
     var lit = 0.0
     var specular: Specular?
+    /// Step 2's ink, as its prototype draws the key and padlock: line width
+    /// from the figure's size, dots at full strength in every vertex.
+    var keyStage = false
 }
 
 // MARK: - Wire solid
@@ -182,8 +185,9 @@ struct OnboardingWireSolid {
         meanX /= Double(max(1, n))
         meanY /= Double(max(1, n))
         let apparent = Self.apparentRadius(radius, worldZ: worldZ)
-        let fine = min(1.14, max(0.58, apparent / 68))
+        let fine = style.keyStage ? min(1.06, max(0.60, radius / 58)) : min(1.14, max(0.58, apparent / 68))
         let lit = style.lit, fade = style.fade
+        let two = style.keyStage
 
         // A neutral veil only: no coloured spot behind the figure.
         if lit > 0.03 {
@@ -239,7 +243,7 @@ struct OnboardingWireSolid {
         for index in dotIndices {
             let level = bucket(depths[index])
             let t = (Double(level) + 0.5) / Double(Self.depthLevels)
-            let r = (0.82 + 1.30 * t + lit * 0.16 * t) * fine
+            let r = (0.82 + (two ? 1.28 : 1.30) * t + lit * 0.16 * t) * fine
             let p = points[index]
             dotPaths[level].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             guard let spec = specular, spec.dots else { continue }
@@ -258,25 +262,28 @@ struct OnboardingWireSolid {
         for level in 0..<Self.depthLevels {
             let t = (Double(level) + 0.5) / Double(Self.depthLevels)
             if !edgePaths[level].isEmpty {
-                let alpha = min(0.92, (0.11 + 0.48 * t + lit * 0.08 * t) * inkWeight * fade)
+                let alpha = min(0.92, ((two ? 0.12 : 0.11) + 0.48 * t + lit * 0.08 * t) * inkWeight * fade)
                 context.stroke(edgePaths[level], with: .color(baseColor.opacity(alpha)),
-                               style: StrokeStyle(lineWidth: (0.56 + 0.92 * t + lit * 0.10 * t) * fine,
+                               style: StrokeStyle(lineWidth: (0.56 + (two ? 0.90 : 0.92) * t + lit * 0.10 * t) * fine,
                                                   lineCap: .round, lineJoin: .round))
             }
             if !dotPaths[level].isEmpty {
-                let alpha = min(0.95, (0.28 + 0.52 * t + lit * 0.08) * (0.65 + 0.35 * inkWeight) * fade)
+                let alpha = two ? min(0.95, (0.30 + 0.54 * t) * fade)
+                    : min(0.95, (0.28 + 0.52 * t + lit * 0.08) * (0.65 + 0.35 * inkWeight) * fade)
                 context.fill(dotPaths[level], with: .color(baseColor.opacity(alpha)))
             }
         }
         guard let spec = specular else { return }
         for tier in 0..<3 {
-            let st = [0.23, 0.47, 0.75][tier]
-            let mix = 0.56 + 0.39 * st
+            let st = (two ? [0.24, 0.48, 0.76] : [0.22, 0.46, 0.74])[tier]
+            let mix = two ? 0.58 + 0.38 * st : 0.55 + 0.40 * st
             let color = Color(red: base.0 + (spec.rgb.0 - base.0) * mix, green: base.1 + (spec.rgb.1 - base.1) * mix,
                               blue: base.2 + (spec.rgb.2 - base.2) * mix)
             if !specEdges[tier].isEmpty {
-                context.stroke(specEdges[tier], with: .color(color.opacity(min(0.89, (0.21 + st * 0.51) * fade))),
-                               style: StrokeStyle(lineWidth: (0.93 + st * 0.60) * fine, lineCap: .round, lineJoin: .round))
+                let alpha = two ? min(0.90, (0.20 + st * 0.52) * fade) : min(0.88, (0.22 + st * 0.50) * fade)
+                context.stroke(specEdges[tier], with: .color(color.opacity(alpha)),
+                               style: StrokeStyle(lineWidth: ((two ? 0.92 : 0.95) + st * (two ? 0.58 : 0.62)) * fine,
+                                                  lineCap: .round, lineJoin: .round))
             }
             if !specDots[tier].isEmpty {
                 let r = (1.30 + st * 0.72) * fine
@@ -797,9 +804,12 @@ final class OnboardingWireScene {
     /// Step 2's shared camera: a 3/4 view that shows the key's profile and the
     /// padlock's face; the shudder rolls both.
     private func lockAngles(still: Bool) -> (Double, Double, Double) {
-        (-0.20 + (still ? 0 : cos(clock * 0.44) * 0.042), -0.68 + (still ? 0 : sin(clock * 0.56) * 0.065),
+        (-0.20 + (still ? 0 : cos(clock * 0.44) * 0.06), -0.68 + (still ? 0 : sin(clock * 0.38) * 0.16),
          0.02 + jolt.value * 0.14)
     }
+
+    /// The pair breathes in depth, slowly, like the key on step 1.
+    private func lockBreath(still: Bool) -> Double { still ? 0 : sin(clock * 0.52) * 0.10 }
 
     // MARK: Drawing
 
@@ -845,7 +855,9 @@ final class OnboardingWireScene {
         let hy = m[3] * hole.x + m[4] * hole.y + m[5] * hole.z
         let hz = m[6] * hole.x + m[7] * hole.y + m[8] * hole.z
         let lockCenter = CGPoint(x: lockX, y: keyBandY + bodyY.value)
-        let holeScale = OnboardingWireSolid.cameraDistance / (OnboardingWireSolid.cameraDistance - hz * 0.55) * Self.lockRadius
+        let breath = lockBreath(still: still)
+        let holeScale = OnboardingWireSolid.cameraDistance
+            / max(1.2, OnboardingWireSolid.cameraDistance - (breath + hz * 0.55)) * Self.lockRadius
         let holeX = lockCenter.x + hx * holeScale, holeY = lockCenter.y + hy * holeScale
         let axisLength = max(0.0001, hypot(m[0], m[3]))
         let dirX = m[0] / axisLength, dirY = m[3] / axisLength
@@ -860,11 +872,11 @@ final class OnboardingWireScene {
             var shackleLight = light; shackleLight.strength *= 0.95
             var bodyLight = light; bodyLight.strength *= 0.80
             OnboardingPadlock.shackle(lift: lift.value, swing: swing.value).draw(
-                in: &context, center: lockCenter, worldZ: 0, radius: Self.lockRadius, angles: angles,
-                style: OnboardingWireStyle(fade: fade, specular: shackleLight))
+                in: &context, center: lockCenter, worldZ: breath, radius: Self.lockRadius, angles: angles,
+                style: OnboardingWireStyle(fade: fade, specular: shackleLight, keyStage: true))
             OnboardingWireCatalog.padlockBody.draw(
-                in: &context, center: lockCenter, worldZ: 0, radius: Self.lockRadius, angles: angles,
-                style: OnboardingWireStyle(fade: fade, specular: bodyLight))
+                in: &context, center: lockCenter, worldZ: breath, radius: Self.lockRadius, angles: angles,
+                style: OnboardingWireStyle(fade: fade, specular: bodyLight, keyStage: true))
             if keyPhase == .network {
                 // Dots dimming toward the lock that does not answer.
                 for d in 0..<3 {
@@ -902,10 +914,10 @@ final class OnboardingWireScene {
                 let arc = sin(.pi * b) * 14
                 let center = CGPoint(x: key.x.value + (seated.x - key.x.value) * b,
                                      y: key.y.value + (seated.y - key.y.value) * b - arc)
-                let z = key.z.value * (1 - b)
+                let z = key.z.value * (1 - b) + breath * b
                 let lit = key.lit.value * (1 - b)
                 var style = OnboardingWireStyle(fade: key.fade.value + (1 - key.fade.value) * b, lit: lit)
-                if b > 0.5 { style.specular = light } else { style.specular = hoverLight(lit) }
+                if b > 0.5 { style.specular = light; style.keyStage = true } else { style.specular = hoverLight(lit) }
                 OnboardingWireCatalog.key.draw(
                     in: &context, center: center, worldZ: z, radius: radius + (Self.keyRadius - radius) * b,
                     angles: blended, style: style)

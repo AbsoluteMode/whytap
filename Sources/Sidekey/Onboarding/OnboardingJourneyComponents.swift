@@ -102,65 +102,6 @@ struct OnboardingBackButton: View {
     }
 }
 
-// MARK: - Dwell pill
-
-/// The footer's quiet indicator while the step is about to move on, held, or
-/// reviewed after Back. It replaces a permanent Continue button.
-struct OnboardingDwellPill: View {
-    @ObservedObject var dwell: OnboardingDwellController
-    @State private var hovered = false
-
-    var body: some View {
-        switch dwell.state {
-        case .idle:
-            EmptyView()
-        case .counting(let next, _):
-            Button(action: dwell.latch) {
-                HStack(spacing: 6) {
-                    Circle().fill(OnboardingTheme.green).frame(width: 5, height: 5)
-                    Text("Next: \(next)")
-                        .font(OnboardingTheme.sans(11.5, weight: .medium))
-                        .foregroundColor(OnboardingTheme.muted)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 26)
-                .background(Capsule(style: .continuous).fill(OnboardingTheme.surface))
-                .overlay(Capsule(style: .continuous).strokeBorder(OnboardingTheme.border, lineWidth: 0.75))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .accessibilityLabel("Moving on to \(next). Activate to stay on this step.")
-        case .latched(let next, _), .reviewing(let next):
-            let reviewing = { if case .reviewing = dwell.state { return true } else { return false } }()
-            Button(action: dwell.commitNow) {
-                HStack(spacing: 6) {
-                    Image(systemName: reviewing ? "checkmark" : "pause.fill")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .foregroundColor(reviewing ? OnboardingTheme.green : OnboardingTheme.orange)
-                    Text(hovered ? "Go to \(next)" : reviewing ? "Continue · \(next)" : "Paused · Stay as long as you need")
-                        .font(OnboardingTheme.sans(11.5, weight: .medium))
-                        .foregroundColor(hovered ? OnboardingTheme.ink : OnboardingTheme.ink2)
-                    Image(systemName: "return")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(OnboardingTheme.muted)
-                }
-                .padding(.horizontal, 11)
-                .frame(height: 26)
-                .background(Capsule(style: .continuous).fill(hovered ? OnboardingTheme.surface3 : OnboardingTheme.surface2))
-                .overlay(Capsule(style: .continuous)
-                    .strokeBorder(reviewing ? OnboardingTheme.borderStrong : OnboardingTheme.orange.opacity(0.55), lineWidth: 0.75))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .onHover { hovered = $0 }
-            .keyboardShortcut(.return, modifiers: [])
-            .accessibilityLabel("Press Return to continue to \(next).")
-        }
-    }
-}
-
 // MARK: - Choice card
 
 /// A raised slab with a recessed spec header; the chosen one locks with an

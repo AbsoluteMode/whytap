@@ -3,8 +3,9 @@ import SwiftUI
 
 /// The onboarding's one small window: a fixed Back slot, the grouped progress
 /// rail and the step count; one step on a stage; a footer with Skip or Set up
-/// later on the left and the dwell pill on the right. A successful action
-/// moves on by itself; the pointer over the stage holds it.
+/// later on the left and Next on the right only when nothing moves on by
+/// itself. A successful action moves on by itself, with no chip; Return goes
+/// on at once.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 struct OnboardingJourneyView: View {
@@ -36,8 +37,6 @@ struct OnboardingJourneyView: View {
             .padding(.horizontal, Self.isWireframe(model.step) ? 0 : OnboardingTheme.compactHorizontalInset)
             .clipped()
             .contentShape(Rectangle())
-            // The Dwell Latch: a pointer on the step holds the automatic move.
-            .onHover { inside in inside ? dwell.latch() : dwell.resume() }
             .animation(OnboardingMotion.resolve(flowsWithTheKey ? OnboardingMotion.keyFlow : OnboardingMotion.stepGlide,
                                                 reduceMotion: reduceMotion, allowFade: true),
                        value: model.step)
@@ -155,13 +154,29 @@ struct OnboardingJourneyView: View {
         }
     }
 
+    /// No chip while a step moves on by itself (the owner removed "Next: …",
+    /// "Paused" and "Continue · …" on every step): the move is the animation,
+    /// and Return still goes on at once. A step reached by Back, or one that is
+    /// done with no move pending, offers the plain Next.
     @ViewBuilder private var rightAction: some View {
-        if dwell.state != .idle {
-            OnboardingDwellPill(dwell: dwell)
-        } else if model.step != .thanks, model.step != .source,
-                  model.step.isInformational || model.outcome(model.step).isDone {
-            OnboardingPrimaryButton(title: "Next", action: model.next)
-                .keyboardShortcut(.defaultAction)
+        switch dwell.state {
+        case .counting, .latched:
+            Button("", action: dwell.commitNow)
+                .keyboardShortcut(.return, modifiers: [])
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityLabel("Continue")
+        case .reviewing:
+            if model.step != .source {
+                OnboardingPrimaryButton(title: "Next", action: dwell.commitNow)
+                    .keyboardShortcut(.defaultAction)
+            }
+        case .idle:
+            if model.step != .thanks, model.step != .source,
+               model.step.isInformational || model.outcome(model.step).isDone {
+                OnboardingPrimaryButton(title: "Next", action: model.next)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
     }
 

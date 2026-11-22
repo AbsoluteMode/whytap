@@ -54,7 +54,7 @@ window, Back and a progress bar.
 - **One small window** (520 × 440 pt): a fixed 32 × 24 pt Back slot, the
   progress rail and "NN / 13" on top; the act, a serif title and one line
   under it; the step's stage; a footer with Skip or Set up later on the left
-  and the dwell pill on the right. Back also answers ← and ⌘[ outside text
+  and Next on the right only when nothing moves on by itself. Back also answers ← and ⌘[ outside text
   fields. The visual and motion come from the design pass (dark raised
   cards with a 1 pt top highlight, recessed key fields, near-critically
   damped springs, nothing moving at rest, opacity only under Reduce Motion).
@@ -75,18 +75,22 @@ window, Back and a progress bar.
   9. Screen Recording (optional).
   10. Try Drop (only when speech is on the way).
   11. Shortcuts. 12. Toolbox. 13. Help on whytap.ai. 14. Thank you.
-- **Moving on by itself, and holding (Dwell Latch).** When a shown step's
-  action succeeds (a key accepted and applied, a permission turning granted,
-  a dictation inserted, a language picked, a source chosen) its segment
-  fills for the step's dwell (0.62 s for a choice, 0.78 s for a verified key
-  or grant, 1.35 s after Try Drop; Reduce Motion adds 0.22 s) and the
-  footer says "Next: …". The pointer over the stage, or the pill, holds it
-  ("Paused · Stay as long as you need"); leaving resumes, Return or the pill
-  goes on. Back to a step that is done, or to a tour step, shows "Continue ·
-  …" and never moves by itself; Back during the dwell cancels it. The tour
-  steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when reached
-  going forward. Required steps keep a quiet "Set up later", optional ones
-  "Skip"; a step that is done without a pending move offers Next.
+- **Moving on by itself, with no chip.** When a shown step's action
+  succeeds (a key accepted and applied, a permission turning granted, a
+  dictation inserted, a language picked, a source chosen) its segment fills
+  for the step's dwell (0.62 s for a choice, 0.78 s for a verified key or
+  grant, 1.15 s on the speech key so the padlock opens and settles first,
+  1.35 s after Try Drop; Reduce Motion adds 0.22 s), then the step moves on
+  with its animation. The owner removed every footer chip on 2026-11-22
+  ("Next: …", "Paused · Stay as long as you need", "Continue · …"): Return
+  still goes on at once without one. With no visible hold, the pointer no
+  longer holds the move (a pointer resting on the page would have stopped
+  it silently). Back to a step that is done, or to a tour step, never moves
+  by itself and offers the plain Next; Back during the dwell cancels it.
+  The tour steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when
+  reached going forward. Required steps keep a quiet "Set up later",
+  optional ones "Skip"; a step that is done without a pending move offers
+  Next.
   Step 1 is the exception (the owner asked to remove the pill, 2026-11-22): a
   click on a figure, or Return on the figure in front, is its Continue, with
   no pill and no Next, also after Back. It is not an instant cut either (the
@@ -179,7 +183,7 @@ window, Back and a progress bar.
   key, an empty balance, a key without speech access, or no answer (with
   Retry); the key check has no separate rate-limit answer. The wire key
   turns in its lock when accepted and catches on a pin when refused. The
-  footer pill no longer says "Hold"; the pointer still holds the move.
+  footer has no chip at all (see "Moving on by itself, with no chip").
 - **The wire figures move per display frame, not by SwiftUI animation.**
   Values a `Canvas` captures are not interpolated by `.animation`, so the
   first draft jumped between poses, and it drew at 30 fps. The stages now
@@ -211,6 +215,9 @@ window, Back and a progress bar.
   light turn rose-pearl on hover (step 1), and on step 2 a light from the
   field below goes rose, green when accepted and amber on a problem; the
   only glow is a faint dithered blush under the field, so nothing bands.
+  The key and padlock use that prototype's ink (line width from the
+  figure's size, full-strength dots in the vertices) and breathe slowly in
+  depth and yaw, like the key on step 1.
 - **Only what looks like a key is masked.** Latin letters, digits, "-" and
   "_", 20 characters or more, show the start and the last four. Anything
   else (a typed word, Cyrillic, spaces, short input) shows as typed and is
@@ -237,10 +244,11 @@ window, Back and a progress bar.
 - A separate per-feature speech or LLM choice in the onboarding: the shared
   rows already do one pick for all, and Advanced in Settings keeps custom
   models.
-- A permanent Continue next to the automatic move: the pill appears only
-  while a move is pending, held or reviewed.
-- A move that cannot be stopped: the pointer on the stage holds it, so
-  reading a result is never cut off.
+- A permanent Continue next to the automatic move, or any chip that names
+  the next step: the owner removed them; Return goes on, Back stops.
+- Holding the move while the pointer rests on the page: with no visible
+  hold it silently stopped the move; the dwells are long enough to read the
+  result instead.
 - A Post Event screen: no separate System Settings pane on current macOS.
 - Asking for System Audio Recording and Automation in the onboarding: they
   are only needed by Meetings and Now Playing and are asked at first use.

@@ -79,7 +79,10 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     var dwell: TimeInterval? {
         switch self {
         case .source, .language: return 0.62
-        case .speechKey, .llmKey, .search, .keyboard, .microphone, .inputMonitoring, .screenRecording: return 0.78
+        // The padlock plays to the end first: the key turns, the shackle opens
+        // and settles (the design pass moves on after 1.15 s).
+        case .speechKey: return 1.15
+        case .llmKey, .search, .keyboard, .microphone, .inputMonitoring, .screenRecording: return 0.78
         case .tryDrop: return 1.35
         case .hotkeys, .toolbox, .help: return 4.2
         case .thanks: return nil

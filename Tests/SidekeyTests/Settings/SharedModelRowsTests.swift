@@ -207,6 +207,40 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(APIAndModelsView.sharedStatusLines(shared).allSatisfy { $0.hasPrefix("Meetings: ") })
     }
 
+    // OpenAI speech on the shared OpenAI key: one pick in Speech sets the four
+    // live features; Meetings has no OpenAI model and says so. The picker
+    // has an OpenAI section with the live models and the turn-based ones from
+    // the catalog, the diarizing model left out.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func test_openai_speech_pick_sets_live_features_and_names_meetings() async throws {
+        let catalog = try ModelCatalogFetcher.parseOpenAI(Data(#"""
+        {"data":[{"id":"gpt-live-transcribe","created":1790000000},{"id":"gpt-realtime-whisper"},
+                 {"id":"gpt-4o-mini-transcribe"},{"id":"gpt-4o-transcribe-diarize"},{"id":"gpt-6"},
+                 {"id":"gpt-realtime-translate"}]}
+        """#.utf8))
+        let env = try makeEnv(snapshots: [.openAI: fresh(catalog)], keyed: [.openAI])
+        let vm = env.makeViewModel()
+
+        let section = try XCTUnwrap(vm.sections(for: SharedModelKind.speech.pickerFeature).first { $0.account == .openAI })
+        XCTAssertEqual(Set(section.options.map(\.model)),
+                       ["gpt-live-transcribe", "gpt-realtime-whisper", "gpt-4o-mini-transcribe"])
+        XCTAssertEqual(section.options.first { $0.model == "gpt-4o-mini-transcribe" }?.hint, "text after each pause")
+        XCTAssertNil(section.options.first { $0.model == "gpt-live-transcribe" }?.hint)
+
+        let picked = await vm.selectShared(model: ModelRegistry.openAILiveModel, account: .openAI,
+                                           kind: .speech, replaceCustom: false)
+        XCTAssertTrue(picked)
+        XCTAssertTrue(env.probe.calls.isEmpty, "built-in speech models need no check")
+        for feature in [AIFeature.dropFast, .dropSmart, .agentVoice, .voiceSearch] {
+            XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .openAI, model: "gpt-live-transcribe"))
+        }
+        XCTAssertNil(env.routing.route(for: .meetings))
+        let shared = try row(.speech, vm)
+        XCTAssertEqual(shared.label, "OpenAI · gpt-live-transcribe · 1 not set")
+        XCTAssertEqual(shared.uncovered.map(\.feature), [.meetings])
+        XCTAssertEqual(shared.uncovered.first?.skipReason, "OpenAI can't serve Meetings")
+    }
+
     func test_self_hosted_server_serves_its_kinds_with_one_check_each() async throws {
         let env = try makeEnv(keyed: [])
         let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:8000/v1")

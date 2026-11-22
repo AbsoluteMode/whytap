@@ -41,7 +41,7 @@ Knowledge workers — разработчики, продакт-менеджер�
 - To-do — компактный локальный список в hover: ввод + Enter, нажатие завершает/возвращает задачу, завершённые уходят вниз до закрытия, затем доступны в History с датой и временем завершения. Длинный текст раскрывается нативной подсказкой при наведении; черновик сохраняется при закрытии. Calendar открывается внутри Hover на текущем дне. Повестка, полные подробности события (пузырь при наведении на блок, который что-то обрезает; блоки показывают название, время, описание и участников по мере высоты; Google/Outlook через Календарь macOS получают свой логотип), выбор видимых календарей и кнопка Connect остаются внутри Hover; повторное открытие возвращает сегодня. Connect и Settings → Integrations сразу запускают общий сценарий подключения Apple, Google, Outlook/Teams и Zoom Calendar Service: без промежуточной формы, имени аккаунта и Advanced setup. Браузер или системный запрос открываются только для разрешения доступа провайдеру; аккаунта Whytap нет. Внешние события доступны для чтения. Публичные Google/Zoom подключения остаются недоступны до проверки; живая авторизация проверяется отдельно. См. [Planner](planner.md).
 
 - macOS 14.2+, Swift + AppKit + SwiftUI; surface — Dynamic Island (status-bar item нет)
-- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) → cleanup (OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / без LLM) → Cmd+V (в собственные текстовые поля Whytap, например в ввод Translate, текст вставляется напрямую в выделение, без буфера обмена и Cmd+V)
+- Voice flow: hold Space (удержание пробела в редактируемом поле; Escape — отмена) → запись → realtime STT: «Your key» (Soniox / Deepgram / ElevenLabs / OpenAI / self-hosted OpenAI-compatible, напрямую ключом пользователя из Keychain) → cleanup (OpenRouter ключом пользователя / custom OpenAI-compatible endpoint / без LLM) → Cmd+V (в собственные текстовые поля Whytap, например в ввод Translate, текст вставляется напрямую в выделение, без буфера обмена и Cmd+V)
 - Agent flow: Right Cmd tap/hold → Whytap Agent → выбранная пользователем модель OpenRouter, OpenAI или Anthropic, рендер в окне
 - Meeting Notes: always-on детектор → запись (mic + system audio) → BYOK-процессор (Soniox размечает спикеров, саммари — LLM пользователя) → notes window
 - App-aware форматирование (Notion/Linear/Slack/Telegram → markdown, остальное → plain)
@@ -500,11 +500,21 @@ Refresh повторяет чтение цен; при ошибке API изве
 
 **STT-провайдеры (Your key, выбор пользователя в Settings → API & Models для
 каждой фичи):** Soniox (`stt-rt-v6`, по умолчанию), Deepgram (`nova-3`),
-ElevenLabs (`scribe_v3_live`) или self-hosted endpoint с протоколом OpenAI
-Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`). Сам
-OpenAI не предлагается: сохранённый выбор OpenAI читается как Soniox. Drop —
-realtime streaming, не batch; заметки встреч с Soniox идут через file API
-(`stt-async-v6`).
+ElevenLabs (`scribe_v3_live`), OpenAI или self-hosted endpoint с протоколом
+OpenAI Realtime (модель вводит пользователь, по умолчанию `gpt-4o-transcribe`).
+OpenAI работает на общем OpenAI-ключе (тот же, что у LLM) и только на
+`api.openai.com`: `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper`
+стримят слова во время речи, а пофразовые модели каталога (`gpt-transcribe`,
+`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`) идут через server
+VAD и показывают текст после каждой паузы («text after each pause» в пикере,
+auto-stop для них не включается). Batch-восстановление и Retry отправляют дубль в
+`/v1/audio/transcriptions` (`gpt-transcribe` для live-моделей). Meetings у
+OpenAI нет: ни одна модель OpenAI не размечает спикеров (diarize-модель
+OpenAI выводит из оборота), а файл ограничен 25 MB. Старый сохранённый выбор
+OpenAI переносится на OpenAI со своей моделью, не на Soniox. Решение —
+[2026-11-22-openai-speech-provider](../.project-docs/decisions/2026-11-22-openai-speech-provider.md).
+Drop — realtime streaming, не batch; заметки встреч с Soniox идут через file
+API (`stt-async-v6`).
 
 **Input language** — отдельный от Smart Output language выбор. Явный язык
 передаётся STT-провайдеру: Soniox получает мягкие hints с добавлением английского,

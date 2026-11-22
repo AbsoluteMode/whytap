@@ -10,6 +10,8 @@ enum ProviderBatchRoute: Equatable, Sendable {
     case elevenLabs(apiKey: String, model: String)
     /// A server's key is optional: without one no `Authorization` is sent.
     case selfHosted(apiKey: String?, endpoint: URL, model: String)
+    /// OpenAI's `/v1/audio/transcriptions` on the shared OpenAI key.
+    case openAI(apiKey: String, model: String)
     /// The model on this Mac: no request leaves it.
     case onDevice(model: String)
 
@@ -39,10 +41,18 @@ enum ProviderBatchRoute: Equatable, Sendable {
             return .selfHosted(apiKey: key, endpoint: endpoint, model: route.model)
         case .thisMac:
             return .onDevice(model: route.model)
-        case .openRouter, .openAI, .anthropic:
+        case .openAI:
+            // The live-only models are not served by the file endpoint.
+            guard let key else { return nil }
+            return .openAI(apiKey: key, model: ModelRegistry.openAIRecordedModel(for: route.model))
+        case .openRouter, .anthropic:
             return nil
         }
     }
+
+    /// OpenAI's file transcription endpoint; a take over 25 MB (about 13
+    /// minutes of 16 kHz PCM) is refused there with 413.
+    static let openAIEndpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
 
     /// `/v1/audio/transcriptions` on the realtime base URL's host, over TLS
     /// whatever the scheme (the realtime socket is always `wss`). A base URL
@@ -64,6 +74,7 @@ enum ProviderBatchRoute: Equatable, Sendable {
         case .deepgram: return BYOKProvider.deepgram.rawValue
         case .elevenLabs: return BYOKProvider.elevenLabs.rawValue
         case .selfHosted: return BYOKProvider.selfHosted.rawValue
+        case .openAI: return BYOKProvider.openAI.rawValue
         case .onDevice: return "on_device"
         }
     }
@@ -147,7 +158,8 @@ struct ProviderBatchTranscriber: BatchTranscribing {
             guard let resolved = resolvedRoute(), let route = ProviderBatchRoute.make(for: resolved) else { return nil }
             let model: String
             switch route {
-            case .soniox(_, let value), .deepgram(_, let value), .elevenLabs(_, let value), .selfHosted(_, _, let value): model = value
+            case .soniox(_, let value), .deepgram(_, let value), .elevenLabs(_, let value), .selfHosted(_, _, let value),
+                 .openAI(_, let value): model = value
             // Nothing is billed and no provider is called: Costs has no row.
             case .onDevice: return Selection(route: route, usage: nil)
             }
@@ -192,6 +204,9 @@ struct ProviderBatchTranscriber: BatchTranscribing {
                                              onReference: { providerReference = $0 })
             case .selfHosted(let apiKey, let endpoint, let model):
                 result = try await selfHosted(wav, apiKey: apiKey, endpoint: endpoint, model: model, language: language)
+            case .openAI(let apiKey, let model):
+                result = try await selfHosted(wav, apiKey: apiKey, endpoint: ProviderBatchRoute.openAIEndpoint,
+                                              model: model, language: language)
             case .onDevice:
                 result = try await onDevice.transcribe(audio: audio, language: language)
             }

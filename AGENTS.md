@@ -105,12 +105,24 @@ Voice flow (Drop / dictation):
             model, AIRoutingStore) into a ResolvedRoute with the account's
             Keychain key; RealtimeAdapterFactory builds the adapter. Your key
             (BYOK) only: direct to the provider (Streaming/BYOK/): Soniox
-            (default), Deepgram, ElevenLabs or a self-hosted endpoint speaking
-            the OpenAI Realtime protocol. OpenAI itself is not offered; a
-            legacy OpenAI choice resolves to Soniox. A server route has no
-            default host: a missing or unparseable base URL fails
-            (.invalidBaseURL / .missingBaseURL) before any socket opens, never
-            reaching api.openai.com. WHY:
+            (default), Deepgram, ElevenLabs, OpenAI or a self-hosted endpoint
+            speaking the OpenAI Realtime protocol. OpenAI runs on the shared
+            OpenAI key (byok.openai.llm_api_key, never the retired
+            byok.openAI.api_key) to its explicit host
+            (BYOKRealtimeURL.openAIHosted): gpt-live-transcribe (default) and
+            gpt-realtime-whisper stream within one turn (one commit at the
+            end); a turn-based model (gpt-transcribe, gpt-4o-*-transcribe,
+            whisper-1) runs with server VAD and shows text after each pause,
+            so it starts no auto-stop take. Turns are tracked by item_id and
+            finals kept in commit order; a pong is stall progress; a refusal
+            (providerRefused) degrades Drop to the batch rung
+            (/v1/audio/transcriptions, gpt-transcribe for the live-only
+            models), which names it. Meetings have no OpenAI model. A legacy
+            OpenAI choice migrates to OpenAI with its model, never to Soniox.
+            WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            A server route has no default host: a missing or unparseable base
+            URL fails (.invalidBaseURL / .missingBaseURL) before any socket
+            opens, never reaching api.openai.com. WHY:
             .project-docs/decisions/2026-10-18-no-default-realtime-host.md
             A feature without a route (Not set: never chosen on Apple Silicon,
             the retired Local route, or its key removed), or whose key is

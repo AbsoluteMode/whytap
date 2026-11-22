@@ -78,8 +78,34 @@ final class ProviderBatchRouteTests: XCTestCase {
     }
 
     // Breaks if a built-in provider could be reached without a key.
+    // OpenAI: the file endpoint on api.openai.com with the shared key; the
+    // live-only models map to gpt-transcribe, a file-capable one is kept.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func test_openAI_batch_uses_its_file_model_and_key() {
+        XCTAssertEqual(
+            ProviderBatchRoute.make(for: resolved(.openAI, model: "gpt-live-transcribe", apiKey: "oa-key")),
+            .openAI(apiKey: "oa-key", model: "gpt-transcribe"))
+        XCTAssertEqual(
+            ProviderBatchRoute.make(for: resolved(.openAI, model: "gpt-realtime-whisper", apiKey: "oa-key")),
+            .openAI(apiKey: "oa-key", model: "gpt-transcribe"))
+        XCTAssertEqual(
+            ProviderBatchRoute.make(for: resolved(.openAI, model: "gpt-4o-mini-transcribe", apiKey: "oa-key")),
+            .openAI(apiKey: "oa-key", model: "gpt-4o-mini-transcribe"))
+        XCTAssertEqual(ProviderBatchRoute.openAIEndpoint.absoluteString,
+                       "https://api.openai.com/v1/audio/transcriptions")
+    }
+
+    // A server never inherits OpenAI's host, whatever model it names.
+    func test_server_named_like_openai_model_stays_on_its_own_host() {
+        let server = ServerEndpoint(id: UUID(), name: "S", baseURL: "https://gpu.local", keyAccount: "k")
+        let route = ProviderBatchRoute.make(for: resolved(.server(server.id), model: "gpt-live-transcribe",
+                                                          apiKey: "k", server: server))
+        XCTAssertEqual(route, .selfHosted(apiKey: "k", endpoint: URL(string: "https://gpu.local/v1/audio/transcriptions")!,
+                                          model: "gpt-live-transcribe"))
+    }
+
     func test_hosted_provider_without_a_key_is_nil() {
-        for account in [ProviderAccount.soniox, .deepgram, .elevenLabs] {
+        for account in [ProviderAccount.soniox, .deepgram, .elevenLabs, .openAI] {
             for key in [nil, ""] as [String?] {
                 XCTAssertNil(ProviderBatchRoute.make(for: resolved(account, apiKey: key)), "\(account)")
             }
@@ -569,6 +595,42 @@ final class ProviderBatchTranscriberTests: XCTestCase {
         let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
         let form = try MultipartForm(request, body: StubURLProtocol.capturedBodies[0])
         XCTAssertEqual(form.fields, ["model": "whisper-large-v3", "response_format": "json"])
+    }
+
+    // MARK: OpenAI
+
+    // Breaks if the take leaves OpenAI's file contract or goes to another host.
+    func test_openAI_postsMultipartToItsTranscriptionsEndpointWithTheSharedKey() async throws {
+        StubURLProtocol.handler = { _ in (200, [:], Self.json(["text": "Привет."])) }
+
+        let text = try await transcriber(.openAI(apiKey: "oa-key", model: "gpt-transcribe"))
+            .transcribe(audio: pcm, language: "ru")
+
+        XCTAssertEqual(text, "Привет.")
+        let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
+        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/transcriptions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer oa-key")
+        let form = try MultipartForm(request, body: StubURLProtocol.capturedBodies[0])
+        XCTAssertEqual(form.fields, ["model": "gpt-transcribe", "language": "ru", "response_format": "json"])
+    }
+
+    // 401 and 429 reach the failure face as named reasons, not "offline".
+    func test_openAI_refusals_are_named() async {
+        for (status, expected) in [(401, ProviderFailure.keyRefused), (429, .busy)] {
+            StubURLProtocol.reset()
+            StubURLProtocol.handler = { _ in
+                (status, ["Content-Type": "application/json"], Self.json(["error": ["type": "x", "code": "y"]]))
+            }
+            do {
+                _ = try await transcriber(.openAI(apiKey: "oa-key", model: "gpt-transcribe"))
+                    .transcribe(audio: pcm, language: nil)
+                XCTFail("HTTP \(status) must throw")
+            } catch {
+                XCTAssertEqual(ProviderFailure(error), expected, "HTTP \(status)")
+                XCTAssertEqual(ProviderFailure(error)?.dropMessage(provider: "OpenAI"),
+                               status == 401 ? "OpenAI refused the key" : "OpenAI is busy, try again")
+            }
+        }
     }
 
     // MARK: Soniox

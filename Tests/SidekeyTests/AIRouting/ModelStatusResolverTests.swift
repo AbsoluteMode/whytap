@@ -419,7 +419,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(env.resolver.missingProviderHint(for: .agent), "Add a key for OpenRouter, OpenAI or Anthropic")
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
-            "Add a key for Soniox, Deepgram, ElevenLabs or an OpenAI-compatible server"
+            "Add a key for Soniox, Deepgram, ElevenLabs, OpenAI or an OpenAI-compatible server"
                 + (HostArchitecture.isAppleSilicon ? ", or download the On this Mac model" : "")
         )
         env.addKey(.soniox)

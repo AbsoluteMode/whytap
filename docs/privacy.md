@@ -111,7 +111,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 |---|---|---|
 | Meeting detector (FluidAudio Silero VAD) | nowhere; a one-time download from Hugging Face fetches the model | the first time the detector checks for speech |
 | On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in API & Models; recognition while a feature set to On this Mac is in use |
-| Your key: speech (Soniox, Deepgram, ElevenLabs, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
+| Your key: speech (Soniox, Deepgram, ElevenLabs, OpenAI, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
 | Agent (native) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key; tool actions may access destinations needed by your request | when you submit an agent request |
 | Agent model mark | public image files on OpenRouter for the displayed model author; no API key, cookies, audio, prompt or reply. Bundled marks appear immediately; a small local cache is disposable | asynchronously when the voice mark is shown, at most weekly per cached author; failures retain usable artwork |
 | Key checks | the provider of the key: a free request (model list, key or account endpoint) that sends only the key. A restricted ElevenLabs key may need a minimal paid speech request, made only when you save the key or press Check now | when you save a key, press Check now, or open API & Models and the last result is a day old |
@@ -125,9 +125,15 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
-OpenAI itself is not offered for speech. An older saved OpenAI choice reads as
-Soniox and sends audio there only with a Soniox key you stored; without one,
-dictation opens Settings → API & Models instead of recording.
+OpenAI speech uses the same OpenAI key as its language models. A dictation on
+an OpenAI route streams the microphone audio to `wss://api.openai.com/v1/realtime`
+while you record, and a take the live stream could not finish (or Retry) is
+sent once as a WAV file to `https://api.openai.com/v1/audio/transcriptions`.
+Nothing else goes to OpenAI, and meetings never do: Meetings have no OpenAI
+model. A self-hosted server is never sent to api.openai.com, even when it names
+an OpenAI model. An older saved OpenAI choice from the former Models tab stays
+OpenAI and runs only when that OpenAI key is stored; it is never moved to
+Soniox and never brings back the separate OpenAI speech key of older builds.
 
 Each provider has its own data-use terms; check them before pasting a key.
 Data-use policies depend on the selected provider and its account settings.

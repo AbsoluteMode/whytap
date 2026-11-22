@@ -182,7 +182,9 @@ extension AIProviderKind {
     var keyTileDetail: String {
         switch self {
         case .soniox, .deepgram, .elevenLabs, .onDevice: return "Speech recognition"
-        case .openRouter, .openAI, .anthropic: return "Language models"
+        // One OpenAI key serves its speech and its language models.
+        case .openAI: return "Speech and LLMs"
+        case .openRouter, .anthropic: return "Language models"
         case .openAICompatible: return "Your own endpoint"
         }
     }

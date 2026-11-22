@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/SharedModelRowsTests.swift
     confirmed_at: 2026-11-22
-related: []
+related: [2026-11-22-openai-speech-provider.md]
 ---
 
 # Two shared rows, Speech and LLM, set every feature's model in two picks

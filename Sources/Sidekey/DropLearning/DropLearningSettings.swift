@@ -1,7 +1,7 @@
 import Foundation
 
-/// Learning from edits is opt-in (`enabled`, off by default; its switch ships
-/// with the drops UI). Calibration is a hidden developer mode for tuning the
+/// Learning from edits is on by default (Settings, Other, Drop, "Learn from my
+/// edits"); a user who switched it off stays off. Calibration is a hidden developer mode for tuning the
 /// rules on real dictation: it reads the field longer, writes a local journal
 /// and saves nothing on Y. It switches itself off after 14 days and deletes the
 /// journal and its own counters.
@@ -23,7 +23,15 @@ struct DropLearningSettings {
         self.journal = journal
     }
 
-    var isEnabled: Bool { defaults.bool(forKey: Self.enabledKey) }
+    var isEnabled: Bool { Self.isEnabled(in: defaults) }
+
+    /// On unless the user switched it off: the key is written only by the
+    /// switch, so a missing key means "never touched" and reads as on, while
+    /// an explicit `false` is kept. No migration is needed.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-default-on.md
+    static func isEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: enabledKey) as? Bool ?? true
+    }
 
     /// True while calibration is on and younger than 14 days. The first call
     /// after it is switched on starts the clock; expiry cleans up.

@@ -51,7 +51,7 @@ struct SettingsOtherView: View {
     /// on init and re-read on appear; written back on every toggle.
     @State private var volumeDuckEnabled: Bool
     @State private var dropAutoStopEnabled = false
-    @State private var dropLearningEnabled = false
+    @State private var dropLearningEnabled = true
 
     /// Local mirror of the island auto-hide flag. Seeded from
     /// `islandIdlePreferences` on init and re-read on appear; written back on
@@ -133,7 +133,8 @@ struct SettingsOtherView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 0) {
-                    MacGroupTitle(title: "Recording")
+                    // WHY: .project-docs/decisions/2026-11-22-drop-learning-default-on.md
+                    MacGroupTitle(title: "Drop")
                     MacCard {
                         MacRow(
                             title: "Lower other audio while speaking",
@@ -250,7 +251,7 @@ struct SettingsOtherView: View {
             // never shows a stale toggle state.
             volumeDuckEnabled = volumeDuckConfig.isEnabled
             dropAutoStopEnabled = DropAutoStopPreferences.shared.isEnabled
-            dropLearningEnabled = UserDefaults.standard.bool(forKey: DropLearningSettings.enabledKey)
+            dropLearningEnabled = DropLearningSettings.isEnabled(in: .standard)
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
             meetingsEnabled = meetingsEnabledProvider()
             googleEnabled = googleEnabledProvider()
@@ -272,7 +273,8 @@ struct SettingsOtherView: View {
     }
 
     /// Binding: persists to `DropAutoStopPreferences`; read when a take starts.
-    /// Off by default. Turning it off also stops a read already scheduled.
+    /// On by default; turning it off is remembered and also stops a read
+    /// already scheduled.
     private var dropLearningToggleBinding: Binding<Bool> {
         Binding(
             get: { dropLearningEnabled },

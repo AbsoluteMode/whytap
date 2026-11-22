@@ -365,7 +365,11 @@ final class SpeechTranslationRoutingTests: XCTestCase {
     /// (`SubtitleAudioTranslateTests`); the registry still knows it.
     func testTheTranslateModelStaysKnownButIsNoPickerModel() {
         XCTAssertNil(AIFeature.subtitlesAudio.modelUse(on: .openAI))
-        XCTAssertNil(AIFeature.dropFast.modelUse(on: .openAI))
+        // OpenAI serves Drop's live speech again, but never with the translate
+        // model: it is no speech-to-text model.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+        XCTAssertEqual(AIFeature.dropFast.modelUse(on: .openAI), .realtimeSTT)
+        XCTAssertFalse(ModelRegistry.isVerified("gpt-realtime-translate", kind: .openAI, use: .realtimeSTT))
         XCTAssertEqual(SubtitleAudioTranslate.model, "gpt-realtime-translate")
         XCTAssertTrue(ModelRegistry.isVerified("gpt-realtime-translate", kind: .openAI, use: .speechTranslation))
     }

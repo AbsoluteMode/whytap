@@ -259,6 +259,8 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
             place(item, after: obj["previous_item_id"] as? String)
             if endRequested { commitSettled = true }
             emitPartialLocked()
+            // The turn may have completed before its commit was reported.
+            finishIfDoneLocked()
         case "conversation.item.input_audio_transcription.delta":
             place(item, after: nil)
             if let delta = obj["delta"] as? String { deltas[item, default: ""] += delta }

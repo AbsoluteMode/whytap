@@ -372,6 +372,24 @@ window, Back and a progress bar.
   and URL protocol moved out of the app's module into `OnboardingPreviewKit`
   (Sources/OnboardingPreviewKit), which only the OnboardingPreview
   executable and the tests link, so a Whytap build cannot contain them.
+- **The access steps follow the design pass's screen 04.** The owner,
+  REV 57: "the access steps are fine, put them to work". Keyboard control,
+  Microphone, Input Monitoring and Screen Recording share one template, each
+  with its own wire figure in the key, padlock and globe family: a Command
+  keycap on its switch stem (its glyph drawn as continuous strokes whose
+  loops meet the square's sides, sharper than the prototype's), a
+  microphone capsule, an aperture, a display with viewfinder corners. Rest:
+  the title, one purpose line and Allow. Waiting: where to turn Whytap on
+  and the pane's path, a quiet Open System Settings, no spinner. Allowed:
+  the figure plays (the cap presses and a caret rises, the capsule stands
+  up, the aperture opens, the corners close on the window) and the step
+  flows on after 1.05 s, the prototype's beat, with no chip. Not on yet: a
+  return to the app with the switch still off shows one calm amber line and
+  Allow again, with no shake and no red; it is not shown while macOS's own
+  microphone dialog is open, and a step reached again starts at Allow. Only
+  the system's check grants a step, as before. The progress rail and the
+  step count stay the app's. Screen Recording, the one optional step, has
+  Skip for now under Allow, so the footer shows no second Skip there.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -470,6 +488,15 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 57: each access step goes Allow, waiting, back with the switch off
+  (Not on yet), Allow again, allowed, in the preview with its pretend
+  system; a return before any ask changes nothing; a step left and reached
+  again starts at Allow; Open System Settings opens the step's pane and its
+  grant moves the step on; a later return never undoes a grant; macOS's
+  microphone dialog still open is no refusal, a Don't Allow is; the Command
+  glyph's loops start and end on the square's sides; offscreen renders of
+  the four steps in their four states.
 
 - REV 56: no file of the app's module names a preview fake (the fake
   catalogs, key checks, permissions and URL protocol moved to

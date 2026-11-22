@@ -1228,7 +1228,19 @@ own state (its try, "Saved X key · press Return" or an empty field), the
 server fields stay open, and the route, model, Self-hosted mark and Tavily
 step change only after a new check passes; "Choose model" picks only on the
 accepted provider. Above ten models the list opens with a search over the
-provider's whole catalog (OnboardingModelSearch, modelCatalog).
+provider's whole catalog (OnboardingModelSearch, modelCatalog). The four access
+steps share one template (OnboardingAccessStage): a title, the step's own wire
+figure (a Command keycap on its switch, a microphone capsule, an aperture, a
+display with viewfinder corners; OnboardingAccessFigures, drawn per display
+frame), one line and an Allow capsule. Allow asks macOS and the step waits
+(OnboardingAccessState.waiting: "Turn on Whytap in System Settings", the
+Privacy & Security pane, a quiet Open System Settings, no spinner); only the
+system's own check (polling and a return to the app) makes it granted, then
+the figure plays its click and the step moves on after 1.05 s. A return to the
+app with the switch still off shows one calm line and Allow again
+(OnboardingJourneyModel.recheckPermissions; not while macOS's own microphone
+dialog is open); reaching the step again starts at Allow. Screen Recording has
+Skip for now under Allow instead of the footer's Skip.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
 does not link. System Audio Recording, Automation and Calendar are asked at

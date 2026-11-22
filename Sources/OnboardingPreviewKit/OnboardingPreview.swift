@@ -17,7 +17,9 @@ import Foundation
 /// check are answered here without a network request; a word in the key
 /// picks the answer ("bad": refused, "credit": out of credit, "noaccess": no
 /// speech access, "offline": no answer; shorter than 16 characters fails the
-/// shape check before any request); Allow only pretends macOS granted it; the speech model
+/// shape check before any request); the first Allow on an access step comes
+/// back without the switch on (Not on yet), Allow again or Open System
+/// Settings pretends macOS granted it; the speech model
 /// "download" is a timer; Try Drop has a Simulate button. No hotkeys, event
 /// taps, stores or island are started.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -89,10 +91,28 @@ final class OnboardingPreviewSession {
         var accessibility = false
         var microphone = false
         var screen = false
+        /// macOS's microphone dialog was answered Don't Allow.
+        var microphoneRefused = false
         weak var permissions: PermissionsSettingsViewModel?
 
         var snapshot: PermissionsHelper.Snapshot {
-            .init(accessibilityGranted: accessibility, microphoneStatus: microphone ? .authorized : .notDetermined)
+            .init(accessibilityGranted: accessibility,
+                  microphoneStatus: microphone ? .authorized : microphoneRefused ? .denied : .notDetermined)
+        }
+
+        /// The person came back from System Settings (the app's own
+        /// didBecomeActive check).
+        var returned: () -> Void = {}
+        private var asked: Set<String> = []
+
+        /// The first ask of an access step comes back with the switch still
+        /// off, so the calm Not on yet line shows; the next ask grants.
+        @MainActor func ask(_ step: String, _ change: @escaping (System) -> Void) {
+            guard asked.insert(step).inserted else { return grant(change) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+                if step == "microphone" { self?.microphoneRefused = true }
+                self?.returned()
+            }
         }
 
         /// macOS "answers" a moment later, so Waiting for macOS shows.
@@ -136,12 +156,12 @@ final class OnboardingPreviewSession {
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
             snapshotProvider: { system.snapshot }, screenRecordingAccessProvider: { system.screen },
-            screenRecordingRequester: {}, accessibilityRequester: { system.grant { $0.accessibility = true } },
+            screenRecordingRequester: {}, accessibilityRequester: { system.ask("keyboard") { $0.accessibility = true } },
             openAccessibilitySettings: { system.grant { $0.accessibility = true } },
             openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
         system.permissions = permissions
         let screenRecording = ScreenRecordingAccess(isGranted: { system.screen },
-                                                    request: { await MainActor.run { system.grant { $0.screen = true } } })
+                                                    request: { await MainActor.run { system.ask("screen") { $0.screen = true } } })
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
         let tavily = TavilySettings(keys: keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
@@ -159,12 +179,22 @@ final class OnboardingPreviewSession {
             toolbox: HoverLayoutStore(defaults: defaults),
             agentEnabled: { UserPreferencesCache(defaults: defaults).currentAgentEnabled },
             requests: OnboardingPermissionRequests(
-                keyboard: { system.grant { $0.accessibility = true } },
-                microphone: { system.grant { $0.microphone = true } },
-                inputMonitoring: { system.grant { _ in } }),
+                keyboard: { system.ask("keyboard") { $0.accessibility = true } },
+                microphone: { system.ask("microphone") { $0.microphone = true } },
+                inputMonitoring: { system.ask("input") { _ in } },
+                openSettings: { step in
+                    switch step {
+                    case .keyboard: system.grant { $0.accessibility = true }
+                    case .microphone: system.grant { $0.microphone = true }
+                    case .screenRecording: system.grant { $0.screen = true }
+                    default: break
+                    }
+                }),
             isPreview: true,
             // OpenAI speech is shown here already; the app waits for its model.
             offersOpenAISpeech: true)
+        let model = self.model
+        system.returned = { [weak model] in model?.recheckPermissions() }
     }
 
     /// Nothing of the run stays behind.

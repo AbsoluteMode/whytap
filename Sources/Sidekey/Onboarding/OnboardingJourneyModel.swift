@@ -74,6 +74,20 @@ struct OnboardingPermissionRequests {
     var keyboard: () -> Void
     var microphone: () -> Void
     var inputMonitoring: () -> Void
+    /// "Open System Settings" on an access step.
+    var openSettings: (OnboardingStep) -> Void = { _ in }
+}
+
+/// Where an access step stands (the design pass's screen 04): Allow, then
+/// waiting for System Settings, then allowed and on to the next step; a
+/// return from System Settings with the switch still off is "not on yet",
+/// with Allow again.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+enum OnboardingAccessState: Equatable {
+    case rest
+    case waiting
+    case granted
+    case notOn
 }
 
 /// What the shown step is doing: nothing yet, working, done (with what was
@@ -382,6 +396,9 @@ final class OnboardingJourneyModel: ObservableObject {
         offerSavedKey(on: step)
         switch step {
         case .keyboard, .microphone, .inputMonitoring, .screenRecording:
+            // Back on an access step that is still off: Allow again, not a
+            // wait left over from before.
+            if !latest(step).isDone { requested.remove(step) }
             permissions.refresh(restartRecoveryPolling: false)
             startPolling()
         default:
@@ -935,27 +952,75 @@ final class OnboardingJourneyModel: ObservableObject {
     // MARK: - 6–8. Permissions
 
     func requestKeyboard() {
-        requested.insert(.keyboard)
+        asking(.keyboard)
         if let requests { requests.keyboard() } else { permissions.requestAccessibility() }
     }
 
     func requestMicrophone() {
-        requested.insert(.microphone)
+        asking(.microphone)
         if let requests { requests.microphone() } else { permissions.requestMicrophone() }
     }
 
     func requestInputMonitoring() {
-        requested.insert(.inputMonitoring)
+        asking(.inputMonitoring)
         if let requests { requests.inputMonitoring() } else { permissions.requestInputMonitoring() }
     }
 
-    /// Coming back from System Settings: check again at once.
-    func recheckPermissions() { permissions.refresh(restartRecoveryPolling: false) }
+    /// Allow (or Allow again): the step waits for System Settings.
+    private func asking(_ step: OnboardingStep) {
+        requested.insert(step)
+        if case .failed = latest(step) { outcomes[step] = .idle }
+    }
+
+    /// The access step's Allow.
+    func requestAccess(_ step: OnboardingStep) {
+        switch step {
+        case .keyboard: requestKeyboard()
+        case .microphone: requestMicrophone()
+        case .inputMonitoring: requestInputMonitoring()
+        case .screenRecording: requestScreenRecording()
+        default: break
+        }
+    }
+
+    /// Where the access step stands, from the system's own answer: only a
+    /// granted check moves it on; nothing here pretends.
+    func accessState(_ step: OnboardingStep) -> OnboardingAccessState {
+        switch outcome(step) {
+        case .done: return .granted
+        case .failed: return .notOn
+        default: return requested.contains(step) ? .waiting : .rest
+        }
+    }
+
+    /// The quiet "Open System Settings" while a step waits.
+    func openSystemSettings(for step: OnboardingStep) {
+        if let requests { return requests.openSettings(step) }
+        switch step {
+        case .keyboard: PermissionsHelper.openAccessibilitySettings()
+        case .microphone: PermissionsHelper.openMicrophoneSettings()
+        case .inputMonitoring: PermissionsHelper.openInputMonitoringSettings()
+        case .screenRecording: openScreenRecordingSettings()
+        default: break
+        }
+    }
+
+    /// Coming back from System Settings: check again at once. A waiting step
+    /// whose switch is still off says so, calmly, and offers Allow again;
+    /// polling still moves it on if the switch turns on later.
+    func recheckPermissions() {
+        permissions.refresh(restartRecoveryPolling: false)
+        guard [.keyboard, .microphone, .inputMonitoring, .screenRecording].contains(step),
+              requested.contains(step), !latest(step).isDone else { return }
+        // macOS's own microphone dialog is still open: nothing was refused.
+        if step == .microphone, permissions.snapshot.microphoneStatus == .notDetermined { return }
+        outcomes[step] = .failed("Not on yet")
+    }
 
     /// One request per launch, shared with Shot; afterwards System Settings.
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
     func requestScreenRecording() {
-        requested.insert(.screenRecording)
+        asking(.screenRecording)
         switch screenRecording.requestOnce() {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
         case .requested: break

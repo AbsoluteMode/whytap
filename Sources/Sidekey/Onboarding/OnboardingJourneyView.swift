@@ -62,7 +62,10 @@ struct OnboardingJourneyView: View {
     /// Step 1 and the two key steps draw on a softly lit ground (the
     /// wireframe pass); its edge is the window's own colour, so nothing shows
     /// a seam.
-    static func isWireframe(_ step: OnboardingStep) -> Bool { [.source, .speechKey, .llmKey, .search, .language].contains(step) }
+    static func isWireframe(_ step: OnboardingStep) -> Bool {
+        [.source, .speechKey, .llmKey, .search, .language, .keyboard, .microphone, .inputMonitoring, .screenRecording]
+            .contains(step)
+    }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
     /// to its lock, and the lock closes again for the language model key); the
@@ -152,8 +155,10 @@ struct OnboardingJourneyView: View {
             OnboardingOutlineButton(title: "Open Hotkeys") { model.openSettings(.hotkeys, nil) }.fixedSize()
         } else if model.step == .toolbox {
             OnboardingOutlineButton(title: "Open Toolbox") { model.openSettings(.toolbox, nil) }.fixedSize()
-        } else if model.step != .source, !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
-            // Step 1 has no skip: its two figures are the choice.
+        } else if model.step != .source, model.step != .screenRecording, !model.step.isInformational, !outcome.isDone,
+                  dwell.state == .idle {
+            // Step 1 has no skip: its two figures are the choice. Screen
+            // Recording has its own Skip for now under Allow.
             Button(model.step.isOptional ? "Skip" : "Set up later", action: model.next)
                 .buttonStyle(.plain)
                 .font(OnboardingTheme.sans(12, weight: .medium))
@@ -203,22 +208,8 @@ struct OnboardingJourneyView: View {
             OnboardingKeyStage(kind: .search, model: model, scene: wireScene)
         case .language:
             OnboardingLanguageStage(model: model)
-        case .keyboard:
-            permission(step, icon: "keyboard", title: "Keyboard control",
-                       purpose: "To hear your Drop shortcut and type the text where your cursor is.",
-                       section: "PRIVACY & SECURITY › ACCESSIBILITY", request: model.requestKeyboard)
-        case .microphone:
-            permission(step, icon: "mic", title: "Microphone",
-                       purpose: "To hear you, only while Drop is recording.",
-                       section: "PRIVACY & SECURITY › MICROPHONE", request: model.requestMicrophone)
-        case .inputMonitoring:
-            permission(step, icon: "keyboard.badge.eye", title: "Input Monitoring",
-                       purpose: "This Mac also asks for it before Drop can see its shortcut.",
-                       section: "PRIVACY & SECURITY › INPUT MONITORING", request: model.requestInputMonitoring)
-        case .screenRecording:
-            permission(step, icon: "rectangle.dashed.badge.record", title: "Screen Recording",
-                       purpose: "Optional. For Shot, and when you ask the Agent about your screen.",
-                       section: "PRIVACY & SECURITY › SCREEN RECORDING", request: model.requestScreenRecording)
+        case .keyboard, .microphone, .inputMonitoring, .screenRecording:
+            if let kind = OnboardingAccessKind(step: step) { OnboardingAccessStage(kind: kind, model: model) }
         case .tryDrop: tryDropStage
         case .hotkeys:
             OnboardingJourneyStep(act: step.act, title: "Every tool has a shortcut",
@@ -256,16 +247,6 @@ struct OnboardingJourneyView: View {
                                problem: problem,
                                onDictated: model.noteDictated,
                                simulate: simulate)
-        }
-    }
-
-    private func permission(_ step: OnboardingStep, icon: String, title: String, purpose: String, section: String,
-                            request: @escaping () -> Void) -> some View {
-        let phase: OnboardingPermissionPhase = model.outcome(step).isDone ? .granted
-            : model.requested.contains(step) ? .awaitingSystem : .ready
-        return OnboardingJourneyStep(act: step.act, title: title, lede: "macOS asks once. Whytap waits here.") {
-            OnboardingPermissionCard(icon: icon, title: title, purpose: purpose, section: section, phase: phase,
-                                     request: request, recheck: model.recheckPermissions)
         }
     }
 

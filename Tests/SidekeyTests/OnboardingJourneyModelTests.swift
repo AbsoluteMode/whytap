@@ -744,6 +744,30 @@ final class OnboardingJourneyModelTests: XCTestCase {
                 .write(to: directory.appendingPathComponent(String(format: "%02d-language-%@.png", index, name)))
         }
 
+        // The access steps in their four states (REV 57), the springs landed.
+        OnboardingAccessMotion.settlesAtOnce = true
+        defer { OnboardingAccessMotion.settlesAtOnce = false }
+        for kind in OnboardingAccessKind.allCases {
+            for (name, state) in [("rest", OnboardingAccessState.rest), ("waiting", .waiting), ("granted", .granted),
+                                  ("not-on", .notOn)] {
+                let stage = OnboardingAccessStage(kind: kind, model: model, shownState: state)
+                    .frame(width: 520, height: 320)
+                    .background(OnboardingTheme.bg)
+                    .preferredColorScheme(.dark)
+                let host = NSHostingView(rootView: stage)
+                host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+                host.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(80))
+                host.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                index += 1
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: directory.appendingPathComponent(String(format: "%02d-access-%@-%@.png", index,
+                                                                       kind.pane.replacingOccurrences(of: " ", with: "-"), name)))
+            }
+        }
+
         // The "Choose model" list (a popover, not in the window's image).
         for provider in [AIProviderKind.anthropic] {
             let list = OnboardingModelList(choices: model.modelChoices(.llmKey, provider: provider), selected: nil,

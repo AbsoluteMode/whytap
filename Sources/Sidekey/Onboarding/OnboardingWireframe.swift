@@ -19,6 +19,7 @@ enum OnboardingWireframeInk {
     static let amber: RGB = (0.910, 0.690, 0.408)
     static let roseColor = Color(red: rose.0, green: rose.1, blue: rose.2)
     static let amberColor = Color(red: amber.0, green: amber.1, blue: amber.2)
+    static let greenColor = Color(red: green.0, green: green.1, blue: green.2)
     static let veil = Color(red: 0.071, green: 0.071, blue: 0.086)
     /// The ground: lighter at the centre, the window's own colour at the edge.
     static let groundCenter = Color(red: 0.098, green: 0.098, blue: 0.118)
@@ -82,6 +83,8 @@ struct OnboardingWireStyle {
         var dots = false
         /// The x of a light running along the figure while a key is checked.
         var waveX: Double?
+        /// The y of a light running up the figure while an access step waits.
+        var waveY: Double?
     }
 
     var fade = 1.0
@@ -230,8 +233,9 @@ struct OnboardingWireSolid {
             let nLen = max(0.0001, sqrt(nx * nx + ny * ny + nz * nz))
             let nDotL = (nx * lx + ny * ly + nz * lz) / nLen
             let front = min(1, max(0, (nz + 0.35) / 1.15))
-            let midX = (points[a].x + points[b].x) * 0.5
-            let wave = spec.waveX.map { exp(-pow((midX - $0) / 28, 2)) * 0.55 } ?? 0
+            let midX = (points[a].x + points[b].x) * 0.5, midY = (points[a].y + points[b].y) * 0.5
+            let wave = (spec.waveX.map { exp(-pow((midX - $0) / 28, 2)) * 0.55 } ?? 0)
+                + (spec.waveY.map { exp(-pow((midY - $0) / 26, 2)) * 0.48 } ?? 0)
             guard nDotL > -0.12, front > 0.10 else { continue }
             let value = spec.strength * front * max(0, nDotL * 0.72 + 0.28) * pow(sinTH, spec.power) + wave
             let tier = value > 0.52 ? 2 : value > 0.27 ? 1 : value > 0.12 ? 0 : -1
@@ -251,7 +255,8 @@ struct OnboardingWireSolid {
             let nLen = max(0.0001, sqrt(v.x * v.x + v.y * v.y + v.z * v.z))
             let nDotH = (v.x * hx + v.y * hy + v.z * hz) / nLen
             let front = min(1, max(0, (v.z + 0.25) / 1.1))
-            let wave = spec.waveX.map { exp(-pow((p.x - $0) / 26, 2)) * 0.65 } ?? 0
+            let wave = (spec.waveX.map { exp(-pow((p.x - $0) / 26, 2)) * 0.65 } ?? 0)
+                + (spec.waveY.map { exp(-pow((p.y - $0) / 24, 2)) * 0.55 } ?? 0)
             let value = spec.strength * front * pow(max(0, nDotH), 3) + wave
             let tier = value > 0.46 ? 2 : value > 0.22 ? 1 : value > 0.10 ? 0 : -1
             if tier >= 0 { specDots[tier].append(p) }

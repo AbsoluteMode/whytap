@@ -56,17 +56,20 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.step, .language)
         model.setLanguage(nil)
         model.next()
-        XCTAssertEqual(model.step, .keyboard)
-        model.requestKeyboard()
-        try await eventually { model.outcome(.keyboard).isDone }
-        model.next()
-        XCTAssertEqual(model.step, .microphone)
-        model.requestMicrophone()
-        try await eventually { model.outcome(.microphone).isDone }
-        model.next()
-        XCTAssertEqual(model.step, .screenRecording)
-        model.requestScreenRecording()
-        try await eventually { model.outcome(.screenRecording).isDone }
+        // Each access step: Allow, back without the switch (Not on yet),
+        // Allow again, allowed (REV 57).
+        for step in [OnboardingStep.keyboard, .microphone, .screenRecording] {
+            XCTAssertEqual(model.step, step)
+            XCTAssertEqual(model.accessState(step), .rest)
+            model.requestAccess(step)
+            XCTAssertEqual(model.accessState(step), .waiting)
+            try await eventually { model.accessState(step) == .notOn }
+            model.requestAccess(step)
+            XCTAssertEqual(model.accessState(step), .waiting, "Allow again waits for System Settings again")
+            try await eventually { model.outcome(step).isDone }
+            XCTAssertEqual(model.accessState(step), .granted)
+            if step != .screenRecording { model.next() }
+        }
         model.next()
         XCTAssertEqual(model.step, .tryDrop)
         model.noteDictated()
@@ -694,5 +697,83 @@ final class OnboardingPreviewTests: XCTestCase {
         let appTarget = try XCTUnwrap(manifest.range(of: #"name: "SidekeyApp",\s*dependencies: \["Sidekey"\]"#,
                                                       options: .regularExpression), "the app links Sidekey only")
         XCTAssertFalse(manifest[appTarget].contains("OnboardingPreviewKit"))
+    }
+
+    /// The access steps' states come from the system's answer only (REV 57):
+    /// a return with the switch off says Not on yet, a step reached again
+    /// starts at Allow, macOS's own microphone dialog is never taken for a
+    /// refusal, and Open System Settings opens that step's pane.
+    func testAccessStepsFollowTheSystemsAnswer() async throws {
+        let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
+        let session = OnboardingPreviewSession(suiteName: suite)
+        defer { session.clear() }
+        let model = session.model
+        model.showPermissions()
+        XCTAssertEqual(model.step, .keyboard)
+        XCTAssertEqual(model.accessState(.keyboard), .rest)
+
+        // Coming back before anything was asked changes nothing.
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.keyboard), .rest)
+
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.keyboard), .notOn, "back from System Settings with the switch off")
+        XCTAssertFalse(model.outcome(.keyboard).isDone)
+
+        // Another step and back: Allow again, not a leftover wait or line.
+        model.next()
+        XCTAssertEqual(model.step, .microphone)
+        model.back()
+        XCTAssertEqual(model.step, .keyboard)
+        XCTAssertEqual(model.accessState(.keyboard), .rest)
+
+        // The quiet link opens the pane, and the system's grant moves it on.
+        model.requestAccess(.keyboard)
+        model.openSystemSettings(for: .keyboard)
+        try await eventually { model.accessState(.keyboard) == .granted }
+        // A grant is never undone by a later return from System Settings.
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.keyboard), .granted)
+
+        // While macOS's microphone dialog is open (not determined yet), a
+        // return to the app is no refusal.
+        model.next()
+        XCTAssertEqual(model.step, .microphone)
+        model.requestAccess(.microphone)
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.microphone), .waiting)
+        // Don't Allow in that dialog: Not on yet.
+        try await eventually { model.accessState(.microphone) == .notOn }
+    }
+
+    /// Each access step has its own words and figure; only Screen Recording
+    /// is optional, and its pane is named where to turn Whytap on.
+    func testAccessKindsMatchTheirSteps() {
+        for kind in OnboardingAccessKind.allCases {
+            XCTAssertEqual(OnboardingAccessKind(step: kind.step), kind)
+            XCTAssertEqual(kind.isOptional, kind.step.isOptional)
+            XCTAssertFalse(kind.notOnLine.isEmpty)
+        }
+        XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "Accessibility")
+        XCTAssertNil(OnboardingAccessKind(step: .language))
+        XCTAssertTrue(OnboardingJourneyView.isWireframe(.screenRecording))
+        // The ⌘ is closed strokes: four sides and four 270-degree loops whose
+        // ends meet the sides.
+        let legend = OnboardingAccessFigures.Keyboard.legend
+        XCTAssertEqual(legend.count, 8)
+        for loop in legend.suffix(4) {
+            let first = loop[0], last = loop[loop.count - 1]
+            let touches: (OnboardingWireSolid.Vec3) -> Bool = { p in
+                legend.prefix(4).contains { side in
+                    let a = side[0], b = side[1]
+                    let onX = abs(a.x - b.x) < 1e-9 && abs(p.x - a.x) < 1e-6
+                    let onZ = abs(a.z - b.z) < 1e-9 && abs(p.z - a.z) < 1e-6
+                    return (onX && abs(abs(p.z) - abs(a.z)) < 1e-6) || (onZ && abs(abs(p.x) - abs(a.x)) < 1e-6)
+                }
+            }
+            XCTAssertTrue(touches(first) && touches(last), "each loop starts and ends on a side's end")
+        }
     }
 }

@@ -3,26 +3,56 @@ import XCTest
 @testable import Sidekey
 
 /// User scenarios for learning from edits after Drop: a take is pasted, the
-/// user corrects the field, the read 5 s later finds the correction.
+/// user corrects the field and sends it (or leaves it); the text the field
+/// held last before that is compared with the paste.
 @MainActor
 final class DropLearningScenarioTests: XCTestCase {
     private final class FakeField: DropEditFieldAccess {
+        final class Watch: DropEditFieldWatch {
+            var cancelled = false
+            func cancel() { cancelled = true }
+        }
+
         var capturable = true
-        /// The user moved to another field during the paste delay.
+        /// Focus is verifiably elsewhere: during the paste delay, or later.
         var focusMovedAfterCapture = false
-        /// What each read returns, in order; the last value repeats.
-        var reads: [String?] = []
+        /// What the field holds at each read, in order; the last value
+        /// repeats. nil is a field still focused that cannot be read.
+        var reads: [String?] = [] { didSet { position = 0 } }
+        private var position = 0
         private(set) var readCount = 0
         private(set) var captureCount = 0
+        /// The AX notifications of the watched field.
+        private(set) var onChange: (@MainActor (DropEditFieldChange) -> Void)?
+        private(set) var watches: [Watch] = []
+        /// The app needs its tree turned on (Electron, web views).
+        var needsExposure = false
+        private(set) var exposed = 0
+        private(set) var released = 0
+
         func capture(pid: pid_t) -> DropEditFieldHandle? {
             captureCount += 1
             return capturable ? DropEditFieldHandle(pid: pid, element: AXUIElementCreateApplication(pid)) : nil
         }
         func isStillFocused(_ handle: DropEditFieldHandle) -> Bool { !focusMovedAfterCapture }
-        func read(_ handle: DropEditFieldHandle) -> String? {
-            defer { readCount += 1 }
-            guard !reads.isEmpty else { return nil }
-            return reads[min(readCount, reads.count - 1)]
+        func read(_ handle: DropEditFieldHandle) -> DropEditFieldRead {
+            readCount += 1
+            if focusMovedAfterCapture { return .focusLeft }
+            guard !reads.isEmpty else { return .unreadable }
+            defer { position = min(position + 1, reads.count - 1) }
+            return reads[position].map { .text($0) } ?? .unreadable
+        }
+        func watch(_ handle: DropEditFieldHandle,
+                   onChange: @escaping @MainActor (DropEditFieldChange) -> Void) -> DropEditFieldWatch? {
+            self.onChange = onChange
+            let watch = Watch()
+            watches.append(watch)
+            return watch
+        }
+        func exposeFields(pid: pid_t) -> DropEditAccessibilityLease? {
+            guard needsExposure else { return nil }
+            exposed += 1
+            return DropEditAccessibilityLease(pid: pid) { [unowned self] in released += 1 }
         }
     }
 
@@ -48,6 +78,10 @@ final class DropLearningScenarioTests: XCTestCase {
             .appendingPathComponent("drop-learning-\(UUID().uuidString)").appendingPathComponent("calibration.jsonl")
     }
 
+    /// Return or Enter in the watched app.
+    private var pressReturn: (@MainActor () -> Void)?
+    private var returnWatchStops = 0
+
     private func makeCoordinator(sleep: @escaping (Double) async throws -> Void = { _ in }) -> DropLearningCoordinator {
         let coordinator = DropLearningCoordinator(dependencies: .init(
             fieldAccess: field, lexicon: FakeLexicon(), defaults: defaults, now: { [unowned self] in now },
@@ -59,15 +93,32 @@ final class DropLearningScenarioTests: XCTestCase {
                     replacements: DropReplacementStore(defaults: defaults).replacements()
                 )
             },
-            sleep: sleep,
+            // Every sleep moves the clock, so the deadlines are seconds.
+            sleep: { [unowned self] seconds in
+                try await sleep(seconds)
+                now += seconds
+            },
             isIdle: { [unowned self] in idle },
             openVocabulary: { [unowned self] in vocabOpened += 1 },
             vocabulary: VocabularyCache(defaults: defaults),
             fillers: FillerTermsStore(defaults: defaults),
-            replacements: DropReplacementStore(defaults: defaults)
+            replacements: DropReplacementStore(defaults: defaults),
+            watchReturn: { [unowned self] onReturn in
+                pressReturn = onReturn
+                return { [unowned self] in
+                    returnWatchStops += 1
+                    pressReturn = nil
+                }
+            },
+            clock: { [unowned self] in now.timeIntervalSince1970 }
         ))
         coordinator.onSuggestion = { [unowned self] in suggestions.append($0) }
         return coordinator
+    }
+
+    /// Sleeps until the observation is stopped: the test drives every read.
+    private static let held: (Double) async throws -> Void = { _ in
+        try await Task.sleep(nanoseconds: 3_600_000_000_000)
     }
 
     private func take(
@@ -78,15 +129,22 @@ final class DropLearningScenarioTests: XCTestCase {
                          firedReplacements: fired, firedFillers: fillers, vocabTransport: transport)
     }
 
+    /// The paste lands, the user edits it to `text` and sends it: the field
+    /// empties.
     private func run(_ coordinator: DropLearningCoordinator, _ take: DropLearningTake, field text: String?) async {
-        field.reads = [text]
+        field.reads = text.map { [take.pasted, $0, ""] } ?? [nil]
         await runReads(coordinator, take)
     }
 
     private func runReads(_ coordinator: DropLearningCoordinator, _ take: DropLearningTake) async {
         let handle = coordinator.prepareDelivery(targetPID: 4242)
         coordinator.delivered(take, handle: handle)
-        await coordinator.waitForPendingRead()
+        await coordinator.waitForObservation()
+    }
+
+    /// Lets the observation's first read run.
+    private func settle() async {
+        for _ in 0..<5 { await Task.yield() }
     }
 
     // MARK: - Repeated correction
@@ -320,13 +378,14 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertTrue(suggestions.isEmpty)
     }
 
-    func testTurningLearningOffDuringTheDelayStopsTheRead() async {
+    func testTurningLearningOffWhileAFieldIsWatchedStopsReadingAndCountsNothing() async {
         let coordinator = makeCoordinator(sleep: { [unowned self] _ in
             defaults.set(false, forKey: DropLearningSettings.enabledKey)
         })
         await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
-        XCTAssertEqual(field.readCount, 0)
+        XCTAssertEqual(field.readCount, 1, "no read after opt-out")
         XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
     }
 
     /// On by default: a user who never touched the switch (no key) learns;
@@ -337,13 +396,15 @@ final class DropLearningScenarioTests: XCTestCase {
         let coordinator = makeCoordinator()
         XCTAssertTrue(coordinator.capturesFields)
         await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
-        XCTAssertEqual(field.readCount, 1)
+        let reads = field.readCount
+        XCTAssertGreaterThan(reads, 0)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
 
         defaults.set(false, forKey: DropLearningSettings.enabledKey)
         XCTAssertFalse(DropLearningSettings.isEnabled(in: defaults))
         XCTAssertFalse(coordinator.capturesFields)
         await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
-        XCTAssertEqual(field.readCount, 1)
+        XCTAssertEqual(field.readCount, reads)
 
         defaults.set(true, forKey: DropLearningSettings.enabledKey)
         XCTAssertTrue(coordinator.capturesFields)
@@ -362,18 +423,18 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertTrue(coordinator.capturesFields)
     }
 
-    func testTurningCalibrationOffDuringTheDelayStopsTheReadAndJournal() async {
+    func testTurningCalibrationOffWhileAFieldIsWatchedStopsTheReadsAndJournal() async {
         defaults.set(false, forKey: DropLearningSettings.enabledKey)
         defaults.set(true, forKey: DropLearningSettings.calibrationKey)
         let coordinator = makeCoordinator(sleep: { [unowned self] _ in
             defaults.set(false, forKey: DropLearningSettings.calibrationKey)
         })
         await run(coordinator, take(pasted: "Позвони клоду завтра"), field: "Позвони Claude завтра")
-        XCTAssertEqual(field.readCount, 0)
+        XCTAssertEqual(field.readCount, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
-    func testTurningCalibrationOffBetweenReadsStopsBeforeTheSettledEntry() async throws {
+    func testTurningCalibrationOffBetweenReadsStopsBeforeTheJournalEntry() async throws {
         defaults.set(false, forKey: DropLearningSettings.enabledKey)
         defaults.set(true, forKey: DropLearningSettings.calibrationKey)
         var sleeps = 0
@@ -383,7 +444,7 @@ final class DropLearningScenarioTests: XCTestCase {
         })
         field.reads = ["Позвони клоду", "Позвони Cl", "Позвони Claude"]
         await runReads(coordinator, take(pasted: "Позвони клоду"))
-        XCTAssertEqual(field.readCount, 2, "no read after opt-out")
+        XCTAssertEqual(field.readCount, 3, "no read after opt-out")
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path), "opt-out deletes the journal")
     }
 
@@ -446,30 +507,295 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
     }
 
-    func testAnEmptiedFieldAfterSendCountsNothing() async {
+    /// The field never showed the paste (it was sent before the first read,
+    /// or the app keeps its text elsewhere): nothing is learned.
+    func testAFieldThatNeverShowsThePasteCountsNothing() async {
         let coordinator = makeCoordinator()
-        for _ in 0..<3 { await run(coordinator, take(pasted: "Позвони клоду"), field: "") }
+        for _ in 0..<3 {
+            field.reads = [""]
+            await runReads(coordinator, take(pasted: "Позвони клоду"))
+        }
         XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+        XCTAssertEqual(field.readCount, 3 * Int(DropLearningCoordinator.alignSeconds / DropLearningCoordinator.pollInterval),
+                       "gives up 5 s after the paste")
     }
 
-    func testANewTakeCancelsThePendingRead() async {
-        var release: CheckedContinuation<Void, Never>?
-        let coordinator = DropLearningCoordinator(dependencies: .init(
-            fieldAccess: field, lexicon: FakeLexicon(), defaults: defaults, now: { Date() },
-            journal: DropLearningJournal(url: journalURL),
-            lists: { DropLearningLists(vocabulary: [], fillers: [], replacements: []) },
-            sleep: { _ in await withCheckedContinuation { release = $0 } },
-            isIdle: { true }, openVocabulary: {},
-            vocabulary: VocabularyCache(defaults: defaults), fillers: FillerTermsStore(defaults: defaults),
-            replacements: DropReplacementStore(defaults: defaults)
-        ))
+    // MARK: - Watching the field until it is sent
+
+    /// The chat case (Claude, Slack, Telegram): the user fixes the word by
+    /// hand and presses Return; the field empties as the message goes. The
+    /// text before it emptied is what counts.
+    func testFixingAWordAndSendingWithReturnCountsTheFix() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        for day in 0..<2 {
+            now += 86_400 * Double(day)
+            field.reads = ["Позвони клоду"]
+            coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+            await settle()
+            field.reads = ["Позвони Cl"]
+            field.onChange?(.value)
+            field.reads = ["Позвони Claude"]
+            field.onChange?(.value)
+            XCTAssertNotNil(pressReturn, "Return is watched only while a field is")
+            field.reads = [""]
+            pressReturn?()
+            await coordinator.waitForObservation()
+            XCTAssertNil(pressReturn, "the Return watch is removed with the observation")
+        }
+        XCTAssertEqual(suggestions, [DropLearningSuggestion(candidate: .vocabAdd(term: "Claude"), dryRun: false)])
+        XCTAssertEqual(returnWatchStops, 2)
+    }
+
+    /// Return that only adds a line (Shift-Return, a notes app) keeps the
+    /// field watched; it ends when the field empties later.
+    func testReturnThatDoesNotSendKeepsWatching() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = ["Позвони клоду"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        field.reads = ["Позвони Claude\n"]
+        pressReturn?()
+        await settle()
+        XCTAssertNotNil(pressReturn, "still watching")
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
+        field.reads = [""]
+        field.onChange?(.value)
+        await coordinator.waitForObservation()
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
+    }
+
+    /// The user fixes the word and clicks elsewhere (or the send button takes
+    /// focus): the last text counts.
+    func testLeavingTheFieldAfterTheFixCountsIt() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = ["Позвони клоду"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
         field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        field.focusMovedAfterCapture = true
+        field.onChange?(.focusLeft)
+        await coordinator.waitForObservation()
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+    }
+
+    func testAFieldThatGoesAwayAfterTheFixCountsIt() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = ["Позвони клоду"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        field.onChange?(.removed)
+        await coordinator.waitForObservation()
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
+    }
+
+    /// The user deletes the take and writes another message: no correction.
+    func testReplacingTheTakeWithAnotherMessageCountsNothing() async {
+        let coordinator = makeCoordinator()
+        field.reads = ["Позвони клоду", "Позвони Claude", "Совсем другое сообщение без этой фразы вообще"]
+        await runReads(coordinator, take(pasted: "Позвони клоду"))
+        XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+    }
+
+    /// A field nobody sends (a document) is watched for 2 minutes at most.
+    func testAFieldIsWatchedForTwoMinutesAtMost() async {
+        let coordinator = makeCoordinator()
+        field.reads = ["Позвони клоду", "Позвони Claude"]
+        await runReads(coordinator, take(pasted: "Позвони клоду"))
+        XCTAssertEqual(field.readCount, Int(DropLearningCoordinator.maxObserveSeconds / DropLearningCoordinator.pollInterval))
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+    }
+
+    /// The next take counts what the field holds before its paste lands.
+    func testANewTakeCountsTheWatchedFieldBeforeItsPaste() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = ["Позвони клоду"]
         coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 1))
-        await Task.yield()
-        coordinator.takeStarted()
-        release?.resume()
-        await coordinator.waitForPendingRead()
-        XCTAssertEqual(field.readCount, 0)
+        await settle()
+        field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        let reads = field.readCount
+        coordinator.takeStarted(targetPID: 1)
+        await coordinator.waitForObservation()
+        XCTAssertEqual(field.readCount, reads, "nothing is read after the new take starts")
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 1)
+    }
+
+    // MARK: - What a watch may trust
+
+    /// Still focused but no longer readable (an AX error, the gate now says
+    /// no, the text grew past the bound): the text kept earlier is dropped.
+    func testAnUnreadableStillFocusedFieldDoesNotCountTheKeptEdit() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        for _ in 0..<2 {
+            field.reads = ["Позвони клоду"]
+            coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+            await settle()
+            field.reads = ["Позвони Claude"]
+            field.onChange?(.value)
+            field.reads = [nil]
+            field.onChange?(.value)
+            await coordinator.waitForObservation()
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+    }
+
+    /// The deadline is the clock, not a count of polls: a poll that is late
+    /// does not let a notification read past 2 minutes.
+    func testTheTwoMinuteDeadlineHoldsForNotificationsEvenIfThePollIsLate() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = ["Позвони клоду"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        XCTAssertEqual(field.readCount, 1)
+        now += DropLearningCoordinator.maxObserveSeconds + 1
+        field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        pressReturn?()
+        XCTAssertEqual(field.readCount, 1, "no read after the deadline")
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+        XCTAssertNil(pressReturn)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
+    }
+
+    /// No paste seen 5 s after delivery: a late notification reads nothing.
+    func testTheAlignDeadlineHoldsForNotificationsToo() async {
+        let coordinator = makeCoordinator(sleep: Self.held)
+        field.reads = [""]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        now += DropLearningCoordinator.alignSeconds
+        field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        XCTAssertEqual(field.readCount, 1)
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+    }
+
+    /// The field already held the corrected text (a draft), and the paste
+    /// never landed: no edit was made during the watch, nothing counts.
+    func testTextAlreadyInTheFieldIsNotTheUsersEdit() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            field.reads = ["Позвони Claude", ""]
+            await runReads(coordinator, take(pasted: "Позвони клоду"))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
+    }
+
+    /// Only the corrections made during the watch count, not the ones that
+    /// were already there when the paste showed up.
+    func testOnlyTheCorrectionMadeDuringTheWatchCounts() async {
+        let coordinator = makeCoordinator()
+        field.reads = ["Позвони Claude завтра", "Позвони Claude в код", ""]
+        await runReads(coordinator, take(pasted: "Позвони клоду завтра"))
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Claude")), 0)
+    }
+
+    // MARK: - Electron and web fields
+
+    /// An Electron or web app gets its fields exposed when the take starts
+    /// (so the field can be captured at the paste) and turned off again when
+    /// the field is no longer watched.
+    func testAnAppAskedToExposeItsFieldsIsRestoredAfterTheObservation() async {
+        field.needsExposure = true
+        let coordinator = makeCoordinator(sleep: Self.held)
+        coordinator.takeStarted(targetPID: 4242)
+        XCTAssertEqual(field.exposed, 1)
+        field.reads = ["Позвони Claude"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        XCTAssertEqual(field.released, 0, "on while the field is watched")
+        field.reads = [""]
+        field.onChange?(.value)
+        await coordinator.waitForObservation()
+        XCTAssertEqual(field.released, 1)
+    }
+
+    func testATakeThatIsNeverPastedTurnsTheExposureOff() async {
+        field.needsExposure = true
+        let coordinator = makeCoordinator()
+        coordinator.takeStarted(targetPID: 4242)
+        await settle()
+        XCTAssertEqual(field.released, 1, "after the longest take, with no paste")
+        coordinator.takeStarted(targetPID: 4242)
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: nil)
+        XCTAssertEqual(field.released, 2, "no field to watch: off at once")
+    }
+
+    func testTheSameAppIsNotExposedAgainForTheNextTake() async {
+        field.needsExposure = true
+        let coordinator = makeCoordinator(sleep: Self.held)
+        coordinator.takeStarted(targetPID: 4242)
+        field.reads = ["Позвони Claude"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        coordinator.takeStarted(targetPID: 4242)
+        XCTAssertEqual(field.exposed, 1)
+        XCTAssertEqual(field.released, 0, "kept for the next take into the same app")
+        coordinator.takeStarted(targetPID: 5151)
+        XCTAssertEqual(field.released, 1)
+    }
+
+    /// Quitting Whytap mid-watch: the app's tree is turned off, nothing counts.
+    func testQuittingMidWatchUndoesTheExposureAndCountsNothing() async {
+        field.needsExposure = true
+        let coordinator = makeCoordinator(sleep: Self.held)
+        coordinator.takeStarted(targetPID: 4242)
+        field.reads = ["Позвони Claude"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        coordinator.stopWatching()
+        XCTAssertEqual(field.released, 1)
+        XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+        XCTAssertNil(pressReturn)
+    }
+
+    /// Switching learning off releases the exposure at once, even before
+    /// the paste (the take is still being recorded).
+    func testSwitchingLearningOffReleasesTheExposureBeforeThePaste() {
+        field.needsExposure = true
+        let coordinator = makeCoordinator(sleep: Self.held)
+        coordinator.takeStarted(targetPID: 4242)
+        XCTAssertEqual(field.exposed, 1)
+        coordinator.settingsChanged()
+        XCTAssertEqual(field.released, 0, "still on: nothing to release")
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        coordinator.settingsChanged()
+        XCTAssertEqual(field.released, 1)
+        XCTAssertNil(coordinator.prepareDelivery(targetPID: 4242))
+    }
+
+    func testSwitchingLearningOffMidWatchEndsItAndReleases() async {
+        field.needsExposure = true
+        let coordinator = makeCoordinator(sleep: Self.held)
+        coordinator.takeStarted(targetPID: 4242)
+        field.reads = ["Позвони клоду"]
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 4242))
+        await settle()
+        field.reads = ["Позвони Claude"]
+        field.onChange?(.value)
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        coordinator.settingsChanged()
+        XCTAssertEqual(field.released, 1)
+        XCTAssertTrue(field.watches.allSatisfy(\.cancelled))
+        XCTAssertNil(pressReturn)
+        XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+    }
+
+    func testNothingIsExposedWhileLearningIsOff() {
+        field.needsExposure = true
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        let coordinator = makeCoordinator()
+        coordinator.takeStarted(targetPID: 4242)
+        XCTAssertEqual(field.exposed, 0)
     }
 
     func testDisabledFeatureCapturesNothing() async {
@@ -504,24 +830,25 @@ final class DropLearningScenarioTests: XCTestCase {
 
     // MARK: - Calibration
 
-    func testCalibrationReadsUntilTheFieldSettlesJournalsAndSavesNothing() async throws {
+    func testCalibrationWatchesTheFieldJournalsAndSavesNothing() async throws {
         defaults.set(false, forKey: DropLearningSettings.enabledKey)
         defaults.set(true, forKey: DropLearningSettings.calibrationKey)
         let coordinator = makeCoordinator()
         for _ in 0..<2 {
             field = FakeField()
-            field.reads = ["Позвони клоду", "Позвони Cl", "Позвони Claude"]
+            field.reads = ["Позвони клоду", "Позвони Cl", "Позвони Claude", ""]
             let rebuilt = makeCoordinator()
             await runReads(rebuilt, take(pasted: "Позвони клоду"))
         }
         _ = coordinator
         XCTAssertEqual(suggestions, [DropLearningSuggestion(candidate: .vocabAdd(term: "Claude"), dryRun: true)])
-        XCTAssertGreaterThan(field.readCount, 3, "kept reading until stable")
+        XCTAssertEqual(field.readCount, 4, "read until the field emptied")
         XCTAssertNil(defaults.data(forKey: DropLearningLedger.key), "the real counters are untouched")
         makeCoordinator().accept(suggestions[0])
         XCTAssertEqual(VocabularyCache(defaults: defaults).terms, [], "dry run")
         let journal = try String(contentsOf: journalURL, encoding: .utf8)
-        XCTAssertTrue(journal.contains("missedByFirstRead"))
+        XCTAssertTrue(journal.contains("\"reason\":\"cleared\""))
+        XCTAssertTrue(journal.contains("\"event\":\"observed\""))
         let attributes = try FileManager.default.attributesOfItem(atPath: journalURL.path)
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }

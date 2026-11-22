@@ -60,9 +60,13 @@ is a verifiable claim rather than a slogan.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
 - Learning from your edits after Drop (on unless you turn it off in Settings
-  → Other → Drop → Learn from my edits) reads the
-  field a take was pasted into once, five seconds later, through
-  Accessibility, only if it is still the same focused field. Password fields,
+  → Other → Drop → Learn from my edits) watches the field a take was pasted
+  into, through Accessibility, until you send or clear it, leave it, start
+  another take or 2 minutes pass, and only while it is still the same
+  focused field. While it watches, it notices Return and Enter by key code
+  only, to read the field once more; no keys are recorded. For Electron and
+  web apps (Claude, Slack) it asks only that app to expose its text fields
+  for that time and turns this off afterwards. Password fields,
   secure input, terminals, password managers, Whytap's own fields and fields
   that do not expose their text are never read. The words of a correction stay
   in memory until you accept a suggestion; on disk there are only salted

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningScenarioTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-drops.md, 2026-11-11-drop-auto-stop.md]
+related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-drops.md, 2026-11-11-drop-auto-stop.md, 2026-11-22-drop-edit-observation.md]
 ---
 
 ## Context

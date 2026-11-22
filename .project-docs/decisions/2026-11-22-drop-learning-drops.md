@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningDropsTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-default-on.md]
+related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-default-on.md, 2026-11-22-drop-edit-observation.md]
 ---
 
 ## Context

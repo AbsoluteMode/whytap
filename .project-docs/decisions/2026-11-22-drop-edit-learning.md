@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningScenarioTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md, 2026-11-22-drop-learning-default-on.md]
+related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md, 2026-11-22-drop-learning-default-on.md, 2026-11-22-drop-edit-observation.md]
 ---
 
 ## Context
@@ -36,7 +36,9 @@ that rewrites what the provider keeps getting wrong.
 
 ## Decision
 
-- **One read of the same field.** At the paste boundary, after focus is
+- **One read of the same field** (superseded the same day: the field is now
+  watched until it is sent, see [observation](2026-11-22-drop-edit-observation.md);
+  the capture and every read keep the rules below). At the paste boundary, after focus is
   back on the target and right before Cmd+V, the paste engine hands over the
   element that has keyboard focus (the system-wide focused element of the
   frontmost app), from its identity and security metadata only. Five seconds
@@ -108,7 +110,9 @@ that rewrites what the provider keeps getting wrong.
   from my edits"): on unless the user switched it off, see
   [default on](2026-11-22-drop-learning-default-on.md). The drops that ask are described in
   [the drops decision](2026-11-22-drop-learning-drops.md).
-- **Calibration** (`sidekey.dropLearning.calibration`, hidden): reads at 5 s and
+- **Calibration** (`sidekey.dropLearning.calibration`, hidden; since the
+  [observation](2026-11-22-drop-edit-observation.md) it journals one
+  `observed` entry per watched field instead): reads at 5 s and
   then every second until the field holds still for three reads or 30 s,
   journals each read (words of the edits, candidates, which ones the 5 s read
   missed) to Application Support/<bundle id>/drop-learning/calibration.jsonl,

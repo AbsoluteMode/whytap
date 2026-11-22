@@ -54,15 +54,27 @@ Settings → Hotkeys.
   press keys, so ⌘ and ⇧ shortcuts that macOS and other apps own are never
   reachable by a misread request. Settings' recorder stays the way to set any
   other key.
-- **Conflicts.** Keys used by another action (Agent close ⌥Q, another tool…)
-  are refused as `hotkey_conflict` naming that action; nothing is taken over
-  or cleared. The prompt tells the Agent to name the owner and ask.
+- **Conflicts and refused keys.** Keys used by another action (Agent close
+  ⌥Q, another tool…) are refused as `hotkey_conflict` naming that action;
+  nothing is taken over or cleared. Both that and `invalid_hotkey` (⌘F) name
+  the nearest free keys the rules accept: the same key with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or
+  ⌃. The prompt tells the Agent to give the reason and that choice and ask.
+- **Typed characters.** An Option combo is allowed but types a character in
+  text fields (⌥F types the florin sign on US); a global hotkey takes it. The reply carries
+  `typesInTextFields`, read from the current keyboard layout with
+  `UCKeyTranslate` (dead keys: "its ⌥ accent"), and the line warns once:
+  `(no longer types “<character>” in text fields)`.
+- **Words.** The descriptions and prompt call them the island's hover tools,
+  quick actions, Toolbox or menu, and say "option f" means option+f, so
+  "add Shot to my quick actions (hover) and set the hotkey option f" (the
+  maintainer's acceptance request, asked in Russian) maps to these operations.
 - **Expected values.** Every write needs the exact current value: the pinned
   list for the Toolbox, the tool's keys (any modifier order) for a hotkey. A
   stale value is a `conflict`.
 - **Visible changes.** Lines from the saved result: `Toolbox + Shot`,
   `Toolbox − Monitor`, `Toolbox: Monitor → place 1`, `Hotkey: Shot — ⌥S`,
-  `Hotkey: Shot — none`. A repeated identical request answers
+  `Hotkey: Shot — none`. A hotkey for a tool added in the same turn joins its
+  line: `Toolbox + Shot · ⌥F (no longer types “<character>” in text fields)`. A repeated identical request answers
   `changed: false` and shows no line.
 
 ## Why
@@ -78,7 +90,11 @@ Settings → Hotkeys.
 ## What was tested
 
 `NativeAgentAppControlTests` with the real native loop, a stubbed model and
-the real controller on temporary stores: "add Shot and set ⌥S" (layout and
+the real controller on temporary stores: the acceptance request word for
+word ("quick actions (hover)", "option f": Shot pinned, ⌥F saved, one line with
+the florin-sign warning, the words present in the tool description and prompt); keys
+refused for ⌘ and owned by Agent close, each naming the nearest free keys;
+which combos type a character; "add Shot and set ⌥S" (layout and
 shortcut saved, two lines, a fresh store reads both, the shortcut resolves to
 a registration); "remove Monitor" (gone from the layout, its hotkey kept);
 moving a tool to place 1; conflicts with Agent close and with another tool

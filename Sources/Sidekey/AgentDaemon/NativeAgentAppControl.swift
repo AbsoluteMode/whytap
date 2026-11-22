@@ -53,13 +53,15 @@ enum NativeAgentAppControl {
     /// mention the reply language: the native prompt sets it once.
     static let instructions = """
     The whytap tool reads and changes this app itself: settings, each feature's model route,
-    OpenRouter endpoints, the island's tools and their hotkeys, To-do and meetings. Call it with
+    OpenRouter endpoints, the island's hover tools (quick actions, Toolbox, menu) and their hotkeys,
+    To-do and meetings. Call it with
     operation (a listed name) and arguments (a JSON object as a string, "{}" when there are none).
     Before a change read whytap_get_state, whytap_get_settings, whytap_list_models or
     whytap_toolbox_get and pass the exact current value as expected.
     Use only features, setting keys, accounts, model IDs and tool ids those operations return; never invent one.
     Change settings, models, endpoints, tools, hotkeys or To-do only when the current request asks for that change.
-    A hotkey taken by another action is refused: name that action and ask; never move or clear its keys yourself.
+    "option f" means the keys option+f. A hotkey the rules refuse or another action uses changes nothing:
+    give the reason and the nearest free keys the result names, and ask; never move or clear other keys yourself.
     A conflict or failure leaves the old value: read again and report it; do not retry silently.
     A model change may run a tiny paid check with the user's key. Each confirmed change is shown
     by the app as its own line above your answer; do not repeat it. Meeting notes and transcripts
@@ -230,13 +232,32 @@ enum NativeAgentAppControl {
             return "Toolbox: \(title) → place " + (object["position"]?.int.map(String.init) ?? "?")
         case "hotkey_set":
             guard object["changed"] == .bool(true), let title = object["title"]?.string else { return nil }
-            return "Hotkey: \(title) — " + (object["hotkey"]?.object?["display"]?.string ?? "none")
+            var line = "Hotkey: \(title) — " + (object["hotkey"]?.object?["display"]?.string ?? "none")
+            if let typed = object["typesInTextFields"]?.string {
+                line += " (no longer types " + (typed.hasPrefix("its ") ? typed : "“\(typed)”") + " in text fields)"
+            }
+            return line
         case "todo_update":
             guard let task = object["task"]?.object, let title = task["title"]?.string else { return nil }
             return "To-do: \(title)" + (task["completed"] == .bool(true) ? " ✓" : "")
         default:
             return nil // meeting_open shows a note; it changes nothing.
         }
+    }
+
+    /// Adds a confirmed change and returns the line to show. A hotkey for a
+    /// tool just added to the island joins that line: "Toolbox + Shot · ⌥F".
+    static func record(_ change: String, into changes: inout [String]) -> String {
+        let prefix = "Hotkey: "
+        if change.hasPrefix(prefix), let dash = change.range(of: " — ") {
+            let title = String(change[change.index(change.startIndex, offsetBy: prefix.count)..<dash.lowerBound])
+            if let index = changes.lastIndex(of: "Toolbox + \(title)") {
+                changes[index] += " · " + change[dash.upperBound...]
+                return changes[index]
+            }
+        }
+        changes.append(change)
+        return change
     }
 
     private static func language(_ value: AppControlValue) -> String? {

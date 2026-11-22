@@ -1534,8 +1534,12 @@ whytap_hotkey_set assigns or clears a tool's hotkey through
 HotkeyPreferences.assignToolShortcut (Hotkeys Save, shared with the Toolbox
 Hotkey block). Keys follow the whytap://hotkey rule (⌃ or ⌥, no Quit, no Soon
 tool); another action's keys are refused as hotkey_conflict, never taken over.
-Both need the exact current value as expected; lines "Toolbox + Shot",
-"Toolbox − Monitor", "Hotkey: Shot — ⌥S"; repeats are quiet. WHY:
+Refusals name the nearest free keys; an Option combo that types a character
+is assigned with typesInTextFields (current layout, UCKeyTranslate). Both need
+the exact current value as expected; lines "Toolbox + Shot", "Toolbox −
+Monitor", "Hotkey: Shot — ⌥S", joined as "Toolbox + Shot · ⌥F (no longer
+types “<character>” in text fields)" in one turn; repeats are quiet. Descriptions call
+them hover tools / quick actions / Toolbox / menu. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and

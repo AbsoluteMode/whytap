@@ -68,7 +68,10 @@ punctuation, so ⌘ and ⇧ shortcuts of macOS and other apps stay free; Quit an
 coming-soon tools are refused (`hotkey_not_allowed`), other keys
 `invalid_hotkey`. The change goes through the Hotkeys Save path
 (`HotkeyPreferences.assignToolShortcut`): keys another action uses are refused
-as `hotkey_conflict` naming that action, never taken over; the Hotkeys pane,
+as `hotkey_conflict` naming that action, never taken over, and refusals name
+the nearest free keys (the same key with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or ⌃). An Option combo
+that types a character in text fields (⌥F is ƒ on US) is assigned and the
+reply's `typesInTextFields` names that character; the Hotkeys pane,
 Help and the registered shortcut update at once. A repeated identical request
 answers `changed: false`. Unknown tool ids answer `unknown_tool`. Keys, permissions, security controls,
 Case contents, history, clipboard, recording, shell execution,
@@ -271,7 +274,10 @@ anthropic/claude-sonnet-5.5", "add a task: send the report" or "where did we
 discuss the budget?". Every change still needs the exact current value, and
 each confirmed change appears as one line above the answer, such as
 `Drop Smart cleanup → anthropic/claude-sonnet-5.5`, `Toolbox + Shot` or
-`Hotkey: Shot — ⌥S`. "Add Shot to the menu and give it ⌥S" pins the tool and
-assigns the keys; a hotkey taken by another action is reported, not moved. Meetings need no harness
+`Hotkey: Shot — ⌥S`. "Add Shot to my quick actions (hover) and give it option
+f" pins the tool and assigns the keys in one line,
+`Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)`; a hotkey the rules
+refuse or another action uses is reported with the nearest free keys, not
+moved. Meetings need no harness
 prompt there: the request comes from you at this Mac. The Agent still cannot
 read key values, the clipboard or run commands through these tools.

@@ -388,11 +388,67 @@ final class NativeAgentAppControlTests: XCTestCase {
 
     private let defaultPinned = ["inputLang", "notes", "meetingRecord", "hotkeys", "monitor"]
     private func combo(_ keys: String) -> HotkeyShortcut { .combo(WhytapLink.linkCombo(from: keys)!) }
+    /// US layout answers, so the lines do not depend on this Mac's layout.
+    private func usKeyboard() {
+        let saved = AppControlToolbox.keyboardCharacter
+        AppControlToolbox.keyboardCharacter = { ["option+f": "ƒ", "option+s": "ß"][WhytapLink.linkKeys(for: $0)] }
+        addTeardownBlock { await MainActor.run { AppControlToolbox.keyboardCharacter = saved } }
+    }
+
+    /// Maxim's acceptance request, word for word: "quick actions (hover)" is
+    /// the island's hover tools and "option f" is ⌥F. One request pins Shot,
+    /// assigns ⌥F and answers with one line that warns about ƒ.
+    func testQuickActionsHoverShotWithOptionFIsOneLine() async throws {
+        let e = try env()
+        usKeyboard()
+        let result = try await turn(e, "добавь мне shot в быстрые действия (ховер) и поставь хоткей option f", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "expected": defaultPinned], id: "p"),
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option f", "expected": NSNull()], id: "h"),
+            final("Готово.")
+        ])
+        XCTAssertEqual(e.layout.slots.suffix(2), [.screenshot, .settings])
+        XCTAssertEqual(e.hotkeys.toolShortcuts[.screenshot], combo("option+f"))
+        XCTAssertEqual(result.finalText, "Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)\n\nГотово.")
+        XCTAssertEqual(result.labels.last { $0.hasPrefix("Toolbox") }, "Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)")
+        XCTAssertTrue(result.toolResults()[2].contains(#""typesInTextFields":"ƒ""#), result.toolResults()[2])
+        // What lets the model map the words: the tool description and prompt.
+        let first = try XCTUnwrap(result.bodies.first)
+        let tools = first["tools"] as? [[String: Any]] ?? []
+        let whytap = tools.compactMap { $0["function"] as? [String: Any] }.first { $0["name"] as? String == NativeAgentAppControl.toolName }
+        XCTAssertTrue((whytap?["description"] as? String ?? "").contains("quick actions the island shows on hover"))
+        let system = (first["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.contains("hover tools (quick actions") && system.contains("\"option f\" means the keys option+f"))
+    }
+
+    /// Keys the rules refuse, or that another action owns, name the reason
+    /// and the nearest free keys; nothing changes.
+    func testRefusedKeysNameTheNearestFreeOnes() async throws {
+        let e = try env()
+        let result = try await turn(e, "поставь Shot на command f, или на option q", [
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "command+f", "expected": NSNull()], id: "a"),
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+q", "expected": NSNull()], id: "b"),
+            final("Обе не подходят.")
+        ])
+        XCTAssertNil(e.hotkeys.toolShortcuts[.screenshot])
+        let results = result.toolResults()
+        XCTAssertTrue(results[0].contains("invalid_hotkey") && results[0].contains("Nearest free keys: option+f (⌥F)"), results[0])
+        XCTAssertTrue(results[1].contains("Agent close") && results[1].contains("Nearest free keys: option+shift+q"), results[1])
+        XCTAssertEqual(result.finalText, "Обе не подходят.")
+    }
+
+    func testTypedCharacterOnlyForOptionTypingKeys() {
+        XCTAssertNil(AppControlToolbox.typedCharacter(WhytapLink.linkCombo(from: "control+option+f")!))
+        XCTAssertNil(AppControlToolbox.typedCharacter(WhytapLink.linkCombo(from: "option+f5")!))
+        XCTAssertNil(AppControlToolbox.typedCharacter(WhytapLink.linkCombo(from: "control+f")!))
+        XCTAssertNotNil(AppControlToolbox.typedCharacter(WhytapLink.linkCombo(from: "option+f")!))
+    }
 
     /// "добавь Shot и поставь ⌥S": both changes saved in the Settings stores,
-    /// one app-owned line each, visible to a fresh store (Settings, island).
-    func testAddShotWithOptionSSavesBothAndShowsTwoLines() async throws {
+    /// joined in one app-owned line, visible to a fresh store (Settings, island).
+    func testAddShotWithOptionSSavesBothAndShowsOneLine() async throws {
         let e = try env()
+        usKeyboard()
         let result = try await turn(e, "добавь в меню Shot и поставь ему ⌥S", [
             app("whytap_toolbox_get", [:], id: "g"),
             app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "position": NSNull(),
@@ -402,10 +458,10 @@ final class NativeAgentAppControlTests: XCTestCase {
         ])
         XCTAssertEqual(e.layout.slots, [.inputLang, .notes, .meetingRecord, .hotkeys, .monitor, .screenshot, .settings])
         XCTAssertEqual(e.hotkeys.toolShortcuts[.screenshot], combo("option+s"))
-        XCTAssertEqual(result.finalText, "Toolbox + Shot\n\nHotkey: Shot — ⌥S\n\nГотово.")
+        XCTAssertEqual(result.finalText, "Toolbox + Shot · ⌥S (no longer types “ß” in text fields)\n\nГотово.")
         XCTAssertTrue(result.labels.contains("Reading Whytap tools"), "\(result.labels)")
         XCTAssertTrue(result.labels.contains("Toolbox + Shot"), "\(result.labels)")
-        XCTAssertTrue(result.labels.contains("Hotkey: Shot — ⌥S"), "\(result.labels)")
+        XCTAssertTrue(result.labels.contains("Toolbox + Shot · ⌥S (no longer types “ß” in text fields)"), "\(result.labels)")
         // The read listed Shot unpinned with no hotkey, before the change.
         let read = try XCTUnwrap(result.toolResults().first)
         XCTAssertTrue(read.contains(#""hotkey":null"#) && read.contains(#""tool":"screenshot""#), read)

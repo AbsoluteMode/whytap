@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import Foundation
 import WhytapCaseKit
 
@@ -88,7 +89,8 @@ struct AppControlToolbox {
         var shortcut: HotkeyShortcut?
         if let text = keys.string {
             guard text.count <= 64, let combo = WhytapLink.linkCombo(from: text) else {
-                return .failure("invalid_hotkey", "Write keys as modifiers then one key joined by +, with Control or Option: option+s, control+shift+f5. Keys: A–Z, 0–9, F1–F20 and US punctuation. Command or Shift alone, Space, Return, Tab, Escape, Delete and arrows are not accepted, so system and app shortcuts stay free.")
+                return .failure("invalid_hotkey", "Write keys as modifiers then one key joined by +, with Control or Option: option+s, control+shift+f5. Keys: A–Z, 0–9, F1–F20 and US punctuation. Command or Shift alone, Space, Return, Tab, Escape, Delete and arrows are not accepted, so system and app shortcuts stay free."
+                    + Self.suggestion(nearest: text, for: tool, in: preferences.configuration))
             }
             shortcut = .combo(combo)
         }
@@ -99,13 +101,18 @@ struct AppControlToolbox {
             guard preferences.toolShortcuts[tool] == shortcut else {
                 return .failure("unconfirmed", "The saved hotkeys do not contain the change.")
             }
-            return .success(.object(["tool": .string(tool.rawValue), "title": .string(Self.title(tool)),
-                                     "hotkey": Self.hotkeyValue(shortcut), "changed": .bool(result == .saved)]))
+            var reply: [String: AppControlValue] = ["tool": .string(tool.rawValue), "title": .string(Self.title(tool)),
+                                                    "hotkey": Self.hotkeyValue(shortcut), "changed": .bool(result == .saved)]
+            if case .combo(let combo)? = shortcut, let typed = Self.keyboardCharacter(combo) {
+                reply["typesInTextFields"] = .string(typed)
+            }
+            return .success(.object(reply))
         case .conflict(let conflicts):
             let owners = conflicts.flatMap(\.actionTitles).filter { $0 != Self.title(tool) }
             let display = shortcut.map(Self.display) ?? ""
             let used = owners.isEmpty ? "Another shortcut conflicts" : "\(display) is already used by \(Self.list(owners))"
-            return .failure("hotkey_conflict", "\(used). Nothing changed. Choose other keys, or the user can free them in Settings → Hotkeys.")
+            return .failure("hotkey_conflict", "\(used). Nothing changed. Choose other keys, or the user can free them in Settings → Hotkeys."
+                + Self.suggestion(nearest: keys.string ?? "", for: tool, in: preferences.configuration))
         case .rejectedHoldSpace:
             return Self.invalid()
         }
@@ -150,6 +157,55 @@ struct AppControlToolbox {
         case .modifier(let key): return key.shortcutChipTitle
         case .holdSpace: return "Space"
         }
+    }
+
+    /// Tests replace it: the real answer depends on the Mac's keyboard layout.
+    static var keyboardCharacter: (HotkeyTapCombo) -> String? = typedCharacter
+
+    /// The character an Option combo types in text fields on the current
+    /// keyboard layout (⌥F is ƒ on US). A global hotkey takes that key, so
+    /// the user can no longer type the character; the Agent says so.
+    static func typedCharacter(_ combo: HotkeyTapCombo) -> String? {
+        let option = UInt32(optionKey), shift = UInt32(shiftKey)
+        // Function keys type nothing; ⌃ and ⌘ combos are not typing.
+        let key = WhytapLink.linkKeys(for: combo).split(separator: "+").last.map(String.init) ?? ""
+        let functionKey = key.count > 1 && key.hasPrefix("f") && key.dropFirst().allSatisfy(\.isNumber)
+        guard combo.modifiers & option != 0, combo.modifiers & ~(option | shift) == 0, !functionKey else { return nil }
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return "its ⌥ character"
+        }
+        let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        var deadKeys: UInt32 = 0, length = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        let status = data.withUnsafeBytes { bytes -> OSStatus in
+            guard let layout = bytes.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return -1 }
+            return UCKeyTranslate(layout, UInt16(combo.keyCode), UInt16(kUCKeyActionDown), (combo.modifiers >> 8) & 0xFF,
+                                  UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys,
+                                  characters.count, &length, &characters)
+        }
+        guard status == noErr else { return "its ⌥ character" }
+        let text = String(utf16CodeUnits: characters, count: length)
+        // A dead key (⌥E, ⌥U on US) types an accent on the next letter.
+        guard !text.isEmpty, !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            return deadKeys != 0 ? "its ⌥ accent" : nil
+        }
+        return text
+    }
+
+    /// The nearest keys the rules accept that nothing uses yet: the same key
+    /// with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or ⌃, in that order. "" when there is none.
+    static func suggestion(nearest text: String, for tool: HoverTool, in configuration: HotkeyConfiguration) -> String {
+        guard let key = text.lowercased().split(whereSeparator: { $0 == "+" || $0 == " " }).last.map(String.init) else { return "" }
+        let wanted = WhytapLink.linkCombo(from: text)
+        for modifiers in ["option", "option+shift", "control+option", "control+shift", "control"] {
+            guard let combo = WhytapLink.linkCombo(from: modifiers + "+" + key), combo != wanted else { continue }
+            let candidate = configuration.settingToolShortcut(.combo(combo), for: tool)
+            guard candidate.conflicts.allSatisfy({ !$0.actionTitles.contains(title(tool)) }) else { continue }
+            let keys = WhytapLink.linkKeys(for: combo)
+            return " Nearest free keys: \(keys) (\(display(.combo(combo))))."
+        }
+        return ""
     }
 
     /// The expected keys match when they name the same combo in any order or

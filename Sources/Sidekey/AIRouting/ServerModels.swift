@@ -63,6 +63,32 @@ extension ServerEndpoint {
     }
 }
 
+extension ServerEndpoint {
+    /// What the server is called everywhere: its address, without scheme or
+    /// path, the port kept unless it is the scheme's own. A local port that
+    /// names a known server adds that name: `Ollama · localhost:11434`,
+    /// `LM Studio · localhost:1234`; any other address is just itself
+    /// (`vllm.company.ru`). `nil` for a base URL without a host.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    static func displayName(for baseURL: String) -> String? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withScheme = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        guard let components = URLComponents(string: withScheme), let host = components.host?.lowercased(),
+              !host.isEmpty else { return nil }
+        let scheme = components.scheme?.lowercased()
+        let defaultPort = (scheme == "https" || scheme == "wss") ? 443 : 80
+        var address = host
+        if let port = components.port, port != defaultPort { address += ":\(port)" }
+        switch components.port {
+        case 11434?: return "Ollama · " + address
+        case 1234?: return "LM Studio · " + address
+        default: return address
+        }
+    }
+
+    var displayName: String { Self.displayName(for: baseURL) ?? name }
+}
+
 /// Guesses a model's kind from its name, only to preselect the type when the
 /// user adds a model: the user decides. Unknown names guess LLM.
 enum ServerModelClassifier {

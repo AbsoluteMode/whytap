@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Everything about one of the user's servers in one window: its name,
-/// address, optional key and the models it runs, each with its type and
-/// the result of its check. One Save keeps it all.
+/// Everything about one of the user's servers in one window: its address,
+/// optional key and the models it runs, each with its type and the result
+/// of its check. One Save keeps it all. The server has no name field: it is
+/// called by its address (`ServerEndpoint.displayName(for:)`).
 // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
 struct ServerSheetDraft: Equatable {
     struct Row: Identifiable, Equatable {
@@ -30,15 +31,11 @@ struct ServerSheetDraft: Equatable {
     }
 
     var isNew: Bool
-    var name: String
     var baseURL: String
     /// Typed into the key field; empty keeps the stored key (if any).
     var apiKey: String
     var hasStoredKey: Bool
     var rows: [Row]
-    /// A better server name when the current one is a model's name
-    /// (servers named before models were added).
-    var nameSuggestion: String?
 }
 
 @MainActor
@@ -64,7 +61,6 @@ struct ServerSheet: View {
     }
     private var canSave: Bool {
         !saving && checking == 0
-            && !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
             && !draft.baseURL.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -84,7 +80,7 @@ struct ServerSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(draft.isNew ? "Add your server" : draft.name)
+            Text(draft.isNew ? "Add your server" : (ServerEndpoint.displayName(for: draft.baseURL) ?? "Your server"))
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(MacSettingsTheme.text)
                 .lineLimit(1)
@@ -98,23 +94,6 @@ struct ServerSheet: View {
 
     private var connection: some View {
         group {
-            labeled("Name") {
-                VStack(alignment: .leading, spacing: 6) {
-                    MacField(placeholder: "For example, Ollama · localhost", text: $draft.name)
-                    if let suggestion = draft.nameSuggestion, suggestion != draft.name {
-                        HStack(spacing: 6) {
-                            Text("This is a model's name. Name the server “\(suggestion)”?")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(MacSettingsTheme.text2)
-                            Button("Use") { draft.name = suggestion }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(MacSettingsTheme.accent)
-                        }
-                    }
-                }
-            }
-            divider
             labeled("Base URL") {
                 MacField(placeholder: "http://localhost:11434/v1", text: $draft.baseURL, monospaced: true)
             }

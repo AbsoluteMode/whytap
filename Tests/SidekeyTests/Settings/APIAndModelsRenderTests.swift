@@ -386,25 +386,17 @@ final class APIAndModelsRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suggestions = ["qwen3:0.6b", "qwen3-asr", "whisper-large-v3-turbo"]
         let states: [(String, ServerSheetDraft)] = [
-            ("1-new", .init(isNew: true, name: "", baseURL: "", apiKey: "", hasStoredKey: false,
-                            rows: [.init()], nameSuggestion: nil)),
-            ("2-two-models", .init(isNew: false, name: "Ollama · localhost", baseURL: "http://localhost:11434/v1",
-                                   apiKey: "", hasStoredKey: true,
+            ("1-new", .init(isNew: true, baseURL: "", apiKey: "", hasStoredKey: false, rows: [.init()])),
+            ("2-two-models", .init(isNew: false, baseURL: "http://localhost:11434/v1", apiKey: "", hasStoredKey: false,
                                    rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
-                                          .init(name: "whisper-large-v3-turbo", kind: .transcription, status: .works)],
-                                   nameSuggestion: nil)),
-            ("3-check-failed", .init(isNew: false, name: "Ollama · localhost", baseURL: "http://localhost:11434/v1",
-                                     apiKey: "", hasStoredKey: false,
-                                     rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
+                                          .init(name: "whisper-large-v3-turbo", kind: .transcription, status: .works)])),
+            ("3-check-failed", .init(isNew: false, baseURL: "https://vllm.company.ru/v1", apiKey: "", hasStoredKey: true,
+                                     rows: [.init(name: "ut-llm", kind: .llm, status: .works),
                                             .init(name: "qwen3:0.6b", kind: .transcription, status: .failed(
                                                 "Server answered 400 on /audio/transcriptions — this model can't transcribe here (\"qwen3:0.6b\" does not support audio input)")),
-                                            .init(name: "ut-llm", kind: .llm, status: .notChecked)],
-                                     nameSuggestion: nil)),
-            ("4-named-after-model", .init(isNew: false, name: "qwen3:0.6b", baseURL: "http://localhost:11434/v1",
-                                          apiKey: "", hasStoredKey: false,
-                                          rows: [.init(name: "qwen3:0.6b", kind: .llm, status: .works),
-                                                 .init(name: "qwen3-asr", kind: .transcription, status: .checking)],
-                                          nameSuggestion: "Ollama · localhost")),
+                                            .init(name: "qwen3-asr", kind: .transcription, status: .works)])),
+            ("4-new-checking", .init(isNew: true, baseURL: "http://localhost:11434/v1", apiKey: "", hasStoredKey: false,
+                                     rows: [.init(name: "qwen3-asr", kind: .transcription, status: .checking)])),
         ]
         for dark in [false, true] {
             for (label, draft) in states {

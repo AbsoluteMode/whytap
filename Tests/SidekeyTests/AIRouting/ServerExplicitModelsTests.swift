@@ -212,6 +212,22 @@ final class ServerExplicitModelsTests: XCTestCase {
         XCTAssertNil(ServerModelTarget(account: .server(UUID()), baseURL: "http://h/v1", apiKey: "").keyDigest)
     }
 
+    // MARK: - A server is called by its address
+
+    func test_a_server_is_named_after_its_address() {
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://localhost:11434/v1"), "Ollama · localhost:11434")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://127.0.0.1:1234/v1"), "LM Studio · 127.0.0.1:1234")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "https://vllm.company.ru/v1"), "vllm.company.ru")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "https://GPU.Example.com:8443/openai/v1"), "gpu.example.com:8443")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "wss://asr.lab:443/v1"), "asr.lab")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "http://box:80"), "box")
+        XCTAssertEqual(ServerEndpoint.displayName(for: "vllm.company.ru:8000/v1"), "vllm.company.ru:8000")
+        XCTAssertNil(ServerEndpoint.displayName(for: ""))
+        XCTAssertNil(ServerEndpoint.displayName(for: "http:///v1"))
+        let legacy = ServerEndpoint(id: UUID(), name: "qwen3:0.6b", baseURL: "http://localhost:11434/v1", keyAccount: "k")
+        XCTAssertEqual(legacy.displayName, "Ollama · localhost:11434", "a name from before is replaced by the address")
+    }
+
     // MARK: - The form runs one operation at a time
 
     func test_a_model_check_blocks_key_save_and_remove_until_it_finishes() {

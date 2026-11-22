@@ -1242,6 +1242,15 @@ enum OnboardingKeyStageKind: Equatable {
         case .search: return "Paste a Tavily key."
         }
     }
+    init?(step: OnboardingStep) {
+        switch step {
+        case .speechKey: self = .speech
+        case .llmKey: self = .languageModel
+        case .search: self = .search
+        default: return nil
+        }
+    }
+
     /// Search has no server of its own: its link is absent.
     var serverHelp: String? {
         switch self {
@@ -1272,6 +1281,9 @@ struct OnboardingKeyStage: View {
     /// without the key's own format.
     @State private var picked: OnboardingKeyVendor?
     @State private var hoveredLogo: OnboardingKeyVendor?
+    /// The key field and the own-server fields share one capsule.
+    @Namespace private var morph
+    @State private var serverGrown = false
 
     private var step: OnboardingStep { kind.step }
     private var providers: [OnboardingKeyProvider] {
@@ -1332,25 +1344,58 @@ struct OnboardingKeyStage: View {
         return draft.isEmpty ? .empty : .pasted
     }
 
+    /// "Use your own server →" turned the key field into the server's fields.
+    private var server: Bool { model.showsServerForm(kind) }
+
     var body: some View {
         VStack(spacing: 0) {
-            Text(kind.title)
-                .font(OnboardingTheme.serifItalic(31))
-                .foregroundColor(OnboardingTheme.ink)
-                .padding(.top, 6)
-                .accessibilityAddTraits(.isHeader)
+            ZStack {
+                Text(server ? "Your own server." : kind.title)
+                    .id(server)
+                    .transition(.opacity)
+            }
+            .font(OnboardingTheme.serifItalic(31))
+            .foregroundColor(OnboardingTheme.ink)
+            .padding(.top, 6)
+            .accessibilityAddTraits(.isHeader)
             keyBand
                 .frame(height: 100)
-            field
-                .padding(.horizontal, Self.fieldInset)
-                .padding(.top, 4)
-            feedback
-                .frame(height: 44, alignment: .top)
-                .padding(.horizontal, Self.fieldInset)
-                .padding(.top, 9)
-            Spacer(minLength: 12)
-            logos
-            if let help = kind.serverHelp {
+            if server {
+                OnboardingServerFields(kind: kind, model: model, scene: scene, morph: morph, grown: $serverGrown)
+                    .padding(.horizontal, Self.fieldInset)
+                    .padding(.top, 1)
+                    .onAppear {
+                        withAnimation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion)) {
+                            serverGrown = true
+                        }
+                    }
+                Spacer(minLength: 0)
+                Button(action: backToKeys) {
+                    Text("‹ Back to keys")
+                        .font(OnboardingTheme.sans(12.5))
+                        .foregroundColor(OnboardingTheme.muted)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .disabled(checking || outcome.isDone)
+                .opacity(outcome.isDone ? 0 : 1)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+            } else {
+                field
+                    .padding(.horizontal, Self.fieldInset)
+                    .padding(.top, 4)
+                feedback
+                    .frame(height: 44, alignment: .top)
+                    .padding(.horizontal, Self.fieldInset)
+                    .padding(.top, 9)
+                Spacer(minLength: 12)
+                logos
+                    .transition(.opacity)
+            }
+            if server {
+                EmptyView()
+            } else if let help = kind.serverHelp {
                 Button { model.useOwnServer(kind) } label: {
                     Text("Use your own server →")
                         .font(OnboardingTheme.sans(12.5))
@@ -1370,6 +1415,8 @@ struct OnboardingKeyStage: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion, allowFade: true),
+                   value: server)
         .onChange(of: outcome) { _, new in react(to: new) }
         .onChange(of: phase) { _, new in
             scene.refusedAngle = problem == .noCredit || problem == .noSpeechAccess ? 0.46 : 0.36
@@ -1378,6 +1425,19 @@ struct OnboardingKeyStage: View {
         .onAppear {
             focused = true
             scene.keyPhase = phase
+        }
+    }
+
+    /// The lower fields fold into the first, then it becomes the key field.
+    private func backToKeys() {
+        withAnimation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion)) {
+            serverGrown = false
+        }
+        let kind = self.kind
+        let model = self.model
+        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0 : 0.18)) {
+            model.closeServerForm(kind)
+            focused = true
         }
     }
 
@@ -1451,7 +1511,8 @@ struct OnboardingKeyStage: View {
         .padding(.leading, shown == nil ? 20 : 12)
         .padding(.trailing, 8)
         .frame(height: 50)
-        .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098)))
+        .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098))
+            .matchedGeometryEffect(id: "field", in: morph))
         .overlay(Capsule().strokeBorder(border, lineWidth: 1))
         // A soft halo, not a neon band.
         .shadow(color: halo, radius: 14, x: 0, y: 0)
@@ -1499,13 +1560,14 @@ struct OnboardingKeyStage: View {
             if checking {
                 Text("Checking the key with \(name)…").foregroundColor(OnboardingTheme.muted)
             } else if accepted, choices.count > 1 {
-                // The key worked: the person picks the model, the newest
-                // flagship already set; Return keeps it.
+                // The key worked with the recommended model set; the step
+                // moves on unless the person opens "Choose model".
                 VStack(spacing: 5) {
                     Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
                     OnboardingModelMenu(choices: choices, selected: model.currentModel(step),
                                         recommended: model.recommendedModel(step),
-                                        busy: model.choosingModel == step) { id in
+                                        busy: model.choosingModel == step,
+                                        opened: { model.modelMenu(open: $0) }) { id in
                         Task { await model.chooseModel(id, on: step) }
                     }
                 }
@@ -1684,28 +1746,24 @@ struct OnboardingModelMenu: View {
     /// Marked "Recommended" in the line and the list.
     let recommended: String?
     let busy: Bool
+    /// The list opened, or closed without a pick.
+    var opened: (Bool) -> Void = { _ in }
     let pick: (String) -> Void
     @State private var hovered = false
     @State private var open = false
-
-    private var current: OnboardingModelChoice? { choices.first { $0.id == selected } }
+    @State private var picking = false
 
     var body: some View {
         Button { open.toggle() } label: {
+            // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+            // The owner: "after the key, Choose model, and there the
+            // Recommended tag". At rest only this; models, prices and the
+            // tag are in the list.
             HStack(spacing: 6) {
-                Text("Model").foregroundColor(OnboardingTheme.faint)
-                Text(selected ?? "Choose")
-                    .font(OnboardingTheme.mono(12))
-                    .foregroundColor(OnboardingTheme.ink)
+                Text("Choose model").foregroundColor(OnboardingTheme.ink)
                 Image(systemName: busy ? "ellipsis" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(OnboardingTheme.muted)
-                if let price = current?.price {
-                    Text(price).foregroundColor(OnboardingTheme.faint)
-                }
-                if selected != nil, selected == recommended {
-                    Text("Recommended").foregroundColor(OnboardingTheme.muted)
-                }
             }
             .font(OnboardingTheme.sans(12))
             .padding(.horizontal, 11)
@@ -1719,8 +1777,11 @@ struct OnboardingModelMenu: View {
         .disabled(busy)
         .onHover { hovered = $0 }
         .popover(isPresented: $open, arrowEdge: .bottom) { list }
+        .onChange(of: open) { _, isOpen in
+            if isOpen { picking = false; opened(true) } else if !picking { opened(false) }
+        }
         .help("The recommended model is set; pick another of this provider's current models")
-        .accessibilityLabel("Model, \(selected ?? "none")")
+        .accessibilityLabel("Choose model, \(selected ?? "none") set")
     }
 
     private var list: some View {
@@ -1728,8 +1789,9 @@ struct OnboardingModelMenu: View {
             ForEach(choices) { choice in
                 OnboardingModelRow(choice: choice, isSelected: choice.id == selected,
                                    isRecommended: choice.id == recommended) {
+                    picking = choice.id != selected
                     open = false
-                    if choice.id != selected { pick(choice.id) }
+                    if picking { pick(choice.id) }
                 }
             }
         }

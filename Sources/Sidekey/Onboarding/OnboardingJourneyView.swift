@@ -51,16 +51,6 @@ struct OnboardingJourneyView: View {
         }
         .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion),
                    value: Self.isWireframe(model.step))
-        // "Use your own server →" (the preview): the form in this window,
-        // over the onboarding, which waits underneath and gets it back.
-        .overlay {
-            if let kind = model.serverForm {
-                OnboardingServerFormView(kind: kind, onSave: model.saveServer, onClose: model.closeServerForm)
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-            }
-        }
-        .animation(OnboardingMotion.resolve(OnboardingMotion.stepGlide, reduceMotion: reduceMotion, allowFade: true),
-                   value: model.serverForm)
         .frame(width: Self.size.width, height: Self.size.height)
         .background(ground)
         // The page fills the window, title bar included: inside the safe area

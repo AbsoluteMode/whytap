@@ -277,14 +277,15 @@ window, Back and a progress bar.
   `gpt-6.2-astra`, Anthropic `claude-fable-5-2` on 2026-11-22), otherwise the
   newest; small tiers, voice, search and dated snapshots are never the
   default. The registry is used only before the catalog exists. Under the
-  accepted line a quiet "Model … ⌄ price" opens a small dark list of up to
-  eight current models with prices (OpenRouter: each major author's
-  flagship); a pick goes through the shared row and the step moves on. With
-  a choice of models the step waits after the padlock opens; Return keeps
-  the set model. The speech step does the same when its provider has more
-  than one model (OpenAI: per-minute prices), otherwise it moves on as
-  before. A native menu was not used: AppKit draws only one text of its
-  label, so the model and price disappeared.
+  accepted line a quiet "Choose model ⌄" (the owner: "after the key, Choose
+  model, and there the Recommended tag"; no model name or price at rest)
+  opens a small dark list of up to eight current models with prices
+  (OpenRouter: each major author's flagship), the recommended one first and
+  tagged. The recommended model is already set, so the step moves on by
+  itself like any accepted key; an open list pauses the move, a pick goes
+  through the shared row and moves on. The speech step does the same when
+  its provider has more than one model (OpenAI: per-minute prices). A native
+  menu was not used: AppKit draws only one text of its label.
 - **One model is recommended: the provider's current Sonnet or Sol.** The
   owner asked on 2026-11-22 for "Sonnet / Sol, the current one" as the
   onboarding's recommendation, replaceable by the person. The language model
@@ -296,8 +297,8 @@ window, Back and a progress bar.
   cached by the app, lists `gpt-6.2-sol`, `gpt-6.1-sol` and `gpt-6-sol`). A
   family, not an ID, so a newer Sonnet or Sol takes over without a code
   change; a provider without that family falls back to the newest flagship.
-  The model line and the list mark it "Recommended"; any other pick replaces
-  it. The speech step recommends the registry's Drop model.
+  The list tags it "Recommended"; any other pick replaces it. The speech
+  step recommends the registry's Drop model.
 - **Search is asked only when the model cannot search.** The owner,
   2026-11-22: when search works without Tavily, Tavily is not asked for.
   Anthropic, OpenAI and OpenRouter search the web themselves
@@ -312,17 +313,24 @@ window, Back and a progress bar.
   401 or 403 refused, 432 or 433 (plan and pay-as-you-go limits) no credit,
   429 busy with Retry, no answer unreachable with Retry. The Agent's use of
   the providers' built-in search is session 78's change, not this one.
-- **"Use your own server →" shows the server form in the same window (the
-  preview).** Base URL, an optional key (a secure field), the models with
-  LLM or Transcription each, one Save; the name comes from the address
-  (Ollama and LM Studio by their default ports, otherwise the host). Back,
-  Cancel or Escape return to the key step unchanged; Save returns with the
-  step done like an accepted key. The app opens the real form instead:
-  Settings → API & Models → API keys with the Custom server tile opened
-  through the same path as a click on it (`SettingsWindowSelection
-  .requestNewServer`), so it shows the inline form today and the server
-  window of PR 408 once that lands; the onboarding stays open behind
-  Settings and is where the person returns.
+- **"Use your own server →" changes the step in place.** The owner,
+  2026-11-22: a separate screen (first a form over the window, in the app
+  Settings) and a return to the key step before the move looked cobbled
+  together. Now, in the app and the preview alike, the key field's capsule
+  reshapes into the first of three fields of the same family (Base URL, an
+  optional key, one model with an LLM | Transcription switch) and the other
+  two unfold from it; the title reads "Your own server.", the wire key and
+  padlock stay. "‹ Back to keys" (or Escape, or Back) folds them into the
+  key field again. Return on the model adds the server the way Settings
+  does (`addServer`: the address answers, the key if any is accepted), runs
+  the model's small check (`runServerModelCheck`), adds it and sets the
+  shared Speech or LLM row; the padlock answers like for a key and success
+  moves straight on to the next step, the fields still in place. A second
+  try with the same address and key reuses the server. The name comes from
+  the address (Ollama and LM Studio by their default ports, otherwise the
+  host). The Settings path of the first version
+  (`SettingsWindowSelection.requestNewServer`) was removed with it, so this
+  branch no longer touches the Custom server tile of PR 408.
 
 ## Rejected
 
@@ -368,14 +376,17 @@ window, Back and a progress bar.
   OpenRouter keys only on the language model step), masks every input from
   its first character (Russian layout and symbols included, with the dots'
   width equal to the typed text's), calls an unnamed key a format problem until it
-  is edited, and opens and closes the server form (Back, Save, the name
-  from the address), starts the language model step on the newest flagship
-  of a realistic catalog, lists only current text models with prices, waits
-  for the choice and applies a pick, offers OpenAI's speech models with
+  is edited, turns the key field into the server fields and back on the
+  same step (the name from the address; a saved server keeps its fields
+  until the move), starts the language model step on the recommended model
+  of a realistic catalog listed first, lists only current text models with
+  prices, pauses while the list is open and applies a pick, offers OpenAI's speech models with
   per-minute prices, and checks the flagship rule on its own; the
   recommendation is the newest Sonnet or Sol. `OnboardingJourneyModelTests`
-  leave the search step out after an Anthropic key, keep it after a server
-  language model, and name Tavily's refused, no credit, busy and unreachable
+  add a server model with its check (a refused model keeps the fields, the
+  retry reuses the server, the shared row takes it, the move goes straight
+  to search), leave the search step out after an Anthropic key, keep it
+  after a server language model, and name Tavily's refused, no credit, busy and unreachable
   answers and a foreign key's format; Tavily keys are recognised only on the
   search step.
 - `OnboardingPreviewTests`: the preview session walks every step with its
@@ -386,8 +397,8 @@ window, Back and a progress bar.
   OpenAI key saved on the LLM step opens the speech step on it, and one
   saved for speech opens the LLM step on it.
 - Offscreen renders (520 × 440) of every step, including a refused key, an
-  accepted key while counting, a held step, Back to a reviewed step and the
-  server form.
+  accepted key while counting, a held step, Back to a reviewed step, the
+  server fields on the speech and language model steps and an added server.
 
 Not verified: the real window with real permissions, real provider key
 checks, the motion itself (offscreen renders are still frames) and the

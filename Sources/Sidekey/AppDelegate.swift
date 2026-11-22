@@ -543,9 +543,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
-        model.openServerSetup = { [weak self] in
-            self?.ensureSettingsWindowController().showNewServer()
-        }
         let controller = OnboardingJourneyWindowController(model: model) { [weak self] in
             OnboardingLaunch.finish(in: .standard)
             NowPlayingAutomationConsent.promptsDeferred = false

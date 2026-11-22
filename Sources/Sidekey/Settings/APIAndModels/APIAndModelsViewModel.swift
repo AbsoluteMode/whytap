@@ -358,6 +358,13 @@ final class APIAndModelsViewModel: ObservableObject {
         }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
+    /// Whether the server already has `name` as `kind` (the onboarding's
+    /// server step tried again after the model was added).
+    func serverHasModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) -> Bool {
+        guard case .server(let id) = account else { return false }
+        return routing.server(id)?.hasModel(name, kind: kind) ?? false
+    }
+
     /// Why `name` cannot be added as `kind`, before any request; `nil` when it can.
     func serverModelProblem(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) -> String? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

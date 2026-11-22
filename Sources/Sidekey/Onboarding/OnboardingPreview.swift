@@ -124,7 +124,8 @@ final class OnboardingPreviewSession {
             routing: routing, keys: keys,
             catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: providers),
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
-            keyChecker: providers, probe: providers, endpoints: providers, inputLanguage: { nil }, onDevice: readiness)
+            keyChecker: providers, probe: providers, serverModelChecker: providers, endpoints: providers,
+            inputLanguage: { nil }, onDevice: readiness)
 
         let system = System()
         let permissions = PermissionsSettingsViewModel(
@@ -191,7 +192,18 @@ final class OnboardingPreviewTokenStore: TokenStore, @unchecked Sendable {
 }
 
 /// Offline answers for key checks, catalogs, probes and OpenRouter endpoints.
-struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching {
+struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching,
+                                   ServerModelChecking {
+    /// A server's model check: a name containing "bad" is refused, "offline"
+    /// gets no answer, any other passes.
+    func check(_ model: String, kind: ServerModel.Kind, on server: ServerEndpoint, apiKey: String?) async -> ServerModelCheckResult {
+        try? await Task.sleep(for: .milliseconds(500))
+        let name = model.lowercased()
+        if name.contains("offline") { return .unreachable("\(server.name) didn't answer. Is it running?") }
+        if name.contains("bad") { return .failed("\(server.name) has no model named \(model)") }
+        return .passed
+    }
+
     static func refuses(_ key: String?) -> Bool { key?.lowercased().contains("bad") == true }
 
     static func answer(_ key: String?) -> KeyStatus {

@@ -156,8 +156,6 @@ final class OnboardingJourneyModel: ObservableObject {
 
     var onFinish: () -> Void = {}
     var openSettings: (SettingsWindowTab, AIFeature?) -> Void = { _, _ in }
-    /// Settings -> API & Models -> API keys with the Custom server form open.
-    var openServerSetup: () -> Void = {}
 
     /// The speech providers of the speech key step (Drop runs on these), in
     /// their tab order. OpenAI joins them once the app can run its speech
@@ -266,8 +264,10 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Back, by button or ← / ⌘[. Only the step changes; a pending automatic
     /// move is cancelled, and a step already done waits in review.
     func back() {
-        // Over the server form, Back returns to the key step it came from.
-        if serverForm != nil { return closeServerForm() }
+        // On the server fields, Back returns to the key field first.
+        if let kind = OnboardingKeyStageKind(step: step), serverForms.contains(kind), !outcome(step).isDone {
+            return closeServerForm(kind)
+        }
         guard let previous = OnboardingJourney.previous(before: step, in: steps) else { return }
         show(previous, direction: .backward)
     }
@@ -326,10 +326,10 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The shown step's action succeeded: show it for the step's dwell, then
     /// move on. A success of a step that is not shown is only recorded.
-    private func succeed(_ done: OnboardingStep, _ text: String, holds: Bool = false) {
+    private func succeed(_ done: OnboardingStep, _ text: String) {
         outcomes[done] = .done(text)
         if done == .source, step == .source { moveOnFromSource(); return }
-        guard !holds, done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
+        guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
         dwell.schedule(seconds, next: following) { [weak self] in self?.next() }
     }
@@ -432,7 +432,7 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         progress.speechExpected = true
-        succeed(.speechKey, model, holds: modelChoices(.speechKey).count > 1)
+        succeed(.speechKey, model)
     }
 
     // MARK: - 3. Language model key
@@ -478,9 +478,10 @@ final class OnboardingJourneyModel: ObservableObject {
     private func choices(for provider: AIProviderKind, speech: Bool) -> [OnboardingModelChoice] {
         let all = allChoices(for: provider, speech: speech)
         var listed = OnboardingModelPick.listed(all, speech: speech, router: provider == .openRouter)
-        // The recommended model is always on the list, first for OpenRouter.
-        if !speech, let recommended = OnboardingModelPick.recommended(all, provider: provider),
-           !listed.contains(where: { $0.id == recommended.id }) {
+        // The recommended model is always on the list, and first.
+        if let id = recommendedModel(speech ? .speechKey : .llmKey, provider: provider),
+           let recommended = all.first(where: { $0.id == id }) ?? listed.first(where: { $0.id == id }) {
+            listed.removeAll { $0.id == id }
             listed.insert(recommended, at: 0)
         }
         return listed
@@ -519,8 +520,15 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The person picked another model on an accepted key step: it goes
     /// through the shared row like the first pick, then the step moves on.
+    /// "Choose model" opened or closed without a pick: the automatic move
+    /// waits while the list is open and goes on from where it was.
+    func modelMenu(open: Bool) {
+        if open { dwell.latch() } else if dwell.isLatched { dwell.resume() }
+    }
+
     func chooseModel(_ id: String, on step: OnboardingStep) async {
         guard step == .speechKey || step == .llmKey, outcome(step).isDone, choosingModel == nil else { return }
+        if step == self.step, dwell.isCounting || dwell.isLatched { dwell.cancel() }
         let kind: SharedModelKind = step == .speechKey ? .speech : .llm
         let provider = step == .speechKey ? speechProvider : llmProvider
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return }
@@ -564,39 +572,91 @@ final class OnboardingJourneyModel: ObservableObject {
         outcomes[step] = .failed(problem.message(provider: step == .search ? "Tavily" : ""))
     }
 
-    /// The server form shown over the onboarding (the preview), for speech or
-    /// a language model; nil shows the onboarding.
-    @Published private(set) var serverForm: OnboardingKeyStageKind?
+    /// The key steps showing their own-server fields in place of the key
+    /// field ("Use your own server →"). The step itself does not change.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    @Published private(set) var serverForms: Set<OnboardingKeyStageKind> = []
+    /// The server this onboarding added for a step, reused when the same
+    /// address and key are tried again (another model, or after a refusal).
+    private var addedServers: [OnboardingKeyStageKind: (address: String, key: String, account: ProviderAccount)] = [:]
 
-    /// "Use your own server →". The app opens the real server form (Settings
-    /// -> API & Models -> API keys, the Custom server tile as if clicked) and
-    /// the onboarding stays open behind it; the standalone preview has no
-    /// Settings, so it shows the form's fields in this window.
+    func showsServerForm(_ kind: OnboardingKeyStageKind) -> Bool { serverForms.contains(kind) }
+
+    /// "Use your own server →": the step's key field turns into the server's
+    /// fields, in the same window and step, in the app and the preview alike.
     func useOwnServer(_ kind: OnboardingKeyStageKind) {
-        if isPreview {
-            serverForm = kind
-        } else {
-            openServerSetup()
-        }
+        guard kind.serverHelp != nil else { return }
+        clearFailure(kind.step)
+        serverForms.insert(kind)
     }
 
-    /// Back to the onboarding, nothing saved.
-    func closeServerForm() { serverForm = nil }
+    /// "‹ Back to keys": the fields turn back into the key field.
+    func closeServerForm(_ kind: OnboardingKeyStageKind) {
+        clearFailure(kind.step)
+        serverForms.remove(kind)
+    }
 
-    /// The preview's Save: the server stands in for the step's key, the step
-    /// is done and moves on like an accepted key.
-    func saveServer(_ server: OnboardingServerDraft) {
-        guard let kind = serverForm else { return }
-        serverForm = nil
-        let used = server.models.first { $0.use == (kind == .speech ? .transcription : .llm) } ?? server.models.first
-        if kind == .speech {
-            progress.speechExpected = true
-            succeed(.speechKey, "\(server.name) · \(used?.name ?? "")")
+    private func clearFailure(_ step: OnboardingStep) {
+        guard case .failed = outcome(step) else { return }
+        outcomes[step] = .idle
+        keyProblems[step] = nil
+    }
+
+    /// The server's Return: the server is added the way Settings adds one
+    /// (its address answers, the key if any is accepted), its model passes
+    /// the same small check, and the shared Speech or LLM row takes it. On
+    /// success the step is done and moves on like an accepted key, straight
+    /// to the next step.
+    func saveServer(_ server: OnboardingServerDraft, on kind: OnboardingKeyStageKind) async {
+        let step = kind.step
+        guard let url = server.url else {
+            outcomes[step] = .failed("Enter an address like http://localhost:11434/v1"); return
+        }
+        let name = server.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { outcomes[step] = .failed("Enter the model's name"); return }
+        let shared: SharedModelKind = server.use == .llm ? .llm : .speech
+        let action = begin(shared)
+        keyProblems[step] = nil
+        outcomes[step] = .working("Checking \(server.name)…")
+        let address = url.absoluteString
+        let key = server.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let account: ProviderAccount
+        if let added = addedServers[kind], added.address == address, added.key == key {
+            account = added.account
         } else {
+            if let problem = await models.addServer(name: server.name, baseURL: address, key: key, proposeModels: false) {
+                guard isLatest(action, shared) else { return }
+                outcomes[step] = .failed(problem); return
+            }
+            guard isLatest(action, shared) else { return }
+            guard let added = models.lastAddedServer else { outcomes[step] = .failed("Couldn't add the server"); return }
+            addedServers[kind] = (address, key, added)
+            account = added
+        }
+        let modelKind = ServerModel.Kind(rawValue: server.use.rawValue) ?? .llm
+        if !models.serverHasModel(name, kind: modelKind, on: account) {
+            let check = await models.runServerModelCheck(name, kind: modelKind, on: account)
+            guard isLatest(action, shared) else { return }
+            switch check.result {
+            case .passed: break
+            case .failed(let text): outcomes[step] = .failed(text); return
+            case .unreachable(let text): keyProblems[step] = .unreachable; outcomes[step] = .failed(text); return
+            }
+            if let problem = models.addServerModel(after: check, to: account) { outcomes[step] = .failed(problem); return }
+        }
+        let applied = await models.selectShared(model: name, account: account, kind: shared, replaceCustom: false)
+        guard isLatest(action, shared) else { return }
+        notes = models.sharedRow(shared)?.notes ?? []
+        guard applied || models.sharedRow(shared)?.choice != nil else {
+            outcomes[step] = .failed(notes.first ?? "\(server.name) · \(name) could not be used"); return
+        }
+        if shared == .llm {
             progress.hasLanguageModel = true
             progress.languageModelSearches = false
-            succeed(.llmKey, "\(server.name) · \(used?.name ?? "")")
+        } else {
+            progress.speechExpected = true
         }
+        succeed(step, "\(server.name) · \(name)")
     }
 
     /// The model the person picked on the LLM step, or `nil` for the preselected one.
@@ -627,8 +687,9 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         progress.hasLanguageModel = true
         progress.languageModelSearches = OnboardingJourney.searchesTheWeb(provider)
-        // With a choice of models the step waits for it (Return keeps this one).
-        succeed(.llmKey, model, holds: modelChoices(.llmKey).count > 1)
+        // The recommended model is set, so the step moves on by itself;
+        // "Choose model" pauses it while its list is open.
+        succeed(.llmKey, model)
     }
 
     /// A new key is checked for its shape here, then goes through Settings'

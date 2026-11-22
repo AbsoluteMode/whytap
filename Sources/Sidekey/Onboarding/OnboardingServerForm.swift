@@ -1,28 +1,23 @@
 import SwiftUI
 
-/// What the server form holds: an address, an optional key and the models
-/// the person names, each with what it is for.
+/// What the own-server fields hold: an address, an optional key and one
+/// model with what it is for.
 struct OnboardingServerDraft: Equatable {
     enum Use: String, CaseIterable, Equatable {
         case llm, transcription
         var title: String { self == .llm ? "LLM" : "Transcription" }
     }
 
-    struct Model: Equatable, Identifiable {
-        var id = UUID()
-        var name: String
-        var use: Use
-    }
-
     var address = ""
     var key = ""
-    var models: [Model] = []
+    var model = ""
+    var use: Use = .llm
 
     /// The base URL: http(s) with a host; "localhost:11434/v1" gets http://.
     var url: URL? { Self.url(from: address) }
     /// The server's name comes from its address.
     var name: String { url.map(Self.name(for:)) ?? "" }
-    var canSave: Bool { url != nil && !models.isEmpty }
+    var canSave: Bool { url != nil && !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     static func url(from address: String) -> URL? {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,207 +42,174 @@ struct OnboardingServerDraft: Equatable {
         if local, let port = url.port { return "\(host):\(port)" }
         return host
     }
-
-    /// Adds a model once per use; an empty name adds nothing.
-    mutating func add(_ name: String, use: Use) {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !models.contains(where: { $0.name == name && $0.use == use }) else { return }
-        models.append(Model(name: name, use: use))
-    }
 }
 
-/// "Use your own server →" in the preview: the server form in the same
-/// window, over the onboarding. Base URL, an optional key, the models with
-/// LLM or Transcription each, one Save. The name comes from the address.
-/// Cancel, the back button or Escape return to the key step unchanged; Save
-/// returns with the step done.
-struct OnboardingServerFormView: View {
-    let kind: OnboardingKeyStageKind
-    let onSave: (OnboardingServerDraft) -> Void
-    let onClose: () -> Void
+/// "Use your own server →" on a key step: the key field becomes three
+/// fields of the same family in the same place (Base URL, an optional key,
+/// one model with LLM or Transcription), over the same key and padlock.
+/// Return moves down the fields and, on the model, adds the server; the
+/// padlock answers like it does for a key, and success moves straight on.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+struct OnboardingServerFields: View {
+    static let pillHeight: CGFloat = 40
 
-    @State private var draft = OnboardingServerDraft()
-    @State private var modelName = ""
-    @State private var newUse: OnboardingServerDraft.Use
+    let kind: OnboardingKeyStageKind
+    @ObservedObject var model: OnboardingJourneyModel
+    let scene: OnboardingWireScene
+    /// The key field's capsule, so it reshapes into the first field.
+    let morph: Namespace.ID
+    /// The two lower fields unfold out of the first one, and fold back
+    /// into it before "Back to keys" turns it into the key field again.
+    @Binding var grown: Bool
+
+    @State private var draft: OnboardingServerDraft
     @FocusState private var focus: Field?
 
     private enum Field { case address, key, model }
 
-    init(kind: OnboardingKeyStageKind, onSave: @escaping (OnboardingServerDraft) -> Void, onClose: @escaping () -> Void) {
+    init(kind: OnboardingKeyStageKind, model: OnboardingJourneyModel, scene: OnboardingWireScene,
+         morph: Namespace.ID, grown: Binding<Bool>) {
         self.kind = kind
-        self.onSave = onSave
-        self.onClose = onClose
-        _newUse = State(initialValue: kind == .speech ? .transcription : .llm)
+        self.model = model
+        self.scene = scene
+        self.morph = morph
+        _grown = grown
+        _draft = State(initialValue: OnboardingServerDraft(use: kind == .speech ? .transcription : .llm))
     }
 
+    private var step: OnboardingStep { kind.step }
+    private var outcome: OnboardingStepOutcome { model.outcome(step) }
+    private var checking: Bool { if case .working = outcome { return true } else { return false } }
+    private var accepted: Bool { outcome.isDone }
+    private var failure: String? { if case .failed = outcome { return outcome.failureText } else { return nil } }
+
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: onClose) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                        Text(kind == .speech ? "Speech key" : "Language model")
-                    }
-                    .font(OnboardingTheme.sans(12, weight: .medium))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Back to the onboarding")
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .frame(height: OnboardingTheme.compactHeaderHeight)
-            .padding(.top, 24)
-
-            VStack(spacing: 0) {
-                Text("Your own server.")
-                    .font(OnboardingTheme.serifItalic(28))
+        VStack(spacing: 6) {
+            pill(icon: "server.rack", first: true) {
+                TextField("", text: $draft.address,
+                          prompt: Text("Base URL · http://localhost:11434/v1").foregroundColor(OnboardingTheme.faint))
+                    .textFieldStyle(.plain)
+                    .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Any OpenAI-compatible server: Ollama, LM Studio, vLLM.")
-                    .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    pill {
-                        TextField("", text: $draft.address,
-                                  prompt: Text("Base URL · http://localhost:11434/v1").foregroundColor(OnboardingTheme.faint))
-                            .textFieldStyle(.plain)
-                            .font(OnboardingTheme.mono(12.5))
-                            .foregroundColor(OnboardingTheme.ink)
-                            .focused($focus, equals: .address)
-                            .onSubmit { focus = .key }
-                            .accessibilityLabel("Base URL")
-                    }
-                    Text(addressLine)
-                        .font(OnboardingTheme.sans(11.5))
-                        .foregroundColor(addressIsWrong ? OnboardingTheme.orange : OnboardingTheme.faint)
-                        .lineLimit(1)
-                        .padding(.leading, 16)
-                    pill {
-                        SecureField("", text: $draft.key,
-                                    prompt: Text("API key · optional").foregroundColor(OnboardingTheme.faint))
-                            .textFieldStyle(.plain)
-                            .font(OnboardingTheme.mono(12.5))
-                            .foregroundColor(OnboardingTheme.ink)
-                            .focused($focus, equals: .key)
-                            .onSubmit { focus = .model }
-                            .accessibilityLabel("API key, optional")
-                    }
-                }
-                .padding(.top, 14)
-
-                models
-                    .padding(.top, 12)
+                    .focused($focus, equals: .address)
+                    .onSubmit { focus = .key }
+                    .accessibilityLabel("Base URL")
             }
-            .padding(.horizontal, OnboardingKeyStage.fieldInset)
-
-            Spacer(minLength: 6)
-
-            HStack {
-                Button("Cancel", action: onClose)
-                    .buttonStyle(.plain)
-                    .font(OnboardingTheme.sans(12, weight: .medium))
-                    .foregroundColor(OnboardingTheme.muted)
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                OnboardingPrimaryButton(title: "Save", chevron: false, isEnabled: draft.canSave) { onSave(draft) }
+            pill(icon: "key") {
+                SecureField("", text: $draft.key,
+                            prompt: Text("API key · optional").foregroundColor(OnboardingTheme.faint))
+                    .textFieldStyle(.plain)
+                    .font(OnboardingTheme.sans(13.5))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .focused($focus, equals: .key)
+                    .onSubmit { focus = .model }
+                    .accessibilityLabel("API key, optional")
             }
-            .padding(.horizontal, OnboardingKeyStage.fieldInset)
-            .frame(height: OnboardingTheme.compactFooterHeight)
-            .padding(.bottom, 10)
+            .opacity(grown ? 1 : 0)
+            .offset(y: grown ? 0 : -(Self.pillHeight + 6))
+            pill(icon: "cube") {
+                TextField("", text: $draft.model,
+                          prompt: Text("Model · e.g. qwen3:8b").foregroundColor(OnboardingTheme.faint))
+                    .textFieldStyle(.plain)
+                    .font(OnboardingTheme.sans(13.5))
+                    .foregroundColor(OnboardingTheme.ink)
+                    .focused($focus, equals: .model)
+                    .onSubmit(save)
+                    .accessibilityLabel("Model name")
+                OnboardingUseToggle(use: $draft.use)
+                trailing
+            }
+            .opacity(grown ? 1 : 0)
+            .offset(y: grown ? 0 : -2 * (Self.pillHeight + 6))
+            line
+                .font(OnboardingTheme.sans(12))
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .frame(height: 18, alignment: .top)
+                .padding(.top, 2)
+                .opacity(grown ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(OnboardingTheme.bg.contentShape(Rectangle()))
+        .disabled(checking || accepted)
+        .onChange(of: draft) { _, _ in model.keyEdited(on: step) }
         .onAppear { focus = .address }
     }
 
-    private var addressIsWrong: Bool {
-        !draft.address.trimmingCharacters(in: .whitespaces).isEmpty && draft.url == nil
-    }
-
-    private var addressLine: String {
-        if addressIsWrong { return "Enter an address like http://localhost:11434/v1" }
-        if draft.url != nil { return "Name: \(draft.name) · from the address" }
-        return "The name comes from the address."
-    }
-
-    private var models: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Models")
-                .font(OnboardingTheme.sans(11.5, weight: .semibold))
-                .foregroundColor(OnboardingTheme.muted)
-                .padding(.leading, 16)
-            if !draft.models.isEmpty {
-                ScrollView(.vertical) {
-                    VStack(spacing: 0) {
-                        ForEach($draft.models) { $model in
-                            HStack(spacing: 8) {
-                                Text(model.name)
-                                    .font(OnboardingTheme.mono(12))
-                                    .foregroundColor(OnboardingTheme.ink)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer(minLength: 6)
-                                OnboardingUseToggle(use: $model.use)
-                                Button {
-                                    draft.models.removeAll { $0.id == model.id }
-                                } label: {
-                                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(OnboardingTheme.muted)
-                                        .frame(width: 22, height: 22)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Remove \(model.name)")
-                            }
-                            .padding(.leading, 16)
-                            .padding(.trailing, 6)
-                            .frame(height: 32)
-                        }
-                    }
-                }
-                .frame(height: min(CGFloat(draft.models.count), 2.5) * 32)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.04)))
-            }
-            pill {
-                TextField("", text: $modelName,
-                          prompt: Text("Model name · e.g. qwen3:8b").foregroundColor(OnboardingTheme.faint))
-                    .textFieldStyle(.plain)
-                    .font(OnboardingTheme.mono(12))
-                    .foregroundColor(OnboardingTheme.ink)
-                    .focused($focus, equals: .model)
-                    .onSubmit(addModel)
-                    .accessibilityLabel("Model name")
-                OnboardingUseToggle(use: $newUse)
-                Button("Add", action: addModel)
-                    .buttonStyle(.plain)
-                    .font(OnboardingTheme.sans(12, weight: .semibold))
-                    .foregroundColor(modelName.trimmingCharacters(in: .whitespaces).isEmpty ? OnboardingTheme.faint : OnboardingTheme.ink)
-                    .padding(.horizontal, 6)
-            }
+    @ViewBuilder private var line: some View {
+        if checking {
+            Text("Checking \(draft.name) and \(draft.model)…").foregroundColor(OnboardingTheme.muted)
+        } else if accepted, case .done(let what) = outcome {
+            Text("\(what) · added").foregroundColor(OnboardingTheme.green)
+        } else if let failure {
+            Text(failure).foregroundColor(OnboardingTheme.orange)
+        } else if !draft.address.trimmingCharacters(in: .whitespaces).isEmpty, draft.url == nil {
+            Text("Enter an address like http://localhost:11434/v1").foregroundColor(OnboardingTheme.orange)
+        } else if draft.url != nil {
+            Text("\(draft.name) · any OpenAI-compatible server").foregroundColor(OnboardingTheme.muted)
+        } else {
+            Text("Ollama, LM Studio, vLLM or any OpenAI-compatible server").foregroundColor(OnboardingTheme.faint)
         }
     }
 
-    private func addModel() {
-        draft.add(modelName, use: newUse)
-        modelName = ""
-        focus = .model
+    private var trailing: some View {
+        let ready = draft.canSave
+        return Button(action: save) {
+            Image(systemName: accepted ? "checkmark" : checking ? "ellipsis" : "arrow.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(accepted ? OnboardingTheme.green : ready && !checking ? .black : OnboardingTheme.muted)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(accepted ? OnboardingTheme.green.opacity(0.16)
+                                          : checking ? Color.clear : ready ? Color.white : Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!ready || checking || accepted)
+        .accessibilityLabel(accepted ? "Server added" : checking ? "Checking" : "Add server")
     }
 
-    private func pill<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 8) { content() }
-            .padding(.leading, 16)
-            .padding(.trailing, 8)
-            .frame(height: 36)
-            .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+    private func save() {
+        guard draft.canSave, !checking, !accepted else {
+            if draft.url == nil { focus = .address } else if draft.model.isEmpty { focus = .model }
+            return
+        }
+        let draft = self.draft
+        let kind = self.kind
+        Task { await model.saveServer(draft, on: kind) }
+    }
+
+    private var border: Color {
+        if accepted { return OnboardingTheme.green.opacity(0.55) }
+        if failure != nil { return OnboardingTheme.orange.opacity(0.50) }
+        if checking { return OnboardingWireframeInk.roseColor.opacity(0.45) }
+        return Color.white.opacity(0.10)
+    }
+
+    private func pill<Content: View>(icon: String, first: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(OnboardingTheme.ink)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.white.opacity(0.07)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                .accessibilityHidden(true)
+            content()
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 6)
+        .frame(height: Self.pillHeight)
+        .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098))
+            .matchedGeometryEffect(id: first ? "field" : "field-\(icon)", in: morph))
+        .overlay(Capsule().strokeBorder(border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.30), radius: 16, x: 0, y: 10)
+        .background(GeometryReader { proxy in
+            let y = proxy.frame(in: .named(OnboardingWireScene.space)).midY
+            Color.clear
+                .onAppear { if first { scene.fieldY = y } }
+                .onChange(of: y) { _, new in if first { scene.fieldY = new } }
+        })
     }
 }
 
-/// LLM | Transcription, one quiet two-way switch per model.
+/// LLM | Transcription, one quiet two-way switch.
 struct OnboardingUseToggle: View {
     @Binding var use: OnboardingServerDraft.Use
 

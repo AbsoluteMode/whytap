@@ -12,8 +12,6 @@ enum APIAndModelsSection: String, CaseIterable {
 struct APIAndModelsView: View {
     @ObservedObject var viewModel: APIAndModelsViewModel
     @Binding var focusedFeature: AIFeature?
-    /// Set by the onboarding: show API keys with the Custom server form.
-    @Binding var newServerRequested: Bool
 
     private struct KeyNotice: Identifiable {
         let id = UUID()
@@ -37,14 +35,12 @@ struct APIAndModelsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(viewModel: APIAndModelsViewModel, focusedFeature: Binding<AIFeature?>,
-         newServerRequested: Binding<Bool> = .constant(false),
          initiallyExpandedGroup: String? = nil, initialSection: APIAndModelsSection = .models,
          usageStore: AIUsageStore? = nil, usageModel: AIUsageCostsViewModel? = nil,
          initialKeyResult: Bool? = nil) {
         self.viewModel = viewModel
         self._keyNotice = State(initialValue: initialKeyResult.map { KeyNotice(accepted: $0) })
         self._focusedFeature = focusedFeature
-        self._newServerRequested = newServerRequested
         self._expandedGroup = State(initialValue: initiallyExpandedGroup)
         // A link to one feature's settings, or features that disagree
         // (Mixed), open the per-feature list.
@@ -110,9 +106,6 @@ struct APIAndModelsView: View {
                 }
             .onChange(of: focusedFeature) { _, feature in
                 if let feature { focus(feature, scroller: scroller) }
-            }
-            .onChange(of: newServerRequested, initial: true) { _, requested in
-                if requested { section = .keys }
             }
             .onChange(of: showUnsetTick) { _, _ in
                 var unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
@@ -228,7 +221,7 @@ struct APIAndModelsView: View {
     private var keysBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "API keys")
-            ProviderKeyTiles(viewModel: viewModel, newServerRequested: $newServerRequested,
+            ProviderKeyTiles(viewModel: viewModel,
                 onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") },
                 onSaveResult: { keyNotice = KeyNotice(accepted: $0) },
                 // The reason replaces the bare "Key not accepted".

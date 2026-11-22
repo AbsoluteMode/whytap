@@ -41,9 +41,8 @@ final class OnboardingPreviewTests: XCTestCase {
         model.back()
         XCTAssertEqual(model.step, .llmKey)
         model.useOwnServer(.languageModel)
-        var server = OnboardingServerDraft(address: "localhost:1234/v1")
-        server.models = [.init(name: "qwen3", use: .llm)]
-        model.saveServer(server)
+        await model.saveServer(OnboardingServerDraft(address: "localhost:1234/v1", model: "qwen3"), on: .languageModel)
+        XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
         XCTAssertEqual(model.step, .search, "a server's model has no known search")
         await model.useSearchKey("tvly-bad-0123456789abcdef")
@@ -214,33 +213,30 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertTrue(model.outcome(.speechKey).isDone, "typing never undoes an accepted key")
     }
 
-    /// "Use your own server →" opens the server form in the preview's window;
-    /// Back or Cancel returns to the same step, Save returns with it done.
-    func testOwnServerOpensTheFormAndComesBack() async throws {
+    /// "Use your own server →" turns the key field into the server's fields
+    /// on the same step; Back returns to the key field, Save is the step done.
+    func testOwnServerChangesTheStepAndComesBack() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
         try await eventually { model.step == .speechKey }
         model.useOwnServer(.speech)
-        XCTAssertEqual(model.serverForm, .speech)
+        XCTAssertTrue(model.showsServerForm(.speech))
         model.back()
-        XCTAssertNil(model.serverForm, "Back closes the form first")
+        XCTAssertFalse(model.showsServerForm(.speech), "Back returns to the key field first")
         XCTAssertEqual(model.step, .speechKey, "and stays on the key step")
         XCTAssertEqual(model.outcome(.speechKey), .idle, "nothing was saved")
 
         model.useOwnServer(.speech)
-        var server = OnboardingServerDraft()
-        server.address = "localhost:11434/v1"
+        var server = OnboardingServerDraft(address: "localhost:11434/v1", use: .transcription)
         XCTAssertFalse(server.canSave, "a server needs a model")
-        server.add("qwen3:8b", use: .llm)
-        server.add("whisper-large-v3", use: .transcription)
-        server.add("whisper-large-v3", use: .transcription)
-        XCTAssertEqual(server.models.count, 2, "one model per use")
         XCTAssertEqual(server.name, "Ollama", "the name comes from the address")
-        model.saveServer(server)
-        XCTAssertNil(model.serverForm)
-        XCTAssertEqual(model.outcome(.speechKey), .done("Ollama · whisper-large-v3"), "the speech model, not the LLM")
+        server.model = "whisper-large-v3"
+        await model.saveServer(server, on: .speech)
+        XCTAssertEqual(model.outcome(.speechKey), .done("Ollama · whisper-large-v3"))
+        XCTAssertEqual(model.step, .speechKey, "the fields stay until the step moves on")
+        XCTAssertTrue(model.showsServerForm(.speech), "no return to the key field before the move")
     }
 
     func testAServerIsNamedByItsAddress() {
@@ -275,7 +271,7 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-sol")
         XCTAssertEqual(model.recommendedModel(.llmKey), "gpt-6.2-sol")
         let ids = model.modelChoices(.llmKey).map(\.id)
-        XCTAssertEqual(ids.first, "gpt-6.2-sol", "newest first")
+        XCTAssertEqual(ids.first, "gpt-6.2-sol", "the recommended model is first")
         XCTAssertTrue(ids.contains("gpt-6.2-astra"))
         XCTAssertFalse(ids.contains("gpt-live-1.1"), "a voice model is not a text choice")
         XCTAssertFalse(ids.contains("gpt-5.5-2026-04-23"), "dated snapshots are left out")
@@ -283,8 +279,10 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertLessThanOrEqual(ids.count, OnboardingModelPick.listLimit)
         XCTAssertEqual(model.modelChoices(.llmKey).first { $0.id == "gpt-6.2-astra" }?.price, "$8 / $40 per 1M")
 
+        // "Choose model" open: the automatic move waits for the list.
+        model.modelMenu(open: true)
         try await Task.sleep(for: .milliseconds(1_600))
-        XCTAssertEqual(model.step, .llmKey, "with a choice of models the step waits")
+        XCTAssertEqual(model.step, .llmKey, "an open list pauses the move")
         await model.chooseModel("gpt-6.2-astra", on: .llmKey)
         XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"))
         XCTAssertEqual(model.currentModel(.llmKey), "gpt-6.2-astra", "the shared LLM row runs the person's pick")
@@ -307,8 +305,9 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     /// OpenAI speech has more than one model: the speech step offers them
-    /// too, with the per-minute price, and waits; one-model providers move on.
-    func testOpenAISpeechOffersItsModelsAndWaits() async throws {
+    /// too, with the per-minute price, the recommended one set and first, and
+    /// moves on by itself like every accepted key.
+    func testOpenAISpeechOffersItsModelsAndMovesOn() async throws {
         let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
         defer { session.clear() }
         let model = session.model
@@ -321,10 +320,8 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertGreaterThan(choices.count, 1, "\(choices.map(\.id))")
         XCTAssertEqual(choices.first { $0.id == ModelRegistry.openAILiveModel }?.price, "$0.017 / min")
         XCTAssertEqual(model.currentModel(.speechKey), ModelRegistry.openAILiveModel)
-        try await Task.sleep(for: .milliseconds(1_600))
-        XCTAssertEqual(model.step, .speechKey, "the step waits for the choice; Return keeps the model")
-        model.next()
-        XCTAssertEqual(model.step, .llmKey)
+        XCTAssertEqual(choices.first?.id, model.recommendedModel(.speechKey), "the recommended model is first")
+        try await eventually { model.step == .llmKey }
     }
 
     func testTheFlagshipRuleAndTheListedModels() {

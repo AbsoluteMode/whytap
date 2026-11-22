@@ -149,7 +149,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             catalogs: ModelCatalogStore(fileURL: catalogURL,
                                         fetcher: realCatalogs ? OnboardingPreviewProviders() as ModelCatalogFetching : offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
-            keyChecker: keyChecker ?? offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
+            keyChecker: keyChecker ?? offline, probe: offline, serverModelChecker: OnboardingPreviewProviders(),
+            endpoints: offline, inputLanguage: { nil }, onDevice: readiness)
         let snapshot = env.snapshot
         let screen = env.screen
         let permissions = PermissionsSettingsViewModel(
@@ -195,20 +196,50 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // MARK: - Your own server
 
-    /// In the app, "Use your own server →" opens the real server form in
-    /// Settings (API keys, the Custom server tile), never a feature row and
-    /// never the preview's in-window stand-in.
-    func testTheAppsServerLinkOpensSettingsServerSetup() throws {
+    /// The owner, 2026-11-22: no separate screen. In the app too, "Use your
+    /// own server →" turns the step's key field into the server's fields;
+    /// Settings does not open and the step stays.
+    func testTheServerLinkChangesTheStepInPlace() throws {
         let model = try makeModel(makeEnv())
-        var opened = 0
         var settings: [SettingsWindowTab] = []
-        model.openServerSetup = { opened += 1 }
         model.openSettings = { tab, _ in settings.append(tab) }
+        model.chooseYourKey()
         model.useOwnServer(.speech)
-        model.useOwnServer(.languageModel)
-        XCTAssertEqual(opened, 2, "both key steps lead to the server form")
+        XCTAssertTrue(model.showsServerForm(.speech))
+        XCTAssertFalse(model.showsServerForm(.languageModel))
+        model.useOwnServer(.search)
+        XCTAssertFalse(model.showsServerForm(.search), "search has no server")
         XCTAssertTrue(settings.isEmpty)
-        XCTAssertNil(model.serverForm)
+        model.closeServerForm(.speech)
+        XCTAssertFalse(model.showsServerForm(.speech))
+    }
+
+    /// Save adds the server the way Settings does (address, key, the model's
+    /// check), sets the shared row and moves straight on to the next step.
+    func testAServerModelIsAddedCheckedAndUsed() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        model.next()
+        XCTAssertEqual(model.step, .llmKey)
+        model.useOwnServer(.languageModel)
+        var server = OnboardingServerDraft(address: "localhost:11434/v1", model: "bad-model")
+        await model.saveServer(server, on: .languageModel)
+        XCTAssertEqual(model.outcome(.llmKey), .failed("Ollama has no model named bad-model"))
+        XCTAssertTrue(model.showsServerForm(.languageModel), "a refusal keeps the fields")
+        server.model = "qwen3:8b"
+        await model.saveServer(server, on: .languageModel)
+        XCTAssertEqual(model.outcome(.llmKey), .done("Ollama · qwen3:8b"))
+        let routed = llmFeatures.compactMap { env.routing.route(for: $0) }
+        XCTAssertFalse(routed.isEmpty, "the shared LLM row took the server model")
+        for route in routed {
+            XCTAssertEqual(route.model, "qwen3:8b")
+            guard case .server = route.account else { return XCTFail("text features run on the added server") }
+        }
+        XCTAssertEqual(env.routing.state.servers.count, 1, "the second try reused the server")
+        XCTAssertTrue(model.steps.contains(.search), "a server model has no known web search")
+        try await endBeat(env, until: .search, in: model)
     }
 
     // MARK: - OpenAI for speech and text
@@ -356,9 +387,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.next()
         XCTAssertEqual(model.step, .llmKey)
         model.useOwnServer(.languageModel)
-        var server = OnboardingServerDraft(address: "localhost:11434/v1")
-        server.models = [.init(name: "qwen3", use: .llm)]
-        model.saveServer(server)
+        await model.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3"), on: .languageModel)
         XCTAssertTrue(model.steps.contains(.search), "a server has no known web search")
         try await endBeat(env, until: .search, in: model)
     }
@@ -684,9 +713,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env2, until: .speechKey, in: second)
         second.next()
         second.useOwnServer(.languageModel)
-        var server = OnboardingServerDraft(address: "localhost:11434/v1")
-        server.models = [.init(name: "qwen3", use: .llm)]
-        second.saveServer(server)
+        try await snap("llm-server-fields")
+        await second.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3"), on: .languageModel)
+        try await snap("llm-server-added", after: 300)
         try await endBeat(env2, until: .search, in: second)
         try await snap("search-key")
         second.rejectUnrecognizedKey(on: .search)

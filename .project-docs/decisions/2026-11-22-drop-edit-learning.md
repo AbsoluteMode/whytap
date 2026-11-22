@@ -36,16 +36,22 @@ that rewrites what the provider keeps getting wrong.
 
 ## Decision
 
-- **One read of the same field.** Right after Cmd+V the focused element of the
-  target app is captured. Five seconds later it is read once, only if it is
-  still the focused element of that app; a changed, closed or emptied field
-  (Enter in a messenger), an AX error or a field without a string value is
-  skipped silently. Whytap's own editors are never read.
+- **One read of the same field.** Right before Cmd+V the target app's own
+  focused element is captured from its identity and security metadata only;
+  right after the paste it must still be that app's focused element, so a
+  field focused during the paste delay is never read. Five seconds later it is
+  read once, only if it is still that focused element and the gate still
+  allows it: the length is checked first when the field reports it, then the
+  text is read once and bounded to 20,000 UTF-16 units. A changed, closed or
+  emptied field (Enter in a messenger), an AX error or a field without a string
+  value is skipped silently. Whytap's own editors are never read.
 - **Own fail-closed gate** (`DropEditFieldGate`). `PasteTargetValidator` is not
   a password gate: it accepts any text field before its subrole and says yes
   on AX errors. The gate refuses AXSecureTextField, secure event input,
   terminals and password managers by bundle ID, Whytap's own process, unknown
-  apps, non-text roles and any AX error. Checked at capture and at the read.
+  apps, non-text roles and any AX error other than a missing attribute (an
+  IPC failure on the subrole fails closed). The gate sees metadata only and
+  runs before any text is read, at capture, after the paste and at the read.
 - **Compare with what was pasted**: the plain text of a rich paste (Slack,
   Telegram), after Smart, Replace and Filler. A semi-global word alignment finds
   the take inside the field; more than half its words changed = a rewrite,
@@ -100,10 +106,17 @@ that rewrites what the provider keeps getting wrong.
 - **Calibration** (`sidekey.dropLearning.calibration`, hidden): reads at 5 s and
   then every second until the field holds still for three reads or 30 s,
   journals each read (words of the edits, candidates, which ones the 5 s read
-  missed) to Application Support/<bundle id>/drop-learning/calibration.jsonl
-  (0600, not in backups or sync), counts in its own ledger and is a dry run: Y
-  saves nothing. It ends itself 14 days after it was first seen, deleting the
-  journal and its ledger. Release reads once at 5 s.
+  missed) to Application Support/<bundle id>/drop-learning/calibration.jsonl,
+  counts in its own ledger and is a dry run: Y saves nothing. The journal is
+  written only into a real 0700 directory of this user, through a regular
+  file opened without following links and made 0600 before each write. It
+  ends itself 14 days after it was first seen; expiry and switching it off are
+  checked at launch, every hour and before every read and journal write, so a
+  read already scheduled stops and the journal and its ledger are deleted
+  without another Drop. Switching learning off likewise stops a scheduled read.
+  Release reads once at 5 s.
+- **Fired fillers** are collected on the same masked text the Filler step
+  sees, so a filler word inside protected Markdown code is not counted as cut.
 
 ## Why
 
@@ -143,4 +156,9 @@ before Filler. Budget: per-route limits, Cyrillic, URL size, dedupe.
 - One global 50 x 20 Vocab cap: it wasted every provider with a larger limit.
 - Writing Replace rules into the Filler key: it is the Filler list.
 
-2026-11-22 · ORCH-TASK 72 · PR: candidate logic (drops UI follows)
+Builder review of PR #406 (queue #409) found the gate reading the value
+before its checks, capture after the paste delay, calibration continuing after
+opt-out, a journal accepting a 0644 file and fillers in protected code counted
+as cut; all five were fixed with regression tests before integration.
+
+2026-11-22 · ORCH-TASK 72 · PR #406: candidate logic (drops UI follows)

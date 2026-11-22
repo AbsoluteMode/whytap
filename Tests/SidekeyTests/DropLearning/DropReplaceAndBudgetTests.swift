@@ -63,6 +63,20 @@ final class DropReplaceAndBudgetTests: XCTestCase {
         XCTAssertEqual(smart.text, "Позвони Claude, `клоду` остаётся")
     }
 
+    func testAFillerInsideProtectedCodeIsNotCountedAsCut() async throws {
+        let literal = "Keep `типа` exactly as code"
+        let smart = try await DropOutputPolicy(mode: .smart).prepareDetailed(
+            rawText: "raw", fillerTerms: ["типа"], preservingMarkdown: { true }
+        ) { literal }
+        XCTAssertEqual(smart.text, literal)
+        XCTAssertEqual(smart.firedFillers, [])
+        let cut = try await DropOutputPolicy(mode: .smart).prepareDetailed(
+            rawText: "raw", fillerTerms: ["типа"], preservingMarkdown: { true }
+        ) { "Это типа `типа` код" }
+        XCTAssertEqual(cut.text, "Это `типа` код")
+        XCTAssertEqual(cut.firedFillers, ["типа"])
+    }
+
     func testARuleCannotBringBackACutFiller() async throws {
         let rules = [DropReplacement(heard: "тип", wanted: "типа")]
         let text = try await DropOutputPolicy(mode: .fast).prepare(

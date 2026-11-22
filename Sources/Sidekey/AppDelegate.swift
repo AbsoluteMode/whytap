@@ -374,6 +374,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Runs after this method returns, once the island and its actions exist.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Creating it runs calibration expiry and opt-out cleanup now and
+            // hourly. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+            _ = self.dropLearning
             self.acceptsLinkRequests = true
             if let request = self.pendingLinkRequest {
                 self.pendingLinkRequest = nil
@@ -1356,11 +1359,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
+        // Whytap's own editors are never read. The target app's focused field
+        // is captured before Cmd+V (metadata only) and read once later only
+        // if it is still that field. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        let learningField = learning != nil && !autoPasteEngine.hasLocalDropTarget
+            ? dropLearning.prepareDelivery(targetPID: targetPID) : nil
         let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
-        // Whytap's own editors are never read; the field is captured now,
-        // right after Cmd+V, and read once later only if it is the same one.
         if pasted, !autoPasteEngine.hasLocalDropTarget, let learning {
-            dropLearning.delivered(learning, targetPID: targetPID)
+            dropLearning.delivered(learning, handle: learningField)
         }
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {

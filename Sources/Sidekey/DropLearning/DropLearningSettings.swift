@@ -65,20 +65,29 @@ final class DropLearningJournal {
             .appendingPathComponent("calibration.jsonl"))
     }
 
+    /// Appends only to a private destination: the folder is a real 0700
+    /// directory, the file is a regular file of this user opened without
+    /// following links, and it is made 0600 before anything is written.
+    // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
     func append(_ entry: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(entry),
               var line = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
         line.append(0x0A)
-        let manager = FileManager.default
         let directory = url.deletingLastPathComponent()
-        try? manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        if !manager.fileExists(atPath: url.path) {
-            manager.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: line)
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        var dirInfo = stat()
+        guard lstat(directory.path, &dirInfo) == 0, (dirInfo.st_mode & S_IFMT) == S_IFDIR,
+              dirInfo.st_uid == getuid() else { return }
+        if dirInfo.st_mode & 0o077 != 0 { chmod(directory.path, 0o700) }
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_uid == getuid(),
+              fchmod(fd, 0o600) == 0 else { return }
+        _ = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
     }
 
     func delete() {

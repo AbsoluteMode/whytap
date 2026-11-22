@@ -1,16 +1,16 @@
 import Foundation
 
-/// What the learning step knows about the field a take was pasted into. Read
-/// through Accessibility at paste time and again before the one read.
+/// What the learning step knows about the field a take was pasted into: its
+/// identity and security metadata, read through Accessibility before the paste
+/// and again before the one read. Never derived from the field's text.
 struct DropEditFieldFacts: Equatable {
     var bundleID: String?
     var isOwnProcess: Bool
     var role: String?
     var subrole: String?
     var secureEventInput: Bool
-    /// The field exposes its text as a string `AXValue`.
-    var hasStringValue: Bool
-    /// Any Accessibility call needed for these facts failed.
+    /// An Accessibility call for these facts failed (other than a missing
+    /// attribute).
     var accessibilityError: Bool
 }
 
@@ -38,8 +38,9 @@ enum DropEditFieldGate {
         guard !facts.accessibilityError, !facts.secureEventInput, !facts.isOwnProcess else { return false }
         guard let bundleID = facts.bundleID, !deniedBundleIDs.contains(bundleID) else { return false }
         if let subrole = facts.subrole, secureSubroles.contains(subrole) { return false }
-        guard let role = facts.role, textRoles.contains(role) || role == "AXWebArea" else { return false }
-        // Electron and some web composers do not expose the text: skip.
-        return facts.hasStringValue
+        guard let role = facts.role, textRoles.contains(role) else { return false }
+        // A field that does not expose its text as a string (Electron, some
+        // web composers) is skipped at the read.
+        return true
     }
 }

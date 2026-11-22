@@ -8,12 +8,17 @@ import XCTest
 final class DropLearningScenarioTests: XCTestCase {
     private final class FakeField: DropEditFieldAccess {
         var capturable = true
+        /// The user moved to another field during the paste delay.
+        var focusMovedAfterCapture = false
         /// What each read returns, in order; the last value repeats.
         var reads: [String?] = []
         private(set) var readCount = 0
+        private(set) var captureCount = 0
         func capture(pid: pid_t) -> DropEditFieldHandle? {
-            capturable ? DropEditFieldHandle(pid: pid, element: AXUIElementCreateApplication(pid)) : nil
+            captureCount += 1
+            return capturable ? DropEditFieldHandle(pid: pid, element: AXUIElementCreateApplication(pid)) : nil
         }
+        func isStillFocused(_ handle: DropEditFieldHandle) -> Bool { !focusMovedAfterCapture }
         func read(_ handle: DropEditFieldHandle) -> String? {
             defer { readCount += 1 }
             guard !reads.isEmpty else { return nil }
@@ -43,7 +48,7 @@ final class DropLearningScenarioTests: XCTestCase {
             .appendingPathComponent("drop-learning-\(UUID().uuidString)").appendingPathComponent("calibration.jsonl")
     }
 
-    private func makeCoordinator() -> DropLearningCoordinator {
+    private func makeCoordinator(sleep: @escaping (Double) async throws -> Void = { _ in }) -> DropLearningCoordinator {
         let coordinator = DropLearningCoordinator(dependencies: .init(
             fieldAccess: field, lexicon: FakeLexicon(), defaults: defaults, now: { [unowned self] in now },
             journal: DropLearningJournal(url: journalURL),
@@ -54,7 +59,7 @@ final class DropLearningScenarioTests: XCTestCase {
                     replacements: DropReplacementStore(defaults: defaults).replacements()
                 )
             },
-            sleep: { _ in },
+            sleep: sleep,
             isIdle: { [unowned self] in idle },
             openVocabulary: { [unowned self] in vocabOpened += 1 },
             vocabulary: VocabularyCache(defaults: defaults),
@@ -79,7 +84,8 @@ final class DropLearningScenarioTests: XCTestCase {
     }
 
     private func runReads(_ coordinator: DropLearningCoordinator, _ take: DropLearningTake) async {
-        coordinator.delivered(take, targetPID: 4242)
+        let handle = coordinator.prepareDelivery(targetPID: 4242)
+        coordinator.delivered(take, handle: handle)
         await coordinator.waitForPendingRead()
     }
 
@@ -281,7 +287,7 @@ final class DropLearningScenarioTests: XCTestCase {
 
     func testPasswordAndUnreadableFieldsAreNeverRead() {
         let base = DropEditFieldFacts(bundleID: "com.tinyspeck.slackmacgap", isOwnProcess: false, role: "AXTextArea",
-                                      subrole: nil, secureEventInput: false, hasStringValue: true, accessibilityError: false)
+                                      subrole: nil, secureEventInput: false, accessibilityError: false)
         XCTAssertTrue(DropEditFieldGate.allowsRead(base))
         var secure = base; secure.subrole = "AXSecureTextField"
         var secureInput = base; secureInput.secureEventInput = true
@@ -289,10 +295,10 @@ final class DropLearningScenarioTests: XCTestCase {
         var manager = base; manager.bundleID = "com.1password.1password"
         var own = base; own.isOwnProcess = true
         var axError = base; axError.accessibilityError = true
-        var electron = base; electron.hasStringValue = false
+        var webArea = base; webArea.role = "AXWebArea"
         var unknownApp = base; unknownApp.bundleID = nil
         var button = base; button.role = "AXButton"
-        for facts in [secure, secureInput, terminal, manager, own, axError, electron, unknownApp, button] {
+        for facts in [secure, secureInput, terminal, manager, own, axError, webArea, unknownApp, button] {
             XCTAssertFalse(DropEditFieldGate.allowsRead(facts), "\(facts)")
         }
     }
@@ -303,6 +309,83 @@ final class DropLearningScenarioTests: XCTestCase {
         for _ in 0..<2 { await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude") }
         XCTAssertEqual(field.readCount, 0)
         XCTAssertTrue(suggestions.isEmpty)
+    }
+
+    func testAFieldFocusedDuringThePasteDelayIsNeverRead() async {
+        field.focusMovedAfterCapture = true
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 { await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude") }
+        XCTAssertEqual(field.captureCount, 2, "captured before Cmd+V")
+        XCTAssertEqual(field.readCount, 0)
+        XCTAssertTrue(suggestions.isEmpty)
+    }
+
+    func testTurningLearningOffDuringTheDelayStopsTheRead() async {
+        let coordinator = makeCoordinator(sleep: { [unowned self] _ in
+            defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        })
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertEqual(field.readCount, 0)
+        XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
+    }
+
+    func testTurningCalibrationOffDuringTheDelayStopsTheReadAndJournal() async {
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator(sleep: { [unowned self] _ in
+            defaults.set(false, forKey: DropLearningSettings.calibrationKey)
+        })
+        await run(coordinator, take(pasted: "Позвони клоду завтра"), field: "Позвони Claude завтра")
+        XCTAssertEqual(field.readCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testTurningCalibrationOffBetweenReadsStopsBeforeTheSettledEntry() async throws {
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        var sleeps = 0
+        let coordinator = makeCoordinator(sleep: { [unowned self] _ in
+            sleeps += 1
+            if sleeps == 3 { defaults.set(false, forKey: DropLearningSettings.calibrationKey) }
+        })
+        field.reads = ["Позвони клоду", "Позвони Cl", "Позвони Claude"]
+        await runReads(coordinator, take(pasted: "Позвони клоду"))
+        XCTAssertEqual(field.readCount, 2, "no read after opt-out")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path), "opt-out deletes the journal")
+    }
+
+    func testExpiredCalibrationIsCleanedWithoutAnotherDrop() {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        coordinator.performMaintenance()
+        DropLearningJournal(url: journalURL).append(["event": "x"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        now += 86_400 * 14 + 1
+        coordinator.performMaintenance()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertFalse(defaults.bool(forKey: DropLearningSettings.calibrationKey))
+        XCTAssertEqual(field.captureCount, 0)
+    }
+
+    func testJournalMakesAnExistingFilePrivateBeforeWriting() throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: journalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("prior data\n".utf8).write(to: journalURL)
+        try manager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: journalURL.path)
+        DropLearningJournal(url: journalURL).append(["synthetic": "private text"])
+        let permissions = try manager.attributesOfItem(atPath: journalURL.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+    }
+
+    func testJournalNeverFollowsALink() throws {
+        let manager = FileManager.default
+        let directory = journalURL.deletingLastPathComponent()
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let elsewhere = directory.appendingPathComponent("elsewhere.txt")
+        try Data("other file\n".utf8).write(to: elsewhere)
+        try manager.createSymbolicLink(at: journalURL, withDestinationURL: elsewhere)
+        DropLearningJournal(url: journalURL).append(["synthetic": "private text"])
+        XCTAssertEqual(try String(contentsOf: elsewhere, encoding: .utf8), "other file\n")
     }
 
     func testAFieldThatChangedOrClosedBeforeTheReadCountsNothing() async {
@@ -330,7 +413,7 @@ final class DropLearningScenarioTests: XCTestCase {
             replacements: DropReplacementStore(defaults: defaults)
         ))
         field.reads = ["Позвони Claude"]
-        coordinator.delivered(take(pasted: "Позвони клоду"), targetPID: 1)
+        coordinator.delivered(take(pasted: "Позвони клоду"), handle: coordinator.prepareDelivery(targetPID: 1))
         await Task.yield()
         coordinator.takeStarted()
         release?.resume()

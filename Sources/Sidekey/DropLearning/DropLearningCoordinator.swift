@@ -55,12 +55,15 @@ final class DropLearningCoordinator {
 
     private let deps: Dependencies
     private var pending: Task<Void, Never>?
+    private var maintenanceTimer: Timer?
 
     init(dependencies: Dependencies) { self.deps = dependencies }
 
+    /// The app's coordinator. Calibration expiry and opt-out cleanup run at
+    /// launch and every hour, not only when another take is delivered.
     static func live(openVocabulary: @escaping () -> Void) -> DropLearningCoordinator {
         let defaults = UserDefaults.standard
-        return DropLearningCoordinator(dependencies: Dependencies(
+        let coordinator = DropLearningCoordinator(dependencies: Dependencies(
             fieldAccess: AXDropEditFieldAccess(),
             lexicon: SystemWordLexicon(),
             defaults: defaults,
@@ -80,6 +83,23 @@ final class DropLearningCoordinator {
             fillers: FillerTermsStore(),
             replacements: DropReplacementStore()
         ))
+        coordinator.performMaintenance()
+        coordinator.maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak coordinator] _ in
+            MainActor.assumeIsolated { coordinator?.performMaintenance() }
+        }
+        return coordinator
+    }
+
+    /// Ends calibration that expired or was switched off, deleting its
+    /// journal and counters. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    func performMaintenance() {
+        _ = settings.isCalibrating()
+    }
+
+    /// Is this kind of read still wanted? Checked before every read and every
+    /// journal write, so switching it off stops a read already scheduled.
+    private func stillWanted(calibrating: Bool) -> Bool {
+        calibrating ? settings.isCalibrating() : settings.isEnabled
     }
 
     private var settings: DropLearningSettings {
@@ -93,13 +113,22 @@ final class DropLearningCoordinator {
         pending = nil
     }
 
-    /// Called right after a take reached an external app's field.
-    func delivered(_ take: DropLearningTake, targetPID: pid_t?) {
+    /// Called right before Cmd+V: the target app's focused field, if learning
+    /// is on and the gate allows it. Reads no text.
+    func prepareDelivery(targetPID: pid_t?) -> DropEditFieldHandle? {
+        guard settings.isEnabled || settings.isCalibrating(), let pid = targetPID else { return nil }
+        return deps.fieldAccess.capture(pid: pid)
+    }
+
+    /// Called right after the take reached an external app. The field
+    /// captured before Cmd+V must still be that app's focused field; a field
+    /// focused during the paste delay is never read.
+    func delivered(_ take: DropLearningTake, handle: DropEditFieldHandle?) {
         pending?.cancel()
         pending = nil
         let calibrating = settings.isCalibrating()
         guard settings.isEnabled || calibrating else { return }
-        guard let pid = targetPID, let handle = deps.fieldAccess.capture(pid: pid) else {
+        guard let handle, deps.fieldAccess.isStillFocused(handle) else {
             if calibrating { deps.journal.append(entry(event: "skipped", take: take, extra: ["reason": "field_not_readable"])) }
             return
         }
@@ -113,17 +142,18 @@ final class DropLearningCoordinator {
 
     private func observe(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool) async {
         do { try await deps.sleep(Self.readDelay) } catch { return }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, stillWanted(calibrating: calibrating) else { return }
         let first = deps.fieldAccess.read(handle)
         let lists = deps.lists()
         let firstCandidates = first.map {
             DropLearningClassifier.candidates(take: take, field: $0, lists: lists, lexicon: deps.lexicon)
         } ?? []
         guard calibrating else {
-            guard first != nil else { return }
+            guard first != nil, stillWanted(calibrating: false) else { return }
             finish(candidates: firstCandidates, ledger: DropLearningLedger(defaults: deps.defaults, now: deps.now), dryRun: false)
             return
         }
+        guard stillWanted(calibrating: true) else { return }
         deps.journal.append(entry(event: "read", take: take, extra: [
             "seconds": Self.readDelay, "readable": first != nil, "candidates": describe(firstCandidates),
             "hunks": first.flatMap { describeHunks(take.pasted, $0) } ?? [],
@@ -134,12 +164,13 @@ final class DropLearningCoordinator {
         var elapsed = Self.readDelay
         while let current = last, stable < Self.calibrationStableReads, elapsed < Self.calibrationMaxSeconds {
             do { try await deps.sleep(Self.calibrationPollInterval) } catch { return }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, stillWanted(calibrating: true) else { return }
             elapsed += Self.calibrationPollInterval
             let next = deps.fieldAccess.read(handle)
             if next == current { stable += 1 } else { stable = 0 }
             last = next
         }
+        guard stillWanted(calibrating: true) else { return }
         let settled = last.map {
             DropLearningClassifier.candidates(take: take, field: $0, lists: deps.lists(), lexicon: deps.lexicon)
         } ?? []

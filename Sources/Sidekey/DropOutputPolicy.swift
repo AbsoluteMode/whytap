@@ -48,8 +48,13 @@ struct DropOutputPolicy {
         }
         try Task.checkCancellation()
         let replaced = DropReplaceFilter.apply(output, rules: replacements)
-        let firedFillers = DropFillerFilter.matchedTerms(in: replaced.text, terms: fillerTerms)
-        let filter: (String) -> String = { DropFillerFilter.apply($0, removing: fillerTerms) }
+        // Fillers that were really cut: collected on the same (masked) text
+        // the filter sees, so a term inside protected code is not counted.
+        var firedFillers: [String] = []
+        let filter: (String) -> String = { text in
+            firedFillers = DropFillerFilter.matchedTerms(in: text, terms: fillerTerms)
+            return DropFillerFilter.apply(text, removing: fillerTerms)
+        }
         let markdown = mode == .smart && preservingMarkdown()
         let withoutFillers = markdown
             ? SmartMarkdownProtection.filtering(replaced.text, apply: filter) : filter(replaced.text)

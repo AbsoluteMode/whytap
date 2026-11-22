@@ -906,12 +906,15 @@ Input language offer:
 
 Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   the drops UI and its switch come after the visual is approved):
-  finishDropDelivery captures the focused element of the target app right
-  after Cmd+V (never Whytap's own editors) and DropLearningCoordinator reads
-  it once 5 s later, only if it is still that app's focused element and
-  DropEditFieldGate allows it (fail closed: AXSecureTextField, secure event
-  input, terminals and password managers by bundle ID, own process, unknown
-  app, non-text role, AX error or no string AXValue). It compares with what
+  finishDropDelivery captures the target app's own focused element right
+  before Cmd+V (metadata only; never Whytap's own editors), it must still be
+  focused right after the paste, and DropLearningCoordinator reads it once 5 s
+  later, only if it is still that app's focused element and DropEditFieldGate
+  allows it (metadata before any text, fail closed: AXSecureTextField, secure
+  event input, terminals and password managers by bundle ID, own process,
+  unknown app, non-text role, any AX error but a missing attribute); the text
+  is read once, bounded to 20,000 UTF-16 units, and a non-string value skips.
+  Switching learning or calibration off stops a scheduled read. It compares with what
   reached the field (a rich paste's plainText), aligns the take inside the
   field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
   DropLearningClassifier turns edits into candidates without a model: a
@@ -931,7 +934,9 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   notification). Hidden calibration (sidekey.dropLearning.calibration):
   reads until the field holds still (<=30 s), journals to Application
   Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
-  ledger, dry-run Y, ends itself after 14 days and deletes its data.
+  ledger, dry-run Y, 0700 folder / 0600 file without following links, ends
+  itself after 14 days (checked at launch, hourly and before every read) and
+  deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler
   (DropReplaceFilter: one pass, longest first, letter lookaround
   boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,

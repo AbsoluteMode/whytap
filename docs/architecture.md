@@ -55,17 +55,19 @@ Voice flow (Drop / dictation):
             speaking the OpenAI Realtime protocol. OpenAI runs on the shared
             OpenAI key (byok.openai.llm_api_key, never the retired
             byok.openAI.api_key) to its explicit host
-            (BYOKRealtimeURL.openAIHosted): gpt-live-transcribe (default) and
-            gpt-realtime-whisper stream within one turn (one commit at the
-            end); a turn-based model (gpt-transcribe, gpt-4o-*-transcribe,
-            whisper-1) runs with server VAD and shows text after each pause,
-            so it starts no auto-stop take. Turns are tracked by item_id and
+            (BYOKRealtimeURL.openAIHosted) with two models: gpt-live-transcribe,
+            the only live one offered, streams within one turn (one commit at
+            the end), and gpt-transcribe takes recorded audio. A saved route
+            on another OpenAI transcription model moves to them by role at
+            launch (AIRoutingStore.narrowOpenAISpeechModelsIfNeeded); a
+            turn-based model the move could not rewrite still runs with server
+            VAD, shows text after each pause and starts no auto-stop take. Turns are tracked by item_id and
             finals kept in commit order; the take ends at the `cleared`
             answer to a clear sent after the final commit (server VAD), and
             only OpenAI's empty-commit refusal of that commit means nothing
             is left; a pong is stall progress; a refusal (providerRefused)
             degrades Drop to the batch rung (/v1/audio/transcriptions,
-            gpt-transcribe for the live-only models), which names it (credit
+            always gpt-transcribe), which names it (credit
             apart from a rate limit). A server keeps its plain commit,
             terminal refusal and no pings. Meetings have no OpenAI model. A legacy
             OpenAI choice migrates to OpenAI with its model, never to Soniox.
@@ -1096,7 +1098,13 @@ Anthropic and OpenAI rows show the price, and in Drop Smart cleanup "always
 reasons, slower", of the same model in that cached OpenRouter catalog
 (`openai/<id>` exactly; `anthropic/<id>`, also without the date suffix and with
 dots between version digits) and keep their own date. No OpenRouter catalog or
-no match shows nothing; no new request. Other providers show no price. Sections
+no match shows nothing; no new request. Speech rows (Soniox, Deepgram,
+ElevenLabs, OpenAI) show the published pay-as-you-go price per audio minute
+from the dated table `ModelRegistry.speechListPrice` (`$0.017 per min`;
+`From $0.0048 per min` where options billed extra raise it): the live price on
+a live feature, the recorded one on Meetings; unknown models, servers and On
+this Mac show none, never zero. WHY:
+.project-docs/decisions/2026-11-22-speech-model-prices.md. Sections
 come in this order: speech providers, Anthropic, OpenAI, the user's servers,
 OpenRouter last (its hundreds of models used to hide the direct sections below
 the visible rows); every keyed provider that can serve the feature has one,

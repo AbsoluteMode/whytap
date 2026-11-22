@@ -226,9 +226,9 @@ final class ModelStatusResolverTests: XCTestCase {
             let offered = try XCTUnwrap(env.resolver.sections(for: feature).first).options.map(\.model)
             XCTAssertEqual(offered, ["nova-3"], "\(feature)")
         }
-        XCTAssertTrue(ModelRegistry.offersOnlyBuiltInModels(.soniox))
-        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.elevenLabs))
-        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.openRouter))
+        XCTAssertTrue(ModelRegistry.offersOnlyBuiltInModels(.soniox, use: .realtimeSTT))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.elevenLabs, use: .realtimeSTT))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.openRouter, use: .chat))
     }
 
     func test_deepgram_nova_3_is_not_removed() throws {
@@ -672,5 +672,75 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(plainOptions.map(\.state), openRouter.map(\.state))
         let found = ModelPickerSearch.results(in: sections, query: "0.3").map(\.option.model)
         XCTAssertFalse(found.contains(priced.id), "a price is not searchable text")
+    }
+
+    // MARK: - Speech prices
+    // WHY: .project-docs/decisions/2026-11-22-speech-model-prices.md
+
+    /// What the user sees when they open a speech picker: each transcription
+    /// model with a known list price shows it per minute, the live price on a
+    /// live feature and the recorded one on Meetings; an unknown price, a
+    /// user's server and a model nobody priced show nothing, never a zero.
+    func test_speech_pickers_show_the_price_per_minute_where_it_is_known() throws {
+        let openAI = try ModelCatalogFetcher.parseOpenAI(Data(#"""
+        {"data":[{"id":"gpt-live-transcribe"},{"id":"gpt-transcribe"},{"id":"gpt-4o-transcribe"},{"id":"gpt-6"}]}
+        """#.utf8))
+        let env = try makeEnv(snapshots: [
+            .soniox: sonioxCatalog(),
+            .deepgram: fresh([CatalogModel(id: "nova-3", uses: [.realtimeSTT, .asyncSTT]),
+                              CatalogModel(id: "nova-2", uses: [.realtimeSTT, .asyncSTT])]),
+            .elevenLabs: fresh([CatalogModel(id: "scribe_v3_live", uses: [.realtimeSTT]),
+                                CatalogModel(id: "scribe_v3", uses: [.asyncSTT])]),
+            .openAI: fresh(openAI),
+        ], keyed: [.soniox, .deepgram, .elevenLabs, .openAI])
+        // A saved route on a model the app has no price for keeps its row.
+        env.routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-2"), for: .voiceSearch)
+        let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:8000/v1")
+        env.routing.addModel(ServerModel(name: "whisper-large-v3", kind: .transcription, checked: true), toServer: server.id)
+
+        func prices(_ feature: AIFeature) -> [String: String?] {
+            var result: [String: String?] = [:]
+            for section in env.resolver.sections(for: feature) {
+                for option in section.options { result["\(section.account.storageID)/\(option.model)"] = option.priceLabel }
+            }
+            return result
+        }
+        let live = prices(.dropFast)
+        XCTAssertEqual(live["soniox/stt-rt-v6"], "$0.002 per min")
+        XCTAssertEqual(live["deepgram/nova-3"], "From $0.0048 per min")
+        XCTAssertEqual(live["elevenLabs/scribe_v3_live"], "From $0.00367 per min")
+        XCTAssertEqual(live["openAI/gpt-live-transcribe"], "$0.017 per min")
+        XCTAssertEqual(live.keys.filter { $0.hasPrefix("openAI/") }, ["openAI/gpt-live-transcribe"],
+                       "OpenAI offers one live model")
+        XCTAssertEqual(live["\(ProviderAccount.server(server.id).storageID)/whisper-large-v3"], .some(nil))
+
+        let searched = prices(.voiceSearch)
+        XCTAssertEqual(searched["deepgram/nova-2"], .some(nil), "no published price, no label")
+
+        let meetings = prices(.meetings)
+        XCTAssertEqual(meetings["soniox/stt-async-v6"], "$0.00167 per min")
+        XCTAssertEqual(meetings["deepgram/nova-3"], "From $0.0043 per min")
+        XCTAssertEqual(meetings["elevenLabs/scribe_v3"], "From $0.00333 per min")
+        XCTAssertTrue(meetings.keys.allSatisfy { !$0.hasPrefix("openAI/") }, "OpenAI can't serve Meetings")
+
+        for label in (Array(live.values) + Array(meetings.values)).compactMap({ $0 }) {
+            XCTAssertFalse(label.contains("$0 ") || label == "Free", label)
+        }
+        XCTAssertNil(ModelStatusResolver.speechPriceLabel(SpeechListPrice(usdPerMinute: 0)))
+        XCTAssertNil(ModelStatusResolver.speechPriceLabel(nil))
+        XCTAssertNil(ModelRegistry.speechListPrice("whisper-large-v3", kind: .openAICompatible, use: .realtimeSTT))
+        XCTAssertNil(ModelRegistry.speechListPrice(ModelRegistry.onDeviceSpeechModel, kind: .onDevice, use: .realtimeSTT))
+    }
+
+    /// A route saved on a model OpenAI no longer offers moves to the live
+    /// model at launch and its row reads as fine, not as an error.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func test_a_moved_openai_speech_route_is_a_working_row() throws {
+        let openAI = try ModelCatalogFetcher.parseOpenAI(Data(#"{"data":[{"id":"gpt-live-transcribe"}]}"#.utf8))
+        let env = try makeEnv(snapshots: [.openAI: fresh(openAI)], keyed: [.openAI])
+        env.routing.setRoute(FeatureRoute(account: .openAI, model: "gpt-4o-mini-transcribe"), for: .dropFast)
+        env.routing.narrowOpenAISpeechModelsIfNeeded()
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .openAI, model: "gpt-live-transcribe"))
+        XCTAssertEqual(env.resolver.status(for: .dropFast), .ok)
     }
 }

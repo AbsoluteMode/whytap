@@ -26,7 +26,8 @@ struct PickerOption: Equatable {
     let hint: String?
     var dateLabel: String? = nil
     var catalogDate: Date? = nil
-    /// OpenRouter's list price; display only, never part of search or routing.
+    /// A list price: per audio minute for a speech model, OpenRouter's per
+    /// token price for an LLM. Display only, never part of search or routing.
     var priceLabel: String? = nil
 }
 
@@ -197,7 +198,7 @@ struct ModelStatusResolver {
         }
         let snapshot = catalogs.snapshot(for: account)
         if let entry = snapshot?.models.first(where: { $0.id == model }), entry.aliasOf == nil,
-           !ModelRegistry.offersOnlyBuiltInModels(account.kind), !Self.isStale(entry, fetchedAt: snapshot?.fetchedAt) {
+           !ModelRegistry.offersOnlyBuiltInModels(account.kind, use: use), !Self.isStale(entry, fetchedAt: snapshot?.fetchedAt) {
             return .offered
         }
         return .notListed
@@ -231,7 +232,7 @@ struct ModelStatusResolver {
                 }
             } else {
                 for model in (snapshot?.models ?? []).sorted(by: { $0.id < $1.id })
-                where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind)
+                where (model.aliasOf == nil && !ModelRegistry.offersOnlyBuiltInModels(account.kind, use: use)
                     && !Self.isStale(model, fetchedAt: snapshot?.fetchedAt)) || isSelected(model.id) {
                     add(model.id)
                 }
@@ -262,7 +263,8 @@ struct ModelStatusResolver {
                     hint: hint(model: id, account: account, feature: feature, use: use, listing: listing),
                     dateLabel: dateLabel,
                     catalogDate: dateLabel == nil ? nil : date,
-                    priceLabel: Self.catalogPriceLabel(listing?.tokenPrice)
+                    priceLabel: Self.speechPriceLabel(ModelRegistry.speechListPrice(id, kind: account.kind, use: use))
+                        ?? Self.catalogPriceLabel(listing?.tokenPrice)
                 ))
             }
             return PickerSection(
@@ -313,6 +315,15 @@ struct ModelStatusResolver {
         else { return nil }
         if price.inputPerMillion == 0, price.outputPerMillion == 0 { return "Free" }
         return "$\(input) in / $\(output) out per 1M tokens"
+    }
+
+    /// A speech model's list price per audio minute: `$0.017 per min`, or
+    /// `From $0.0048 per min` where options the provider bills extra raise it.
+    /// No known price, no label: never a zero.
+    // WHY: .project-docs/decisions/2026-11-22-speech-model-prices.md
+    static func speechPriceLabel(_ price: SpeechListPrice?) -> String? {
+        guard let price, price.usdPerMinute > 0, let amount = priceAmount(price.usdPerMinute) else { return nil }
+        return "\(price.startingAt ? "From " : "")$\(amount) per min"
     }
 
     /// The same model in OpenRouter's catalog, for a direct Anthropic or

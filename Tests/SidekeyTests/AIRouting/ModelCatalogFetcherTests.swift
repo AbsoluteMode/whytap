@@ -23,10 +23,11 @@ final class ModelCatalogFetcherTests: XCTestCase {
         let text = models.filter { $0.uses?.contains(.chat) == true }
         XCTAssertEqual(text.map(\.id), ["gpt-4.1-mini", "gpt-6.1-sol", "o3"])
         XCTAssertTrue(text.allSatisfy { $0.uses == [.chat, .chatWithTools] })
-        // A transcription model is a speech model, never a text one.
+        // A transcription model is never a text one; this deprecated one is
+        // not offered for speech either.
         // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
-        XCTAssertEqual(models.first { $0.id == "gpt-4o-transcribe" }?.uses, [.realtimeSTT, .asyncSTT])
-        XCTAssertEqual(models.count, 4)
+        XCTAssertNil(models.first { $0.id == "gpt-4o-transcribe" })
+        XCTAssertEqual(models.count, 3)
         let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
         XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/models")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer openai-key")

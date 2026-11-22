@@ -174,4 +174,46 @@ extension NativeAgentWebSearchTests {
             XCTAssertEqual(finalText(events), cleaned ? "Verified." : "Verified \(mark).", "\(route) \(model)")
         }
     }
+
+    // MARK: - Builder #450: literal spans keep the bytes, prose beside them is cleaned
+
+    func testLiteralSpansKeepCitationBytesWhileNeighbouringProseIsCleaned() throws {
+        let mark = "\u{E200}cite\u{E202}turn0search0\u{E201}"
+        let quotedCommand = "printf '%s' 'prefix \(mark) suffix'"
+        let quoted = try finalAnswer("Exact command.", insert: quotedCommand, copy: quotedCommand)
+        XCTAssertEqual(copyText(quoted.insert), quotedCommand, "single-quoted Insert")
+        XCTAssertTrue(quoted.actions.items.contains { copyText($0) == quotedCommand }, "single-quoted Copy")
+        let doubleQuoted = "printf '%s' \"prefix \(mark) suffix\""
+        XCTAssertEqual(copyText(try finalAnswer("Exact command.", insert: doubleQuoted).insert), doubleQuoted, "double-quoted Insert")
+
+        let inline = "Example: `printf '%s' 'prefix \(mark) suffix'`."
+        XCTAssertEqual(try finalAnswer(inline).answer, inline, "inline code")
+        XCTAssertEqual(try finalAnswer(inline + " A supporting note \(mark).").answer, inline + " A supporting note.",
+                       "the literal stays, the prose citation beside it goes")
+
+        let spacedPath = "/tmp/fixture/literal \(mark) then.txt"
+        let spacedFinal = try finalAnswer("Open `\(spacedPath)`.")
+        XCTAssertEqual(spacedFinal.answer, "Open `\(spacedPath)`.")
+        XCTAssertEqual(NativeAgentAnswerArtifacts.collect(from: spacedFinal.visibleText, existing: spacedFinal.actions)?.items.first?.insertText,
+                       spacedPath, "inferred path")
+
+        for block in ["Literal bytes:\n\n~~~text\nprefix \(mark) suffix\n~~~",
+                      "Example:\n\n    prefix \(mark) suffix",
+                      "Example:\n\n````text\n```\nprefix \(mark) suffix\n````",
+                      "Example:\n\n> ```text\n> prefix \(mark) suffix\n> ```",
+                      "Example:\n\n```sh\necho \(mark) done\n```"] {
+            XCTAssertEqual(try finalAnswer(block).answer, block)
+        }
+        XCTAssertEqual(try finalAnswer("Before \(mark).\n\n```sh\necho \(mark) x\n```\n\nAfter \(mark).").answer,
+                       "Before.\n\n```sh\necho \(mark) x\n```\n\nAfter.", "prose around a fence is still cleaned")
+        XCTAssertEqual(try finalAnswer("Погода «Гидрометцентр» \(mark), it's cold \(mark).").answer,
+                       "Погода «Гидрометцентр», it's cold.", "apostrophes and closed quotes do not hide prose citations")
+
+        let disabled = try NativeAgentFinalAnswer(arguments: [
+            "status": "answered", "answer": "Verbatim \(mark).", "insert_text": quotedCommand,
+            "sources": [[String: Any]](), "actions": [["type": "copy", "description": "Fixture", "text": quotedCommand]],
+        ], openAICitations: false)
+        XCTAssertEqual(disabled.answer, "Verbatim \(mark).")
+        XCTAssertEqual(copyText(disabled.insert), quotedCommand)
+    }
 }

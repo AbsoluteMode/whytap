@@ -114,37 +114,74 @@ struct NativeAgentFinalAnswer {
     /// that render as "citeturn0search0"), one or more `turn<n><kind><n>`
     /// references. It is removed, with the spaces before it, only where it
     /// annotates prose: after whitespace or at a line start, before the line
-    /// end, whitespace or punctuation, outside fenced code. The same bytes
-    /// inside a word, path, URL, quoted literal or code fence stay, as does
+    /// end, whitespace or punctuation, and outside every literal span (fenced
+    /// code with backticks or tildes, also in a blockquote; indented code;
+    /// inline code of any backtick length; single, double and curly quoted
+    /// text). The same bytes inside a word, path, URL or literal stay, as does
     /// any other private-use glyph or sequence.
     /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
     static func withoutProviderCitationMarks(_ text: String) -> String {
         guard text.unicodeScalars.contains("\u{E200}"), let regex = citationMarkup else { return text }
-        var output: [String] = [], prose: [String] = [], fenced = false
-        func flush() {
-            guard !prose.isEmpty else { return }
-            let block = prose.joined(separator: "\n")
-            output.append(regex.stringByReplacingMatches(in: block, range: NSRange(block.startIndex..., in: block), withTemplate: ""))
-            prose.removeAll()
+        let string = text as NSString
+        let literal = literalRanges(in: text)
+        var result = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: string.length)).reversed() {
+            let mark = match.range(at: 1)
+            guard !literal.contains(where: { NSIntersectionRange($0, mark).length > 0 }) else { continue }
+            result = result.replacingCharacters(in: match.range, with: "") as NSString
         }
-        for line in text.components(separatedBy: "\n") {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                if !fenced { flush() }
-                fenced.toggle()
-                output.append(line)
-            } else if fenced {
-                output.append(line)
-            } else {
-                prose.append(line)
-            }
-        }
-        flush()
-        return output.joined(separator: "\n")
+        return result as String
     }
 
     private static let citationMarkup = try? NSRegularExpression(
-        pattern: "(?:^|[ \\t]+)\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201}(?=$|[\\s.,;:!?)\\]])",
+        pattern: "(?:^|[ \\t]+)(\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201})(?=$|[\\s.,;:!?)\\]])",
         options: [.anchorsMatchLines])
+
+    /// Literal spans of Markdown and shell text, in UTF-16 ranges.
+    static func literalRanges(in text: String) -> [NSRange] {
+        let string = text as NSString
+        var ranges: [NSRange] = []
+        // Fenced code (``` or ~~~, three or more, optionally in a blockquote)
+        // up to a closing fence of the same character and at least the same
+        // length; indented code lines.
+        let fence = try? NSRegularExpression(pattern: "^[ \\t]{0,3}(?:>[ \\t]?)*[ \\t]{0,3}(`{3,}|~{3,})")
+        var open: (char: Character, length: Int, start: Int)?
+        var location = 0
+        for line in text.components(separatedBy: "\n") {
+            let lineRange = NSRange(location: location, length: (line as NSString).length)
+            location += lineRange.length + 1
+            let marker = fence?.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length))
+                .map { (line as NSString).substring(with: $0.range(at: 1)) }
+            if let current = open {
+                if let marker, marker.first == current.char, marker.count >= current.length {
+                    ranges.append(NSRange(location: current.start, length: NSMaxRange(lineRange) - current.start))
+                    open = nil
+                }
+                continue
+            }
+            if let marker, let char = marker.first {
+                open = (char, marker.count, lineRange.location)
+            } else if line.hasPrefix("    ") || line.hasPrefix("\t") {
+                ranges.append(lineRange)
+            }
+        }
+        if let current = open { ranges.append(NSRange(location: current.start, length: string.length - current.start)) }
+        // Inline code and quoted text outside those blocks.
+        let patterns = [
+            "(`+)[\\s\\S]+?(?<!`)\\1(?!`)",
+            "(?<![\\p{L}\\p{N}])'[^'\\n]*'(?![\\p{L}\\p{N}])",
+            "(?<![\\p{L}\\p{N}])\"[^\"\\n]*\"(?![\\p{L}\\p{N}])",
+            "“[^”\\n]*”", "‘[^’\\n]*’", "«[^»\\n]*»",
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            for match in regex.matches(in: text, range: NSRange(location: 0, length: string.length))
+            where !ranges.contains(where: { NSIntersectionRange($0, match.range).length > 0 && $0.length >= match.range.length && NSLocationInRange(match.range.location, $0) }) {
+                ranges.append(match.range)
+            }
+        }
+        return ranges
+    }
 
     static func pasteText(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)

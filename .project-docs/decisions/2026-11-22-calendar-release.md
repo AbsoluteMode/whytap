@@ -51,11 +51,20 @@ and hover details. The maintainer decided to release it.
   not touched at all until the user connects Apple Calendar.
 - **Anything short of Full Access is one state, `appleAccessOff`**: refused at the
   prompt, refused earlier (macOS then answers without a prompt), restricted,
-  revoked later in System Settings, or "Add Events Only". Apple events and
-  calendars disappear from the day, the connection itself is kept, and Settings
-  -> Integrations and the Connect page say to turn on Whytap in System Settings ->
+  revoked later in System Settings, or "Add Events Only". Settings ->
+  Integrations and the Connect page say to turn on Whytap in System Settings ->
   Privacy & Security -> Calendars, with an **Open Privacy Settings** button.
-  Allowing access is enough: the next refresh shows the events again.
+  - *Connect refused:* nothing is saved. The message ends "then press Connect
+    again"; after access is allowed, Connect succeeds without a second prompt.
+  - *Saved connection, access off later:* Apple events leave the day, the
+    connection is kept, its row reads **Access off** (not Connected) and opens
+    System Settings. Allowing access is enough: the events come back.
+- **Live status, both surfaces.** `checkAppleAccess()` reads only
+  `EKEventStore.authorizationStatus` (no prompt, no event read) for a saved
+  connection or a refused Connect, never for an untouched calendar. Calendar
+  runs it when it opens and Settings -> Integrations when it appears; both run it
+  again when Whytap becomes active, i.e. on return from System Settings. A
+  refusal message that is no longer true is cleared.
 
 ## Why
 
@@ -70,6 +79,15 @@ Connect presses that could never succeed. A revoked access looked the same in
 Hover. Naming the System Settings place and opening it is the only way out, so it
 is the message. Write-only access is included because Whytap has to read events.
 
+The builder's first review (queue #411) found that the refusal state was only
+updated by an event refresh: after the first refusal, allowing access left the
+warning in place, a revoked connection still read "Connected" and sent the user
+back to the empty day, and Settings showed whatever Calendar saw last. Reading
+the status is free and shows nothing, so both surfaces now ask macOS for the
+current answer instead of remembering one. A refused Connect deliberately stays
+not connected: the user chose "Don't Allow", so Whytap names Connect as the next
+step instead of connecting on its own once access appears.
+
 The EventKit calls moved behind a small value of closures so the permission
 states can be tested as user scenarios without asking the test machine's macOS
 or reading the developer's calendars.
@@ -81,9 +99,13 @@ the tile routes to the panel and the panel opens on today; search finds it with
 its own description; a saved hotkey registers and appears in Help; links open the
 panel and may propose a hotkey; connections saved while closed (Outlook account,
 Apple flag, hidden calendar) are read unchanged without a new prompt; nothing
-reads EventKit before Connect; access granted, refused (with a second Connect
-giving no second prompt, then allowing it in System Settings), "Add Events Only",
-revoked and allowed again, Disconnect clearing the warning; no calendars and no
+reads EventKit before Connect; access granted; refused (a second Connect gives no second prompt; reopening
+keeps the advice); allowed after a refusal (reopening clears the stale warning,
+Connect needs no prompt, events appear); "Add Events Only"; revoked (row reads
+Access off and opens System Settings without leaving the Connect page) and
+allowed again; Settings opened alone reading the live status, updating when
+Whytap becomes active and never checking an unconnected calendar; Disconnect
+clearing the warning; no calendars and no
 connection showing an empty day without an error; an event with a Zoom link joins
 the call and one without opens in Calendar, with the service logo of the synced
 account. `CalendarSoonTests` now closes the switch and checks that a closed

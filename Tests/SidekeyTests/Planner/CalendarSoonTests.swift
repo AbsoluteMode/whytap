@@ -212,7 +212,11 @@ final class CalendarSoonTests: XCTestCase {
     /// Headless SwiftUI exposes no accessibility tree, so the card is checked by what it
     /// replaces: one compact card instead of four provider cards with Connect/Disconnect.
     func testSettingsShowsOneCompactSoonCardInsteadOfTheProviderCards() async throws {
-        let connections = try previouslyConnected()
+        // Once opened, Settings may read the access status of the saved Apple connection.
+        let connections = try previouslyConnected(apple: AppleCalendarAccess(
+            status: { CalendarAvailability.isOpen ? .fullAccess : { XCTFail("closed Calendar read the access status"); return .denied }() },
+            request: { XCTFail("Settings asked macOS for access"); return false },
+            read: { _ in XCTFail("Settings read events"); return ([], []) }))
         func height() async throws -> CGFloat {
             let host = NSHostingView(rootView: SettingsCalendarIntegrationsView(connections: connections).frame(width: 520))
             let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 520, height: 900),

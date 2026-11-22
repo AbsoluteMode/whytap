@@ -143,11 +143,14 @@ Disconnect removes local credentials/events, keeping the original provider data.
 permission. It shows the calendars available through EventKit, including iCloud.
 macOS requires full event permission even for reading; Whytap only reads.
 macOS asks only when you press Connect, never when Whytap starts or Calendar
-opens. It asks once: after **Don't Allow**, or if access is later turned off or
-limited to "Add Events Only", Calendar shows no Apple events and Settings and the
+opens. It asks once. After **Don't Allow** nothing is connected: Settings and the
 Connect page say to turn on Whytap in **System Settings → Privacy & Security →
-Calendars** (Full Access), with an **Open Privacy Settings** button. The Apple
-connection is kept, so events come back as soon as access is allowed.
+Calendars** (Full Access), with an **Open Privacy Settings** button; then press
+Connect again, which needs no second prompt. If access of a connected Apple
+Calendar is later turned off or limited to "Add Events Only", its events leave
+the day, its row reads **Access off** and opens System Settings, and the
+connection is kept: allowing access brings the events back. Calendar and Settings
+check the current permission when they open and when you return to Whytap.
 This connection does not require a Whytap backend or a new Apple OAuth client.
 When the same Google/Exchange account is also available through macOS, use the
 feed checkboxes to select the desired source. UID-based collapse cannot identify

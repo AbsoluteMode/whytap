@@ -1,5 +1,6 @@
 import AppKit
 import EventKit
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -192,34 +193,64 @@ final class CalendarReleaseTests: XCTestCase {
         XCTAssertTrue(model.connect(.apple, info: nil))
         try await finish(model.connectionFlow)
         XCTAssertEqual(mac.prompts, 1)
-        XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleAccessOffMessage)
+        XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleConnectRefusedMessage)
         XCTAssertTrue(model.connectionFlow.error?.contains("System Settings → Privacy & Security → Calendars") == true)
+        XCTAssertTrue(model.connectionFlow.error?.contains("then press Connect again") == true,
+                      "nothing was connected, so the step after System Settings is named")
         XCTAssertTrue(connections.appleAccessOff, "Settings and the Connect page offer Open Privacy Settings")
         XCTAssertFalse(connections.appleEnabled)
         XCTAssertNil(defaults.object(forKey: CalendarAccountSettings.appleEnabledKey))
         XCTAssertEqual(model.page, .providers, "the message stays next to the Apple row")
+        XCTAssertEqual(model.connectState(.apple), .connect)
         XCTAssertFalse(connections.isConnecting)
 
         // Connect again: macOS remembers the refusal, so there is no second prompt, only the same advice.
         XCTAssertTrue(model.connect(.apple, info: nil))
         try await finish(model.connectionFlow)
         XCTAssertEqual(mac.prompts, 1)
-        XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleAccessOffMessage)
+        XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleConnectRefusedMessage)
 
-        // The user allows Whytap in System Settings, then connects.
-        mac.status = .fullAccess
+        // Reopening Calendar while access is still off keeps the advice.
+        model.end(); model.begin()
+        XCTAssertTrue(connections.appleAccessOff)
+        XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleConnectRefusedMessage)
+    }
+
+    func testAllowingAccessAfterARefusalClearsTheWarningAndConnectNeedsNoPrompt() async throws {
+        let mac = FakeMac(); mac.answer = .denied
+        mac.feeds = [CalendarFeed(id: "apple:work", accountID: nil, remoteID: "work", title: "Work · iCloud", provider: .apple)]
+        mac.events = [appleEvent("Planning", hour: 15)]
+        let connections = connections(mac)
+        let model = model(connections)
+        model.begin()
         XCTAssertTrue(model.connect(.apple, info: nil))
         try await finish(model.connectionFlow)
-        XCTAssertNil(model.connectionFlow.error)
+        XCTAssertTrue(connections.appleAccessOff)
+
+        // In System Settings the user turns Whytap on, then reopens Calendar.
+        mac.status = .fullAccess
+        model.end(); model.begin()
+        XCTAssertFalse(connections.appleAccessOff, "the live status replaces the stale refusal")
+        XCTAssertFalse(connections.appleConnectRefused)
+        XCTAssertNil(model.connectionFlow.error, "no stale denial under the Apple row")
+        XCTAssertNil(connections.errors["apple"])
+        XCTAssertEqual(model.connectState(.apple), .connect, "the refusal saved nothing; Connect is the explicit next step")
+        XCTAssertEqual(mac.reads, 0, "checking access never reads events of an unconnected calendar")
+
+        XCTAssertTrue(model.connect(.apple, info: nil))
+        try await finish(model.connectionFlow)
+        XCTAssertEqual(mac.prompts, 1, "macOS already allows it: no second prompt")
         XCTAssertTrue(connections.appleEnabled)
-        XCTAssertFalse(connections.appleAccessOff)
+        XCTAssertEqual(model.page, .agenda)
+        await connections.refresh(interval: model.interval)
+        XCTAssertEqual(model.events.map(\.event.title), ["Planning"])
     }
 
     func testAddEventsOnlyCannotReadAndGetsTheSameAdvice() async throws {
         let mac = FakeMac(); mac.status = .writeOnly
         let connections = connections(mac)
         do { try await connections.enableApple(); XCTFail("write-only access cannot show events") }
-        catch CalendarConnectionError.appleAccessOff { }
+        catch CalendarConnectionError.appleConnectRefused { }
         XCTAssertTrue(connections.appleAccessOff)
         XCTAssertFalse(connections.appleEnabled)
     }
@@ -231,12 +262,15 @@ final class CalendarReleaseTests: XCTestCase {
         mac.events = [appleEvent("Review", hour: 14)]
         let connections = connections(mac)
         let model = model(connections)
+        var privacyOpened = 0
+        model.openPrivacySettings = { privacyOpened += 1 }
         model.begin()
         await connections.refresh(interval: model.interval)
         XCTAssertEqual(model.events.map(\.event.title), ["Review"])
+        XCTAssertEqual(model.connectState(.apple), .connected)
 
         mac.status = .denied   // the user turns Whytap off in System Settings
-        connections.refreshAppleIfEnabled(interval: model.interval)
+        model.end(); model.begin()
         XCTAssertEqual(mac.prompts, 0, "a revoked access is reported, never re-prompted")
         XCTAssertTrue(model.events.isEmpty, "no stale events stay on screen")
         XCTAssertTrue(connections.feeds.isEmpty)
@@ -244,11 +278,81 @@ final class CalendarReleaseTests: XCTestCase {
         XCTAssertTrue(connections.appleAccessOff)
         XCTAssertTrue(connections.appleEnabled, "the connection is kept, so allowing access again is enough")
 
-        mac.status = .fullAccess
-        connections.refreshAppleIfEnabled(interval: model.interval)
+        // The Apple row no longer claims Connected, and pressing it leads to System Settings.
+        model.page = .providers
+        XCTAssertEqual(model.connectState(.apple), .accessOff)
+        XCTAssertEqual(model.connectAccessibilityLabel(.apple), "Apple Calendar, access off. Open Privacy Settings")
+        XCTAssertFalse(model.connect(.apple, info: nil))
+        XCTAssertEqual(privacyOpened, 1)
+        XCTAssertEqual(model.page, .providers, "the user is not sent back to an empty day")
+        XCTAssertFalse(model.connectionFlow.working)
+
+        mac.status = .fullAccess   // allowed again, then Whytap becomes active
+        model.recheckAppleAccess()
         XCTAssertNil(connections.errors["apple"])
         XCTAssertFalse(connections.appleAccessOff)
+        XCTAssertEqual(model.connectState(.apple), .connected)
+        await connections.refresh(interval: model.interval)
         XCTAssertEqual(model.events.map(\.event.title), ["Review"])
+    }
+
+    // MARK: - Settings alone, Calendar never opened
+
+    private func renderSettings(_ connections: CalendarConnections) async throws {
+        let host = NSHostingView(rootView: SettingsCalendarIntegrationsView(connections: connections).frame(width: 520))
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 520, height: 900),
+            styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(50))
+    }
+
+    func testSettingsAloneShowsARevokedAccessFromTheLiveStatus() async throws {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .denied
+        let connections = connections(mac)
+        XCTAssertFalse(connections.appleAccessOff, "nothing was checked yet")
+        let host = NSHostingView(rootView: SettingsCalendarIntegrationsView(connections: connections).frame(width: 520))
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 520, height: 900),
+            styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(connections.appleAccessOff, "opening Settings reads the current permission")
+        XCTAssertEqual(connections.errors["apple"], CalendarConnectionError.appleAccessOffMessage)
+        XCTAssertEqual(mac.prompts, 0)
+        XCTAssertEqual(mac.reads, 0, "Settings checks the status only, it reads no events")
+
+        mac.status = .fullAccess   // back from System Settings with Settings still open: Whytap becomes active
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(connections.appleAccessOff)
+        XCTAssertNil(connections.errors["apple"])
+        XCTAssertEqual(mac.reads, 0)
+    }
+
+    func testSettingsNeverChecksAnUnconnectedCalendar() async throws {
+        let mac = FakeMac(); mac.status = .denied
+        let connections = connections(mac)
+        try await renderSettings(connections)
+        XCTAssertEqual(mac.statusReads, 0)
+        XCTAssertEqual(mac.prompts, 0)
+        XCTAssertFalse(connections.appleAccessOff)
+    }
+
+    func testSettingsClearsAStaleRefusalOnceAccessIsAllowed() async throws {
+        let mac = FakeMac(); mac.answer = .denied
+        let connections = connections(mac)
+        let flow = CalendarConnectionFlow(connections: connections)
+        XCTAssertTrue(flow.startRegistered(provider: .apple, info: nil))
+        try await finish(flow)
+        XCTAssertEqual(flow.error, CalendarConnectionError.appleConnectRefusedMessage)
+        mac.status = .fullAccess
+        connections.checkAppleAccess()
+        flow.clearAppleRefusalIfAllowed()
+        XCTAssertNil(flow.error)
+        XCTAssertFalse(connections.appleAccessOff)
+        XCTAssertFalse(connections.appleConnectRefused)
     }
 
     func testDisconnectingAppleForgetsTheAccessWarning() {

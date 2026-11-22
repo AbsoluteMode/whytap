@@ -1308,9 +1308,13 @@ HoverTool.isComingSoon. WHY: .project-docs/decisions/2026-11-21-calendar-soon.md
 Calendar on this Mac goes through AppleCalendarAccess (EventKit; tests use a
 fake). macOS is asked only from Connect (requestFullAccessToEvents); opening
 Hover and refreshing only read the authorization status. Anything but Full Access
-(denied, restricted, revoked, "Add Events Only") is appleAccessOff: Apple events
-are cleared, the connection is kept, and Settings and the Connect page say where
-to allow access, with Open Privacy Settings (Privacy & Security -> Calendars).
+(denied, restricted, revoked, "Add Events Only") is appleAccessOff; Settings and
+the Connect page say where to allow access, with Open Privacy Settings (Privacy &
+Security -> Calendars). A refused Connect saves nothing (allow, then Connect
+again, no second prompt); a saved connection keeps itself, clears Apple events
+and its row reads Access off. checkAppleAccess() reads only the status for a
+saved or refused Apple connection when Calendar or Settings opens and when the
+app becomes active, so neither shows a stale answer.
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,

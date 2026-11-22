@@ -72,8 +72,13 @@ final class CalendarConnections: ObservableObject {
     @Published private(set) var appleEnabled = false
     @Published private(set) var connectingProvider: CalendarProvider?
     /// macOS refuses Whytap calendar access (denied, restricted, revoked or
-    /// "Add Events Only"): only System Settings can change it.
+    /// "Add Events Only") for a saved Apple connection or a Connect refused in
+    /// this run: only System Settings can change it. `checkAppleAccess()` keeps
+    /// it current from the live authorization status.
     @Published private(set) var appleAccessOff = false
+    /// Connect was refused in this run; nothing was saved. Cleared once access is
+    /// allowed (then Connect succeeds without a prompt) or by Disconnect.
+    @Published private(set) var appleConnectRefused = false
     var isConnecting: Bool { connectingProvider != nil }
     var connectionBlockReason: String? { CalendarAvailability.blockReason ?? backup?.calendarConnectionBlockReason }
     var accountConnectionIssue: String? {
@@ -170,9 +175,11 @@ final class CalendarConnections: ObservableObject {
         try Task.checkCancellation()
         guard granted, AppleCalendarAccess.canRead(apple.status()) else {
             appleAccessOff = true
-            throw CalendarConnectionError.appleAccessOff
+            appleConnectRefused = true
+            throw CalendarConnectionError.appleConnectRefused
         }
         appleAccessOff = false
+        appleConnectRefused = false
         errors.removeValue(forKey: "apple")
         appleEnabled = true
         defaults.set(true, forKey: "planner.calendar.appleEnabled")
@@ -183,6 +190,7 @@ final class CalendarConnections: ObservableObject {
         refreshing = false
         appleEnabled = false
         appleAccessOff = false
+        appleConnectRefused = false
         defaults.set(false, forKey: "planner.calendar.appleEnabled")
         feeds.removeAll { $0.provider == .apple }
         events.removeAll { $0.feedID.hasPrefix("apple:") }
@@ -216,6 +224,28 @@ final class CalendarConnections: ObservableObject {
             } catch is CancellationError { return }
             catch { if generation == current { errors[key] = error.localizedDescription } }
         }
+    }
+
+    /// Re-reads the authorization status (never prompts, never reads events) for a
+    /// saved Apple connection or a refused Connect, e.g. when Settings or Calendar
+    /// opens or Whytap becomes active after System Settings. Returns true when a
+    /// saved connection can read again, so the caller may refresh its events.
+    @discardableResult
+    func checkAppleAccess() -> Bool {
+        guard CalendarAvailability.isOpen, appleEnabled || appleConnectRefused else { return false }
+        if AppleCalendarAccess.canRead(apple.status()) {
+            let recovered = appleEnabled && appleAccessOff
+            appleAccessOff = false
+            appleConnectRefused = false
+            if errors["apple"] == CalendarConnectionError.appleAccessOffMessage { errors.removeValue(forKey: "apple") }
+            return recovered
+        }
+        appleAccessOff = true
+        if appleEnabled {
+            feeds.removeAll { $0.provider == .apple }; events.removeAll { $0.feedID.hasPrefix("apple:") }
+            errors["apple"] = CalendarConnectionError.appleAccessOffMessage
+        }
+        return false
     }
 
     func refreshAppleIfEnabled(interval: DateInterval) {

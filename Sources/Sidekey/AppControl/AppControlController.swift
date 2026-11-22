@@ -123,6 +123,9 @@ final class AppControlController {
                 "sourceRevision": identity.sourceRevision.map(AppControlValue.string) ?? .null,
                 "googleCalendarReviewActive": .bool(googleCalendarReview()),
                 "activity": activity(), "features": .array(features),
+                // Read-only: writes stay per feature through set_model.
+                // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+                "shared": sharedValue(),
                 // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
                 "agentWorkspace": .string(agentWorkspace())
             ]))
@@ -235,6 +238,24 @@ final class AppControlController {
         ["dropMode": .string(preferences.currentMode.rawValue), "autoHideIsland": .bool(idle.isEnabled),
          "inputLanguage": languages.selectedLanguage.map { .string($0.code) } ?? .null,
          "outputLanguage": languages.targetLanguage.map { .string($0.code) } ?? .null]
+    }
+
+    /// The Speech and LLM rows as Models shows them: the model most features
+    /// follow (or Mixed), and which features have their own model or none.
+    private func sharedValue() -> AppControlValue {
+        var result: [String: AppControlValue] = [:]
+        for kind in SharedModelKind.allCases {
+            guard let row = models.sharedRow(kind) else { continue }
+            result[kind.rawValue] = .object([
+                "label": .string(row.label),
+                "mixed": .bool(row.isMixed),
+                "route": row.choice.map { .object(["account": .string($0.account.storageID), "model": .string($0.model)]) } ?? .null,
+                "features": .array(kind.features.map { .string($0.rawValue) }),
+                "custom": .array(row.custom.map { .string($0.rawValue) }),
+                "unset": .array(row.unset.map { .string($0.rawValue) }),
+            ])
+        }
+        return .object(result)
     }
 
     private func routeValue(_ feature: AIFeature) -> AppControlValue {

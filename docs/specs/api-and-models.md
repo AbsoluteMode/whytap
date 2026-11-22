@@ -243,6 +243,16 @@ no model · Set up». Она открывает то же окно.
 
 ## Блок Models
 
+**Общие строки (22.11.2026).** Сверху две строки: Speech и LLM. Выбор в строке
+ставит модель всем фичам своего вида: Speech — Drop Fast, Drop Smart, Agent
+voice, Voice search и Meetings (Meetings получает парную модель для записи,
+например `scribe_v3` к `scribe_v3_live`); LLM — Drop Smart cleanup, Meeting
+notes, Agent и Translation. Фича, которую модель обслужить не может, остаётся
+со своей моделью, и под строкой видно почему. Строка не хранится, она
+считается из маршрутов фич: «N custom», «N not set» или «Mixed». Пофичевые
+строки ниже, под «Advanced · a model per feature». Решение:
+`.project-docs/decisions/2026-11-22-shared-model-rows.md`.
+
 **Строка:** название фичи, рядом мелко режим, и одна выпадашка «Provider · model-id».
 Статус в строке показывается только при проблеме:
 

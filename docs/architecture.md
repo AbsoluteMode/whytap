@@ -1233,8 +1233,9 @@ steps share one template (OnboardingAccessStage): a title, the step's own wire
 figure (a Command keycap on its switch, a microphone capsule, an aperture, a
 display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
-(OnboardingAccessState.waiting: "Turn on Whytap in System Settings", the
-Privacy & Security pane, a quiet Open System Settings, no spinner); only the
+(OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
+Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
+no spinner); only the
 system's own check (polling and a return to the app) makes it granted, then
 the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again
@@ -1242,7 +1243,11 @@ app with the switch still off shows one calm line and Allow again
 dialog is open); reaching the step again starts at Allow. Screen Recording has
 Skip for now under Allow instead of the footer's Skip. The last four steps
 (OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
-key as a wire key and as keys over the real field; while Drop records
+key as a wire key and once as keys in the real field's header ("Hold Space
+and speak"); the placeholder, the line under the field and the capsule never
+repeat it (the line shows only a take that runs, arrived or failed, the capsule
+only Continue; the standalone preview alone has a "Preview take" capsule that
+stands in for the key); while Drop records
 (OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
 lede becomes soft waves that follow the voice, with no island chip; a take that
 ends with nothing in the field gets one calm line ("No speech heard - try

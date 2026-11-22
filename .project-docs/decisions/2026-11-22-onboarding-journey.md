@@ -444,6 +444,27 @@ window, Back and a progress bar.
   sample question are gone, so the rail has one segment fewer ("NN / 11",
   "NN / 12" with the search step). A page that only points elsewhere was a
   stop with nothing to do; one line on the last screen says the same.
+- **Each thing is said once.** The owner, REV 62, on a preview screenshot
+  of Try Drop: "we write hold Space four times, do we think the user is
+  dumb?" (the field's header, the placeholder, the line under the field and
+  the capsule). Try Drop now says which key to hold once, in the field's
+  header ("Hold Space and speak"). The placeholder says where the words go
+  ("Your words land here"); the line under the field is empty at rest and
+  only reports a take (let go to drop it, "No speech heard - try again.",
+  "That's Drop - the same shortcut works in any app."); the header's right
+  label no longer says "real text field" (the lede does) or "try again"
+  (the line does). In the app there is no capsule until the text arrives,
+  then Continue; Skip stays. The standalone preview has no Drop, so it keeps
+  one capsule, "Preview take" with a microphone, that stands in for the
+  key while held and names what it is, not what to do. The other steps were
+  checked the same way: an access step's waiting copy no longer names
+  System Settings three times ("Turn on Whytap, then come back here.", the
+  pane's path, a "Waiting..." capsule, Open System Settings); its allowed
+  line says what now works instead of repeating "allowed" next to the
+  Allowed capsule; its not-on-yet line states the fact and leaves the action
+  to Allow again; and Shortcuts and Toolbox lost their footer "Open
+  Hotkeys" and "Open Toolbox" buttons, since each lede already names its
+  Settings tab.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -542,6 +563,12 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 62: Try Drop's placeholder names no key, the line under the field is
+  empty at rest and no state's line repeats the key instruction, and the
+  no-speech line is the failure itself; offscreen renders of Try Drop
+  waiting (preview capsule), recording, done and failed, and of every
+  access step in each state.
 
 - REV 61: the flow ends Shortcuts, Toolbox, Enjoy Whytap with no Help
   step (eleven segments by default), the last step has no timer and

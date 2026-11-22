@@ -65,19 +65,19 @@ enum OnboardingAccessKind: CaseIterable {
 
     var grantedLine: String {
         switch self {
-        case .keyboard: return "Keyboard control allowed — ready to type anywhere."
-        case .microphone: return "Microphone allowed."
-        case .inputMonitoring: return "Input Monitoring allowed — Drop can see its shortcut."
-        case .screenRecording: return "Screen Recording allowed — for Shot and the Agent."
+        case .keyboard: return "Ready to type anywhere."
+        case .microphone: return "Drop can hear you now."
+        case .inputMonitoring: return "Drop can see its shortcut."
+        case .screenRecording: return "Ready for Shot and the Agent."
         }
     }
 
     var notOnLine: String {
         switch self {
-        case .keyboard: return "Whytap isn’t on in Accessibility yet — flip its switch to continue."
-        case .microphone: return "Microphone access is still off — turn on Whytap in System Settings."
-        case .inputMonitoring: return "Input Monitoring isn’t on yet — turn on Whytap in System Settings."
-        case .screenRecording: return "Screen Recording isn’t on yet — allow it, or skip for now."
+        case .keyboard: return "Whytap isn’t on in Accessibility yet."
+        case .microphone: return "Microphone access is still off."
+        case .inputMonitoring: return "Input Monitoring isn’t on yet."
+        case .screenRecording: return "Screen Recording isn’t on yet."
         }
     }
 
@@ -624,7 +624,7 @@ struct OnboardingAccessStage: View {
         case .waiting:
             VStack(spacing: 5) {
                 (Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                    + Text(" in System Settings, then return here."))
+                    + Text(", then come back here."))
                     .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.muted)
                 HStack(spacing: 7) {
@@ -669,7 +669,7 @@ struct OnboardingAccessStage: View {
     }
 }
 
-/// The access step's capsule: Allow →, Waiting for System Settings… (no
+/// The access step's capsule: Allow →, Waiting… (no
 /// spinner), Allowed ✓, Allow again →.
 struct OnboardingAccessPill: View {
     let kind: OnboardingAccessKind
@@ -681,7 +681,7 @@ struct OnboardingAccessPill: View {
         case .rest:
             OnboardingWirePill("Allow", isDefault: true, action: action).accessibilityLabel("Allow \(kind.pane)")
         case .waiting:
-            OnboardingWirePill("Waiting for System Settings…", tone: .active, disc: .none, action: action)
+            OnboardingWirePill("Waiting…", tone: .active, disc: .none, action: action)
         case .granted:
             OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
         case .notOn:

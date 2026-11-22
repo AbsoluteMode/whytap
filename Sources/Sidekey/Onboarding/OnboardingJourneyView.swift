@@ -154,11 +154,9 @@ struct OnboardingJourneyView: View {
 
     @ViewBuilder private var leftAction: some View {
         let outcome = model.outcome(model.step)
-        if model.step == .hotkeys {
-            OnboardingOutlineButton(title: "Open Hotkeys") { model.openSettings(.hotkeys, nil) }.fixedSize()
-        } else if model.step == .toolbox {
-            OnboardingOutlineButton(title: "Open Toolbox") { model.openSettings(.toolbox, nil) }.fixedSize()
-        } else if model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
+        // Shortcuts and Toolbox name their Settings tab in the lede; a second
+        // "Open …" button here said it twice.
+        if model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
                   !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
             // Step 1 has no skip: its two figures are the choice. Screen
             // Recording and Try Drop have their own Skip under the capsule.

@@ -819,6 +819,23 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(command.modifiers.count, 3)
     }
 
+    /// Try Drop says which key to hold once, in the field's header: the
+    /// placeholder, the line under the field and the capsule do not repeat it.
+    func testTryDropSaysTheKeyOnce() {
+        let placeholder = OnboardingTryDropStage.placeholder.lowercased()
+        XCTAssertFalse(placeholder.contains("hold") || placeholder.contains("press") || placeholder.contains("space"))
+        for holds in [true, false] {
+            XCTAssertEqual(OnboardingTryDropStage.hint(.waiting, holds: holds), "", "no line at rest")
+            let states: [OnboardingTryState] = [.waiting, .recording, .done, .failed(OnboardingJourneyModel.noSpeech)]
+            for state in states {
+                let line = OnboardingTryDropStage.hint(state, holds: holds)
+                XCTAssertFalse(line.hasPrefix("Hold") || line.contains("Space"), "\(state) repeats the instruction")
+            }
+        }
+        XCTAssertEqual(OnboardingTryDropStage.hint(.failed(OnboardingJourneyModel.noSpeech), holds: true),
+                       OnboardingJourneyModel.noSpeech)
+    }
+
     /// The ring shows the whole Toolbox catalog Settings lists (every tool
     /// but Settings, a tool not out yet included), and the card names the
     /// tool under the pointer or says what Toolbox is.

@@ -103,7 +103,6 @@ struct OnboardingTryDropStage: View {
         }
     }
 
-    private var key: String { shortcut.title }
     private var holds: Bool { gesture == .hold }
 
     var body: some View {
@@ -115,12 +114,16 @@ struct OnboardingTryDropStage: View {
             hint
                 .frame(height: 22)
                 .padding(.top, 7)
+            // The capsule is only a result (Continue); the field's header is
+            // the one place that says which key to hold.
+            // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
             HStack(spacing: 14) {
                 pill
                 if case .done = state {} else if case .recording = state {} else {
                     OnboardingWireLink(title: "Skip", arrow: "arrow.right", action: model.next)
                 }
             }
+            .frame(height: 46)
             .padding(.top, 6)
             Spacer(minLength: 0)
         }
@@ -161,12 +164,10 @@ struct OnboardingTryDropStage: View {
 
     private var status: (String, Color) {
         switch state {
-        case .waiting: return ("REAL TEXT FIELD", OnboardingTheme.faint)
+        case .waiting, .failed: return ("", OnboardingTheme.faint)
         case .recording: return ("LISTENING", OnboardingTheme.muted)
         case .done:
-            let seconds = model.tryDropSeconds.map { String(format: "%.1fS · ", $0) } ?? ""
-            return ("\(seconds)ANY APP", OnboardingWireframeInk.greenColor)
-        case .failed: return ("TRY AGAIN", OnboardingWireframeInk.amberColor)
+            return (model.tryDropSeconds.map { String(format: "%.1f S", $0) } ?? "", OnboardingWireframeInk.greenColor)
         }
     }
 
@@ -187,7 +188,7 @@ struct OnboardingTryDropStage: View {
             .padding(.horizontal, 14)
             .frame(height: 36)
             .overlay(Rectangle().fill(OnboardingTheme.border).frame(height: 0.5), alignment: .bottom)
-            OnboardingTryField(placeholder: "Click here, \(holds ? "hold" : "press") \(key), and say a sentence…",
+            OnboardingTryField(placeholder: Self.placeholder,
                                take: take, onDictated: model.noteDictated)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -199,20 +200,23 @@ struct OnboardingTryDropStage: View {
             .strokeBorder(state == .waiting ? OnboardingTheme.borderStrong : state.tone.border, lineWidth: 1))
     }
 
-    private var hint: some View {
-        let text: String
+    /// The field's empty text: where the words go, not which key to hold.
+    static let placeholder = "Your words land here"
+
+    /// The line under the field: only for a take that runs, arrived or
+    /// failed. Nothing at rest: the field's header already says which key.
+    static func hint(_ state: OnboardingTryState, holds: Bool) -> String {
         switch state {
-        case .waiting:
-            text = holds ? "Hold \(key), speak, and let go." : "Press \(key), speak, and press it again."
+        case .waiting: return ""
         case .recording:
-            text = holds ? "Speak now — release \(key) to drop the text at your cursor."
-                : "Speak now — press \(key) again to drop the text at your cursor."
-        case .done:
-            text = "That’s Drop — the same shortcut works in any app."
-        case .failed(let reason):
-            text = reason
+            return holds ? "Let go to drop the text at your cursor." : "Press it again to drop the text at your cursor."
+        case .done: return "That’s Drop — the same shortcut works in any app."
+        case .failed(let reason): return reason
         }
-        return Text(text)
+    }
+
+    private var hint: some View {
+        Text(Self.hint(state, holds: holds))
             .font(OnboardingTheme.sans(13))
             .foregroundColor(state.tone.lineColor)
             .lineLimit(1)
@@ -225,21 +229,24 @@ struct OnboardingTryDropStage: View {
         case .done:
             OnboardingWirePill("Continue", tone: .done, disc: .check, isDefault: true, action: model.next)
         case .recording:
-            OnboardingWirePill(holds ? "Release \(key) to drop" : "Press \(key) again to drop", tone: .active,
-                               disc: .none, interactive: false, action: {})
+            // The standalone preview keeps its capsule under the pointer
+            // while it is held; the app shows nothing here.
+            if model.isPreview { previewTake }
         case .waiting, .failed:
-            let title = "\(holds ? "Hold" : "Press") \(key) to \(state == .waiting ? "speak" : "try again")"
-            if model.isPreview {
-                // The preview has no Drop: holding the capsule stands in for the key.
-                OnboardingWirePill(title, tone: state.tone, disc: .arrow, interactive: false, action: {})
-                    .gesture(DragGesture(minimumDistance: 0)
-                        .onChanged { _ in startPretendTake() }
-                        .onEnded { _ in endPretendTake() })
-            } else {
-                // A status, not a button: the take starts with the key itself.
-                OnboardingWirePill(title, tone: state.tone, disc: .none, interactive: false, action: {})
-            }
+            // The app shows no capsule: the take starts with the key itself.
+            if model.isPreview { previewTake }
         }
+    }
+
+    /// Only in the standalone preview, which has no Drop: holding this
+    /// capsule stands in for the key. It names what it is, not what to do.
+    private var previewTake: some View {
+        OnboardingWirePill(tone: state.tone, disc: .none, interactive: false, action: {}) {
+            Label("Preview take", systemImage: "mic")
+        }
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in startPretendTake() }
+            .onEnded { _ in endPretendTake() })
     }
 
     private func startPretendTake() {

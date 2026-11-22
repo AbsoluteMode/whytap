@@ -362,9 +362,10 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   max_uses 2); else the Tavily web_search function when its key exists; else
   no search tool and a prompt line telling the model to say so. Anthropic's
   catalog flag capabilities.server_tools.web_search.supported decides when
-  present; a few OpenAI families without search are excluded by ID. The
-  Settings -> Other -> Agent switch agent.native.webSearchPrefersTavily (off by
-  default) chooses Tavily when its key exists. A 400 on the turn's first request
+  present; a few OpenAI families without search are excluded by ID. With
+  built-in search Tavily is never called, even with a key: the function is not
+  offered and a call to it gets an "unavailable" tool result. There is no
+  switch to prefer Tavily. A 400 on the turn's first request
   with built-in search retries once without it (nothing has run or been billed);
   later failures are never retried. Anthropic server blocks, including
   encrypted_content, are replayed verbatim; pause_turn and a search without a

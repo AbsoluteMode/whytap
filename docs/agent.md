@@ -41,13 +41,13 @@ never sees a separate search request. The pages the model cites appear as
 source cards. If the model lists none itself, Whytap shows the provider's
 citations (up to five).
 
-**Tavily** is the fallback. Add its key in **Settings → API & Models → API
-keys** (saving checks the key without running a search). It is used when the
-model has no web search of its own (the Anthropic catalog says so, a few old
-OpenAI models such as `gpt-4.1-nano`, or the provider rejects the search tool
-on the first request), or when **Search the web with Tavily** is on in
-**Settings → Other → Agent**. Only the search query goes to Tavily; the
-returned excerpts and links go to your selected model. With neither, the
+**Tavily** is only for a model without web search of its own: the Anthropic
+catalog says so, a few old OpenAI models such as `gpt-4.1-nano`, or the
+provider rejects the search tool on the first request. When the provider can
+search, Tavily is never called, even with its key saved. Add the key in
+**Settings → API & Models → API keys** (saving checks the key without running
+a search). Only the search query goes to Tavily; the returned excerpts and
+links go to your selected model. With neither, the
 Agent has no search tool and says it could not check the web instead of
 inventing recent facts.
 

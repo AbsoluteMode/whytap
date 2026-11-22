@@ -2,7 +2,7 @@
 id: agent-provider-web-search-2026-11-22
 type: decision
 title: The native Agent searches with its model provider's own web search; Tavily is the fallback
-summary: On Anthropic, OpenAI and OpenRouter routes the Agent sends the provider's server-side web search tool instead of requiring a Tavily key; Tavily stays for models without it or by the user's choice, and with neither the Agent says it cannot check the web.
+summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches only with the provider's server-side web search tool, even when a Tavily key exists; Tavily is only for models without built-in search, and with neither the Agent says it cannot check the web.
 status: confirmed
 tags: [agent, native-agent, web-search, tavily, anthropic, openai, openrouter, costs]
 canonical_for: [agent-web-search]
@@ -10,6 +10,9 @@ verified_at: 2026-11-22
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer approved ("yes, do it") moving the Agent to the provider's built-in web search with Tavily as fallback (orchestrator task 78).
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-22 the maintainer clarified that when search works without Tavily, Tavily is not used, and that no switch to prefer Tavily is needed.
     confirmed_at: 2026-11-22
   - type: url
     reference: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
@@ -45,10 +48,10 @@ Anthropic's web search, OpenAI's Responses `web_search` and OpenRouter's
 Each turn resolves one search (`NativeAgentWebSearch.resolve`):
 
 1. **Built-in** when the route is Anthropic, OpenAI or OpenRouter and the model
-   has it. This is the default.
-2. **Tavily** when its key exists and the model has no built-in search, or the
-   user turned on **Search the web with Tavily** (Settings → Other → Agent,
-   `agent.native.webSearchPrefersTavily`, off by default).
+   has it. Then only the built-in search is used: the Tavily function is not
+   offered, and a call to it gets an "unavailable" tool result without
+   reaching Tavily, even when its key is saved.
+2. **Tavily** when its key exists and the model has no built-in search.
 3. **None** otherwise: no search tool is sent and a prompt line tells the model
    to say it could not check the web and where search is enabled.
 
@@ -88,8 +91,9 @@ unavailable, never 0.
 - The Agent's most common "current facts" question worked only after the user
   found and connected a second service. The provider already has the user's
   key, billing and privacy terms.
-- Default built-in, Tavily as a switch: one obvious path, and a free option
-  (Tavily's 1,000 monthly credits) for users who prefer it.
+- The maintainer's rule: if search works without Tavily, Tavily is not used.
+  One path per model, no setting to explain; Tavily keeps models without
+  search useful.
 - Anthropic's basic tool version stays ZDR-eligible and works with the
   existing `anthropic-version: 2023-06-01`; dynamic filtering (`_20260209`+)
   would need programmatic tool calling or `allowed_callers` and loses ZDR.
@@ -106,10 +110,11 @@ unavailable, never 0.
   Tavily (pause_turn, verbatim encrypted replay, citation cards, cost with the
   search fee), a catalog-unsupported model falling back to Tavily, a rejected
   first request retrying once with Tavily, a later rejection not retried, no
-  search at all (no tool, honest prompt line, unverified answer), a provider
+  search at all (no tool, honest prompt line, unverified answer), Tavily never
+  called on a built-in route even with a key, a provider
   search error and a Tavily timeout, OpenAI and OpenRouter request shapes,
   OpenAI continuation after a search without a function call, model sources
-  winning over provider citations, settings persistence and backup.
+  winning over provider citations.
 - Not verified live: no paid request was made. In particular OpenAI's replay
   of `web_search_call` items with `store: false`, OpenRouter's server tool on
   Chat Completions with `tool_choice: "required"`, and the exact shape of
@@ -118,6 +123,9 @@ unavailable, never 0.
 
 ## Rejected
 
+- A Settings switch to prefer Tavily over built-in search (first version of
+  this PR): the maintainer ruled that Tavily is not used when search works
+  without it.
 - Keep Tavily mandatory: the reason for this change.
 - OpenRouter `:online` / `plugins: [{id: "web"}]`: deprecated by OpenRouter.
 - Anthropic `web_search_20260318` with dynamic filtering: needs a newer API

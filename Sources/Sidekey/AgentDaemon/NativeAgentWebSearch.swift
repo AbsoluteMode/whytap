@@ -1,8 +1,8 @@
 import Foundation
 
-/// How the native Agent searches the web in one turn. The provider's own
-/// search is the default on Anthropic, OpenAI and OpenRouter; Tavily is the
-/// fallback for a model without it, or the user's explicit choice.
+/// How the native Agent searches the web in one turn. When the provider has
+/// its own search, only that is used, even with a Tavily key: Tavily is only
+/// for a model without built-in search (maintainer's rule, 2026-11-22).
 /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
 enum NativeAgentWebSearch: Equatable {
     /// The route provider's server-side search tool, billed by that provider.
@@ -14,10 +14,9 @@ enum NativeAgentWebSearch: Equatable {
 
     var isBuiltIn: Bool { if case .builtIn = self { return true }; return false }
 
-    /// The turn's search: built-in unless the user prefers Tavily (with a key)
-    /// or the model is known not to support it; Tavily with a key; else none.
+    /// The turn's search: built-in unless the model is known not to support
+    /// it; then Tavily with a key; else none.
     static func resolve(options: AgentRunOptions, tavilyConnected: Bool) -> Self {
-        if options.preferTavilySearch, tavilyConnected { return .tavily }
         if let model = options.model, supportsBuiltIn(provider: options.openCodeProvider, model: model,
                                                       catalogFlag: options.openCodeModelSpec?.webSearch) {
             return .builtIn(options.openCodeProvider)

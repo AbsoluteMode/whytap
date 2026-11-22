@@ -218,6 +218,13 @@ final class NativeAgentProvider: CLIProvider {
                 if appWrite { actionsAttempted = true }
                 let result: NativeAgentToolResult
                 if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
+                else if call.name == "web_search", search != .tavily {
+                    // Tavily is offered only when the model has no search of its
+                    // own; a call to the absent function never reaches Tavily.
+                    result = .init(text: search.isBuiltIn
+                        ? "Tool failed: this function is unavailable. Use the built-in web_search tool."
+                        : "Tool failed: web search is not available in this turn.")
+                }
                 else if searchCount > 2 && call.name == "web_search" { result = .init(text: "Search limit reached; answer using available results.") }
                 else if screenCount > 2 && call.name == "capture_screen" { result = .init(text: "Screen capture limit reached for this request.") }
                 else { result = await tools.execute(call) }

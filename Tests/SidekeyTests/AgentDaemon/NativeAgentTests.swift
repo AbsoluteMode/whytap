@@ -619,9 +619,9 @@ final class NativeAgentTests: XCTestCase {
                                            diagnosticsSink: { diagnostics.append($0) })
         var events: [AgentSSEEvent] = []
         for await event in provider.run(prompt: "weather", resumeSessionID: nil,
-            options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16", preferTavilySearch: true)) { events.append(event) }
+            options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16")) { events.append(event) }
         XCTAssertEqual(modelCalls, 2)
-        XCTAssertEqual(searchCalls, 1)
+        XCTAssertEqual(searchCalls, 0, "OpenRouter has its own search: the absent Tavily function never runs")
         XCTAssertTrue(events.contains { if case .error(_, let text, _) = $0 { return text.contains("invalid_prompt") && !text.contains("SYNTHETIC_PRIVATE_CONTENT") }; return false })
         XCTAssertFalse(events.contains(.done(sources: [])))
         XCTAssertNil(provider.lastSessionID)

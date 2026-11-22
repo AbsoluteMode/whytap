@@ -58,18 +58,18 @@ final class NativeAgentWebSearchTests: XCTestCase {
 
     // MARK: - Choosing the search
 
-    func testResolutionPrefersBuiltInThenTavilyThenNone() {
-        func resolve(_ provider: OpenCodeModelProvider, _ model: String, flag: Bool? = nil,
-                     prefer: Bool = false, tavily: Bool) -> NativeAgentWebSearch {
+    func testResolutionUsesBuiltInWheneverPossibleThenTavilyThenNone() {
+        func resolve(_ provider: OpenCodeModelProvider, _ model: String, flag: Bool? = nil, tavily: Bool) -> NativeAgentWebSearch {
             let spec = flag.map { OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 200_000, outputLimit: 8192, webSearch: $0) }
-            return NativeAgentWebSearch.resolve(options: .init(model: model, openCodeModelSpec: spec, openCodeProvider: provider,
-                                                               preferTavilySearch: prefer), tavilyConnected: tavily)
+            return NativeAgentWebSearch.resolve(options: .init(model: model, openCodeModelSpec: spec, openCodeProvider: provider),
+                                                tavilyConnected: tavily)
         }
         XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", tavily: false), .builtIn(.anthropic))
-        XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", tavily: true), .builtIn(.anthropic), "Built-in is the default")
-        XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", prefer: true, tavily: true), .tavily, "The user chose Tavily")
-        XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", prefer: true, tavily: false), .builtIn(.anthropic),
-                       "Preferring Tavily without its key keeps working search")
+        XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", tavily: true), .builtIn(.anthropic),
+                       "A Tavily key never replaces the provider's own search")
+        XCTAssertEqual(resolve(.anthropic, "claude-opus-5-5", flag: true, tavily: true), .builtIn(.anthropic))
+        XCTAssertEqual(resolve(.openAI, "gpt-6.2-astra", tavily: true), .builtIn(.openAI))
+        XCTAssertEqual(resolve(.openRouter, "qwen/qwen3.8-27b", tavily: true), .builtIn(.openRouter))
         XCTAssertEqual(resolve(.anthropic, "old-claude", flag: false, tavily: true), .tavily, "Catalog says no built-in search")
         XCTAssertEqual(resolve(.anthropic, "old-claude", flag: false, tavily: false), .none)
         XCTAssertEqual(resolve(.openAI, "gpt-6.2-astra", tavily: false), .builtIn(.openAI))
@@ -79,16 +79,30 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(NativeAgentWebSearch.resolve(options: .init(model: nil, openCodeProvider: .anthropic), tavilyConnected: false), .none)
     }
 
-    func testPreferenceIsOffByDefaultPersistsAndReachesTheRun() {
-        let name = #function
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
-        let store = AgentSettingsStore(defaults: defaults, codexConfig: .init())
-        XCTAssertFalse(store.webSearchPrefersTavily)
-        XCTAssertFalse(store.options(for: .native).preferTavilySearch)
-        store.webSearchPrefersTavily = true
-        XCTAssertTrue(AgentSettingsStore(defaults: defaults, codexConfig: .init()).options(for: .native).preferTavilySearch)
-        XCTAssertTrue(ConfigBackupRegistry.entries.contains { $0.key == "agent.native.webSearchPrefersTavily" })
+    func testWithBuiltInSearchTavilyIsNeverCalledEvenWithAKey() async throws {
+        let (directory, keys, http) = try fixture()
+        try keys.save("anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+        try keys.save("tavily-key", account: TavilySearch.keychainAccount)
+        var calls = 0
+        StubURLProtocol.handler = { request in
+            XCTAssertNotEqual(request.url?.host, "api.tavily.com")
+            calls += 1
+            if calls == 1 {
+                // A model that still asks for the absent Tavily function.
+                return self.serve(["stop_reason": "tool_use", "content": [
+                    ["type": "tool_use", "id": "t", "name": "web_search", "input": ["query": "q"]]]])
+            }
+            return self.serve(["stop_reason": "tool_use", "content": [
+                ["type": "tool_use", "id": "f", "name": "finish_answer", "input": self.final("Answer.")]]])
+        }
+        let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
+        let events = await run(provider, "q", .init(model: "claude-opus-5-5", openCodeProvider: .anthropic))
+        let tools = try XCTUnwrap(try body(0)["tools"] as? [[String: Any]])
+        XCTAssertTrue(tools.contains { $0["type"] as? String == "web_search_20250305" })
+        XCTAssertFalse(tools.contains { $0["input_schema"] != nil && $0["name"] as? String == "web_search" })
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.host ?? "" }, ["api.anthropic.com", "api.anthropic.com"])
+        XCTAssertTrue(text(1).contains("Use the built-in web_search tool"))
+        XCTAssertEqual(finalText(events), "Answer.")
     }
 
     func testAnthropicCatalogStatesWebSearchSupport() throws {
@@ -401,28 +415,28 @@ final class NativeAgentWebSearchTests: XCTestCase {
 
     func testTavilyTimeoutReachesTheModelAsAFailedToolAndTheTurnFinishes() async throws {
         let (directory, keys, http) = try fixture()
-        try keys.save("router-key", account: OpenRouterLLMKeyStore.account)
+        try keys.save("openai-key", account: ProviderAccount.openAIKeychainAccount)
         try keys.save("tavily-key", account: TavilySearch.keychainAccount)
         var modelCalls = 0
         StubURLProtocol.handler = { request in
             if request.url?.host == "api.tavily.com" { throw URLError(.timedOut) }
             modelCalls += 1
             if modelCalls == 1 {
-                return self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
-                    "tool_calls": [["id": "s", "type": "function", "function": ["name": "web_search", "arguments": "{\"query\":\"q\"}"]]]]]]])
+                return self.serve(["status": "completed", "output": [
+                    ["type": "function_call", "call_id": "s", "name": "web_search", "arguments": "{\"query\":\"q\"}"]]])
             }
-            return self.serve(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
-                "tool_calls": [["id": "f", "type": "function", "function": ["name": "finish_answer",
-                    "arguments": self.arguments(self.final("Search timed out; I couldn't check.", status: "unverified"))]]]]]]])
+            return self.serve(["status": "completed", "output": [["type": "function_call", "call_id": "f", "name": "finish_answer",
+                "arguments": self.arguments(self.final("Search timed out; I couldn't check.", status: "unverified"))]]])
         }
         let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
-        let events = await run(provider, "q", .init(model: "qwen/qwen3.8-27b", preferTavilySearch: true))
+        // gpt-4.1-nano has no built-in search, so this turn uses Tavily.
+        let events = await run(provider, "q", .init(model: "gpt-4.1-nano", openCodeProvider: .openAI))
         XCTAssertEqual(modelCalls, 2)
         // Requests: model, Tavily (timed out), model.
-        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.host ?? "" }, ["openrouter.ai", "api.tavily.com", "openrouter.ai"])
-        let toolMessage = try XCTUnwrap((try body(2)["messages"] as? [[String: Any]])?.first { $0["role"] as? String == "tool" })
-        XCTAssertTrue((toolMessage["content"] as? String)?.hasPrefix("Tool failed:") == true)
-        XCTAssertFalse(String(describing: toolMessage).contains("tavily-key"))
+        XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.host ?? "" }, ["api.openai.com", "api.tavily.com", "api.openai.com"])
+        let toolOutput = try XCTUnwrap((try body(2)["input"] as? [[String: Any]])?.first { $0["type"] as? String == "function_call_output" })
+        XCTAssertTrue((toolOutput["output"] as? String)?.hasPrefix("Tool failed:") == true)
+        XCTAssertFalse(String(describing: toolOutput).contains("tavily-key"))
         XCTAssertTrue(finalText(events)?.contains("couldn't check") == true)
     }
 

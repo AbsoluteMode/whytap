@@ -150,6 +150,16 @@ final class AIRoutingStore: ObservableObject {
         return server
     }
 
+    /// Which of the server's models the pickers offer. Routes stay as they
+    /// are: a feature already on one of its models keeps it.
+    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+    func setModelKinds(_ kinds: ServerModelKinds, forServer id: UUID) {
+        var updated = stateWithSubtitleSeparation
+        guard let index = updated.servers.firstIndex(where: { $0.id == id }) else { return }
+        updated.servers[index].modelKinds = kinds
+        commit(updated)
+    }
+
     /// Removes the server and un-sets every feature that ran on it. Those
     /// features become Not set; none moves to another provider.
     func removeServer(_ id: UUID) {

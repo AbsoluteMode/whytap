@@ -621,7 +621,8 @@ struct OnboardingKeyCard: View {
         let hasKey = isSaved(offer.target)
         let refusal = offer.target.speechKind.flatMap(model.keyRefusal)
         let forDrop = offer.target.speechKind.map { model.chosenDrop == .provider($0) } ?? false
-        return Button {
+        let highlighted = selected || forDrop
+        return OnboardingKeyTileButton(highlighted: highlighted, isEnabled: !saving) {
             model.keyTarget = selected ? nil : offer.target
             // A saved speech key is a choice for Drop, applied by Continue.
             if hasKey, refusal == nil, let kind = offer.target.speechKind { model.pickDrop(.provider(kind)) }
@@ -664,18 +665,7 @@ struct OnboardingKeyCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 3)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected || forDrop ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(selected || forDrop ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
-                              lineWidth: selected || forDrop ? 1.2 : 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .disabled(saving)
         .help(offer.detail ?? offer.target.name)
         .accessibilityLabel("\(offer.target.name), \(offer.category.rawValue.lowercased())"
                             + (offer.short.map { ", \($0)" } ?? ""))
@@ -737,6 +727,8 @@ struct OnboardingKeyCard: View {
     private func save() {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty, !saving, let target = model.keyTarget else { return }
+        // Saving a speech key is the page's latest speech action until another starts.
+        let action = target.speechKind == nil ? nil : model.beginSpeechAction()
         saving = true
         failure = nil
         Task {
@@ -760,7 +752,7 @@ struct OnboardingKeyCard: View {
             } else {
                 if model.keyTarget == target { key = "" }
                 saved.insert(target)
-                if let kind = target.speechKind { model.useKey(kind) }
+                if let kind = target.speechKind, let action { model.useKey(kind, action: action) }
             }
         }
     }
@@ -1386,5 +1378,64 @@ struct OnboardingClipStage: View {
         guard let image = try? await generator.image(at: CMTime(seconds: 0.2, preferredTimescale: 600)).image
         else { return nil }
         return NSImage(cgImage: image, size: .zero)
+    }
+}
+
+/// A key tile: the whole tile is the control. Hover lightens all of it, a
+/// press dims and shrinks it slightly, keyboard focus draws the accent ring
+/// and, while a key is being saved, every tile is visibly unavailable.
+// WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+struct OnboardingKeyTileButton<Label: View>: View {
+    let highlighted: Bool
+    var isEnabled = true
+    let action: () -> Void
+    @ViewBuilder let label: Label
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) { label }
+            .buttonStyle(Style(highlighted: highlighted, hovered: hovered && isEnabled,
+                               focused: focused, isEnabled: isEnabled))
+            .disabled(!isEnabled)
+            // The accent ring is the focus indicator; no second system ring.
+            .focusEffectDisabled()
+            .focused($focused)
+            .onHover { hovered = $0 }
+    }
+
+    struct Style: ButtonStyle {
+        let highlighted: Bool
+        let hovered: Bool
+        let focused: Bool
+        let isEnabled: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        func makeBody(configuration: Configuration) -> some View {
+            let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+            let pressed = configuration.isPressed && isEnabled
+            configuration.label
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 3)
+                .background(shape.fill(fill(pressed: pressed)))
+                .overlay(shape.strokeBorder(stroke, lineWidth: highlighted ? 1.2 : 0.75))
+                .overlay(shape.inset(by: -2.5).strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
+                .opacity(isEnabled ? (pressed ? 0.85 : 1) : 0.45)
+                .scaleEffect(pressed && !reduceMotion ? 0.97 : 1)
+                .contentShape(shape)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: pressed)
+        }
+
+        private func fill(pressed: Bool) -> Color {
+            if highlighted { return OnboardingTheme.accent.opacity(pressed ? 0.22 : hovered ? 0.19 : 0.14) }
+            return pressed ? OnboardingTheme.surface3 : hovered ? OnboardingTheme.surface3.opacity(0.85) : OnboardingTheme.surface2
+        }
+
+        private var stroke: Color {
+            if highlighted { return OnboardingTheme.accent.opacity(0.8) }
+            return hovered ? OnboardingTheme.borderStrong : OnboardingTheme.border
+        }
     }
 }

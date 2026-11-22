@@ -1,13 +1,13 @@
 import Combine
 import Foundation
 
-/// One provider account in the API keys row. Carries the check outcome, never
-/// the key.
+/// One provider account in the API keys row, with its check and server settings.
 struct KeyChip: Equatable, Identifiable {
     let account: ProviderAccount
     let title: String
     let statusText: String
     let checkedAt: Date?
+    var modelKinds: ServerModelKinds? = nil
     var id: String { account.storageID }
 }
 
@@ -313,6 +313,20 @@ final class APIAndModelsViewModel: ObservableObject {
         await store(key, for: account, proposing: false)
     }
 
+    /// Which of a server's models the pickers offer; `nil` for any other account.
+    private func modelKinds(of account: ProviderAccount) -> ServerModelKinds? {
+        guard case .server(let id) = account else { return nil }
+        return routing.server(id)?.modelKinds
+    }
+
+    /// Changes only what pickers offer: routes already on the server stay.
+    // WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+    func setModelKinds(_ kinds: ServerModelKinds, for account: ProviderAccount) {
+        guard case .server(let id) = account else { return }
+        routing.setModelKinds(kinds, forServer: id)
+        recompute()
+    }
+
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
         AIFeature.activeCases.filter { routing.route(for: $0)?.account == account }
     }
@@ -345,14 +359,23 @@ final class APIAndModelsViewModel: ObservableObject {
     /// be used (the onboarding's Continue). `nil` without a readable key. A
     /// free "limited" does not clear a recorded refusal, as on opening.
     func checkSavedKey(_ account: ProviderAccount) async -> KeyStatus? {
-        guard let access = access(account) else { return nil }
-        let status = await keyChecker.check(account, apiKey: access.apiKey, server: access.server, allowPaidProbe: false)
-        if status == .limited, case .rejected(let reason) = keyStatuses.record(for: account)?.status {
-            return .rejected(reason)
+        // An answer counts only for the key it was about: a key replaced in
+        // Settings while the request ran is checked again, never marked with
+        // the old key's result.
+        // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+        for _ in 0..<3 {
+            guard let checked = access(account) else { return nil }
+            let status = await keyChecker.check(account, apiKey: checked.apiKey, server: checked.server, allowPaidProbe: false)
+            guard let current = access(account) else { return nil }
+            guard current.apiKey == checked.apiKey else { continue }
+            if status == .limited, case .rejected(let reason) = keyStatuses.record(for: account)?.status {
+                return .rejected(reason)
+            }
+            keyStatuses.set(status, for: account, at: now())
+            recompute()
+            return status
         }
-        keyStatuses.set(status, for: account, at: now())
-        recompute()
-        return status
+        return nil
     }
 
     /// Why a saved key was refused, in the API keys tile's words; `nil` when
@@ -820,15 +843,16 @@ final class APIAndModelsViewModel: ObservableObject {
         if account == .thisMac {
             return KeyChip(account: account, title: title(of: account), statusText: "Model downloaded", checkedAt: nil)
         }
+        let kinds = modelKinds(of: account)
         if lookup(account) == .unreadable {
             return KeyChip(account: account, title: title(of: account),
-                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil)
+                           statusText: "Couldn't read the key from the Keychain", checkedAt: nil, modelKinds: kinds)
         }
         let record = keyStatuses.record(for: account)
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt
+            checkedAt: record?.checkedAt, modelKinds: kinds
         )
     }
 

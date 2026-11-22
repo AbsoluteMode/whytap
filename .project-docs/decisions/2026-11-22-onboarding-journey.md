@@ -101,8 +101,8 @@ window, Back and a progress bar.
   longer holds the move (a pointer resting on the page would have stopped
   it silently). Back to a step that is done, or to a tour step, never moves
   by itself and offers the plain Next; Back during the dwell cancels it.
-  The tour steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when
-  reached going forward. Required steps keep a quiet "Set up later",
+  The tour steps (Shortcuts, Toolbox, Help) and Finish have no timer since
+  REV 60: they wait for Continue or Return. Required steps keep a quiet "Set up later",
   optional ones "Skip"; a step that is done without a pending move offers
   Next. Step 1 has neither: its two figures are the choice (the owner asked
   to remove its skip).
@@ -409,15 +409,32 @@ window, Back and a progress bar.
   AppState.phase). Shortcuts: three wire keys over the person's shortcuts
   in two columns (Drop, the Agent marked Off while it is off, then the tools
   that have a shortcut, six at most); a row's modifier keys go down while
-  the pointer is on it. Toolbox: the top of a display with the island on
-  it; hovering (or clicking) the island fans the person's own tools out
-  above it with thin leader lines, and the tool under the pointer is named
-  and described from HoverToolRegistry. whytap.ai: four small solids on a
+  the pointer is on it. Toolbox (REV 60): see below. whytap.ai: four small solids on a
   ring over one Ask card with the real question and answer kept from
   before. Finish: "You're all set.", the key, open padlock, globe and
   Command key turning on one ring, "We hope you'll love having Whytap on
   your Mac." and Finish; the receipt table is gone. Each of these steps has
   its own capsule, so the footer adds no Next or Skip there.
+- **Steps without an action wait for Continue; Toolbox is a ring.** The
+  owner, REV 60, after testing the preview: remove the timers, the screens
+  without an action (Shortcuts, Toolbox, whytap.ai) must not move on by
+  themselves, only by Continue or Return, and their progress segment must
+  not fill over time; the short pause after a success on a step with an
+  action stays, so the padlock or key finishes its animation. A tour step
+  that leaves while the person is still reading loses what it was showing.
+  For Toolbox he asked to drop the display frame and put every Toolbox tool
+  (the app's whole catalog, not six) on a circle with a card in the middle:
+  "Toolbox", the tool under the pointer and its short description, or a
+  general line when nothing is hovered; hovering a tile lights it and
+  changes the card. The ring holds the catalog Settings → Toolbox lists
+  (every tool but Settings, which is always on the island; a tool not out
+  yet is dimmed and its card says so), not the person's own layout, which
+  that subtitle sends them to choose. Nineteen tiles do not fit a true
+  circle in the 520 by 440 window without touching, so the circle is drawn
+  tilted toward the person: about twice as wide as tall, the near tiles a
+  little larger, tiles at equal steps along the ring (equal angles crowd
+  its narrow ends). A thin rose spoke joins the card to the lit tile; the
+  keyboard focus lights a tile like the pointer.
 - **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
   just give a search above 10 models". When the accepted provider's catalog
   has more than ten usable models (`OnboardingModelSearch.threshold`), the
@@ -517,12 +534,21 @@ window, Back and a progress bar.
 
 ## What was tested
 
+- REV 60: Shortcuts, Toolbox and whytap.ai keep the dwell idle and their
+  segment empty and wait for Continue however long the person reads, and
+  Back to one offers Continue again; the Toolbox ring holds every catalog
+  tool but Settings, with a tool not out yet, and nineteen 30-point tiles
+  never touch at their tilted sizes in the window; its card names the tool and its
+  description or says what Toolbox is; offscreen renders of Toolbox with no
+  tool and with Case lit.
+
 - REV 58: on Try Drop a take with nothing in the field says "No speech
   heard", the next take clears it, a take that reached the insert elsewhere
   and Drop's delivery failure each have their own line, and a take that
   arrived records its time; Shortcuts lists Drop and the Agent first, the
   Agent Off while off, only tools with a shortcut, six at most; the island
-  shows the person's tools without Settings or tools not out yet;
+  showed the person's tools without Settings or tools not out yet (replaced
+  in REV 60);
   offscreen renders of Try Drop in four states, Shortcuts, Toolbox idle and
   open, whytap.ai and Finish, and the whole window on each step.
 

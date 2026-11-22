@@ -557,16 +557,20 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .llmKey, in: model)
     }
 
-    func testTourChaptersMoveOnAfterAReadingPauseOnlyGoingForward() async throws {
+    func testTourChaptersWaitForContinue() async throws {
         let env = try makeEnv(accessibility: true, microphone: .authorized)
         let model = try makeModel(env, hotkey: .ready)
         while model.step != .tryDrop && model.step != .hotkeys { model.next() }
         if model.step == .tryDrop { model.next() }
         XCTAssertEqual(model.step, .hotkeys)
-        XCTAssertTrue(model.dwell.isCounting, "Shortcuts moves on by itself after the reading pause")
-        try await endBeat(env, until: .toolbox, in: model)
+        XCTAssertFalse(model.dwell.isCounting, "Shortcuts has no timer")
+        env.beat.end()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.step, .hotkeys, "it waits however long the person reads")
+        model.next()
+        XCTAssertEqual(model.step, .toolbox)
         model.back()
-        XCTAssertEqual(model.dwell.state, .reviewing(next: "Toolbox"), "Back to a chapter does not run it again")
+        XCTAssertEqual(model.dwell.state, .reviewing(next: "Toolbox"), "Back to a chapter offers Continue again")
     }
 
     // MARK: - Language
@@ -630,7 +634,13 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.onFinish = { finished = true }
         while model.step != .hotkeys { model.next() }
         XCTAssertEqual(model.steps.suffix(4), [.hotkeys, .toolbox, .help, .thanks])
-        model.next(); model.next(); model.next()
+        let tour: [OnboardingStep] = [.hotkeys, .toolbox, .help]
+        for step in tour {
+            XCTAssertEqual(model.step, step)
+            XCTAssertEqual(model.dwell.state, OnboardingDwellController.State.idle, "\(step) has no timer")
+            XCTAssertEqual(model.dwell.fraction, 0, "its segment does not fill by time")
+            model.next()
+        }
         XCTAssertEqual(model.step, .thanks)
         XCTAssertEqual(model.fraction, 1)
         model.next()
@@ -782,9 +792,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             ("try-failed", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
                                                           shownState: .failed(OnboardingJourneyModel.noSpeech)))),
             ("shortcuts", AnyView(OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration))),
-            ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model, slots: model.toolbox.slots))),
-            ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, slots: model.toolbox.slots,
-                                                            shownTool: OnboardingToolboxStage.tools(model.toolbox.slots).first))),
+            ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
+            ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
             ("help", AnyView(OnboardingHelpStage(model: model))),
             ("finish", AnyView(OnboardingFinishStage(model: model))),
         ]

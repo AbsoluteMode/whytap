@@ -1248,10 +1248,14 @@ lede becomes soft waves that follow the voice, with no island chip; a take that
 ends with nothing in the field gets one calm line ("No speech heard - try
 again.", the text went to another field, or Drop's delivery failure) and a new
 take clears it. Shortcuts lists Drop, the Agent and the tools with a shortcut
-under three wire keys; Toolbox fans the person's own tools out above a drawn
-island when it is hovered, with HoverToolRegistry's descriptions; whytap.ai is
+under three wire keys; Toolbox puts the whole Toolbox catalog (every tool but
+Settings, as Settings → Toolbox lists it) on a tilted ring around a card that
+names the tool under the pointer with HoverToolRegistry's description, or says
+what Toolbox is when none is; whytap.ai is
 one Ask card under four small solids; Finish has no summary, only the
-constellation of the earlier figures, one line and Finish.
+constellation of the earlier figures, one line and Finish. Shortcuts, Toolbox,
+whytap.ai and Finish have no timer: they wait for Continue (or Return), and
+their progress segment does not fill by time.
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
 does not link. System Audio Recording, Automation and Calendar are asked at

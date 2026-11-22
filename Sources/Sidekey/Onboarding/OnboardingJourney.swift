@@ -75,7 +75,8 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     }
 
     /// How long a success stays on screen before the next step (the dwell),
-    /// or `nil` for the last step. Tour chapters move on after a reading pause.
+    /// or `nil` for a step without an action: Shortcuts, Toolbox, whytap.ai
+    /// and Finish wait for Continue (or Return) and never move on by time.
     var dwell: TimeInterval? {
         switch self {
         case .source, .language: return 0.62
@@ -87,13 +88,13 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         // after 1.05 s).
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return 1.05
         case .tryDrop: return 1.35
-        case .hotkeys, .toolbox, .help: return 4.2
-        case .thanks: return nil
+        // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+        case .hotkeys, .toolbox, .help, .thanks: return nil
         }
     }
 
-    /// A step without an action of its own: it moves on after a reading pause
-    /// (or Next), not after a success.
+    /// A step without an action of its own: it moves on only by Continue (or
+    /// Return), never after a pause or a success.
     var isInformational: Bool {
         switch self {
         case .hotkeys, .toolbox, .help, .thanks: return true

@@ -405,174 +405,206 @@ struct OnboardingShortcutsStage: View {
 
 // MARK: - Toolbox
 
-/// Toolbox: the top of a display with the island on it; hovering the island
-/// fans the person's tools out above it, and the tool under the pointer is
-/// named and described below.
+/// Toolbox: every tool of the Toolbox catalog on a ring, a circle tilted
+/// toward the person (the near tiles a little larger), and a card in its
+/// middle. The card names Toolbox and the tool under the pointer (or keyboard
+/// focus) with its short description; with none, a line about Toolbox.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingToolboxStage: View {
     @ObservedObject var model: OnboardingJourneyModel
-    let slots: [HoverTool]
-    /// Offscreen renders show the fan open on a tool.
+    /// Offscreen renders show the card on a tool.
     var shownTool: HoverTool?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var motion = OnboardingFinaleMotion()
-    @State private var open = false
-    @State private var selected: HoverTool?
+    @State private var shown = false
+    @State private var hovered: HoverTool?
+    @State private var picked: HoverTool?
+    @FocusState private var focused: HoverTool?
 
-    init(model: OnboardingJourneyModel, slots: [HoverTool], shownTool: HoverTool? = nil) {
+    init(model: OnboardingJourneyModel, shownTool: HoverTool? = nil) {
         self.model = model
-        self.slots = slots
         self.shownTool = shownTool
-        _open = State(initialValue: shownTool != nil)
-        _selected = State(initialValue: shownTool)
     }
 
-    /// The tools the island shows, in the person's order (up to six).
-    static func tools(_ slots: [HoverTool]) -> [HoverTool] {
-        Array(slots.filter { $0 != .settings && !$0.isComingSoon }.prefix(6))
+    /// The whole Toolbox catalog, as Settings → Toolbox lists it: every tool
+    /// but Settings (always on the island), tools not out yet included.
+    static var tools: [HoverTool] { HoverTool.allCases.filter { $0 != .settings } }
+
+    /// What the card says: the tool's title and short description, or `nil`
+    /// for the line about Toolbox.
+    static func card(for tool: HoverTool?) -> (title: String, text: String) {
+        guard let tool else {
+            return ("Your quick tools", "Point at one to see what it does.")
+        }
+        let info = HoverToolRegistry.info(for: tool)
+        if tool.isComingSoon { return ("\(info.title) · \(CalendarAvailability.badge)", CalendarAvailability.message) }
+        return (info.title, info.description)
     }
 
-    private static let areaHeight: CGFloat = 196
-    private static let islandY: CGFloat = 84
+    static let tile: CGFloat = 30
+
+    private var selected: HoverTool? { hovered ?? focused ?? picked ?? shownTool }
 
     var body: some View {
         VStack(spacing: 0) {
             OnboardingWireTitle(title: "Tools above the island.",
                                 lede: "Hover the island at the top of the screen. Pick yours in Settings → Toolbox.")
-            area
-                .frame(height: Self.areaHeight)
-                .padding(.top, 4)
+            ring
+                .frame(maxHeight: .infinity)
             OnboardingWirePill("Continue", isDefault: true, action: model.next)
-            Spacer(minLength: 0)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
         }
         .frame(maxWidth: .infinity)
+        .onAppear { shown = true }
     }
 
-    private func target(_ index: Int, of count: Int, width: CGFloat) -> CGPoint {
-        let spacing: CGFloat = 70
-        let x = width / 2 + (CGFloat(index) - CGFloat(count - 1) / 2) * spacing
-        let edge = abs(CGFloat(index) - CGFloat(count - 1) / 2) / max(1, CGFloat(count - 1) / 2)
-        return CGPoint(x: x, y: 26 + edge * edge * 8)
+    /// Radii of the ring in this area: the window is wide and low, so the
+    /// circle is seen tilted, about twice as wide as it is tall.
+    private static func radii(_ size: CGSize) -> (x: CGFloat, y: CGFloat) {
+        let y = max(40, size.height / 2 - tile * 0.55 - 1)
+        let x = min(size.width / 2 - tile / 2 - 22, y * 2.2)
+        return (x, y)
     }
 
-    private var area: some View {
-        let tools = Self.tools(slots)
-        let open = self.open
+    /// The tilt: tiles on the near (lower) half of the ring a little larger.
+    static func tileScale(_ spot: CGPoint, in size: CGSize) -> CGFloat {
+        0.9 + 0.1 * (spot.y - size.height / 2) / max(1, radii(size).y)
+    }
+
+    /// The tiles' places, the first at the top, at equal steps along the
+    /// ring (equal angles would crowd its narrow ends).
+    static func spots(_ count: Int, in size: CGSize, spread: CGFloat = 1) -> [CGPoint] {
+        guard count > 0 else { return [] }
+        let r = radii(size)
+        let samples = 720
+        let points = (0...samples).map { i -> CGPoint in
+            let angle = -Double.pi / 2 + Double(i) / Double(samples) * 2 * Double.pi
+            return CGPoint(x: size.width / 2 + CGFloat(cos(angle)) * r.x * spread,
+                           y: size.height / 2 + CGFloat(sin(angle)) * r.y * spread)
+        }
+        var lengths: [CGFloat] = [0]
+        for i in 1...samples {
+            lengths.append(lengths[i - 1] + hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y))
+        }
+        let total = lengths[samples]
+        var spots: [CGPoint] = []
+        var j = 0
+        for index in 0..<count {
+            let goal = total * CGFloat(index) / CGFloat(count)
+            while j < samples, lengths[j + 1] < goal { j += 1 }
+            let part = (goal - lengths[j]) / max(0.0001, lengths[j + 1] - lengths[j])
+            spots.append(CGPoint(x: points[j].x + (points[j + 1].x - points[j].x) * part,
+                                 y: points[j].y + (points[j + 1].y - points[j].y) * part))
+        }
+        return spots
+    }
+
+    private var ring: some View {
+        let tools = Self.tools
         let selected = self.selected
         return GeometryReader { proxy in
-            let width = proxy.size.width
-            let island = CGPoint(x: width / 2, y: Self.islandY)
+            let size = proxy.size
+            let r = Self.radii(size)
+            // The card fills the middle and stays clear of the tiles.
+            let card = CGSize(width: max(150, r.x * 1.25), height: max(64, r.y * 2 - Self.tile * 2.2))
             TimelineView(.animation) { timeline in
                 let _ = motion.advance(to: timeline.date.timeIntervalSinceReferenceDate, reduceMotion: reduceMotion,
-                                       fan: open ? 1 : 0)
-                let fan = max(0, min(1.08, motion.fan.value))
+                                       fan: shown || shownTool != nil ? 1 : 0)
+                let spread = 0.55 + 0.45 * max(0, min(1.04, motion.fan.value))
+                let fade = max(0, min(1, motion.fan.value))
+                let spots = Self.spots(tools.count, in: size, spread: spread)
                 ZStack(alignment: .topLeading) {
                     Canvas { context, size in
-                        let sway = motion.sway(reduceMotion)
-                        OnboardingFinaleFigures.display.draw(
-                            in: &context, center: CGPoint(x: size.width / 2, y: Self.islandY + 62), worldZ: motion.stage.value,
-                            radius: 108, angles: (ax: -0.14 + sway.x * 0.45, ay: sway.y * 0.45, az: 0),
-                            style: OnboardingWireStrokes.style(fade: motion.fade * 0.92, tint: OnboardingWireframeInk.rose,
-                                                               strength: 0.48 + 0.38 * min(1, fan), clock: motion.clock))
-                        guard fan > 0.04 else { return }
-                        for (index, tool) in tools.enumerated() {
-                            let goal = target(index, of: tools.count, width: size.width)
-                            let tip = CGPoint(x: island.x + (goal.x - island.x) * fan, y: island.y - 12 + (goal.y + 26 - island.y + 12) * fan)
-                            let from = CGPoint(x: island.x + (CGFloat(index) - CGFloat(tools.count - 1) / 2) * 9, y: island.y - 12)
-                            let lit = tool == selected
-                            let color = lit ? OnboardingWireframeInk.roseColor.opacity(0.66 * min(1, fan))
-                                : OnboardingWireframeInk.wireColor.opacity(0.17 * min(1, fan))
-                            context.stroke(Path { $0.move(to: from); $0.addLine(to: tip) }, with: .color(color),
-                                           lineWidth: lit ? 1.15 : 0.82)
-                            let r: CGFloat = lit ? 1.8 : 1.25
-                            context.fill(Path(ellipseIn: CGRect(x: tip.x - r, y: tip.y - r, width: r * 2, height: r * 2)),
-                                         with: .color(color.opacity(lit ? 1 : 2)))
-                        }
+                        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                        let oval = CGRect(x: center.x - r.x * spread, y: center.y - r.y * spread,
+                                          width: r.x * spread * 2, height: r.y * spread * 2)
+                        context.stroke(Path(ellipseIn: oval),
+                                       with: .color(OnboardingWireframeInk.wireColor.opacity(0.16 * fade)), lineWidth: 0.8)
+                        guard let selected, let index = tools.firstIndex(of: selected) else { return }
+                        let tip = spots[index]
+                        // The spoke leaves the card's edge, not its middle.
+                        let dx = tip.x - center.x, dy = tip.y - center.y
+                        let along = 0.5 / max(abs(dx) / card.width, abs(dy) / card.height, 0.001)
+                        let from = CGPoint(x: center.x + dx * along, y: center.y + dy * along)
+                        let to = CGPoint(x: tip.x - dx / hypot(dx, dy) * (Self.tile / 2 + 3),
+                                         y: tip.y - dy / hypot(dx, dy) * (Self.tile / 2 + 3))
+                        context.stroke(Path { $0.move(to: from); $0.addLine(to: to) },
+                                       with: .color(OnboardingWireframeInk.roseColor.opacity(0.55 * fade)), lineWidth: 1)
+                        context.fill(Path(ellipseIn: CGRect(x: from.x - 1.8, y: from.y - 1.8, width: 3.6, height: 3.6)),
+                                     with: .color(OnboardingWireframeInk.roseColor.opacity(0.8 * fade)))
                     }
                     .allowsHitTesting(false)
+                    self.card(selected)
+                        .frame(width: card.width, height: card.height)
+                        .opacity(fade)
+                        .position(x: size.width / 2, y: size.height / 2)
                     ForEach(Array(tools.enumerated()), id: \.element) { index, tool in
-                        let goal = target(index, of: tools.count, width: width)
-                        tile(tool)
-                            .scaleEffect(0.5 + 0.5 * min(1, fan))
-                            .opacity(min(1, fan))
-                            .position(x: island.x + (goal.x - island.x) * fan, y: island.y + (goal.y - island.y) * fan)
-                            .allowsHitTesting(fan > 0.6)
+                        let scale = Self.tileScale(spots[index], in: size)
+                        tile(tool, lit: tool == selected)
+                            .scaleEffect(scale)
+                            .opacity(fade * (0.86 + 1.4 * (scale - 0.9)))
+                            .position(spots[index])
+                            .zIndex(tool == selected ? 1 : 0)
                     }
-                    islandPill(tools: tools)
-                        .position(island)
-                    caption
-                        .frame(width: 300)
-                        .position(x: width / 2, y: Self.islandY + 66)
                 }
             }
         }
     }
 
-    private func tile(_ tool: HoverTool) -> some View {
-        let info = HoverToolRegistry.info(for: tool)
-        let lit = tool == selected
-        return Button { selected = tool } label: {
-            VStack(spacing: 5) {
-                Image(systemName: info.sfSymbol).font(.system(size: 14, weight: .medium))
-                Text(info.title).font(OnboardingTheme.sans(11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .foregroundColor(OnboardingTheme.ink)
-            .frame(width: 60, height: 52)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(red: 0.13, green: 0.13, blue: 0.15)))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(lit ? OnboardingWireframeInk.roseColor.opacity(0.75) : Color.white.opacity(0.12), lineWidth: lit ? 1.3 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { if $0 { selected = tool } }
-        .accessibilityLabel(info.title)
-        .accessibilityHint(info.description)
-    }
-
-    private func islandPill(tools: [HoverTool]) -> some View {
-        let name = selected.map { HoverToolRegistry.info(for: $0).title }
-        return Button {
-            open = true
-            if selected == nil { selected = tools.first }
-        } label: {
-            HStack(spacing: 9) {
-                Circle().fill(OnboardingWireframeInk.roseColor).frame(width: 6, height: 6)
-                Text(open ? "Toolbox · \(name ?? "")" : "Hover the island")
-                    .font(OnboardingTheme.mono(11.5, weight: .medium))
-                    .foregroundColor(OnboardingTheme.ink)
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 28)
-            .background(Capsule(style: .continuous).fill(Color.black))
-            .overlay(Capsule(style: .continuous)
-                .strokeBorder(open ? OnboardingWireframeInk.roseColor.opacity(0.45) : Color.white.opacity(0.16), lineWidth: 1))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { inside in
-            guard inside else { return }
-            open = true
-            if selected == nil { selected = tools.first }
-        }
-        .accessibilityLabel("Island")
-        .accessibilityHint("Shows the tools above it")
-    }
-
-    private var caption: some View {
-        let info = selected.map(HoverToolRegistry.info(for:))
-        return VStack(spacing: 4) {
-            Text(info?.title ?? "Top of your display")
-                .font(OnboardingTheme.sans(14, weight: .semibold))
+    private func card(_ tool: HoverTool?) -> some View {
+        let text = Self.card(for: tool)
+        return VStack(spacing: 5) {
+            Text("TOOLBOX")
+                .font(OnboardingTheme.mono(10, weight: .medium))
+                .tracking(1.6)
+                .foregroundColor(tool == nil ? OnboardingTheme.muted : OnboardingWireframeInk.roseColor)
+            Text(text.title)
+                .font(OnboardingTheme.sans(15, weight: .semibold))
                 .foregroundColor(OnboardingTheme.ink)
-            Text(info?.description ?? "Move your pointer onto the island above to fan out your quick tools.")
-                .font(OnboardingTheme.sans(12.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Text(text.text)
+                .font(OnboardingTheme.sans(12))
                 .foregroundColor(OnboardingTheme.muted)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(red: 0.106, green: 0.106, blue: 0.122)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(tool == nil ? Color.white.opacity(0.10) : OnboardingWireframeInk.roseColor.opacity(0.32), lineWidth: 1))
         .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tile(_ tool: HoverTool, lit: Bool) -> some View {
+        let info = HoverToolRegistry.info(for: tool)
+        let soon = tool.isComingSoon
+        return Button { picked = tool } label: {
+            Image(systemName: info.sfSymbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(lit ? OnboardingTheme.ink : OnboardingTheme.ink2.opacity(soon ? 0.5 : 0.9))
+                .frame(width: Self.tile, height: Self.tile)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(lit ? Color(red: 0.19, green: 0.15, blue: 0.17) : Color(red: 0.13, green: 0.13, blue: 0.15)))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(lit ? OnboardingWireframeInk.roseColor.opacity(0.8) : Color.white.opacity(soon ? 0.07 : 0.12),
+                                  lineWidth: lit ? 1.3 : 1))
+                .scaleEffect(lit ? 1.14 : 1)
+                .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.7), value: lit)
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .focused($focused, equals: tool)
+        .onHover { inside in
+            if inside { hovered = tool } else if hovered == tool { hovered = nil }
+        }
+        .accessibilityLabel(info.title)
+        .accessibilityHint(soon ? CalendarAvailability.message : info.description)
     }
 }
 

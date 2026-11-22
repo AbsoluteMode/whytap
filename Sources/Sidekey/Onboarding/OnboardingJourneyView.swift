@@ -219,7 +219,7 @@ struct OnboardingJourneyView: View {
         case .hotkeys:
             OnboardingShortcutsStage(model: model, configuration: hotkeys.configuration)
         case .toolbox:
-            OnboardingToolboxStage(model: model, slots: model.toolbox.slots)
+            OnboardingToolboxStage(model: model)
         case .help:
             OnboardingHelpStage(model: model)
         case .thanks:

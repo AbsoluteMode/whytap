@@ -1,9 +1,9 @@
 import SwiftUI
 
 // The wire figures of the last five steps (design pass screens 05 to 09), in
-// the key, padlock and globe family: keycaps with a crisp legend, the top of
-// a display under the island, four small solids around whytap.ai, the
-// closing constellation, and the line that turns into voice waves.
+// the key, padlock and globe family: keycaps with a crisp legend, four small
+// solids around whytap.ai, the closing constellation, and the line that
+// turns into voice waves.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 
 /// The glyph drawn on a keycap's dish.
@@ -103,27 +103,6 @@ enum OnboardingFinaleFigures {
     static let cluster = [OnboardingKeycapFigure(.option, offsetX: -1.36, offsetZ: -0.18, scale: 0.88),
                           OnboardingKeycapFigure(.shift, offsetX: 1.36, offsetZ: -0.18, scale: 0.88),
                           OnboardingKeycapFigure(.command, offsetX: 0, offsetZ: 0.22, scale: 0.96)]
-
-    /// Toolbox: the top of a display; the island sits on its top edge.
-    static let display: OnboardingWireSolid = {
-        var b = Builder(norm: 1, shift: 0)
-        let w = 1.72, top = -0.44, bottom = 0.54, z = 0.055, ch = 0.08
-        let outline: [(Double, Double)] = [(-w + ch, top), (w - ch, top), (w, top + ch), (w, bottom), (-w, bottom), (-w, top + ch)]
-        let front = outline.enumerated().map { index, p in b.point(p.0, p.1, z, dot: index < 3 || index == 5) }
-        let back = outline.map { b.point($0.0, $0.1, -z) }
-        for side in [front, back] {
-            b.edge(side[5], side[0]); b.edge(side[0], side[1]); b.edge(side[1], side[2])
-            b.edge(side[5], side[4]); b.edge(side[2], side[3])
-        }
-        for i in [0, 1, 2, 5] { b.edge(front[i], back[i]) }
-        let iw = 1.58, it = -0.34, ib = 0.50
-        let bl = b.point(-iw, ib, z), tl = b.point(-iw, it, z, dot: true), tr = b.point(iw, it, z, dot: true), br = b.point(iw, ib, z)
-        let n1 = b.point(-0.34, it, z, dot: true), n2 = b.point(-0.30, it + 0.09, z)
-        let n3 = b.point(0.30, it + 0.09, z), n4 = b.point(0.34, it, z, dot: true)
-        b.edge(bl, tl); b.edge(tl, n1); b.edge(n1, n2); b.edge(n2, n3); b.edge(n3, n4); b.edge(n4, tr); b.edge(tr, br)
-        b.edge(b.point(-iw + 0.06, it + 0.11, z), b.point(iw - 0.06, it + 0.11, z))
-        return b.solid
-    }()
 
     /// whytap.ai: four small solids on a ring.
     static let solids: [OnboardingWireSolid] = {

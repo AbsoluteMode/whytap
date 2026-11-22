@@ -126,8 +126,9 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertEqual(OnboardingStep.speechKey.dwell, 1.15, "the padlock opens and settles before the move")
         XCTAssertEqual(OnboardingStep.llmKey.dwell, 1.15, "the language model key has the same padlock")
         XCTAssertEqual(OnboardingStep.tryDrop.dwell, 1.35)
-        XCTAssertEqual(OnboardingStep.hotkeys.dwell, 4.2)
-        XCTAssertNil(OnboardingStep.thanks.dwell)
+        for step in [OnboardingStep.hotkeys, .toolbox, .help, .thanks] {
+            XCTAssertNil(step.dwell, "\(step) waits for Continue: no timer")
+        }
     }
 
     // MARK: - Dwell latch

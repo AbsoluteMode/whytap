@@ -819,15 +819,47 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(command.modifiers.count, 3)
     }
 
-    /// The island shows the person's tools in their order, without Settings
-    /// or tools that are not out yet, six at most.
-    func testToolboxShowsThePersonsTools() {
-        let all = HoverTool.allCases
-        let tools = OnboardingToolboxStage.tools(all)
-        XCTAssertLessThanOrEqual(tools.count, 6)
+    /// The ring shows the whole Toolbox catalog Settings lists (every tool
+    /// but Settings, a tool not out yet included), and the card names the
+    /// tool under the pointer or says what Toolbox is.
+    func testToolboxShowsTheWholeCatalog() {
+        let tools = OnboardingToolboxStage.tools
+        XCTAssertEqual(tools, HoverTool.allCases.filter { $0 != .settings })
+        XCTAssertGreaterThan(tools.count, 6, "the whole catalog, not six tools")
+        XCTAssertTrue(tools.contains(.calendar))
         XCTAssertFalse(tools.contains(.settings))
-        XCTAssertFalse(tools.contains { $0.isComingSoon })
-        XCTAssertEqual(tools, Array(all.filter { $0 != .settings && !$0.isComingSoon }.prefix(6)))
-        XCTAssertEqual(OnboardingToolboxStage.tools([.translate, .settings, .screenshot]), [.translate, .screenshot])
+        XCTAssertEqual(OnboardingToolboxStage.card(for: nil).title, "Your quick tools")
+        let shot = OnboardingToolboxStage.card(for: .screenshot)
+        XCTAssertEqual(shot.title, "Shot")
+        XCTAssertEqual(shot.text, HoverToolRegistry.info(for: .screenshot).description)
+        if HoverTool.calendar.isComingSoon {
+            XCTAssertEqual(OnboardingToolboxStage.card(for: .calendar).text, CalendarAvailability.message)
+        }
+        // The whole catalog fits the ring in the window without tiles
+        // touching (at their tilted sizes), the first at the top.
+        let sizes: [CGSize] = [CGSize(width: 520, height: 186), CGSize(width: 520, height: 210)]
+        for size in sizes {
+            let spots: [CGPoint] = OnboardingToolboxStage.spots(tools.count, in: size)
+            XCTAssertEqual(spots.count, tools.count)
+            XCTAssertEqual(Double(spots[0].x), Double(size.width) / 2, accuracy: 0.5)
+            XCTAssertLessThan(Double(spots[0].y), Double(size.height) / 2)
+            XCTAssertGreaterThan(Self.closestTiles(spots, in: size), 2, "tiles touch at \(size)")
+        }
+    }
+
+    /// The smallest clearance between two tiles at their tilted sizes.
+    private static func closestTiles(_ spots: [CGPoint], in size: CGSize) -> Double {
+        var closest = Double.infinity
+        let tile = Double(OnboardingToolboxStage.tile)
+        for i in spots.indices {
+            for j in spots.indices where j > i {
+                let dx: Double = Double(abs(spots[i].x - spots[j].x))
+                let dy: Double = Double(abs(spots[i].y - spots[j].y))
+                let si: Double = Double(OnboardingToolboxStage.tileScale(spots[i], in: size))
+                let sj: Double = Double(OnboardingToolboxStage.tileScale(spots[j], in: size))
+                closest = min(closest, max(dx, dy) - (si + sj) / 2 * tile)
+            }
+        }
+        return closest
     }
 }

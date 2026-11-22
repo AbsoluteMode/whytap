@@ -16,15 +16,20 @@ struct ProviderKeyTiles: View {
     let onSaveResult: (Bool) -> Void
     /// Why a key was not saved, after `onSaveResult(false)`.
     let onSaveFailure: (String) -> Void
+    /// The onboarding asked for a new server: the Custom server tile opens
+    /// as if clicked, then the request clears.
+    @Binding var newServerRequested: Bool
     @State private var expanded: Target?
     @State private var busy = false
     @FocusState private var focused: Target?
 
-    init(viewModel: APIAndModelsViewModel, initiallyExpanded: Target? = nil,
+    init(viewModel: APIAndModelsViewModel, newServerRequested: Binding<Bool> = .constant(false),
+         initiallyExpanded: Target? = nil,
          tavily: TavilySettings? = nil, onRemoveFailure: @escaping () -> Void = {},
          onSaveResult: @escaping (Bool) -> Void = { _ in },
          onSaveFailure: @escaping (String) -> Void = { _ in }) {
         self.viewModel = viewModel
+        self._newServerRequested = newServerRequested
         self.onSaveResult = onSaveResult
         self.onSaveFailure = onSaveFailure
         self.onRemoveFailure = onRemoveFailure
@@ -64,6 +69,11 @@ struct ProviderKeyTiles: View {
             close()
             return .handled
         }
+        .onChange(of: newServerRequested, initial: true) { _, requested in
+            guard requested else { return }
+            newServerRequested = false
+            if expanded != .provider(.openAICompatible) { activate(.provider(.openAICompatible)) }
+        }
     }
 
     private func tile(_ target: Target) -> some View {
@@ -74,7 +84,7 @@ struct ProviderKeyTiles: View {
         let hasKey = target == .tavily ? tavily.configured : chip != nil
         let selected = expanded == target
         return Button {
-            expanded = selected ? nil : target
+            activate(target)
         } label: {
             Color.clear.aspectRatio(1, contentMode: .fit)
                 .overlay {
@@ -113,6 +123,12 @@ struct ProviderKeyTiles: View {
         .accessibilityLabel(title)
         .accessibilityValue("\(status), \(selected ? "Expanded" : "Collapsed")")
         .accessibilityHint(selected ? "Close key settings" : "Open key settings")
+    }
+
+    /// A click on a tile; the onboarding's new server request takes the
+    /// same path, so it opens whatever the Custom server tile opens.
+    private func activate(_ target: Target) {
+        expanded = expanded == target ? nil : target
     }
 
     private func kind(_ target: Target) -> AIProviderKind? {

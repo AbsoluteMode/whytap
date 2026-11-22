@@ -29,6 +29,15 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingPreview.swift
     confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingWireframe.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingServerForm.swift
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-22 the maintainer accepted the onboarding screens in the standalone preview at commit 6d9f196c and asked to go on.
+    confirmed_at: 2026-11-22
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer asked, through the orchestrating session, to run the onboarding on its own, outside Whytap, and see all of it after every change.
     confirmed_at: 2026-11-22
@@ -262,8 +271,12 @@ window, Back and a progress bar.
   LLM or Transcription each, one Save; the name comes from the address
   (Ollama and LM Studio by their default ports, otherwise the host). Back,
   Cancel or Escape return to the key step unchanged; Save returns with the
-  step done like an accepted key. The app still opens Settings → API &
-  Models on the step's row until the server form of task 66 lands there.
+  step done like an accepted key. The app opens the real form instead:
+  Settings → API & Models → API keys with the Custom server tile opened
+  through the same path as a click on it (`SettingsWindowSelection
+  .requestNewServer`), so it shows the inline form today and the server
+  window of PR 408 once that lands; the onboarding stays open behind
+  Settings and is where the person returns.
 
 ## Rejected
 

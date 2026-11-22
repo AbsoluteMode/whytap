@@ -1178,52 +1178,41 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
-OnboardingWindowController, accessory app, no Dock icon) in place of the former
-Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
-onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
-word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done; every page but the first has Back
-(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
-OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
-route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
-Lang setting; searchable list, English or native name, arrows and Return), On
-this Mac card ("Download and use for Drop", about 470 MB; when the download
-lands OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that
-cannot run, nothing else; hidden on Intel), and one tile per keyed provider
-(OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
-Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
-badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; one footer place: Continue when a
-saved speech key (not refused) or the downloaded model can run Drop, with "Drop
-will use X" above it (preselected: Drop's running provider, else Soniox,
-Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
-the free key check before a new provider), else Set up later; "Restore from another Mac"; the
-stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
-and Keyboard control on PermissionsSettingsViewModel, done at
-dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
-the shortcut is not installed), plus an optional Screen Recording row for Shot
-(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
-never holds Continue); hidden when ready.
-3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
-DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
-onboarding is visible a Drop press with no route says so on the page (no
-Settings over it) and one with a missing permission returns to page 2.
-4 Make it yours: tool shortcuts and hover tools, each with a bundled clip
-(Resources/FeatureVideos/onboarding-hotkeys.mp4, onboarding-hover.mp4) and Open
-for Settings -> Hotkeys or Toolbox. 5 Turn on more: Google search / Meeting
-Notes / Agent with switch and clip, "Add a model" when the feature's model does
-not run, and Coding agents (OnboardingCodingTools: Claude Code and Codex when
-installed; Connect runs CaseClientSetup.connect, the Case -> Connect setup,
-without a Case registration); Done. No Calendar. System Audio Recording, Input
-Monitoring, Automation and Calendar are asked at first use. OnboardingLaunch:
-firstLaunchPresented (any launch since 2026-10-26) or the former onboarding's
-key = ran before, never shown on update; sidekey.onboarding.pending.v1 brings
-it back after a quit until Done; neither key is in backups or sync. A first
-Drop press with the microphone never asked asks it and records nothing
+OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
+Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
+fields), a progress rail with one segment per step and "NN / 13", one step at
+a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
+(On this Mac or API keys, two wire figures), Speech key, Language model key
+(optional), Search for the Agent (Tavily, only with a language model),
+Language, Keyboard control, Microphone, Input Monitoring (only when the Drop
+shortcut needs it), Screen Recording (optional), Try Drop, Shortcuts, Toolbox,
+Help, Thank you; a step whose result already holds is left out. A step whose
+action succeeds moves on by itself after its dwell (OnboardingDwellController;
+1.15 s on the key steps so the padlock opens first) with no chip or Continue;
+Return goes on at once, Back keeps what was done and a step reached by Back
+offers a plain Next. Step 1 and the two key steps share one wire scene
+(OnboardingWireScene, drawn per display frame): the chosen key flies to its
+padlock, turns and opens it when a key is accepted and catches when refused.
+The key field (OnboardingKeyStage) shows every input as dots; a provider is
+named only by its key's own format (prefix or Deepgram's 40 hex characters)
+or a clicked mark, otherwise Return is a format problem; five problems are
+named (format, refused, no credit or access, no answer with Retry). Speech and
+the language model go through the shared Speech and LLM rows
+(APIAndModelsViewModel.selectShared). "Use your own server →" opens Settings ->
+API & Models -> API keys with the Custom server tile's form
+(SettingsWindowSelection.requestNewServer), the onboarding open behind it.
+`scripts/onboarding-preview.sh` runs the same window standalone with fakes,
+outside Whytap. System Audio Recording, Automation and Calendar are asked at
+first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
+or the former onboarding's key = ran before, never shown on update;
+sidekey.onboarding.pending.v1 brings it back after a quit until it is
+finished; neither key is in backups or sync. A first Drop press with the
+microphone never asked asks it and records nothing
 (DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
 onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
-and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+and relaunch. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
+.project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow

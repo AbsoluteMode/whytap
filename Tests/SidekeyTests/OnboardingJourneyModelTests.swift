@@ -181,6 +181,24 @@ final class OnboardingJourneyModelTests: XCTestCase {
     private let speechFeatures: [AIFeature] = [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .meetings]
     private let llmFeatures: [AIFeature] = [.dropSmartCleanup, .meetingNotes, .agent, .translation]
 
+    // MARK: - Your own server
+
+    /// In the app, "Use your own server →" opens the real server form in
+    /// Settings (API keys, the Custom server tile), never a feature row and
+    /// never the preview's in-window stand-in.
+    func testTheAppsServerLinkOpensSettingsServerSetup() throws {
+        let model = try makeModel(makeEnv())
+        var opened = 0
+        var settings: [SettingsWindowTab] = []
+        model.openServerSetup = { opened += 1 }
+        model.openSettings = { tab, _ in settings.append(tab) }
+        model.useOwnServer(.speech)
+        model.useOwnServer(.languageModel)
+        XCTAssertEqual(opened, 2, "both key steps lead to the server form")
+        XCTAssertTrue(settings.isEmpty)
+        XCTAssertNil(model.serverForm)
+    }
+
     // MARK: - OpenAI for speech and text
 
     func testOpenAIIsOfferedForSpeechOnlyOnceTheAppCanRunItsSpeechModels() throws {

@@ -208,7 +208,8 @@ struct SettingsWindowView: View {
     private var detailPane: some View {
         switch selection.selectedTab {
         case .apiAndModels:
-            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature)
+            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature,
+                             newServerRequested: $selection.newServerRequested)
         case .hotkeys:
             HotkeysSettingsView()
         case .permissions:
@@ -336,6 +337,9 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
+    /// The onboarding's "Use your own server →": API keys opens the Custom
+    /// server tile as if clicked; the tiles clear it.
+    @Published var newServerRequested = false
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?
@@ -367,6 +371,14 @@ final class SettingsWindowSelection: ObservableObject {
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
         focusedFeature = feature
+    }
+
+    /// Opens API & Models -> API keys with the Custom server tile's form,
+    /// the same path as a click on that tile.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    func requestNewServer() {
+        select(.apiAndModels)
+        newServerRequested = true
     }
 
     /// Opens Toolbox on one tool's pane without running its action.

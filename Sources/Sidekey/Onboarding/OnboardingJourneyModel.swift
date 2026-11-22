@@ -133,6 +133,8 @@ final class OnboardingJourneyModel: ObservableObject {
 
     var onFinish: () -> Void = {}
     var openSettings: (SettingsWindowTab, AIFeature?) -> Void = { _, _ in }
+    /// Settings -> API & Models -> API keys with the Custom server form open.
+    var openServerSetup: () -> Void = {}
 
     /// The speech providers of the speech key step (Drop runs on these), in
     /// their tab order. OpenAI joins them once the app can run its speech
@@ -445,14 +447,15 @@ final class OnboardingJourneyModel: ObservableObject {
     /// a language model; nil shows the onboarding.
     @Published private(set) var serverForm: OnboardingKeyStageKind?
 
-    /// "Use your own server →". The preview opens the server form in this
-    /// window and comes back here; the app opens Settings -> API & Models on
-    /// the step's row until that form ships there.
+    /// "Use your own server →". The app opens the real server form (Settings
+    /// -> API & Models -> API keys, the Custom server tile as if clicked) and
+    /// the onboarding stays open behind it; the standalone preview has no
+    /// Settings, so it shows the form's fields in this window.
     func useOwnServer(_ kind: OnboardingKeyStageKind) {
         if isPreview {
             serverForm = kind
         } else {
-            openSettings(.apiAndModels, kind == .speech ? .dropFast : .agent)
+            openServerSetup()
         }
     }
 

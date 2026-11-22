@@ -92,6 +92,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fatalError("SettingsWindowController only supports programmatic init.")
     }
 
+    /// API & Models -> API keys with the Custom server form open (the
+    /// onboarding's "Use your own server →").
+    func showNewServer() {
+        selection.requestNewServer()
+        show(tab: .apiAndModels)
+    }
+
     /// Bring the window forward and refresh the selected tab.
     func show(tab: SettingsWindowTab = .apiAndModels, feature: AIFeature? = nil) {
         if window?.isVisible != true {

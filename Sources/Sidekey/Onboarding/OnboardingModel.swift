@@ -477,4 +477,3 @@ enum OnboardingDropCheck: Equatable {
     case checking
     case failed(OnboardingDropChoice, String)
 }
-

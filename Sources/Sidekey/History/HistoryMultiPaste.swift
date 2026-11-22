@@ -117,6 +117,7 @@ enum HistoryPasteboardWriter {
     /// breaks (AppKit's behaviour); some apps read only the first item.
     /// WHY: .project-docs/decisions/2026-11-22-history-multi-copy.md
     static func writeAll(_ groups: [HistoryPasteGroup], to pasteboard: NSPasteboard, assetsDirectory: URL) {
+        guard !groups.isEmpty else { return }
         if groups.count == 1, let group = groups.first {
             write(group, to: pasteboard, assetsDirectory: assetsDirectory)
             return

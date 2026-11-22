@@ -350,6 +350,18 @@ final class HistoryMultiPasteTests: XCTestCase {
         XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
     }
 
+    func testCopyingAnEmptyFileEntryKeepsTheExistingPasteboard() {
+        let pasteboard = scratchPasteboard()
+        pasteboard.setString("existing copy", forType: .string)
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [fileCard(1)]),
+            to: pasteboard,
+            assetsDirectory: FileManager.default.temporaryDirectory
+        )
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing copy")
+    }
+
     func testPlainClickCopiesThenClearsAndCommandClickOnlyMarks() throws {
         // The row's click closure: ⌘ toggles a mark; a plain click copies
         // (all marks or the row) and then clears the marks, everywhere —

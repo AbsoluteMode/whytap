@@ -287,6 +287,16 @@ Hotkeys pane without unsaved edits picks up the new binding.
 WHY: [Feature hotkeys](decisions/2026-10-19-feature-hotkeys.md),
 [Hotkeys from links](../.project-docs/decisions/2026-10-21-whytap-link-hotkeys.md).
 
+### Assigning from the Agent or a coding tool
+
+The Agent ("give Shot ⌥S") and the plugin's `whytap_hotkey_set` use the same
+key rule as links (⌃ or ⌥, no Quit, no coming-soon tool) and save through
+`HotkeyPreferences.assignToolShortcut`, the Hotkeys Save path. There is no
+dialog: the request itself is the user's, and the Agent shows
+`Hotkey: Shot — ⌥S` above its answer. Keys owned by another action are refused
+and change nothing. Guide: [application control](customization/app-control.md).
+WHY: [Island tools and hotkeys](../.project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md).
+
 ## Meeting-record hotkey
 
 Manual Meeting Notes recording has a configurable global hotkey (default

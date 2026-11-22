@@ -1,0 +1,103 @@
+---
+id: agent-toolbox-hotkeys-2026-11-22
+type: decision
+title: The Agent and the plugin change the island's tools and their hotkeys
+summary: whytap_toolbox_get/set and whytap_hotkey_set pin, move or remove island tools and assign tool hotkeys through the Settings stores, with the link hotkey rule and refusal on conflict.
+status: confirmed
+tags: [agent, native-agent, app-control, toolbox, hotkeys, mcp]
+canonical_for: [agent-toolbox-hotkeys]
+verified_at: 2026-11-22
+sources:
+  - type: user-confirmed
+    reference: "On 2026-11-22 the maintainer asked whether the agent can add or remove something in the menu, for example Shot, and assign it a hotkey right away, then said: yes, teach it (orchestrator task 53)."
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/AppControl/AppControlToolbox.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
+    confirmed_at: 2026-11-22
+related: [2026-11-22-native-agent-app-control.md, 2026-10-21-app-control-plugin.md]
+---
+
+# Island tools and hotkeys from the Agent and the plugin
+
+## Context
+
+The Agent in the island and the plugin's `whytap mcp` could change models,
+settings and To-do, but not which tools the island shows or their hotkeys:
+`get_settings` told the model that hotkeys cannot be changed. "Add Shot to the
+menu and give it ⌥S" had to be done by hand in Settings → Toolbox and
+Settings → Hotkeys.
+
+## Decision
+
+- **Three operations in the one catalog.** `whytap_toolbox_get` (pinned order
+  plus every tool with id, title, description, pinned, position, comingSoon,
+  hotkey `{keys, display}` and hotkeyAssignable), `whytap_toolbox_set`
+  (`tool`, `pinned`, optional `position`, `expected` pinned list) and
+  `whytap_hotkey_set` (`tool`, `keys` or null, `expected` current keys or
+  null). They are added to `AppControlMCPServer.tools`, so the plugin gets
+  them as MCP tools and the native Agent as operations of its single strict
+  `whytap` tool (no new strict tool, union or optional parameter; the
+  first-request limit test checks Anthropic, OpenAI and OpenRouter).
+- **Settings' own stores.** Pinning and moving use `HoverLayoutStore.placeTool`,
+  removing `removeTool`: the island and Settings → Toolbox observe that store
+  and change at once; Settings stays last and cannot be moved or removed.
+  Hotkeys go through `HotkeyPreferences.assignToolShortcut`, the Hotkeys Save
+  path (`apply`) shared with the Toolbox Hotkey block of session 69: one
+  conflict check, persistence and registration. The Hotkeys pane follows a
+  saved change when its draft was clean. No UserDefaults write of its own.
+- **Which keys.** The `whytap://hotkey` rule (`WhytapLink.linkCombo`,
+  `acceptsLinkHotkey`): Control or Option plus A–Z, 0–9, F1–F20 or US
+  punctuation; no Quit, no "Soon" tool. A model writes key names, it does not
+  press keys, so ⌘ and ⇧ shortcuts that macOS and other apps own are never
+  reachable by a misread request. Settings' recorder stays the way to set any
+  other key.
+- **Conflicts.** Keys used by another action (Agent close ⌥Q, another tool…)
+  are refused as `hotkey_conflict` naming that action; nothing is taken over
+  or cleared. The prompt tells the Agent to name the owner and ask.
+- **Expected values.** Every write needs the exact current value: the pinned
+  list for the Toolbox, the tool's keys (any modifier order) for a hotkey. A
+  stale value is a `conflict`.
+- **Visible changes.** Lines from the saved result: `Toolbox + Shot`,
+  `Toolbox − Monitor`, `Toolbox: Monitor → place 1`, `Hotkey: Shot — ⌥S`,
+  `Hotkey: Shot — none`. A repeated identical request answers
+  `changed: false` and shows no line.
+
+## Why
+
+- The same stores as Settings keep the island, Settings, Help and the
+  registered shortcut consistent and avoid a second validation that could
+  drift from the Hotkeys pane.
+- The link rule is the reviewed safe subset for keys chosen without a key
+  press; reusing it keeps one definition of "safe to assign remotely".
+- Refusing conflicts keeps the user's existing shortcuts; silently moving them
+  would break muscle memory with no visible cause.
+
+## What was tested
+
+`NativeAgentAppControlTests` with the real native loop, a stubbed model and
+the real controller on temporary stores: "add Shot and set ⌥S" (layout and
+shortcut saved, two lines, a fresh store reads both, the shortcut resolves to
+a registration); "remove Monitor" (gone from the layout, its hotkey kept);
+moving a tool to place 1; conflicts with Agent close and with another tool
+(nothing changed, owners named); repeating the request (no change, no line);
+unknown tool, Settings removal, stale expected values, a bad position, Quit
+and Calendar (Soon), ⌘/⇧/Space keys and wrong types; clearing with the keys in
+another order. The first request on Anthropic, OpenAI and OpenRouter stays
+within the strict limits and its operation enum has the three operations.
+`AppControlMCPServerTests` lists the three MCP tools with their annotations
+and forwards a call. Not tested: the installed app, a live provider.
+
+## Rejected
+
+- Writing `toolShortcuts` / the layout defaults directly: bypasses
+  registration, conflict check and the published stores.
+- Accepting any recorded combo (⌘, ⇧, arrows): a misread request could take
+  ⌘C or ⌘Q system-wide.
+- Taking over or clearing a conflicting action's keys: surprising and silent.
+- A tool-only expected value for `toolbox_set`: the position meaning depends
+  on the rest of the list, so the whole pinned list is compared.
+
+2026-11-22, branch `claude/agent-toolbox-hotkeys`.

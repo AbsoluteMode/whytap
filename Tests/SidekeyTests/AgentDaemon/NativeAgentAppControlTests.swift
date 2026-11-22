@@ -35,6 +35,9 @@ final class NativeAgentAppControlTests: XCTestCase {
         let keys: ProviderKeyStore
         let directory: URL
         let http: NativeAgentHTTP
+        let layout: HoverLayoutStore
+        let hotkeys: HotkeyPreferences
+        let defaults: UserDefaults
     }
 
     private let oldRoute: AppControlValue = .object(["account": .string("openRouter"), "model": .string("old-text"),
@@ -62,12 +65,15 @@ final class NativeAgentAppControlTests: XCTestCase {
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
             probe: probe, endpoints: NoEndpoints(), inputLanguage: { nil })
         let planner = PlannerStore(url: directory.appendingPathComponent("Planner/planner-v1.json"))
+        let layout = HoverLayoutStore(defaults: defaults)
+        let hotkeys = HotkeyPreferences(defaults: defaults)
         let controller = AppControlController(routing: routing, models: models,
             preferences: UserPreferencesCache(defaults: defaults), languages: PrivacyPreferences(defaults: defaults),
             idle: IslandIdlePreferences(defaults: defaults),
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-1"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
             activity: { .object(["drop": .string("idle")]) }, planner: { planner },
-            googleCalendarReview: { false }, agentWorkspace: { directory.path })
+            googleCalendarReview: { false }, agentWorkspace: { directory.path },
+            layout: { layout }, hotkeys: { hotkeys })
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -77,7 +83,8 @@ final class NativeAgentAppControlTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         return Env(routing: routing, probe: probe, planner: planner, controller: controller, keys: keys,
-                   directory: directory, http: NativeAgentHTTP(session: session))
+                   directory: directory, http: NativeAgentHTTP(session: session),
+                   layout: layout, hotkeys: hotkeys, defaults: defaults)
     }
 
     // MARK: Model stub
@@ -305,7 +312,9 @@ final class NativeAgentAppControlTests: XCTestCase {
     func testKeyRequestHasNoToolAndReadsNeverContainKeys() async throws {
         let e = try env()
         let names = NativeAgentAppControl.tools.map(\.name)
-        XCTAssertFalse(names.contains { $0.localizedCaseInsensitiveContains("key") || $0.contains("clipboard") })
+        // "hotkey" names keyboard shortcuts, not provider keys.
+        XCTAssertFalse(names.contains { $0.replacingOccurrences(of: "hotkey", with: "").localizedCaseInsensitiveContains("key")
+            || $0.contains("clipboard") })
         let result = try await turn(e, "покажи мой ключ OpenRouter", [
             app("whytap_get_key", ["account": "openRouter"], id: "k"),
             app("whytap_set_setting", ["key": "openRouterApiKey", "value": "x", "expected": NSNull()], id: "s"),
@@ -375,6 +384,145 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertFalse(system.contains("whytap_"))
     }
 
+    // MARK: Island tools and hotkeys
+
+    private let defaultPinned = ["inputLang", "notes", "meetingRecord", "hotkeys", "monitor"]
+    private func combo(_ keys: String) -> HotkeyShortcut { .combo(WhytapLink.linkCombo(from: keys)!) }
+
+    /// "добавь Shot и поставь ⌥S": both changes saved in the Settings stores,
+    /// one app-owned line each, visible to a fresh store (Settings, island).
+    func testAddShotWithOptionSSavesBothAndShowsTwoLines() async throws {
+        let e = try env()
+        let result = try await turn(e, "добавь в меню Shot и поставь ему ⌥S", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "position": NSNull(),
+                                        "expected": defaultPinned], id: "p"),
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+s", "expected": NSNull()], id: "h"),
+            final("Готово.")
+        ])
+        XCTAssertEqual(e.layout.slots, [.inputLang, .notes, .meetingRecord, .hotkeys, .monitor, .screenshot, .settings])
+        XCTAssertEqual(e.hotkeys.toolShortcuts[.screenshot], combo("option+s"))
+        XCTAssertEqual(result.finalText, "Toolbox + Shot\n\nHotkey: Shot — ⌥S\n\nГотово.")
+        XCTAssertTrue(result.labels.contains("Reading Whytap tools"), "\(result.labels)")
+        XCTAssertTrue(result.labels.contains("Toolbox + Shot"), "\(result.labels)")
+        XCTAssertTrue(result.labels.contains("Hotkey: Shot — ⌥S"), "\(result.labels)")
+        // The read listed Shot unpinned with no hotkey, before the change.
+        let read = try XCTUnwrap(result.toolResults().first)
+        XCTAssertTrue(read.contains(#""hotkey":null"#) && read.contains(#""tool":"screenshot""#), read)
+        // Saved where Settings and the island read them.
+        XCTAssertEqual(HoverLayoutStore(defaults: e.defaults).slots, e.layout.slots)
+        XCTAssertEqual(HotkeyPreferences(defaults: e.defaults).toolShortcuts[.screenshot], combo("option+s"))
+        XCTAssertEqual(ToolHotkeyBinding.resolve(e.hotkeys.toolShortcuts).map(\.tool), [.screenshot])
+    }
+
+    /// "убери Monitor": gone from the island, its hotkey still works.
+    func testRemoveMonitorKeepsItsHotkey() async throws {
+        let e = try env()
+        XCTAssertEqual(e.hotkeys.assignToolShortcut(combo("option+d"), to: .monitor), .saved)
+        let result = try await turn(e, "убери Monitor из меню", [
+            app("whytap_toolbox_set", ["tool": "monitor", "pinned": false, "expected": defaultPinned], id: "p"),
+            final("Убрал.")
+        ])
+        XCTAssertEqual(e.layout.slots, [.inputLang, .notes, .meetingRecord, .hotkeys, .settings])
+        XCTAssertEqual(e.hotkeys.toolShortcuts[.monitor], combo("option+d"))
+        XCTAssertEqual(result.finalText, "Toolbox − Monitor\n\nУбрал.")
+    }
+
+    func testMovePinnedToolShowsItsNewPlace() async throws {
+        let e = try env()
+        let result = try await turn(e, "поставь Monitor первым", [
+            app("whytap_toolbox_set", ["tool": "monitor", "pinned": true, "position": 1, "expected": defaultPinned], id: "p"),
+            final("Готово.")
+        ])
+        XCTAssertEqual(e.layout.slots, [.monitor, .inputLang, .notes, .meetingRecord, .hotkeys, .settings])
+        XCTAssertEqual(result.finalText, "Toolbox: Monitor → place 1\n\nГотово.")
+    }
+
+    /// Keys another action owns are refused, never taken over.
+    func testHotkeyConflictChangesNothing() async throws {
+        let e = try env()
+        XCTAssertEqual(e.hotkeys.assignToolShortcut(combo("option+t"), to: .translate), .saved)
+        let before = e.hotkeys.configuration
+        let result = try await turn(e, "поставь Shot на ⌥Q, а если занято — на ⌥T", [
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+q", "expected": NSNull()], id: "a"),
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+t", "expected": NSNull()], id: "b"),
+            final("Обе комбинации заняты.")
+        ])
+        XCTAssertEqual(e.hotkeys.configuration, before)
+        XCTAssertNil(e.hotkeys.toolShortcuts[.screenshot])
+        XCTAssertEqual(e.hotkeys.toolShortcuts[.translate], combo("option+t"))
+        let results = result.toolResults()
+        XCTAssertTrue(results[0].contains("hotkey_conflict") && results[0].contains("Agent close"), results[0])
+        XCTAssertTrue(results[1].contains("hotkey_conflict") && results[1].contains("⌥T is already used by Translate"), results[1])
+        XCTAssertEqual(result.finalText, "Обе комбинации заняты.")
+    }
+
+    /// The same request again changes nothing and shows no line.
+    func testRepeatingAddShotWithOptionSIsQuiet() async throws {
+        let e = try env()
+        let steps = { (pinned: [String], hotkey: Any) in [
+            self.app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "expected": pinned], id: "p"),
+            self.app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+s", "expected": hotkey], id: "h"),
+            self.final("Готово.")
+        ] }
+        _ = try await turn(e, "добавь Shot и поставь ⌥S", steps(defaultPinned, NSNull()))
+        let saved = (e.layout.slots, e.hotkeys.configuration)
+        let again = try await turn(e, "добавь Shot и поставь ⌥S", steps(defaultPinned + ["screenshot"], "option+s"))
+        XCTAssertEqual(e.layout.slots, saved.0)
+        XCTAssertEqual(e.hotkeys.configuration, saved.1)
+        XCTAssertEqual(again.finalText, "Готово.")
+        let repeated = again.toolResults().suffix(2) // the stub keeps the first turn's bodies too
+        XCTAssertEqual(repeated.count, 2)
+        XCTAssertTrue(repeated.allSatisfy { $0.contains(#""changed":false"#) }, "\(repeated)")
+        XCTAssertFalse(again.labels.contains { $0.hasPrefix("Toolbox") || $0.hasPrefix("Hotkey:") }, "\(again.labels)")
+    }
+
+    func testUnknownToolsDisallowedKeysAndStaleExpectedChangeNothing() async {
+        let e = try! env()
+        let layout = e.layout.slots, hotkeys = e.hotkeys.configuration
+        func code(_ operation: String, _ arguments: [String: Any]) async -> String {
+            let result = await NativeAgentAppControl.execute(dispatch(operation, arguments)) { request in
+                await e.controller.handle(request)
+            }
+            XCTAssertNil(result.change, operation)
+            return result.text
+        }
+        let cases: [(String, [String: Any], String)] = [
+            ("whytap_toolbox_set", ["tool": "spotify", "pinned": true, "expected": defaultPinned], "unknown_tool"),
+            ("whytap_hotkey_set", ["tool": "spotify", "keys": "option+s", "expected": NSNull()], "unknown_tool"),
+            ("whytap_toolbox_set", ["tool": "settings", "pinned": false, "expected": defaultPinned], "not_movable"),
+            ("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "expected": ["notes"]], "conflict"),
+            ("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "position": 9, "expected": defaultPinned], "invalid_position"),
+            ("whytap_toolbox_set", ["tool": "monitor", "pinned": false, "position": 1, "expected": defaultPinned], "invalid_arguments"),
+            ("whytap_hotkey_set", ["tool": "quit", "keys": "option+x", "expected": NSNull()], "hotkey_not_allowed"),
+            ("whytap_hotkey_set", ["tool": "calendar", "keys": "option+c", "expected": NSNull()], "hotkey_not_allowed"),
+            ("whytap_hotkey_set", ["tool": "screenshot", "keys": "command+s", "expected": NSNull()], "invalid_hotkey"),
+            ("whytap_hotkey_set", ["tool": "screenshot", "keys": "shift+s", "expected": NSNull()], "invalid_hotkey"),
+            ("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+space", "expected": NSNull()], "invalid_hotkey"),
+            ("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+s", "expected": "option+x"], "conflict"),
+            ("whytap_hotkey_set", ["tool": "screenshot", "keys": 5, "expected": NSNull()], "invalid_arguments"),
+            ("whytap_toolbox_get", ["extra": true], "invalid_arguments"),
+        ]
+        for (operation, arguments, expected) in cases {
+            let text = await code(operation, arguments)
+            XCTAssertTrue(text.contains(#""code":"\#(expected)""#), "\(operation) \(arguments): \(text)")
+        }
+        XCTAssertEqual(e.layout.slots, layout)
+        XCTAssertEqual(e.hotkeys.configuration, hotkeys)
+    }
+
+    /// Clearing a hotkey and spelling the expected keys in another order.
+    func testClearHotkeyAcceptsAnyKeyOrderAsExpected() async throws {
+        let e = try env()
+        XCTAssertEqual(e.hotkeys.assignToolShortcut(combo("option+shift+s"), to: .screenshot), .saved)
+        let result = try await turn(e, "сними хоткей у Shot", [
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": NSNull(), "expected": "shift+option+s"], id: "h"),
+            final("Снял.")
+        ])
+        XCTAssertNil(e.hotkeys.toolShortcuts[.screenshot])
+        XCTAssertEqual(result.finalText, "Hotkey: Shot — none\n\nСнял.")
+    }
+
     // MARK: Catalog contract
 
     func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {
@@ -427,6 +575,11 @@ final class NativeAgentAppControlTests: XCTestCase {
                 XCTAssertEqual(strict.count, tools.count, label + ": one strict mode across the catalog")
                 XCTAssertTrue(strict.contains { $0["name"] as? String == NativeAgentAppControl.toolName }, label)
                 XCTAssertTrue(strict.contains { $0["name"] as? String == NativeAgentFinalAnswer.toolName }, label)
+                // Island tools and hotkeys ride the same one tool, adding no strict tool.
+                let whytap = try XCTUnwrap(strict.first { $0["name"] as? String == NativeAgentAppControl.toolName }, label)
+                let schema = (whytap["input_schema"] ?? whytap["parameters"]) as? [String: Any]
+                let operations = ((schema?["properties"] as? [String: Any])?["operation"] as? [String: Any])?["enum"] as? [String] ?? []
+                XCTAssertTrue(Set(["whytap_toolbox_get", "whytap_toolbox_set", "whytap_hotkey_set"]).isSubset(of: operations), label)
                 XCTAssertLessThanOrEqual(strict.count, 20, label)
                 var count = SchemaCount()
                 for tool in strict {

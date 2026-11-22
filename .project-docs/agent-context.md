@@ -1526,6 +1526,17 @@ is added only with the tool and never mentions the reply language. Offered
 only when the app installed the controller (packaged app), never in tests or
 swift run. The CLI providers are not reachable (only native connects). WHY:
 .project-docs/decisions/2026-11-22-native-agent-app-control.md
+Island tools and hotkeys (Agent and `whytap mcp`): whytap_toolbox_get lists
+the pinned order and every tool with its hotkey; whytap_toolbox_set pins
+(optionally at a place) or removes a tool through HoverLayoutStore
+placeTool/removeTool (Settings stays last, a removed tool keeps its hotkey);
+whytap_hotkey_set assigns or clears a tool's hotkey through
+HotkeyPreferences.assignToolShortcut (Hotkeys Save, shared with the Toolbox
+Hotkey block). Keys follow the whytap://hotkey rule (⌃ or ⌥, no Quit, no Soon
+tool); another action's keys are refused as hotkey_conflict, never taken over.
+Both need the exact current value as expected; lines "Toolbox + Shot",
+"Toolbox − Monitor", "Hotkey: Shot — ⌥S"; repeats are quiet. WHY:
+.project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only

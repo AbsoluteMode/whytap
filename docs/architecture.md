@@ -278,7 +278,7 @@ Live text in the recording wing (Drop and agent voice):
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
-Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
+Drop auto-stop (opt-in, Settings -> Other -> Drop, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
@@ -972,8 +972,10 @@ Input language offer:
   language code, the count and the offered codes are stored. WHY:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
-Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
-  Settings -> Other -> Recording -> Learn from my edits):
+Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
+  user switched it off: a missing key reads as on, an explicit false is kept;
+  Settings -> Other -> Drop -> Learn from my edits; WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-default-on.md):
   AutoPasteEngine.paste hands over the field at the paste boundary (after
   focus restore, right before Cmd+V): the system-wide focused element of the
   frontmost target app, metadata only, never Whytap's own editors.

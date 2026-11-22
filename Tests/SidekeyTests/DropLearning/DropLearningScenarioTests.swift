@@ -329,6 +329,26 @@ final class DropLearningScenarioTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: DropLearningLedger.key))
     }
 
+    /// On by default: a user who never touched the switch (no key) learns;
+    /// one who switched it off stays off; switching it on again works.
+    func testLearningIsOnUntilTheUserSwitchesItOff() async {
+        defaults.removeObject(forKey: DropLearningSettings.enabledKey)
+        XCTAssertTrue(DropLearningSettings.isEnabled(in: defaults))
+        let coordinator = makeCoordinator()
+        XCTAssertTrue(coordinator.capturesFields)
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertEqual(field.readCount, 1)
+
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        XCTAssertFalse(DropLearningSettings.isEnabled(in: defaults))
+        XCTAssertFalse(coordinator.capturesFields)
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertEqual(field.readCount, 1)
+
+        defaults.set(true, forKey: DropLearningSettings.enabledKey)
+        XCTAssertTrue(coordinator.capturesFields)
+    }
+
     /// With learning and calibration off the paste engine gets no capture
     /// callback at all, so its ordinary path is unchanged.
     func testFieldsAreCapturedOnlyWhileLearningOrCalibrationIsOn() {

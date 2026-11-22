@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropAutoStop/DropAutoStopTests.swift
     confirmed_at: 2026-11-11
-related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-13-drop-auto-stop-voice-guard.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-13-drop-auto-stop-voice-guard.md, 2026-11-22-drop-learning-default-on.md]
 ---
 
 # Drop auto-stop
@@ -41,7 +41,8 @@ user tried it and asked to remove it, keeping only the automatic stop.
 
 ## Decision
 
-- **Opt-in switch** in Settings -> Other -> Recording, "Stop Drop
+- **Opt-in switch** in Settings -> Other -> Drop (named Recording until
+  2026-11-22), "Stop Drop
   automatically", off by default. It applies to a Toggle shortcut only: one
   press starts the take and it ends by itself; a second press still stops it at
   once. A hold shortcut is unchanged, because releasing the key is the end.

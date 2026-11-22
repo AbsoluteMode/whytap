@@ -62,7 +62,7 @@ struct OnboardingJourneyView: View {
     /// Step 1 and the two key steps draw on a softly lit ground (the
     /// wireframe pass); its edge is the window's own colour, so nothing shows
     /// a seam.
-    static func isWireframe(_ step: OnboardingStep) -> Bool { [.source, .speechKey, .llmKey, .search].contains(step) }
+    static func isWireframe(_ step: OnboardingStep) -> Bool { [.source, .speechKey, .llmKey, .search, .language].contains(step) }
 
     /// Between wireframe steps the key stays on the page (it flies from step 1
     /// to its lock, and the lock closes again for the language model key); the
@@ -202,10 +202,7 @@ struct OnboardingJourneyView: View {
         case .search:
             OnboardingKeyStage(kind: .search, model: model, scene: wireScene)
         case .language:
-            OnboardingJourneyStep(act: step.act, title: "Which language do you speak?",
-                                  lede: "Auto works too: the provider listens for it.") {
-                OnboardingLanguageList(selected: model.language, rowsHeight: 150) { model.setLanguage($0) }
-            }
+            OnboardingLanguageStage(model: model)
         case .keyboard:
             permission(step, icon: "keyboard", title: "Keyboard control",
                        purpose: "To hear your Drop shortcut and type the text where your cursor is.",

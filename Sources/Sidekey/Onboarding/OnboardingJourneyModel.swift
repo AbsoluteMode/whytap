@@ -865,6 +865,45 @@ final class OnboardingJourneyModel: ObservableObject {
 
     // MARK: - 5. Language
 
+    /// The languages the speech route set on the speech steps can take:
+    /// Deepgram's model lists its own; the other routes take the menu set
+    /// (`AppLanguage.all`, the Soniox realtime languages).
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    var speechLanguages: [AppLanguage] {
+        _ = revision
+        return Self.languages(account: models.sharedRow(.speech)?.choice?.account, model: models.sharedRow(.speech)?.choice?.model)
+    }
+
+    static func languages(account: ProviderAccount?, model: String?) -> [AppLanguage] {
+        guard account == .deepgram, let model,
+              let codes = DeepgramLanguagePolicy.supportedLanguageCodes(for: model) else { return AppLanguage.all }
+        return AppLanguage.all.filter { codes.contains($0.code) }
+    }
+
+    /// Whether the speech route can find the language by itself (Deepgram
+    /// models without "multi" cannot).
+    var speechDetectsLanguage: Bool {
+        Self.detectsLanguage(account: models.sharedRow(.speech)?.choice?.account, model: models.sharedRow(.speech)?.choice?.model)
+    }
+
+    static func detectsLanguage(account: ProviderAccount?, model: String?) -> Bool {
+        guard account == .deepgram else { return true }
+        return DeepgramLanguagePolicy.automaticLanguageCodes(for: model ?? "") != nil
+    }
+
+    /// Why a language is not offered: the route's own list (Soniox, whose
+    /// realtime set is Whytap's menu, or a Deepgram model's), otherwise
+    /// Whytap's dictation menu, never a guess about another provider.
+    var speechLanguageLimit: String {
+        let route = models.sharedRow(.speech)?.choice
+        switch route?.account {
+        case .soniox?: return "isn't available with Soniox"
+        case .deepgram? where DeepgramLanguagePolicy.supportedLanguageCodes(for: route?.model ?? "") != nil:
+            return "isn't available with Deepgram \(route?.model ?? "")"
+        default: return "isn't in Whytap's dictation languages yet"
+        }
+    }
+
     func setLanguage(_ language: AppLanguage?) {
         preferences.selectedLanguage = language
         self.language = preferences.selectedLanguage

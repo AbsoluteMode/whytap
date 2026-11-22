@@ -720,6 +720,29 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.back()
         try await snap("help-review")
 
+        // The language globe in its states (REV 50), the springs landed.
+        OnboardingGlobeMotion.settlesAtOnce = true
+        defer { OnboardingGlobeMotion.settlesAtOnce = false }
+        for (name, query, country) in [("rest", "", nil), ("typing-rus", "Rus", nil), ("typing-jap", "Jap", nil),
+                                       ("typing-english", "English", nil), ("picked-brazil", "", "BR"),
+                                       ("picked-switzerland", "", "CH"), ("unavailable-iceland", "", "IS"),
+                                       ("no-match", "Xyzzy", nil)] as [(String, String, String?)] {
+            let stage = OnboardingLanguageStage(model: model, query: query, country: country)
+                .frame(width: 520, height: 330)
+                .background(OnboardingTheme.bg)
+                .preferredColorScheme(.dark)
+            let host = NSHostingView(rootView: stage)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 330)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-language-%@.png", index, name)))
+        }
+
         // The "Choose model" list (a popover, not in the window's image).
         for provider in [AIProviderKind.anthropic] {
             let list = OnboardingModelList(choices: model.modelChoices(.llmKey, provider: provider), selected: nil,

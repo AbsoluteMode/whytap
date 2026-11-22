@@ -82,7 +82,7 @@ window, Back and a progress bar.
      preselected model.
   4. Web search for the Agent (optional; only after a Self-hosted language
      model, see "Web search: a step only after Self-hosted").
-  5. Language.
+  5. Language: the wireframe globe (see "The language step is a globe").
   6. Keyboard control (Accessibility).
   7. Microphone.
   8. Input Monitoring, only when the Drop shortcut reports it needs it.
@@ -382,6 +382,36 @@ window, Back and a progress bar.
   next Anthropic check's model). Another mark during the automatic move
   stops it; Next keeps the accepted route. Keys stay in the Keychain:
   switching saves and deletes nothing.
+- **The language step is a globe.** The owner asked for the language
+  choice in the key steps' visual language, then for a globe where a person
+  finds their country and, or by typing, sees it lit; he approved the
+  design pass's prototype (screen 03). The step replaces the old list (same
+  step, same place in the way): a wireframe globe of country outlines on a
+  unit sphere, drawn like the key and the padlock (depth-shaded edges,
+  vertex dots, light glancing off the coasts, a slow turn and a breath),
+  turned by dragging; a click on a country turns it to the middle and lights
+  it; the one field ("Language or country, or click the globe...") turns the
+  globe as the text matches a country (English, its own or the Mac's
+  language, a few aliases such as UK) or a language (its home country, with
+  that language, and the other countries of that language lit softly).
+  Under the field: the country's language in its own script and in English, or its
+  languages side by side (German, French and Italian for Switzerland, each named in its own language with its code), each a
+  choice; "Auto-detect any language" when nothing is lit. Only languages the
+  speech route can take are offered: a Deepgram model's own list
+  (`DeepgramLanguagePolicy`), otherwise Whytap's dictation menu
+  (`AppLanguage.all`, the Soniox realtime set); a language outside it says
+  so in one line ("isn't in Whytap's dictation languages yet", or "isn't
+  available with Soniox" / "with Deepgram <model>" where that list is the
+  route's own), and Auto-detect is offered only where the route has it. No
+  checkmark until a language is chosen; then the outline turns green, the
+  field's arrow becomes a check and the step moves on by itself. The
+  outlines come from `scripts/onboarding_globe_data.py` into
+  `OnboardingGlobeCountries.swift`; this version is built from the
+  prototype's 79 regions (some neighbours joined), and the script takes
+  Natural Earth's admin-0 countries for finer outlines. Language variants
+  (English US/UK/AU, Portuguese BR/PT, Spanish ES/MX) are not offered yet:
+  Whytap stores and sends one ISO 639-1 code, and only Deepgram takes a
+  variant.
 
 ## Rejected
 
@@ -402,6 +432,16 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- `OnboardingGlobeTests` (REV 50): the typed text finds the country ("Rus",
+  "Jap", "Port" before Portuguese, "uk") and a language's home country with
+  that language (Russian in Cyrillic, "English", "Catalan"), nothing for "Xyzzy"; a
+  click finds the country under it (Russia, Brazil, the US, Japan, none in
+  the open Pacific); a point of the view maps back to the sphere at any
+  turn; the spring lands with the country facing the viewer; a Deepgram
+  model offers only its languages and Auto-detect only where it has it.
+  Offscreen renders of the step at rest, typing, picked, a country of three
+  languages, a language outside the menu and no match.
 
 - `OnboardingPreviewTests` switching marks (REV 46), both key steps: a key,
   another provider, back (no borrowed "accepted", no pick or route without

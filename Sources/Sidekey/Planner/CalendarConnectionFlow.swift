@@ -23,6 +23,13 @@ final class CalendarConnectionFlow: ObservableObject {
     }
 
     func clearError() { error = nil }
+
+    /// A refusal shown under Apple Calendar is stale once access is allowed.
+    func clearAppleRefusalIfAllowed() {
+        guard !working, lastProvider == .apple, !connections.appleAccessOff,
+              error == CalendarConnectionError.appleConnectRefusedMessage else { return }
+        error = nil
+    }
     func cancel() { error = nil; task?.cancel(); browser?.cancel() }
 
     /// Ordinary Connect goes straight to the provider, using this build's registration.

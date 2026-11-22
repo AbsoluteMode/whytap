@@ -44,12 +44,25 @@ struct SettingsCalendarIntegrationsView: View {
                 .font(.system(size: 11))
         }
         .background(CalendarConnectionWindowClose(onClose: flow.cancel).frame(width: 0, height: 0))
+        // Settings shows the live permission, not what Calendar saw last
+        // (status only: no prompt, no event read).
+        .onAppear { recheckAppleAccess() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            recheckAppleAccess()
+        }
         .onDisappear { flow.cancel() }
         .onChange(of: flow.error) { _, error in
             guard let error else { return }
             NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
                 userInfo: [.announcement: error, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
+    }
+}
+
+extension SettingsCalendarIntegrationsView {
+    func recheckAppleAccess() {
+        connections.checkAppleAccess()
+        flow.clearAppleRefusalIfAllowed()
     }
 }
 
@@ -92,6 +105,7 @@ private struct CalendarIntegrationCard: View {
         if disconnecting { return "Disconnecting…" }
         if connections.connectingProvider == provider { return "Sign-in in progress…" }
         if provider != .apple && connections.errors["accounts"] != nil { return "Connections unavailable" }
+        if provider == .apple && connected && connections.appleAccessOff { return "Access off" }
         if connected { return "Connected" }
         if !available { return readiness.status }
         return "Not connected"
@@ -127,6 +141,10 @@ private struct CalendarIntegrationCard: View {
                 if provider == .apple, let message = connections.errors["apple"] {
                     Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if provider == .apple, connections.appleAccessOff {
+                    IntegrationAction(title: "Open Privacy Settings") { PermissionsHelper.openCalendarsSettings() }
+                        .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
                 }
                 ForEach(accounts) { account in
                     HStack(spacing: 12) {

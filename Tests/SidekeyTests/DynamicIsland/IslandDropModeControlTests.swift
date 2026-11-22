@@ -274,8 +274,6 @@ final class IslandDropModeControlTests: XCTestCase {
 
     @MainActor
     func test_hoverToolsPreserveExistingActionsAndAccessibility() {
-        // Calendar ships as "Soon"; this contract describes the open catalog (see CalendarSoonTests).
-        openCalendarForThisTest()
         let expected: [(tool: HoverTool, title: String, effect: HoverSlotEffect)] = [
             (.dropMode, "Drop Mode", .toggleDropMode),
             (.clipboard, "History", .openPanel(.history)),

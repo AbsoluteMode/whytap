@@ -7,7 +7,7 @@
 - [Whytap Agent](agent.md): off by default; what it can do once on (files, commands), web search and memory
 - [Translation and subtitles](translation.md)
 - [Screenshots](screenshots.md): Shot editor, Blur and Copy text
-- [Planner](planner.md): To-do; Calendar (coming soon)
+- [Planner](planner.md): To-do and Calendar
 - [Backup and recovery](backup.md): encrypted backups to your own GitHub repository
 - [Troubleshooting](troubleshooting.md): ask on whytap.ai, and the most common problems
 

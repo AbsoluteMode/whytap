@@ -30,7 +30,7 @@ struct AppleCalendarAccess {
                         title: calendar.title + " · " + calendar.source.title, provider: .apple,
                         displayService: calendar.source.map {
                             CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
-                        })
+                        }, sourceTitle: calendar.source?.title, calendarTitle: calendar.title)
                 }
                 // EventKit reads every calendar when the list is empty; no calendars means no events.
                 guard !calendars.isEmpty else { return (feeds, []) }
@@ -48,6 +48,28 @@ struct AppleCalendarAccess {
                 return (feeds, events)
             })
     }()
+}
+
+/// What Calendar on this Mac can show, for the Calendars page and Settings.
+// WHY: .project-docs/decisions/2026-11-23-calendar-macos-only.md
+enum MacCalendarAccess: Equatable {
+    /// Never connected in Whytap: one button asks macOS.
+    case notAsked
+    /// macOS refuses (denied, restricted, revoked, Add Events Only).
+    case refused
+    /// Connected, the first read has not finished.
+    case loading
+    /// Connected, but this Mac has no calendars: add accounts in Internet Accounts.
+    case noCalendars
+    case ready
+}
+
+/// One account of Internet Accounts (iCloud, an address, Exchange) and its calendars.
+struct MacCalendarGroup: Identifiable, Equatable {
+    var id: String { title }
+    let title: String
+    let service: CalendarProvider?
+    let feeds: [CalendarFeed]
 }
 
 @MainActor
@@ -80,6 +102,40 @@ final class CalendarConnections: ObservableObject {
     /// allowed (then Connect succeeds without a prompt) or by Disconnect.
     @Published private(set) var appleConnectRefused = false
     var isConnecting: Bool { connectingProvider != nil }
+
+    var macAccess: MacCalendarAccess {
+        if appleAccessOff { return .refused }
+        guard appleEnabled else { return .notAsked }
+        if lastSynced["apple"] == nil { return errors["apple"] == nil ? .loading : .refused }
+        return feeds.contains { $0.provider == .apple } ? .ready : .noCalendars
+    }
+
+    /// What to say while access is off: a saved connection recovers on its own,
+    /// a refused Connect needs Connect again.
+    var macAccessOffMessage: String {
+        errors["apple"] ?? (appleEnabled ? CalendarConnectionError.appleAccessOffMessage
+                                         : CalendarConnectionError.appleConnectRefusedMessage)
+    }
+
+    /// Calendars of this Mac by account, accounts and calendars in alphabetical order.
+    var macCalendarGroups: [MacCalendarGroup] {
+        let mac = feeds.filter { $0.provider == .apple }
+        let titles = mac.reduce(into: [String]()) { list, feed in
+            let title = feed.sourceTitle ?? "On My Mac"
+            if !list.contains(title) { list.append(title) }
+        }
+        return titles.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { title in
+            let group = mac.filter { ($0.sourceTitle ?? "On My Mac") == title }
+                .sorted { ($0.calendarTitle ?? $0.title).localizedStandardCompare($1.calendarTitle ?? $1.title) == .orderedAscending }
+            return MacCalendarGroup(title: title, service: group.first?.displayService, feeds: group)
+        }
+    }
+
+    /// Whether a calendar's events are shown. Only Calendar on this Mac can be
+    /// hidden; Whytap's own events and direct connections are always shown.
+    func isShown(feedID: String) -> Bool {
+        !(feedID.hasPrefix("apple:") && hiddenFeeds.contains(feedID))
+    }
     var connectionBlockReason: String? { CalendarAvailability.blockReason ?? backup?.calendarConnectionBlockReason }
     var accountConnectionIssue: String? {
         if let error = errors["accounts"] { return error }

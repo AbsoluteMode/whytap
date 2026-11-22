@@ -70,6 +70,10 @@ struct CalendarFeed: Identifiable, Equatable {
     /// The service whose logo the calendar shows when it differs from the
     /// connection: a Google or Exchange account synced by Calendar on this Mac.
     var displayService: CalendarProvider?
+    /// Calendar on this Mac: the account as Internet Accounts names it (iCloud,
+    /// an address, Exchange) and the calendar's own name, for the calendar list.
+    var sourceTitle: String?
+    var calendarTitle: String?
 }
 
 struct CalendarFeedEvent: Identifiable, Equatable {
@@ -151,7 +155,7 @@ enum CalendarConnectionError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse: return "The calendar service returned an unsupported response. Try refreshing."
-        case .signInRequired: return "Sign-in expired. Disconnect this account, then use Connect account to sign in again."
+        case .signInRequired: return "Sign-in expired. Disconnect this account and add it in System Settings → Internet Accounts instead; it then appears with the calendars of this Mac."
         case .denied: return "Calendar access wasn’t granted. You can connect again when ready."
         case .cancelled: return "Connection cancelled."
         case .timeout: return "Sign-in timed out. Try connecting again."

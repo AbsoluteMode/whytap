@@ -1,19 +1,22 @@
 import AppKit
 import SwiftUI
 
+/// Settings → Integrations → Calendars: Calendar on this Mac is the one way to
+/// connect calendars; Google, Outlook and the rest come through Internet
+/// Accounts. Accounts connected directly by an earlier build keep working and
+/// are listed with Disconnect; the direct sign-in code stays but is not offered.
+// WHY: .project-docs/decisions/2026-11-23-calendar-macos-only.md
 struct SettingsCalendarIntegrationsView: View {
     @ObservedObject var connections: CalendarConnections
-    var readiness: (CalendarProvider) -> CalendarConnectionReadiness = {
-        .shared($0, configuration: CalendarClientConfiguration.registered($0))
-    }
     @StateObject private var flow: CalendarConnectionFlow
     private let configurationInfo: [String: Any]?
+    @State private var removing: ConnectedCalendarAccount?
+    @State private var confirmingAppleDisconnect = false
+    @State private var error: String?
 
-    init(connections: CalendarConnections,
-         readiness: @escaping (CalendarProvider) -> CalendarConnectionReadiness = {
-             .shared($0, configuration: CalendarClientConfiguration.registered($0))
-         }, configurationInfo: [String: Any]? = Bundle.main.infoDictionary, flow: CalendarConnectionFlow? = nil) {
-        self.connections = connections; self.readiness = readiness; self.configurationInfo = configurationInfo
+    init(connections: CalendarConnections, configurationInfo: [String: Any]? = Bundle.main.infoDictionary,
+         flow: CalendarConnectionFlow? = nil) {
+        self.connections = connections; self.configurationInfo = configurationInfo
         self._flow = StateObject(wrappedValue: flow ?? CalendarConnectionFlow(connections: connections))
     }
 
@@ -21,27 +24,27 @@ struct SettingsCalendarIntegrationsView: View {
         if CalendarAvailability.isOpen { openBody } else { CalendarComingSoonCard() }
     }
 
+    private var busy: Bool { connections.isConnecting || connections.connectionBlockReason != nil }
+
     private var openBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Calendars").font(.system(size: 15, weight: .semibold))
-            Text("Connect the feature you need. Each connection requests its own permissions.")
+            Text("Whytap shows the calendars of this Mac and only reads them. Add Google, Outlook and other accounts in System Settings → Internet Accounts; they appear here.")
                 .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
-            if let message = connections.accountConnectionIssue {
-                Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if let message = connections.connectionBlockReason {
-                Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                warning(message)
             }
-            ForEach([CalendarProvider.google, .microsoft, .apple, .zoom]) { provider in
-                CalendarIntegrationCard(provider: provider, connections: connections,
-                    readiness: readiness(provider), flow: flow,
-                    onConnect: { flow.startRegistered(provider: provider, info: configurationInfo) })
+            MacCard { macCard.padding(14) }
+            if !connections.accounts.isEmpty || connections.errors["accounts"] != nil {
+                MacCard { directCard.padding(14) }
             }
-            IntegrationLink(title: "Calendar privacy", destination: URL(string: "https://whytap.ai/calendar-privacy/")!)
-                .font(.system(size: 11))
+            if let error { warning(error) }
+            HStack(spacing: 8) {
+                IntegrationAction(title: "Open Internet Accounts") { PermissionsHelper.openInternetAccountsSettings() }
+                    .accessibilityHint("Opens System Settings → Internet Accounts")
+                IntegrationLink(title: "Calendar privacy", destination: URL(string: "https://whytap.ai/calendar-privacy/")!)
+            }.font(.system(size: 11))
         }
         .background(CalendarConnectionWindowClose(onClose: flow.cancel).frame(width: 0, height: 0))
         // Settings shows the live permission, not what Calendar saw last
@@ -56,6 +59,124 @@ struct SettingsCalendarIntegrationsView: View {
             NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
                 userInfo: [.announcement: error, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
+        .alert("Disconnect calendars of this Mac?", isPresented: $confirmingAppleDisconnect) {
+            Button("Cancel", role: .cancel) {}
+            Button("Disconnect", role: .destructive) { connections.disableApple() }
+        } message: { Text("Whytap stops showing them. Your calendars and macOS access stay as they are.") }
+        .alert("Disconnect \(removing?.label ?? "account")?", isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { account in
+                Button("Cancel", role: .cancel) { removing = nil }
+                Button("Disconnect", role: .destructive) { disconnect(account) }
+            } message: { _ in Text("This removes the direct connection from Whytap. Your events stay in the source calendar.") }
+    }
+
+    private var macStatus: String {
+        if flow.working { return "Waiting for macOS…" }
+        switch connections.macAccess {
+        case .notAsked: return "Not connected"
+        case .refused: return "Access off"
+        case .loading: return "Loading calendars…"
+        case .noCalendars: return "No calendars on this Mac yet"
+        case .ready:
+            let count = connections.feeds.filter { $0.provider == .apple }.count
+            return count == 1 ? "1 calendar" : "\(count) calendars"
+        }
+    }
+
+    @ViewBuilder private var macCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Calendars on this Mac").font(.system(size: 13, weight: .semibold))
+                    Text(macStatus).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
+                }
+                Spacer(minLength: 8)
+                if flow.working {
+                    IntegrationAction(title: "Cancel") { flow.cancel() }
+                } else if connections.macAccess == .refused {
+                    IntegrationAction(title: "Open Privacy Settings", primary: true) { PermissionsHelper.openCalendarsSettings() }
+                        .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
+                } else if connections.appleEnabled {
+                    IntegrationAction(title: "Disconnect", enabled: !busy) { confirmingAppleDisconnect = true }
+                } else {
+                    IntegrationAction(title: "Allow access", primary: true, enabled: !busy) {
+                        flow.startRegistered(provider: .apple, info: configurationInfo)
+                    }
+                    .accessibilityHint("macOS asks once for access to the calendars of this Mac")
+                }
+            }
+            switch connections.macAccess {
+            case .refused:
+                warning((flow.lastProvider == .apple ? flow.error : nil) ?? connections.macAccessOffMessage)
+            case .notAsked:
+                Text("iCloud, Google, Outlook and every account in Internet Accounts. macOS asks for full calendar access; Whytap only reads events.")
+                    .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2).fixedSize(horizontal: false, vertical: true)
+                if flow.lastProvider == .apple, let message = flow.error { warning(message) }
+            case .noCalendars:
+                Text("Add an account with calendars in System Settings → Internet Accounts, or create a calendar in the Calendar app.")
+                    .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2).fixedSize(horizontal: false, vertical: true)
+            case .loading:
+                EmptyView()
+            case .ready:
+                Text("Ticked calendars appear in the day view.")
+                    .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
+                ForEach(connections.macCalendarGroups) { group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            CalendarSourceLogoView(source: .provider(group.service ?? .apple), size: 16)
+                            Text(group.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        }
+                        ForEach(group.feeds) { feed in
+                            Toggle(feed.calendarTitle ?? feed.title, isOn: Binding(
+                                get: { connections.isShown(feedID: feed.id) },
+                                set: { connections.setVisible($0, feedID: feed.id) }))
+                                .toggleStyle(.checkbox).font(.system(size: 12)).padding(.leading, 22)
+                        }
+                    }
+                }
+                if let message = connections.errors["visibility"] { warning(message) }
+            }
+        }
+    }
+
+    /// Accounts an earlier build connected through Google, Microsoft or Zoom sign-in.
+    @ViewBuilder private var directCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Connected directly").font(.system(size: 13, weight: .semibold))
+            Text("These still work. To move one, add the account in Internet Accounts, then disconnect it here; the same events are shown once.")
+                .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2).fixedSize(horizontal: false, vertical: true)
+            if let message = connections.errors["accounts"] { warning(message) }
+            ForEach(connections.accounts) { account in
+                HStack(spacing: 12) {
+                    CalendarSourceLogoView(source: .provider(account.provider), size: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(account.label).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                        Text(account.provider.integrationTitle).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    IntegrationAction(title: "Disconnect", enabled: !busy) { removing = account }
+                        .accessibilityLabel("Disconnect \(account.label) from \(account.provider.integrationTitle)")
+                }
+                if let message = connections.errors[account.id.uuidString] { warning(message) }
+            }
+        }
+    }
+
+    private func disconnect(_ account: ConnectedCalendarAccount) {
+        removing = nil
+        guard connections.beginConnecting(provider: account.provider) else {
+            error = connections.connectionBlockReason ?? "Finish the other calendar operation first."
+            return
+        }
+        error = nil
+        Task {
+            defer { connections.endConnecting() }
+            do { try await connections.remove(account) } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func warning(_ text: String) -> some View {
+        Text(text).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -83,112 +204,6 @@ private struct CalendarConnectionWindowClose: NSViewRepresentable {
             }
         }
         @objc private func windowClosing(_ notification: Notification) { onClose?() }
-    }
-}
-
-private struct CalendarIntegrationCard: View {
-    let provider: CalendarProvider
-    @ObservedObject var connections: CalendarConnections
-    let readiness: CalendarConnectionReadiness
-    @ObservedObject var flow: CalendarConnectionFlow
-    private var available: Bool { readiness == .available }
-    let onConnect: () -> Void
-    @State private var removing: ConnectedCalendarAccount?
-    @State private var disconnecting = false
-    @State private var error: String?
-
-    private var accounts: [ConnectedCalendarAccount] { connections.accounts.filter { $0.provider == provider } }
-    private var connected: Bool { provider == .apple ? connections.appleEnabled : !accounts.isEmpty }
-    private var busy: Bool { disconnecting || connections.isConnecting || connections.connectionBlockReason != nil }
-    private var actionTitle: String { available ? (connected ? "Add account" : "Connect") : "Unavailable" }
-    private var status: String {
-        if disconnecting { return "Disconnecting…" }
-        if connections.connectingProvider == provider { return "Sign-in in progress…" }
-        if provider != .apple && connections.errors["accounts"] != nil { return "Connections unavailable" }
-        if provider == .apple && connected && connections.appleAccessOff { return "Access off" }
-        if connected { return "Connected" }
-        if !available { return readiness.status }
-        return "Not connected"
-    }
-
-    var body: some View {
-        MacCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(provider.integrationTitle).font(.system(size: 13, weight: .semibold))
-                        Text(status).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
-                    }
-                    Spacer(minLength: 8)
-                    if flow.working && flow.lastProvider == provider {
-                        IntegrationAction(title: "Cancel") { flow.cancel() }
-                    } else if provider == .apple && connected {
-                        IntegrationAction(title: "Disconnect", enabled: !busy) { confirmAppleDisconnect() }
-                    } else {
-                        IntegrationAction(title: actionTitle,
-                            primary: !connected, enabled: available && !busy && (provider == .apple || connections.accountConnectionIssue == nil), action: onConnect)
-                            .accessibilityLabel("\(actionTitle) · \(provider.integrationTitle)")
-                            .accessibilityHint(readiness.message ?? connections.connectionBlockReason ?? connections.accountConnectionIssue ?? "")
-                    }
-                }
-                Text(provider.permissionSummary).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !available {
-                    Text(readiness.message ?? "")
-                        .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if provider == .apple, let message = connections.errors["apple"] {
-                    Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if provider == .apple, connections.appleAccessOff {
-                    IntegrationAction(title: "Open Privacy Settings") { PermissionsHelper.openCalendarsSettings() }
-                        .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
-                }
-                ForEach(accounts) { account in
-                    HStack(spacing: 12) {
-                        Text(account.label).font(.system(size: 12))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        IntegrationAction(title: "Disconnect", enabled: !busy) { removing = account }
-                            .accessibilityLabel("Disconnect \(account.label) from \(provider.integrationTitle)")
-                    }
-                    if let message = connections.errors[account.id.uuidString] {
-                        Text(message).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if let error { Text(error).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange) }
-                if flow.lastProvider == provider, let error = flow.error {
-                    Text(error).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.padding(14)
-        }
-        .alert("Disconnect \(provider.integrationTitle)?", isPresented: Binding(
-            get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { account in
-                Button("Cancel", role: .cancel) { removing = nil }
-                Button("Disconnect", role: .destructive) {
-                    guard connections.beginConnecting(provider: provider) else {
-                        error = connections.connectionBlockReason ?? "Finish the other calendar operation first."
-                        removing = nil
-                        return
-                    }
-                    removing = nil; disconnecting = true; error = nil
-                    Task {
-                        defer { disconnecting = false; connections.endConnecting() }
-                        do {
-                            if provider == .apple { connections.disableApple() }
-                            else { try await connections.remove(account) }
-                        } catch { self.error = error.localizedDescription }
-                    }
-                }
-            } message: { _ in Text("This removes this calendar connection from Whytap. Your events are kept in the source calendar.") }
-    }
-
-    private func confirmAppleDisconnect() {
-        removing = ConnectedCalendarAccount(id: UUID(), provider: .apple, label: provider.title)
     }
 }
 

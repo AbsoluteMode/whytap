@@ -68,13 +68,15 @@ final class CalendarHoverModel: ObservableObject {
     var isToday: Bool { Calendar.current.isDate(selectedDay, inSameDayAs: now()) }
     var interval: DateInterval { Calendar.current.dateInterval(of: .day, for: selectedDay)! }
 
-    /// Every connected calendar: Hover has no calendar hiding. A choice saved by
-    /// an older build stays stored for backups and is ignored here.
+    /// Whytap's own events and every calendar the user left ticked on the
+    /// Calendars page; only calendars of this Mac can be unticked.
+    // WHY: .project-docs/decisions/2026-11-23-calendar-macos-only.md
     var events: [CalendarFeedEvent] {
         let local = store.archive.events.map {
             CalendarFeedEvent(id: $0.id.uuidString, feedID: "local", event: $0, sourceURL: nil)
         }
-        return CalendarEventMerger.merge(local + connections.events).filter { $0.event.occurs(on: selectedDay) }.sorted {
+        let shown = connections.events.filter { connections.isShown(feedID: $0.feedID) }
+        return CalendarEventMerger.merge(local + shown).filter { $0.event.occurs(on: selectedDay) }.sorted {
             if $0.event.allDay != $1.event.allDay { return $0.event.allDay }
             if $0.event.start != $1.event.start { return $0.event.start < $1.event.start }
             return $0.id < $1.id
@@ -177,6 +179,8 @@ final class CalendarHoverModel: ObservableObject {
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// Opens System Settings → Privacy & Security → Calendars; tests replace it.
     var openPrivacySettings: () -> Void = { PermissionsHelper.openCalendarsSettings() }
+    /// Opens System Settings → Internet Accounts; tests replace it.
+    var openInternetAccounts: () -> Void = { PermissionsHelper.openInternetAccountsSettings() }
 
     /// A click on an event: join its meeting, else open it in its own calendar.
     @discardableResult
@@ -255,9 +259,9 @@ struct CalendarHoverView: View {
             Spacer(minLength: 0)
             if model.page == .agenda {
                 CalendarHoverButton { model.page = .providers } label: {
-                    Text("Connect").font(.system(size: 11, weight: .semibold))
+                    Text(connections.appleEnabled ? "Calendars" : "Connect").font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 9).frame(height: 26)
-                }.accessibilityLabel("Connect a calendar")
+                }.accessibilityLabel(connections.appleEnabled ? "Choose calendars" : "Connect calendars")
             }
         }
         .frame(height: 26)
@@ -266,7 +270,7 @@ struct CalendarHoverView: View {
     private var title: String {
         switch model.page {
         case .agenda: return "Calendar"
-        case .providers: return "Connect"
+        case .providers: return "Calendars"
         }
     }
 
@@ -416,58 +420,99 @@ struct CalendarHoverView: View {
         }
     }
 
+    /// The Calendars page: one permission for every calendar of this Mac, the
+    /// calendars by account with a tick each, and where to add more accounts.
+    // WHY: .project-docs/decisions/2026-11-23-calendar-macos-only.md
     private var providers: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach([CalendarProvider.google, .microsoft, .apple, .zoom]) { provider in
-                    CalendarHoverButton {
-                        model.connect(provider, info: configurationInfo) {
-                            if model.visible { NSApp.activate(ignoringOtherApps: true) }
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            CalendarSourceLogoView(source: .provider(provider), size: 28)
-                            Text(provider.integrationTitle).font(.system(size: 12, weight: .semibold))
-                            Spacer(minLength: 2)
-                            switch model.connectState(provider) {
-                            case .connecting: ProgressView().controlSize(.small)
-                            case .connected:
-                                Text("Connected").font(.system(size: 11)).foregroundStyle(.white.opacity(0.76))
-                            case .accessOff:
-                                Text("Access off").font(.system(size: 11, weight: .medium)).foregroundStyle(MacSettingsTheme.orange)
-                            case .addAccount: Text("Add account").font(.system(size: 11, weight: .medium))
-                            case .connect: Text("Connect").font(.system(size: 11, weight: .medium))
-                            }
-                        }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .disabled(connections.isConnecting)
-                    .accessibilityLabel(model.connectAccessibilityLabel(provider))
-                    if connectionFlow.lastProvider == provider, let error = connectionFlow.error {
-                        Text(error).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.orange)
-                            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
-                    }
-                }
-                if connections.appleAccessOff {
-                    CalendarHoverButton { model.openPrivacySettings() } label: {
-                        Text("Open Privacy Settings").font(.system(size: 11, weight: .medium)).padding(8)
-                    }.accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
-                }
+                macAccessSection
                 if connectionFlow.working {
                     CalendarHoverButton { connectionFlow.cancel() } label: {
                         Text("Cancel").font(.system(size: 11)).padding(8)
                     }
                 }
-                // Problems of connected calendars, moved here with the calendar list.
+                // Problems of other calendars (direct connections, storage); Calendar on
+                // this Mac shows its own above.
                 if let message = connections.connectionBlockReason { notice(message) }
-                ForEach(connections.errors.keys.sorted(), id: \.self) { key in notice(connections.errors[key] ?? "") }
+                ForEach(connections.errors.keys.sorted().filter { $0 != "apple" }, id: \.self) { key in
+                    notice(connections.errors[key] ?? "")
+                }
                 if let error = store.errorMessage {
                     notice(error)
                     CalendarHoverButton { store.reload() } label: { Text("Retry").font(.system(size: 11)).padding(8) }
                 }
-                Text("Manage connected accounts in Settings → Integrations.")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).padding(.top, 4).padding(.horizontal, 2)
+                internetAccountsHint
+                if !connections.accounts.isEmpty {
+                    Text("Accounts connected directly: Settings → Integrations.")
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).padding(.horizontal, 2)
+                }
             }.padding(3)
         }.scrollIndicators(.visible)
+    }
+
+    @ViewBuilder private var macAccessSection: some View {
+        let appleError = connectionFlow.lastProvider == .apple ? connectionFlow.error : nil
+        switch connections.macAccess {
+        case .notAsked:
+            Text("See the calendars of this Mac: iCloud, Google, Outlook and every account in Internet Accounts. Whytap only reads them.")
+                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.86)).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+            CalendarHoverButton { allowAccess() } label: {
+                HStack(spacing: 8) {
+                    CalendarSourceLogoView(source: .provider(.apple), size: 22)
+                    Text("Allow access to calendars").font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 2)
+                    if connectionFlow.working { ProgressView().controlSize(.small) }
+                }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .disabled(connections.isConnecting)
+            .accessibilityLabel("Allow access to calendars")
+            .accessibilityHint("macOS asks once for access to the calendars of this Mac")
+            if let appleError { notice(appleError) }
+        case .refused:
+            notice(appleError ?? connections.macAccessOffMessage)
+            CalendarHoverButton { model.openPrivacySettings() } label: {
+                Text("Open Privacy Settings").font(.system(size: 11, weight: .medium)).padding(8)
+            }.accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
+        case .loading:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Loading calendars…").font(.system(size: 11))
+            }.padding(.horizontal, 2)
+        case .noCalendars:
+            Text("This Mac has no calendars yet.")
+                .font(.system(size: 12, weight: .semibold)).padding(.horizontal, 2)
+        case .ready:
+            ForEach(connections.macCalendarGroups) { group in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        CalendarSourceLogoView(source: .provider(group.service ?? .apple), size: 15)
+                        Text(group.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    }.padding(.horizontal, 2).padding(.top, 2)
+                    ForEach(group.feeds) { feed in
+                        CalendarFeedToggle(connections: connections, feed: feed)
+                    }
+                }
+            }
+        }
+    }
+
+    private var internetAccountsHint: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Add Google, Outlook and other calendars in System Settings → Internet Accounts; they appear here.")
+                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+            CalendarHoverButton { model.openInternetAccounts() } label: {
+                Text("Open Internet Accounts").font(.system(size: 11, weight: .medium)).padding(8)
+            }.accessibilityHint("Opens System Settings → Internet Accounts")
+        }.padding(.top, 4)
+    }
+
+    private func allowAccess() {
+        model.connect(.apple, info: configurationInfo) {
+            if model.visible { NSApp.activate(ignoringOtherApps: true) }
+        }
     }
 
     private var needsAttention: Bool {
@@ -478,6 +523,26 @@ struct CalendarHoverView: View {
     private func notice(_ text: String) -> some View {
         Text(text).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.orange)
             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 2)
+    }
+}
+
+/// One calendar of this Mac with its tick; unticked calendars leave the day.
+struct CalendarFeedToggle: View {
+    @ObservedObject var connections: CalendarConnections
+    let feed: CalendarFeed
+    var body: some View {
+        let shown = connections.isShown(feedID: feed.id)
+        CalendarHoverButton { connections.setVisible(!shown, feedID: feed.id) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: shown ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13)).foregroundStyle(.white.opacity(shown ? 0.96 : 0.6))
+                Text(feed.calendarTitle ?? feed.title).font(.system(size: 12)).lineLimit(1)
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 8).padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityLabel(feed.calendarTitle ?? feed.title)
+        .accessibilityValue(shown ? "Shown" : "Hidden")
+        .accessibilityAddTraits(.isToggle)
     }
 }
 

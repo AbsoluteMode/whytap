@@ -41,6 +41,9 @@ struct OnboardingJourneyView: View {
         }
         .frame(width: Self.size.width, height: Self.size.height)
         .background(ground)
+        // The page fills the window, title bar included: inside the safe area
+        // the fixed page was centred and its footer ran past the bottom edge.
+        .ignoresSafeArea()
         .preferredColorScheme(.dark)
     }
 
@@ -75,7 +78,7 @@ struct OnboardingJourneyView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: OnboardingTheme.compactHeaderHeight)
-        .padding(.top, 14)
+        .padding(.top, 24)
     }
 
     private var counter: String {
@@ -123,7 +126,8 @@ struct OnboardingJourneyView: View {
     @ViewBuilder private var rightAction: some View {
         if dwell.state != .idle {
             OnboardingDwellPill(dwell: dwell)
-        } else if model.step != .thanks, model.step.isInformational || model.outcome(model.step).isDone {
+        } else if model.step != .thanks, model.step != .source,
+                  model.step.isInformational || model.outcome(model.step).isDone {
             OnboardingPrimaryButton(title: "Next", action: model.next)
                 .keyboardShortcut(.defaultAction)
         }

@@ -568,6 +568,15 @@ struct OnboardingSourceStage: View {
                 choiceButton(.key, label: "API keys. \(keyDetail)")
             }
             .allowsHitTesting(false)
+            // Return chooses the figure in front, like a click; no pill shows.
+            Button("") {
+                let figure = motion.hovered ?? chosen ?? (offersLaptop ? nil : .key)
+                if let figure { choose(figure) }
+            }
+            .keyboardShortcut(.defaultAction)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
         }
         .frame(width: size.width, height: size.height)
         .contentShape(Rectangle())

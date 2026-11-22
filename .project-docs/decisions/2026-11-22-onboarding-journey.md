@@ -87,6 +87,14 @@ window, Back and a progress bar.
   steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when reached
   going forward. Required steps keep a quiet "Set up later", optional ones
   "Skip"; a step that is done without a pending move offers Next.
+  Step 1 is the exception (the owner asked to remove the pill, 2026-11-22): a
+  click on a figure, or Return on the figure in front, moves on at once,
+  with no dwell, no pill and no Next, also after Back.
+- **The page fills the whole window.** The window's content runs under its
+  transparent title bar; inside the safe area the fixed 520×440 page was
+  centred and its footer ran about 14 pt past the bottom edge on every step,
+  so the page ignores the safe area and the header keeps its place with a
+  24 pt top inset.
 - **Done before means not shown.** Steps whose result already holds when the
   window opens (speech runs, an LLM is set, a Tavily key is saved, the
   language is chosen, a permission is granted) are left out; choices remove

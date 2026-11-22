@@ -23,8 +23,7 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.step, .source, "it starts at the first step")
 
         model.chooseYourKey()
-        model.next()
-        XCTAssertEqual(model.step, .speechKey)
+        XCTAssertEqual(model.step, .speechKey, "a choice on step 1 moves on at once")
         await model.useSpeechKey("bad-key-0123456789abcdef", provider: .deepgram)
         XCTAssertEqual(model.keyProblems[.speechKey], .refused, "a key containing bad is refused")
         await model.useSpeechKey("sk-preview-0123456789abcdef", provider: .elevenLabs)
@@ -90,7 +89,6 @@ final class OnboardingPreviewTests: XCTestCase {
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
-        model.next()
         let cases: [(String, OnboardingKeyProblem)] = [
             ("short-key", .format),
             ("key with spaces 0123456789", .format),

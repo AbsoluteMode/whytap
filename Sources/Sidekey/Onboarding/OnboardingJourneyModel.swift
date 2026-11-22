@@ -251,6 +251,8 @@ final class OnboardingJourneyModel: ObservableObject {
         step = next
         arrive(at: next)
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
+        // Step 1 is its own Continue: a click on a figure moves on at once.
+        guard next != .source else { return }
         if direction == .backward, outcome(next).isDone || next.isInformational, next != .thanks {
             dwell.review(next: following) { [weak self] in self?.next() }
         } else if direction == .forward, next.isInformational, let seconds = next.dwell {
@@ -288,6 +290,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// move on. A success of a step that is not shown is only recorded.
     private func succeed(_ done: OnboardingStep, _ text: String) {
         outcomes[done] = .done(text)
+        if done == .source, step == .source { next(); return }
         guard done == step, !dwell.isCounting, !dwell.isLatched, let seconds = done.dwell else { return }
         let following = nextStep?.shortTitle ?? OnboardingStep.thanks.shortTitle
         dwell.schedule(seconds, next: following) { [weak self] in self?.next() }

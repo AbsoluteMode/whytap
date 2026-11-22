@@ -172,6 +172,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
     /// Lets the success beat end and waits for the step it leads to.
     private func endBeat(_ env: Env, until step: OnboardingStep, in model: OnboardingJourneyModel,
                          file: StaticString = #filePath, line: UInt = #line) async throws {
+        // Step 1 has no beat: a choice moves on at once.
+        if model.step == step { return }
         try await eventually({ env.beat.count > 0 }, file: file, line: line)
         env.beat.end()
         try await eventually({ model.step == step }, file: file, line: line)
@@ -337,6 +339,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.chooseOnThisMac()
         try await endBeat(env, until: .llmKey, in: model)
         XCTAssertFalse(model.steps.contains(.speechKey))
+        // The step moves on at once; the routes land when the model is applied.
+        try await eventually { env.routing.route(for: .voiceSearch)?.account == .thisMac }
         for feature in [AIFeature.dropFast, .dropSmart, .agentVoice, .voiceSearch] {
             XCTAssertEqual(env.routing.route(for: feature)?.account, .thisMac, "\(feature) runs on this Mac")
         }
@@ -376,31 +380,47 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // MARK: - Dwell latch and review
 
+    func testAChoiceOnTheFirstStepMovesOnAtOnceWithoutAPill() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        XCTAssertEqual(model.step, .speechKey, "the click is the Continue")
+        XCTAssertEqual(env.beat.count, 0, "no beat, no pill")
+        model.back()
+        XCTAssertEqual(model.step, .source)
+        XCTAssertEqual(model.dwell.state, .idle, "back on step 1 shows no Continue pill")
+        model.chooseYourKey()
+        XCTAssertEqual(model.step, .speechKey)
+    }
+
     func testBackToADoneStepWaitsInReviewUntilReturn() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
-        try await endBeat(env, until: .speechKey, in: model)
+        await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
+        try await endBeat(env, until: .llmKey, in: model)
         model.back()
-        XCTAssertEqual(model.step, .source)
-        XCTAssertEqual(model.dwell.state, .reviewing(next: "Speech key"), "Continue · Speech key, no jump forward")
-        try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(model.step, .source)
-        model.dwell.commitNow() // Return
         XCTAssertEqual(model.step, .speechKey)
+        let following = OnboardingStep.llmKey.shortTitle
+        XCTAssertEqual(model.dwell.state, .reviewing(next: following), "Continue · \(following), no jump forward")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.step, .speechKey)
+        model.dwell.commitNow() // Return
+        XCTAssertEqual(model.step, .llmKey)
     }
 
     func testHoldingTheDwellKeepsTheStep() async throws {
         let env = try makeEnv()
         let model = try makeModel(env)
         model.chooseYourKey()
+        await model.useSpeechKey("sk-0123456789abcdef", provider: .soniox)
         try await eventually { env.beat.count > 0 }
         model.dwell.latch() // pointer entered the step
         env.beat.end()
         try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(model.step, .source, "held as long as the person needs")
+        XCTAssertEqual(model.step, .speechKey, "held as long as the person needs")
         model.dwell.resume() // pointer left
-        try await endBeat(env, until: .speechKey, in: model)
+        try await endBeat(env, until: .llmKey, in: model)
     }
 
     func testTourChaptersMoveOnAfterAReadingPauseOnlyGoingForward() async throws {
@@ -524,8 +544,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
         try await snap("source")
         model.chooseYourKey()
-        try await snap("source-key-chosen")
-        try await endBeat(env, until: .speechKey, in: model)
+        XCTAssertEqual(model.step, .speechKey)
         try await snap("speech-key")
         model.speechProvider = .deepgram
         await model.useSpeechKey("bad-0123456789abcdef", provider: .deepgram)

@@ -141,7 +141,8 @@ the window finishes it. It does not come back after updates.
 4. **Optional features:** turn on Google search, Meeting Notes or the Agent;
    a feature whose model is not set offers **Add a model**.
 
-The next version (after 2.2.26) redesigns this window into five pages: the
+The next version (after 2.2.26) redesigns this window into five pages with
+Back on every page after the first: the
 speech page also lists language-model and Tavily keys with each provider's
 free offer and a searchable "I speak" language, Screen Recording (for Shot)
 becomes an optional row on the permissions page, a page introduces tool

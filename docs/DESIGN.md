@@ -88,6 +88,20 @@ change the tool's settings below.
 
 See the [shared model rows decision](../.project-docs/decisions/2026-11-22-shared-model-rows.md).
 
+## Search row — 2026-11-22
+
+- A third card under Speech and LLM, laid out like them: "Search" with the
+  caption "Agent web search" and one menu. The label is what the Agent uses
+  now: "Anthropic · built-in", "OpenAI · built-in", "OpenRouter · web",
+  "Tavily" or "Off — add a Tavily key".
+- The menu offers the Agent model's built-in search (when it has one) and
+  Tavily, with a checkmark on the current one; without a Tavily key it offers
+  "Add a Tavily key…", which opens API keys.
+- One secondary line under the menu names the price and who bills it. Off
+  keeps the orange setup contour and turns that line orange.
+
+See the [provider web search decision](../.project-docs/decisions/2026-11-22-agent-provider-web-search.md).
+
 ## History: several rows in one paste — 2026-11-22
 
 - ⌘-click marks a History row; a blue badge at its right edge shows its paste

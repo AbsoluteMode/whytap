@@ -14,7 +14,7 @@ sources:
   - type: url
     reference: https://platform.claude.com/docs/en/about-claude/pricing
     confirmed_at: 2026-10-27
-related: [2026-10-20-feature-costs.md]
+related: [2026-10-20-feature-costs.md, 2026-11-22-agent-provider-web-search.md]
 ---
 
 # Anthropic costs from tokens

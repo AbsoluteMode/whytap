@@ -252,6 +252,10 @@ struct APIAndModelsView: View {
                     }
                     .id("shared.\(row.kind.rawValue)")
                 }
+                MacCard(needsSetup: viewModel.searchRow.needsSetup) {
+                    searchRow(viewModel.searchRow)
+                }
+                .id("shared.search")
                 ForEach(viewModel.groups.filter { $0.audioTranslate != nil }) { group in
                     MacCard(needsSetup: group.needsSetup) {
                         groupRow(group)
@@ -329,6 +333,61 @@ struct APIAndModelsView: View {
         .accessibilityLabel(row.kind.title)
         .accessibilityValue(row.needsSetup ? "\(row.label), Needs setup" : row.label)
     }
+
+    // MARK: - Search
+
+    /// The Agent's web search, laid out like Speech and LLM: what it searches
+    /// with now, a menu of what it can use, and what that costs.
+    // WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    private func searchRow(_ row: AgentSearchRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeometryReader { geometry in
+                let menuWidth = max(120, geometry.size.width - 28 - 116 - 12)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.searchTitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(MacSettingsTheme.text)
+                        Text(Self.searchCaption)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(MacSettingsTheme.text3)
+                            .lineLimit(1)
+                    }
+                    .frame(width: 116, alignment: .leading)
+                    MacMenu(title: row.current.label, minWidth: menuWidth, maxWidth: menuWidth) {
+                        if let builtIn = row.builtIn {
+                            Button { viewModel.selectSearch(.auto) } label: {
+                                if row.current == builtIn { Label(builtIn.label, systemImage: "checkmark") } else { Text(builtIn.label) }
+                            }
+                        }
+                        if row.tavilyConnected {
+                            Button { viewModel.selectSearch(.tavily) } label: {
+                                if row.current == .tavily { Label("Tavily", systemImage: "checkmark") } else { Text("Tavily") }
+                            }
+                        } else {
+                            if row.builtIn != nil { Divider() }
+                            Button("Add a Tavily key…", action: showKeySetup)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: geometry.size.height)
+            }
+            .frame(height: 54)
+            Text(row.current.priceNote)
+                .font(.system(size: 11.5))
+                .foregroundStyle(row.needsSetup ? MacSettingsTheme.orange : MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 9)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Self.searchTitle)
+        .accessibilityValue(row.needsSetup ? "\(row.current.label), Needs setup" : row.current.label)
+    }
+
+    static let searchTitle = "Search"
+    static let searchCaption = "Agent web search"
 
     static func sharedCaption(_ kind: SharedModelKind) -> String {
         switch kind {

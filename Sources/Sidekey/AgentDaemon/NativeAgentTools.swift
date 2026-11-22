@@ -40,8 +40,12 @@ struct NativeAgentTools {
     /// Use one strict mode across the catalog: some endpoints reject a mix of
     /// strict and non-strict functions. Optional inputs remain nullable and keep
     /// their existing defaults. The shared model's other consumers are unchanged.
-    static func structuredDefinitions(allowActions: Bool, appControl: Bool = false) -> [[String: Any]] {
-        let tools = definitions(allowActions: allowActions, appControl: appControl).filter { $0["name"] as? String != "show_actions" }.map { tool in
+    /// `tavilySearch: false` leaves out the Tavily `web_search` function: the
+    /// turn uses the provider's own search, or has none.
+    static func structuredDefinitions(allowActions: Bool, appControl: Bool = false, tavilySearch: Bool = true) -> [[String: Any]] {
+        let tools = definitions(allowActions: allowActions, appControl: appControl).filter {
+            $0["name"] as? String != "show_actions" && (tavilySearch || $0["name"] as? String != "web_search")
+        }.map { tool in
             var tool = tool
             var schema = tool["parameters"] as! [String: Any]
             var properties = schema["properties"] as! [String: [String: Any]]

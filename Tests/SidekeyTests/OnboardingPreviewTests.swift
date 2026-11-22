@@ -11,6 +11,14 @@ import XCTest
 /// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingPreviewTests: XCTestCase {
+    /// The preview's animation ticks can be throttled in an unattended test process.
+    /// Keep the actual dwell duration while testing transitions independently of its frame rate.
+    private func makeSession(suiteName: String = "OnboardingPreviewTests-\(UUID().uuidString)") -> OnboardingPreviewSession {
+        OnboardingPreviewSession(suiteName: suiteName, dwellWait: { seconds in
+            try? await Task.sleep(for: .seconds(seconds))
+        })
+    }
+
     private func eventually(_ condition: @MainActor () -> Bool, timeout: Double = 6,
                             file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -20,7 +28,7 @@ final class OnboardingPreviewTests: XCTestCase {
 
     func testThePreviewWalksEveryStepWithoutTheSystem() async throws {
         let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
-        let session = OnboardingPreviewSession(suiteName: suite)
+        let session = makeSession(suiteName: suite)
         defer { session.clear() }
         let model = session.model
         XCTAssertTrue(model.isPreview)
@@ -110,7 +118,7 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     func testThePreviewOnThisMacDownloadsOnATimer() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseOnThisMac()
@@ -119,7 +127,7 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     func testEachKeyProblemIsNamedWithoutBlame() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -206,7 +214,7 @@ final class OnboardingPreviewTests: XCTestCase {
             }
         }
 
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -222,7 +230,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// Return on a key that names nobody (no format, no picked mark) is a
     /// format problem; editing the key clears it; an accepted key stays.
     func testAKeyThatNamesNoProviderIsAFormatProblemUntilEdited() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -243,7 +251,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// on the same step; Back returns to the key field, Save is the step done.
     func testOwnServerChangesTheStepAndComesBack() async throws {
         let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
-        let session = OnboardingPreviewSession(suiteName: suite)
+        let session = makeSession(suiteName: suite)
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -300,7 +308,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// one" as the recommendation: the step starts on the newest Sol from the
     /// provider's catalog, marked Recommended, and lets the person pick another.
     func testTheLanguageModelStepStartsOnTheRecommendedModelAndWaitsForTheChoice() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -335,7 +343,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// OpenRouter: the recommended model is Anthropic's current Sonnet,
     /// first in the list and set, and the step waits for a pick or Next.
     func testOpenRouterRecommendsTheCurrentSonnetAndWaits() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -372,7 +380,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// "Choose model" until the person picks one, the recommended one
     /// included; then the button names the pick. A new key asks again.
     func testThePickedModelIsNamedOnItsButton() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -397,7 +405,7 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     func testAnthropicStartsOnTheCurrentSonnetWithItsPrice() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.llmProvider = .anthropic
@@ -415,7 +423,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// sets the one model Settings -> Speech uses for the provider and the
     /// step moves on by itself; no list, no pick, no wait.
     func testTheSpeechStepHasNoModelChoice() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -488,7 +496,7 @@ final class OnboardingPreviewTests: XCTestCase {
     private func account(_ kind: AIProviderKind) -> ProviderAccount? { APIAndModelsViewModel.builtInAccount(for: kind) }
 
     private func atLanguageModelStep() async throws -> (OnboardingPreviewSession, OnboardingJourneyModel) {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         let model = session.model
         model.chooseYourKey()
         try await eventually { model.step == .speechKey }
@@ -589,7 +597,7 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     func testSpeechKeyThenAnotherProviderThenBack() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -619,7 +627,7 @@ final class OnboardingPreviewTests: XCTestCase {
     }
 
     func testSpeechServerAndProviderSwitches() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         model.chooseYourKey()
@@ -769,7 +777,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// refusal, and Open System Settings opens that step's pane.
     func testAccessStepsFollowTheSystemsAnswer() async throws {
         let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
-        let session = OnboardingPreviewSession(suiteName: suite)
+        let session = makeSession(suiteName: suite)
         defer { session.clear() }
         let model = session.model
         model.showPermissions()
@@ -997,7 +1005,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// keyboard) records instead of typing, and letting go drops the text
     /// into the field; once the step is gone nothing listens.
     func testSpaceInThePreviewWindowDictatesIntoTheField() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         let drop = try XCTUnwrap(model.dropStandIn as? OnboardingPreviewDrop)
@@ -1054,7 +1062,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// The same in the whole onboarding window: Try Drop reached by walking
     /// the steps (with their transitions), then Space held and released.
     func testSpaceInTheWholeWindowNeverTypesIntoTryDrop() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         let drop = try XCTUnwrap(model.dropStandIn as? OnboardingPreviewDrop)
@@ -1107,7 +1115,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// From any Try Drop state, Skip and Back leave the step, a take running
     /// included; the preview has its Drop stand-in and the app has none.
     func testTryDropCanAlwaysBeLeft() async throws {
-        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        let session = makeSession()
         defer { session.clear() }
         let model = session.model
         XCTAssertTrue(model.dropStandIn is OnboardingPreviewDrop)

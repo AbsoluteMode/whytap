@@ -126,7 +126,8 @@ final class OnboardingPreviewSession {
         }
     }
 
-    init(suiteName: String = OnboardingPreviewSession.suiteName) {
+    init(suiteName: String = OnboardingPreviewSession.suiteName,
+         dwellWait: ((TimeInterval) async -> Void)? = nil) {
         self.suiteName = suiteName
         let defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
         defaults.removePersistentDomain(forName: suiteName)
@@ -175,6 +176,7 @@ final class OnboardingPreviewSession {
             screenRecording: screenRecording,
             openScreenRecordingSettings: { system.grant { $0.screen = true } },
             defaultsChanges: NotificationCenter(),
+            dwellWait: dwellWait,
             tavily: tavily,
             hotkeys: HotkeyPreferences(defaults: defaults),
             toolbox: HoverLayoutStore(defaults: defaults),

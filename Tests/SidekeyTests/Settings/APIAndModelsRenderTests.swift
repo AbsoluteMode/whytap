@@ -375,6 +375,63 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
+    /// The server form: a new server, an empty model list, models of both
+    /// kinds with Not checked, and a refused check offering Save without check.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    func test_render_server_models() async throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
+        }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+        }
+        let routing = AIRoutingStore(defaults: defaults)
+        let empty = routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        let lab = routing.addServer(name: "Company gateway", baseURL: "https://llm.example.internal/v1")
+        routing.addModel(ServerModel(name: "ut-llm", kind: .llm, checked: true), toServer: lab.id)
+        routing.addModel(ServerModel(name: "qwen3-asr", kind: .transcription, checked: true), toServer: lab.id)
+        routing.addModel(ServerModel(name: "whisper-large-v3-turbo", kind: .transcription, checked: false), toServer: lab.id)
+        try JSONEncoder().encode([ProviderAccount.server(empty.id).storageID: CatalogSnapshot(
+            models: [CatalogModel(id: "qwen3:0.6b"), CatalogModel(id: "nomic-embed-text")], fetchedAt: Date())]).write(to: file)
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
+        let stub = NoNetwork(list: [])
+        let vm = APIAndModelsViewModel(
+            routing: routing, keys: keys, catalogs: ModelCatalogStore(fileURL: file, fetcher: stub),
+            checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
+            keyChecker: stub, probe: stub, endpoints: stub, inputLanguage: { nil }
+        )
+        let failure = "Server answered 404 on /audio/transcriptions — this model can't transcribe here (404 page not found)"
+        for dark in [false, true] {
+            for width in [600.0, 900.0] {
+                let suffix = "\(dark ? "dark" : "light")-\(Int(width))"
+                for (label, target) in [("new", ProviderKeyTiles.Target.provider(.openAICompatible)),
+                                        ("empty", .server(.server(empty.id))), ("models", .server(.server(lab.id)))] {
+                    try await render(ProviderKeyTiles(viewModel: vm, initiallyExpanded: target)
+                        .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(MacSettingsTheme.bgCard),
+                        size: NSSize(width: width, height: 1000), dark: dark,
+                        to: directory.appendingPathComponent("server-form-\(label)-\(suffix).png"))
+                }
+                try await render(ServerModelsSection(viewModel: vm, account: .server(empty.id), models: [],
+                                                     activity: .constant(ServerFormActivity()),
+                                                     draft: "qwen3:0.6b", draftKind: .transcription, draftFailure: failure)
+                    .padding(16).frame(width: width - 36, alignment: .topLeading)
+                    .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(MacSettingsTheme.bgCard),
+                    size: NSSize(width: width, height: 320), dark: dark,
+                    to: directory.appendingPathComponent("server-form-refused-\(suffix).png"))
+            }
+        }
+    }
+
     private func render<V: View>(_ view: V, size: NSSize, dark: Bool = true, to url: URL,
                                  inspect: ((NSWindow) -> Void)? = nil) async throws {
         let host = NSHostingView(rootView: view.background(MacSettingsTheme.bgContent)

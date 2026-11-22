@@ -1110,15 +1110,21 @@ stamp the request time); servers have no price. Caches
 written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
 .project-docs/decisions/2026-11-22-direct-model-list-prices.md
-A server's /v1/models lists IDs only: ServerModelClassifier sorts each by name
-into speech (whisper, transcribe, parakeet, canary, stt, asr…: Speech pickers),
-other (embed, rerank, tts…: no picker) or language (anything else: Text
-pickers). The server's form under API keys has "Offer models for" (By model
-name, Language models, Speech recognition, Both; ServerModelKinds, stored on
-the server in the routing document only when not automatic), which wins over
-the name. The model a feature already runs on is never judged by either, so a
-saved route keeps working; a section with nothing of the feature's kind takes
-a typed model name. WHY: .project-docs/decisions/2026-11-22-server-model-kinds.md
+A user's server offers only the models the user added (ServerEndpoint.models,
+in the routing document): its form under API keys has Server name, Base URL,
+the optional key and Models, where each model gets a name (typed or from the
+server's /v1/models, which only suggests names) and a required type, LLM or
+Transcription (ServerModel.Kind; the name only preselects it). Adding checks
+it once with the server's key (ServerModelChecker): a one-line
+/chat/completions request or 0.5 s of silence to /audio/transcriptions; a
+failure is shown at once ("Server answered 404 on /audio/transcriptions —
+this model can't transcribe here") and "Save without check" adds it marked
+Not checked. Pickers and the shared rows show a server model only for its
+own type; the same name may be added once per type. A route already on a
+model stays listed; removing a model un-sets that type's routes on it.
+Launch turns an earlier server's routes into added models and ignores the
+retired "Offer models for". WHY:
+.project-docs/decisions/2026-11-22-server-explicit-models.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which
@@ -1131,8 +1137,8 @@ breaks equal-relevance ties by newest date, unknown last, within provider groups
 equal dates and empty queries keep catalog order. Older caches refresh once for dates.
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
-Refresh models or Other model ID actions. Custom servers without /models offer
-a contextual model-name field. API keys uses square provider tiles opening an
+Refresh models or Other model ID actions. Custom servers offer only the models
+added in their form, typed or from /models. API keys uses square provider tiles opening an
 inline Save/Remove form with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;

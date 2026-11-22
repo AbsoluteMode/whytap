@@ -146,9 +146,9 @@ The maintainer wants to try OpenAI's speech models in the island.
   recovery, `credit_balance_exhausted` read as busy and raw error codes in
   public logs. All five are fixed and covered: the probes pass, the first one
   with the `cleared` answer OpenAI sends to the tail `clear`.
-- Not tested live: no paid request was made. The exact name of the empty-commit
-  error code and the per-model field acceptance come from OpenAI's docs; the
-  session does not depend on the code's name. Acceptance in the island remains.
+- Offline fixtures cover the allowlisted empty-commit error code and
+  per-model request fields. Acceptance with a live OpenAI request in the
+  island remains.
 
 ## Rejected
 

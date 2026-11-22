@@ -384,6 +384,22 @@ Russian keyboard layout:
   The card and Help read the same `CaseApprovalKey.keycap` values as the filter's
   actions. WHY: [answer keys and numeric minutes](decisions/2026-10-21-case-approval-minutes-input.md).
 
+## Learning suggestion keys
+
+When learning from edits after Drop is on (Settings -> Other -> Learn from my
+edits), a suggestion appears as glass drops right of the island:
+
+- **⌃Y** accepts, **⌃N** declines; plain Y and N always go to the field. The
+  two combinations are Carbon hot keys (`CarbonHotkeyMonitor` IDs 19 and 20)
+  registered only while the drops are on screen; holding ⌃ alone lights the
+  Y and N drops. A click answers too, without taking focus from the field.
+- They are reserved in `HotkeyConfiguration.assignments` ("Suggestion yes",
+  "Suggestion no"), so a tool shortcut on ⌃Y or ⌃N is a conflict, and Help
+  lists them (Suggestion — yes / no) from `DropLearningKeyCombos`.
+- If another app already holds a combination, registration fails quietly and
+  the drops still answer to a click. WHY:
+  [drops](../.project-docs/decisions/2026-11-22-drop-learning-drops.md).
+
 ## Canonical reference
 
 `HelpWindowController.swift` shows every existing hotkey through

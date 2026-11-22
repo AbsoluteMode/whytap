@@ -923,7 +923,7 @@ Input language offer:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
 Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
-  the drops UI and its switch come after the visual is approved):
+  Settings -> Other -> Recording -> Learn from my edits):
   AutoPasteEngine.paste hands over the field at the paste boundary (after
   focus restore, right before Cmd+V): the system-wide focused element of the
   frontmost target app, metadata only, never Whytap's own editors.
@@ -940,8 +940,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   Cmd+V and restores the clipboard. With learning and calibration off no
   capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops a scheduled read. It
-  compares with what reached the field (a rich paste's plainText), aligns the take inside the
-  field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  compares with what reached the field (a rich paste's plainText), aligns
+  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
   DropLearningClassifier turns edits into candidates without a model: a
   sound-alike term -> Vocab (only if the wrong word is in the provider's raw
   text); On this Mac / batch / Retry / recorder fallback, a full route list,
@@ -960,9 +960,8 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   reads until the field holds still (<=30 s), journals to Application
   Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
   ledger, dry-run Y, 0700 folder / 0600 single-name file without following
-  links, ends
-  itself after 14 days (checked at launch, hourly and before every read) and
-  deletes its data. Fired fillers come from the same masked Filler pass.
+  links, ends itself after 14 days (checked at launch, hourly and before
+  every read) and deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler
   (DropReplaceFilter: one pass, longest first, letter lookaround
   boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
@@ -972,6 +971,22 @@ Learning from edits after Drop (opt-in, sidekey.dropLearning.enabled, off;
   Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
   terms within 8 KB encoded. WHY:
   .project-docs/decisions/2026-11-22-drop-edit-learning.md
+  A suggestion is asked by DropLearningDropsController: DropLearningDropsModel
+  (chain of four drops: list icon, action with +/- in a thin circle, Y, N;
+  budding 0.1 s apart, open at 0.7 s, reverse retract 0.6 s, 10 s open time
+  with no visible timer, hover pauses, one suggestion at a time) drawn by
+  DropLearningDropsView in DropLearningDropsPanel, a non-activating panel
+  right of the island just below its level, following the system
+  appearance. macOS 26 glassEffect in a GlassEffectContainer (blend spacing
+  5 pt < 7 pt gap: bridges only while a drop leaves its parent); thin
+  material on 14/15; opaque with Reduce Transparency; Reduce Motion fades.
+  Y/N are plain glass with a 0.75 pt green/red contour and soft glow only,
+  letters at rest, check/cross under the pointer. Answers: click, or
+  Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
+  the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
+  conflict check and listed in Help. Any phase other than idle, sleep or quit
+  puts them out and lets an unanswered suggestion go. WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-drops.md
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference

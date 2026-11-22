@@ -25,6 +25,8 @@ final class AppControlController {
     /// Set only where the broker gates these operations by `HarnessAccessGate`.
     private let meetings: AppControlMeetings?
     private let agentWorkspace: () -> String
+    /// The island's tools and their hotkeys, through the Settings stores.
+    private let toolbox: AppControlToolbox
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
@@ -33,8 +35,12 @@ final class AppControlController {
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
          planner: (@MainActor () -> PlannerStore)? = nil, meetings: AppControlMeetings? = nil,
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive },
-         agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path }) {
+         agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path },
+         layout: (@MainActor () -> HoverLayoutStore)? = nil,
+         hotkeys: (@MainActor () -> HotkeyPreferences)? = nil) {
         self.meetings = meetings
+        self.toolbox = AppControlToolbox(layout: layout ?? { HoverLayoutStore.shared },
+                                         hotkeys: hotkeys ?? { HotkeyPreferences.shared })
         self.agentWorkspace = agentWorkspace
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
@@ -59,6 +65,7 @@ final class AppControlController {
     func handle(_ request: AppControlRequest) async -> AppControlResponse {
         let args = request.arguments
         let writes = ["set_model", "set_provider", "set_setting"].contains(request.operation)
+            || AppControlToolbox.writes.contains(request.operation)
         guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled.") }
         if writes {
             guard !mutating else { return .failure("busy", "Another application-setting change is in progress.") }
@@ -68,6 +75,9 @@ final class AppControlController {
         switch request.operation {
         case "capture_screen":
             return await screenCapture.handle(args)
+        // WHY: .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+        case _ where AppControlToolbox.operations.contains(request.operation):
+            return toolbox.handle(request.operation, args)
         // The user's notes and transcripts: reachable only behind the broker's
         // harness access gate. WHY: .project-docs/decisions/2026-11-20-harness-access.md
         case _ where AppControlMeetings.operations.contains(request.operation):

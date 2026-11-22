@@ -81,8 +81,8 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .source, .language: return 0.62
         // The padlock plays to the end first: the key turns, the shackle opens
         // and settles (the design pass moves on after 1.15 s).
-        case .speechKey: return 1.15
-        case .llmKey, .search, .keyboard, .microphone, .inputMonitoring, .screenRecording: return 0.78
+        case .speechKey, .llmKey: return 1.15
+        case .search, .keyboard, .microphone, .inputMonitoring, .screenRecording: return 0.78
         case .tryDrop: return 1.35
         case .hotkeys, .toolbox, .help: return 4.2
         case .thanks: return nil

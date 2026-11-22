@@ -90,7 +90,8 @@ window, Back and a progress bar.
   The tour steps (Shortcuts, Toolbox, Help) move on after 4.2 s only when
   reached going forward. Required steps keep a quiet "Set up later",
   optional ones "Skip"; a step that is done without a pending move offers
-  Next.
+  Next. Step 1 has neither: its two figures are the choice (the owner asked
+  to remove its skip).
   Step 1 is the exception (the owner asked to remove the pill, 2026-11-22): a
   click on a figure, or Return on the figure in front, is its Continue, with
   no pill and no Next, also after Back. It is not an instant cut either (the
@@ -176,9 +177,8 @@ window, Back and a progress bar.
   without its caption. Step 2 is "Paste your speech key.": a dark pill
   field with the whole key masked, the speech providers only (with
   their logos from `UsefulLinkIcons`), the provider's real offer, and a
-  quiet "Use your own server →" to Settings → API & Models. Only real key
-  prefixes pick the provider (ElevenLabs `sk_`, OpenAI `sk-` once offered;
-  Soniox and Deepgram keys have none). A refusal names one of five causes
+  quiet "Use your own server →" (see below). Only a key's own format picks
+  the provider (see "Only a key's own format names its provider"). A refusal names one of five causes
   without blame: the key's shape (checked before any request), a refused
   key, an empty balance, a key without speech access, or no answer (with
   Retry); the key check has no separate rate-limit answer. The wire key
@@ -218,13 +218,26 @@ window, Back and a progress bar.
   The key and padlock use that prototype's ink (line width from the
   figure's size, full-strength dots in the vertices) and breathe slowly in
   depth and yaw, like the key on step 1.
-- **Only what looks like a key is masked.** Latin letters, digits, "-" and
-  "_", 20 characters or more, is closed entirely with dots: no start and no
-  last four stay visible (the owner asked for the whole key closed). Anything
-  else (a typed word, Cyrillic, spaces, short input) shows as typed and is
-  named as a format problem; the owner had seen a typed Cyrillic word shown masked. The
-  mask keeps the length in the monospaced font, so typing a key by hand
-  never moves the caret when the mask begins.
+- **Key-like input is closed like a secure field.** Input made only of
+  Latin letters, digits, "-" and "_" is dots from its first character, at
+  any length, with no visible start or end (the owner asked for the whole
+  key closed; a 17-character string had shown in clear). Anything else
+  (Cyrillic, spaces, punctuation) shows as typed and is named as a format
+  problem; the owner had seen a typed Cyrillic word shown masked. The mask
+  keeps the length in the monospaced font, so the caret never moves.
+- **Only a key's own format names its provider.** A real prefix, the
+  longest that matches across every provider Whytap knows ("sk-ant-"
+  Anthropic, "sk-or-" OpenRouter, "sk-proj-"/"sk-" OpenAI, "sk_"
+  ElevenLabs), or Deepgram's 40 hexadecimal characters, and at least 20
+  key characters. The owner saw a random string get the OpenAI mark, a
+  green check and "check it with OpenAI": the step had fallen back to the
+  last provider and kept an earlier acceptance while a new key was typed.
+  Now nothing is guessed: an unrecognised key leaves the marks at rest, is
+  not checked on paste, and Return calls it a format problem ("pick its
+  provider below"). A mark the person clicks still names the provider
+  (Soniox keys have no format of their own). A new key in the field is a
+  new attempt: an earlier refusal clears, and an earlier acceptance no
+  longer shows its check.
 - **Step 2's layout follows the design pass.** One centred axis: title, the
   key over its lock, the field ("Paste your API key…"), one quiet line under
   it (empty at rest), four monochrome provider marks of one optical height
@@ -235,6 +248,19 @@ window, Back and a progress bar.
   "Set up later" stays in the footer like on every step, aligned with the
   field's edge. The standalone preview already shows OpenAI as the fourth
   provider; the app keeps it behind the registry until OpenAI speech lands.
+- **The language model step is the same screen.** "Paste a language model
+  key." uses the speech step's layout, key, padlock, mask, problems and
+  dwell (1.15 s, so the lock opens before the move), with Anthropic, OpenAI
+  and OpenRouter marks; a recognised key names the model it will set. The
+  lock closes again when the step opens (the key withdraws), and the page
+  flows under the key like step 1 into step 2. "Skip" stays in the footer.
+- **"Use your own server →" shows the server form in the same window (the
+  preview).** Base URL, an optional key (a secure field), the models with
+  LLM or Transcription each, one Save; the name comes from the address
+  (Ollama and LM Studio by their default ports, otherwise the host). Back,
+  Cancel or Escape return to the key step unchanged; Save returns with the
+  step done like an accepted key. The app still opens Settings → API &
+  Models on the step's row until the server form of task 66 lands there.
 
 ## Rejected
 
@@ -275,8 +301,12 @@ window, Back and a progress bar.
   latch and resume, commit now, review never firing, cancel, and the
   per-step dwell times.
 - `OnboardingPreviewTests` also names each of the five key problems
-  (and saves no refused key), accepts only real prefixes, keeps an
-  Anthropic key out of speech and masks the whole key.
+  (and saves no refused key), names a provider only from a real format
+  (random strings, short and Cyrillic input name nobody; Anthropic and
+  OpenRouter keys only on the language model step), masks key-like input
+  from its first character, calls an unnamed key a format problem until it
+  is edited, and opens and closes the server form (Back, Save, the name
+  from the address).
 - `OnboardingPreviewTests`: the preview session walks every step with its
   fakes (refused and accepted keys, the stubbed Tavily check, pretend
   permissions, Simulate Drop, Back, finish) and writes routes only to its
@@ -285,7 +315,8 @@ window, Back and a progress bar.
   OpenAI key saved on the LLM step opens the speech step on it, and one
   saved for speech opens the LLM step on it.
 - Offscreen renders (520 × 440) of every step, including a refused key, an
-  accepted key while counting, a held step and Back to a reviewed step.
+  accepted key while counting, a held step, Back to a reviewed step and the
+  server form.
 
 Not verified: the real window with real permissions, real provider key
 checks, the motion itself (offscreen renders are still frames) and the

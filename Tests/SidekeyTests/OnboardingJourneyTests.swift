@@ -116,6 +116,7 @@ final class OnboardingJourneyTests: XCTestCase {
     func testEveryStepHasADwellButTheLast() {
         XCTAssertEqual(OnboardingStep.source.dwell, 0.62)
         XCTAssertEqual(OnboardingStep.speechKey.dwell, 1.15, "the padlock opens and settles before the move")
+        XCTAssertEqual(OnboardingStep.llmKey.dwell, 1.15, "the language model key has the same padlock")
         XCTAssertEqual(OnboardingStep.tryDrop.dwell, 1.35)
         XCTAssertEqual(OnboardingStep.hotkeys.dwell, 4.2)
         XCTAssertNil(OnboardingStep.thanks.dwell)

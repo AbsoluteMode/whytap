@@ -1118,117 +1118,153 @@ struct OnboardingSourceStage: View {
 // MARK: - Step 2: the speech key
 
 
-/// One provider of the speech key step, with where to get a key and pay.
-struct OnboardingSpeechKeyProvider: Equatable {
+/// One provider of a key step (speech or language model), with where to get
+/// a key and pay.
+struct OnboardingKeyProvider: Equatable {
     let kind: AIProviderKind
     let assetName: String
     let keysURL: URL
     let billingURL: URL
-    /// Prefixes the provider's keys really start with; none for providers
-    /// whose keys have no prefix (Soniox, Deepgram).
-    let prefixes: [String]
 
-    static func of(_ kind: AIProviderKind) -> OnboardingSpeechKeyProvider? {
+    static func of(_ kind: AIProviderKind) -> OnboardingKeyProvider? {
+        func provider(_ asset: String, _ keys: String, _ billing: String) -> OnboardingKeyProvider {
+            .init(kind: kind, assetName: asset, keysURL: URL(string: keys)!, billingURL: URL(string: billing)!)
+        }
         switch kind {
-        case .soniox:
-            return .init(kind: kind, assetName: "soniox", keysURL: URL(string: "https://console.soniox.com")!,
-                         billingURL: URL(string: "https://console.soniox.com")!, prefixes: [])
-        case .deepgram:
-            return .init(kind: kind, assetName: "deepgram", keysURL: URL(string: "https://console.deepgram.com")!,
-                         billingURL: URL(string: "https://console.deepgram.com")!, prefixes: [])
+        case .soniox: return provider("soniox", "https://console.soniox.com", "https://console.soniox.com")
+        case .deepgram: return provider("deepgram", "https://console.deepgram.com", "https://console.deepgram.com")
         case .elevenLabs:
-            return .init(kind: kind, assetName: "elevenlabs", keysURL: URL(string: "https://elevenlabs.io/app/settings/api-keys")!,
-                         billingURL: URL(string: "https://elevenlabs.io/app/subscription")!, prefixes: ["sk_"])
+            return provider("elevenlabs", "https://elevenlabs.io/app/settings/api-keys", "https://elevenlabs.io/app/subscription")
         case .openAI:
-            return .init(kind: kind, assetName: "openai", keysURL: URL(string: "https://platform.openai.com/api-keys")!,
-                         billingURL: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!,
-                         prefixes: ["sk-proj-", "sk-svcacct-", "sk-"])
+            return provider("openai", "https://platform.openai.com/api-keys",
+                            "https://platform.openai.com/settings/organization/billing/overview")
+        case .anthropic:
+            return provider("model-anthropic", "https://console.anthropic.com/settings/keys",
+                            "https://console.anthropic.com/settings/billing")
+        case .openRouter:
+            return provider("openrouter", "https://openrouter.ai/settings/keys", "https://openrouter.ai/settings/credits")
         default:
             return nil
         }
     }
 
-    /// The offered provider whose prefix a pasted key carries, longest first.
-    /// "sk-ant-" and "sk-or-" are language model keys, never OpenAI speech.
-    static func detect(_ key: String, among providers: [OnboardingSpeechKeyProvider]) -> (provider: OnboardingSpeechKeyProvider, prefix: Int)? {
+    /// The prefixes keys really start with, for every provider Whytap knows,
+    /// longest first. Soniox keys have none; Deepgram's are 40 hexadecimal
+    /// characters.
+    static let prefixes: [(prefix: String, kind: AIProviderKind)] = [
+        ("sk-svcacct-", .openAI), ("sk-proj-", .openAI), ("sk-ant-", .anthropic), ("sk-or-", .openRouter),
+        ("sk_", .elevenLabs), ("sk-", .openAI),
+    ]
+
+    /// A real key is at least this long; shorter input is never recognised.
+    static let minimumLength = 20
+
+    /// The offered provider a key's own format names: a real prefix (the
+    /// longest that matches, so "sk-ant-" is Anthropic, never OpenAI) or
+    /// Deepgram's 40 hexadecimal characters. Any other string names nobody:
+    /// the marks stay at rest and Return calls it a format problem.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    static func detect(_ key: String, among providers: [OnboardingKeyProvider]) -> OnboardingKeyProvider? {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.hasPrefix("sk-ant-"), !key.hasPrefix("sk-or-") else { return nil }
-        // Deepgram keys have no prefix but are 40 hexadecimal characters.
-        if key.count == 40, key.allSatisfy(\.isHexDigit), let deepgram = providers.first(where: { $0.kind == .deepgram }) {
-            return (deepgram, 4)
+        guard key.count >= minimumLength, OnboardingKeyMask.isKeyLike(key) else { return nil }
+        if key.count == 40, key.allSatisfy(\.isHexDigit) {
+            return providers.first { $0.kind == .deepgram }
         }
-        let candidates = providers.flatMap { provider in provider.prefixes.map { (provider, $0) } }
-            .sorted { $0.1.count > $1.1.count }
-        return candidates.first { key.hasPrefix($0.1) }.map { ($0.0, $0.1.count) }
+        guard let match = prefixes.first(where: { key.hasPrefix($0.prefix) }) else { return nil }
+        return providers.first { $0.kind == match.kind }
     }
 }
 
-/// Hides all of what looks like a key: Latin letters, digits, "-" and "_",
-/// 20 characters or more. Anything else (short, Cyrillic, spaces) shows
-/// as typed, so a mistyped word is visible and named as a format problem.
-/// The mask keeps the length (one dot per hidden character, in a monospaced
-/// font), so the caret stays where the typed character is.
+/// Closes key-like input entirely, like a secure field: Latin letters,
+/// digits, "-" and "_", from the first character, with no visible start or
+/// end. Anything else (Cyrillic, spaces, punctuation) shows as typed, so a
+/// mistyped word is visible and named as a format problem. The mask keeps the
+/// length (one dot per character, in a monospaced font), so the caret stays
+/// where the typed character is.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 enum OnboardingKeyMask {
-    static let minimumLength = 20
-
-    static func looksLikeAKey(_ raw: String) -> Bool {
-        raw.count >= minimumLength && raw.unicodeScalars.allSatisfy {
+    static func isKeyLike(_ raw: String) -> Bool {
+        !raw.isEmpty && raw.unicodeScalars.allSatisfy {
             ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "-" || $0 == "_"
         }
     }
 
-    /// Every character becomes a dot, none of the key stays visible (the
-    /// owner asked for the whole key closed); nil when the input does not
-    /// look like a key.
+    /// One dot per character; nil when the input is not key-like.
     static func masked(_ raw: String) -> String? {
-        guard looksLikeAKey(raw) else { return nil }
+        guard isKeyLike(raw) else { return nil }
         return String(repeating: "•", count: raw.count)
     }
 }
 
-/// The speech key, laid out like the design pass: the shared wire key over
-/// its lock, one pill field, a quiet line under it, four monochrome provider
-/// marks and one quiet link, all on one centred axis. Pasting a whole key
-/// checks it; Return or the arrow checks too. A mark shows its name on hover,
-/// when picked or when the pasted key is recognised; nothing is preselected.
-struct OnboardingSpeechKeyStage: View {
+/// Which key a key step asks for. Both steps share one layout, the wire key
+/// over its padlock, the mask and the five problems.
+enum OnboardingKeyStageKind: Equatable {
+    case speech, languageModel
+
+    var step: OnboardingStep { self == .speech ? .speechKey : .llmKey }
+    var title: String { self == .speech ? "Paste your speech key." : "Paste a language model key." }
+    var serverHelp: String {
+        self == .speech ? "Add an OpenAI-compatible speech server (Ollama, LM Studio, vLLM)"
+                        : "Add an OpenAI-compatible language model server (Ollama, LM Studio, vLLM)"
+    }
+}
+
+/// A key step, laid out like the design pass: the shared wire key over its
+/// lock, one pill field, a quiet line under it, monochrome provider marks and
+/// one quiet link, all on one centred axis. A pasted key whose format names
+/// its provider is checked at once; Return or the arrow checks too. A mark
+/// shows its name on hover, when picked or when the key is recognised;
+/// nothing is preselected and nothing is guessed.
+struct OnboardingKeyStage: View {
     /// The field's side inset; the footer's secondary action lines up with it.
     static let fieldInset: CGFloat = 44
 
+    let kind: OnboardingKeyStageKind
     @ObservedObject var model: OnboardingJourneyModel
     let scene: OnboardingWireScene
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     @State private var draft = ""
+    /// A mark the person clicked: the one choice that names a provider
+    /// without the key's own format.
     @State private var picked: AIProviderKind?
     @State private var hoveredLogo: AIProviderKind?
 
-    private var providers: [OnboardingSpeechKeyProvider] { model.speechProviders.compactMap(OnboardingSpeechKeyProvider.of) }
-    private var detected: (provider: OnboardingSpeechKeyProvider, prefix: Int)? {
-        OnboardingSpeechKeyProvider.detect(draft, among: providers)
+    private var step: OnboardingStep { kind.step }
+    private var providers: [OnboardingKeyProvider] {
+        (kind == .speech ? model.speechProviders : OnboardingJourneyModel.llmProviders).compactMap(OnboardingKeyProvider.of)
     }
-    /// The provider the person or the key named; nil at rest.
-    private var known: OnboardingSpeechKeyProvider? {
-        detected?.provider ?? picked.flatMap(OnboardingSpeechKeyProvider.of)
+    private var detected: OnboardingKeyProvider? { OnboardingKeyProvider.detect(draft, among: providers) }
+    /// The provider the key's format or the person named; nil otherwise.
+    private var known: OnboardingKeyProvider? { detected ?? picked.flatMap(OnboardingKeyProvider.of) }
+    /// The step's provider in the model: whose key is saved or was answered.
+    private var current: AIProviderKind { kind == .speech ? model.speechProvider : model.llmProvider }
+    private func setCurrent(_ provider: AIProviderKind) {
+        if kind == .speech { model.speechProvider = provider } else { model.llmProvider = provider }
     }
-    /// The provider a check goes to.
-    private var active: OnboardingSpeechKeyProvider {
-        known ?? OnboardingSpeechKeyProvider.of(model.speechProvider) ?? providers[0]
+    /// The provider that answered (a saved or accepted key with the field
+    /// empty, or a refusal); never for a key that named nobody.
+    private var settled: OnboardingKeyProvider? {
+        let answered = problem.map { $0 != .unrecognized } ?? false
+        return (draft.isEmpty && (accepted || saved)) || answered ? OnboardingKeyProvider.of(current) : nil
     }
-    private var outcome: OnboardingStepOutcome { model.outcome(.speechKey) }
+    /// The mark in the field and the name in the lines under it.
+    private var shown: OnboardingKeyProvider? { known ?? settled }
+    private var outcome: OnboardingStepOutcome { model.outcome(step) }
     private var checking: Bool { if case .working = outcome { return true } else { return false } }
-    private var accepted: Bool { outcome.isDone }
+    /// A new key in the field is a new attempt, never the earlier answer.
+    private var accepted: Bool { outcome.isDone && draft.isEmpty }
     private var problem: OnboardingKeyProblem? {
-        if case .failed = outcome { return model.keyProblems[.speechKey] ?? .other(outcome.failureText ?? "") } else { return nil }
+        if case .failed = outcome { return model.keyProblems[step] ?? .other(outcome.failureText ?? "") } else { return nil }
     }
-    private var saved: Bool { model.keySaved(active.kind) }
+    private var saved: Bool { model.keySaved(current) }
 
     private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
-        if accepted, draft.isEmpty { return .accepted }
+        if accepted { return .accepted }
         if let problem {
             switch problem {
-            case .format: return .format
+            case .format, .unrecognized: return .format
             case .unreachable: return .network
             default: return .refused
             }
@@ -1238,7 +1274,7 @@ struct OnboardingSpeechKeyStage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Paste your speech key.")
+            Text(kind.title)
                 .font(OnboardingTheme.serifItalic(31))
                 .foregroundColor(OnboardingTheme.ink)
                 .padding(.top, 6)
@@ -1254,13 +1290,13 @@ struct OnboardingSpeechKeyStage: View {
                 .padding(.top, 10)
             Spacer(minLength: 4)
             logos
-            Button { model.openSettings(.apiAndModels, .dropFast) } label: {
+            Button { model.useOwnServer(kind) } label: {
                 Text("Use your own server →")
                     .font(OnboardingTheme.sans(12.5))
                     .foregroundColor(OnboardingTheme.muted)
             }
             .buttonStyle(.plain)
-            .help("Add an OpenAI-compatible speech server in Settings → API & Models")
+            .help(kind.serverHelp)
             .padding(.top, 12)
             .padding(.bottom, 4)
         }
@@ -1273,7 +1309,6 @@ struct OnboardingSpeechKeyStage: View {
         .onAppear {
             focused = true
             scene.keyPhase = phase
-            if saved || accepted { picked = model.speechProvider }
         }
     }
 
@@ -1292,8 +1327,8 @@ struct OnboardingSpeechKeyStage: View {
 
     private var field: some View {
         HStack(spacing: 10) {
-            if let known {
-                ProviderBrandIcon(assetName: known.assetName, size: 14, color: OnboardingTheme.ink)
+            if let shown {
+                ProviderBrandIcon(assetName: shown.assetName, size: 14, color: OnboardingTheme.ink)
                     .frame(width: 26, height: 26)
                     .background(Circle().fill(Color.white.opacity(0.07)))
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
@@ -1303,8 +1338,8 @@ struct OnboardingSpeechKeyStage: View {
             ZStack(alignment: .leading) {
                 let masked = OnboardingKeyMask.masked(draft)
                 if draft.isEmpty {
-                    Text(accepted ? "\(active.kind.displayName) key saved"
-                         : saved ? "Saved \(active.kind.displayName) key · press Return to use it"
+                    Text(accepted ? "\(current.displayName) key saved"
+                         : saved ? "Saved \(current.displayName) key · press Return to use it"
                          : "Paste your API key…")
                         .font(OnboardingTheme.sans(14))
                         .foregroundColor(OnboardingTheme.faint)
@@ -1332,18 +1367,19 @@ struct OnboardingSpeechKeyStage: View {
                     .disabled(checking)
                     .onSubmit(submit)
                     .onChange(of: draft) { old, new in
-                        if let provider = OnboardingSpeechKeyProvider.detect(new, among: providers)?.provider {
-                            model.speechProvider = provider.kind
-                        }
-                        // A whole key pasted at once is checked right away.
+                        model.keyEdited(on: step)
+                        guard let provider = OnboardingKeyProvider.detect(new, among: providers) else { return }
+                        setCurrent(provider.kind)
+                        // A whole key pasted at once is checked right away,
+                        // only when its own format names the provider.
                         if new.count - old.count >= 16 { submit() }
                     }
-                    .accessibilityLabel("\(active.kind.displayName) key")
+                    .accessibilityLabel(shown.map { "\($0.kind.displayName) key" } ?? "API key")
             }
             .frame(maxWidth: .infinity)
             trailing
         }
-        .padding(.leading, known == nil ? 20 : 12)
+        .padding(.leading, shown == nil ? 20 : 12)
         .padding(.trailing, 8)
         .frame(height: 50)
         .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098)))
@@ -1359,7 +1395,7 @@ struct OnboardingSpeechKeyStage: View {
         })
         .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion), value: outcome)
         .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: focused)
-        .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: known?.kind)
+        .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: shown?.kind)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -1382,35 +1418,37 @@ struct OnboardingSpeechKeyStage: View {
                                               : checking ? Color.clear : ready ? Color.white : Color.white.opacity(0.08)))
             }
             .buttonStyle(.plain)
-            .disabled(!ready || checking || (accepted && draft.isEmpty))
+            .disabled(!ready || checking || accepted)
             .accessibilityLabel(accepted ? "Key accepted" : checking ? "Checking" : "Check key")
         }
     }
 
     /// One quiet line under the field; empty at rest.
     @ViewBuilder private var feedback: some View {
-        let name = active.kind.displayName
+        let name = (shown?.kind ?? current).displayName
         Group {
             if checking {
                 Text("Checking the key with \(name)…").foregroundColor(OnboardingTheme.muted)
-            } else if accepted, draft.isEmpty {
-                Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
+            } else if accepted {
+                Text(acceptedLine(name)).foregroundColor(OnboardingTheme.green)
             } else if let problem {
                 VStack(spacing: 3) {
                     Text(problem.message(provider: name)).foregroundColor(OnboardingTheme.orange)
-                    switch problem {
-                    case .refused, .noSpeechAccess:
-                        Link("Open \(name) keys ↗", destination: active.keysURL).foregroundColor(OnboardingTheme.ink)
-                    case .noCredit:
-                        Link("Check billing ↗", destination: active.billingURL).foregroundColor(OnboardingTheme.ink)
-                    default:
-                        EmptyView()
+                    if let provider = shown {
+                        switch problem {
+                        case .refused, .noSpeechAccess:
+                            Link("Open \(name) keys ↗", destination: provider.keysURL).foregroundColor(OnboardingTheme.ink)
+                        case .noCredit:
+                            Link("Check billing ↗", destination: provider.billingURL).foregroundColor(OnboardingTheme.ink)
+                        default:
+                            EmptyView()
+                        }
                     }
                 }
             } else if !draft.isEmpty {
-                Text(detected != nil ? "\(name) key recognized. Press Return to check it."
+                Text(detected != nil ? "\(name) key recognized\(modelSuffix(name)). Press Return to check it."
                      : known != nil ? "Press Return to check it with \(name)."
-                     : "Press Return to check it with \(name), or pick its provider below.")
+                     : "Press Return to check it, or pick its provider below.")
                     .foregroundColor(OnboardingTheme.muted)
             } else if let known, !saved {
                 Link(destination: known.keysURL) {
@@ -1427,9 +1465,21 @@ struct OnboardingSpeechKeyStage: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func acceptedLine(_ name: String) -> String {
+        if case .done(let what) = outcome, kind == .languageModel { return "\(name) · \(what) · key saved in your Keychain" }
+        return "\(name) key accepted · saved in your Keychain"
+    }
+
+    /// " · claude-sonnet-5-5": the model the language model step will use.
+    private func modelSuffix(_ name: String) -> String {
+        guard kind == .languageModel, let provider = detected?.kind,
+              let model = model.llmModel ?? model.preselectedModel(provider) else { return "" }
+        return " · \(model)"
+    }
+
     /// "Need a Soniox key? Get one · $200 credit ↗", with the provider's real
     /// free offer if any.
-    private func offerLine(_ provider: OnboardingSpeechKeyProvider) -> String {
+    private func offerLine(_ provider: OnboardingKeyProvider) -> String {
         let name = provider.kind.displayName
         let article = name.first.map { "AEIOU".contains($0) } == true ? "an" : "a"
         if let hint = APIHintsView.hints.first(where: { $0.provider == name && $0.access == .noCard }) {
@@ -1443,11 +1493,11 @@ struct OnboardingSpeechKeyStage: View {
     private var logos: some View {
         HStack(spacing: 10) {
             ForEach(providers, id: \.kind) { provider in
-                let open = known?.kind == provider.kind || hoveredLogo == provider.kind
+                let open = shown?.kind == provider.kind || hoveredLogo == provider.kind
                 let dimmed = detected != nil && !open
                 Button {
                     picked = picked == provider.kind && draft.isEmpty ? nil : provider.kind
-                    model.speechProvider = provider.kind
+                    setCurrent(provider.kind)
                     focused = true
                 } label: {
                     HStack(spacing: 7) {
@@ -1475,14 +1525,14 @@ struct OnboardingSpeechKeyStage: View {
                     if inside { hoveredLogo = provider.kind } else if hoveredLogo == provider.kind { hoveredLogo = nil }
                 }
                 .accessibilityLabel(provider.kind.displayName)
-                .accessibilityAddTraits(known?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAddTraits(shown?.kind == provider.kind ? [.isButton, .isSelected] : .isButton)
             }
         }
         .frame(height: 36)
         .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
                    value: hoveredLogo)
         .animation(OnboardingMotion.resolve(.spring(response: 0.28, dampingFraction: 0.86), reduceMotion: reduceMotion),
-                   value: known?.kind)
+                   value: shown?.kind)
     }
 
     private static func monoWidth(_ text: String) -> CGFloat {
@@ -1491,7 +1541,7 @@ struct OnboardingSpeechKeyStage: View {
     }
 
     private var border: Color {
-        if accepted, draft.isEmpty { return OnboardingTheme.green.opacity(0.55) }
+        if accepted { return OnboardingTheme.green.opacity(0.55) }
         if problem != nil { return OnboardingTheme.orange.opacity(0.50) }
         if checking { return OnboardingWireframeInk.roseColor.opacity(0.45) }
         return focused ? Color.white.opacity(0.22) : Color.white.opacity(0.10)
@@ -1506,25 +1556,31 @@ struct OnboardingSpeechKeyStage: View {
     private func submit() {
         guard !checking else { return }
         let key = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty || saved else { return }
-        let provider = active.kind
-        model.speechProvider = provider
+        if key.isEmpty {
+            // An empty field uses the key already saved for this step.
+            guard saved, !outcome.isDone else { return }
+            use("", provider: current)
+            return
+        }
+        // Nobody named: neither the key's format nor a picked mark.
+        guard let provider = known?.kind else { return model.rejectUnrecognizedKey(on: step) }
+        setCurrent(provider)
+        use(key, provider: provider)
+    }
+
+    private func use(_ key: String, provider: AIProviderKind) {
+        let step = self.step, kind = self.kind
         Task {
-            await model.useSpeechKey(key, provider: provider)
-            if model.outcome(.speechKey).isDone {
-                draft = ""
-                picked = provider
-            }
+            if kind == .speech { await model.useSpeechKey(key, provider: provider) }
+            else { await model.useLLMKey(key, provider: provider) }
+            if model.outcome(step).isDone { draft = "" }
         }
     }
 
-    /// The provider that answered keeps its mark open; the scene plays the
-    /// key and the padlock from the phase.
+    /// A failed check keeps the key in the field; a new answer clears the
+    /// hand-picked mark only when the check succeeded.
     private func react(to outcome: OnboardingStepOutcome) {
-        switch outcome {
-        case .done, .failed: picked = model.speechProvider
-        case .idle, .working: break
-        }
+        if outcome.isDone { picked = nil }
     }
 }
 

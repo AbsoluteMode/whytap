@@ -7,6 +7,8 @@ import Foundation
 /// speech access and no answer; a rate limit has no answer of its own.
 enum OnboardingKeyProblem: Equatable {
     case format
+    /// Neither the key's own format nor a picked mark names a provider.
+    case unrecognized
     case refused
     case noCredit
     case noSpeechAccess
@@ -31,6 +33,7 @@ enum OnboardingKeyProblem: Equatable {
     func message(provider: String) -> String {
         switch self {
         case .format: return "That doesn't look like a \(provider) key. Check for missing characters."
+        case .unrecognized: return "That doesn't look like a key from these providers. Check it, or pick its provider below."
         case .refused: return "\(provider) didn't accept this key. It may be mistyped or revoked."
         case .noCredit: return "The key works, but this \(provider) account is out of credit."
         case .noSpeechAccess: return "This \(provider) key has no Speech to Text access."
@@ -237,6 +240,8 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Back, by button or ← / ⌘[. Only the step changes; a pending automatic
     /// move is cancelled, and a step already done waits in review.
     func back() {
+        // Over the server form, Back returns to the key step it came from.
+        if serverForm != nil { return closeServerForm() }
         guard let previous = OnboardingJourney.previous(before: step, in: steps) else { return }
         show(previous, direction: .backward)
     }
@@ -416,6 +421,57 @@ final class OnboardingJourneyModel: ObservableObject {
         let options = models.sections(for: .agent).filter { $0.account == account }.flatMap(\.options)
         let usable = options.filter { if case .notSupported = $0.state { return false } else { return true } }
         return usable.max { ($0.catalogDate ?? .distantPast) < ($1.catalogDate ?? .distantPast) }?.model
+    }
+
+    // MARK: - Key steps: the field and your own server
+
+    /// The key in a key step's field changed: an earlier refusal no longer
+    /// describes it. An accepted key stays accepted until a new check.
+    func keyEdited(on step: OnboardingStep) {
+        guard case .failed = outcome(step) else { return }
+        outcomes[step] = .idle
+        keyProblems[step] = nil
+    }
+
+    /// Return on a key whose format names no offered provider and no mark
+    /// was picked: a format problem, never a guess.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    func rejectUnrecognizedKey(on step: OnboardingStep) {
+        keyProblems[step] = .unrecognized
+        outcomes[step] = .failed(OnboardingKeyProblem.unrecognized.message(provider: ""))
+    }
+
+    /// The server form shown over the onboarding (the preview), for speech or
+    /// a language model; nil shows the onboarding.
+    @Published private(set) var serverForm: OnboardingKeyStageKind?
+
+    /// "Use your own server →". The preview opens the server form in this
+    /// window and comes back here; the app opens Settings -> API & Models on
+    /// the step's row until that form ships there.
+    func useOwnServer(_ kind: OnboardingKeyStageKind) {
+        if isPreview {
+            serverForm = kind
+        } else {
+            openSettings(.apiAndModels, kind == .speech ? .dropFast : .agent)
+        }
+    }
+
+    /// Back to the onboarding, nothing saved.
+    func closeServerForm() { serverForm = nil }
+
+    /// The preview's Save: the server stands in for the step's key, the step
+    /// is done and moves on like an accepted key.
+    func saveServer(_ server: OnboardingServerDraft) {
+        guard let kind = serverForm else { return }
+        serverForm = nil
+        let used = server.models.first { $0.use == (kind == .speech ? .transcription : .llm) } ?? server.models.first
+        if kind == .speech {
+            progress.speechExpected = true
+            succeed(.speechKey, "\(server.name) · \(used?.name ?? "")")
+        } else {
+            progress.hasLanguageModel = true
+            succeed(.llmKey, "\(server.name) · \(used?.name ?? "")")
+        }
     }
 
     /// The model the person picked on the LLM step, or `nil` for the preselected one.

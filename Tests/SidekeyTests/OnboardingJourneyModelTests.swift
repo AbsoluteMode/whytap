@@ -129,7 +129,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
     private func makeModel(_ env: Env, refusing: [ProviderAccount] = [], supportsOnDevice: Bool = true,
                            hotkey: DropHotkeyStatus = .accessibilityRequired,
                            keyChecker: ProviderKeyChecking? = nil,
-                           offersOpenAISpeech: Bool = false) throws -> OnboardingJourneyModel {
+                           offersOpenAISpeech: Bool = false, isPreview: Bool = false) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -159,6 +159,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
             screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
             openScreenRecordingSettings: {}, defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
+            isPreview: isPreview,
             offersOpenAISpeech: offersOpenAISpeech)
         addTeardownBlock { model.stop() }
         return model
@@ -536,7 +537,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
-        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true)
+        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true)
         let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
         let window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
@@ -564,6 +565,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("key-flight-2", after: 90)
         try await snap("key-flight-3", after: 120)
         try await snap("speech-key")
+        // "Use your own server →": the form in the same window, then back.
+        model.useOwnServer(.speech)
+        try await snap("server-form")
+        model.back()
+        try await snap("speech-key-after-server")
         model.speechProvider = .deepgram
         await model.useSpeechKey("bad-0123456789abcdef", provider: .deepgram)
         try await snap("speech-key-refused")

@@ -51,7 +51,12 @@ final class AIFeatureTests: XCTestCase {
             case .deepgram: return deepgram
             case .elevenLabs: return elevenLabs
             case .openRouter: return openRouter
-            case .openAI: return openRouter
+            // OpenAI: the text cells of OpenRouter, plus live speech on the
+            // shared key; no meetings model.
+            // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+            case .openAI:
+                let live: Set<AIFeature> = [.dropFast, .dropSmart, .agentVoice, .voiceSearch]
+                return features.allSatisfy(live.contains) ? .realtimeSTT : openRouter
             case .anthropic: return anthropic
             case .openAICompatible: return openAICompatible
             // Every speech feature, meetings and subtitles included; no text.
@@ -107,12 +112,13 @@ final class AIFeatureTests: XCTestCase {
         XCTAssertEqual(visited, 72)
     }
 
-    func test_direct_llm_providers_are_available_for_all_text_modes_only() {
+    func test_direct_llm_providers_serve_text_modes_and_openai_also_live_speech() {
         for kind in [AIProviderKind.openAI, .anthropic] {
             for feature in AIFeature.activeCases {
                 let expected: ModelUse? = feature.mode == .llm ? .chat
                     : (feature.mode == .llmWithTools ? .chatWithTools
-                       : (kind == .openAI && feature.mode == .decision ? .decision : nil))
+                       : (kind == .openAI && feature.mode == .decision ? .decision
+                          : (kind == .openAI && feature.mode == .realtime ? .realtimeSTT : nil)))
                 XCTAssertEqual(feature.modelUse(on: kind), expected, feature.rawValue)
             }
         }

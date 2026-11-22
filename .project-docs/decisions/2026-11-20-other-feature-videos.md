@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/AgentOtherSectionTests.swift
     confirmed_at: 2026-11-20
-related: [2026-11-21-first-launch-onboarding.md]
+related: [2026-11-21-first-launch-onboarding.md, 2026-11-22-drop-edit-observation.md]
 ---
 
 # Settings -> Other: short descriptions, feature clips, Agent in one group
@@ -56,6 +56,11 @@ else configured through Claude Code or Codex via the Whytap plugin.
   clip shows an example Toggle combo (there is no default one), so its popover
   names the user's own Drop shortcut; Google's names its Text and Voice keys.
   Screenshot protection and Auto-hide have no shortcut line.
+- 2026-11-22: Maxim accepted the Learn from my edits clip ("the video is
+  great"): `drop-learning.mp4` (about 680 KB), a 720p re-encode with the same
+  settings. It shows the field being watched until it is sent
+  ([observation](2026-11-22-drop-edit-observation.md)): fix, Return, drops,
+  ⌃Y, then Vocab. Its popover names the Drop key and the fixed ⌃Y.
 - The Agents tab leaves the sidebar. Other gets an Agent group: an Agent switch
   that enables the shortcuts and connects the native Agent in one step (off
   disables and disconnects; no model means a message with Choose model), and

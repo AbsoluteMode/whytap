@@ -52,7 +52,7 @@ enum ConfigBackupRegistry {
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
             "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
-        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms"])
+        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms", DropReplacementStore.key])
         add(.toolbox, .strings, ["sidekey.b2b.hover.layout"])
         add(.other, .bool, ["sidekey.privacy.screenshotProtectionEnabled", "sidekey.preferences.hideHelpers",
             "sidekey.preferences.hideIslandHoverWidgets", "sidekey.preferences.agentEnabled", "sidekey.preferences.meetingsEnabled",
@@ -64,7 +64,7 @@ enum ConfigBackupRegistry {
         add(.other, .strings, [CalendarAccountSettings.hiddenFeedsKey])
         add(.other, .bool, [CalendarAccountSettings.appleEnabledKey])
         add(.other, .propertyList, ["notifications.sourceSounds"])
-        add(.agents, .string, ["agent.opencode.model", "agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier"])
+        add(.agents, .string, ["agent.native.webSearch", "agent.opencode.model", "agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier"])
         add(.agents, .bool, ["agent.opencode.allowActions"])
         return result
     }()

@@ -226,9 +226,9 @@ final class ModelStatusResolverTests: XCTestCase {
             let offered = try XCTUnwrap(env.resolver.sections(for: feature).first).options.map(\.model)
             XCTAssertEqual(offered, ["nova-3"], "\(feature)")
         }
-        XCTAssertTrue(ModelRegistry.offersOnlyBuiltInModels(.soniox))
-        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.elevenLabs))
-        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.openRouter))
+        XCTAssertTrue(ModelRegistry.offersOnlyBuiltInModels(.soniox, use: .realtimeSTT))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.elevenLabs, use: .realtimeSTT))
+        XCTAssertFalse(ModelRegistry.offersOnlyBuiltInModels(.openRouter, use: .chat))
     }
 
     func test_deepgram_nova_3_is_not_removed() throws {
@@ -300,6 +300,10 @@ final class ModelStatusResolverTests: XCTestCase {
         let env = try makeEnv(keyed: [.soniox, .openRouter])
         let b = env.routing.addServer(name: "b-box", baseURL: "http://b:8000/v1")
         let a = env.routing.addServer(name: "A-box", baseURL: "http://a:8000/v1")
+        for server in [a, b] {
+            env.routing.addModel(ServerModel(name: "whisper", kind: .transcription, checked: true), toServer: server.id)
+            env.routing.addModel(ServerModel(name: "qwen", kind: .llm, checked: true), toServer: server.id)
+        }
 
         XCTAssertEqual(
             env.resolver.sections(for: .dropFast).map(\.account),
@@ -311,7 +315,7 @@ final class ModelStatusResolverTests: XCTestCase {
         )
         XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.openRouter])
         XCTAssertEqual(env.resolver.sections(for: .dropFast).first?.title, "Soniox")
-        XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "A-box")
+        XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "a:8000")
     }
 
     func test_every_keyed_llm_provider_has_a_section_and_openrouter_comes_last() throws {
@@ -325,6 +329,7 @@ final class ModelStatusResolverTests: XCTestCase {
         )
         for key in [ProviderAccount.anthropic, .openAI, .openRouter] { env.keyStatuses.set(.valid, for: key, at: Date()) }
         let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        env.routing.addModel(ServerModel(name: "qwen3:8b", kind: .llm, checked: true), toServer: server.id)
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "vendor/model-7"), for: .dropSmartCleanup)
 
         // A huge OpenRouter catalog never pushes the direct providers out of view.
@@ -334,11 +339,11 @@ final class ModelStatusResolverTests: XCTestCase {
         }
         XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.anthropic, .openAI, .openRouter])
         let sections = env.resolver.sections(for: .dropSmartCleanup)
-        XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama", "OpenRouter"])
+        XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama · localhost:11434", "OpenRouter"])
         XCTAssertTrue(sections.allSatisfy { $0.keyProblem == nil })
         // Search covers every section; the route itself is untouched.
         XCTAssertEqual(Set(ModelPickerSearch.results(in: sections, query: "").map(\.account)),
-                       [.anthropic, .openAI, .openRouter])
+                       [.anthropic, .openAI, .server(server.id), .openRouter])
         let sonnet = ModelPickerSearch.results(in: sections, query: "sonnet")
         XCTAssertEqual(sonnet.first?.account, .anthropic, "the direct section leads the search results too")
         XCTAssertTrue(sonnet.contains { $0.account == .anthropic && $0.option.model == "claude-sonnet-5-5" })
@@ -382,6 +387,9 @@ final class ModelStatusResolverTests: XCTestCase {
         let pulled = Date(timeIntervalSince1970: 1_762_000_000)
         let env = try makeEnv(snapshots: [.openRouter: openRouterListing()], keyed: [.openRouter])
         let server = env.routing.addServer(name: "Ollama", baseURL: "http://localhost:11434/v1")
+        for name in ["qwen3:8b", "stamped", "undated", "gpt-5"] {
+            env.routing.addModel(ServerModel(name: name, kind: .llm, checked: true), toServer: server.id)
+        }
         var snapshot = CatalogSnapshot(models: [
             CatalogModel(id: "qwen3:8b", catalogDate: pulled),
             CatalogModel(id: "stamped", catalogDate: fetched.addingTimeInterval(-2)),
@@ -419,7 +427,7 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(env.resolver.missingProviderHint(for: .agent), "Add a key for OpenRouter, OpenAI or Anthropic")
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
-            "Add a key for Soniox, Deepgram, ElevenLabs or an OpenAI-compatible server"
+            "Add a key for Soniox, Deepgram, ElevenLabs, OpenAI or an OpenAI-compatible server"
                 + (HostArchitecture.isAppleSilicon ? ", or download the On this Mac model" : "")
         )
         env.addKey(.soniox)
@@ -664,5 +672,75 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(plainOptions.map(\.state), openRouter.map(\.state))
         let found = ModelPickerSearch.results(in: sections, query: "0.3").map(\.option.model)
         XCTAssertFalse(found.contains(priced.id), "a price is not searchable text")
+    }
+
+    // MARK: - Speech prices
+    // WHY: .project-docs/decisions/2026-11-22-speech-model-prices.md
+
+    /// What the user sees when they open a speech picker: each transcription
+    /// model with a known list price shows it per minute, the live price on a
+    /// live feature and the recorded one on Meetings; an unknown price, a
+    /// user's server and a model nobody priced show nothing, never a zero.
+    func test_speech_pickers_show_the_price_per_minute_where_it_is_known() throws {
+        let openAI = try ModelCatalogFetcher.parseOpenAI(Data(#"""
+        {"data":[{"id":"gpt-live-transcribe"},{"id":"gpt-transcribe"},{"id":"gpt-4o-transcribe"},{"id":"gpt-6"}]}
+        """#.utf8))
+        let env = try makeEnv(snapshots: [
+            .soniox: sonioxCatalog(),
+            .deepgram: fresh([CatalogModel(id: "nova-3", uses: [.realtimeSTT, .asyncSTT]),
+                              CatalogModel(id: "nova-2", uses: [.realtimeSTT, .asyncSTT])]),
+            .elevenLabs: fresh([CatalogModel(id: "scribe_v3_live", uses: [.realtimeSTT]),
+                                CatalogModel(id: "scribe_v3", uses: [.asyncSTT])]),
+            .openAI: fresh(openAI),
+        ], keyed: [.soniox, .deepgram, .elevenLabs, .openAI])
+        // A saved route on a model the app has no price for keeps its row.
+        env.routing.setRoute(FeatureRoute(account: .deepgram, model: "nova-2"), for: .voiceSearch)
+        let server = env.routing.addServer(name: "Lab", baseURL: "http://localhost:8000/v1")
+        env.routing.addModel(ServerModel(name: "whisper-large-v3", kind: .transcription, checked: true), toServer: server.id)
+
+        func prices(_ feature: AIFeature) -> [String: String?] {
+            var result: [String: String?] = [:]
+            for section in env.resolver.sections(for: feature) {
+                for option in section.options { result["\(section.account.storageID)/\(option.model)"] = option.priceLabel }
+            }
+            return result
+        }
+        let live = prices(.dropFast)
+        XCTAssertEqual(live["soniox/stt-rt-v6"], "$0.002 per min")
+        XCTAssertEqual(live["deepgram/nova-3"], "From $0.0048 per min")
+        XCTAssertEqual(live["elevenLabs/scribe_v3_live"], "From $0.00367 per min")
+        XCTAssertEqual(live["openAI/gpt-live-transcribe"], "$0.017 per min")
+        XCTAssertEqual(live.keys.filter { $0.hasPrefix("openAI/") }, ["openAI/gpt-live-transcribe"],
+                       "OpenAI offers one live model")
+        XCTAssertEqual(live["\(ProviderAccount.server(server.id).storageID)/whisper-large-v3"], .some(nil))
+
+        let searched = prices(.voiceSearch)
+        XCTAssertEqual(searched["deepgram/nova-2"], .some(nil), "no published price, no label")
+
+        let meetings = prices(.meetings)
+        XCTAssertEqual(meetings["soniox/stt-async-v6"], "$0.00167 per min")
+        XCTAssertEqual(meetings["deepgram/nova-3"], "From $0.0043 per min")
+        XCTAssertEqual(meetings["elevenLabs/scribe_v3"], "From $0.00333 per min")
+        XCTAssertTrue(meetings.keys.allSatisfy { !$0.hasPrefix("openAI/") }, "OpenAI can't serve Meetings")
+
+        for label in (Array(live.values) + Array(meetings.values)).compactMap({ $0 }) {
+            XCTAssertFalse(label.contains("$0 ") || label == "Free", label)
+        }
+        XCTAssertNil(ModelStatusResolver.speechPriceLabel(SpeechListPrice(usdPerMinute: 0)))
+        XCTAssertNil(ModelStatusResolver.speechPriceLabel(nil))
+        XCTAssertNil(ModelRegistry.speechListPrice("whisper-large-v3", kind: .openAICompatible, use: .realtimeSTT))
+        XCTAssertNil(ModelRegistry.speechListPrice(ModelRegistry.onDeviceSpeechModel, kind: .onDevice, use: .realtimeSTT))
+    }
+
+    /// A route saved on a model OpenAI no longer offers moves to the live
+    /// model at launch and its row reads as fine, not as an error.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    func test_a_moved_openai_speech_route_is_a_working_row() throws {
+        let openAI = try ModelCatalogFetcher.parseOpenAI(Data(#"{"data":[{"id":"gpt-live-transcribe"}]}"#.utf8))
+        let env = try makeEnv(snapshots: [.openAI: fresh(openAI)], keyed: [.openAI])
+        env.routing.setRoute(FeatureRoute(account: .openAI, model: "gpt-4o-mini-transcribe"), for: .dropFast)
+        env.routing.narrowOpenAISpeechModelsIfNeeded()
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .openAI, model: "gpt-live-transcribe"))
+        XCTAssertEqual(env.resolver.status(for: .dropFast), .ok)
     }
 }

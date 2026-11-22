@@ -32,7 +32,8 @@ enum BYOKProvider: String, CaseIterable, Codable {
     /// picked one yet).
     var defaultTranscriptionModel: String {
         switch self {
-        case .openAI, .selfHosted: return "gpt-4o-transcribe"
+        case .openAI: return ModelRegistry.openAILiveModel
+        case .selfHosted: return "gpt-4o-transcribe"
         case .deepgram: return "nova-3"
         case .soniox: return ModelRegistry.sonioxRealtimeModel
         case .elevenLabs: return ModelRegistry.elevenLabsRealtimeModel
@@ -44,19 +45,13 @@ enum BYOKProvider: String, CaseIterable, Codable {
     /// so it has no fixed list.
     var availableTranscriptionModels: [String] {
         switch self {
-        case .openAI: return ["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+        case .openAI: return [ModelRegistry.openAILiveModel]
         case .selfHosted: return []
         case .deepgram: return ["nova-3"]
         case .soniox: return [ModelRegistry.sonioxRealtimeModel]
         case .elevenLabs: return [ModelRegistry.elevenLabsRealtimeModel]
         }
     }
-
-    /// Providers offered in the BYOK picker. OpenAI is excluded: its realtime
-    /// transcription doesn't stream partials, so offering it for BYOK would be
-    /// a dead end for long holds. The `.openAI` case stays for decoding any
-    /// legacy stored value. WHY: docs/decisions/2026-06-23-byok-models-ui-cleanup.md
-    static var selectable: [BYOKProvider] { allCases.filter { $0 != .openAI } }
 }
 
 /// Synchronous UserDefaults-backed config for the Models / BYOK settings.
@@ -94,13 +89,12 @@ struct SelfKeyPreferences {
         nonmutating set { setStoredLevel(newValue?.rawValue, forKey: Key.level) }
     }
 
+    /// The old Models tab's provider. A stored OpenAI choice stays OpenAI (it
+    /// was read as Soniox while OpenAI was not offered, which moved audio to
+    /// a provider the user never chose); nothing stored reads as Soniox.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     var selectedProvider: BYOKProvider {
-        // OpenAI is no longer offered for BYOK; resolve a legacy/default OpenAI
-        // selection to soniox so it's gone from the UI AND the runtime path.
-        get {
-            let stored = defaults.string(forKey: Key.provider).flatMap(BYOKProvider.init) ?? .soniox
-            return BYOKProvider.selectable.contains(stored) ? stored : .soniox
-        }
+        get { defaults.string(forKey: Key.provider).flatMap(BYOKProvider.init) ?? .soniox }
         nonmutating set { defaults.set(newValue.rawValue, forKey: Key.provider) }
     }
 

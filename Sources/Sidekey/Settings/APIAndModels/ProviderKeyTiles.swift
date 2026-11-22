@@ -17,6 +17,9 @@ struct ProviderKeyTiles: View {
     /// Why a key was not saved, after `onSaveResult(false)`.
     let onSaveFailure: (String) -> Void
     @State private var expanded: Target?
+    /// A server opens its own window instead of an inline form.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    @State private var serverSheet: ServerSheetModel?
     @State private var busy = false
     @FocusState private var focused: Target?
 
@@ -63,17 +66,26 @@ struct ProviderKeyTiles: View {
             close()
             return .handled
         }
+        .sheet(item: $serverSheet) { model in
+            ServerSheet(model: model) { serverSheet = nil }
+        }
     }
 
     private func tile(_ target: Target) -> some View {
         let provider = kind(target)
         let chip = account(target).flatMap { account in viewModel.chips.first { $0.account == account } }
         let title = target == .tavily ? "Tavily" : chip?.title ?? (provider == .openAICompatible ? "Custom server" : provider?.displayName ?? "")
-        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key") : chip?.statusText ?? "Add API key"
+        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key")
+            : chip?.statusText ?? (provider == .openAICompatible ? "Add server" : "Add API key")
         let hasKey = target == .tavily ? tavily.configured : chip != nil
         let selected = expanded == target
         return Button {
-            expanded = selected ? nil : target
+            if opensServerSheet(target) {
+                expanded = nil
+                serverSheet = ServerSheetModel(viewModel: viewModel, account: account(target))
+            } else {
+                expanded = selected ? nil : target
+            }
         } label: {
             Color.clear.aspectRatio(1, contentMode: .fit)
                 .overlay {
@@ -112,6 +124,15 @@ struct ProviderKeyTiles: View {
         .accessibilityLabel(title)
         .accessibilityValue("\(status), \(selected ? "Expanded" : "Collapsed")")
         .accessibilityHint(selected ? "Close key settings" : "Open key settings")
+    }
+
+    /// The Custom server tile adds a server; a server's tile edits it.
+    private func opensServerSheet(_ target: Target) -> Bool {
+        switch target {
+        case .provider(let kind): return kind == .openAICompatible
+        case .server: return true
+        case .tavily: return false
+        }
     }
 
     private func kind(_ target: Target) -> AIProviderKind? {
@@ -182,7 +203,9 @@ extension AIProviderKind {
     var keyTileDetail: String {
         switch self {
         case .soniox, .deepgram, .elevenLabs, .onDevice: return "Speech recognition"
-        case .openRouter, .openAI, .anthropic: return "Language models"
+        // One OpenAI key serves its speech and its language models.
+        case .openAI: return "Speech and LLMs"
+        case .openRouter, .anthropic: return "Language models"
         case .openAICompatible: return "Your own endpoint"
         }
     }
@@ -203,28 +226,17 @@ struct ProviderKeyForm: View {
     var showsRemove = true
 
     @State private var key = ""
-    @State private var name = ""
-    @State private var baseURL = ""
     @State private var saving = false
     @FocusState private var keyFocused: Bool
     @State private var keyHovered = false
 
     private var chip: KeyChip? { viewModel.chips.first { $0.account == account } }
-    private var newServer: Bool { kind == .openAICompatible && account == nil }
     private var busy: Bool { saving }
-    private var canSave: Bool {
-        !busy && (newServer ? !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  && !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    }
+    private var canSave: Bool { !busy && !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if newServer {
-                MacField(placeholder: "Name", text: $name)
-                MacField(placeholder: "Base URL", text: $baseURL, monospaced: true)
-            }
-            SecureField(chip == nil ? (newServer ? "API key (optional)" : "API key") : "New API key", text: $key)
+            SecureField(chip == nil ? "API key" : "New API key", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .focused($keyFocused)
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !busy ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }
@@ -232,14 +244,14 @@ struct ProviderKeyForm: View {
                 .onSubmit(save)
             HStack(spacing: 10) {
                 if showsRemove {
-                    APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil) {
-                        guard let account else { return }
+                    APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil && !busy) {
+                        guard let account, !busy else { return }
                         viewModel.remove(account)
                         onClose()
                     }
                 }
                 Spacer(minLength: 0)
-                if busy { ProgressView().controlSize(.small).accessibilityLabel("Saving key") }
+                if saving { ProgressView().controlSize(.small).accessibilityLabel("Saving key") }
                 APIModelAction(title: "Save", style: .primary, isEnabled: canSave, action: save)
             }
         }
@@ -248,31 +260,25 @@ struct ProviderKeyForm: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 12))
         .disabled(busy)
+        .onChange(of: busy) { _, isBusy in onBusyChanged(isBusy) }
         .onAppear { keyFocused = true }
     }
 
     private func save() {
         guard canSave else { return }
         saving = true
-        onBusyChanged(true)
         let candidate = key
         Task {
             let failure: String?
-            if newServer {
-                failure = await viewModel.addServer(name: name, baseURL: baseURL, key: candidate, proposeModels: false)
-            } else if let account {
+            if let account {
                 failure = await viewModel.replaceKey(candidate, for: account)
             } else {
                 failure = await viewModel.addKey(candidate, kind: kind)
             }
             saving = false
-            onBusyChanged(false)
             onSaveResult(failure == nil)
             if let failure { onSaveFailure(failure) }
-            if failure == nil {
-                key = ""
-                if newServer { onClose() }
-            }
+            if failure == nil { key = "" }
         }
     }
 }

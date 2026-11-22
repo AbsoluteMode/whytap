@@ -54,7 +54,9 @@ struct AIRoutingMigration {
         routing.retireMeetingRoutesIfNeeded()
         routing.upgradeElevenLabsScribeIfNeeded()
         routing.upgradeSonioxModelsIfNeeded()
+        routing.narrowOpenAISpeechModelsIfNeeded()
         routing.moveMeetingsToRecordedModelIfNeeded()
+        routing.adoptExplicitServerModelsIfNeeded()
     }
 
     // MARK: - Routes
@@ -67,14 +69,16 @@ struct AIRoutingMigration {
         guard let account = speechAccount(for: provider, server: server), hasKey(account) else { return [:] }
 
         let realtime = FeatureRoute(account: account, model: prefs.transcriptionModel(for: provider))
+        var routes = Dictionary(uniqueKeysWithValues: Self.realtimeFeatures.map { ($0, realtime) })
         // Soniox transcribes a finished recording through its file API; the
         // other providers ran it through their real-time model then (an
         // ElevenLabs meeting route moves on in moveMeetingsToRecordedModelIfNeeded).
-        let recorded = provider == .soniox
-            ? FeatureRoute(account: account, model: SonioxFileAPI.asyncModel)
-            : realtime
-        var routes = Dictionary(uniqueKeysWithValues: Self.realtimeFeatures.map { ($0, realtime) })
-        routes[.meetings] = recorded
+        // OpenAI has no meetings model: Meetings stay Not set.
+        switch provider {
+        case .soniox: routes[.meetings] = FeatureRoute(account: account, model: SonioxFileAPI.asyncModel)
+        case .openAI: break
+        case .deepgram, .elevenLabs, .selfHosted: routes[.meetings] = realtime
+        }
         return routes
     }
 
@@ -84,9 +88,12 @@ struct AIRoutingMigration {
         case .deepgram: return .deepgram
         case .elevenLabs: return .elevenLabs
         case .selfHosted: return server.map { ProviderAccount.server($0.id) }
-        // `selectedProvider` already turns a stored OpenAI choice into Soniox,
-        // and API & Models has no OpenAI account.
-        case .openAI: return nil
+        // The shared OpenAI key (`byok.openai.llm_api_key`) decides, never the
+        // retired speech credential `byok.openAI.api_key`: a key the user
+        // removed from the old Models tab is not brought back. The stored
+        // model is kept; a turn-based one runs with server VAD.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+        case .openAI: return .openAI
         }
     }
 

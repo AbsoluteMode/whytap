@@ -38,6 +38,9 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// `capabilities.thinking.supported`.
     var supportsReasoning: Bool?
     var reasoning: OpenRouterReasoningCapabilities?
+    /// Anthropic's `capabilities.server_tools.web_search.supported`; `nil`
+    /// when the catalog does not say. Decides the Agent's built-in search.
+    var supportsWebSearch: Bool?
     var expiresAt: Date?
     /// Deepgram: the date of the model's newest version (`version` is
     /// `YYYY-MM-DD.N`). Pickers hide a model not updated for a year.
@@ -58,6 +61,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         supportsTools: Bool? = nil,
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
+        supportsWebSearch: Bool? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
         catalogDate: Date? = nil,
@@ -71,6 +75,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.supportsTools = supportsTools
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
+        self.supportsWebSearch = supportsWebSearch
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
         self.catalogDate = catalogDate
@@ -434,6 +439,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             let maxInputTokens: Int?
             let maxTokens: Int?
             let thinking: Bool?
+            let webSearch: Bool?
             let createdAt: String?
 
             enum CodingKeys: String, CodingKey {
@@ -446,7 +452,26 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
 
             private struct Capabilities: Decodable {
                 struct Support: Decodable { let supported: Bool? }
+                struct ServerTools: Decodable {
+                    let webSearch: Support?
+                    enum CodingKeys: String, CodingKey { case webSearch = "web_search" }
+                    init(from decoder: Decoder) throws {
+                        webSearch = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Support.self, forKey: .webSearch)
+                    }
+                }
                 let thinking: Support?
+                let serverTools: ServerTools?
+                enum CodingKeys: String, CodingKey {
+                    case thinking
+                    case serverTools = "server_tools"
+                }
+                // Each capability decodes on its own: an odd value in one
+                // (say web_search.supported) never costs another (thinking).
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    thinking = try? container.decodeIfPresent(Support.self, forKey: .thinking)
+                    serverTools = try? container.decodeIfPresent(ServerTools.self, forKey: .serverTools)
+                }
             }
 
             init(from decoder: Decoder) throws {
@@ -456,7 +481,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 maxInputTokens = try? container.decodeIfPresent(Int.self, forKey: .maxInputTokens)
                 maxTokens = try? container.decodeIfPresent(Int.self, forKey: .maxTokens)
                 // A capabilities object of another shape costs only the flag.
-                thinking = (try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities))?.thinking?.supported
+                let capabilities = try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
+                thinking = capabilities?.thinking?.supported
+                webSearch = capabilities?.serverTools?.webSearch?.supported
             }
         }
         let data: [Model]
@@ -481,6 +508,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 maxOutputTokens: model.maxTokens,
                 supportsTools: true,
                 supportsReasoning: model.thinking,
+                supportsWebSearch: model.webSearch,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
             )
         }
@@ -497,6 +525,10 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         let data: [Model]
     }
 
+    /// A server lists IDs only. They suggest names when the user adds a model
+    /// to the server; what each model does is the user's entry
+    /// (`ServerEndpoint.models`), never this list.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
     static func parseServer(_ data: Data) throws -> [CatalogModel] {
         try decode(ServerResponse.self, from: data).data.map { CatalogModel(id: $0.id, catalogDate: $0.created?.date) }
     }
@@ -518,6 +550,9 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             if base.hasPrefix("gpt-realtime-translate") {
                 return CatalogModel(id: id, uses: [.speechTranslation], catalogDate: model.created?.date)
             }
+            if let uses = openAISpeechUses(base) {
+                return uses.isEmpty ? nil : CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
+            }
             guard base.hasPrefix("gpt-") || ["o1", "o3", "o4"].contains(where: { base == $0 || base.hasPrefix($0 + "-") }),
                   !["audio", "realtime", "transcribe", "tts", "image", "search", "codex", "deep-research", "-pro", "instruct"].contains(where: base.contains)
             else { return nil }
@@ -525,6 +560,22 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             if id == ModelRegistry.openAIDecisionModel { uses.insert(.decision) }
             return CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
         }.sorted { $0.id < $1.id }
+    }
+
+    /// What an OpenAI transcription model can do, or `nil` for a model that
+    /// is not one. Two are offered: `gpt-live-transcribe` live and
+    /// `gpt-transcribe` for recorded audio. Every other transcription model
+    /// (`gpt-realtime-whisper`, the deprecated `gpt-4o-*transcribe*` and
+    /// `whisper-1`, the diarizing one) is left out (`[]`).
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static func openAISpeechUses(_ base: String) -> Set<ModelUse>? {
+        if base.hasPrefix(ModelRegistry.openAILiveModel) { return [.realtimeSTT] }
+        if base.contains("transcribe-diarize") { return [] }
+        if base == ModelRegistry.openAIRecordedModel || base.hasPrefix(ModelRegistry.openAIRecordedModel + "-") {
+            return [.asyncSTT]
+        }
+        if base.contains("transcribe") || base.contains("whisper") { return [] }
+        return nil
     }
 
     /// Optional metadata must never make an otherwise usable catalog fail.

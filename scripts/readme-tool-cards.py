@@ -23,11 +23,11 @@ LUCIDE = pathlib.Path(sys.argv[1])
 OUT = REPO / "docs/assets/readme"
 A = "docs/assets/readme"
 
-# Calendar is closed as Soon in the app (CalendarAvailability.shipped = false,
-# AbsoluteMode/whytap#360): its card marks Calendar "(soon)". When Calendar ships,
-# set this to False and rerun. The slug changes with it, so GitHub's image cache
-# cannot keep showing the old card.
-CALENDAR_SOON = True
+# Calendar was closed as Soon (AbsoluteMode/whytap#360) and released on
+# 2026-11-22. Set this to True and rerun only if CalendarAvailability.shipped goes
+# back to false. The slug changes with it, so GitHub's image cache cannot keep
+# showing the old card.
+CALENDAR_SOON = False
 SOON = " (soon)" if CALENDAR_SOON else ""
 
 # slug, Lucide icon, title, subtitle (alt text only), steps, description (wide card, one

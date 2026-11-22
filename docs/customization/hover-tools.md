@@ -4,8 +4,9 @@ The user chooses any number of tools in **Settings, Toolbox**. Selected tools wr
 into rows of three compact capsules, 52 points high. The drawer has exactly the
 same width as the compact island, using its actual notch-derived `compactWidth`.
 Each cell width is `(panelWidth - 24 - 16) / 3`: 90 points for a 310-point island,
-or about 90.67 for 312 points. Each shows an icon and title inside,
-with a current status when the tool has state. Settings stays last and cannot
+or about 90.67 for 312 points. Each shows an icon and title inside; a tool's
+current state (mode, language, recording, brightness) is read by VoiceOver,
+not drawn as a caption. Settings stays last and cannot
 be removed. The Settings editor keeps Add and Settings fixed in its header;
 saved tools scroll horizontally while the catalog scrolls vertically below.
 Click Add to choose a tool, or drag a tile onto it. Already pinned catalog tiles
@@ -87,7 +88,8 @@ python3 scripts/customize.py build
 ```
 
 Inspect one row and multiple rows, add/reorder/remove, Settings locking, relaunch
-persistence and keyboard activation of the first five positions. Verify that
+persistence and each tool's own optional hotkey (Settings → Hotkeys → Tools; there
+are no positional shortcuts). Verify that
 scrolling preserves and reaches tool 13+, all drawer/search/inline-panel native
 hit regions match the compact island width, and music uses that same width.
 Cover 310-point and 312-point examples, including fractional capsule widths;

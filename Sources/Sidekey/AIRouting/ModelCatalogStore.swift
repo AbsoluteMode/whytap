@@ -1,9 +1,10 @@
+import CryptoKit
 import Foundation
 
 /// What the app last learned about one account's model catalog. Model metadata
 /// only: no keys, no URLs, no response bodies.
 struct CatalogSnapshot: Codable, Equatable {
-    static let currentMetadataVersion = 4
+    static let currentMetadataVersion = 6
     var models: [CatalogModel]
     /// Last successful load.
     var fetchedAt: Date?
@@ -13,8 +14,14 @@ struct CatalogSnapshot: Codable, Equatable {
     /// The key may not list models: only the built-in registry applies.
     var limited: Bool
     /// Older caches remain readable offline, but refresh once for dates,
-    /// capabilities and OpenRouter prices (version 4).
+    /// capabilities and OpenRouter prices (version 4), OpenAI's speech
+    /// models (version 5) and their narrowing to two (version 6).
     var metadataVersion: Int?
+    /// For a user's server: a digest of the base URL the list came from (not
+    /// the URL), so a list is never shown for another address. `nil` for
+    /// providers and caches written before.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    var source: String?
 
     init(models: [CatalogModel] = [], fetchedAt: Date? = nil, lastRefreshFailed: Bool = false, limited: Bool = false) {
         self.models = models
@@ -50,6 +57,9 @@ final class ModelCatalogStore: ObservableObject {
     private let now: () -> Date
     private let ttl: TimeInterval
     private var inFlight: Set<String> = []
+    /// Bumped by `forget`: a refresh that was in flight then does not write
+    /// back what it fetched for the forgotten configuration.
+    private var generations: [String: Int] = [:]
 
     init(
         fileURL: URL = ModelCatalogStore.defaultFileURL,
@@ -66,6 +76,16 @@ final class ModelCatalogStore: ObservableObject {
 
     func snapshot(for account: ProviderAccount) -> CatalogSnapshot? {
         snapshots[account.storageID]
+    }
+
+    /// The server's list, only if it came from the server's current address.
+    func snapshot(for account: ProviderAccount, server: ServerEndpoint) -> CatalogSnapshot? {
+        guard let snapshot = snapshots[account.storageID], snapshot.source == Self.source(of: server) else { return nil }
+        return snapshot
+    }
+
+    nonisolated static func source(of server: ServerEndpoint) -> String {
+        SHA256.hash(data: Data(server.baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Loads the catalog unless the cached one is younger than the TTL and its
@@ -87,7 +107,14 @@ final class ModelCatalogStore: ObservableObject {
         guard inFlight.insert(id).inserted else { return }
         defer { inFlight.remove(id) }
 
+        let generation = generations[id, default: 0]
+        let source = server.map(Self.source(of:))
         var snapshot = snapshots[id] ?? CatalogSnapshot()
+        if snapshot.source != source {
+            // Another address's list says nothing about this one.
+            snapshot = CatalogSnapshot()
+            snapshot.source = source
+        }
         do {
             snapshot.models = try await fetcher.fetch(account: account, apiKey: apiKey, server: server)
             snapshot.fetchedAt = now()
@@ -111,11 +138,13 @@ final class ModelCatalogStore: ObservableObject {
         } catch {
             snapshot.lastRefreshFailed = true
         }
+        guard generations[id, default: 0] == generation else { return }
         snapshots[id] = snapshot
         persist()
     }
 
     func forget(_ account: ProviderAccount) {
+        generations[account.storageID, default: 0] += 1
         guard snapshots.removeValue(forKey: account.storageID) != nil else { return }
         persist()
     }

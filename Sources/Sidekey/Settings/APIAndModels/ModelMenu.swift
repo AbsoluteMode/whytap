@@ -48,6 +48,51 @@ struct ModelMenu: View {
     }
 }
 
+/// The model dropdown of a shared Speech or LLM row: the picker of the kind's
+/// lead feature, whose pick goes to the caller (which may first ask about
+/// custom per-feature models).
+// WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+@MainActor
+struct SharedModelMenu: View {
+    @ObservedObject var viewModel: APIAndModelsViewModel
+    let kind: SharedModelKind
+    let label: String
+    let onAddKey: () -> Void
+    let onPick: (ProviderAccount, String) -> Void
+    var width: CGFloat? = nil
+    @State private var isPresented = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            MacPopupLabel(title: label, minWidth: width ?? 90, maxWidth: width ?? 300)
+        }
+        .buttonStyle(APIModelFeedbackStyle(cornerRadius: MacPopupMetrics.radius, focused: focused))
+        .focused($focused)
+        .help(label)
+        .accessibilityLabel("\(kind.title) model for every feature")
+        .accessibilityValue(label)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            ModelPicker(
+                sections: viewModel.sharedSections(kind),
+                missingProviderHint: viewModel.missingProviderHint(for: kind.pickerFeature),
+                onSelect: { account, model in
+                    isPresented = false
+                    onPick(account, model)
+                },
+                onRefresh: { await viewModel.refreshModels() },
+                onAddKey: { isPresented = false; onAddKey() },
+                onClose: { isPresented = false }
+            )
+        }
+        .onChange(of: isPresented) { _, shown in
+            if !shown { focused = true }
+        }
+    }
+}
+
 /// Query terms can appear anywhere in an ID and in any order. Keeping the
 /// provider in each result prevents identical IDs on two accounts from merging.
 enum ModelPickerSearch {

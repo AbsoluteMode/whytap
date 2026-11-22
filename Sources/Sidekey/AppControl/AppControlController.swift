@@ -25,6 +25,8 @@ final class AppControlController {
     /// Set only where the broker gates these operations by `HarnessAccessGate`.
     private let meetings: AppControlMeetings?
     private let agentWorkspace: () -> String
+    /// The island's tools and their hotkeys, through the Settings stores.
+    private let toolbox: AppControlToolbox
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
@@ -33,8 +35,12 @@ final class AppControlController {
          activity: (() -> AppControlValue)? = nil, screenCapture: AgentScreenCapture? = nil,
          planner: (@MainActor () -> PlannerStore)? = nil, meetings: AppControlMeetings? = nil,
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive },
-         agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path }) {
+         agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path },
+         layout: (@MainActor () -> HoverLayoutStore)? = nil,
+         hotkeys: (@MainActor () -> HotkeyPreferences)? = nil) {
         self.meetings = meetings
+        self.toolbox = AppControlToolbox(layout: layout ?? { HoverLayoutStore.shared },
+                                         hotkeys: hotkeys ?? { HotkeyPreferences.shared })
         self.agentWorkspace = agentWorkspace
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
@@ -59,6 +65,7 @@ final class AppControlController {
     func handle(_ request: AppControlRequest) async -> AppControlResponse {
         let args = request.arguments
         let writes = ["set_model", "set_provider", "set_setting"].contains(request.operation)
+            || AppControlToolbox.writes.contains(request.operation)
         guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled.") }
         if writes {
             guard !mutating else { return .failure("busy", "Another application-setting change is in progress.") }
@@ -68,6 +75,9 @@ final class AppControlController {
         switch request.operation {
         case "capture_screen":
             return await screenCapture.handle(args)
+        // WHY: .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+        case _ where AppControlToolbox.operations.contains(request.operation):
+            return toolbox.handle(request.operation, args)
         // The user's notes and transcripts: reachable only behind the broker's
         // harness access gate. WHY: .project-docs/decisions/2026-11-20-harness-access.md
         case _ where AppControlMeetings.operations.contains(request.operation):
@@ -113,6 +123,9 @@ final class AppControlController {
                 "sourceRevision": identity.sourceRevision.map(AppControlValue.string) ?? .null,
                 "googleCalendarReviewActive": .bool(googleCalendarReview()),
                 "activity": activity(), "features": .array(features),
+                // Read-only: writes stay per feature through set_model.
+                // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+                "shared": sharedValue(),
                 // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
                 "agentWorkspace": .string(agentWorkspace())
             ]))
@@ -225,6 +238,24 @@ final class AppControlController {
         ["dropMode": .string(preferences.currentMode.rawValue), "autoHideIsland": .bool(idle.isEnabled),
          "inputLanguage": languages.selectedLanguage.map { .string($0.code) } ?? .null,
          "outputLanguage": languages.targetLanguage.map { .string($0.code) } ?? .null]
+    }
+
+    /// The Speech and LLM rows as Models shows them: the model most features
+    /// follow (or Mixed), and which features have their own model or none.
+    private func sharedValue() -> AppControlValue {
+        var result: [String: AppControlValue] = [:]
+        for kind in SharedModelKind.allCases {
+            guard let row = models.sharedRow(kind) else { continue }
+            result[kind.rawValue] = .object([
+                "label": .string(row.label),
+                "mixed": .bool(row.isMixed),
+                "route": row.choice.map { .object(["account": .string($0.account.storageID), "model": .string($0.model)]) } ?? .null,
+                "features": .array(kind.features.map { .string($0.rawValue) }),
+                "custom": .array(row.custom.map { .string($0.rawValue) }),
+                "unset": .array(row.unset.map { .string($0.rawValue) }),
+            ])
+        }
+        return .object(result)
     }
 
     private func routeValue(_ feature: AIFeature) -> AppControlValue {

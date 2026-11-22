@@ -148,7 +148,7 @@ stored separately and can be changed in Settings independently of the key.
 | `.hold` | Hold | Press starts recording; release sends (grace-tail then commit). |
 | `.tap`  | Toggle | First press starts recording; second press sends. |
 
-With **Stop Drop automatically** on (Settings -> Other -> Recording), a Toggle
+With **Stop Drop automatically** on (Settings -> Other -> Drop), a Toggle
 Drop shortcut needs one press: recording ends when the speaker has finished,
 and a second press still stops it at once. Hold shortcuts are unchanged. See
 `.project-docs/decisions/2026-11-11-drop-auto-stop.md`.
@@ -246,6 +246,10 @@ Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a
 shortcut beside a named function and Save; remove it with the clear button and
 Save. Escape cancels recording, Revert discards the draft, and Reset to defaults
 clears optional tool bindings. New installs do not reserve Option 1–5.
+Settings → Toolbox also sets the selected tool's shortcut in the Hotkey block
+at the top of its pane: Set, Change or remove, saved at once through the same
+`HotkeyPreferences.apply` path, conflict check and recorder
+(`HotkeyRecordingSession`); a conflicting key saves nothing and names its owner.
 
 Bindings use stable tool IDs in `HotkeyConfiguration.toolShortcuts` and
 `hotkeys.toolShortcuts.v1`. Moving or removing a tile never changes its shortcut;
@@ -287,6 +291,16 @@ Hotkeys pane without unsaved edits picks up the new binding.
 WHY: [Feature hotkeys](decisions/2026-10-19-feature-hotkeys.md),
 [Hotkeys from links](../.project-docs/decisions/2026-10-21-whytap-link-hotkeys.md).
 
+### Assigning from the Agent or a coding tool
+
+The Agent ("give Shot ⌥S") and the plugin's `whytap_hotkey_set` use the same
+key rule as links (⌃ or ⌥, no Quit, no coming-soon tool) and save through
+`HotkeyPreferences.assignToolShortcut`, the Hotkeys Save path. There is no
+dialog: the request itself is the user's, and the Agent shows
+`Hotkey: Shot — ⌥S` above its answer. Keys owned by another action are refused
+and change nothing. Guide: [application control](customization/app-control.md).
+WHY: [Island tools and hotkeys](../.project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md).
+
 ## Meeting-record hotkey
 
 Manual Meeting Notes recording has a configurable global hotkey (default
@@ -327,8 +341,9 @@ Whytap take them from macOS (`BrightnessKeys`, `BrightnessKeyEventTap`).
   held. The next press lowers brightness normally (also with ⌥⇧). A first
   slider decrease likewise consumes the whole drag; a new drag or accessibility
   adjustment can then lower the backlight. Native macOS brightness changes,
-  automatic brightness and idle dimming still turn Extra off when they lower
-  the backlight, detected about every half second with the strip closed.
+  automatic brightness and battery or idle dimming keep Extra on; only
+  Whytap's own first decrease (above), its switch, heat, a display change or
+  another app adjusting the display end it.
 - ⌘, ⌃, ⌥ or ⇧ (other than ⌥⇧), hidden hover widgets and an unadjustable
   display leave the keys with macOS; ⌥ still opens Displays settings. Fn and
   Caps Lock do not matter. A press belongs wholly to whoever got its first
@@ -368,6 +383,22 @@ Russian keyboard layout:
   window has one row per answer (Case — allow / deny / allow for minutes).
   The card and Help read the same `CaseApprovalKey.keycap` values as the filter's
   actions. WHY: [answer keys and numeric minutes](decisions/2026-10-21-case-approval-minutes-input.md).
+
+## Learning suggestion keys
+
+When learning from edits after Drop is on (Settings -> Other -> Learn from my
+edits), a suggestion appears as glass drops right of the island:
+
+- **⌃Y** accepts, **⌃N** declines; plain Y and N always go to the field. The
+  two combinations are Carbon hot keys (`CarbonHotkeyMonitor` IDs 19 and 20)
+  registered only while the drops are on screen; holding ⌃ alone lights the
+  Y and N drops. A click answers too, without taking focus from the field.
+- They are reserved in `HotkeyConfiguration.assignments` ("Suggestion yes",
+  "Suggestion no"), so a tool shortcut on ⌃Y or ⌃N is a conflict, and Help
+  lists them (Suggestion — yes / no) from `DropLearningKeyCombos`.
+- If another app already holds a combination, registration fails quietly and
+  the drops still answer to a click. WHY:
+  [drops](../.project-docs/decisions/2026-11-22-drop-learning-drops.md).
 
 ## Canonical reference
 

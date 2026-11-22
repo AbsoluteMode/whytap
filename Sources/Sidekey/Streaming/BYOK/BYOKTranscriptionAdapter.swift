@@ -51,6 +51,12 @@ enum BYOKTranscriptJoin: Equatable {
 
 enum BYOKStreamErrorCode {
     static let endOfStreamSendFailed = "end_of_stream_send_failed"
+    /// The provider refused the session or a turn (an OpenAI Realtime
+    /// `error` or failed transcription). Drop treats it like a broken
+    /// connection: the take's own audio goes to the batch rung, whose answer
+    /// names the reason (refused key, no credit, busy).
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static let providerRefused = "provider_refused"
 }
 
 protocol BYOKUpstreamSession: AnyObject {

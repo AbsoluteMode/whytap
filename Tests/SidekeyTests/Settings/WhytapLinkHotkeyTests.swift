@@ -31,8 +31,6 @@ final class WhytapLinkHotkeyTests: XCTestCase {
     }
 
     func test_every_tool_but_quit_accepts_a_link_hotkey() {
-        // Calendar ships as "Soon"; this contract describes the open catalog (see CalendarSoonTests).
-        openCalendarForThisTest()
         for tool in HoverTool.allCases {
             let parsed = request("whytap://hotkey/\(tool.rawValue)?keys=ctrl+option+k")
             if tool == .quit {

@@ -65,7 +65,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md]
 ---
 
 # Parallel development, one working Whytap
@@ -110,12 +110,17 @@ data sandbox: meetings, staged audio and clipboard history share stores with
 production, and two processes also compete for the same global hotkeys/event
 taps. Keep the user's working instance; do not launch a second app for testing.
 
-1. Read the current shared guidance and this procedure before starting. Before
-   integration or any app build/install action, fetch `origin` and also read
-   the command shown below; an old worktree's instructions may be stale.
+1. Read the current shared guidance and this procedure before starting:
+   `AGENTS.md`, the [team runbook](team-runbook.md) it points to, and
+   `docs/architecture.md` (the architecture and invariants that were the body
+   of `AGENTS.md` until 2026-11-22). Before integration or any app
+   build/install action, fetch `origin` and also read them as shown below;
+   an old worktree's instructions may be stale.
 
    ```bash
    git show origin/main:AGENTS.md
+   git show origin/main:.project-docs/processes/team-runbook.md
+   git show origin/main:docs/architecture.md
    ```
 
 2. Inspect open PRs and relevant active branches for shared files, runtime paths
@@ -552,7 +557,8 @@ a feature branch may contain fixes not in main yet. Integrate/review those
 fixes before replacing it; do not silently downgrade to an older source tree.
 Preserve the primary checkout's WIP for its owning session to reconcile.
 
-Publish this procedure through main and synchronized `AGENTS.md`/`CLAUDE.md`.
+Publish this procedure through main, the team runbook and synchronized
+`AGENTS.md`/`CLAUDE.md` (whose first lines point team sessions to the runbook).
 Existing sessions must reread it before their next integration/build action;
 do not overwrite all active worktrees or claim that old chats reread files
 automatically. Keep their feature changes intact while they incorporate main.

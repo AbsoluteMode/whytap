@@ -133,7 +133,7 @@ A continuous script should stay alive. Clean exit restarts after 5 seconds unles
 `intervalSeconds` is supplied; in that case a polling pass repeats after that
 delay. Errors retry with backoff up to 60 seconds. Each source can deliver up to
 10 events/second; a line is limited to 64 KiB and worker output to 1 MiB/second.
-The visible queue holds 32 events; excess accepted events remain in history.
+The visible queue holds 33 events; excess accepted events remain in history.
 
 Store credentials in Keychain or the user's chosen credential manager. The
 manifest, arguments and events must never contain credentials. Whytap does not

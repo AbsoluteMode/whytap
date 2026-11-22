@@ -12,7 +12,7 @@ For documentation-only changes, mark the Swift checks not applicable.
 
 ## Docs
 
-`[docs: na]` or the paths you updated (`CLAUDE.md`, `docs/hotkey.md`,
+`[docs: na]` or the paths you updated (`docs/architecture.md`, `docs/hotkey.md`,
 `docs/build-and-release.md`, `docs/decisions/...`).
 
 <!--

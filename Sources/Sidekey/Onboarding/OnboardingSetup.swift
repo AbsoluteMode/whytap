@@ -54,7 +54,37 @@ struct OnboardingDropSpeech {
         return use(account, model: model)
     }
 
-    static func account(for kind: AIProviderKind) -> ProviderAccount? {
+    /// The person picked this on the speech page and pressed Continue (or
+    /// saved its key there): both Drop rows get it. A row already running on
+    /// the same account keeps its model.
+    @discardableResult
+    func choose(_ account: ProviderAccount, model: String) -> [AIFeature] {
+        let changed = Self.features.filter { routing.route(for: $0)?.account != account || !runs($0) }
+        for feature in changed {
+            routing.setRoute(FeatureRoute(account: account, model: model), for: feature)
+        }
+        return changed
+    }
+
+    @discardableResult
+    func choose(provider kind: AIProviderKind) -> [AIFeature] {
+        guard let account = Self.account(for: kind),
+              let model = ModelRegistry.recommended(for: .dropFast, kind: kind) else { return [] }
+        return choose(account, model: model)
+    }
+
+    @discardableResult
+    func chooseOnDevice() -> [AIFeature] {
+        choose(.thisMac, model: OnDeviceSpeechModel.parakeetTdtV3.rawValue)
+    }
+
+    /// The account the current Drop mode's speech row runs on now.
+    var currentAccount: ProviderAccount? {
+        let feature = AIFeature.drop(mode())
+        return runs(feature) ? routing.route(for: feature)?.account : nil
+    }
+
+    nonisolated static func account(for kind: AIProviderKind) -> ProviderAccount? {
         switch kind {
         case .soniox: return .soniox
         case .deepgram: return .deepgram

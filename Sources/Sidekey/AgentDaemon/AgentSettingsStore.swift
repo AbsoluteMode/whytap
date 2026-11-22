@@ -3,10 +3,19 @@ import Foundation
 /// Per-provider model / reasoning / speed settings chosen in Settings,
 /// persisted in UserDefaults. Codex models and controls come from its registry;
 /// the same resolution feeds both the Settings UI and per-turn CLI flags.
+/// The Agent's web search pick in API & Models → Models → Search.
+enum AgentWebSearchChoice: String, Sendable {
+    /// The Agent model's built-in search; Tavily for a model without it.
+    case auto
+    /// Tavily, when its key exists; otherwise as `.auto`.
+    case tavily
+}
+
 @MainActor
 final class AgentSettingsStore: ObservableObject {
     static let shared = AgentSettingsStore()
     static let pinnedClaudeModel = "sonnet"
+    static let webSearchChoiceKey = "agent.native.webSearch"
     /// Claude retains its existing low-effort default.
     static let defaultEffort = "low"
     /// Claude options; Codex capabilities come from model/list.
@@ -18,6 +27,9 @@ final class AgentSettingsStore: ObservableObject {
     @Published var codexEffort: String?       { didSet { write(Keys.codexEffort, codexEffort) } }
     @Published var codexServiceTier: String?  { didSet { write(Keys.codexServiceTier, codexServiceTier) } }
     @Published var openCodeAllowActions: Bool { didSet { defaults.set(openCodeAllowActions, forKey: Keys.openCodeAllowActions) } }
+    /// API & Models → Models → Search. `.auto` (default): the Agent model's
+    /// built-in search, else Tavily. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    @Published var webSearchChoice: AgentWebSearchChoice { didSet { defaults.set(webSearchChoice.rawValue, forKey: Keys.webSearchChoice) } }
 
     private enum Keys {
         static let claudeModel = "agent.claude.model"
@@ -26,6 +38,7 @@ final class AgentSettingsStore: ObservableObject {
         static let codexEffort = "agent.codex.effort"
         static let codexServiceTier = "agent.codex.serviceTier"
         static let openCodeAllowActions = "agent.opencode.allowActions"
+        static let webSearchChoice = AgentSettingsStore.webSearchChoiceKey
     }
 
     @Published private(set) var codexCatalog: [CodexModelOption] = []
@@ -47,6 +60,7 @@ final class AgentSettingsStore: ObservableObject {
         self.injectedRouting = routing
         self.injectedCatalogs = catalogs
         self.openCodeAllowActions = defaults.object(forKey: Keys.openCodeAllowActions) as? Bool ?? true
+        self.webSearchChoice = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
         // Property observers do not fire on initial assignment in init, so this
         // load does not write back.
         self.claudeModel = defaults.string(forKey: Keys.claudeModel)
@@ -58,6 +72,12 @@ final class AgentSettingsStore: ObservableObject {
         self.codexModel = defaults.string(forKey: Keys.codexModel)
         self.codexEffort = defaults.string(forKey: Keys.codexEffort)
         self.codexServiceTier = defaults.string(forKey: Keys.codexServiceTier)
+    }
+
+    /// A choice that arrived by settings sync (SettingsSyncLiveReload).
+    func reloadWebSearchChoice() {
+        let stored = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
+        if stored != webSearchChoice { webSearchChoice = stored }
     }
 
     /// Resolve the overrides for one provider into the run-time options struct.
@@ -82,7 +102,10 @@ final class AgentSettingsStore: ObservableObject {
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
                                    openRouterProvider: selectedOpenCodeProvider == .openRouter
-                                       ? routing.route(for: .agent)?.provider : nil)
+                                       ? routing.route(for: .agent)?.provider : nil,
+                                   // Read from defaults: a synced choice applies at once.
+                                   preferTavilySearch: defaults.string(forKey: Keys.webSearchChoice) == AgentWebSearchChoice.tavily.rawValue,
+                                   webSearchSupport: selectedWebSearchSupport)
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
@@ -131,6 +154,16 @@ final class AgentSettingsStore: ObservableObject {
                                  reasoning: entry.supportsReasoning ?? false,
                                  contextLimit: context,
                                  outputLimit: entry.maxOutputTokens ?? 16_384)
+    }
+
+    /// The catalog's built-in web search flag for the Agent model, independent
+    /// of whether the catalog gives token limits (the Search row and the next
+    /// turn must agree). WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
+    var selectedWebSearchSupport: Bool? {
+        guard let id = selectedOpenCodeModel, let provider = selectedOpenCodeProvider else { return nil }
+        return catalogs.snapshot(for: provider.account)?.models.first {
+            OpenCodeEnvironment.normalizeModel($0.id) == id
+        }?.supportsWebSearch
     }
 
     /// The user's explicit pick when it is a level this CLI accepts, else Low.

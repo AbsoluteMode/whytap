@@ -39,8 +39,11 @@ struct DropEditHunk: Equatable {
 enum DropEditDiff {
     static let maxPastedWords = 400
     static let maxFieldWords = 4_000
-    /// More than this share of the pasted words changed = a rewrite, not
-    /// corrections: nothing is learned from the take.
+    /// More than this share of the kept pasted words changed = a rewrite,
+    /// not corrections: nothing is learned from the take. Words cut from the
+    /// start or the end of the take (a made-up tail the provider added) are
+    /// not counted: cutting is not rewriting.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
     static let maxChangedShare = 0.5
 
     struct Result: Equatable {
@@ -71,7 +74,6 @@ enum DropEditDiff {
         // Ties prefer the longer match: a changed last word is a substitution,
         // not a deletion followed by text typed after the take.
         for j in 0...m where cost[n][j] <= cost[n][end] { end = j }
-        guard Double(cost[n][end]) <= Double(n) * maxChangedShare else { return nil }
 
         // Backtrack into aligned pairs, then group runs of non-matches.
         enum Step { case same, sub(Int, Int), del(Int), ins(Int) }
@@ -92,6 +94,16 @@ enum DropEditDiff {
             }
         }
         steps.reverse()
+        // Words removed at either edge of the take, with nothing typed in
+        // their place: the user cut them. They are their own hunks and do not
+        // count towards a rewrite.
+        func isCut(_ step: Step) -> Bool { if case .del = step { return true } else { return false } }
+        let leadingCut = steps.prefix(while: isCut).count
+        let trailingCut = leadingCut == steps.count ? 0 : steps.reversed().prefix(while: isCut).count
+        let kept = n - leadingCut - trailingCut
+        let changed = cost[n][end] - leadingCut - trailingCut
+        guard kept > 0, steps.contains(where: { if case .same = $0 { return true } else { return false } }),
+              Double(changed) <= Double(kept) * maxChangedShare else { return nil }
         var hunks: [DropEditHunk] = []
         var removed: [DropEditToken] = [], inserted: [DropEditToken] = []
         var start: Int?
@@ -102,7 +114,9 @@ enum DropEditDiff {
             }
             removed = []; inserted = []; start = nil
         }
-        for step in steps {
+        for (index, step) in steps.enumerated() {
+            // The cut edges end any hunk next to them.
+            if index == leadingCut || index == steps.count - trailingCut { flush() }
             switch step {
             case .same:
                 flush(); pastedCursor += 1

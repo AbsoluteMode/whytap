@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningScenarioTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md, 2026-11-22-drop-learning-default-on.md, 2026-11-22-drop-edit-observation.md]
+related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md, 2026-11-22-drop-learning-default-on.md, 2026-11-22-drop-edit-observation.md, 2026-11-22-drop-learning-cut-tail.md]
 ---
 
 ## Context
@@ -116,7 +116,9 @@ that rewrites what the provider keeps getting wrong.
   then every second until the field holds still for three reads or 30 s,
   journals each read (words of the edits, candidates, which ones the 5 s read
   missed) to Application Support/<bundle id>/drop-learning/calibration.jsonl,
-  counts in its own ledger and is a dry run: Y saves nothing. The journal is
+  counts in its own ledger and is a dry run: Y saves nothing (since the
+  [developer journal](2026-11-22-drop-learning-cut-tail.md), only while
+  learning is off; with learning on it journals beside real learning). The journal is
   written only into a real 0700 directory of this user, through a regular
   file with one name (a hard link is refused) opened without following links
   and made 0600 before each write. It

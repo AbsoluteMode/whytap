@@ -1030,14 +1030,22 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops the watch. It
   compares with what reached the field (a rich paste's plainText), aligns
-  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  the take inside the field word by word (DropEditDiff, semi-global, >50%
+  of the kept words changed = rewrite; words cut from either edge of the
+  take, such as a made-up tail, are their own hunks and are not counted;
+  WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md) and
   DropLearningClassifier turns edits into candidates without a model: a
-  sound-alike term -> Vocab (only if the wrong word is in the provider's raw
+  sound-alike term (transliterated spelling, or the consonant skeleton with
+  voiced and voiceless pairs as one sound; one changed part of a
+  hyphenated word is the term) -> Vocab (only if the wrong word is in the provider's raw
   text); On this Mac / batch / Retry / recorder fallback, a full route list,
   a term already in Vocab or a Smart-only error -> Replace (never for
   dictionary words or grammar endings); full list without Replace -> Vocab
   full with the route's limit (Y opens Vocab); undone replacement / Vocab
   term written where not said -> remove; deleted spoken word -> Filler;
+  DropLearningStats counts why each take did or did not teach anything as
+  fixed reason names only (sidekey.dropLearning.stats.v1, local, not backed
+  up, deleted when learning and calibration are off);
   retyped cut filler -> Stop cutting. Translated takes teach nothing. The
   same correction in two takes within 14 days becomes one suggestion; N is
   forever, an expired one starts over; never while the island is not idle;
@@ -1045,10 +1053,14 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
   stay in memory until Y, which saves through VocabularyCache /
   FillerTermsStore / DropReplacementStore (editors reload on their change
-  notification). Hidden calibration (sidekey.dropLearning.calibration):
-  reads until the field holds still (<=30 s), journals to Application
-  Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
-  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
+  notification). Hidden calibration (sidekey.dropLearning.calibration,
+  `defaults write` only): the developer journal, Application
+  Support/<bundle id>/drop-learning/calibration.jsonl (0600), one entry
+  per Drop with app, capture refusal or end reason, refusal reasons,
+  candidates with counts, the edited words and whether a drop was shown.
+  With learning on it runs beside real learning; with learning off it is
+  a dry run with a separate ledger and dry-run Y (WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md); 0700 folder / 0600 single-name file without following
   links, ends itself after 14 days (checked at launch, hourly and before
   every read) and deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler

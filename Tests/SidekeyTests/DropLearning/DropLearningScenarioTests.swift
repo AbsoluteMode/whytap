@@ -30,6 +30,8 @@ final class DropLearningScenarioTests: XCTestCase {
         private(set) var exposed = 0
         private(set) var released = 0
 
+        var refusal = "secureField"
+        var lastRefusal: String? { capturable ? nil : refusal }
         func capture(pid: pid_t) -> DropEditFieldHandle? {
             captureCount += 1
             return capturable ? DropEditFieldHandle(pid: pid, element: AXUIElementCreateApplication(pid)) : nil
@@ -110,7 +112,8 @@ final class DropLearningScenarioTests: XCTestCase {
                     pressReturn = nil
                 }
             },
-            clock: { [unowned self] in now.timeIntervalSince1970 }
+            clock: { [unowned self] in now.timeIntervalSince1970 },
+            appID: { _ in "com.anthropic.claudefordesktop" }
         ))
         coordinator.onSuggestion = { [unowned self] in suggestions.append($0) }
         return coordinator
@@ -182,6 +185,60 @@ final class DropLearningScenarioTests: XCTestCase {
         await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
         now += 86_400 * 15
         await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertTrue(suggestions.isEmpty)
+    }
+
+    /// Build 1722, Claude desktop: the provider wrote "Джефф" for "jev" and
+    /// added a made-up tail. The user fixed the word, cut the tail and sent.
+    /// Cutting the tail is not a rewrite, and the cut words are not part of
+    /// the substitution; "Джефф" and "jev" sound alike (dzh = j, ff = v).
+    func testFixingAWordAndCuttingAMadeUpTailCountsTheFix() async {
+        let coordinator = makeCoordinator()
+        await run(coordinator,
+                  take(pasted: "Я думаю, что нам стоит подключить джефф-модели. Искусства и спорта. Есть ещё один способ заработать. Общественные работы."),
+                  field: "Я думаю, что нам стоит подключить jev-модели.")
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "jev")), 1)
+        await run(coordinator,
+                  take(pasted: "Я думаю, что в этом направлении лучше использовать Джефф. Как, впрочем, и зовут"),
+                  field: "Я думаю, что в этом направлении лучше использовать jev.")
+        XCTAssertEqual(suggestions, [DropLearningSuggestion(candidate: .vocabAdd(term: "jev"), dryRun: false)])
+        let stats = DropLearningStats(defaults: defaults).counts
+        XCTAssertEqual(stats["end.cleared"], 2)
+        XCTAssertEqual(stats["candidate.vocabAdd"], 2)
+        XCTAssertEqual(stats["suggested"], 1)
+        XCTAssertEqual(stats["cut.long"], 2, "both made-up tails are cuts, not edits")
+    }
+
+    /// The counters tell why nothing was learned, without any of the words.
+    func testReasonCountersExplainARejectWithoutWords() async {
+        let coordinator = makeCoordinator()
+        await run(coordinator, take(pasted: "Позвони клоду завтра"), field: "Позвони маме завтра")
+        let stats = DropLearningStats(defaults: defaults).counts
+        XCTAssertEqual(stats["sub.notSoundAlike"], 1)
+        XCTAssertEqual(stats["end.cleared"], 1)
+        let text = String(describing: defaults.dictionary(forKey: DropLearningStats.key) ?? [:])
+        for word in ["клоду", "маме", "Позвони", "завтра"] { XCTAssertFalse(text.contains(word), word) }
+        XCTAssertNil(ConfigBackupRegistry.entries[DropLearningStats.key], "never in backup or sync")
+    }
+
+    func testSwitchingLearningOffDeletesTheCounters() async {
+        let coordinator = makeCoordinator()
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertFalse(DropLearningStats(defaults: defaults).counts.isEmpty)
+        coordinator.settingsChanged()
+        XCTAssertFalse(DropLearningStats(defaults: defaults).counts.isEmpty, "still on: kept")
+        defaults.set(false, forKey: DropLearningSettings.enabledKey)
+        coordinator.settingsChanged()
+        XCTAssertTrue(DropLearningStats(defaults: defaults).counts.isEmpty)
+    }
+
+    /// Cutting most of a take and typing something else is still a rewrite.
+    func testKeepingOneWordAndTypingAnotherMessageIsStillARewrite() async {
+        let coordinator = makeCoordinator()
+        for _ in 0..<2 {
+            await run(coordinator, take(pasted: "Позвони клоду завтра утром и скажи про отчёт"),
+                      field: "Позвони мне когда сможешь")
+        }
         XCTAssertTrue(suggestions.isEmpty)
     }
 
@@ -829,6 +886,43 @@ final class DropLearningScenarioTests: XCTestCase {
     }
 
     // MARK: - Calibration
+
+    /// Calibration with learning on is the developer journal: real learning
+    /// goes on (the suggestion is real) and every take gets an entry with the
+    /// app, how the watch ended, every refusal reason and the edited words.
+    func testCalibrationWithLearningOnJournalsBesideRealLearning() async throws {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        await run(coordinator,
+                  take(pasted: "Я думаю, что нам стоит подключить джефф-модели. Искусства и спорта. Есть ещё один способ заработать."),
+                  field: "Я думаю, что нам стоит подключить jev-модели.")
+        await run(coordinator, take(pasted: "Лучше использовать Джефф. Как, впрочем, и зовут"), field: "Лучше использовать jev.")
+        field.capturable = false
+        await run(coordinator, take(pasted: "Пароль"), field: "Пароль")
+        XCTAssertEqual(suggestions, [DropLearningSuggestion(candidate: .vocabAdd(term: "jev"), dryRun: false)])
+        let lines = try String(contentsOf: journalURL, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 3)
+        let entries = try lines.map { try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]) }
+        XCTAssertEqual(entries[0]["app"] as? String, "com.anthropic.claudefordesktop")
+        XCTAssertEqual(entries[0]["reason"] as? String, "cleared")
+        XCTAssertEqual(entries[0]["dryRun"] as? Bool, false)
+        XCTAssertEqual(entries[0]["counts"] as? [Int], [1])
+        XCTAssertTrue((entries[0]["notes"] as? [String])?.contains("cut.long") == true)
+        XCTAssertTrue(lines[0].contains("jev"), "the developer journal keeps the edited words")
+        XCTAssertEqual(entries[1]["shown"] as? String, "suggested")
+        XCTAssertEqual(entries[2]["event"] as? String, "skipped")
+        XCTAssertEqual(entries[2]["reason"] as? String, "secureField")
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["field.secureField"], 1)
+    }
+
+    /// Without calibration nothing is journaled, whatever happens.
+    func testWithoutCalibrationNothingIsJournaled() async {
+        let coordinator = makeCoordinator()
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        field.capturable = false
+        await run(coordinator, take(pasted: "Позвони клоду"), field: "Позвони Claude")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
 
     func testCalibrationWatchesTheFieldJournalsAndSavesNothing() async throws {
         defaults.set(false, forKey: DropLearningSettings.enabledKey)

@@ -92,7 +92,25 @@ final class DropEditFieldAccessTests: XCTestCase {
 
     func testNothingIsCapturedWhenTheTargetIsNotFrontmost() {
         frontmost = otherPID
-        XCTAssertNil(access().capture(pid: targetPID))
+        let access = access()
+        XCTAssertNil(access.capture(pid: targetPID))
+        XCTAssertEqual(access.lastRefusal, "notFrontmost")
+    }
+
+    /// The developer journal and the counters name why a field was refused.
+    func testARefusedCaptureNamesItsReason() throws {
+        let access = access()
+        for (setup, reason) in [({ self.role = "AXWebArea" }, "notTextRole"),
+                                ({ self.role = "AXTextField"; self.secureInput = true }, "secureInput"),
+                                ({ self.secureInput = false; self.bundleID = "com.apple.Terminal" }, "deniedApp"),
+                                ({ self.bundleID = "com.apple.Notes"; self.focused = nil }, "noFocusedElement")] {
+            setup()
+            XCTAssertNil(access.capture(pid: targetPID), reason)
+            XCTAssertEqual(access.lastRefusal, reason)
+        }
+        focused = field
+        XCTAssertNotNil(access.capture(pid: targetPID))
+        XCTAssertNil(access.lastRefusal)
     }
 
     /// The target app keeps its own focused element while the user works in

@@ -161,4 +161,54 @@ final class DropReplaceAndBudgetTests: XCTestCase {
     func testCaseOnlyChangesAreNotEdits() throws {
         XCTAssertEqual(try XCTUnwrap(DropEditDiff.diff(pasted: "позвони клоду", field: "Позвони Клоду")).hunks, [])
     }
+
+    /// The provider added a made-up tail; the user cut it. Cutting is not a
+    /// rewrite, however long the tail.
+    func testACutTailIsNotARewrite() throws {
+        let diff = try XCTUnwrap(DropEditDiff.diff(
+            pasted: "Подключи клоду модели. Искусства и спорта. Есть ещё один способ заработать. Общественные работы.",
+            field: "Подключи Claude модели."
+        ))
+        XCTAssertEqual(diff.hunks.map { $0.removed.map(\.text) }, [["клоду"], ["Искусства", "и", "спорта", "Есть", "ещё", "один",
+                                                                     "способ", "заработать", "Общественные", "работы"]])
+        XCTAssertEqual(diff.hunks.first?.inserted.map(\.text), ["Claude"])
+    }
+
+    /// A fixed last word next to a cut tail stays its own one-word edit.
+    func testACutTailNextToAFixedWordIsItsOwnHunk() throws {
+        let diff = try XCTUnwrap(DropEditDiff.diff(pasted: "лучше использовать Джефф. Как, впрочем, и зовут",
+                                                   field: "лучше использовать jev."))
+        XCTAssertEqual(diff.hunks.first?.removed.map(\.text), ["Джефф"])
+        XCTAssertEqual(diff.hunks.first?.inserted.map(\.text), ["jev"])
+        XCTAssertEqual(diff.hunks.count, 2)
+    }
+
+    func testACutHeadIsNotARewrite() throws {
+        let diff = try XCTUnwrap(DropEditDiff.diff(pasted: "Ну короче значит вот позвони клоду завтра",
+                                                   field: "Позвони Claude завтра"))
+        XCTAssertEqual(diff.hunks.last?.removed.map(\.text), ["клоду"])
+    }
+
+    /// What is kept must still mostly be the take: a cut plus a rewrite of
+    /// the rest, or a take cut whole, teaches nothing.
+    func testACutDoesNotHideARewriteOfTheRest() {
+        XCTAssertNil(DropEditDiff.diff(pasted: "Позвони клоду завтра утром и скажи про отчёт",
+                                       field: "Позвони мне когда сможешь"))
+        XCTAssertNil(DropEditDiff.diff(pasted: "Позвони клоду завтра", field: "Совсем другое"))
+    }
+
+    // MARK: - Sound-alike and hyphenated words
+
+    func testVoicedAndVoicelessPairsAndDzhSoundAlike() {
+        XCTAssertTrue(DropLearningClassifier.soundsAlike("Джефф", "jev"))
+        XCTAssertTrue(DropLearningClassifier.soundsAlike("клоду", "Claude"))
+        XCTAssertFalse(DropLearningClassifier.soundsAlike("отчёт", "презентацию"))
+        XCTAssertFalse(DropLearningClassifier.soundsAlike("Севе", "Мише"))
+    }
+
+    func testOnePartOfAHyphenatedWordIsTheTerm() {
+        XCTAssertTrue(DropLearningClassifier.changedHyphenPart("джефф-модели", "jev-модели")! == ("джефф", "jev"))
+        XCTAssertNil(DropLearningClassifier.changedHyphenPart("джефф-модели", "jev-моделей"))
+        XCTAssertNil(DropLearningClassifier.changedHyphenPart("клоду", "Claude"))
+    }
 }

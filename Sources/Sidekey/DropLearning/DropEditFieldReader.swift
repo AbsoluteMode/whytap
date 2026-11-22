@@ -19,6 +19,8 @@ protocol DropEditFieldAccess: AnyObject {
     /// The focused field of the frontmost target app, if the gate allows it.
     /// Reads no text.
     func capture(pid: pid_t) -> DropEditFieldHandle?
+    /// Why the last capture returned nil, as a fixed name.
+    var lastRefusal: String? { get }
     /// The same element still has keyboard focus and is still allowed.
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool
     /// The field's text; `.focusLeft` when keyboard focus verifiably moved
@@ -35,6 +37,10 @@ protocol DropEditFieldAccess: AnyObject {
     /// request. When the target app's focused element is not a readable field,
     /// asks that app (only it) to expose its fields; the lease undoes it.
     func exposeFields(pid: pid_t) -> DropEditAccessibilityLease?
+}
+
+extension DropEditFieldAccess {
+    var lastRefusal: String? { nil }
 }
 
 enum DropEditFieldRead: Equatable {
@@ -127,8 +133,16 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
 
     init(system: System = .live) { self.system = system }
 
+    private(set) var lastRefusal: String?
+
     func capture(pid: pid_t) -> DropEditFieldHandle? {
-        guard let element = focusedElement(ofFrontmost: pid), allowed(element, pid: pid) else { return nil }
+        lastRefusal = nil
+        guard system.frontmostPID() == pid else { lastRefusal = "notFrontmost"; return nil }
+        guard let element = focusedElement(ofFrontmost: pid) else { lastRefusal = "noFocusedElement"; return nil }
+        if let refusal = DropEditFieldGate.refusal(system.facts(element, pid)) {
+            lastRefusal = refusal
+            return nil
+        }
         return DropEditFieldHandle(pid: pid, element: element)
     }
 

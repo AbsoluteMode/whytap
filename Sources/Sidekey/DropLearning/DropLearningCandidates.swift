@@ -15,6 +15,19 @@ enum DropLearningCandidate: Equatable {
     /// The term would help but the current route's list is full.
     case vocabFull(term: String, usage: VocabularyBudget.Usage)
 
+    /// The kind as a fixed name, for the reason counters.
+    var kind: String {
+        switch self {
+        case .vocabAdd: return "vocabAdd"
+        case .vocabRemove: return "vocabRemove"
+        case .replaceAdd: return "replaceAdd"
+        case .replaceRemove: return "replaceRemove"
+        case .fillerAdd: return "fillerAdd"
+        case .fillerRemove: return "fillerRemove"
+        case .vocabFull: return "vocabFull"
+        }
+    }
+
     var ledgerKey: String {
         switch self {
         case .vocabAdd(let term): return "vocab+|" + DropEditToken.key(term)
@@ -72,19 +85,33 @@ enum DropLearningClassifier {
     /// sounds like what was heard; anything further is a rewrite.
     static let maxSoundDistance = 0.5
 
+    /// `note` hears why each edit did or did not become a candidate, as
+    /// fixed reason names with no words (DropLearningStats).
     static func candidates(
-        take: DropLearningTake, field: String, lists: DropLearningLists, lexicon: DropWordLexicon
+        take: DropLearningTake, field: String, lists: DropLearningLists, lexicon: DropWordLexicon,
+        note: (String) -> Void = { _ in }
     ) -> [DropLearningCandidate] {
-        guard !take.translated, let diff = DropEditDiff.diff(pasted: take.pasted, field: field) else { return [] }
-        let rawKeys = DropEditToken.tokenize(take.raw).map(\.key)
+        guard !take.translated else { note("take.translated"); return [] }
+        guard let diff = DropEditDiff.diff(pasted: take.pasted, field: field) else { note("take.rewrite"); return [] }
+        if diff.hunks.isEmpty { note("take.unchanged") }
+        let rawTokens = DropEditToken.tokenize(take.raw)
+        let rawKeys = rawTokens.map(\.key)
+        // Parts of hyphenated words ("джефф-модели"): a fix of one part is
+        // checked against the part.
+        let rawParts = Set(rawTokens.flatMap { hyphenParts($0.text).map(DropEditToken.key) })
         var result: [DropLearningCandidate] = []
         func add(_ candidate: DropLearningCandidate?) {
             if let candidate, !result.contains(where: { $0.ledgerKey == candidate.ledgerKey }) { result.append(candidate) }
         }
-        for hunk in diff.hunks where hunk.removed.count <= maxHunkWords && hunk.inserted.count <= maxHunkWords {
+        for hunk in diff.hunks {
+            guard hunk.removed.count <= maxHunkWords, hunk.inserted.count <= maxHunkWords else {
+                note(hunk.inserted.isEmpty ? "cut.long" : "edit.tooLong")
+                continue
+            }
             switch (hunk.removed.isEmpty, hunk.inserted.isEmpty) {
             case (false, false):
-                add(substitution(hunk, take: take, rawKeys: rawKeys, lists: lists, lexicon: lexicon))
+                add(substitution(hunk, take: take, rawKeys: rawKeys, rawParts: rawParts, lists: lists,
+                                 lexicon: lexicon, note: note))
             case (false, true):
                 add(deletion(hunk.removed, take: take, rawKeys: rawKeys, lists: lists))
             case (true, false):
@@ -103,12 +130,22 @@ enum DropLearningClassifier {
     // MARK: - Substitution: a word was heard wrong
 
     private static func substitution(
-        _ hunk: DropEditHunk, take: DropLearningTake, rawKeys: [String],
-        lists: DropLearningLists, lexicon: DropWordLexicon
+        _ hunk: DropEditHunk, take: DropLearningTake, rawKeys: [String], rawParts: Set<String>,
+        lists: DropLearningLists, lexicon: DropWordLexicon, note: (String) -> Void
     ) -> DropLearningCandidate? {
-        let wrong = phrase(hunk.removed), right = phrase(hunk.inserted)
+        var wrong = phrase(hunk.removed), right = phrase(hunk.inserted)
+        var wrongInRaw = contains(rawKeys, phraseKeys: hunk.removed.map(\.key))
+        // One part of a hyphenated word fixed ("джефф-модели" ->
+        // "jev-модели"): the term is that part ("jev").
+        if let (part, fixed) = changedHyphenPart(wrong, right) {
+            wrong = part
+            right = fixed
+            wrongInRaw = wrongInRaw || rawParts.contains(DropEditToken.key(part))
+        }
         let wrongKey = DropEditToken.key(wrong), rightKey = DropEditToken.key(right)
-        guard wrongKey != rightKey, !isInflection(wrongKey, rightKey), soundsAlike(wrong, right) else { return nil }
+        guard wrongKey != rightKey else { note("sub.sameWord"); return nil }
+        guard !isInflection(wrongKey, rightKey) else { note("sub.inflection"); return nil }
+        guard soundsAlike(wrong, right) else { note("sub.notSoundAlike"); return nil }
 
         // The user undoes one of our replacements.
         if let rule = take.firedReplacements.first(where: { DropEditToken.key($0.wanted) == wrongKey }) {
@@ -121,10 +158,14 @@ enum DropLearningClassifier {
         let replacement = replaceCandidate(heard: wrong, wanted: right, lists: lists, lexicon: lexicon)
         // Smart can make its own mistakes; Vocab only helps with what the
         // provider wrote.
-        let wrongInRaw = contains(rawKeys, phraseKeys: hunk.removed.map(\.key))
-        guard wrongInRaw, isTermLike(right, replacing: wrong, lexicon: lexicon) else { return replacement }
+        guard wrongInRaw else { note(replacement == nil ? "sub.notInRawNoReplace" : "sub.notInRaw"); return replacement }
+        guard isTermLike(right, replacing: wrong, lexicon: lexicon) else {
+            note(replacement == nil ? "sub.notTermNoReplace" : "sub.notTerm")
+            return replacement
+        }
         let alreadyInVocab = lists.vocabulary.contains { DropEditToken.key($0) == rightKey }
         if alreadyInVocab || take.vocabTransport == .none || right.count > VocabularyCache.maxTermLength {
+            note(alreadyInVocab ? "sub.inVocab" : take.vocabTransport == .none ? "sub.noVocabRoute" : "sub.termTooLong")
             return replacement
         }
         if VocabularyBudget.accepts(right, appendedTo: lists.vocabulary, on: take.vocabTransport) {
@@ -174,6 +215,22 @@ enum DropLearningClassifier {
 
     static func phrase(_ tokens: [DropEditToken]) -> String { tokens.map(\.text).joined(separator: " ") }
 
+    static func hyphenParts(_ word: String) -> [String] {
+        word.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+    }
+
+    /// The one differing part of two single hyphenated words with the same
+    /// number of parts; nil otherwise.
+    static func changedHyphenPart(_ wrong: String, _ right: String) -> (String, String)? {
+        guard !wrong.contains(" "), !right.contains(" ") else { return nil }
+        let a = hyphenParts(wrong), b = hyphenParts(right)
+        guard a.count > 1, a.count == b.count else { return nil }
+        let differing = zip(a, b).enumerated().filter { DropEditToken.key($0.element.0) != DropEditToken.key($0.element.1) }
+        guard differing.count == 1, let index = differing.first?.offset,
+              !a[index].isEmpty, !b[index].isEmpty else { return nil }
+        return (a[index], b[index])
+    }
+
     private static func contains(_ haystack: [String], phraseKeys: [String]) -> Bool {
         guard !phraseKeys.isEmpty, haystack.count >= phraseKeys.count else { return false }
         return (0...(haystack.count - phraseKeys.count)).contains {
@@ -191,8 +248,11 @@ enum DropLearningClassifier {
     }
 
     /// Close spelling after transliteration, or the same consonant skeleton
-    /// ("клод" -> "klod" -> "kld", "Claude" -> "kld"): English names written in
-    /// Cyrillic keep their consonants and lose their vowels.
+    /// ("клод" -> "klod" -> "klt", "Claude" -> "klt"): English names written in
+    /// Cyrillic keep their consonants and lose their vowels. Voiced and
+    /// voiceless pairs are one sound ("Джефф" -> "tjf", "jev" -> "tjf"),
+    /// because Russian spelling of a heard name often swaps them.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
     static func soundsAlike(_ a: String, _ b: String) -> Bool {
         let x = latin(a), y = latin(b)
         guard !x.isEmpty, !y.isEmpty else { return false }
@@ -204,12 +264,17 @@ enum DropLearningClassifier {
 
     static func skeleton(_ latin: String) -> String {
         var s = latin
-        for (from, to) in [("ph", "f"), ("ck", "k"), ("qu", "kv"), ("x", "ks"), ("c", "k"), ("q", "k"),
-                           ("w", "v"), ("z", "s"), ("j", "dj"), ("h", "")] {
+        // "Дж" transliterates to "dz" once the caron is folded away.
+        for (from, to) in [("dzh", "j"), ("dz", "j"), ("ph", "f"), ("ck", "k"), ("qu", "kv"), ("x", "ks"),
+                           ("c", "k"), ("q", "k"), ("w", "v"), ("j", "dj"), ("h", "")] {
             s = s.replacingOccurrences(of: from, with: to)
         }
+        let voiceless: [Character: Character] = ["b": "p", "d": "t", "g": "k", "v": "f", "z": "s"]
         var out = ""
-        for ch in s where !"aeiouy'".contains(ch) && out.last != ch { out.append(ch) }
+        for raw in s where !"aeiouy'".contains(raw) {
+            let ch = voiceless[raw] ?? raw
+            if out.last != ch { out.append(ch) }
+        }
         return out
     }
 

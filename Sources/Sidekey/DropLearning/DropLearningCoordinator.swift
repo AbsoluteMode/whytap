@@ -84,6 +84,8 @@ final class DropLearningCoordinator {
         var watchReturn: (@escaping @MainActor () -> Void) -> () -> Void = { _ in {} }
         /// Monotonic seconds for the watch deadlines.
         var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        /// The target app's bundle ID, for the developer journal only.
+        var appID: (pid_t) -> String? = { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
     }
 
     /// Set by the drops UI; until then suggestions only reach the journal.
@@ -92,7 +94,12 @@ final class DropLearningCoordinator {
     private final class Observation {
         let take: DropLearningTake
         let handle: DropEditFieldHandle
+        /// Learning is off and calibration on: counters of its own, Y saves
+        /// nothing.
         let calibrating: Bool
+        /// Calibration is on: the developer journal gets an entry.
+        let journaling: Bool
+        let app: String?
         let startedAt: TimeInterval
         var elapsed: Double = 0
         var reads = 0
@@ -107,10 +114,13 @@ final class DropLearningCoordinator {
         var task: Task<Void, Never>?
         var returnRead: Task<Void, Never>?
 
-        init(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool, startedAt: TimeInterval) {
+        init(take: DropLearningTake, handle: DropEditFieldHandle, calibrating: Bool, journaling: Bool,
+             app: String?, startedAt: TimeInterval) {
             self.take = take
             self.handle = handle
             self.calibrating = calibrating
+            self.journaling = journaling
+            self.app = app
             self.startedAt = startedAt
         }
     }
@@ -169,11 +179,15 @@ final class DropLearningCoordinator {
         return coordinator
     }
 
-    /// Learning and calibration both off: nothing is watched or exposed.
+    /// Learning and calibration both off: nothing is watched or exposed, and
+    /// the reason counters are deleted.
     func settingsChanged() {
-        guard !capturesFields, observation != nil || lease != nil else { return }
-        stopWatching()
+        guard !capturesFields else { return }
+        if observation != nil || lease != nil { stopWatching() }
+        if deps.defaults.object(forKey: DropLearningStats.key) != nil { stats.clear() }
     }
+
+    private var stats: DropLearningStats { DropLearningStats(defaults: deps.defaults) }
 
     /// Stops any watch without learning from it and undoes any exposure.
     func stopWatching() {
@@ -228,22 +242,43 @@ final class DropLearningCoordinator {
     /// Called right before Cmd+V: the target app's focused field, if learning
     /// is on and the gate allows it. Reads no text.
     func prepareDelivery(targetPID: pid_t?) -> DropEditFieldHandle? {
+        pendingTarget = nil
         guard capturesFields, let pid = targetPID else { return nil }
-        return deps.fieldAccess.capture(pid: pid)
+        let handle = deps.fieldAccess.capture(pid: pid)
+        pendingTarget = (pid, handle == nil ? deps.fieldAccess.lastRefusal ?? "noCapture" : nil)
+        return handle
     }
+
+    /// The target of the last capture and why it failed, for the reason
+    /// counters and the developer journal.
+    private var pendingTarget: (pid: pid_t, refusal: String?)?
 
     /// Called right after the take reached an external app. The field
     /// captured before Cmd+V must still be that app's focused field; a field
     /// focused during the paste delay is never read.
     func delivered(_ take: DropLearningTake, handle: DropEditFieldHandle?) {
         end(.newTake, keepLease: true)
-        let calibrating = settings.isCalibrating()
-        guard settings.isEnabled || calibrating else { return releaseLease() }
+        let target = pendingTarget
+        pendingTarget = nil
+        let journaling = settings.isCalibrating()
+        let learning = settings.isEnabled
+        // Calibration alone is a dry run; with learning on it only adds the
+        // developer journal to real learning.
+        // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+        let calibrating = journaling && !learning
+        guard learning || journaling else { return releaseLease() }
+        let app = (handle?.pid ?? target?.pid).flatMap(deps.appID)
         guard let handle, deps.fieldAccess.isStillFocused(handle) else {
-            if calibrating { deps.journal.append(entry(event: "skipped", take: take, extra: ["reason": "field_not_readable"])) }
+            let refusal = handle == nil ? target?.refusal ?? "noCapture" : "focusMovedBeforePaste"
+            stats.add(["watch.noField", "field." + refusal])
+            if journaling {
+                deps.journal.append(entry(event: "skipped", take: take, extra: ["reason": refusal, "app": app ?? "-"]))
+            }
             return releaseLease()
         }
-        let observation = Observation(take: take, handle: handle, calibrating: calibrating, startedAt: deps.clock())
+        stats.add(["watch.started"])
+        let observation = Observation(take: take, handle: handle, calibrating: calibrating, journaling: journaling,
+                                      app: app, startedAt: deps.clock())
         self.observation = observation
         leaseTimer?.cancel()
         leaseTimer = nil
@@ -346,29 +381,44 @@ final class DropLearningCoordinator {
         guard stillWanted(calibrating: calibrating) else { return }
         let field = reason.counts ? observation.lastAligned : nil
         let lists = deps.lists()
-        let classify = { (text: String) in
-            DropLearningClassifier.candidates(take: observation.take, field: text, lists: lists, lexicon: self.deps.lexicon)
+        // Why this take did or did not teach anything, as reason names only.
+        var notes = ["end." + reason.rawValue]
+        if reason.counts, field == nil { notes.append("end.neverAligned") }
+        let classify = { (text: String, note: (String) -> Void) in
+            DropLearningClassifier.candidates(take: observation.take, field: text, lists: lists,
+                                              lexicon: self.deps.lexicon, note: note)
         }
-        var candidates = field.map(classify) ?? []
+        var candidates = field.map { classify($0) { notes.append($0) } } ?? []
         // Only corrections made while watching: text already in the field
         // when it first held the take (a draft, a paste that never landed)
         // is not this take's edit.
         if let first = observation.firstAligned, !candidates.isEmpty {
-            let before = Set(classify(first).map(\.ledgerKey))
+            let before = Set(classify(first) { _ in }.map(\.ledgerKey))
+            let count = candidates.count
             candidates.removeAll { before.contains($0.ledgerKey) }
+            notes += Array(repeating: "candidate.alreadyInField", count: count - candidates.count)
         }
-        guard calibrating else {
-            guard field != nil else { return }
-            finish(candidates: candidates, ledger: DropLearningLedger(defaults: deps.defaults, now: deps.now), dryRun: false)
-            return
+        notes += candidates.map { "candidate." + $0.kind }
+        let ledger = calibrating
+            ? DropLearningLedger(defaults: deps.defaults, key: DropLearningSettings.calibrationLedgerKey, now: deps.now)
+            : DropLearningLedger(defaults: deps.defaults, now: deps.now)
+        let ready = field == nil ? nil : finish(candidates: candidates, ledger: ledger, dryRun: calibrating)
+        var shown = "none"
+        if ready != nil {
+            shown = deps.isIdle() ? "suggested" : "suggestion.waitsForIdle"
+            notes.append(shown)
         }
-        let ledger = DropLearningLedger(defaults: deps.defaults, key: DropLearningSettings.calibrationLedgerKey, now: deps.now)
-        let ready = field == nil ? nil : finish(candidates: candidates, ledger: ledger, dryRun: true)
+        stats.add(notes)
+        // The developer journal holds the words of the edit: only while
+        // calibration is on, on this Mac, deleted after 14 days.
+        guard observation.journaling, settings.isCalibrating() else { return }
         deps.journal.append(entry(event: "observed", take: observation.take, extra: [
+            "app": observation.app ?? "-", "dryRun": calibrating,
             "reason": reason.rawValue, "seconds": observation.elapsed, "reads": observation.reads,
-            "readable": observation.lastAligned != nil, "candidates": describe(candidates),
+            "readable": observation.lastAligned != nil, "notes": notes, "candidates": describe(candidates),
+            "counts": candidates.map { ledger.count($0) }, "threshold": DropLearningLedger.threshold,
             "hunks": field.flatMap { describeHunks(observation.take.pasted, $0) } ?? [],
-            "ready": describe(ready.map { [$0] } ?? []),
+            "ready": describe(ready.map { [$0] } ?? []), "shown": shown,
         ]))
     }
 

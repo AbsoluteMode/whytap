@@ -1,0 +1,134 @@
+---
+id: drop-learning-cut-tail-2026-11-22
+type: decision
+title: Learning from edits ignores a cut tail, hears voiced and voiceless pairs as one sound, counts its reasons and keeps a developer journal
+summary: Words cut from either edge of a take no longer make it a rewrite or join the neighbouring fix; the consonant skeleton treats voiced and voiceless pairs and "dzh" as one sound; one changed part of a hyphenated word is the term; DropLearningStats counts why each take did or did not teach anything, with reason names only; and calibration with learning on is a developer journal beside real learning, with the edited words, the app and every refusal reason.
+status: confirmed
+tags: [drop, learning, privacy]
+canonical_for: [drop-learning-cut-tail, drop-learning-stats]
+verified_at: 2026-11-22
+sources:
+  - type: user-confirmed
+    reference: ORCH-TASK 72. Live check on build 1722 failed. In the Claude desktop chat the user twice fixed a misheard word to "jev" by hand and sent with Return; no drops appeared ("the drops did not appear"). The orchestrator asked for the cause and a way to see the reason for a refusal without revealing text.
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: ORCH-TASK 72 REV 19 item 19. The user wants a development log on their own Mac ("we need to collect some logs here for development"): one entry per Drop with time, app, whether the field was read, how the watch ended, whether a diff was found, the reason each gate refused, and whether a drop was shown; local only, deleted after 14 days; the edited words are needed for debugging on the user's Mac, while ordinary users keep only hashes.
+    confirmed_at: 2026-11-22
+  - type: trace
+    reference: Build 1722 read only. The ledger key existed with an empty "seen" map, so both fields were read and classified with no candidate. History showed the provider wrote the Cyrillic "Dzheff" (once inside a hyphenated word, "Dzheff-modeli") and added a made-up tail of 4 and 16 words after each phrase; the user cut the tails and fixed the word.
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/DropLearning/DropEditDiff.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/DropLearning/DropLearningCandidates.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/DropLearning/DropLearningStats.swift
+    confirmed_at: 2026-11-22
+related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-edit-observation.md]
+---
+
+## Context
+
+The first live check of learning from edits after watching was added
+(build 1722) gave no drops. The field reads worked: the ledger was written
+with no candidates. Three rules each dropped the correction.
+
+1. The provider added a made-up tail (4 and 16 words). The user cut it.
+   The diff counted the cut words as changes, so the first take was over
+   the 50 % rewrite share and taught nothing.
+2. In the second take the cut tail sat right after the fixed word, so the
+   diff made one hunk of five removed words and one typed word. Hunks over
+   three words are ignored.
+3. Cyrillic "Dzheff" and "jev" did not sound alike: the transliteration is "dzeff",
+   whose consonant skeleton ("dzf") differs from "jev" ("djv") in two of
+   three letters.
+
+Nothing showed which rule refused, because learning logs nothing.
+
+## Decision
+
+- **A cut is not a rewrite.** Words removed at the start or the end of
+  the take with nothing typed in their place are a cut. They become their
+  own hunk, next to any fix, and the rewrite share is counted over the
+  kept words only. At least one word must still match and the kept part
+  must be at most half changed, so cutting most of a take and typing
+  something else is still a rewrite.
+- **Sound-alike.** The consonant skeleton treats "dzh" and "dz" as "j",
+  and voiced and voiceless pairs (b/p, d/t, g/k, v/f, z/s) as one sound.
+  Russian spelling of a heard name often swaps them.
+- **Hyphenated words.** When only one part of a hyphenated word changed
+  (Cyrillic "dzheff-modeli" to "jev-modeli"), that part is the term; the raw check
+  accepts it as part of a raw word.
+- **Reason counters.** DropLearningStats keeps counts per fixed reason
+  name in `sidekey.dropLearning.stats.v1`: how the watch ended, why an
+  edit was refused (`take.rewrite`, `edit.tooLong`, `cut.long`,
+  `sub.notSoundAlike`, `sub.notInRaw`, `sub.notTerm`, `sub.noVocabRoute`
+  and others), which candidates were counted and whether a suggestion was
+  shown. No words, hashes or app names. Local defaults, outside backup
+  and sync, deleted when learning and calibration are both off.
+- **Developer journal.** The hidden calibration switch
+  (`sidekey.dropLearning.calibration`, set with `defaults write`, no
+  Settings control) keeps its journal at Application
+  Support/<bundle id>/drop-learning/calibration.jsonl (0600, outside
+  backups, sync and logs) and ends itself after 14 days, deleting it.
+  With learning on it now runs beside real learning: suggestions are
+  real and Y saves. Only with learning off is it the dry run it was.
+  Each Drop gets one entry: time, app bundle ID, mode, Vocab route, the
+  capture refusal (`notFrontmost`, `noFocusedElement`, `secureField`,
+  `secureInput`, `deniedApp`, `notTextRole`, `axError` and others) or how
+  the watch ended, reads, every refusal reason from the counters, the
+  candidates with their counts against the threshold, the edited words
+  (removed and typed per hunk) and whether a drop was shown. The words are
+  kept on purpose: a refusal such as "Dzheff" to "jev" cannot be judged
+  without them. Ordinary users never have the switch on; for them the
+  disk holds only the ledger hashes and the reason counters.
+
+## Why
+
+- A made-up tail is a known provider failure, and cutting it is the most
+  common edit next to fixing a word. Treating it as a rewrite threw away
+  exactly the takes that most need a Vocab term.
+- The skeleton rule exists for names heard in another language; voicing
+  is the usual difference there.
+- The counters answer "why no drops" from `defaults read` without
+  turning on calibration, which journals the words.
+
+## What we tested
+
+- A scenario test with the structure of both 1722 takes (made-up tails,
+  the fix inside a hyphenated word and before a cut tail): the second
+  take gives the Vocab suggestion for "jev", and the counters show two
+  cleared watches, two Vocab candidates, two long cuts and one shown
+  suggestion. It failed before the change.
+- Diff tests: a long cut tail aligns; a cut tail next to a fixed word is
+  its own hunk; a cut head aligns; a cut plus a rewrite of the rest, or a
+  different message, is still a rewrite.
+- Cyrillic "Dzheff" and "jev", "klodu" and "Claude" sound alike;
+  "otchyot" and "prezentatsiyu", "Seve" and "Mishe" do not (all Cyrillic
+  in the tests).
+- The counters hold no words, are not in the backup registry, and are
+  deleted when learning is switched off.
+- With learning and calibration on, the same two takes give a real
+  suggestion and three journal entries (app, end reason, refusal reasons
+  including the long cuts, counts against the threshold, the words, the
+  drop shown, and a skipped take with its capture refusal). Without
+  calibration nothing is journaled. A refused capture names its reason.
+- Not verified here: the built app. The acceptance is the same dictation
+  in Claude desktop.
+
+## Rejected
+
+- Raise the hunk limit above three words: it would let real rewrites
+  through as substitutions.
+- Log the refusal reason to the system log: learning keeps nothing in
+  logs, and the counters are enough.
+- Store the refused words for every user: calibration exists for that,
+  and only the developer turns it on.
+- A Settings switch for the journal: it would offer every user a log of
+  their own words for a developer need.
+- Keep calibration a dry run even with learning on: the developer could
+  not use real learning and the journal at the same time.
+
+2026-11-22, branch claude/drop-learning-cut-tail.

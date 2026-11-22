@@ -18,22 +18,6 @@
 
 </div>
 
-## At a glance
-
-Whytap is a free, open-source macOS app in the notch. It has no account, no Whytap servers and no telemetry: it runs on **your own provider keys or self-hosted models**, and dictation can also run on the Mac itself.
-
-- **Drop**: hold <kbd>Space</kbd> in any text field, speak, release. The text is pasted. **Fast** pastes what you said; **Smart** sends it to your language model for a clean, edited version.
-- **Agent**: tap <kbd>Right ⌘</kbd> to ask by text, hold it to ask by voice; the answer appears in the notch. It is off until you turn it on. Once on, it can edit files and run commands by default: [what it can do](docs/agent.md).
-- **Meeting Notes**: records a call (microphone and system audio) and writes notes with your models.
-
-**Install:** the [DMG](https://github.com/AbsoluteMode/whytap/releases/latest/download/Whytap-latest.dmg) or `brew install absolutemode/tap/whytap`; macOS 14.2+, Apple Silicon or Intel, notarized. The first launch opens a short setup ([install guide](docs/install.md)).
-
-**Runs on the Mac without any key:** Drop Fast with the optional *On this Mac* speech model (Apple Silicon only, about 470 MB download, 25 European languages including English and Russian; no Chinese, Japanese, Arabic or Hindi). The same model can transcribe Agent voice, Voice search and meetings, but their text steps still need a language model. Screenshots with OCR, clipboard History, To-do, Case and Display need no provider at all. There is no on-device language model.
-
-**Needs your key or server:** Drop Smart, meeting notes, the Agent and Translate need a language model (OpenRouter, OpenAI, Anthropic or your own OpenAI-compatible server; the Agent only OpenRouter, OpenAI or Anthropic). Subtitles need an OpenAI key (from the version after 2.2.26; 2.2.26 uses a speech and a language model). On Intel Macs every speech feature needs a provider (Soniox, Deepgram, ElevenLabs or your own server). Your provider bills you; ChatGPT Pro or Business and Claude Max, Ultra or Team plans include monthly API credits that can pay for it ([What it costs](docs/install.md#what-it-costs)).
-
-**Limits:** Calendar shows Soon in the published 2.2.26 build. The next version opens its day grid. The built-in Agent is not a sandbox. Meetings on the Mac or on your own server have no speaker labels. Coding tools: Claude Code and Codex can use the Whytap MCP server; what each client may access is in [app control](docs/customization/app-control.md#which-client-can-use-what). Data that leaves the Mac: [Privacy](docs/privacy.md).
-
 ## Tools
 
 <details name="tool-demo">
@@ -152,8 +136,6 @@ claude mcp add --scope user whytap -- /Applications/Whytap.app/Contents/Helpers/
 ```bash
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
-
-<p><sub>Whytap 2.2.26 and older have no <code>whytap mcp</code> yet: use <code>whytap app mcp</code> (settings, To-do, meetings) and add Case as a second server with <code>whytap case mcp</code>. <a href="docs/customization/app-control.md#which-client-can-use-what">Which client can use what</a>.</sub></p>
 
 <p align="center">Stuck on setup? Ask Claude Code or Codex for help: with the plugin they read your Whytap settings and switch models, providers, Drop mode and languages for you.</p>
 

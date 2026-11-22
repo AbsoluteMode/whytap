@@ -1,7 +1,7 @@
 # Whytap Planner
 
 Open **Search all tools → To-do** for a compact list inside hover.
-**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button.
+**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button. The published 2.2.26 build shows Calendar as **Soon**.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
 range and the calendar name. A Google or Outlook account synced through Calendar

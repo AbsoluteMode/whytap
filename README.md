@@ -32,7 +32,7 @@ Whytap is a free, open-source macOS app in the notch. It has no account, no Whyt
 
 **Needs your key or server:** Drop Smart, meeting notes, the Agent and Translate need a language model (OpenRouter, OpenAI, Anthropic or your own OpenAI-compatible server; the Agent only OpenRouter, OpenAI or Anthropic). Subtitles need an OpenAI key (from the version after 2.2.26; 2.2.26 uses a speech and a language model). On Intel Macs every speech feature needs a provider (Soniox, Deepgram, ElevenLabs or your own server). Your provider bills you; ChatGPT Pro or Business and Claude Max, Ultra or Team plans include monthly API credits that can pay for it ([What it costs](docs/install.md#what-it-costs)).
 
-**Limits:** Calendar is not available yet (shown as Soon). The built-in Agent is not a sandbox. Meetings on the Mac or on your own server have no speaker labels. Coding tools: Claude Code and Codex can use the Whytap MCP server; what each client may access is in [app control](docs/customization/app-control.md#which-client-can-use-what). Data that leaves the Mac: [Privacy](docs/privacy.md).
+**Limits:** Calendar shows Soon in the published 2.2.26 build. The next version opens its day grid. The built-in Agent is not a sandbox. Meetings on the Mac or on your own server have no speaker labels. Coding tools: Claude Code and Codex can use the Whytap MCP server; what each client may access is in [app control](docs/customization/app-control.md#which-client-can-use-what). Data that leaves the Mac: [Privacy](docs/privacy.md).
 
 ## Tools
 

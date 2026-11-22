@@ -121,6 +121,23 @@ final class OnboardingModel: ObservableObject {
         show(next)
     }
 
+    /// The page Back returns to; `nil` on the first one, which has no Back.
+    var previousPage: OnboardingPage? {
+        OnboardingFlow.previous(before: page, in: pages, speechExpected: speechExpected)
+    }
+
+    /// Back, by button or ← / ⌘[. Only the page changes: what was chosen,
+    /// saved, downloaded or connected stays, and that page shows it as done.
+    func goBack() {
+        guard let previous = previousPage else { return }
+        show(previous)
+    }
+
+    /// The footer's Back; `nil` hides it.
+    var backAction: (() -> Void)? {
+        previousPage == nil ? nil : { [weak self] in self?.goBack() }
+    }
+
     func finish() {
         stop()
         onFinish()

@@ -53,6 +53,8 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
     let count: Int
     /// The speech page holds two cards and takes a little more height.
     var top: CGFloat = 72
+    /// Back to the previous page; `nil` on the first page, which has none.
+    var back: (() -> Void)?
     @ViewBuilder var left: Left
     @ViewBuilder var footer: Footer
     @ViewBuilder var stage: Stage
@@ -70,8 +72,15 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
                     .accessibilityLabel("Step \(index + 1) of \(count): \(step)")
                 left
                 Spacer(minLength: 12)
-                HStack(spacing: 10) { footer }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack(spacing: 10) {
+                    if let back {
+                        OnboardingQuietButton(title: "Back", systemImage: "chevron.left", action: back)
+                            .help("Back (←)")
+                        Spacer(minLength: 0)
+                    }
+                    footer
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(EdgeInsets(top: top, leading: 40, bottom: 26, trailing: 32))
             .frame(width: OnboardingTheme.leftPaneWidth, alignment: .topLeading)
@@ -211,7 +220,7 @@ struct OnboardingSpeechPage: View {
 
     var body: some View {
         let presentation = Presentation(onDevice.status)
-        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44) {
+        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
                 OnboardingLanguageRow(model: model)
@@ -246,7 +255,12 @@ struct OnboardingSpeechPage: View {
         } footer: {
             OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
             Spacer(minLength: 0)
-            OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
+            // Back here after choosing: the choice is done, so the page goes on.
+            if model.dropReady {
+                OnboardingPrimaryButton(title: "Continue", action: model.advance)
+            } else {
+                OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
+            }
         } stage: {
             ZStack {
                 OnboardingStageBackdrop(corner: UnitPoint(x: 0.85, y: 0.1))
@@ -700,7 +714,7 @@ struct OnboardingPermissionsPage: View {
     var body: some View {
         let microphone = permissions.snapshot.microphoneGranted
         let keyboard = permissions.snapshot.accessibilityGranted
-        OnboardingSplit(step: "Permissions", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Permissions", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Two quick", italic: "permissions.", stacked: true)
                 OnboardingLede(text: "Asked once, used only while you dictate.")
@@ -952,7 +966,7 @@ struct OnboardingTryPage: View {
     var body: some View {
         let chord = configuration.dropVoiceShortcut.contents
         let copy = Copy(shortcut: configuration.dropVoiceShortcut.title, gesture: configuration.normalizedDropGesture)
-        OnboardingSplit(step: "Try it", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Try it", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Try", italic: "Drop.")
                 VStack(alignment: .leading, spacing: 18) {
@@ -1047,7 +1061,7 @@ struct OnboardingCustomizePage: View {
 
     var body: some View {
         let selected = model.customizeVideo
-        OnboardingSplit(step: "Customize", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Customize", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Make it", italic: "yours.")
                 OnboardingLede(text: "Your keys, your tools.")
@@ -1127,7 +1141,7 @@ struct OnboardingFeaturesPage: View {
 
     var body: some View {
         let _ = model.revision
-        OnboardingSplit(step: "More", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "More", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Turn on", italic: "more.")
                 OnboardingLede(text: "Each stays off until you turn it on.")

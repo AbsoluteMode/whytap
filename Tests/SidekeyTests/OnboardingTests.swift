@@ -329,6 +329,149 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(finished, "Done on the last page ends the onboarding")
     }
 
+    // MARK: - Back
+
+    func testBackRetracesEveryPageAndTheFirstHasNone() throws {
+        let env = try makeEnv()
+        try env.keys.save("dg-key", account: BYOKKeyStore.account(for: .deepgram))
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(model.previousPage, "The first page has no Back")
+        XCTAssertNil(model.backAction)
+        model.goBack()
+        XCTAssertEqual(model.page, .speech, "Back on the first page does nothing")
+
+        model.useKey(.deepgram)
+        var forward = [model.page]
+        while !model.isLastPage { model.advance(); forward.append(model.page) }
+        XCTAssertEqual(forward, [.permissions, .tryDrop, .customize, .features])
+
+        var backward: [OnboardingPage] = []
+        var counters: [Int] = []
+        while let action = model.backAction {
+            action()
+            backward.append(model.page)
+            counters.append(model.pageIndex)
+        }
+        XCTAssertEqual(backward, [.customize, .tryDrop, .permissions, .speech])
+        XCTAssertEqual(counters, [3, 2, 1, 0], "The N / M counter follows the page")
+        XCTAssertEqual(model.pages.count, 5, "Back never changes the list")
+    }
+
+    func testBackSkipsHiddenPages() throws {
+        let env = try makeEnv(modelPresent: true)
+        env.speech.useOnDevice()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        XCTAssertEqual(model.pages, [.tryDrop, .customize, .features])
+        XCTAssertNil(model.previousPage, "Speech and permissions are done, so Try is first and has no Back")
+        model.advance()
+        model.advance()
+        XCTAssertEqual(model.page, .features)
+        model.goBack()
+        XCTAssertEqual(model.page, .customize)
+        model.goBack()
+        XCTAssertEqual(model.page, .tryDrop)
+        XCTAssertNil(model.previousPage)
+    }
+
+    func testBackPassesOverTheTryPageSetUpLaterSkipped() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        model.setUpSpeechLater()
+        model.advance()
+        XCTAssertEqual(model.page, .customize)
+        XCTAssertEqual(model.previousPage, .permissions, "No try page on the way forward, none on the way back")
+        model.goBack()
+        XCTAssertEqual(model.page, .permissions)
+        model.goBack()
+        XCTAssertEqual(model.page, .speech)
+    }
+
+    func testBackKeepsWhatWasDoneOnEveryPage() async throws {
+        let env = try makeEnv()
+        try env.keys.save("dg-key", account: BYOKKeyStore.account(for: .deepgram))
+        let tools = OnboardingCodingTools(detect: { [.claudeCode] }, connect: { _ in .init() })
+        let model = OnboardingModel(speech: env.speech,
+                                    permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready),
+                                    onDevice: env.controller(), supportsOnDevice: true,
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: tools, defaultsChanges: NotificationCenter())
+        addTeardownBlock { model.stop() }
+        model.setLanguage(AppLanguage.find(code: "ru"))
+        model.useKey(.deepgram)
+        XCTAssertEqual(model.page, .tryDrop)
+        model.noteDictated()
+        model.advance()
+        model.customizeVideo = .hover
+        model.advance()
+        await tools.refreshIfNeeded()
+        tools.connect()
+        try await eventually { tools.state == .connected }
+
+        while model.backAction != nil { model.goBack() }
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertTrue(model.dropReady, "The speech page shows the chosen route as done and offers Continue")
+        XCTAssertTrue(model.keyAvailable(.deepgram), "The Deepgram tile still says Saved")
+        XCTAssertEqual(model.language, AppLanguage.find(code: "ru"))
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .deepgram, model: "nova-3"))
+
+        model.advance()
+        XCTAssertEqual(model.page, .tryDrop)
+        XCTAssertTrue(model.dictated, "The try page still says That's Drop")
+        model.advance()
+        XCTAssertEqual(model.customizeVideo, .hover)
+        model.advance()
+        XCTAssertEqual(tools.state, .connected, "Coding agents stay connected")
+        model.goBack()
+        model.goBack()
+        model.useKey(.deepgram)
+        XCTAssertEqual(model.page, .tryDrop, "Choosing again is safe: only the speech page moves on")
+    }
+
+    func testBackToCompletedPermissionsStaysThere() async throws {
+        let env = try makeEnv(modelPresent: true)
+        env.speech.useOnDevice()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .unavailable))
+        AppState.shared.dropHotkeyStatus = .ready
+        try await eventually { model.page == .tryDrop }
+        model.goBack()
+        XCTAssertEqual(model.page, .permissions)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertEqual(model.page, .permissions, "Done permissions do not push the person forward again")
+    }
+
+    func testArrowAndCommandBracketGoBackOutsideTextFields() {
+        let arrow = OnboardingBackKey.leftArrowKeyCode
+        let bracket = OnboardingBackKey.leftBracketKeyCode
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [], editingText: false))
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [.numericPad, .function], editingText: false),
+                      "Arrow keys carry these flags")
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: bracket, modifiers: .command, editingText: false))
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: bracket, modifiers: [.command, .capsLock], editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: .shift, editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: .command, editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: bracket, modifiers: [], editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: 124, modifiers: [], editingText: false), "→ is not Back")
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [], editingText: true),
+                       "In a text field ← moves the caret")
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: bracket, modifiers: .command, editingText: true))
+        XCTAssertTrue(OnboardingBackKey.isEditingText(NSTextView()), "The field editor of a focused field")
+        XCTAssertTrue(OnboardingBackKey.isEditingText(NSTextField()))
+        XCTAssertFalse(OnboardingBackKey.isEditingText(NSButton()))
+        XCTAssertFalse(OnboardingBackKey.isEditingText(nil))
+    }
+
+    func testPreviousFollowsTheFlowList() {
+        let all: [OnboardingPage] = [.speech, .permissions, .tryDrop, .customize, .features]
+        XCTAssertNil(OnboardingFlow.previous(before: .speech, in: all, speechExpected: true))
+        XCTAssertEqual(OnboardingFlow.previous(before: .customize, in: all, speechExpected: true), .tryDrop)
+        XCTAssertEqual(OnboardingFlow.previous(before: .customize, in: all, speechExpected: false), .permissions)
+        XCTAssertNil(OnboardingFlow.previous(before: .speech, in: [.tryDrop, .features], speechExpected: true),
+                     "A page not in the list has no Back")
+    }
+
     func testPermissionsAdvanceOnlyWhenTheShortcutInstalls() async throws {
         let env = try makeEnv(modelPresent: true)
         env.speech.useOnDevice()

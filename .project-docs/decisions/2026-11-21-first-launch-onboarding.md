@@ -2,7 +2,7 @@
 id: whytap-first-launch-onboarding
 type: decision
 title: A short onboarding on a new Mac, up to the first dictation
-summary: The first launch on a Mac opens up to five short pages in the former paid onboarding's dark two-pane look (speech with language and every provider's key and offer, permissions with optional Screen Recording, try Drop, shortcuts and hover tools, Google/Meetings/Agent and coding agents) instead of Settings -> Permissions; done pages are hidden, every page can be skipped, the On this Mac button sets Drop only, and updated Macs never see it.
+summary: The first launch on a Mac opens up to five short pages in the former paid onboarding's dark two-pane look (speech with language and every provider's key and offer, permissions with optional Screen Recording, try Drop, shortcuts and hover tools, Google/Meetings/Agent and coding agents) instead of Settings -> Permissions; done pages are hidden, every page can be skipped and every page but the first has Back, the On this Mac button sets Drop only, and updated Macs never see it.
 status: confirmed
 tags: [onboarding, first-launch, permissions, drop, on-device, screen-recording, automation]
 canonical_for: [first-launch-onboarding, first-launch-permission-setup]
@@ -13,6 +13,9 @@ sources:
     confirmed_at: 2026-11-21
   - type: user-confirmed
     reference: On 2026-11-21 the maintainer called the first build's screens ugly and asked to rebuild it on the former paid onboarding (removed in 2cc4caa7), beautiful, simple and making an impression. Reviewing offscreen renders on 2026-11-21 and 2026-11-22 he asked for one speech page with the download, every provider's key with its offer and a searchable language, a page showing tool shortcuts and hover editing with two clips, much less text on the left, the coding-agent plugin inside an existing page, Screen Recording as optional for Shot, and one muted colour for the tile badges; then approved it ("the onboarding is fine").
+    confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: Trying build 1700 with clean data on 2026-11-22, the maintainer found no way back from Customize and approved adding Back.
     confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingFlow.swift
@@ -28,6 +31,9 @@ sources:
     confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingCodingTools.swift
+    confirmed_at: 2026-11-22
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingBackKey.swift
     confirmed_at: 2026-11-22
   - type: repository
     reference: Tests/SidekeyTests/OnboardingTests.swift
@@ -108,6 +114,18 @@ Every page can be skipped. Set up later on the speech page also passes over the
 try page when nothing is on its way to dictate with. Closing the window counts
 as Done.
 
+Every page but the first has a quiet Back on the left of its footer; ← and ⌘[
+(physical keys) do the same while no text field has the keyboard, where the
+arrow moves the caret (`OnboardingBackKey`, a local key monitor of the
+window). Back walks the same page list as Continue (`OnboardingFlow.previous`):
+hidden pages are never reached and the try page is passed over by the same
+rule, so the "N / M" caption stays right. Only the page changes: the language,
+saved keys (tiles still say Saved), the On this Mac download, the try page's
+success, the chosen clip and connected coding agents stay, and the speech page
+offers Continue instead of Set up later once Drop's speech route runs.
+Permissions already completed do not advance the page again. Doing a step
+again is safe: a saved key is chosen again and only the speech page moves on.
+
 Permissions asked at first use, not at launch: Screen Recording when the person
 skips it (the first screenshot or Agent screen capture), System Audio Recording
 (the first meeting or Subtitles), Input Monitoring (only when the hold tap could
@@ -160,6 +178,13 @@ Two runtime fixes ship with it:
 
 # What was tested
 
+2026-11-22 Back: scenario tests walk Back from every page to the first (which
+has none) with the counter following, with the speech and permissions pages
+hidden, after Set up later skipped the try page, keeping every page's result,
+staying on completed permissions, and ← / ⌘[ only outside text fields. The
+footer was checked in offscreen renders; the key monitor in the live window is
+acceptance in the installed app.
+
 2026-11-22 redesign: scenario tests for the five pages, the searchable
 language list (English, native and accented names), the key tiles taking
 every API hints offer and inventing none, Screen Recording asked once and not
@@ -192,6 +217,8 @@ behavior beside System Settings; those are acceptance in the installed app.
 - A separate key page behind "I have an API key": the maintainer wanted the
   download, every key and the language visible at once.
 - A colour per badge kind: only offers stay coloured.
+- Back in the title bar or as a bare ‹ arrow: the footer keeps every page's
+  actions in one place, and a word reads at once.
 - A separate page for the coding-agent plugin: one row on the last page is
   enough.
 

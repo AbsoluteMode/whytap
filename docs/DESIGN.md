@@ -1717,7 +1717,9 @@ The former paid onboarding's look, with today's content. One always-dark
 surface steps, purple accent, green for success and free offers). Left pane
 380 pt: a mono step caption ("SPEECH · 1 / 5"), a 44 pt Instrument Serif
 headline with one italic word, at most one short line, the page's controls,
-and a footer aligned right (quiet text actions beside one white capsule).
+and a footer aligned right (quiet text actions beside one white capsule), with a
+quiet ‹ Back on its left on every page but the first (← and ⌘[ outside text
+fields do the same).
 Right: a stage with a soft purple wash (green on the try page after success)
 showing mock windows with traffic lights, the real island orb, or a 16:9 clip
 with the person's own keycaps under it. Pages fade (0.28 s); the left pane

@@ -1177,7 +1177,9 @@ OnboardingWindowController, accessory app, no Dock icon) in place of the former
 Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
 onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
 word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+five pages, each skippable, closing = Done; every page but the first has Back
+(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
+OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
 route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
 Lang setting; searchable list, English or native name, arrows and Return), On
 this Mac card ("Download and use for Drop", about 470 MB; when the download

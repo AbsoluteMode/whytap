@@ -55,6 +55,7 @@ struct AIRoutingMigration {
         routing.upgradeElevenLabsScribeIfNeeded()
         routing.upgradeSonioxModelsIfNeeded()
         routing.moveMeetingsToRecordedModelIfNeeded()
+        routing.adoptExplicitServerModelsIfNeeded()
     }
 
     // MARK: - Routes

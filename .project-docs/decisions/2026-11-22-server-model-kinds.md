@@ -3,27 +3,28 @@ id: server-model-kinds-2026-11-22
 type: decision
 title: A user's server offers speech models to speech pickers and language models to text pickers
 summary: A self-hosted OpenAI-compatible server's models are sorted by name into speech, language or neither (embeddings, rerankers, voices), and each server has a manual "Offer models for" choice (By model name, Language models, Speech recognition, Both) that overrides the guess; routes already on a server model keep working.
-status: confirmed
+status: stale
 tags: [settings, models, server, self-hosted, ollama, routing]
-canonical_for: [server-model-kinds]
+canonical_for: [historical-server-model-name-sorting]
 verified_at: 2026-11-22
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer, through the orchestrating session (ORCH-TASK 66), reported that every model of a self-hosted server appeared in every picker (a company Whisper among LLMs, Ollama's qwen3:0.6b among speech models) and chose "by name plus a manual switch" with LLM / Speech / both, automatic by name by default.
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Sources/Sidekey/AIRouting/ServerModelKinds.swift
+  - type: commit
+    reference: 6a9fda14a39040b46ae7164799e77ac9967fe50e:Sources/Sidekey/AIRouting/ServerModelKinds.swift
     confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/AIRouting/ModelStatusResolver.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AIRouting/ServerModelKindsTests.swift
-    confirmed_at: 2026-11-22
-related: [2026-10-19-api-and-models.md, 2026-11-22-direct-model-list-prices.md]
+related: [2026-10-19-api-and-models.md, 2026-11-22-direct-model-list-prices.md, 2026-11-22-server-explicit-models.md]
 ---
 
 # A user's server offers speech models to speech pickers and language models to text pickers
+
+Superseded the same day by [explicit server models](2026-11-22-server-explicit-models.md):
+the user adds each model with its type, and names only preselect it. The text
+below records the name sorting of build 1704 and is not current guidance.
 
 ## Context
 

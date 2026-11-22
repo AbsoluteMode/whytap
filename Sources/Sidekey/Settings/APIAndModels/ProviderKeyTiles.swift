@@ -53,7 +53,8 @@ struct ProviderKeyTiles: View {
                 } else if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
                                 onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
-                                onSaveFailure: onSaveFailure, onClose: close)
+                                onSaveFailure: onSaveFailure, onClose: close,
+                                onServerAdded: { self.expanded = .server($0) })
                     .id(expanded)
                 }
             }
@@ -199,6 +200,8 @@ struct ProviderKeyForm: View {
     var onSaveResult: (Bool) -> Void = { _ in }
     var onSaveFailure: (String) -> Void = { _ in }
     let onClose: () -> Void
+    /// A new server was saved: its own form opens next and asks for a model.
+    var onServerAdded: (ProviderAccount) -> Void = { _ in }
     /// The onboarding's form only adds a key; removing one stays in Settings.
     var showsRemove = true
 
@@ -221,31 +224,20 @@ struct ProviderKeyForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if newServer {
-                MacField(placeholder: "Name", text: $name)
+                MacField(placeholder: "Server name", text: $name)
                 MacField(placeholder: "Base URL", text: $baseURL, monospaced: true)
             }
+            if let account, let models = chip?.serverModels {
+                ServerModelsSection(viewModel: viewModel, account: account, models: models,
+                                    onBusyChanged: { checking in onBusyChanged(checking || saving) })
+            }
+            if chip?.serverModels != nil { Divider() }
             SecureField(chip == nil ? (newServer ? "API key (optional)" : "API key") : "New API key", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .focused($keyFocused)
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !busy ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }
                 .onHover { keyHovered = $0 }
                 .onSubmit(save)
-            if let account, chip?.modelKinds != nil {
-                HStack(spacing: 10) {
-                    Text("Offer models for")
-                        .font(.system(size: 13))
-                    Spacer(minLength: 0)
-                    MacPopup(
-                        items: ServerModelKinds.allCases.map { .init(value: $0, label: $0.label) },
-                        selection: Binding(
-                            get: { chip?.modelKinds ?? .automatic },
-                            set: { viewModel.setModelKinds($0, for: account) }
-                        ),
-                        minWidth: 170
-                    )
-                    .accessibilityLabel("Offer models for")
-                }
-            }
             HStack(spacing: 10) {
                 if showsRemove {
                     APIModelAction(title: "Remove", style: .danger, isEnabled: chip != nil && account != nil) {
@@ -287,7 +279,9 @@ struct ProviderKeyForm: View {
             if let failure { onSaveFailure(failure) }
             if failure == nil {
                 key = ""
-                if newServer { onClose() }
+                if newServer {
+                    if let added = viewModel.lastAddedServer { onServerAdded(added) } else { onClose() }
+                }
             }
         }
     }
@@ -311,5 +305,194 @@ struct ProviderKeySaveNotice: View {
         .shadow(color: .black.opacity(0.14), radius: 6, y: 2)
         .accessibilityElement(children: .combine)
         .allowsHitTesting(false)
+    }
+}
+
+/// A server's models, each with its kind, and the row that adds one: a name
+/// (any name; the server's `/v1/models` only suggests), LLM or Transcription
+/// (preselected from the name, the user decides) and a check request before
+/// it is saved. A check that does not pass can still be saved, marked Not
+/// checked.
+// WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+@MainActor
+struct ServerModelsSection: View {
+    @ObservedObject var viewModel: APIAndModelsViewModel
+    let account: ProviderAccount
+    let models: [ServerModel]
+    var onBusyChanged: (Bool) -> Void = { _ in }
+
+    @State private var name = ""
+    @State private var kind: ServerModel.Kind = .llm
+    @State private var kindChosen = false
+    @State private var checking = false
+    /// The last check's outcome for exactly `failedFor`.
+    @State private var failure: String?
+    @State private var failedFor: ServerModel?
+    @State private var removedNote: String?
+
+    init(viewModel: APIAndModelsViewModel, account: ProviderAccount, models: [ServerModel],
+         onBusyChanged: @escaping (Bool) -> Void = { _ in },
+         draft: String = "", draftKind: ServerModel.Kind? = nil, draftFailure: String? = nil) {
+        self.viewModel = viewModel
+        self.account = account
+        self.models = models
+        self.onBusyChanged = onBusyChanged
+        _name = State(initialValue: draft)
+        _kind = State(initialValue: draftKind ?? ServerModelClassifier.suggestedKind(for: draft))
+        _kindChosen = State(initialValue: draftKind != nil)
+        _failure = State(initialValue: draftFailure)
+        _failedFor = State(initialValue: draftFailure == nil ? nil
+                           : ServerModel(name: draft, kind: draftKind ?? .llm, checked: false))
+    }
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var problem: String? {
+        trimmed.isEmpty ? nil : viewModel.serverModelProblem(trimmed, kind: kind, on: account)
+    }
+    private var canAdd: Bool { !checking && !trimmed.isEmpty && problem == nil }
+    private var canSaveUnchecked: Bool {
+        !checking && failure != nil && failedFor == ServerModel(name: trimmed, kind: kind, checked: false)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Models")
+                .font(.system(size: 13, weight: .semibold))
+            if models.isEmpty {
+                Text("Add the models this server runs. Each one shows up only where its type fits.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(models.enumerated()), id: \.offset) { index, model in
+                        if index > 0 { Divider() }
+                        row(model)
+                    }
+                }
+                .background(MacSettingsTheme.controlBg, in: RoundedRectangle(cornerRadius: 8))
+            }
+            HStack(spacing: 8) {
+                MacField(placeholder: "Model", text: $name, monospaced: true)
+                    .onSubmit(add)
+                    .accessibilityLabel("Model name")
+                let suggestions = viewModel.modelSuggestions(for: account)
+                if !suggestions.isEmpty {
+                    MacMenu(title: "From server", minWidth: 110, maxWidth: 140) {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button(suggestion) { name = suggestion }
+                        }
+                    }
+                    .accessibilityLabel("Models this server lists")
+                }
+            }
+            HStack(spacing: 10) {
+                Picker("Type", selection: Binding(get: { kind }, set: { kind = $0; kindChosen = true })) {
+                    ForEach(ServerModel.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+                .accessibilityLabel("Model type")
+                Spacer(minLength: 0)
+                if checking {
+                    ProgressView().controlSize(.small)
+                    Text("Checking…").font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
+                }
+                if canSaveUnchecked {
+                    APIModelAction(title: "Save without check", style: .default, isEnabled: true, action: saveUnchecked)
+                }
+                APIModelAction(title: "Add", style: .tinted, isEnabled: canAdd, action: add)
+            }
+            if let message = problem ?? (failedFor == ServerModel(name: trimmed, kind: kind, checked: false) ? failure : nil) {
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Problem: \(message)")
+            } else if let removedNote {
+                Text(removedNote)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onChange(of: name) { _, newValue in
+            removedNote = nil
+            if !kindChosen { kind = ServerModelClassifier.suggestedKind(for: newValue) }
+        }
+    }
+
+    private func row(_ model: ServerModel) -> some View {
+        HStack(spacing: 8) {
+            Text(model.name)
+                .font(.system(size: 12.5, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 6)
+            if !model.checked {
+                Text("Not checked")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacSettingsTheme.orange)
+            }
+            Text(model.kind.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(MacSettingsTheme.fieldBg, in: Capsule())
+            Button {
+                let cleared = viewModel.removeServerModel(model, from: account)
+                removedNote = cleared.isEmpty ? nil
+                    : "\(cleared.map(\.title).joined(separator: ", ")) \(cleared.count == 1 ? "has" : "have") no model now"
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(APIModelFeedbackStyle(cornerRadius: 5))
+            .help("Remove \(model.name)")
+            .accessibilityLabel("Remove \(model.name), \(model.kind.label)")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func add() {
+        guard canAdd else { return }
+        let candidate = ServerModel(name: trimmed, kind: kind, checked: false)
+        checking = true
+        failure = nil
+        onBusyChanged(true)
+        Task {
+            let result = await viewModel.checkServerModel(candidate.name, kind: candidate.kind, on: account)
+            checking = false
+            onBusyChanged(false)
+            switch result {
+            case .passed:
+                if viewModel.addServerModel(candidate.name, kind: candidate.kind, checked: true, to: account) == nil {
+                    reset()
+                }
+            case .failed(let message), .unreachable(let message):
+                failure = message
+                failedFor = candidate
+            }
+        }
+    }
+
+    private func saveUnchecked() {
+        guard canSaveUnchecked, let candidate = failedFor else { return }
+        if viewModel.addServerModel(candidate.name, kind: candidate.kind, checked: false, to: account) == nil {
+            reset()
+        }
+    }
+
+    private func reset() {
+        name = ""
+        kindChosen = false
+        kind = .llm
+        failure = nil
+        failedFor = nil
     }
 }

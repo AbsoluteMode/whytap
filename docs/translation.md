@@ -77,9 +77,13 @@ budget; failures retain the input for another attempt.
 Choose the spoken language (or Auto-detect), a target, then **Start subtitles**.
 Play a video or join a call. A compact dark box floats at the bottom of the
 screen over other apps and full-screen content. Each phrase is a pair: the
-original on the left and its translation on the right, newest at the bottom;
-older pairs leave at the top. The sentence still being heard appears as the
-last row, with its translation so far dimmed.
+original on the left and its translation on the right, newest at the bottom.
+The box keeps one size and blurs the video under it. Text already shown
+stays where it is: the sentence still being heard is the last row, with its
+translation so far dimmed, and turns white in place when it is finished;
+older lines move up and leave at the top one line at a time. Hover the box to
+reach the languages, **Stop** and **×**; they cover the top of the caption
+without moving it.
 In the Toolbox pane the original sits above its translation. **Copy
 translation** in the box's context menu copies the completed translations.
 

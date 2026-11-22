@@ -176,7 +176,7 @@ struct TranslationView: View {
                 // While a session runs, or pairs are on screen, the box has
                 // one fixed size, so its controls never move and no text
                 // reflows. Idle without pairs, it hugs its controls.
-                // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+                // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
                     if !subtitles.phase.isActive { subtitleControls }
                     if subtitles.issue != nil || !rows.isEmpty
@@ -193,7 +193,15 @@ struct TranslationView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                // The video under the box is blurred, then darkened enough for
+                // white text on any picture.
+                .background {
+                    ZStack {
+                        IslandVisualEffectBackground(material: .hudWindow)
+                        Color.black.opacity(Self.overlayTint)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
                 // While running, the controls cover the top of the caption on
                 // hover instead of pushing it: Stop and × stay in one place.
                 .overlay(alignment: .top) {
@@ -216,6 +224,10 @@ struct TranslationView: View {
             .padding(10)
         }
     }
+
+    /// Darkening over the blurred background (the box was a flat 60 % black
+    /// before the blur).
+    static let overlayTint = 0.45
 
     /// The running caption: five lines of the 18 pt translation, as many as
     /// the original overlay showed.

@@ -298,7 +298,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 /// The subtitle overlay never takes keyboard focus, so it is not the key
 /// window when the user reaches for Stop or ×. Without this, AppKit spends
 /// that first click making the panel key and the button never sees it.
-// WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+// WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

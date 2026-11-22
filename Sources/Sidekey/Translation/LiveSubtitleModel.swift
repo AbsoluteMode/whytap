@@ -73,7 +73,7 @@ final class LiveSubtitleModel: ObservableObject {
     /// The identity the live pair shows under and the next committed pair
     /// keeps, so a pair settles in place instead of leaving and coming back
     /// as a new row.
-    // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     @Published private(set) var liveID = UUID()
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false

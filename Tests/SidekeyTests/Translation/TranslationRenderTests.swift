@@ -177,6 +177,9 @@ final class SubtitlePairRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         // The last sentence still being heard and translated.
+        let early = try await session(until: 9_000, pairs: 1)
+        try renderOverlay(early, name: "subtitles-openai-early.png")
+        await early.model.cancel().value
         let live = try await session(until: 31_600, pairs: 5)
         try renderOverlay(live, name: "subtitles-openai-live.png")
         try renderToolbox(live, name: "toolbox-subtitles-openai.png")
@@ -233,7 +236,15 @@ final class SubtitlePairRenderTests: XCTestCase {
         }
         .frame(width: 860, height: 300)
         .environment(\.colorScheme, .dark)
-        try write(frame, to: directoryURL().appendingPathComponent(name))
+        // An AppKit host draws the box's blur view (ImageRenderer cannot);
+        // offscreen it has no window content to blur, so only its tint shows.
+        let host = NSHostingView(rootView: frame)
+        host.frame = NSRect(x: 0, y: 0, width: 860, height: 300)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            .write(to: directoryURL().appendingPathComponent(name))
     }
 
     private func renderToolbox(_ session: Session, name: String) throws {

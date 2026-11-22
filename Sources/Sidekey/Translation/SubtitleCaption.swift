@@ -8,7 +8,7 @@ import Foundation
 enum SubtitleCaption {
     /// More pairs than the box holds: the oldest visible one leaves at the top
     /// a line at a time as new text pushes it up, never as a whole pair.
-    // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     static let maxPairs = 12
 
     struct Row: Identifiable, Equatable {

@@ -57,7 +57,7 @@ struct NewestRowsLayout: Layout {
 /// pair leaves at the top a line at a time as new lines push it up, like the
 /// RealtimeTranslator caption. Every row is three subviews: its band, its
 /// original, its translation.
-// WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+// WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 struct SteadyPairsLayout: Layout {
     var rowSpacing: CGFloat
     var columnSpacing: CGFloat

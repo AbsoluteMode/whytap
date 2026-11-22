@@ -41,7 +41,7 @@ struct SubtitleSpeechPairer {
     /// The original runs ahead of the translation, and the words after that
     /// end usually belong to the next pair; showing them here would move them
     /// out of this row when it settles.
-    // WHY: .project-docs/decisions/2026-11-22-subtitle-steady-overlay.md
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     var liveSourceHead: String {
         let text = liveSource
         guard let end = SubtitleSegmenter.firstSentenceEnd(in: text), end < text.endIndex else { return text }

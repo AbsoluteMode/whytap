@@ -682,6 +682,13 @@ Hover capsules and materials:
   Saved tools scroll horizontally; Add and locked Settings remain visible.
   Add accepts drops and offers a click chooser. Catalog tiles remain selectable
   and draggable when pinned; their header/context menu supports Add/Remove.
+  A selected tool pins its title and a Hotkey block (Set, or keys with Change
+  and remove) above its scrolling panel; it saves at once through
+  HotkeyPreferences.assignToolShortcut (the Hotkeys apply path, conflicts save
+  nothing) with the HotkeyRecordingSession shared with Settings -> Hotkeys.
+  The selected tile is an accent wash with a bold caption; tiles take focus
+  only through keyboard navigation, with a circular focus ring. WHY:
+  .project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md
   Translate/Subtitles embed the shared translation models in compact views;
   History disables the island keyboard-paste monitor; Monitor and Record expose
   working panels. Other tools have explicit actions instead of blank panes.

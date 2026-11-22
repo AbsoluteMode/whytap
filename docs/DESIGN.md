@@ -1,5 +1,26 @@
 # Interface decisions
 
+## Toolbox: tool hotkey and selected tile — 2026-11-22
+
+The user selects a tool in Toolbox and wants to give it a key there, then
+change the tool's settings below.
+
+- A selected tool pins its title row and a Hotkey block above the scrolling
+  tool panel: a soft hover-tinted band with a keyboard glyph and "Hotkey"
+  ("Extra hotkey" for Record), and on the right Set (tinted), or the keycaps,
+  Change and a remove glyph. Recording shows dashed live keycaps, a hint and
+  Cancel; a conflict turns them red with an orange warning line and keeps
+  recording. It saves without a Save step.
+- Selected tile: 20 % accent wash on the circle, accent symbol, semibold
+  label-color caption, no outline. Keyboard focus is the system ring shaped to
+  the circle and appears only with keyboard navigation (tiles are not focused by
+  a click). Why: the click-focus ring drew a thick rectangle around circle and
+  caption; ring/solid variants were rejected because a ring reads as focus and
+  a solid fill as an "on" state. Variants and reasons:
+  `.project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md`.
+- Offscreen renders cover the minimum content size in both appearances; the
+  live focus ring and VoiceOver remain installed-app checks.
+
 ## History: several rows in one paste — 2026-11-22
 
 - ⌘-click marks a History row; a blue badge at its right edge shows its paste

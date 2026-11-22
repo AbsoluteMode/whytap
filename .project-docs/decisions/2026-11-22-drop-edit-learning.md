@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningScenarioTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md]
+related: [2026-10-19-strict-drop-modes.md, 2026-11-20-input-language-suggestion.md, 2026-11-21-recorded-meeting-models.md, 2026-11-22-drop-learning-drops.md, 2026-11-22-drop-learning-default-on.md]
 ---
 
 ## Context
@@ -104,8 +104,9 @@ that rewrites what the provider keeps getting wrong.
 - **Y goes through the same stores** the editors use. The Vocab editor loads
   its list once and saves it whole, so `VocabularyCache` and `FillerTermsStore`
   post a change notification and the open editors reload.
-- **Opt-in** (`sidekey.dropLearning.enabled`, off; Settings, Other, "Learn
-  from my edits"). The drops that ask are described in
+- **Switch** (`sidekey.dropLearning.enabled`; Settings, Other, Drop, "Learn
+  from my edits"): on unless the user switched it off, see
+  [default on](2026-11-22-drop-learning-default-on.md). The drops that ask are described in
   [the drops decision](2026-11-22-drop-learning-drops.md).
 - **Calibration** (`sidekey.dropLearning.calibration`, hidden): reads at 5 s and
   then every second until the field holds still for three reads or 30 s,

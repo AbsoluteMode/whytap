@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningDropsTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-drop-edit-learning.md]
+related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-default-on.md]
 ---
 
 ## Context
@@ -70,8 +70,8 @@ and the answer must never cost the field a letter.
   reach the field. ⌃Y / ⌃N are reserved in the Hotkeys conflict check ("Suggestion
   yes / no") so no tool can take them, and the Help window lists them. If
   another app holds a combination, the drops still answer to a click.
-- **Switch:** Settings, Other, Recording: "Learn from my edits", off by
-  default.
+- **Switch:** Settings, Other, Drop: "Learn from my edits", on unless the
+  user switched it off ([default on](2026-11-22-drop-learning-default-on.md)).
 
 ## Why
 

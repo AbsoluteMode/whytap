@@ -349,15 +349,53 @@ final class APIAndModelsViewModel: ObservableObject {
         return nil
     }
 
+    /// What a check of `account` would run against now; `nil` when the
+    /// server was removed or its key cannot be read.
+    func serverModelTarget(_ account: ProviderAccount) -> ServerModelTarget? {
+        guard let access = access(account), let server = access.server else { return nil }
+        return ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+    }
+
     /// One small request to the server: a one-word chat for an LLM, half a
-    /// second of silence for a transcription model.
+    /// second of silence for a transcription model. The result is bound to
+    /// the server's address and key when it started: if either changed while
+    /// it ran, it is reported as stale instead of passed.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-    func checkServerModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheckResult {
+    func runServerModelCheck(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheck {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let access = access(account), let server = access.server else {
-            return .failed("Couldn't read this server's key from the Keychain")
+        guard case .server(let id) = account, routing.server(id) != nil else {
+            return ServerModelCheck(name: name, kind: kind, target: nil, result: .failed("This server was removed"))
         }
-        return await serverModelChecker.check(name, kind: kind, on: server, apiKey: access.apiKey)
+        guard let access = access(account), let server = access.server else {
+            return ServerModelCheck(name: name, kind: kind, target: nil,
+                                    result: .failed("Couldn't read this server's key from the Keychain"))
+        }
+        let target = ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+        let result = await serverModelChecker.check(name, kind: kind, on: server, apiKey: access.apiKey)
+        guard serverModelTarget(account) == target else {
+            return ServerModelCheck(name: name, kind: kind, target: target,
+                                    result: .failed(Self.serverChangedDuringCheck), stale: true)
+        }
+        return ServerModelCheck(name: name, kind: kind, target: target, result: result)
+    }
+
+    static let serverChangedDuringCheck = "The server's address or key changed during the check. Add the model again."
+    static let serverChangedSinceCheck = "The server's address or key changed since the check. Add the model again."
+
+    func checkServerModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheckResult {
+        await runServerModelCheck(name, kind: kind, on: account).result
+    }
+
+    /// Adds the model a check was for: checked when it passed, unchecked
+    /// ("Save without check") when it did not. Refused when the server's
+    /// address or key is no longer the one the check ran against, so a
+    /// result never carries over to another configuration.
+    @discardableResult
+    func addServerModel(after check: ServerModelCheck, to account: ProviderAccount) -> String? {
+        if check.stale { return Self.serverChangedDuringCheck }
+        guard let target = check.target else { return "This server was removed" }
+        guard target.account == account, serverModelTarget(account) == target else { return Self.serverChangedSinceCheck }
+        return addServerModel(check.name, kind: check.kind, checked: check.result == .passed, to: account)
     }
 
     /// Adds the model to the server; `checked` is false when the user saved it

@@ -420,6 +420,7 @@ final class APIAndModelsRenderTests: XCTestCase {
                         to: directory.appendingPathComponent("server-form-\(label)-\(suffix).png"))
                 }
                 try await render(ServerModelsSection(viewModel: vm, account: .server(empty.id), models: [],
+                                                     activity: .constant(ServerFormActivity()),
                                                      draft: "qwen3:0.6b", draftKind: .transcription, draftFailure: failure)
                     .padding(16).frame(width: width - 36, alignment: .topLeading)
                     .background(MacSettingsTheme.fieldBg, in: RoundedRectangle(cornerRadius: 12))

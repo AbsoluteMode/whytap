@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// One model the user added to their own server, with what it does. A
@@ -88,6 +89,68 @@ enum ServerModelCheckResult: Equatable, Sendable {
     case failed(String)
     /// No answer: the server is down, unreachable or too slow.
     case unreachable(String)
+}
+
+/// What a check ran against: the server's address and its key at that
+/// moment (a digest, never the key). A result counts only while both are
+/// still the same; a key replaced or an address synced from another Mac
+/// during the check makes it stale.
+// WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+struct ServerModelTarget: Equatable, Sendable {
+    let account: ProviderAccount
+    let baseURL: String
+    let keyDigest: String?
+
+    init(account: ProviderAccount, baseURL: String, apiKey: String?) {
+        self.account = account
+        self.baseURL = baseURL
+        self.keyDigest = apiKey.flatMap { $0.isEmpty ? nil : SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined() }
+    }
+}
+
+/// One finished check of one model, bound to the server state it ran
+/// against. The form adds the model from it, checked or (after a refusal)
+/// unchecked, only while `target` is still the server's current state.
+struct ServerModelCheck: Equatable, Sendable {
+    let name: String
+    let kind: ServerModel.Kind
+    /// `nil` when the server was removed or its key could not be read.
+    let target: ServerModelTarget?
+    let result: ServerModelCheckResult
+    /// The server's address or key changed while the request ran: the
+    /// result says nothing about the server as it is now.
+    var stale = false
+}
+
+/// The key form's one operation at a time: saving or removing the key, or
+/// checking a model. Each blocks the others, the form is busy while either
+/// runs, and finishing one never releases the other.
+struct ServerFormActivity: Equatable, Sendable {
+    private(set) var savingKey = false
+    private(set) var checkingModel = false
+
+    var busy: Bool { savingKey || checkingModel }
+
+    /// Starts a key save; `false` (nothing started) while anything runs.
+    mutating func beginKeySave() -> Bool {
+        guard !busy else { return false }
+        savingKey = true
+        return true
+    }
+
+    mutating func finishKeySave() { savingKey = false }
+
+    /// Starts a model check; `false` (nothing started) while anything runs.
+    mutating func beginModelCheck() -> Bool {
+        guard !busy else { return false }
+        checkingModel = true
+        return true
+    }
+
+    mutating func finishModelCheck() { checkingModel = false }
+
+    /// Remove deletes the key and the server at once; never while a save or check runs.
+    var canRemove: Bool { !busy }
 }
 
 protocol ServerModelChecking: Sendable {

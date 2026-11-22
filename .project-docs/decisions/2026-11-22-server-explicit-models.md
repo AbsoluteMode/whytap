@@ -59,6 +59,16 @@ both kinds. The user knows what each model is; the app does not.
   adds it anyway with `checked: false`, shown as Not checked: a server may be
   down while it is set up, and some servers serve a model only on the
   realtime socket.
+- **A check counts only for the server as it was checked.** A check is
+  bound to the server's address and a digest of its key when it started
+  (`ServerModelTarget`; the key itself is not kept). If either changes while
+  the request runs (a replaced key, an address synced from another Mac, the
+  server removed), the result is stale and adds nothing; Save without check
+  from an earlier refusal is refused the same way once the address or key
+  changed. The form runs one operation at a time (`ServerFormActivity`):
+  while a model is checked the model field, its type, Save and Remove are
+  disabled, a key save blocks Add, and the form stays busy until the
+  operation that started it finishes.
 - **Pickers.** A server section lists only its added models of the kind the
   feature needs (`ServerModel.Kind(feature)`: Drop, Agent voice, Voice search
   and Meetings need Transcription; cleanup, notes and translation need LLM;
@@ -111,6 +121,10 @@ off, and the Not checked mark keeps that visible.
   only through Save without check; a server without `/v1/models`;
   migration of a `modelKinds: both` document (routes unchanged, entries
   derived, idempotent); restore/sync reload; a route on an unadded model.
+- Stale checks (from the build queue's review): a pass under a key replaced
+  during the check, or on an address synced during it, adds nothing; Save
+  without check after a later key or address change is refused; a server
+  removed mid-check; overlapping key save and model check keep the form busy.
 - `ServerModelCheckerTests` with a stub URL protocol: the exact 404 message
   on `/audio/transcriptions`, the request URL and multipart body, chat and
   empty-transcript passes, key refusal, server error text with the key cut

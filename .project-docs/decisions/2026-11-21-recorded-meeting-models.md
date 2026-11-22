@@ -23,7 +23,7 @@ sources:
   - type: url
     reference: https://elevenlabs.io/docs/api-reference/speech-to-text/convert (read 2026-11-21)
     confirmed_at: 2026-11-21
-related: [2026-10-18-silent-meetings.md, 2026-11-20-elevenlabs-scribe-v3.md, 2026-10-18-provider-batch-transcription.md, 2026-10-19-api-and-models.md]
+related: [2026-10-18-silent-meetings.md, 2026-11-20-elevenlabs-scribe-v3.md, 2026-10-18-provider-batch-transcription.md, 2026-10-19-api-and-models.md, 2026-11-22-drop-edit-learning.md]
 ---
 
 ## Context

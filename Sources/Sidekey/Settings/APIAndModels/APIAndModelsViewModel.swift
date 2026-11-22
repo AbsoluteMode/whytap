@@ -320,8 +320,8 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Server models
 
-    /// The server the last successful `addServer` created, so its form can
-    /// open next and ask for the first model.
+    /// The server the last successful `addServer` created, so the server
+    /// window can store its models right after.
     private(set) var lastAddedServer: ProviderAccount?
 
     private func serverModels(of account: ProviderAccount) -> [ServerModel]? {
@@ -334,7 +334,7 @@ final class APIAndModelsViewModel: ObservableObject {
     /// kinds are left out.
     func modelSuggestions(for account: ProviderAccount) -> [String] {
         guard case .server(let id) = account, let server = routing.server(id) else { return [] }
-        let ids = (catalogs.snapshot(for: account)?.models ?? []).map(\.id)
+        let ids = (catalogs.snapshot(for: account, server: server)?.models ?? []).map(\.id)
         return Array(Set(ids)).filter { name in
             !ServerModel.Kind.allCases.allSatisfy { server.hasModel(name, kind: $0) }
         }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
@@ -349,54 +349,172 @@ final class APIAndModelsViewModel: ObservableObject {
         return nil
     }
 
-    /// What a check of `account` would run against now; `nil` when the
-    /// server was removed or its key cannot be read.
-    func serverModelTarget(_ account: ProviderAccount) -> ServerModelTarget? {
-        guard let access = access(account), let server = access.server else { return nil }
-        return ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
+    // MARK: - Server sheet
+
+    /// The server window's starting state: an empty server with one model row,
+    /// or the saved server with its models (checked ones as Works).
+    func serverSheetDraft(for account: ProviderAccount?) -> ServerSheetDraft {
+        guard case .server(let id)? = account, let server = routing.server(id) else {
+            return ServerSheetDraft(isNew: true, baseURL: "", apiKey: "", hasStoredKey: false, rows: [.init()])
+        }
+        var storedKey = false
+        if case .key = keys.lookup(account: server.keyAccount) { storedKey = true }
+        let rows = (server.models ?? []).map {
+            ServerSheetDraft.Row(name: $0.name, kind: $0.kind, status: $0.checked ? .works : .notChecked)
+        }
+        return ServerSheetDraft(isNew: false, baseURL: server.baseURL, apiKey: "", hasStoredKey: storedKey,
+                                rows: rows.isEmpty ? [.init()] : rows)
+    }
+
+    /// What the window's model checks run against: the typed address and the
+    /// typed key, or the saved key when none is typed and the address is still
+    /// the saved server's origin (scheme, host and port). A saved key is never
+    /// sent to another origin: the user types it again for the new address.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    func serverSheetConnection(baseURL: String, typedKey: String, account: ProviderAccount) -> Result<ServerSheetConnection, ServerSheetProblem> {
+        let url = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.isEmpty { return .failure(.init(message: "Enter the server's base URL")) }
+        if let error = Self.baseURLError(url) { return .failure(.init(message: error)) }
+        var apiKey = typedKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard case .server(let id) = account else { return .failure(.init(message: "This server was removed")) }
+        var endpoint = ServerEndpoint(id: id, name: ServerEndpoint.displayName(for: url) ?? url, baseURL: url,
+                                      keyAccount: AIRoutingStore.serverKeyAccount(for: id))
+        if let saved = routing.server(id) {
+            endpoint = saved
+            endpoint.baseURL = url
+            if apiKey == nil, Self.origin(url) == Self.origin(saved.baseURL) {
+                switch keys.lookup(account: saved.keyAccount) {
+                case .key(let key): apiKey = key
+                case .absent: break
+                case .unreadable: return .failure(.init(message: "Couldn't read this server's key from the Keychain"))
+                }
+            }
+        }
+        return .success(ServerSheetConnection(
+            server: endpoint, apiKey: apiKey,
+            target: ServerModelTarget(account: account, baseURL: url, apiKey: apiKey)
+        ))
+    }
+
+    /// The saved server has a key that the window will not send, because the
+    /// address now points to another origin and no key is typed.
+    func serverSheetWithholdsKey(baseURL: String, typedKey: String, account: ProviderAccount) -> Bool {
+        guard case .server(let id) = account, let saved = routing.server(id),
+              typedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              Self.origin(baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) != Self.origin(saved.baseURL)
+        else { return false }
+        if case .absent = keys.lookup(account: saved.keyAccount) { return false }
+        return true
+    }
+
+    /// `/v1/models` names for the window: only while it points at the saved
+    /// server's own address, whose list they are.
+    func serverSheetSuggestions(baseURL: String, account: ProviderAccount) -> [String] {
+        guard case .server(let id) = account, let saved = routing.server(id),
+              baseURL.trimmingCharacters(in: .whitespacesAndNewlines) == saved.baseURL else { return [] }
+        return modelSuggestions(for: account)
+    }
+
+    /// `scheme://host:port`, lower case, with the scheme's default port.
+    static func origin(_ url: String) -> String? {
+        guard let components = URLComponents(string: url), let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(), !host.isEmpty else { return nil }
+        let port = components.port ?? (scheme == "https" || scheme == "wss" ? 443 : 80)
+        return "\(scheme)://\(host):\(port)"
     }
 
     /// One small request to the server: a one-word chat for an LLM, half a
-    /// second of silence for a transcription model. The result is bound to
-    /// the server's address and key when it started: if either changed while
-    /// it ran, it is reported as stale instead of passed.
+    /// second of silence for a transcription model.
     // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
-    func runServerModelCheck(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheck {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard case .server(let id) = account, routing.server(id) != nil else {
-            return ServerModelCheck(name: name, kind: kind, target: nil, result: .failed("This server was removed"))
-        }
-        guard let access = access(account), let server = access.server else {
-            return ServerModelCheck(name: name, kind: kind, target: nil,
-                                    result: .failed("Couldn't read this server's key from the Keychain"))
-        }
-        let target = ServerModelTarget(account: account, baseURL: server.baseURL, apiKey: access.apiKey)
-        let result = await serverModelChecker.check(name, kind: kind, on: server, apiKey: access.apiKey)
-        guard serverModelTarget(account) == target else {
-            return ServerModelCheck(name: name, kind: kind, target: target,
-                                    result: .failed(Self.serverChangedDuringCheck), stale: true)
-        }
-        return ServerModelCheck(name: name, kind: kind, target: target, result: result)
+    func checkServerModel(_ name: String, kind: ServerModel.Kind, on connection: ServerSheetConnection) async -> ServerModelCheckResult {
+        await serverModelChecker.check(name, kind: kind, on: connection.server, apiKey: connection.apiKey)
     }
 
-    static let serverChangedDuringCheck = "The server's address or key changed during the check. Add the model again."
-    static let serverChangedSinceCheck = "The server's address or key changed since the check. Add the model again."
+    /// Saves the whole window at once: the address (and the name older builds
+    /// show, which is the address), a typed key and the model list. A new
+    /// server, a changed address or a typed key goes through the ordinary key
+    /// check first, with the same key the rows were checked with; nothing is
+    /// stored before it passes. `expected` is what the rows were checked
+    /// against: if the address or key changed meanwhile (a synced key, say),
+    /// nothing is stored. The address, name and models are written together;
+    /// models taken off the list un-set the features of that kind that ran on
+    /// them. A saved key that would go to another origin is removed unless a
+    /// key is typed. `nil` on success.
+    // WHY: .project-docs/decisions/2026-11-22-server-window.md
+    func saveServer(_ draft: ServerSheetDraft, models: [ServerModel], account: ProviderAccount,
+                    expected: ServerModelTarget) async -> String? {
+        guard case .server(let id) = account else { return "This server was removed" }
+        let connection: ServerSheetConnection
+        switch serverSheetConnection(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account) {
+        case .success(let value): connection = value
+        case .failure(let problem): return problem.message
+        }
+        guard connection.target == expected else { return Self.serverChangedDuringCheck }
+        let url = connection.server.baseURL
+        let name = ServerEndpoint.displayName(for: url) ?? url
+        let typed = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let saved = routing.server(id)
+        if !draft.isNew, saved == nil { return "This server was removed" }
 
-    func checkServerModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) async -> ServerModelCheckResult {
-        await runServerModelCheck(name, kind: kind, on: account).result
+        var status: KeyStatus?
+        if saved == nil || url != saved?.baseURL || typed != nil {
+            let checked = await keyChecker.check(account, apiKey: connection.apiKey, server: connection.server,
+                                                 allowPaidProbe: true)
+            if case .rejected(.invalidKey) = checked {
+                return connection.apiKey == nil ? "This server asks for a key" : "Key not accepted"
+            }
+            guard checked == .valid || checked == .limited else { return Self.statusText(for: checked, account: account) }
+            status = checked
+            // The check awaited: the window's state must still be the one checked.
+            guard case .success(let after) = serverSheetConnection(baseURL: draft.baseURL, typedKey: draft.apiKey, account: account),
+                  after.target == expected else { return Self.serverChangedDuringCheck }
+            if !draft.isNew, routing.server(id) == nil { return "This server was removed" }
+        }
+
+        // From here nothing awaits until everything is written, and Save
+        // ends here: what it reports is what is stored.
+        let current = routing.server(id)
+        if saved != nil, current == nil { return "This server was removed" }
+        let keyAccount = current?.keyAccount ?? AIRoutingStore.serverKeyAccount(for: id)
+        let movesOrigin = current.map { Self.origin(url) != Self.origin($0.baseURL) } ?? false
+        do {
+            if let typed {
+                try keys.save(typed, account: keyAccount)
+            } else if movesOrigin, keys.lookup(account: keyAccount) != .absent {
+                // Read now, not when Save began: a key synced for the old
+                // address meanwhile does not go with the new one either.
+                try keys.delete(account: keyAccount)
+            }
+        } catch {
+            return "Couldn't save the key"
+        }
+        let before = Dictionary(uniqueKeysWithValues: AIFeature.activeCases.compactMap { feature in
+            routing.route(for: feature).flatMap { $0.account == account ? (feature, $0.model) : nil }
+        })
+        if current == nil {
+            routing.insertServer(ServerEndpoint(id: id, name: name, baseURL: url, keyAccount: keyAccount, models: models))
+            lastAddedServer = account
+        } else {
+            if url != current?.baseURL { catalogs.forget(account) }
+            for feature in routing.updateServer(id, name: name, baseURL: url, models: models) {
+                messages[feature] = "\(before[feature] ?? "Its model") was removed from \(name)"
+            }
+        }
+        if let status { keyStatuses.set(status, for: account, at: now()) }
+        recompute()
+        // The list only suggests names: it is loaded after Save, which does
+        // not wait for it, and a server removed meanwhile just has no list.
+        let apiKey = connection.apiKey
+        Task { [weak self] in
+            guard let self, let server = self.routing.server(id), server.baseURL == url else { return }
+            await self.catalogs.refresh(account, apiKey: apiKey, server: server)
+            self.recompute()
+        }
+        return nil
     }
 
-    /// Adds the model a check was for: checked when it passed, unchecked
-    /// ("Save without check") when it did not. Refused when the server's
-    /// address or key is no longer the one the check ran against, so a
-    /// result never carries over to another configuration.
-    @discardableResult
-    func addServerModel(after check: ServerModelCheck, to account: ProviderAccount) -> String? {
-        if check.stale { return Self.serverChangedDuringCheck }
-        guard let target = check.target else { return "This server was removed" }
-        guard target.account == account, serverModelTarget(account) == target else { return Self.serverChangedSinceCheck }
-        return addServerModel(check.name, kind: check.kind, checked: check.result == .passed, to: account)
-    }
+    static let serverChangedDuringCheck = "The server's address or key changed during the check. Save again."
+
 
     /// Adds the model to the server; `checked` is false when the user saved it
     /// without a passing check. `nil` on success, otherwise what to show.
@@ -408,19 +526,6 @@ final class APIAndModelsViewModel: ObservableObject {
         routing.addModel(ServerModel(name: name, kind: kind, checked: checked), toServer: id)
         recompute()
         return nil
-    }
-
-    /// Removes one model of one kind; the features of that kind that ran on
-    /// it become Not set, and nothing moves to another model.
-    /// Returns the features that became Not set, for the form to name them.
-    @discardableResult
-    func removeServerModel(_ model: ServerModel, from account: ProviderAccount) -> [AIFeature] {
-        guard case .server(let id) = account else { return [] }
-        let server = title(of: account)
-        let cleared = routing.removeModel(named: model.name, kind: model.kind, fromServer: id)
-        for feature in cleared { messages[feature] = "\(model.name) was removed from \(server)" }
-        recompute()
-        return cleared
     }
 
     func featuresUsing(_ account: ProviderAccount) -> [AIFeature] {
@@ -1014,7 +1119,7 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func title(of account: ProviderAccount) -> String {
-        if case .server(let id) = account, let server = routing.server(id) { return server.name }
+        if case .server(let id) = account, let server = routing.server(id) { return server.displayName }
         return account.kind.displayName
     }
 

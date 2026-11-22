@@ -90,7 +90,8 @@ actor SonioxMeetingTranscriber: MeetingRecordedTranscribing {
                 "client_reference_id": reference,
             ]
             if let language, !language.isEmpty { body["language_hints"] = [language] }
-            if !terms.isEmpty { body["context"] = ["terms": terms] }
+            let sent = VocabularyBudget.terms(terms, for: .soniox)
+            if !sent.isEmpty { body["context"] = ["terms": sent] }
             let data = try await send(path: "transcriptions", method: "POST",
                                       body: JSONSerialization.data(withJSONObject: body))
             checkpoint.transcriptionID = try Self.identifier(in: data)

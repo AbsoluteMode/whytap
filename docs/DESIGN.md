@@ -1,5 +1,49 @@
 # Interface decisions
 
+## Server window — 2026-11-22
+
+The person comes to connect their own server and say what runs on it. First
+they see the address and each model with its type and whether it works; then
+they add or fix a model and save once. Direction: the maintainer's "one
+window" request (REV 6 mockups approved before wiring).
+
+- The Custom server tile and each server's tile open a 600 pt sheet, not the
+  inline key form: title (the server's address name, or "Add your server"),
+  one 11.5 pt line on what fits, then two inset groups. Connection: Base URL
+  and API key as labeled rows (88 pt label column). Models: one row per model,
+  "+ Add model" as the group's last row, an explanation under the group.
+  Footer: Remove server (existing only), a one-line summary, Cancel, Save.
+  Why: one object, one window, one Save.
+- No name field. The title and the tile show the address
+  (`ServerEndpoint.displayName`). Why: the name was useless and drifted.
+- A model row is a monospaced name field with a ▾ of the server's
+  `/v1/models` inside it, a 176 pt LLM/Transcription segmented control, a
+  104 pt status column (reserved even before the first check, so rows line
+  up) and ×. Status: spinner + Checking…, green Works, red Failed with the
+  server's reason as a full-width line under the row, orange Not checked.
+  Why: the type and the result sit next to the model they describe.
+- Save is disabled while a row is checking and turns into Save anyway when a
+  failure is on screen; the summary says what Save anyway does in red. Save
+  errors use the same summary line. Cancel is the cancel action, Save the
+  default action.
+- The connection and model groups scroll past 460 pt and shrink further
+  when the window has less room; the title and the footer keep their height.
+  Why: a long model list must not push Save off the screen.
+- A typed key that was already sent is cleared when the address moves to
+  another server, with "The key was typed for another address. Type it
+  again to use it here." under the field. Why: a key goes to one server.
+- When the address moves to another server and no key is typed, the key
+  field reads "Optional" with "The saved key stays with the old address.
+  Type it again to use it here." under it. Why: the saved key is not sent to
+  another server, and the user should know before Save removes it.
+- Colors are the shared Settings tokens (status green/red/orange, row
+  separators, card groups) in both appearances; no new tokens.
+
+Offscreen renders cover new, two models of both types, a failed check, a
+new server's first check and 16 models (scrolling) in light and dark, plus
+the tiles. Real pointer,
+keyboard focus order and VoiceOver in the installed app remain acceptance.
+
 ## Toolbox: tool hotkey and selected tile — 2026-11-22
 
 The user selects a tool in Toolbox and wants to give it a key there, then

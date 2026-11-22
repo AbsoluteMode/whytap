@@ -339,7 +339,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.chips[1].statusText, "Couldn't read the key from the Keychain",
                        "an unreadable key is a key problem, never no key")
         XCTAssertEqual(vm.chips[2].statusText, "Out of credit or key limit reached")
-        XCTAssertEqual(vm.chips[3].title, "Lab")
+        XCTAssertEqual(vm.chips[3].title, "10.0.0.2:8000", "a server is named by its address")
         XCTAssertEqual(vm.chips[3].statusText, "Not checked yet")
         XCTAssertEqual(vm.addableKinds, [.deepgram, .openAI, .anthropic, .openAICompatible])
     }

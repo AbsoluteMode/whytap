@@ -185,7 +185,7 @@ struct RecordedMeetingTranscriber: MeetingRecordedTranscribing {
             URLQueryItem(name: "utterances", value: "true"),
             URLQueryItem(name: "language", value: language),
         ]
-        for term in terms { items.append(URLQueryItem(name: "keyterm", value: term)) }
+        for term in VocabularyBudget.terms(terms, for: .deepgram) { items.append(URLQueryItem(name: "keyterm", value: term)) }
         components.queryItems = items
         return components.url!
     }

@@ -535,20 +535,18 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
     }
 
     /// What an OpenAI transcription model can do, or `nil` for a model that
-    /// is not one. The streaming models (`gpt-live-transcribe`,
-    /// `gpt-realtime-whisper`) are live only; the turn-based ones also take a
-    /// file. The diarizing model is left out (`[]`): no OpenAI realtime
-    /// session labels speakers and OpenAI retires it.
+    /// is not one. Two are offered: `gpt-live-transcribe` live and
+    /// `gpt-transcribe` for recorded audio. Every other transcription model
+    /// (`gpt-realtime-whisper`, the deprecated `gpt-4o-*transcribe*` and
+    /// `whisper-1`, the diarizing one) is left out (`[]`).
     // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     static func openAISpeechUses(_ base: String) -> Set<ModelUse>? {
-        if base.hasPrefix(ModelRegistry.openAILiveModel) || base.hasPrefix(ModelRegistry.openAIRealtimeWhisperModel) {
-            return [.realtimeSTT]
-        }
+        if base.hasPrefix(ModelRegistry.openAILiveModel) { return [.realtimeSTT] }
         if base.contains("transcribe-diarize") { return [] }
-        if base == "whisper-1" || base.hasPrefix(ModelRegistry.openAIRecordedModel)
-            || base.hasPrefix("gpt-4o-transcribe") || base.hasPrefix("gpt-4o-mini-transcribe") {
-            return [.realtimeSTT, .asyncSTT]
+        if base == ModelRegistry.openAIRecordedModel || base.hasPrefix(ModelRegistry.openAIRecordedModel + "-") {
+            return [.asyncSTT]
         }
+        if base.contains("transcribe") || base.contains("whisper") { return [] }
         return nil
     }
 

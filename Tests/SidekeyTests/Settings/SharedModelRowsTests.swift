@@ -221,11 +221,13 @@ final class SharedModelRowsTests: XCTestCase {
         let env = try makeEnv(snapshots: [.openAI: fresh(catalog)], keyed: [.openAI])
         let vm = env.makeViewModel()
 
+        // One live model on offer, with its price; the catalog's other
+        // transcription models are not.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
         let section = try XCTUnwrap(vm.sections(for: SharedModelKind.speech.pickerFeature).first { $0.account == .openAI })
-        XCTAssertEqual(Set(section.options.map(\.model)),
-                       ["gpt-live-transcribe", "gpt-realtime-whisper", "gpt-4o-mini-transcribe"])
-        XCTAssertEqual(section.options.first { $0.model == "gpt-4o-mini-transcribe" }?.hint, "text after each pause")
-        XCTAssertNil(section.options.first { $0.model == "gpt-live-transcribe" }?.hint)
+        XCTAssertEqual(section.options.map(\.model), ["gpt-live-transcribe"])
+        XCTAssertNil(section.options.first?.hint)
+        XCTAssertEqual(section.options.first?.priceLabel, "$0.017 per min")
 
         let picked = await vm.selectShared(model: ModelRegistry.openAILiveModel, account: .openAI,
                                            kind: .speech, replaceCustom: false)
@@ -268,7 +270,7 @@ final class SharedModelRowsTests: XCTestCase {
         }
         XCTAssertEqual(env2.probe.calls.map(\.use), [.realtimeSTT, .chat])
         let text = try row(.llm, vm)
-        XCTAssertEqual(text.label, "Lab · qwen3:8b · 1 not set")
+        XCTAssertEqual(text.label, "localhost:8000 · qwen3:8b · 1 not set", "a server is named by its address")
         XCTAssertEqual(text.uncovered.map(\.feature), [.agent])
     }
 
@@ -314,7 +316,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { env.routing.route(for: $0) == nil })
         let notes = try row(.speech, vm).notes
         XCTAssertEqual(notes.count, SharedModelKind.speech.features.count)
-        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Lab as a Transcription model") }, "\(notes)")
+        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Ollama · localhost:11434 as a Transcription model") }, "\(notes)")
 
         // Added as Transcription, the same name is a speech model too.
         XCTAssertNil(vm.addServerModel("qwen3:8b", kind: .transcription, checked: true, to: account))

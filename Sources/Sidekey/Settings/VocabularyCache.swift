@@ -1,16 +1,16 @@
 // Sources/Sidekey/Settings/VocabularyCache.swift
 import Foundation
 
-/// Reasons a user-entered term gets rejected. Mirrors the strictest provider
-/// keyterm constraints so the user sees inline errors immediately.
+/// Reasons a user-entered term gets rejected. The list is one for every route;
+/// each request sends the part its provider accepts (`VocabularyBudget`).
 enum VocabularyRejectionReason: Equatable {
     /// Empty after `.trimmingCharacters(in: .whitespacesAndNewlines)`.
     case empty
-    /// Term length exceeds the 20-char cap.
+    /// Term length exceeds the 50-char cap.
     case tooLong
     /// Already present in the list (case-insensitive compare).
     case duplicate
-    /// Adding would push the list over the 50-term cap.
+    /// Adding would push the list over the 1,000-term cap.
     case tooMany
 }
 
@@ -27,13 +27,18 @@ enum VocabularyAddResult: Equatable {
 final class VocabularyCache {
     static let shared = VocabularyCache()
 
-    /// Maximum terms allowed in a single list, aligned with the strictest
-    /// provider (ElevenLabs Scribe keyterms) so the full list reaches every
-    /// STT provider intact.
-    static let maxTermCount = 50
-    /// Maximum length of a single term in characters (ElevenLabs Scribe
-    /// keyterm cap).
-    static let maxTermLength = 20
+    /// The saved list is no longer capped by the strictest provider: each
+    /// request takes the part its route accepts, in list order
+    /// (`VocabularyBudget`). These caps only bound the stored list.
+    // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    static let maxTermCount = 1_000
+    /// ElevenLabs recorded keyterms allow 50 characters; realtime routes skip
+    /// longer terms per request.
+    static let maxTermLength = 50
+
+    /// Posted after every write so an open editor reloads a list changed
+    /// elsewhere (a learning suggestion's Y, settings sync).
+    static let didChangeNotification = Notification.Name("sidekey.vocabulary.didChange")
 
     private let defaults: UserDefaults
     private let key = "sidekey.preferences.vocabularyTerms"
@@ -42,7 +47,24 @@ final class VocabularyCache {
 
     var terms: [String] { defaults.stringArray(forKey: key) ?? [] }
 
-    func setTerms(_ terms: [String]) { defaults.set(terms, forKey: key) }
+    func setTerms(_ terms: [String]) {
+        defaults.set(terms, forKey: key)
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+    }
+
+    /// Validates against the stored list and appends on success.
+    @discardableResult
+    func add(_ raw: String) -> VocabularyAddResult {
+        let current = terms
+        let result = Self.validate(raw, against: current)
+        guard result == .added else { return result }
+        setTerms(current + [raw.trimmingCharacters(in: .whitespacesAndNewlines)])
+        return .added
+    }
+
+    func remove(_ term: String) {
+        setTerms(terms.filter { $0.caseInsensitiveCompare(term) != .orderedSame })
+    }
 
     /// Validates `raw` against the current list. Pure: does not mutate the
     /// store — callers append and `setTerms` on `.added`.

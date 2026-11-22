@@ -63,6 +63,32 @@ extension ServerEndpoint {
     }
 }
 
+extension ServerEndpoint {
+    /// What the server is called everywhere: its address, without scheme or
+    /// path, the port kept unless it is the scheme's own. A local port that
+    /// names a known server adds that name: `Ollama · localhost:11434`,
+    /// `LM Studio · localhost:1234`; any other address is just itself
+    /// (`vllm.company.ru`). `nil` for a base URL without a host.
+    // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
+    static func displayName(for baseURL: String) -> String? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withScheme = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        guard let components = URLComponents(string: withScheme), let host = components.host?.lowercased(),
+              !host.isEmpty else { return nil }
+        let scheme = components.scheme?.lowercased()
+        let defaultPort = (scheme == "https" || scheme == "wss") ? 443 : 80
+        var address = host
+        if let port = components.port, port != defaultPort { address += ":\(port)" }
+        switch components.port {
+        case 11434?: return "Ollama · " + address
+        case 1234?: return "LM Studio · " + address
+        default: return address
+        }
+    }
+
+    var displayName: String { Self.displayName(for: baseURL) ?? name }
+}
+
 /// Guesses a model's kind from its name, only to preselect the type when the
 /// user adds a model: the user decides. Unknown names guess LLM.
 enum ServerModelClassifier {
@@ -93,8 +119,8 @@ enum ServerModelCheckResult: Equatable, Sendable {
 
 /// What a check ran against: the server's address and its key at that
 /// moment (a digest, never the key). A result counts only while both are
-/// still the same; a key replaced or an address synced from another Mac
-/// during the check makes it stale.
+/// still the same: a changed address or key, typed or synced from another
+/// Mac, needs a new check.
 // WHY: .project-docs/decisions/2026-11-22-server-explicit-models.md
 struct ServerModelTarget: Equatable, Sendable {
     let account: ProviderAccount
@@ -108,49 +134,15 @@ struct ServerModelTarget: Equatable, Sendable {
     }
 }
 
-/// One finished check of one model, bound to the server state it ran
-/// against. The form adds the model from it, checked or (after a refusal)
-/// unchecked, only while `target` is still the server's current state.
-struct ServerModelCheck: Equatable, Sendable {
-    let name: String
-    let kind: ServerModel.Kind
-    /// `nil` when the server was removed or its key could not be read.
-    let target: ServerModelTarget?
-    let result: ServerModelCheckResult
-    /// The server's address or key changed while the request ran: the
-    /// result says nothing about the server as it is now.
-    var stale = false
+/// What a model check in the server window runs against.
+struct ServerSheetConnection: Sendable {
+    let server: ServerEndpoint
+    let apiKey: String?
+    let target: ServerModelTarget
 }
 
-/// The key form's one operation at a time: saving or removing the key, or
-/// checking a model. Each blocks the others, the form is busy while either
-/// runs, and finishing one never releases the other.
-struct ServerFormActivity: Equatable, Sendable {
-    private(set) var savingKey = false
-    private(set) var checkingModel = false
-
-    var busy: Bool { savingKey || checkingModel }
-
-    /// Starts a key save; `false` (nothing started) while anything runs.
-    mutating func beginKeySave() -> Bool {
-        guard !busy else { return false }
-        savingKey = true
-        return true
-    }
-
-    mutating func finishKeySave() { savingKey = false }
-
-    /// Starts a model check; `false` (nothing started) while anything runs.
-    mutating func beginModelCheck() -> Bool {
-        guard !busy else { return false }
-        checkingModel = true
-        return true
-    }
-
-    mutating func finishModelCheck() { checkingModel = false }
-
-    /// Remove deletes the key and the server at once; never while a save or check runs.
-    var canRemove: Bool { !busy }
+struct ServerSheetProblem: Error, Equatable {
+    let message: String
 }
 
 protocol ServerModelChecking: Sendable {

@@ -53,6 +53,11 @@ final class OnboardingModel: ObservableObject {
     /// The user chose Set up later on the speech page.
     private var speechSkipped = false
     private var downloadStarted = false
+    /// Numbers every speech action on the page (a tile picked, Continue, a
+    /// key save, the download). An answer that arrives after a newer action
+    /// changes nothing about Drop's route or the page: the latest action wins.
+    // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+    private(set) var speechAction = 0
     private var pollTimer: Timer?
     private var pollBudget = DropHotkeyRecoveryPollBudget()
     private var subscriptions: Set<AnyCancellable> = []
@@ -171,6 +176,7 @@ final class OnboardingModel: ObservableObject {
     /// belong to this task, not to the window: closing the onboarding during
     /// the download still gives Drop its model when it lands.
     func startOnDevice() {
+        beginSpeechAction()
         if onDevice.status == .ready {
             // The model is here: this is a choice, like Continue on a tile.
             dropPick = .onThisMac
@@ -188,10 +194,18 @@ final class OnboardingModel: ObservableObject {
         advance()
     }
 
-    /// A speech key was accepted and saved (or an existing one chosen).
-    /// A save that lands after the person moved on sets the route and stays
-    /// on the page they are on.
-    func useKey(_ kind: AIProviderKind) {
+    /// Starts a speech action and returns its number (see `speechAction`).
+    @discardableResult
+    func beginSpeechAction() -> Int {
+        speechAction += 1
+        return speechAction
+    }
+
+    /// A speech key was accepted and saved. The key stays saved either way;
+    /// Drop's route and the page follow it only when no newer speech action
+    /// (another tile, Continue, another save) started after this save did.
+    func useKey(_ kind: AIProviderKind, action: Int) {
+        guard action == speechAction else { return routesChanged() }
         dropPick = .provider(kind)
         dropCheck = .idle
         speech.choose(provider: kind)
@@ -231,6 +245,7 @@ final class OnboardingModel: ObservableObject {
 
     /// A saved speech tile or the downloaded model was picked.
     func pickDrop(_ choice: OnboardingDropChoice) {
+        beginSpeechAction()
         dropPick = choice
         dropCheck = .idle
     }
@@ -249,6 +264,7 @@ final class OnboardingModel: ObservableObject {
             if dropReady { advance() }
             return
         }
+        let action = beginSpeechAction()
         guard case .provider(let kind) = choice, speech.currentAccount != choice.account,
               let account = APIAndModelsViewModel.builtInAccount(for: kind) else {
             return apply(choice)
@@ -257,7 +273,8 @@ final class OnboardingModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let status = await self.models.checkSavedKey(account)
-            guard self.dropCheck == .checking else { return }
+            // A newer pick, Continue or save replaced this request.
+            guard action == self.speechAction else { return }
             switch status {
             case .rejected?:
                 self.dropCheck = .failed(choice, self.keyRefusal(kind) ?? "\(choice.name) did not accept the key")

@@ -92,10 +92,11 @@ final class OnboardingTests: XCTestCase {
     }
 
     private func makeModel(_ env: Env, permissions: PermissionsSettingsViewModel,
-                           supportsOnDevice: Bool = true, refusing: [ProviderAccount] = []) -> OnboardingModel {
+                           supportsOnDevice: Bool = true, refusing: [ProviderAccount] = [],
+                           keyChecker: ProviderKeyChecking? = nil) -> OnboardingModel {
         // Keys and key checks stay in this test's stores, never the real Keychain.
         let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: env.controller(),
-                                    supportsOnDevice: supportsOnDevice, models: try? offlineModels(env, refusing: refusing),
+                                    supportsOnDevice: supportsOnDevice, models: try? offlineModels(env, refusing: refusing, keyChecker: keyChecker),
                                     preferences: PrivacyPreferences(defaults: env.defaults),
                                     codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
                                     defaultsChanges: NotificationCenter())
@@ -421,6 +422,86 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(model.speechCanContinue)
     }
 
+    // MARK: - Overlapping speech actions (builder findings on #397)
+
+    func testAnEarlierContinueThatFinishesFirstDoesNotWinOverTheLaterOne() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox, .deepgram])
+        let checker = GatedChecker(gated: ["soniox-key", "deepgram-key"]) { _ in .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        XCTAssertEqual(model.chosenDrop, .provider(.soniox))
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        model.pickDrop(.provider(.deepgram))
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("deepgram-key") }
+
+        checker.release("soniox-key")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNil(env.routing.route(for: .dropFast), "the replaced request sets nothing")
+        XCTAssertEqual(model.page, .speech, "and does not move the page")
+
+        checker.release("deepgram-key")
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .deepgram)
+    }
+
+    func testARefusalOfAKeyReplacedDuringTheCheckIsNotRecordedAgainstTheNewKey() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { key in key == "soniox-key" ? .rejected(.invalidKey) : .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        // The key is replaced in Settings while the old one is being checked.
+        let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .soniox)?.keychainAccount(in: env.routing))
+        try env.keys.save("soniox-new", account: account)
+        checker.release("soniox-key")
+
+        try await eventually { model.page == .permissions }
+        XCTAssertNil(model.keyRefusal(.soniox), "the old key's refusal is not the new key's")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox, "the new key was checked and used")
+    }
+
+    func testAnOldKeysSuccessDoesNotValidateAReplacementThatIsRefused() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { key in key == "soniox-key" ? .valid : .rejected(.invalidKey) }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .soniox)?.keychainAccount(in: env.routing))
+        try env.keys.save("soniox-bad", account: account)
+        checker.release("soniox-key")
+
+        try await eventually { if case .failed = model.dropCheck { return true } else { return false } }
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+    }
+
+    func testASaveThatFinishesAfterAContinueKeepsTheKeyButNotTheRoute() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        // Save pressed for a new Deepgram key; while it is checked, Continue with Soniox.
+        let save = model.beginSpeechAction()
+        model.continueFromSpeech()
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox)
+
+        try saveKeys(env, [.deepgram])  // the earlier save lands
+        model.useKey(.deepgram, action: save)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox, "the later choice stays")
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .soniox)
+        XCTAssertEqual(model.page, .permissions)
+        XCTAssertTrue(model.keyAvailable(.deepgram), "the saved key stays for later")
+    }
+
     func testARefusedKeyFallsBackToTheNextChoice() async throws {
         let env = try makeEnv()
         try saveKeys(env, [.soniox, .deepgram])
@@ -459,7 +540,7 @@ final class OnboardingTests: XCTestCase {
         model.goBack()
         XCTAssertEqual(model.page, .speech, "Back on the first page does nothing")
 
-        model.useKey(.deepgram)
+        model.useKey(.deepgram, action: model.beginSpeechAction())
         var forward = [model.page]
         while !model.isLastPage { model.advance(); forward.append(model.page) }
         XCTAssertEqual(forward, [.permissions, .tryDrop, .customize, .features])
@@ -517,7 +598,7 @@ final class OnboardingTests: XCTestCase {
                                     codingTools: tools, defaultsChanges: NotificationCenter())
         addTeardownBlock { model.stop() }
         model.setLanguage(AppLanguage.find(code: "ru"))
-        model.useKey(.deepgram)
+        model.useKey(.deepgram, action: model.beginSpeechAction())
         XCTAssertEqual(model.page, .tryDrop)
         model.noteDictated()
         model.advance()
@@ -543,7 +624,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(tools.state, .connected, "Coding agents stay connected")
         model.goBack()
         model.goBack()
-        model.useKey(.deepgram)
+        model.useKey(.deepgram, action: model.beginSpeechAction())
         XCTAssertEqual(model.page, .tryDrop, "Choosing again is safe: only the speech page moves on")
     }
 
@@ -697,10 +778,11 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
+        let save = model.beginSpeechAction()  // Save pressed on the speech page
         model.setUpSpeechLater()
         XCTAssertEqual(model.page, .permissions)
         try env.keys.save("fixture", account: BYOKKeyStore.account(for: .soniox))
-        model.useKey(.soniox)  // the check finished late
+        model.useKey(.soniox, action: save)  // the check finished late
         XCTAssertTrue(model.dropReady, "The key still becomes Drop's speech")
         XCTAssertEqual(model.page, .permissions, "and the person stays where they are")
     }
@@ -933,7 +1015,37 @@ final class OnboardingTests: XCTestCase {
         func release() {}
     }
 
-    private func offlineModels(_ env: Env, refusing: [ProviderAccount] = []) throws -> APIAndModelsViewModel {
+    /// A key check that waits for the test for the listed key values, then
+    /// answers by the key value it was asked about.
+    private final class GatedChecker: ProviderKeyChecking, @unchecked Sendable {
+        private let lock = NSLock()
+        private var gated: Set<String>
+        private var waiting: [(key: String, resume: CheckedContinuation<Void, Never>)] = []
+        private let verdict: @Sendable (String?) -> KeyStatus
+        init(gated: Set<String>, verdict: @escaping @Sendable (String?) -> KeyStatus) {
+            self.gated = gated
+            self.verdict = verdict
+        }
+        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
+            if let apiKey, lock.withLock({ gated.contains(apiKey) }) {
+                await withCheckedContinuation { resume in lock.withLock { waiting.append((apiKey, resume)) } }
+            }
+            return verdict(apiKey)
+        }
+        func isWaiting(_ key: String) -> Bool { lock.withLock { waiting.contains { $0.key == key } } }
+        func release(_ key: String) {
+            let resumes: [CheckedContinuation<Void, Never>] = lock.withLock {
+                gated.remove(key)
+                let found = waiting.filter { $0.key == key }.map(\.resume)
+                waiting.removeAll { $0.key == key }
+                return found
+            }
+            resumes.forEach { $0.resume() }
+        }
+    }
+
+    private func offlineModels(_ env: Env, refusing: [ProviderAccount] = [],
+                               keyChecker: ProviderKeyChecking? = nil) throws -> APIAndModelsViewModel {
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
         try Data("{}".utf8).write(to: catalogURL)
@@ -942,7 +1054,7 @@ final class OnboardingTests: XCTestCase {
             routing: env.routing, keys: env.keys,
             catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
-            keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
+            keyChecker: keyChecker ?? offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
     }
 
     /// Offscreen PNGs of every page, walked the way a new Mac goes through

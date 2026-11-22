@@ -10,6 +10,45 @@ struct OnboardingModelChoice: Equatable, Identifiable {
     var outputPerMillion: Double?
 }
 
+/// The search in "Choose model": a provider with more than ten models gets
+/// one over its whole catalog, by readable name and ID (the owner, REV 52:
+/// "maybe just give a search above 10 models").
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+enum OnboardingModelSearch {
+    static let threshold = 10
+
+    static func offersSearch(_ catalog: [OnboardingModelChoice]) -> Bool { catalog.count > threshold }
+
+    /// Names that start with the text first, then names that contain it;
+    /// newest first within each.
+    static func matches(_ query: String, in catalog: [OnboardingModelChoice]) -> [OnboardingModelChoice] {
+        let needle = fold(query)
+        guard !needle.isEmpty else { return [] }
+        let words = needle.split(separator: " ").map(String.init)
+        func fields(_ choice: OnboardingModelChoice) -> [String] {
+            [fold(OnboardingModelPick.readableName(choice.id)), fold(choice.id),
+             fold(choice.id.split(separator: "/").last.map(String.init) ?? choice.id)]
+        }
+        let newest: (OnboardingModelChoice, OnboardingModelChoice) -> Bool = {
+            ($0.date ?? .distantPast) > ($1.date ?? .distantPast)
+        }
+        let hits = catalog.filter { choice in
+            let all = fields(choice).joined(separator: " ")
+            return words.allSatisfy { all.contains($0) }
+        }
+        let starts = hits.filter { fields($0).contains { $0.hasPrefix(needle) } }.sorted(by: newest)
+        let rest = hits.filter { hit in !starts.contains(hit) }.sorted(by: newest)
+        return starts + rest
+    }
+
+    static func fold(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+}
+
 /// Which models a key step lists and which one it starts on: the provider's
 /// current catalog, never a fixed list. The default is the newest flagship:
 /// the newest generation (models within 30 days of the newest) and in it the

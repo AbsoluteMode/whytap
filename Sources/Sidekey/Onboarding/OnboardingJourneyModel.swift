@@ -561,6 +561,17 @@ final class OnboardingJourneyModel: ObservableObject {
         }
     }
 
+    /// Every usable model of the step's provider, for the search in
+    /// "Choose model" (the list itself shows a selection).
+    func modelCatalog(_ step: OnboardingStep, provider: AIProviderKind? = nil) -> [OnboardingModelChoice] {
+        switch step {
+        case .speechKey: return allChoices(for: provider ?? speechProvider, speech: true)
+        case .llmKey:
+            return allChoices(for: provider ?? llmProvider, speech: false).filter { OnboardingModelPick.isListed($0.id, speech: false) }
+        default: return []
+        }
+    }
+
     private func choices(for provider: AIProviderKind, speech: Bool) -> [OnboardingModelChoice] {
         let all = allChoices(for: provider, speech: speech)
         var listed = OnboardingModelPick.listed(all, speech: speech, router: provider == .openRouter)

@@ -1562,7 +1562,7 @@ struct OnboardingKeyStage: View {
                 // waits for a pick in "Choose model" or Next.
                 VStack(spacing: 5) {
                     Text("\(name) key accepted · saved in your Keychain").foregroundColor(OnboardingTheme.green)
-                    OnboardingModelMenu(choices: choices, selected: model.checkedModel(step),
+                    OnboardingModelMenu(choices: choices, catalog: model.modelCatalog(step), selected: model.checkedModel(step),
                                         recommended: model.recommendedModel(step),
                                         busy: model.choosingModel == step,
                                         opened: { model.modelMenu(open: $0) }) { id in
@@ -1782,6 +1782,8 @@ struct OnboardingKeyStage: View {
 /// "Model": AppKit keeps one text of a menu's label.)
 struct OnboardingModelMenu: View {
     let choices: [OnboardingModelChoice]
+    /// The provider's whole catalog, searched when it has more than ten.
+    var catalog: [OnboardingModelChoice] = []
     /// The model the person picked, checked in the list and named on the
     /// button; nil until a pick.
     let selected: String?
@@ -1829,7 +1831,7 @@ struct OnboardingModelMenu: View {
     }
 
     private var list: some View {
-        OnboardingModelList(choices: choices, selected: selected, recommended: recommended) { id in
+        OnboardingModelList(choices: choices, catalog: catalog, selected: selected, recommended: recommended) { id in
             picking = true
             open = false
             pick(id)
@@ -1841,15 +1843,64 @@ struct OnboardingModelMenu: View {
 /// recommended one tagged, prices on the right.
 struct OnboardingModelList: View {
     let choices: [OnboardingModelChoice]
+    /// The whole catalog: above ten models a search field leads the list
+    /// and the typed text searches all of it.
+    var catalog: [OnboardingModelChoice] = []
     let selected: String?
     let recommended: String?
     let pick: (String) -> Void
+    @State private var query: String
+    @FocusState private var searching: Bool
+
+    init(choices: [OnboardingModelChoice], catalog: [OnboardingModelChoice] = [], selected: String?,
+         recommended: String?, query: String = "", pick: @escaping (String) -> Void) {
+        self.choices = choices
+        self.catalog = catalog
+        self.selected = selected
+        self.recommended = recommended
+        self.pick = pick
+        _query = State(initialValue: query)
+    }
+
+    private var searchable: Bool { OnboardingModelSearch.offersSearch(catalog) }
+    private var typed: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var shown: [OnboardingModelChoice] { typed ? OnboardingModelSearch.matches(query, in: catalog) : choices }
 
     var body: some View {
         VStack(spacing: 1) {
-            ForEach(choices) { choice in
-                OnboardingModelRow(choice: choice, isSelected: choice.id == selected,
-                                   isRecommended: choice.id == recommended) { pick(choice.id) }
+            if searchable {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundColor(OnboardingTheme.muted)
+                        .accessibilityHidden(true)
+                    TextField("", text: $query, prompt: Text("Search \(catalog.count) models").foregroundColor(OnboardingTheme.faint))
+                        .textFieldStyle(.plain)
+                        .font(OnboardingTheme.sans(12.5))
+                        .foregroundColor(OnboardingTheme.ink)
+                        .focused($searching)
+                        .onSubmit { if typed, let first = shown.first { pick(first.id) } }
+                        .accessibilityLabel("Search models")
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.05)))
+                .padding(.bottom, 4)
+                .onAppear { searching = true }
+            }
+            if typed, shown.isEmpty {
+                Text("No model matches “\(query.trimmingCharacters(in: .whitespaces))”")
+                    .font(OnboardingTheme.sans(12))
+                    .foregroundColor(OnboardingTheme.faint)
+                    .frame(height: 40)
+            } else if typed {
+                // Search results may be many: they scroll, the field stays.
+                ScrollView {
+                    rows(shown)
+                }
+                .frame(height: min(CGFloat(shown.count) * 41, 330))
+            } else {
+                rows(shown)
             }
         }
         .padding(6)
@@ -1858,6 +1909,15 @@ struct OnboardingModelList: View {
         .frame(minWidth: 280, maxWidth: 480)
         .background(Color(red: 0.086, green: 0.086, blue: 0.098))
         .preferredColorScheme(.dark)
+    }
+
+    private func rows(_ list: [OnboardingModelChoice]) -> some View {
+        VStack(spacing: 1) {
+            ForEach(list) { choice in
+                OnboardingModelRow(choice: choice, isSelected: choice.id == selected,
+                                   isRecommended: choice.id == recommended) { pick(choice.id) }
+            }
+        }
     }
 }
 

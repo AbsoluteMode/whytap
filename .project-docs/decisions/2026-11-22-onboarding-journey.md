@@ -360,6 +360,17 @@ window, Back and a progress bar.
   host). The Settings path of the first version
   (`SettingsWindowSelection.requestNewServer`) was removed with it, so this
   branch no longer touches the Custom server tile of PR 408.
+- **"Choose model" searches a large catalog.** The owner, REV 52: "maybe
+  just give a search above 10 models". When the accepted provider's catalog
+  has more than ten usable models (`OnboardingModelSearch.threshold`), the
+  list opens with a search field ("Search 13 models"). Without text the list
+  is the selection as before (Recommended and the picks; OpenRouter one
+  flagship per author); with text it shows matches from the whole catalog
+  (`modelCatalog`, OpenRouter's every model) by readable name and ID, words
+  in any order, case and dashes ignored, names that start with the text
+  first and newest first, scrolling past about eight rows; Return takes the
+  first. Ten or fewer: no field. A model found by search is set like any
+  pick; the checkmark, Recommended tag and uncut names stay as before.
 - **"Accepted" belongs to the provider or server that answered.** The owner
   saw "Anthropic · dsfadfdas · dafdasfdasf · key saved in your Keychain"
   after adding a server and clicking Anthropic, and asked what happens when
@@ -444,6 +455,12 @@ window, Back and a progress bar.
   are only needed by Meetings and Now Playing and are asked at first use.
 
 ## What was tested
+
+- REV 52: the model search finds by readable name and ID, words in any
+  order, nothing for blank or unknown text, a field only above ten models;
+  OpenRouter's search covers its whole catalog beyond the listed selection
+  and a model found by it is set and checked like any pick; offscreen
+  renders of the list with the field and with "gemini".
 
 - `OnboardingGlobeTests` (REV 50): the typed text finds the country ("Rus",
   "Jap", "Port" before Portuguese, "uk") and a language's home country with

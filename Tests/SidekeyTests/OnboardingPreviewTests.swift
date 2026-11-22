@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Sidekey
 
@@ -613,5 +614,57 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useSpeechKey("", provider: .soniox)
         XCTAssertEqual(speechRoute(model), account(.soniox), "Return on the saved key moves the route back")
         XCTAssertEqual(model.outcome(.speechKey, for: .server), .idle)
+    }
+
+    // MARK: - Search in "Choose model" (REV 52)
+
+    func testModelSearchFindsByNameAndID() {
+        let catalog = ["anthropic/claude-sonnet-5.5", "anthropic/claude-fable-5.2", "openai/gpt-6.2-sol",
+                       "openai/gpt-6.2-astra", "google/gemini-3.8-pro", "deepseek/deepseek-v4"].map {
+            OnboardingModelChoice(id: $0)
+        }
+        XCTAssertEqual(OnboardingModelSearch.matches("sonnet", in: catalog).map(\.id), ["anthropic/claude-sonnet-5.5"])
+        XCTAssertEqual(Set(OnboardingModelSearch.matches("GPT 6.2", in: catalog).map(\.id)),
+                       ["openai/gpt-6.2-sol", "openai/gpt-6.2-astra"], "words in any order, case and dashes ignored")
+        XCTAssertEqual(OnboardingModelSearch.matches("claude-fable", in: catalog).map(\.id), ["anthropic/claude-fable-5.2"], "by ID")
+        XCTAssertEqual(OnboardingModelSearch.matches("Gemini 3.8 Pro", in: catalog).map(\.id), ["google/gemini-3.8-pro"], "by readable name")
+        XCTAssertTrue(OnboardingModelSearch.matches("  ", in: catalog).isEmpty)
+        XCTAssertTrue(OnboardingModelSearch.matches("llama", in: catalog).isEmpty)
+        XCTAssertFalse(OnboardingModelSearch.offersSearch(Array(repeating: catalog[0], count: 10)), "ten or fewer: no search")
+        XCTAssertTrue(OnboardingModelSearch.offersSearch(Array(repeating: catalog[0], count: 11)))
+    }
+
+    /// OpenRouter's catalog is large: the search covers all of it while the
+    /// list stays the selection; a pick from the search sets that model.
+    func testOpenRouterSearchesItsWholeCatalog() async throws {
+        let (session, model) = try await atLanguageModelStep()
+        defer { session.clear() }
+        model.llmProvider = .openRouter
+        await model.useLLMKey("sk-or-v1-good-0123456789abcdef", provider: .openRouter)
+        let catalog = model.modelCatalog(.llmKey)
+        let listed = model.modelChoices(.llmKey)
+        XCTAssertTrue(OnboardingModelSearch.offersSearch(catalog), "\(catalog.count) models")
+        XCTAssertGreaterThan(catalog.count, listed.count)
+        XCTAssertTrue(listed.allSatisfy { choice in catalog.contains { $0.id == choice.id } })
+        if let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] {
+            // Offscreen review images of the list, closed field and searching.
+            for (name, query) in [("model-search-openrouter", ""), ("model-search-openrouter-gemini", "gemini")] {
+                let list = OnboardingModelList(choices: listed, catalog: catalog, selected: nil,
+                                               recommended: model.recommendedModel(.llmKey), query: query) { _ in }
+                let host = NSHostingView(rootView: list)
+                host.frame = NSRect(origin: .zero, size: host.fittingSize)
+                host.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: output).appendingPathComponent("\(name).png"))
+            }
+        }
+        let unlisted = try XCTUnwrap(catalog.first { choice in !listed.contains { $0.id == choice.id } })
+        let found = OnboardingModelSearch.matches(unlisted.id, in: catalog)
+        XCTAssertEqual(found.first?.id, unlisted.id)
+        await model.chooseModel(unlisted.id, on: .llmKey)
+        XCTAssertEqual(model.currentModel(.llmKey), unlisted.id, "a model found by search is set like any pick")
+        XCTAssertEqual(model.checkedModel(.llmKey), unlisted.id)
     }
 }

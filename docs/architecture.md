@@ -1226,7 +1226,8 @@ a provider, the server or Tavily; `outcome(_:for:)`): another mark shows its
 own state (its try, "Saved X key · press Return" or an empty field), the
 server fields stay open, and the route, model, Self-hosted mark and Tavily
 step change only after a new check passes; "Choose model" picks only on the
-accepted provider.
+accepted provider. Above ten models the list opens with a search over the
+provider's whole catalog (OnboardingModelSearch, modelCatalog).
 `scripts/onboarding-preview.sh` runs the same window standalone with fakes,
 outside Whytap. System Audio Recording, Automation and Calendar are asked at
 first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)

@@ -113,7 +113,7 @@ enum HelpWindowContent {
             ),
             HelpHotkeyRowSpec(
                 title: "History — paste",
-                detail: "Hover a card in the island’s History and press Return to paste it into the previously focused app. ⌘-click several cards first to paste them all in that order.",
+                detail: "Hover a card in the island’s History and press Return to paste it into the previously focused app. ⌘-click several cards first to paste them all in that order; a click then copies them all instead.",
                 iconName: "return",
                 prefix: nil,
                 contents: [.text("\u{21A9}")]

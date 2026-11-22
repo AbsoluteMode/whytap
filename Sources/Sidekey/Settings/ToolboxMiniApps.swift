@@ -71,7 +71,7 @@ struct ToolboxHistoryPane: View {
 
     var body: some View {
         HistoryHoverView(mode: $mode, cards: cards, targetAppName: nil,
-                         onSelectMode: { mode = $0 }, onCopy: deps.copyHistoryCard,
+                         onSelectMode: { mode = $0 }, onCopy: deps.copyHistoryCards,
                          onPreviewAnchorChange: { _, _ in }, onPaste: { _ in },
                          allowsKeyboardPaste: false)
             .task(id: mode) {

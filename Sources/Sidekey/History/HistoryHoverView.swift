@@ -155,17 +155,27 @@ struct HistoryHoverView: View {
 
     /// Footer. Without marks it teaches the gestures; with marks it says what
     /// a click and Enter will do with them. `escapeClears` is false where no
-    /// key monitor runs (Toolbox): there ⌘-click unmarks.
-    static func hintText(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> String {
+    /// key monitor runs (Toolbox): there ⌘-click unmarks. Every hint is
+    /// "key → what happens"; the view draws the keys as keycaps.
+    // WHY: .project-docs/decisions/2026-11-22-history-hint-keycaps.md
+    static func hints(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> [HistoryHint] {
         let target = (targetAppName?.isEmpty == false) ? targetAppName : nil
         guard selectedCount > 0 else {
-            guard let target else { return "Click for copy   ⌘-click for several" }
-            return "Click for copy   ⌘-click for several   Enter to paste to \(target)"
+            var hints = [
+                HistoryHint(keys: [.click], action: "Copy"),
+                HistoryHint(keys: [.command, .click], action: "Select"),
+            ]
+            if let target { hints.append(HistoryHint(keys: [.returnKey], action: "Paste to", target: target)) }
+            return hints
         }
-        var parts = ["Click to copy \(selectedCount)"]
-        if let target { parts.append("Enter to paste \(selectedCount) to \(target)") }
-        parts.append(escapeClears ? "Esc to clear" : "⌘-click to unmark")
-        return parts.joined(separator: "   ")
+        var hints = [HistoryHint(keys: [.click], action: "Copy \(selectedCount)")]
+        if let target {
+            hints.append(HistoryHint(keys: [.returnKey], action: "Paste \(selectedCount) to", target: target))
+        }
+        hints.append(escapeClears
+            ? HistoryHint(keys: [.escape], action: "Clear")
+            : HistoryHint(keys: [.command, .click], action: "Unmark"))
+        return hints
     }
 
     /// Enter pastes only where a target was captured; marks and copy work everywhere.
@@ -333,15 +343,11 @@ struct HistoryHoverView: View {
     }
 
     private var hintRow: some View {
-        Text(Self.hintText(
+        HistoryHintBar(hints: Self.hints(
             targetAppName: targetAppName,
             selectedCount: selection.count,
             escapeClears: allowsKeyboardPaste
         ))
-            .font(.system(size: 9.5, weight: .medium))
-            .foregroundStyle(IslandInk.color.opacity(0.55))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .frame(height: Self.hintHeight)
@@ -365,6 +371,76 @@ struct HistoryHoverView: View {
         case .drop: return "Drop"
         case .clipboard: return "Clipboard"
         }
+    }
+}
+
+/// One footer hint: the key or gesture, then what it does.
+struct HistoryHint: Equatable {
+    enum Key: Equatable {
+        case click
+        case command
+        case returnKey
+        case escape
+
+        var keycap: KeycapContent {
+            switch self {
+            case .click: return .symbol("cursorarrow.click", accessibilityLabel: "Click")
+            case .command: return .text(HotkeyGlyph.command)
+            case .returnKey: return .symbol("return", accessibilityLabel: "Return key")
+            case .escape: return .text("esc")
+            }
+        }
+    }
+
+    let keys: [Key]
+    /// Short verb phrase ("Copy", "Paste 3 to").
+    let action: String
+    /// App the paste goes to. Drawn after the action and the only text that
+    /// shortens when the footer is narrow, so the hints stay whole.
+    var target: String? = nil
+
+    var spokenText: String {
+        let keyNames = keys.map { $0 == .escape ? "Escape key" : $0.keycap.spokenName }
+        return keyNames.joined(separator: " ") + ": " + [action, target].compactMap { $0 }.joined(separator: " ")
+    }
+}
+
+/// The footer's hints as separate blocks: keycaps, then the action, with a
+/// hairline between blocks.
+private struct HistoryHintBar: View {
+    let hints: [HistoryHint]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(hints.enumerated()), id: \.offset) { index, hint in
+                if index > 0 {
+                    Capsule()
+                        .fill(IslandInk.color.opacity(0.2))
+                        .frame(width: 1, height: 10)
+                }
+                block(hint)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func block(_ hint: HistoryHint) -> some View {
+        HStack(spacing: 3) {
+            HotkeyHintView(contents: hint.keys.map(\.keycap), style: .keycaps, size: .compact)
+                .accessibilityHidden(true)
+            Text(hint.action)
+                .foregroundStyle(IslandInk.color.opacity(0.72))
+                .fixedSize()
+            if let target = hint.target {
+                Text(target)
+                    .foregroundStyle(IslandInk.color.opacity(0.92))
+                    .truncationMode(.tail)
+                    .layoutPriority(-1)
+            }
+        }
+        .font(.system(size: 10, weight: .medium))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(hint.spokenText)
     }
 }
 

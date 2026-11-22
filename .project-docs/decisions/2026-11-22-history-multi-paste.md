@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md]
+related: [2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md, 2026-11-22-history-hint-keycaps.md]
 ---
 
 # Context
@@ -42,7 +42,8 @@ shows each row's number and ⌘-click again unmarks it. Enter pastes the marked
 rows (instead of the hovered one) and closes History as before. Escape clears
 the marks; without marks it passes on as before. Plain click (copy) and plain
 Enter on one row are unchanged. The footer says "⌘-click for several" and,
-once rows are marked, "Enter to paste N to <app>   Esc to clear".
+once rows are marked, "Enter to paste N to <app>   Esc to clear" (later
+keycap blocks: `2026-11-22-history-hint-keycaps.md`).
 
 `HistoryPastePlan` keeps mark order and merges neighbouring rows of one kind:
 files and images become one pasteboard write with one item each (one Cmd+V,

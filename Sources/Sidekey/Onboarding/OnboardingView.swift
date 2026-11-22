@@ -53,6 +53,8 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
     let count: Int
     /// The speech page holds two cards and takes a little more height.
     var top: CGFloat = 72
+    /// Back to the previous page; `nil` on the first page, which has none.
+    var back: (() -> Void)?
     @ViewBuilder var left: Left
     @ViewBuilder var footer: Footer
     @ViewBuilder var stage: Stage
@@ -70,8 +72,15 @@ struct OnboardingSplit<Left: View, Footer: View, Stage: View>: View {
                     .accessibilityLabel("Step \(index + 1) of \(count): \(step)")
                 left
                 Spacer(minLength: 12)
-                HStack(spacing: 10) { footer }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                HStack(spacing: 10) {
+                    if let back {
+                        OnboardingQuietButton(title: "Back", systemImage: "chevron.left", action: back)
+                            .help("Back (←)")
+                        Spacer(minLength: 0)
+                    }
+                    footer
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(EdgeInsets(top: top, leading: 40, bottom: 26, trailing: 32))
             .frame(width: OnboardingTheme.leftPaneWidth, alignment: .topLeading)
@@ -173,6 +182,55 @@ struct OnboardingIconTile: View {
 
 // MARK: - 1. Speech
 
+/// One place on the right of the speech page's footer: Continue when Drop has
+/// a way to run (a saved speech key or the downloaded model), with what Drop
+/// will use above it, else the quiet Set up later.
+// WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+@MainActor
+struct OnboardingSpeechFooter: View {
+    @ObservedObject var model: OnboardingModel
+    @ObservedObject var models: APIAndModelsViewModel
+    @ObservedObject var onDevice: OnDeviceSpeechModelController
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            caption
+            HStack(spacing: 10) {
+                OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
+                Spacer(minLength: 0)
+                if model.speechCanContinue {
+                    OnboardingPrimaryButton(title: model.dropCheck == .checking ? "Checking…" : "Continue",
+                                            isEnabled: model.dropCheck != .checking,
+                                            action: model.continueFromSpeech)
+                    // No default-button Return: the page's key and search
+                    // fields submit with Return.
+                } else {
+                    OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// One line above the buttons: what Continue sets, or why it could not.
+    @ViewBuilder private var caption: some View {
+        Group {
+            if case .failed(let choice, let reason) = model.dropCheck {
+                Text("\(choice.name): \(reason)")
+                    .foregroundColor(OnboardingTheme.orange)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let choice = model.chosenDrop {
+                Text("Drop will use \(choice.name)")
+                    .foregroundColor(OnboardingTheme.muted)
+                    .lineLimit(1)
+            }
+        }
+        .font(OnboardingTheme.sans(12))
+    }
+}
+
 /// One page for both ways to get speech: the model on this Mac or the
 /// person's own key, plus the language they dictate in. The stage plays Drop.
 @MainActor
@@ -211,7 +269,7 @@ struct OnboardingSpeechPage: View {
 
     var body: some View {
         let presentation = Presentation(onDevice.status)
-        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44) {
+        OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
                 OnboardingLanguageRow(model: model)
@@ -244,9 +302,7 @@ struct OnboardingSpeechPage: View {
                     .padding(.top, 10)
             }
         } footer: {
-            OnboardingQuietButton(title: "Restore from another Mac", action: model.restoreFromAnotherMac)
-            Spacer(minLength: 0)
-            OnboardingQuietButton(title: "Set up later", action: model.setUpSpeechLater)
+            OnboardingSpeechFooter(model: model, models: model.models, onDevice: onDevice)
         } stage: {
             ZStack {
                 OnboardingStageBackdrop(corner: UnitPoint(x: 0.85, y: 0.1))
@@ -541,7 +597,9 @@ struct OnboardingKeyCard: View {
                         tile(offer, selected: offer.target == model.keyTarget)
                     }
                 }
-                if let selected { actions(selected) }
+                // A saved speech key needs no panel: its tile says For Drop and
+                // the footer says what Continue sets. A refusal still shows.
+                if let selected, !quietlySaved(selected.target) { actions(selected) }
             }
         }
         .onChange(of: model.keyTarget) { _, _ in self.failure = nil; key = "" }
@@ -558,8 +616,13 @@ struct OnboardingKeyCard: View {
 
     private func tile(_ offer: OnboardingKeyOffer, selected: Bool) -> some View {
         let hasKey = isSaved(offer.target)
-        return Button {
+        let refusal = offer.target.speechKind.flatMap(model.keyRefusal)
+        let forDrop = offer.target.speechKind.map { model.chosenDrop == .provider($0) } ?? false
+        let highlighted = selected || forDrop
+        return OnboardingKeyTileButton(highlighted: highlighted, isEnabled: !saving) {
             model.keyTarget = selected ? nil : offer.target
+            // A saved speech key is a choice for Drop, applied by Continue.
+            if hasKey, refusal == nil, let kind = offer.target.speechKind { model.pickDrop(.provider(kind)) }
         } label: {
             VStack(spacing: 2) {
                 Text(offer.category.rawValue)
@@ -580,7 +643,12 @@ struct OnboardingKeyCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Group {
-                    if hasKey {
+                    if hasKey, refusal != nil {
+                        Text("Key refused").foregroundColor(OnboardingTheme.orange)
+                    } else if forDrop {
+                        Label("For Drop", systemImage: "mic.fill").labelStyle(.titleAndIcon)
+                            .foregroundColor(OnboardingTheme.accent)
+                    } else if hasKey {
                         Label("Saved", systemImage: "checkmark").labelStyle(.titleAndIcon)
                             .foregroundColor(OnboardingTheme.green)
                     } else if let short = offer.short {
@@ -594,22 +662,12 @@ struct OnboardingKeyCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 3)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? OnboardingTheme.accent.opacity(0.14) : OnboardingTheme.surface2))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(selected ? OnboardingTheme.accent.opacity(0.8) : OnboardingTheme.border,
-                              lineWidth: selected ? 1.2 : 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .disabled(saving)
         .help(offer.detail ?? offer.target.name)
         .accessibilityLabel("\(offer.target.name), \(offer.category.rawValue.lowercased())"
                             + (offer.short.map { ", \($0)" } ?? ""))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityValue(forDrop ? "Drop will use it" : (refusal ?? ""))
+        .accessibilityAddTraits(selected || forDrop ? .isSelected : [])
     }
 
     @ViewBuilder private func actions(_ offer: OnboardingKeyOffer) -> some View {
@@ -617,16 +675,11 @@ struct OnboardingKeyCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if isSaved(target) {
                 HStack(spacing: 10) {
-                    Text(target.speechKind == nil
-                         ? "Saved. Pick its models in Settings → API & Models."
-                         : "Your \(target.name) key is saved.")
+                    Text(savedText(target))
                         .font(OnboardingTheme.sans(11.5))
                         .foregroundColor(OnboardingTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    if let kind = target.speechKind {
-                        OnboardingOutlineButton(title: "Use for Drop") { model.useKey(kind) }
-                    }
                 }
             } else {
                 HStack(spacing: 8) {
@@ -655,11 +708,24 @@ struct OnboardingKeyCard: View {
         }
     }
 
+    private func quietlySaved(_ target: OnboardingKeyTarget) -> Bool {
+        guard let kind = target.speechKind else { return false }
+        return isSaved(target) && model.keyRefusal(kind) == nil && failureTarget != target
+    }
+
+    private func savedText(_ target: OnboardingKeyTarget) -> String {
+        guard let kind = target.speechKind else { return "Saved. Pick its models in Settings → API & Models." }
+        if let refusal = model.keyRefusal(kind) { return refusal }
+        return "Your \(target.name) key is saved."
+    }
+
     /// The same checks and Keychain saves as Settings -> API keys
     /// (`ProviderKeyForm.save` with the provider's account, `TavilySettings.save`).
     private func save() {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty, !saving, let target = model.keyTarget else { return }
+        // Saving a speech key is the page's latest speech action until another starts.
+        let action = target.speechKind == nil ? nil : model.beginSpeechAction()
         saving = true
         failure = nil
         Task {
@@ -683,7 +749,7 @@ struct OnboardingKeyCard: View {
             } else {
                 if model.keyTarget == target { key = "" }
                 saved.insert(target)
-                if let kind = target.speechKind { model.useKey(kind) }
+                if let kind = target.speechKind, let action { model.useKey(kind, action: action) }
             }
         }
     }
@@ -700,7 +766,7 @@ struct OnboardingPermissionsPage: View {
     var body: some View {
         let microphone = permissions.snapshot.microphoneGranted
         let keyboard = permissions.snapshot.accessibilityGranted
-        OnboardingSplit(step: "Permissions", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Permissions", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Two quick", italic: "permissions.", stacked: true)
                 OnboardingLede(text: "Asked once, used only while you dictate.")
@@ -952,7 +1018,7 @@ struct OnboardingTryPage: View {
     var body: some View {
         let chord = configuration.dropVoiceShortcut.contents
         let copy = Copy(shortcut: configuration.dropVoiceShortcut.title, gesture: configuration.normalizedDropGesture)
-        OnboardingSplit(step: "Try it", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Try it", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Try", italic: "Drop.")
                 VStack(alignment: .leading, spacing: 18) {
@@ -1047,7 +1113,7 @@ struct OnboardingCustomizePage: View {
 
     var body: some View {
         let selected = model.customizeVideo
-        OnboardingSplit(step: "Customize", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "Customize", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Make it", italic: "yours.")
                 OnboardingLede(text: "Your keys, your tools.")
@@ -1127,7 +1193,7 @@ struct OnboardingFeaturesPage: View {
 
     var body: some View {
         let _ = model.revision
-        OnboardingSplit(step: "More", index: model.pageIndex, count: model.pages.count) {
+        OnboardingSplit(step: "More", index: model.pageIndex, count: model.pages.count, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Turn on", italic: "more.")
                 OnboardingLede(text: "Each stays off until you turn it on.")
@@ -1309,5 +1375,64 @@ struct OnboardingClipStage: View {
         guard let image = try? await generator.image(at: CMTime(seconds: 0.2, preferredTimescale: 600)).image
         else { return nil }
         return NSImage(cgImage: image, size: .zero)
+    }
+}
+
+/// A key tile: the whole tile is the control. Hover lightens all of it, a
+/// press dims and shrinks it slightly, keyboard focus draws the accent ring
+/// and, while a key is being saved, every tile is visibly unavailable.
+// WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+struct OnboardingKeyTileButton<Label: View>: View {
+    let highlighted: Bool
+    var isEnabled = true
+    let action: () -> Void
+    @ViewBuilder let label: Label
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) { label }
+            .buttonStyle(Style(highlighted: highlighted, hovered: hovered && isEnabled,
+                               focused: focused, isEnabled: isEnabled))
+            .disabled(!isEnabled)
+            // The accent ring is the focus indicator; no second system ring.
+            .focusEffectDisabled()
+            .focused($focused)
+            .onHover { hovered = $0 }
+    }
+
+    struct Style: ButtonStyle {
+        let highlighted: Bool
+        let hovered: Bool
+        let focused: Bool
+        let isEnabled: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        func makeBody(configuration: Configuration) -> some View {
+            let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+            let pressed = configuration.isPressed && isEnabled
+            configuration.label
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 3)
+                .background(shape.fill(fill(pressed: pressed)))
+                .overlay(shape.strokeBorder(stroke, lineWidth: highlighted ? 1.2 : 0.75))
+                .overlay(shape.inset(by: -2.5).strokeBorder(focused ? OnboardingTheme.accent : .clear, lineWidth: 2))
+                .opacity(isEnabled ? (pressed ? 0.85 : 1) : 0.45)
+                .scaleEffect(pressed && !reduceMotion ? 0.97 : 1)
+                .contentShape(shape)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: pressed)
+        }
+
+        private func fill(pressed: Bool) -> Color {
+            if highlighted { return OnboardingTheme.accent.opacity(pressed ? 0.22 : hovered ? 0.19 : 0.14) }
+            return pressed ? OnboardingTheme.surface3 : hovered ? OnboardingTheme.surface3.opacity(0.85) : OnboardingTheme.surface2
+        }
+
+        private var stroke: Color {
+            if highlighted { return OnboardingTheme.accent.opacity(0.8) }
+            return hovered ? OnboardingTheme.borderStrong : OnboardingTheme.border
+        }
     }
 }

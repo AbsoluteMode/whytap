@@ -92,9 +92,11 @@ final class OnboardingTests: XCTestCase {
     }
 
     private func makeModel(_ env: Env, permissions: PermissionsSettingsViewModel,
-                           supportsOnDevice: Bool = true) -> OnboardingModel {
+                           supportsOnDevice: Bool = true, refusing: [ProviderAccount] = [],
+                           keyChecker: ProviderKeyChecking? = nil) -> OnboardingModel {
+        // Keys and key checks stay in this test's stores, never the real Keychain.
         let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: env.controller(),
-                                    supportsOnDevice: supportsOnDevice,
+                                    supportsOnDevice: supportsOnDevice, models: try? offlineModels(env, refusing: refusing, keyChecker: keyChecker),
                                     preferences: PrivacyPreferences(defaults: env.defaults),
                                     codingTools: OnboardingCodingTools(detect: { [] }, connect: { _ in .init() }),
                                     defaultsChanges: NotificationCenter())
@@ -329,6 +331,363 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(finished, "Done on the last page ends the onboarding")
     }
 
+    // MARK: - Speech footer: Continue or Set up later
+
+    private func cleanMac(_ env: Env, refusing: [ProviderAccount] = []) -> OnboardingModel {
+        makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                hotkey: .accessibilityRequired), refusing: refusing)
+    }
+
+    private func saveKeys(_ env: Env, _ kinds: [AIProviderKind]) throws {
+        for kind in kinds {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: kind)?.keychainAccount(in: env.routing))
+            try env.keys.save("\(kind)-key", account: account)
+        }
+    }
+
+    func testNoKeysOffersSetUpLaterAsBefore() throws {
+        let env = try makeEnv()
+        let model = cleanMac(env)
+        XCTAssertEqual(model.dropChoices, [])
+        XCTAssertNil(model.chosenDrop)
+        XCTAssertFalse(model.speechCanContinue, "Set up later holds the footer's place")
+        model.setUpSpeechLater()
+        XCTAssertEqual(model.page, .permissions)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+    }
+
+    func testOneSavedSpeechKeyOffersContinueWithIt() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.elevenLabs])
+        let model = cleanMac(env)
+        XCTAssertEqual(model.chosenDrop, .provider(.elevenLabs))
+        XCTAssertTrue(model.speechCanContinue)
+        XCTAssertFalse(model.dropReady, "Saved, but Drop has no route yet")
+        model.continueFromSpeech()
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .elevenLabs)
+        XCTAssertTrue(model.dropReady)
+    }
+
+    func testSeveralSpeechKeysPickByRuleAndATileChangesIt() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.deepgram, .elevenLabs, .soniox])
+        let model = cleanMac(env)
+        XCTAssertEqual(model.dropChoices, [.provider(.soniox), .provider(.deepgram), .provider(.elevenLabs)])
+        XCTAssertEqual(model.chosenDrop, .provider(.soniox), "Soniox, Whytap's default, comes first")
+        model.pickDrop(.provider(.deepgram))
+        XCTAssertEqual(model.chosenDrop, .provider(.deepgram), "A tile changes the choice")
+        model.continueFromSpeech()
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .deepgram, model: "nova-3"))
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .deepgram)
+    }
+
+    func testTheRouteDropAlreadyRunsOnIsPreferredAndAnotherPickReplacesIt() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox, .elevenLabs])
+        env.speech.use(provider: .elevenLabs)
+        let model = cleanMac(env)
+        XCTAssertEqual(model.chosenDrop, .provider(.elevenLabs), "What Drop runs on wins over the order")
+        model.pickDrop(.provider(.soniox))
+        model.continueFromSpeech()
+        try await eventually { env.routing.route(for: .dropFast)?.account == .soniox }
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .soniox, "Continue applies the pick to both rows")
+    }
+
+    func testOnlyAIKeysDoNotOfferContinue() throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.openRouter, .openAI, .anthropic])
+        let model = cleanMac(env)
+        XCTAssertTrue(model.keyAvailable(.openAI) == false, "OpenAI is not a Drop speech provider")
+        XCTAssertEqual(model.dropChoices, [])
+        XCTAssertFalse(model.speechCanContinue, "AI keys alone cannot dictate: Set up later")
+    }
+
+    func testARefusedKeyStaysOnThePageWithTheReason() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.deepgram])
+        let model = cleanMac(env, refusing: [.deepgram])
+        XCTAssertEqual(model.chosenDrop, .provider(.deepgram), "Not checked yet, so still a choice")
+        model.continueFromSpeech()
+        try await eventually { model.dropCheck != .checking }
+        guard case .failed(let choice, let reason) = model.dropCheck else { return XCTFail("\(model.dropCheck)") }
+        XCTAssertEqual(choice, .provider(.deepgram))
+        XCTAssertEqual(reason, "Key not accepted")
+        XCTAssertEqual(model.page, .speech, "A refused key does not move on")
+        XCTAssertNil(env.routing.route(for: .dropFast), "Nothing is set to a refused key")
+        XCTAssertNotNil(model.keyRefusal(.deepgram))
+        XCTAssertEqual(model.dropChoices, [], "Once refused it is no longer offered")
+        XCTAssertFalse(model.speechCanContinue)
+    }
+
+    // MARK: - Overlapping speech actions (builder findings on #397)
+
+    func testAnEarlierContinueThatFinishesFirstDoesNotWinOverTheLaterOne() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox, .deepgram])
+        let checker = GatedChecker(gated: ["soniox-key", "deepgram-key"]) { _ in .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        XCTAssertEqual(model.chosenDrop, .provider(.soniox))
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        model.pickDrop(.provider(.deepgram))
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("deepgram-key") }
+
+        checker.release("soniox-key")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNil(env.routing.route(for: .dropFast), "the replaced request sets nothing")
+        XCTAssertEqual(model.page, .speech, "and does not move the page")
+
+        checker.release("deepgram-key")
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .deepgram)
+    }
+
+    func testARefusalOfAKeyReplacedDuringTheCheckIsNotRecordedAgainstTheNewKey() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { key in key == "soniox-key" ? .rejected(.invalidKey) : .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        // The key is replaced in Settings while the old one is being checked.
+        let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .soniox)?.keychainAccount(in: env.routing))
+        try env.keys.save("soniox-new", account: account)
+        checker.release("soniox-key")
+
+        try await eventually { model.page == .permissions }
+        XCTAssertNil(model.keyRefusal(.soniox), "the old key's refusal is not the new key's")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox, "the new key was checked and used")
+    }
+
+    func testAnOldKeysSuccessDoesNotValidateAReplacementThatIsRefused() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { key in key == "soniox-key" ? .valid : .rejected(.invalidKey) }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: .soniox)?.keychainAccount(in: env.routing))
+        try env.keys.save("soniox-bad", account: account)
+        checker.release("soniox-key")
+
+        try await eventually { if case .failed = model.dropCheck { return true } else { return false } }
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+    }
+
+    func testASaveThatFinishesAfterAContinueKeepsTheKeyButNotTheRoute() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        // Save pressed for a new Deepgram key; while it is checked, Continue with Soniox.
+        let save = model.beginSpeechAction()
+        model.continueFromSpeech()
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox)
+
+        try saveKeys(env, [.deepgram])  // the earlier save lands
+        model.useKey(.deepgram, action: save)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .soniox, "the later choice stays")
+        XCTAssertEqual(env.routing.route(for: .dropSmart)?.account, .soniox)
+        XCTAssertEqual(model.page, .permissions)
+        XCTAssertTrue(model.keyAvailable(.deepgram), "the saved key stays for later")
+    }
+
+    func testASaveThatSupersedesAContinueCheckLeavesContinueAvailable() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox])
+        let checker = GatedChecker(gated: ["soniox-key"]) { _ in .valid }
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired), keyChecker: checker)
+        model.continueFromSpeech()
+        try await eventually { checker.isWaiting("soniox-key") }
+        _ = model.beginSpeechAction()  // Save pressed for another key; it will fail
+        XCTAssertEqual(model.dropCheck, .idle, "Continue is available at once, not after the old answer")
+        checker.release("soniox-key")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        model.continueFromSpeech()  // Continue works again
+        try await eventually { model.page == .permissions }
+    }
+
+    func testARefusedKeyFallsBackToTheNextChoice() async throws {
+        let env = try makeEnv()
+        try saveKeys(env, [.soniox, .deepgram])
+        let model = cleanMac(env, refusing: [.soniox])
+        model.continueFromSpeech()
+        try await eventually { model.dropCheck != .checking }
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertEqual(model.chosenDrop, .provider(.deepgram), "The next saved key takes its place")
+        model.continueFromSpeech()
+        try await eventually { model.page == .permissions }
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+    }
+
+    func testTheDownloadedModelIsAChoiceAfterKeys() async throws {
+        let env = try makeEnv(modelPresent: true)
+        try saveKeys(env, [.deepgram])
+        let model = cleanMac(env)
+        await model.onDevice.refresh()
+        XCTAssertEqual(model.dropChoices, [.provider(.deepgram), .onThisMac])
+        model.pickDrop(.onThisMac)
+        model.continueFromSpeech()
+        XCTAssertEqual(model.page, .permissions, "On this Mac needs no key check")
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .thisMac)
+    }
+
+    // MARK: - Back
+
+    func testBackRetracesEveryPageAndTheFirstHasNone() throws {
+        let env = try makeEnv()
+        try env.keys.save("dg-key", account: BYOKKeyStore.account(for: .deepgram))
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertNil(model.previousPage, "The first page has no Back")
+        XCTAssertNil(model.backAction)
+        model.goBack()
+        XCTAssertEqual(model.page, .speech, "Back on the first page does nothing")
+
+        model.useKey(.deepgram, action: model.beginSpeechAction())
+        var forward = [model.page]
+        while !model.isLastPage { model.advance(); forward.append(model.page) }
+        XCTAssertEqual(forward, [.permissions, .tryDrop, .customize, .features])
+
+        var backward: [OnboardingPage] = []
+        var counters: [Int] = []
+        while let action = model.backAction {
+            action()
+            backward.append(model.page)
+            counters.append(model.pageIndex)
+        }
+        XCTAssertEqual(backward, [.customize, .tryDrop, .permissions, .speech])
+        XCTAssertEqual(counters, [3, 2, 1, 0], "The N / M counter follows the page")
+        XCTAssertEqual(model.pages.count, 5, "Back never changes the list")
+    }
+
+    func testBackSkipsHiddenPages() throws {
+        let env = try makeEnv(modelPresent: true)
+        env.speech.useOnDevice()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready))
+        XCTAssertEqual(model.pages, [.tryDrop, .customize, .features])
+        XCTAssertNil(model.previousPage, "Speech and permissions are done, so Try is first and has no Back")
+        model.advance()
+        model.advance()
+        XCTAssertEqual(model.page, .features)
+        model.goBack()
+        XCTAssertEqual(model.page, .customize)
+        model.goBack()
+        XCTAssertEqual(model.page, .tryDrop)
+        XCTAssertNil(model.previousPage)
+    }
+
+    func testBackPassesOverTheTryPageSetUpLaterSkipped() throws {
+        let env = try makeEnv()
+        let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
+                                                            hotkey: .accessibilityRequired))
+        model.setUpSpeechLater()
+        model.advance()
+        XCTAssertEqual(model.page, .customize)
+        XCTAssertEqual(model.previousPage, .permissions, "No try page on the way forward, none on the way back")
+        model.goBack()
+        XCTAssertEqual(model.page, .permissions)
+        model.goBack()
+        XCTAssertEqual(model.page, .speech)
+    }
+
+    func testBackKeepsWhatWasDoneOnEveryPage() async throws {
+        let env = try makeEnv()
+        try env.keys.save("dg-key", account: BYOKKeyStore.account(for: .deepgram))
+        let tools = OnboardingCodingTools(detect: { [.claudeCode] }, connect: { _ in .init() })
+        let model = OnboardingModel(speech: env.speech,
+                                    permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .ready),
+                                    onDevice: env.controller(), supportsOnDevice: true, models: try offlineModels(env),
+                                    preferences: PrivacyPreferences(defaults: env.defaults),
+                                    codingTools: tools, defaultsChanges: NotificationCenter())
+        addTeardownBlock { model.stop() }
+        model.setLanguage(AppLanguage.find(code: "ru"))
+        model.useKey(.deepgram, action: model.beginSpeechAction())
+        XCTAssertEqual(model.page, .tryDrop)
+        model.noteDictated()
+        model.advance()
+        model.customizeVideo = .hover
+        model.advance()
+        await tools.refreshIfNeeded()
+        tools.connect()
+        try await eventually { tools.state == .connected }
+
+        while model.backAction != nil { model.goBack() }
+        XCTAssertEqual(model.page, .speech)
+        XCTAssertTrue(model.dropReady, "The speech page shows the chosen route as done and offers Continue")
+        XCTAssertTrue(model.keyAvailable(.deepgram), "The Deepgram tile still says Saved")
+        XCTAssertEqual(model.language, AppLanguage.find(code: "ru"))
+        XCTAssertEqual(env.routing.route(for: .dropFast), FeatureRoute(account: .deepgram, model: "nova-3"))
+
+        model.advance()
+        XCTAssertEqual(model.page, .tryDrop)
+        XCTAssertTrue(model.dictated, "The try page still says That's Drop")
+        model.advance()
+        XCTAssertEqual(model.customizeVideo, .hover)
+        model.advance()
+        XCTAssertEqual(tools.state, .connected, "Coding agents stay connected")
+        model.goBack()
+        model.goBack()
+        model.useKey(.deepgram, action: model.beginSpeechAction())
+        XCTAssertEqual(model.page, .tryDrop, "Choosing again is safe: only the speech page moves on")
+    }
+
+    func testBackToCompletedPermissionsStaysThere() async throws {
+        let env = try makeEnv(modelPresent: true)
+        env.speech.useOnDevice()
+        let model = makeModel(env, permissions: permissions(accessibility: true, microphone: .authorized, hotkey: .unavailable))
+        AppState.shared.dropHotkeyStatus = .ready
+        try await eventually { model.page == .tryDrop }
+        model.goBack()
+        XCTAssertEqual(model.page, .permissions)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertEqual(model.page, .permissions, "Done permissions do not push the person forward again")
+    }
+
+    func testArrowAndCommandBracketGoBackOutsideTextFields() {
+        let arrow = OnboardingBackKey.leftArrowKeyCode
+        let bracket = OnboardingBackKey.leftBracketKeyCode
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [], editingText: false))
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [.numericPad, .function], editingText: false),
+                      "Arrow keys carry these flags")
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: bracket, modifiers: .command, editingText: false))
+        XCTAssertTrue(OnboardingBackKey.isBack(keyCode: bracket, modifiers: [.command, .capsLock], editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: .shift, editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: .command, editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: bracket, modifiers: [], editingText: false))
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: 124, modifiers: [], editingText: false), "→ is not Back")
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: arrow, modifiers: [], editingText: true),
+                       "In a text field ← moves the caret")
+        XCTAssertFalse(OnboardingBackKey.isBack(keyCode: bracket, modifiers: .command, editingText: true))
+        XCTAssertTrue(OnboardingBackKey.isEditingText(NSTextView()), "The field editor of a focused field")
+        XCTAssertTrue(OnboardingBackKey.isEditingText(NSTextField()))
+        XCTAssertFalse(OnboardingBackKey.isEditingText(NSButton()))
+        XCTAssertFalse(OnboardingBackKey.isEditingText(nil))
+    }
+
+    func testPreviousFollowsTheFlowList() {
+        let all: [OnboardingPage] = [.speech, .permissions, .tryDrop, .customize, .features]
+        XCTAssertNil(OnboardingFlow.previous(before: .speech, in: all, speechExpected: true))
+        XCTAssertEqual(OnboardingFlow.previous(before: .customize, in: all, speechExpected: true), .tryDrop)
+        XCTAssertEqual(OnboardingFlow.previous(before: .customize, in: all, speechExpected: false), .permissions)
+        XCTAssertNil(OnboardingFlow.previous(before: .speech, in: [.tryDrop, .features], speechExpected: true),
+                     "A page not in the list has no Back")
+    }
+
     func testPermissionsAdvanceOnlyWhenTheShortcutInstalls() async throws {
         let env = try makeEnv(modelPresent: true)
         env.speech.useOnDevice()
@@ -437,10 +796,11 @@ final class OnboardingTests: XCTestCase {
         let env = try makeEnv()
         let model = makeModel(env, permissions: permissions(accessibility: false, microphone: .notDetermined,
                                                             hotkey: .accessibilityRequired))
+        let save = model.beginSpeechAction()  // Save pressed on the speech page
         model.setUpSpeechLater()
         XCTAssertEqual(model.page, .permissions)
         try env.keys.save("fixture", account: BYOKKeyStore.account(for: .soniox))
-        model.useKey(.soniox)  // the check finished late
+        model.useKey(.soniox, action: save)  // the check finished late
         XCTAssertTrue(model.dropReady, "The key still becomes Drop's speech")
         XCTAssertEqual(model.page, .permissions, "and the person stays where they are")
     }
@@ -653,8 +1013,12 @@ final class OnboardingTests: XCTestCase {
     // MARK: - Review images
 
     private struct Offline: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching {
+        /// Storage IDs of accounts whose key the provider refuses.
+        var refusing: Set<String> = []
         func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] { [] }
-        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus { .valid }
+        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
+            refusing.contains(account.storageID) ? .rejected(.invalidKey) : .valid
+        }
         func probe(_ route: ResolvedRoute, use: ModelUse, catalog: CatalogModel?) async -> ProbeOutcome { .passed }
         func endpoints(model: String, apiKey: String) async throws -> [OpenRouterEndpoint] { [] }
     }
@@ -669,16 +1033,46 @@ final class OnboardingTests: XCTestCase {
         func release() {}
     }
 
-    private func offlineModels(_ env: Env) throws -> APIAndModelsViewModel {
+    /// A key check that waits for the test for the listed key values, then
+    /// answers by the key value it was asked about.
+    private final class GatedChecker: ProviderKeyChecking, @unchecked Sendable {
+        private let lock = NSLock()
+        private var gated: Set<String>
+        private var waiting: [(key: String, resume: CheckedContinuation<Void, Never>)] = []
+        private let verdict: @Sendable (String?) -> KeyStatus
+        init(gated: Set<String>, verdict: @escaping @Sendable (String?) -> KeyStatus) {
+            self.gated = gated
+            self.verdict = verdict
+        }
+        func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
+            if let apiKey, lock.withLock({ gated.contains(apiKey) }) {
+                await withCheckedContinuation { resume in lock.withLock { waiting.append((apiKey, resume)) } }
+            }
+            return verdict(apiKey)
+        }
+        func isWaiting(_ key: String) -> Bool { lock.withLock { waiting.contains { $0.key == key } } }
+        func release(_ key: String) {
+            let resumes: [CheckedContinuation<Void, Never>] = lock.withLock {
+                gated.remove(key)
+                let found = waiting.filter { $0.key == key }.map(\.resume)
+                waiting.removeAll { $0.key == key }
+                return found
+            }
+            resumes.forEach { $0.resume() }
+        }
+    }
+
+    private func offlineModels(_ env: Env, refusing: [ProviderAccount] = [],
+                               keyChecker: ProviderKeyChecking? = nil) throws -> APIAndModelsViewModel {
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
         try Data("{}".utf8).write(to: catalogURL)
-        let offline = Offline()
+        let offline = Offline(refusing: Set(refusing.map(\.storageID)))
         return APIAndModelsViewModel(
             routing: env.routing, keys: env.keys,
             catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: offline),
             checks: ModelCheckStore(defaults: env.defaults), keyStatuses: KeyStatusStore(defaults: env.defaults),
-            keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
+            keyChecker: keyChecker ?? offline, probe: offline, endpoints: offline, inputLanguage: { nil }, onDevice: .unavailable)
     }
 
     /// Offscreen PNGs of every page, walked the way a new Mac goes through
@@ -707,22 +1101,27 @@ final class OnboardingTests: XCTestCase {
             OnboardingClipStage.playsVideo = true
         }
 
-        enum Stop { case speech, speechProvider, speechModelProvider, speechListening, speechLanguage, permissions, tryEmpty, tryDone, tryDownloading,
+        enum Stop { case speech, speechProvider, speechModelProvider, speechListening, speechLanguage,
+                        speechKeys, speechKeyPicked, speechKeyRefused, permissions, tryEmpty, tryDone, tryDownloading,
                         customize, customizeHover, features, featuresConnected }
         let shots: [(Stop, String)] = [
             (.speech, "1-speech"), (.speechProvider, "1-speech-deepgram"), (.speechModelProvider, "1-speech-anthropic"), (.speechListening, "1-speech-listening"), (.speechLanguage, "1-speech-russian"),
+            (.speechKeys, "1-speech-keys-continue"), (.speechKeyPicked, "1-speech-keys-elevenlabs"),
+            (.speechKeyRefused, "1-speech-key-refused"),
             (.permissions, "2-permissions"), (.tryEmpty, "3-try-drop-empty"), (.tryDone, "3-try-drop-done"),
             (.tryDownloading, "3-try-drop-downloading"), (.customize, "4-customize-shortcuts"),
             (.customizeHover, "4-customize-hover"), (.features, "5-more"), (.featuresConnected, "5-more-connected"),
         ]
-        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage]
+        let keyStops: [Stop] = [.speechKeys, .speechKeyPicked, .speechKeyRefused]
+        let beforeCustomize: [Stop] = [.speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage] + keyStops
         let fromTry: [Stop] = [.tryEmpty, .tryDone, .tryDownloading, .customize, .customizeHover, .features, .featuresConnected]
         for (stop, name) in shots {
             // A new Mac: no model (downloading once asked; landed by the try
             // page), nothing granted.
             let status: OnDeviceSpeechModelStatus
             switch stop {
-            case .speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage: status = .notDownloaded
+            case .speech, .speechProvider, .speechModelProvider, .speechListening, .speechLanguage,
+                 .speechKeys, .speechKeyPicked, .speechKeyRefused: status = .notDownloaded
             case .permissions, .tryDownloading: status = .downloading(0.42)
             default: status = .ready
             }
@@ -740,7 +1139,8 @@ final class OnboardingTests: XCTestCase {
             let tools = OnboardingCodingTools(detect: { [] }, connect: { _ in CaseClientSetupReport() })
             tools.show([.claudeCode, .codex], state: stop == .featuresConnected ? .connected : .idle)
             let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,
-                                        supportsOnDevice: true, models: try offlineModels(env),
+                                        supportsOnDevice: true,
+                                        models: try offlineModels(env, refusing: stop == .speechKeyRefused ? [.soniox] : []),
                                         preferences: PrivacyPreferences(defaults: env.defaults), codingTools: tools,
                                         screenRecording: ScreenRecordingAccess(isGranted: { false }, request: {}),
                                         defaultsChanges: NotificationCenter())
@@ -749,6 +1149,19 @@ final class OnboardingTests: XCTestCase {
             if stop == .speechLanguage { model.setLanguage(AppLanguage.find(code: "ru")) }
             if stop == .speechProvider { model.keyTarget = .provider(.deepgram) }
             if stop == .speechModelProvider { model.keyTarget = .provider(.anthropic) }
+            if stop == .speechKeys || stop == .speechKeyPicked {
+                // Keys left in the Keychain from an earlier install: every tile is saved.
+                try saveKeys(env, [.soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic])
+            }
+            if stop == .speechKeyPicked {
+                model.keyTarget = .provider(.elevenLabs)
+                model.pickDrop(.provider(.elevenLabs))
+            }
+            if stop == .speechKeyRefused {
+                try saveKeys(env, [.soniox, .deepgram])
+                model.continueFromSpeech()
+                try await eventually { model.dropCheck != .checking }
+            }
             if stop == .customizeHover { model.customizeVideo = .hover }
             if !beforeCustomize.contains(stop) {
                 model.startOnDevice()  // Download and use for Drop

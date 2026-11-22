@@ -1202,7 +1202,9 @@ OnboardingWindowController, accessory app, no Dock icon) in place of the former
 Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
 onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
 word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+five pages, each skippable, closing = Done; every page but the first has Back
+(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
+OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
 route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
 Lang setting; searchable list, English or native name, arrows and Return), On
 this Mac card ("Download and use for Drop", about 470 MB; when the download
@@ -1211,7 +1213,11 @@ cannot run, nothing else; hidden on Intel), and one tile per keyed provider
 (OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
 Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
 badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; "Restore from another Mac"; the
+speech key also sets that provider for Drop; one footer place: Continue when a
+saved speech key (not refused) or the downloaded model can run Drop, with "Drop
+will use X" above it (preselected: Drop's running provider, else Soniox,
+Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
+the free key check before a new provider), else Set up later; "Restore from another Mac"; the
 stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
 and Keyboard control on PermissionsSettingsViewModel, done at
 dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but

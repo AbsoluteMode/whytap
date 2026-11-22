@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/APIHintsRenderTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-10-19-api-hints.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-10-19-api-hints.md, 2026-11-22-agent-provider-web-search.md]
 ---
 
 ## Context

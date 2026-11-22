@@ -55,17 +55,19 @@ Voice flow (Drop / dictation):
             speaking the OpenAI Realtime protocol. OpenAI runs on the shared
             OpenAI key (byok.openai.llm_api_key, never the retired
             byok.openAI.api_key) to its explicit host
-            (BYOKRealtimeURL.openAIHosted): gpt-live-transcribe (default) and
-            gpt-realtime-whisper stream within one turn (one commit at the
-            end); a turn-based model (gpt-transcribe, gpt-4o-*-transcribe,
-            whisper-1) runs with server VAD and shows text after each pause,
-            so it starts no auto-stop take. Turns are tracked by item_id and
+            (BYOKRealtimeURL.openAIHosted) with two models: gpt-live-transcribe,
+            the only live one offered, streams within one turn (one commit at
+            the end), and gpt-transcribe takes recorded audio. A saved route
+            on another OpenAI transcription model moves to them by role at
+            launch (AIRoutingStore.narrowOpenAISpeechModelsIfNeeded); a
+            turn-based model the move could not rewrite still runs with server
+            VAD, shows text after each pause and starts no auto-stop take. Turns are tracked by item_id and
             finals kept in commit order; the take ends at the `cleared`
             answer to a clear sent after the final commit (server VAD), and
             only OpenAI's empty-commit refusal of that commit means nothing
             is left; a pong is stall progress; a refusal (providerRefused)
             degrades Drop to the batch rung (/v1/audio/transcriptions,
-            gpt-transcribe for the live-only models), which names it (credit
+            always gpt-transcribe), which names it (credit
             apart from a rate limit). A server keeps its plain commit,
             terminal refusal and no pings. Meetings have no OpenAI model. A legacy
             OpenAI choice migrates to OpenAI with its model, never to Soniox.
@@ -276,7 +278,7 @@ Live text in the recording wing (Drop and agent voice):
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
-Drop auto-stop (opt-in, Settings -> Other -> Recording, off by default):
+Drop auto-stop (opt-in, Settings -> Other -> Drop, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
@@ -355,11 +357,68 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
+  Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
+  server-side tool when the model has it (Anthropic web_search_20250305 with
+  max_uses 2, OpenAI Responses web_search with max_tool_calls 2 and
+  web_search_call.action.sources, OpenRouter openrouter:web_search with
+  max_uses 2); else the Tavily web_search function when its key exists; else
+  no search tool and a prompt line telling the model to say so. Anthropic's
+  catalog flag capabilities.server_tools.web_search.supported decides when
+  present; a few OpenAI families without search are excluded by ID. API &
+  Models -> Models -> Search (AgentSearchRow, under Speech and LLM) shows the
+  resolved search ("Anthropic · built-in", "OpenRouter · web", "Tavily",
+  "Off — add a Tavily key") and a menu of the built-in search or Tavily;
+  agent.native.webSearch is auto (default) or tavily, and tavily applies only
+  while its key exists. When the turn does not use Tavily, the function is not
+  offered and a call to it gets an "unavailable" tool result without reaching
+  Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
+  the row updates. Without any search the prompt asks for a one-line answer
+  pointing to a Tavily key in API keys. An error never moves the query to
+  Tavily: Tavily is used only when picked or when the model is known before
+  the turn to lack search. A 400 on the turn's first request with built-in
+  search retries once on the same route without search (NativeAgentWebSearch
+  .refused: the model says search is unavailable) only on tool-specific evidence
+  (ErrorShape.refusesWebSearch from a bounded body read of `message` only: the
+  request carried a search tool; no typed category or unrelated OpenAI code;
+  a param or leading path must be the search tool's own index: its type with
+  a refusal code or word, or the entry itself with the tool named as the
+  refusal's subject, never one of its options or any other location; a
+  message about an option, parameter, field or setting never qualifies, even
+  when it names the tool; otherwise, with quoted text removed and no
+  size/context wording, the tool's identifier and a refusal in one clause, or
+  a message opening with an account or model policy); an ambiguous error stays
+  on the route and later failures are never retried. The two-search budget is per
+  turn: Anthropic's max_uses counts across its provider turn (pause_turn and
+  tool_result continuations), so the tool stays unchanged there and a new
+  provider turn (the app's "Continue" message) gets what is left; OpenAI
+  (max_tool_calls, counting every web_search_call action) and OpenRouter
+  (max_uses; engine exa except for anthropic/ models, because other native
+  engines ignore max_uses and nothing else caps them before they run; a 403 on
+  the first request from a workspace whose locked Server Tools policy excludes
+  Exa (or any other first-request 403 there: the body is not read) retries
+  once without the search tool, like a refusal) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
+  (an OpenAI open_page, OpenRouter usage.server_tool_use_details
+  web_search_requests or tool_calls_executed without citations, Anthropic
+  end_turn after a search or after a deferred web_search_tool_result)
+  with no function call continues the turn; only pause_turn is replayed
+  verbatim, every other continuation adds the user "Continue" message because
+  current Claude models reject prefill. Anthropic's catalog capabilities decode
+  independently, and AgentSettingsStore.selectedWebSearchSupport feeds both the
+  next turn and the Search row even without token limits. A synced
+  agent.native.webSearch reloads through SettingsSyncLiveReload, which also
+  refreshes the row for a synced Tavily key. Anthropic server blocks, including
+  encrypted_content, are replayed verbatim; pause_turn and a search without a
+  function call continue the same turn (OpenAI/OpenRouter add a short user
+  "Continue" message). A finish_answer beside an Anthropic search whose result
+  has not arrived gets a tool result asking to wait. When finish_answer has no
+  source links, up to five provider citations (then results) become link cards.
+  Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
+  OpenRouter's reported cost includes search; OpenAI stays unpriced.
+  WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
   Settings -> API & Models -> API keys saves a separate Tavily key in Keychain
   (byok.tavily.search_api_key), after a GET /usage check without a search. The
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
-  No key means an actionable tool error, never an alternative search provider.
   Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
   structured finish_answer completion and Case key names. The existing action preference
   agent.opencode.allowActions is preserved: Allow file edits and commands is
@@ -920,6 +979,104 @@ Input language offer:
   language code, the count and the offered codes are stored. WHY:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
+Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
+  user switched it off: a missing key reads as on, an explicit false is kept;
+  Settings -> Other -> Drop -> Learn from my edits; WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-default-on.md):
+  AutoPasteEngine.paste hands over the field at the paste boundary (after
+  focus restore, right before Cmd+V): the system-wide focused element of the
+  frontmost target app, metadata only, never Whytap's own editors.
+  DropLearningCoordinator then watches that field until it empties (sent),
+  focus leaves it, it goes away, another take starts or 120 s pass: AX
+  value/destroyed/focus notifications plus a bounded read every 0.5 s, and a
+  listen-only Return/Enter key-code monitor (only during the watch, keeps
+  nothing, never delays Return) that triggers a read. Both deadlines (5 s
+  to see the paste, 120 s in all) are monotonic clock times checked before
+  every read, whatever triggered it. The last text that still aligns with
+  the take counts, minus the corrections it already held when the field
+  first showed the paste (a draft is not an edit). A read reports text,
+  focus left (verified: other app, other element, process gone; the last
+  text counts) or unreadable (a failed or empty focus lookup, or still
+  focused but no length, over the bound, a failed transfer or the gate
+  now refuses it; nothing counts). Another
+  message (no alignment) or a paste not seen within 5 s counts nothing.
+  Electron and Chromium apps get AXManualAccessibility (else
+  AXEnhancedUserInterface) set on the target app only, at take start, only
+  when its focused element is not already a readable field and the
+  attribute reads as false (an unreadable attribute is never written). The
+  approval (same process by bundle ID and launch date, frontmost, the same
+  focused element or a confirmed absence, gate and secure input) is taken
+  again after the blocking flag read and must match, each pass confirming
+  focus after its metadata query; right before the write the flag must
+  still read false, focus, process and front app are confirmed again and a
+  fresh IsSecureEventInputEnabled sample, taken after the last blocking AX
+  call, must be false; a failed focus lookup exposes nothing. It is undone when the watch ends, the next take goes
+  elsewhere, 660 s pass without a paste, learning and calibration are
+  switched off (UserDefaults change) or Whytap quits; only for the same
+  process (checked again after the flag read), while the flag reads true
+  or still reads false after a write never seen applied (Electron applies
+  it about 2 s later, so the pending enable is cancelled) (WHY:
+  .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
+  happens only if that app is still frontmost, the same element still has
+  keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure
+  event input, terminals and password managers by bundle ID, own process,
+  unknown app, non-text role, any AX error but a missing attribute). The
+  field must report its length (at most 20,000 UTF-16 units) and only that
+  range is requested (AXStringForRange); no length means no read. Focus
+  and the gate are confirmed again after the length query and after the
+  transfer (focus is checked before and after the gate's metadata calls);
+  if another app takes focus during the capture, the paste engine posts no
+  Cmd+V and restores the clipboard. With learning and calibration off no
+  capture callback is passed and the paste path is unchanged.
+  Switching learning or calibration off stops the watch. It
+  compares with what reached the field (a rich paste's plainText), aligns
+  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  DropLearningClassifier turns edits into candidates without a model: a
+  sound-alike term -> Vocab (only if the wrong word is in the provider's raw
+  text); On this Mac / batch / Retry / recorder fallback, a full route list,
+  a term already in Vocab or a Smart-only error -> Replace (never for
+  dictionary words or grammar endings); full list without Replace -> Vocab
+  full with the route's limit (Y opens Vocab); undone replacement / Vocab
+  term written where not said -> remove; deleted spoken word -> Filler;
+  retyped cut filler -> Stop cutting. Translated takes teach nothing. The
+  same correction in two takes within 14 days becomes one suggestion; N is
+  forever, an expired one starts over; never while the island is not idle;
+  a new take cancels the pending read. DropLearningLedger stores only
+  HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
+  stay in memory until Y, which saves through VocabularyCache /
+  FillerTermsStore / DropReplacementStore (editors reload on their change
+  notification). Hidden calibration (sidekey.dropLearning.calibration):
+  reads until the field holds still (<=30 s), journals to Application
+  Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
+  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
+  links, ends itself after 14 days (checked at launch, hourly and before
+  every read) and deletes its data. Fired fillers come from the same masked Filler pass.
+  Replace is its own DropOutputPolicy step after Smart and before Filler
+  (DropReplaceFilter: one pass, longest first, letter lookaround
+  boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
+  Vocabulary backup section). Vocab is one list of up to 1,000 terms x 50
+  chars; VocabularyBudget trims it per request in list order: Deepgram ~450
+  est. tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
+  Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
+  terms within 8 KB encoded. WHY:
+  .project-docs/decisions/2026-11-22-drop-edit-learning.md
+  A suggestion is asked by DropLearningDropsController: DropLearningDropsModel
+  (chain of four drops: list icon, action with +/- in a thin circle, Y, N;
+  budding 0.1 s apart, open at 0.7 s, reverse retract 0.6 s, 10 s open time
+  with no visible timer, hover pauses, one suggestion at a time) drawn by
+  DropLearningDropsView in DropLearningDropsPanel, a non-activating panel
+  right of the island just below its level, following the system
+  appearance. macOS 26 glassEffect in a GlassEffectContainer (blend spacing
+  5 pt < 7 pt gap: bridges only while a drop leaves its parent); thin
+  material on 14/15; opaque with Reduce Transparency; Reduce Motion fades.
+  Y/N are plain glass with a 0.75 pt green/red contour and soft glow only,
+  letters at rest, check/cross under the pointer. Answers: click, or
+  Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
+  the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
+  conflict check and listed in Help. An active Drop or Agent phase, an open
+  Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-drops.md
+
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> Other -> "Show island on") -> screen with a real notch ->
@@ -1021,7 +1178,8 @@ retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
 Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
-above Subtitles; "Advanced · a model per feature" discloses the per-feature
+then Search (the Agent's web search, AgentSearchRow; see the native Agent
+section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
 list. A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
@@ -1030,7 +1188,10 @@ recorded model, a server for the Agent) keeps its route and the row says why.
 A model the feature's picker rules out is refused even where a server takes
 a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
 never from full picker lists. One probe per pick (a tools probe also passes
-plain chat). The row is read
+plain chat). The OpenAI tools probe uses the Responses API with one function
+tool, like the Agent; reasoning models such as gpt-6.2-sol refuse function
+tools on Chat Completions (adapter version 2; WHY:
+.project-docs/decisions/2026-11-22-openai-agent-probe-responses.md). The row is read
 from the saved routes, never stored: the model more than half of the routed
 features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
 re-picking asks before replacing custom models. app-control get_state has a
@@ -1096,7 +1257,13 @@ Anthropic and OpenAI rows show the price, and in Drop Smart cleanup "always
 reasons, slower", of the same model in that cached OpenRouter catalog
 (`openai/<id>` exactly; `anthropic/<id>`, also without the date suffix and with
 dots between version digits) and keep their own date. No OpenRouter catalog or
-no match shows nothing; no new request. Other providers show no price. Sections
+no match shows nothing; no new request. Speech rows (Soniox, Deepgram,
+ElevenLabs, OpenAI) show the published pay-as-you-go price per audio minute
+from the dated table `ModelRegistry.speechListPrice` (`$0.017 per min`;
+`From $0.0048 per min` where options billed extra raise it): the live price on
+a live feature, the recorded one on Meetings; unknown models, servers and On
+this Mac show none, never zero. WHY:
+.project-docs/decisions/2026-11-22-speech-model-prices.md. Sections
 come in this order: speech providers, Anthropic, OpenAI, the user's servers,
 OpenRouter last (its hundreds of models used to hide the direct sections below
 the visible rows); every keyed provider that can serve the feature has one,
@@ -1111,20 +1278,39 @@ written before prices refresh once on opening.
 WHY: .project-docs/decisions/2026-11-17-openrouter-model-prices.md,
 .project-docs/decisions/2026-11-22-direct-model-list-prices.md
 A user's server offers only the models the user added (ServerEndpoint.models,
-in the routing document): its form under API keys has Server name, Base URL,
-the optional key and Models, where each model gets a name (typed or from the
-server's /v1/models, which only suggests names) and a required type, LLM or
-Transcription (ServerModel.Kind; the name only preselects it). Adding checks
-it once with the server's key (ServerModelChecker): a one-line
-/chat/completions request or 0.5 s of silence to /audio/transcriptions; a
-failure is shown at once ("Server answered 404 on /audio/transcriptions —
-this model can't transcribe here") and "Save without check" adds it marked
-Not checked. Pickers and the shared rows show a server model only for its
-own type; the same name may be added once per type. A route already on a
-model stays listed; removing a model un-sets that type's routes on it.
-Launch turns an earlier server's routes into added models and ignores the
-retired "Offer models for". WHY:
-.project-docs/decisions/2026-11-22-server-explicit-models.md
+in the routing document). The Custom server tile and each server's tile open
+one window (ServerSheet, ServerSheetModel): Base URL, the optional key and
+model rows, each a name (typed or from the server's /v1/models, which only
+suggests names), a required type, LLM or Transcription (ServerModel.Kind; a
+chosen name only preselects it), its check status and ×; one Save keeps it
+all. Each row is checked with the server's key (ServerModelChecker): a
+one-line /chat/completions request or 0.5 s of silence to
+/audio/transcriptions, 0.8 s after typing stops, at once on a type change, and
+again when the address or key changes; a result counts only for the name,
+type, address and key digest it was sent for (ServerModelTarget). A failure
+shows the server's reason under the row ("Server answered 404 on
+/audio/transcriptions — this model can't transcribe here"); Save checks what
+is stale, stops on a failure it found, and Save anyway keeps failed rows
+marked Not checked. The saved key goes only to the saved server's origin
+(scheme, host, port): for another origin no check gets it, Save removes it
+unless a key is typed (read when Save writes), and the window says so; a
+typed key, once sent, is cleared when the address moves to another origin.
+After the key check Save
+verifies the address and key digest are still what the rows were checked
+with, then writes the key and the server's address, name and models in one
+routing write (AIRoutingStore.insertServer / updateServer), so a new server is
+never listed before its key passed; Save returns there and loads /v1/models
+afterwards. ▾ suggests only the saved address's /v1/models: the cached list
+carries a digest of its address (CatalogSnapshot.source) and a list
+forgotten while a refresh was in flight is not written back. There is no name field: a server is shown as its address
+(ServerEndpoint.displayName: "Ollama · localhost:11434", "vllm.company.ru"),
+replacing names from earlier builds. Pickers and the shared rows show a server
+model only for its own type; the same name may be listed once per type. A
+route already on a model stays listed; a model taken off the list un-sets
+that type's routes on it. Launch turns an earlier server's routes into added
+models and ignores the retired "Offer models for". WHY:
+.project-docs/decisions/2026-11-22-server-explicit-models.md,
+.project-docs/decisions/2026-11-22-server-window.md
 Deepgram's and Soniox's pickers offer only the built-in models: `nova-3` (live
 and recorded), and Soniox `stt-rt-v6` / `stt-async-v6`. A route already saved on
 another of their models stays listed and working, except Soniox v5, which
@@ -1138,8 +1324,8 @@ equal dates and empty queries keep catalog order. Older caches refresh once for 
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
 Refresh models or Other model ID actions. Custom servers offer only the models
-added in their form, typed or from /models. API keys uses square provider tiles opening an
-inline Save/Remove form with no extra helper/status copy; a short Key accepted
+added in their window, typed or from /models. API keys uses square provider tiles opening an
+inline Save/Remove form (a server's tile opens its window instead) with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;
 .project-docs/decisions/2026-10-20-model-search.md
@@ -1158,8 +1344,9 @@ a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
 show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Meeting Notes, Google search, Agent, Screenshot protection,
-Auto-hide island); rows that are plain options have none. WHY:
+automatically, Learn from my edits, Meeting Notes, Google search, Agent,
+Screenshot protection, Auto-hide island); rows that are plain options have
+none. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
@@ -1622,7 +1809,11 @@ is assigned with typesInTextFields (current layout, UCKeyTranslate). Both need
 the exact current value as expected; lines "Toolbox + Shot", "Toolbox −
 Monitor", "Hotkey: Shot — ⌥S", joined as "Toolbox + Shot · ⌥F (no longer
 types “<character>” in text fields)" in one turn; repeats are quiet. Descriptions call
-them hover tools / quick actions / Toolbox / menu. WHY:
+them hover tools / quick actions / Toolbox / menu. For a task a Whytap tool
+does, the Agent reads whytap_toolbox_get (HoverToolRegistry descriptions) and
+only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
+or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
+capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and

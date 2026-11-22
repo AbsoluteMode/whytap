@@ -33,6 +33,21 @@ final class SettingsOtherViewTests: XCTestCase {
         XCTAssertTrue(s.contains("volumeDuckEnabled"), "uses local mirror state for the binding")
     }
 
+    // MARK: - Drop group
+
+    /// The first group is "Drop": its three switches are all about Drop.
+    func test_firstGroupIsDropWithItsThreeSwitches() throws {
+        let s = try source()
+        XCTAssertTrue(s.contains("MacGroupTitle(title: \"Drop\")"))
+        XCTAssertFalse(s.contains("MacGroupTitle(title: \"Recording\")"))
+        let drop = try XCTUnwrap(s.range(of: "MacGroupTitle(title: \"Drop\")"))
+        let next = try XCTUnwrap(s.range(of: "MacGroupTitle(title: \"Features\")"))
+        let group = String(s[drop.upperBound..<next.lowerBound])
+        for title in ["Lower other audio while speaking", "Stop Drop automatically", "Learn from my edits"] {
+            XCTAssertTrue(group.contains(title), title)
+        }
+    }
+
     // MARK: - Meeting Notes row
 
     func test_containsMeetingNotesRow() throws {

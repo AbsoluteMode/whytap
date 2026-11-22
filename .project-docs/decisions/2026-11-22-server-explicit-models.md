@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AIRouting/ServerExplicitModelsTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-server-model-kinds.md, 2026-10-19-api-and-models.md, 2026-11-22-shared-model-rows.md]
+related: [2026-11-22-server-model-kinds.md, 2026-10-19-api-and-models.md, 2026-11-22-shared-model-rows.md, 2026-11-22-server-window.md]
 ---
 
 # A user's server offers only the models the user added, each with its type
@@ -40,14 +40,12 @@ both kinds. The user knows what each model is; the app does not.
 
 ## Decision
 
-- **Form.** The server form under API keys has Server name (was Name), Base
-  URL and the optional key as before, and a Models list. Adding a model takes
-  a name (typed, or chosen from "From server", the server's `/v1/models`
-  when it has one) and a required type, LLM or Transcription. The name only
-  preselects the type (`ServerModelClassifier.suggestedKind`) until the user
-  picks one. A new server opens its own form after Save so models can be
-  added right away. Rows show the name, the type and, when saved without a
-  check, an orange Not checked; × removes the model.
+- **Form.** Superseded the same day by the [server window](2026-11-22-server-window.md):
+  the server is set up in one window with its address, key and model rows,
+  saved by one Save, and named by its address. Each model still has a name
+  (typed, or chosen from the server's `/v1/models`) and a required type, LLM
+  or Transcription; the name only preselects the type
+  (`ServerModelClassifier.suggestedKind`).
 - **Check on add.** `ServerModelChecker` sends one request to the server,
   with the server's own key: an LLM gets a one-line `/chat/completions`
   request (`max_tokens` 16), a transcription model 0.5 s of silence as a WAV
@@ -55,20 +53,17 @@ both kinds. The user knows what each model is; the app does not.
   (silence transcribes to empty text), passes. Otherwise the form shows what
   the server said and where: "Server answered 404 on /audio/transcriptions —
   this model can't transcribe here (…)", "Server refused the key (HTTP 401)",
-  "Couldn't reach the server". After any failed check "Save without check"
-  adds it anyway with `checked: false`, shown as Not checked: a server may be
-  down while it is set up, and some servers serve a model only on the
-  realtime socket.
-- **A check counts only for the server as it was checked.** A check is
-  bound to the server's address and a digest of its key when it started
-  (`ServerModelTarget`; the key itself is not kept). If either changes while
-  the request runs (a replaced key, an address synced from another Mac, the
-  server removed), the result is stale and adds nothing; Save without check
-  from an earlier refusal is refused the same way once the address or key
-  changed. The form runs one operation at a time (`ServerFormActivity`):
-  while a model is checked the model field, its type, Save and Remove are
-  disabled, a key save blocks Add, and the form stays busy until the
-  operation that started it finishes.
+  "Couldn't reach the server". After a failed check that is on screen,
+  Save anyway keeps the model with `checked: false`, shown as Not checked: a
+  server may be down while it is set up, and some servers serve a model only
+  on the realtime socket.
+- **A check counts only for what it was sent for.** A row's result is bound
+  to its name, its type, the address and a digest of the key
+  (`ServerModelTarget`; the key itself is not kept). A change of any of them,
+  typed or synced from another Mac, needs a new check: a result that comes
+  back for an older state is dropped, and Save checks again every row whose
+  result no longer describes it, so a pass or a refusal never carries over
+  to another configuration.
 - **Pickers.** A server section lists only its added models of the kind the
   feature needs (`ServerModel.Kind(feature)`: Drop, Agent voice, Voice search
   and Meetings need Transcription; cleanup, notes and translation need LLM;
@@ -118,7 +113,7 @@ off, and the Not checked mark keeps that visible.
   only in text pickers; `qwen3-asr` as Transcription only in speech pickers
   and is picked through the usual probe; one name as both kinds, removal of
   one kind; empty and duplicate names; failed and unreachable checks save
-  only through Save without check; a server without `/v1/models`;
+  only on request (Save without check, now Save anyway); a server without `/v1/models`;
   migration of a `modelKinds: both` document (routes unchanged, entries
   derived, idempotent); restore/sync reload; a route on an unadded model.
 - Stale checks (from the build queue's review): a pass under a key replaced

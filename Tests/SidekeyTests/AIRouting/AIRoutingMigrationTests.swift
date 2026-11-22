@@ -488,7 +488,8 @@ final class AIRoutingMigrationTests: XCTestCase {
     // MARK: - A stored OpenAI speech choice
     // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
 
-    func test_stored_openai_choice_moves_to_the_openai_account_with_its_model() throws {
+    // An old choice of a model OpenAI no longer offers lands on the live model.
+    func test_stored_openai_choice_moves_to_the_openai_account_on_the_live_model() throws {
         let env = makeEnv()
         env.defaults.set("yourKey", forKey: Old.level)
         env.defaults.set("openAI", forKey: Old.provider)
@@ -501,7 +502,7 @@ final class AIRoutingMigrationTests: XCTestCase {
 
         for feature in realtimeFeatures {
             XCTAssertEqual(env.routing.route(for: feature),
-                           FeatureRoute(account: .openAI, model: "gpt-4o-mini-transcribe"), "\(feature)")
+                           FeatureRoute(account: .openAI, model: "gpt-live-transcribe"), "\(feature)")
         }
         XCTAssertNil(env.routing.route(for: .meetings), "OpenAI has no meetings model")
     }

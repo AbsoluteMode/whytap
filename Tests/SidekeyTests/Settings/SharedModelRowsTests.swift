@@ -221,11 +221,13 @@ final class SharedModelRowsTests: XCTestCase {
         let env = try makeEnv(snapshots: [.openAI: fresh(catalog)], keyed: [.openAI])
         let vm = env.makeViewModel()
 
+        // One live model on offer, with its price; the catalog's other
+        // transcription models are not.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
         let section = try XCTUnwrap(vm.sections(for: SharedModelKind.speech.pickerFeature).first { $0.account == .openAI })
-        XCTAssertEqual(Set(section.options.map(\.model)),
-                       ["gpt-live-transcribe", "gpt-realtime-whisper", "gpt-4o-mini-transcribe"])
-        XCTAssertEqual(section.options.first { $0.model == "gpt-4o-mini-transcribe" }?.hint, "text after each pause")
-        XCTAssertNil(section.options.first { $0.model == "gpt-live-transcribe" }?.hint)
+        XCTAssertEqual(section.options.map(\.model), ["gpt-live-transcribe"])
+        XCTAssertNil(section.options.first?.hint)
+        XCTAssertEqual(section.options.first?.priceLabel, "$0.017 per min")
 
         let picked = await vm.selectShared(model: ModelRegistry.openAILiveModel, account: .openAI,
                                            kind: .speech, replaceCustom: false)
@@ -268,7 +270,7 @@ final class SharedModelRowsTests: XCTestCase {
         }
         XCTAssertEqual(env2.probe.calls.map(\.use), [.realtimeSTT, .chat])
         let text = try row(.llm, vm)
-        XCTAssertEqual(text.label, "Lab · qwen3:8b · 1 not set")
+        XCTAssertEqual(text.label, "localhost:8000 · qwen3:8b · 1 not set", "a server is named by its address")
         XCTAssertEqual(text.uncovered.map(\.feature), [.agent])
     }
 
@@ -314,7 +316,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { env.routing.route(for: $0) == nil })
         let notes = try row(.speech, vm).notes
         XCTAssertEqual(notes.count, SharedModelKind.speech.features.count)
-        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Lab as a Transcription model") }, "\(notes)")
+        XCTAssertTrue(notes.allSatisfy { $0.contains("Not added to Ollama · localhost:11434 as a Transcription model") }, "\(notes)")
 
         // Added as Transcription, the same name is a speech model too.
         XCTAssertNil(vm.addServerModel("qwen3:8b", kind: .transcription, checked: true, to: account))
@@ -383,5 +385,49 @@ final class SharedModelRowsTests: XCTestCase {
             try png.write(to: URL(fileURLWithPath: output).appendingPathComponent("\(name).png"))
         }
         return png
+    }
+
+    // MARK: - OpenAI Sol and the Agent check (orchestrator task 78, REV 2)
+
+    /// Build 1720/1721 state: gpt-6.2-sol and gpt-6.1-sol were refused for the
+    /// Agent by the old Chat Completions tool check (adapter 1), plain text
+    /// passed, the Agent kept Anthropic. With the Responses check (adapter 2)
+    /// both Sol models are offered again for every LLM feature, the Agent
+    /// included, and picking one re-checks it and moves the Agent.
+    func test_sol_refused_by_the_old_tool_check_is_offered_again_and_moves_the_agent() async throws {
+        let sols = ["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol"]
+        let env = try makeEnv(snapshots: [.openAI: fresh(sols.map { llm($0) }), .anthropic: fresh([llm("claude-opus-5")])],
+                              keyed: [.openAI, .anthropic])
+        for feature in SharedModelKind.llm.features where feature != .agent {
+            env.routing.setRoute(FeatureRoute(account: .openAI, model: "gpt-6.1-sol"), for: feature)
+        }
+        env.routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-opus-5"), for: .agent)
+        let refusal = "Provider refused: Function tools with reasoning_effort are not supported for gpt-6.2-sol in /v1/chat/completions."
+        for model in ["gpt-6.2-sol", "gpt-6.1-sol"] {
+            env.checks.store(.failed(reason: refusal), for: ModelCheckKey(account: "openAI", model: model, use: .chatWithTools),
+                             adapterVersion: 1, at: Date())
+            env.checks.store(.passed, for: ModelCheckKey(account: "openAI", model: model, use: .chat), adapterVersion: 1, at: Date())
+        }
+        let vm = env.makeViewModel()
+
+        for feature in [SharedModelKind.llm.pickerFeature, .agent] {
+            let openAI = try XCTUnwrap(vm.sections(for: feature).first { $0.account == .openAI })
+            for model in sols {
+                let option = try XCTUnwrap(openAI.options.first { $0.model == model }, "\(model) listed for \(feature)")
+                if case .notSupported = option.state { XCTFail("\(model) is not ruled out for \(feature)") }
+            }
+        }
+        let shared = try XCTUnwrap(vm.sharedSections(.llm).first { $0.account == .openAI })
+        XCTAssertTrue(shared.options.contains { $0.model == "gpt-6.2-sol" }, "6.2-sol is back in the LLM picker")
+
+        // The Agent kept Anthropic after the refusal, so it counts as custom:
+        // the row asks first (as for any custom model); answering yes:
+        XCTAssertEqual(try row(.llm, vm).label, "OpenAI · gpt-6.1-sol · 1 custom")
+        let picked = await vm.selectShared(model: "gpt-6.2-sol", account: .openAI, kind: .llm, replaceCustom: true)
+        XCTAssertTrue(picked)
+        XCTAssertEqual(env.probe.calls.map(\.use), [.chatWithTools], "the stored failure is from the old check: checked again")
+        XCTAssertEqual(env.routing.route(for: .agent), FeatureRoute(account: .openAI, model: "gpt-6.2-sol"))
+        XCTAssertEqual(try row(.llm, vm).label, "OpenAI · gpt-6.2-sol")
+        XCTAssertEqual(try row(.llm, vm).notes, [])
     }
 }

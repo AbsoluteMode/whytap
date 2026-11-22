@@ -5,7 +5,7 @@ title: Native Whytap agent with Tavily search and a dedicated workspace
 summary: Replace OpenCode dispatch with a bounded direct model/tool loop, preserve selected routes and memory, and configure Tavily independently.
 status: confirmed
 tags: [agent, native, tavily, search, workspace, context, actions, privacy]
-canonical_for: [agent-runtime, agent-web-search, agent-workspace]
+canonical_for: [agent-runtime, agent-workspace]
 verified_at: 2026-10-28
 sources:
   - type: user-confirmed
@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md]
 ---
 
 # Decision
@@ -386,6 +386,9 @@ images, and sends the tool query only. Cap two searches per turn and bound all
 returned excerpts. Missing configuration produces a setup error; no alternative
 search service is chosen. The key joins the existing encrypted credential backup
 allowlist. Tavily credit cost is not added to model inference totals.
+Since 2026-11-22 the model provider's own web search is the default on
+Anthropic, OpenAI and OpenRouter routes and Tavily is the fallback
+([provider web search](2026-11-22-agent-provider-web-search.md)).
 
 The local tool catalog covers list/read/search, HTTPS fetch, requested screenshot,
 Case key names, answer actions, write and shell. Capture calls the app-owned

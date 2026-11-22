@@ -33,27 +33,45 @@ enum ModelRegistry {
         model == elevenLabsRetiredRealtimeModel || model.hasSuffix("_live") || model.hasSuffix("_realtime")
             ? elevenLabsRecordedModel : model
     }
-    /// OpenAI speech, on the shared OpenAI key. `gpt-live-transcribe` streams
-    /// words while the user speaks (OpenAI's recommended live model);
-    /// `gpt-realtime-whisper` streams too. Every other OpenAI transcription
-    /// model starts only after a committed turn, so it runs with server VAD
-    /// and shows text phrase by phrase. Recorded audio (Drop's batch rung and
-    /// Retry) goes to `/v1/audio/transcriptions` with `gpt-transcribe`.
+    /// OpenAI speech, on the shared OpenAI key: two models. `gpt-live-transcribe`
+    /// streams words while the user speaks (live dictation, the island);
+    /// recorded audio (Drop's batch rung and Retry) goes to
+    /// `/v1/audio/transcriptions` with `gpt-transcribe`. Pickers offer nothing
+    /// else; a route saved on another OpenAI transcription model moves to
+    /// these by role (`AIRoutingStore.narrowOpenAISpeechModelsIfNeeded`).
     // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
     static let openAILiveModel = "gpt-live-transcribe"
-    static let openAIRealtimeWhisperModel = "gpt-realtime-whisper"
     static let openAIRecordedModel = "gpt-transcribe"
+    /// Streams within a turn like the live model; no longer offered.
+    static let openAIRealtimeWhisperModel = "gpt-realtime-whisper"
+    /// OpenAI transcription models no longer offered: `gpt-realtime-whisper`
+    /// and the deprecated ones (OpenAI shuts them down on 2027-02-26).
+    static let openAIRetiredSpeechModels = [
+        openAIRealtimeWhisperModel, "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1",
+    ]
+
+    /// The model a saved OpenAI speech route moves to, or `nil` when it stays:
+    /// a retired transcription model (or a dated snapshot of one) becomes
+    /// `gpt-live-transcribe` on a live feature and `gpt-transcribe` on a
+    /// recorded one; `gpt-transcribe` on a live feature becomes the live model.
+    /// Anything else (the live model, a text model) is left alone.
+    static func openAISpeechReplacement(for model: String, mode: AIFeatureMode) -> String? {
+        let target: String
+        switch mode {
+        case .realtime: target = openAILiveModel
+        case .recorded: target = openAIRecordedModel
+        case .llm, .llmWithTools, .decision: return nil
+        }
+        let retired = openAIRetiredSpeechModels.contains { model == $0 || model.hasPrefix($0 + "-") }
+        let otherRole = mode == .realtime
+            && (model == openAIRecordedModel || model.hasPrefix(openAIRecordedModel + "-"))
+        return retired || otherRole ? target : nil
+    }
 
     /// Whether an OpenAI transcription model streams text within one turn
     /// (one commit when the take ends). The others need server VAD turns.
     static func openAIStreamsWithinTurn(_ model: String) -> Bool {
         model.hasPrefix(openAILiveModel) || model.hasPrefix(openAIRealtimeWhisperModel)
-    }
-
-    /// The model a finished take is sent with on OpenAI's file endpoint: the
-    /// live-only models map to `gpt-transcribe`, a file-capable one is kept.
-    static func openAIRecordedModel(for model: String) -> String {
-        openAIStreamsWithinTurn(model) ? openAIRecordedModel : model
     }
 
     /// OpenAI's published transcription prices, USD per audio minute
@@ -69,6 +87,43 @@ enum ModelRegistry {
         }
     }
 
+    /// A speech model's published pay-as-you-go list price in USD per audio
+    /// minute, for the model pickers, or `nil` when no price is known (a
+    /// user's server, On this Mac, any model not listed here): never a guess
+    /// or a zero. `startingAt` marks a base price that grows with options the
+    /// provider bills extra (Deepgram's multilingual Nova-3 and keyterms;
+    /// ElevenLabs keyterms). Checked 2026-11-22 against
+    /// https://soniox.com/pricing (about $0.12/h real-time, $0.10/h async),
+    /// https://deepgram.com/pricing (Nova-3 monolingual pay-as-you-go,
+    /// $0.0048/min streaming promo price, $0.0043/min pre-recorded) and
+    /// https://elevenlabs.io/pricing/api (Scribe v3 $0.20/h, v3 Live $0.22/h).
+    // WHY: .project-docs/decisions/2026-11-22-speech-model-prices.md
+    static func speechListPrice(_ model: String, kind: AIProviderKind, use: ModelUse) -> SpeechListPrice? {
+        switch (kind, use) {
+        case (.openAI, .realtimeSTT), (.openAI, .asyncSTT):
+            return openAISpeechUSDPerMinute(model).map { SpeechListPrice(usdPerMinute: $0) }
+        case (.soniox, .realtimeSTT), (.soniox, .asyncSTT):
+            switch model {
+            case sonioxRealtimeModel, sonioxRetiredRealtimeModel: return SpeechListPrice(usdPerMinute: 0.12 / 60)
+            case sonioxRecordedModel, sonioxRetiredRecordedModel: return SpeechListPrice(usdPerMinute: 0.10 / 60)
+            default: return nil
+            }
+        case (.deepgram, .realtimeSTT), (.deepgram, .asyncSTT):
+            guard model == "nova-3" else { return nil }
+            return SpeechListPrice(usdPerMinute: use == .realtimeSTT ? 0.0048 : 0.0043, startingAt: true)
+        case (.elevenLabs, .realtimeSTT), (.elevenLabs, .asyncSTT):
+            switch model {
+            case elevenLabsRealtimeModel, elevenLabsRetiredRealtimeModel:
+                return SpeechListPrice(usdPerMinute: 0.22 / 60, startingAt: true)
+            case elevenLabsRecordedModel, "scribe_v2":
+                return SpeechListPrice(usdPerMinute: 0.20 / 60, startingAt: true)
+            default: return nil
+            }
+        default:
+            return nil
+        }
+    }
+
     /// The speech model the On this Mac provider downloads and runs.
     static let onDeviceSpeechModel = OnDeviceSpeechModel.parakeetTdtV3.rawValue
     /// The agent's model on Anthropic's own API.
@@ -78,6 +133,12 @@ enum ModelRegistry {
 /// A model the app ships knowledge about: what it is for, and whether the
 /// provider can label speakers with it. "Verified" means the app's adapters
 /// are written and checked against this model.
+/// A list price per audio minute (`ModelRegistry.speechListPrice`).
+struct SpeechListPrice: Equatable, Sendable {
+    let usdPerMinute: Double
+    var startingAt = false
+}
+
 struct RegistryModel: Equatable, Sendable {
     let kind: AIProviderKind
     let id: String
@@ -119,7 +180,7 @@ extension ModelRegistry {
         RegistryModel(kind: .elevenLabs, id: elevenLabsRecordedModel, uses: [.asyncSTT], diarization: true),
         RegistryModel(kind: .onDevice, id: onDeviceSpeechModel, uses: [.realtimeSTT], diarization: false),
         RegistryModel(kind: .openAI, id: openAILiveModel, uses: [.realtimeSTT], diarization: false),
-        RegistryModel(kind: .openAI, id: openAIRealtimeWhisperModel, uses: [.realtimeSTT], diarization: false),
+        RegistryModel(kind: .openAI, id: openAIRecordedModel, uses: [.asyncSTT], diarization: false),
         RegistryModel(kind: .openAI, id: OpenAIRealtimeTranslateAdapter.model, uses: [.speechTranslation], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
         RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
@@ -137,10 +198,14 @@ extension ModelRegistry {
     /// only the built-in models (Nova-3; Soniox v6 live and recorded); a route
     /// already saved on another model keeps it.
     // WHY: .project-docs/decisions/2026-11-20-speech-model-lists.md
-    static func offersOnlyBuiltInModels(_ kind: AIProviderKind) -> Bool {
+    /// OpenAI speech offers its two models (`gpt-live-transcribe`,
+    /// `gpt-transcribe`), not every transcription model its catalog lists.
+    // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+    static func offersOnlyBuiltInModels(_ kind: AIProviderKind, use: ModelUse) -> Bool {
         switch kind {
         case .deepgram, .soniox: return true
-        case .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible, .onDevice: return false
+        case .openAI: return use == .realtimeSTT || use == .asyncSTT
+        case .elevenLabs, .openRouter, .anthropic, .openAICompatible, .onDevice: return false
         }
     }
 
@@ -210,8 +275,12 @@ extension ModelRegistry {
 
     /// Bumped when an adapter changes in a way that makes an earlier "checked
     /// when picked" result stale. Every adapter is at 1 for now.
+    /// A stored check counts only for the adapter version that made it. OpenAI
+    /// tool use is 2: its check moved to the Responses API, so a model refused
+    /// on Chat Completions (newer reasoning models) is checked again.
+    /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
     static func adapterVersion(_ kind: AIProviderKind, _ use: ModelUse) -> Int {
-        1
+        kind == .openAI && use == .chatWithTools ? 2 : 1
     }
 
     /// Why the app cannot run a model it can see in a catalog, or `nil`.

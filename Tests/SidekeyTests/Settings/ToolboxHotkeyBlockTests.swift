@@ -308,16 +308,11 @@ final class ToolboxHotkeyBlockTests: XCTestCase {
 
     func test_selected_tile_is_a_wash_and_click_never_draws_a_focus_rectangle() throws {
         let toolbox = try source("Sources/Sidekey/Settings/ToolboxSettingsView.swift")
-        XCTAssertTrue(toolbox.contains(".focusable(interactions: .activate)"),
-                      "keyboard navigation reaches tiles; a click does not focus them")
-        XCTAssertTrue(toolbox.contains(".contentShape(.focusEffect, ToolboxTileFocusShape("))
+        XCTAssertTrue(toolbox.contains(".focusEffectDisabled()"), "no system focus rectangle")
+        XCTAssertTrue(toolbox.contains(".opacity(isFocused && !pointer.focusFromPointer ? 1 : 0)"),
+                      "keyboard focus draws the circle ring; click focus does not")
         XCTAssertFalse(toolbox.contains("? MacSettingsTheme.accent\n                                          : MacSettingsTheme.sepStrong"),
                        "no accent outline on the selected circle")
         XCTAssertTrue(toolbox.contains("MacSettingsTheme.accent.opacity(Self.selectedWashOpacity)"))
-    }
-
-    func test_focus_shape_is_the_circle_at_the_top_of_the_tile() {
-        let path = ToolboxTileFocusShape(diameter: 56).path(in: CGRect(x: 0, y: 0, width: 70, height: 88))
-        XCTAssertEqual(path.boundingRect, CGRect(x: 7, y: 0, width: 56, height: 56))
     }
 }

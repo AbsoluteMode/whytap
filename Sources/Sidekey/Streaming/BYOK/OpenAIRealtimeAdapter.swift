@@ -109,7 +109,10 @@ struct OpenAIRealtimeAdapter: BYOKTranscriptionAdapter {
     /// `gpt-realtime-whisper` takes no prompt; the older models `language`
     /// and `prompt`. A server keeps `language` and `prompt`.
     static func sessionUpdate(model: String, dialect: OpenAIRealtimeDialect,
-                              language: String?, terms: [String]) -> [String: Any] {
+                              language: String?, terms allTerms: [String]) -> [String: Any] {
+        // The prompt and keywords take, in list order, what fits the route's
+        // budget; a long Vocab list must not break the session.
+        let terms = VocabularyBudget.terms(allTerms, for: .openAIPrompt)
         var tx: [String: Any] = ["model": model]
         let turns = OpenAIRealtimeTurns.forModel(model, dialect: dialect)
         switch dialect {

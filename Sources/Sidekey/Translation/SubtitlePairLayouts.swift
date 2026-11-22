@@ -56,15 +56,16 @@ struct NewestRowsLayout: Layout {
 /// Every row is placed; the ones above the area are clipped by the caller, so
 /// an old pair leaves at the top a line at a time as new lines push it up,
 /// like the RealtimeTranslator caption. Every row is three subviews: its
-/// band, its original, its translation. Each column is at most `columnCap`
-/// high (`NewestLinesColumn`), so the newest row always fits below the top
-/// fade with both its original and its translation.
+/// band, its original, its translation. Each column is at most
+/// `columnCap(height:)` of the caption's actual height (`NewestLinesColumn`),
+/// so the newest row always fits below the top fade with both its original
+/// and its translation. A shorter panel gets a shorter caption.
 // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 struct SteadyPairsLayout: Layout {
     var rowSpacing: CGFloat
     var columnSpacing: CGFloat
     var sourceFraction: CGFloat
-    /// The widest the caption gets, and its height.
+    /// The widest and tallest the caption gets.
     var size: CGSize
     /// Padding inside a row's band.
     var inset = CGSize.zero
@@ -90,8 +91,17 @@ struct SteadyPairsLayout: Layout {
         return max(0, min(proposed, size.width))
     }
 
-    /// The tallest a column gets: the newest row then fits whole below the fade.
-    var columnCap: CGFloat { max(0, (size.height * (1 - Self.topFade)).rounded(.down) - 2 * inset.height) }
+    /// The caption is as tall as it is offered, up to `size.height`.
+    func height(proposed: CGFloat?) -> CGFloat {
+        guard let proposed, proposed.isFinite else { return size.height }
+        return max(0, min(proposed, size.height))
+    }
+
+    /// The tallest a column gets in a caption this high: the newest row then
+    /// fits whole below the fade.
+    func columnCap(height: CGFloat) -> CGFloat {
+        max(0, (height * (1 - Self.topFade)).rounded(.down) - 2 * inset.height)
+    }
 
     /// A row's columns share their first baseline. A column at its cap shows
     /// only its newest lines, so its first baseline is cut off: then both
@@ -113,57 +123,89 @@ struct SteadyPairsLayout: Layout {
         stride(from: 0, to: subviews.count - subviews.count % 3, by: 3).map { $0..<($0 + 3) }
     }
 
-    private func measure(_ subviews: Subviews, _ group: Range<Int>, _ columns: Columns) -> Row {
-        let a = subviews[group.lowerBound + 1].dimensions(in: ProposedViewSize(width: columns.source, height: nil))
-        let b = subviews[group.lowerBound + 2].dimensions(in: ProposedViewSize(width: columns.translation, height: nil))
+    private func measure(_ subviews: Subviews, _ group: Range<Int>, _ columns: Columns, cap: CGFloat) -> Row {
+        let a = subviews[group.lowerBound + 1].dimensions(in: ProposedViewSize(width: columns.source, height: cap))
+        let b = subviews[group.lowerBound + 2].dimensions(in: ProposedViewSize(width: columns.translation, height: cap))
         return Self.row(source: Column(height: a.height, firstBaseline: a[VerticalAlignment.firstTextBaseline]),
                         translation: Column(height: b.height, firstBaseline: b[VerticalAlignment.firstTextBaseline]),
-                        cap: columnCap, inset: inset.height)
+                        cap: cap, inset: inset.height)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: width(proposed: proposal.width), height: size.height)
+        CGSize(width: width(proposed: proposal.width), height: height(proposed: proposal.height))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let columns = columns(width: bounds.width)
+        let cap = columnCap(height: bounds.height)
         var y = bounds.maxY
         for group in groups(subviews).reversed() {
-            let row = measure(subviews, group, columns)
+            let row = measure(subviews, group, columns, cap: cap)
             y -= row.height
             subviews[group.lowerBound].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
                                              proposal: ProposedViewSize(width: bounds.width, height: row.height))
             subviews[group.lowerBound + 1].place(
                 at: CGPoint(x: bounds.minX + inset.width, y: y + inset.height + row.sourceY), anchor: .topLeading,
-                proposal: ProposedViewSize(width: columns.source, height: nil))
+                proposal: ProposedViewSize(width: columns.source, height: cap))
             subviews[group.lowerBound + 2].place(
                 at: CGPoint(x: bounds.minX + inset.width + columns.source + columnSpacing,
                             y: y + inset.height + row.translationY), anchor: .topLeading,
-                proposal: ProposedViewSize(width: columns.translation, height: nil))
+                proposal: ProposedViewSize(width: columns.translation, height: cap))
             y -= rowSpacing
         }
     }
 }
 
-/// A column of one overlay row, at most `cap` high: when the text is taller,
-/// its newest lines show at the bottom and the oldest are cut at the top, so
-/// a long unfinished original never pushes its translation out of sight.
-/// Lines move up only when a new one starts, as in RealtimeTranslator.
+/// A column of one overlay row, at most as high as it is offered: when the
+/// text is taller, its newest lines show at the bottom and the oldest are cut
+/// at the top, so a long unfinished original never pushes its translation out
+/// of sight. Lines move up only when a new one starts, as in RealtimeTranslator.
 // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 struct NewestLinesColumn: ViewModifier {
-    var cap: CGFloat
-
     func body(content: Content) -> some View {
-        content
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: cap, alignment: .bottomLeading)
-            .clipped()
+        NewestLinesLayout { content }.clipped()
+    }
+}
+
+/// `NewestLinesColumn`'s layout: the text at its full height, bottom-anchored
+/// in a frame no taller than the offer.
+struct NewestLinesLayout: Layout {
+    static func height(text: CGFloat, offered: CGFloat?) -> CGFloat {
+        guard let offered, offered.isFinite else { return text }
+        return min(text, max(0, offered))
+    }
+
+    private func text(_ subviews: Subviews, width: CGFloat?) -> CGSize {
+        subviews.first?.sizeThatFits(ProposedViewSize(width: width, height: nil)) ?? .zero
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let text = text(subviews, width: proposal.width)
+        return CGSize(width: text.width, height: Self.height(text: text.height, offered: proposal.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        let text = text(subviews, width: bounds.width)
+        subview.place(at: CGPoint(x: bounds.minX, y: bounds.maxY - text.height), anchor: .topLeading,
+                      proposal: ProposedViewSize(width: bounds.width, height: nil))
+    }
+
+    /// Baselines of the text where it is placed: above the frame when cut.
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout ()) -> CGFloat? {
+        guard let subview = subviews.first, guide == .firstTextBaseline || guide == .lastTextBaseline else { return nil }
+        let dimensions = subview.dimensions(in: ProposedViewSize(width: bounds.width, height: nil))
+        return bounds.height - dimensions.height + dimensions[guide]
     }
 }
 
 /// The overlay box's content column: as wide as its widest child needs (up
 /// to `maxWidth`), every child then laid out at that width. Controls with a
-/// spacer stretch to it; the box no longer spans the panel by default.
+/// spacer stretch to it; the box no longer spans the panel by default. A
+/// child with a negative layout priority (the caption) gets the height the
+/// others leave, up to what it wants, so a short or narrow panel shrinks the
+/// caption instead of cutting the box.
 struct HuggingColumnLayout: Layout {
     var spacing: CGFloat
     var maxWidth: CGFloat
@@ -173,18 +215,30 @@ struct HuggingColumnLayout: Layout {
         return subviews.map { min(cap, $0.sizeThatFits(ProposedViewSize(width: nil, height: nil)).width) }.max() ?? 0
     }
 
+    private func heights(_ subviews: Subviews, width: CGFloat, height: CGFloat?) -> [CGFloat] {
+        let fixed = subviews.map { $0.priority < 0 ? 0 : $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        let flexible = subviews.filter { $0.priority < 0 }.count
+        let spare = height.map { max(0, $0 - fixed.reduce(0, +) - spacing * CGFloat(max(0, subviews.count - 1))) }
+        return subviews.indices.map { index in
+            guard subviews[index].priority < 0 else { return fixed[index] }
+            let offer = spare.map { $0 / CGFloat(flexible) }
+            return subviews[index].sizeThatFits(ProposedViewSize(width: width, height: offer)).height
+        }
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = width(subviews, proposed: proposal.width)
-        let heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        let height = proposal.height.flatMap { $0.isFinite ? $0 : nil }
+        let heights = heights(subviews, width: width, height: height)
         return CGSize(width: width, height: heights.reduce(0, +) + spacing * CGFloat(max(0, heights.count - 1)))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let heights = heights(subviews, width: bounds.width, height: bounds.height)
         var y = bounds.minY
-        for subview in subviews {
-            let proposal = ProposedViewSize(width: bounds.width, height: nil)
-            let height = subview.sizeThatFits(proposal).height
-            subview.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: proposal)
+        for (subview, height) in zip(subviews, heights) {
+            subview.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: subview.priority < 0 ? height : nil))
             y += height + spacing
         }
     }

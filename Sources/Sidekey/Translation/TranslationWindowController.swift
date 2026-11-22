@@ -147,12 +147,17 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
     static let subtitleSize = NSSize(width: 760, height: 190)
+    static let minimumWidth: CGFloat = 360
 
     /// Internal so tests can check the layout without putting the panel on screen.
     func resize(for mode: Mode) {
         let isText = mode == .text
         configureChrome(for: mode)
-        panel.minSize = NSSize(width: 360, height: isText ? 120 : 140)
+        // Subtitles: never shorter than the overlay's own height, so the
+        // controls, a problem with its fix and the caption all fit at the
+        // narrowest width (the caption shrinks to what the controls leave).
+        // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+        panel.minSize = NSSize(width: Self.minimumWidth, height: isText ? 120 : Self.subtitleSize.height)
         let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
         if laidOutMode == .text { rememberTextWidth(frame.width) }

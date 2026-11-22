@@ -40,12 +40,13 @@ struct SubtitleSpeechPairer {
     private(set) var carry = ""
 
     var liveSource: String { String(source.map(\.character)).trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// The live pair's original: the heard text up to its first sentence end.
-    /// The original runs ahead of the translation, and the words after that
-    /// end usually belong to the next pair; showing them here would move them
-    /// out of this row when it settles.
+    /// The live pair's original: the words heard up to the audio position the
+    /// translation has reached, and at most up to the original's first
+    /// sentence end. The original runs ahead of the translation; words past
+    /// either bound may belong to the next pair, and a row never shows what it
+    /// may have to give away when it settles.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
-    var liveSourceHead: String { text(source.prefix(max(headCount, shownSource))) }
+    var liveSourceHead: String { text(source.prefix(max(min(headCount, translatedCount), shownSource))) }
     /// The translation still being spoken, whole words only: the model
     /// streams parts of words ("ошиб" + "лась"), and a fragment is never shown.
     var liveTranslation: String { text(translation.prefix(max(wholeWordCount, shownTranslation))) }
@@ -56,7 +57,7 @@ struct SubtitleSpeechPairer {
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     mutating func showLive() -> (source: String, translation: String) {
         let row = (source: liveSourceHead, translation: liveTranslation)
-        shownSource = max(shownSource, headCount)
+        shownSource = max(shownSource, min(headCount, translatedCount))
         shownTranslation = max(shownTranslation, wholeWordCount)
         return row
     }
@@ -67,6 +68,17 @@ struct SubtitleSpeechPairer {
         let text = String(source.map(\.character))
         guard let end = SubtitleSegmenter.firstSentenceEnd(in: text) else { return source.count }
         return text.distance(from: text.startIndex, to: end)
+    }
+
+    /// Characters of the original heard by the audio position of the last
+    /// shown translation word, whole words only: the timing cut of this pair
+    /// takes at least these.
+    private var translatedCount: Int {
+        guard let reached = translation.prefix(wholeWordCount).map(\.elapsed).max(),
+              let last = source.lastIndex(where: { $0.elapsed <= reached }) else { return 0 }
+        var count = last + 1
+        while count < source.count, !source[count].character.isWhitespace { count += 1 }
+        return count
     }
 
     /// Characters of the translation up to its last whole word.
@@ -110,7 +122,10 @@ struct SubtitleSpeechPairer {
         let text = String(translation.map(\.character))
         guard let last = text.last, !last.isWhitespace, !SubtitleSegmenter.clauseMarks.contains(last),
               !SubtitleSegmenter.endsSentence(text) else { return }
-        let keep = text.lastIndex(where: \.isWhitespace).map { text.distance(from: text.startIndex, to: $0) } ?? 0
+        // Never below what the live row showed (a clause mark the next
+        // fragment followed without a space).
+        let keep = max(shownTranslation,
+                       text.lastIndex(where: \.isWhitespace).map { text.distance(from: text.startIndex, to: $0) } ?? 0)
         translation.removeLast(translation.count - keep)
         shownTranslation = min(shownTranslation, translation.count)
     }

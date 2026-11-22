@@ -81,8 +81,8 @@ original on the left and its translation on the right, newest at the bottom.
 The box keeps one size from Start until the session ends, also before any
 audio or words arrive and after an early **Stop**, and blurs the video under
 it. In a narrower window it narrows with it. Text already shown stays where it
-is: the sentence still being heard is the last row, with its translation so
-far dimmed, and turns white in place when it is finished, keeping every word
+is: the sentence still being heard is the last row, its original appearing
+as far as its translation has reached and the translation so far dimmed, and turns white in place when it is finished, keeping every word
 it showed; older lines move up and leave at the top one line at a time. A very
 long original without a pause shows its newest lines beside the translation.
 Hover the box to

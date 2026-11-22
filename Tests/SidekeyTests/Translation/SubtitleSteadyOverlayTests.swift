@@ -103,23 +103,56 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         }
     }
 
-    /// The original runs far ahead of a short translation: its whole first
-    /// sentence is on screen when the translation's sentence closes at an
-    /// earlier audio position. The settled pair keeps all of it.
-    func testAnOriginalAheadOfItsTranslationStaysInItsRow() async throws {
+    /// The original runs far ahead of its translation (the build queue's
+    /// fixture): early words at 400 ms, the rest at 4,000 ms, translations
+    /// closing at 1,000 ms and 4,300 ms. The live row shows the original only
+    /// as far as its translation has reached, so each translation settles
+    /// with its own original and nothing shown moves.
+    func testAnOriginalAheadOfItsTranslationIsShownOnlyAsFarAsTheTranslation() async throws {
         let shots = try await snapshots([
             (.source, " Welcome to", 400),
-            (.translation, "Добро пожаловать на лекцию.", 1_000),
+            (.translation, "Добро пожаловать.", 1_000),
             (.source, " the lecture. Today we", 4_000),
-            (.translation, " Сегодня", 4_100),
-            (.source, " talk about", 4_600),
-            (.translation, " мы поговорим", 4_800)
+            (.translation, " На лекцию.", 4_300),
+            (.source, " talk", 4_600),
+            (.translation, " Сегодня", 4_700),
+            (.translation, " мы", 4_800)
         ], minimum: 4)
         assertSteady(shots)
-        let first = try XCTUnwrap(shots.last?.first)
-        XCTAssertEqual(first.source, "Welcome to the lecture.")
-        XCTAssertEqual(text(first.translation), "Добро пожаловать на лекцию.")
-        XCTAssertEqual(shots.last?.last?.source, "Today we talk about")
+        let rows = try XCTUnwrap(shots.last)
+        XCTAssertEqual(rows.map(\.source), ["Welcome to", "the lecture.", "Today we talk"])
+        XCTAssertEqual(rows.map { text($0.translation) }, ["Добро пожаловать.", "На лекцию.", "Сегодня"])
+        // Before its translation arrives, no original is offered to the row.
+        var pairer = SubtitleSpeechPairer()
+        pairer.addSource(" Welcome to the lecture.", elapsedMs: 400)
+        XCTAssertEqual(pairer.showLive().source, "")
+    }
+
+    /// The translation splits one sentence of the original in two: each part
+    /// keeps the words heard by its own translation, none is left empty.
+    func testASentenceTranslatedInTwoPartsKeepsAnOriginalForEach() async throws {
+        let shots = try await snapshots([
+            (.source, " Welcome to the lecture", 500),
+            (.source, " about neural networks", 1_200),
+            (.translation, "Добро пожаловать на лекцию о нейросетях.", 1_300),
+            (.source, " and how they learn.", 1_900),
+            (.translation, " Как они учатся.", 2_000),
+            (.source, " Today", 2_600),
+            (.translation, " Сегодня", 2_700),
+            (.translation, " мы", 2_800)
+        ], minimum: 4)
+        assertSteady(shots)
+        let rows = try XCTUnwrap(shots.last)
+        XCTAssertEqual(rows.map(\.source),
+                       ["Welcome to the lecture about neural networks", "and how they learn.", "Today"])
+        XCTAssertFalse(rows.dropLast().contains { $0.source.isEmpty }, "a settled translation lost its original")
+    }
+
+    /// The recorded session: every settled translation keeps an original.
+    func testEveryRecordedTranslationKeepsAnOriginal() async throws {
+        let shots = try await snapshots()
+        let rows = try XCTUnwrap(shots.last)
+        XCTAssertFalse(rows.filter { !$0.isLive }.contains { $0.source.isEmpty && !text($0.translation).isEmpty })
     }
 
     /// A long translation without a sentence end closes at a clause; the
@@ -141,14 +174,26 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
 
     func testThePairerKeepsWhatTheLiveRowShowedThroughAPauseCut() {
         var pairer = SubtitleSpeechPairer()
-        pairer.addSource(" Welcome to", elapsedMs: 400)
-        pairer.addSource(" the lecture. Today", elapsedMs: 4_000)
+        pairer.addSource(" Welcome to the", elapsedMs: 400)
+        pairer.addSource(" lecture. Today", elapsedMs: 900)
         pairer.addTranslation("Добро пожаловать", elapsedMs: 1_000, now: 0)
         XCTAssertEqual(pairer.showLive().source, "Welcome to the lecture.")
-        // The speaker pauses: the translation closes at its audio position.
+        // The speaker pauses: the pair keeps all it showed.
         let pairs = pairer.take(now: SubtitleSpeechPairer.pause + 0.1)
         XCTAssertEqual(pairs, [.init(source: "Welcome to the lecture.", translation: "Добро пожаловать")])
-        XCTAssertEqual(pairer.liveSourceHead, "Today")
+        XCTAssertEqual(pairer.liveSource, "Today")
+    }
+
+    /// The connection fails right after a clause mark the next fragment
+    /// followed without a space: the shown mark stays.
+    func testABrokenSessionKeepsAShownClauseMark() {
+        var pairer = SubtitleSpeechPairer()
+        pairer.addSource(" One two", elapsedMs: 100)
+        pairer.addTranslation("Раз,", elapsedMs: 200, now: 0)
+        XCTAssertEqual(pairer.showLive().translation, "Раз,")
+        pairer.addTranslation("два", elapsedMs: 300, now: 0.01)
+        pairer.dropUnfinishedWord()
+        XCTAssertEqual(pairer.take(now: 0.02, force: true).first?.translation, "Раз,")
     }
 
     func testThePairerKeepsShownTranslationThroughAClauseCut() {
@@ -167,11 +212,13 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         var pairer = SubtitleSpeechPairer()
         pairer.addSource(" Welcome to the lecture.", elapsedMs: 800)
         pairer.addSource(" Today we", elapsedMs: 1_600)
+        pairer.addTranslation("Добро пожаловать на", elapsedMs: 1_700, now: 0)
         XCTAssertEqual(pairer.liveSource, "Welcome to the lecture. Today we")
         // "Today we" is the next pair's original: shown there, not here.
         XCTAssertEqual(pairer.liveSourceHead, "Welcome to the lecture.")
         var short = SubtitleSpeechPairer()
         short.addSource(" Still speaking", elapsedMs: 400)
+        short.addTranslation("Всё ещё говорит", elapsedMs: 500, now: 0)
         XCTAssertEqual(short.liveSourceHead, "Still speaking")
     }
 
@@ -194,34 +241,42 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
     }
 
     /// A long original without punctuation must not push the newest row's
-    /// translation out of the caption: a column at most `columnCap` high
-    /// shows its newest lines, and the row then fits below the top fade.
+    /// translation out of the caption: a column is offered at most
+    /// `columnCap(height:)` and shows its newest lines, and the row then fits
+    /// below the top fade, whatever height the panel leaves the caption.
     func testALongColumnShowsItsNewestLinesAndLeavesTheTranslationInSight() {
-        for height in [TranslationView.captionHeight, TranslationView.stoppedCaptionHeight] {
-            let layout = SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: TranslationView.sourceFraction,
-                                           size: CGSize(width: TranslationView.overlayContentWidth, height: height),
-                                           inset: TranslationView.bandInset)
-            let cap = layout.columnCap
+        let layout = SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: TranslationView.sourceFraction,
+                                       size: CGSize(width: TranslationView.overlayContentWidth,
+                                                    height: TranslationView.captionHeight),
+                                       inset: TranslationView.bandInset)
+        for offered in [TranslationView.captionHeight, TranslationView.stoppedCaptionHeight, 86, 60] {
+            let height = layout.height(proposed: offered)
+            let cap = layout.columnCap(height: height)
             XCTAssertLessThanOrEqual(cap + 2 * TranslationView.bandInset.height, height * (1 - SteadyPairsLayout.topFade))
-            // A clipped original: its first baseline is above the column.
+            // A cut original: its first baseline is above the column.
             let row = SteadyPairsLayout.row(source: .init(height: cap, firstBaseline: -400),
                                             translation: .init(height: 24, firstBaseline: 19),
                                             cap: cap, inset: TranslationView.bandInset.height)
             XCTAssertEqual(row.translationY, 0, "the translation must start at the top of the visible row")
             XCTAssertLessThanOrEqual(row.height, height * (1 - SteadyPairsLayout.topFade))
-            // Short columns still share their first baseline.
-            let short = SteadyPairsLayout.row(source: .init(height: 20, firstBaseline: 15),
-                                              translation: .init(height: 24, firstBaseline: 19),
-                                              cap: cap, inset: 3)
-            XCTAssertEqual(short.sourceY, 4)
         }
+        XCTAssertEqual(layout.height(proposed: 500), TranslationView.captionHeight)
+        XCTAssertEqual(layout.height(proposed: nil), TranslationView.captionHeight)
+        // Short columns still share their first baseline.
+        let short = SteadyPairsLayout.row(source: .init(height: 20, firstBaseline: 15),
+                                          translation: .init(height: 24, firstBaseline: 19), cap: 100, inset: 3)
+        XCTAssertEqual(short.sourceY, 4)
+        // A column is never taller than it is offered, and short text keeps its height.
+        XCTAssertEqual(NewestLinesLayout.height(text: 600, offered: 100), 100)
+        XCTAssertEqual(NewestLinesLayout.height(text: 24, offered: 100), 24)
+        XCTAssertEqual(NewestLinesLayout.height(text: 24, offered: nil), 24)
+        // In a real hosting view the column is cut to its offer.
         let long = String(repeating: "and then the speaker kept going ", count: 20)
         let column = NSHostingView(rootView: Text(long).font(.system(size: 15))
-            .modifier(NewestLinesColumn(cap: 100)).frame(width: 240))
+            .modifier(NewestLinesColumn()).frame(width: 240, height: 100, alignment: .bottom))
+        column.frame = NSRect(x: 0, y: 0, width: 240, height: 100)
+        column.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(column.fittingSize.height, 100.5)
-        let short = NSHostingView(rootView: Text("Hello").font(.system(size: 15))
-            .modifier(NewestLinesColumn(cap: 100)).frame(width: 240))
-        XCTAssertLessThan(short.fittingSize.height, 40)
     }
 
     /// From Connecting to the end of Finishing the caption keeps one size,
@@ -256,6 +311,19 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         let columns = layout.columns(width: narrow)
         XCTAssertEqual(columns.source + columns.translation + 18 + 2 * TranslationView.bandInset.width, narrow, accuracy: 1)
         XCTAssertEqual(layout.columns(width: narrow), columns)
+    }
+
+    /// The subtitles panel cannot be made smaller than the size every state
+    /// was rendered at: 360 pt wide (the caption narrows) and its own height.
+    func testTheSubtitlesPanelMinimumIsTheCheckedSize() throws {
+        let controller = TranslationWindowController(textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
+                                                     subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }),
+                                                     openSettings: { _ in }, activityChanged: { _ in })
+        let panel = try XCTUnwrap(controller.window)
+        controller.resize(for: .subtitles)
+        XCTAssertEqual(panel.minSize, NSSize(width: 360, height: TranslationWindowController.subtitleSize.height))
+        controller.resize(for: .text)
+        XCTAssertEqual(panel.minSize.height, 120)
     }
 
     func testTheOverlayTakesTheFirstClickWithoutBeingKey() throws {

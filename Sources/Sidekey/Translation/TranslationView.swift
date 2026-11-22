@@ -20,7 +20,8 @@ struct TranslationView: View {
         Group {
             if isText { textContent } else { subtitleContent }
         }
-        .frame(minWidth: embedded ? 0 : (isText ? 320 : 420), maxWidth: .infinity,
+        // Subtitles fit the panel's own minimum (360 pt); no wider floor here.
+        .frame(minWidth: embedded || !isText ? 0 : 320, maxWidth: .infinity,
                minHeight: embedded ? 0 : (isText ? 80 : 120), maxHeight: .infinity)
         .background { if !embedded && isText { Rectangle().fill(.regularMaterial) } }
         .onAppear { if isText && embedded { inputFocused = true } }
@@ -184,13 +185,14 @@ struct TranslationView: View {
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
                     if !subtitles.phase.isActive { subtitleControls }
                     if case .fixed(let height) = shape {
+                        // As tall as the panel leaves, up to `height`.
                         caption(rows, height: height)
                             .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
-                                   alignment: .bottomLeading)
-                            .frame(height: height, alignment: .bottomLeading)
+                                   minHeight: 0, idealHeight: height, maxHeight: height, alignment: .bottomLeading)
                             // Inside the caption, so the box does not grow
                             // and shrink while no audio arrives.
                             .overlay(alignment: .bottomTrailing) { if waitingWithoutAudio { audioPermissionsButton } }
+                            .layoutPriority(-1)
                     } else if shape == .hugging {
                         caption(rows, height: Self.stoppedCaptionHeight)
                             .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
@@ -299,8 +301,8 @@ struct TranslationView: View {
                     Group {
                         RoundedRectangle(cornerRadius: 7)
                             .fill(.white.opacity(row.ordinal.isMultiple(of: 2) ? Self.bandOpacity : 0))
-                        sourceText(row).modifier(NewestLinesColumn(cap: layout.columnCap))
-                        translationText(row).modifier(NewestLinesColumn(cap: layout.columnCap))
+                        sourceText(row).modifier(NewestLinesColumn())
+                        translationText(row).modifier(NewestLinesColumn())
                     }
                     .transition(.opacity)
                 }

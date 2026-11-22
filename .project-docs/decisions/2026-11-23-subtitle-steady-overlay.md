@@ -101,6 +101,16 @@ a box that still changed size. Added:
   then keeps at least that much in the settled pair. Before, an original that
   ran ahead of a shorter translation lost its shown tail to the next row. A
   long translation closed at an early clause and moved shown words below.
+- **The original only as far as its translation.** The second check found the
+  floor alone wrong: the live row showed the original's whole first sentence,
+  so a row whose translation closed at an earlier audio position took the next
+  translation's original and left that one empty. The live row now shows the
+  original only up to the audio position of its last shown translation word
+  (and at most to its first sentence end). The timing cut takes at least
+  those words, so the floor never takes another pair's words. The original
+  now appears in step with its translation instead of ahead of it.
+- **A shown clause mark survives a broken session.** Dropping an unfinished
+  word after a failure never goes below what the row showed.
 - **Newest lines of a long column.** A column is at most
   `SteadyPairsLayout.columnCap` high (the caption below its top fade). A taller
   one shows its newest lines (`NewestLinesColumn`), and both columns then start
@@ -113,7 +123,12 @@ a box that still changed size. Added:
   is smaller and hugs its text, so it and its button fit the 190 pt panel.
 - **Narrow panels.** The panel can be resized down to 360 pt. The caption takes
   the width it is given up to 708 pt (`SteadyPairsLayout.width(proposed:)`);
-  the columns still depend only on that width.
+  the columns still depend only on that width. The view no longer demands
+  420 pt. When the controls wrap to two rows, the caption takes the height
+  they leave, up to its own (`HuggingColumnLayout` gives a child with
+  negative layout priority the rest), and its column cap follows that height.
+  The subtitles panel's minimum height is its standard 190 pt (it was 140 pt,
+  where a problem's message, its button and two rows of controls cannot fit).
 
 ## Why
 
@@ -137,15 +152,19 @@ event and checks:
 - a long live original is not cut at the front;
 - the column split depends only on the width;
 - the overlay's content view accepts the first click;
-- an original far ahead of its translation, and a long translation closed at
-  a clause, keep every shown word in their row (these fail without
-  `showLive`);
+- an original far ahead of its translation (the build queue's 400 / 4,000 ms
+  fixture) and a sentence the translation splits in two settle each
+  translation with its own original, none empty, and keep every shown word;
+  a long translation closed at a clause keeps the words it showed; a broken
+  session keeps a shown clause mark (these fail on the earlier heads);
 - a long column stays within its cap with the translation at the row's top;
-- the caption keeps one size in every running phase and fits a narrow panel.
+- the caption keeps one size in every running phase and fits a narrow panel;
+- the subtitles panel's minimum is 360 × 190 pt.
 
 Offscreen renders cover the overlay early, live and stopped, the missing
-key state, silent start, Stop before any words, a long original, and a
-480 pt panel, each inside a red outline of the panel's edge. Offscreen the blur has nothing under it, so only its tint shows.
+key state, silent start, Stop before any words, a long original, and
+480 pt and 360 pt panels (live, stopped, missing key), each inside a red
+outline of the panel's edge. Offscreen the blur has nothing under it, so only its tint shows.
 Not checked: the installed app, a real pointer, and the blur over a playing
 video.
 
@@ -163,5 +182,9 @@ video.
   different heights, and its shorter column would move up with each new line.
 - Bringing back a sliding window for a long original: every word would move
   on every update.
+- Keeping the live original ahead of the translation and only flooring the
+  cut: it takes the next pair's words whenever the two streams split a
+  sentence differently.
+- A 140 pt minimum panel height: the missing-key state at 360 pt cannot fit.
 
 2026-11-23 · branch claude/subtitles-stop-and-steady-text

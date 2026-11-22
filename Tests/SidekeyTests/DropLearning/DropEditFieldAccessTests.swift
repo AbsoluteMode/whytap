@@ -628,4 +628,77 @@ final class DropEditFieldAccessTests: XCTestCase {
             XCTAssertEqual(writes, [true, false], attribute)
         }
     }
+
+    // MARK: - Builder review #442 scenarios
+
+    /// Secure input starting during the final flag read or the final focus
+    /// lookup: nothing is written. A stable target is exposed and restored.
+    func testSecureInputStartingDuringTheFinalQueriesWritesNothing() {
+        let pid = targetPID
+        let field = AXUIElementCreateApplication(pid)
+        for attribute in AXDropEditFieldAccess.exposeAttributes {
+            for transition in ["stable", "flag read", "focus lookup"] {
+                var secure = false
+                var flagReads = 0
+                var flag = false
+                var writes: [Bool] = []
+                let access = AXDropEditFieldAccess(system: .init(
+                    frontmostPID: { pid },
+                    focusedElement: { field },
+                    elementPID: { _ in pid },
+                    isRunning: { _ in true },
+                    facts: { _, _ in
+                        DropEditFieldFacts(bundleID: "com.example.SyntheticHost", isOwnProcess: false, role: "AXWebArea",
+                                           subrole: nil, secureEventInput: secure, accessibilityError: false)
+                    },
+                    characterCount: { _ in nil },
+                    string: { _, _ in nil },
+                    appFlag: { _, name in
+                        guard name == attribute else { return nil }
+                        flagReads += 1
+                        if transition == "flag read", flagReads == 2, writes.isEmpty { secure = true }
+                        return flag
+                    },
+                    setAppFlag: { _, _, value in
+                        writes.append(value)
+                        flag = value
+                        return true
+                    },
+                    processIdentity: { _ in "synthetic@1" },
+                    watch: { _, _ in nil },
+                    focus: {
+                        if transition == "focus lookup", flagReads == 2, writes.isEmpty { secure = true }
+                        return .element(field)
+                    }
+                ))
+                let lease = access.exposeFields(pid: pid)
+                lease?.release()
+                if transition == "stable" {
+                    XCTAssertNotNil(lease, attribute)
+                    XCTAssertEqual(writes, [true, false], attribute)
+                } else {
+                    XCTAssertNil(lease, "\(attribute): \(transition)")
+                    XCTAssertEqual(writes, [], "\(attribute): \(transition)")
+                }
+            }
+        }
+    }
+
+    /// The live check is the non-blocking secure input query, taken last.
+    func testTheSecureInputQueryIsTakenAfterTheLastFocusLookup() {
+        var events: [String] = []
+        var secure = false
+        var system = systemForFocus { events.append("focus"); return .element(self.field) }
+        system.focusedElement = { nil }
+        system.secureInput = { events.append("secure"); return secure }
+        role = "AXWebArea"
+        flags = ["AXManualAccessibility": false]
+        XCTAssertNotNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertEqual(events.last, "secure")
+        flags = ["AXManualAccessibility": false]
+        flagWrites = []
+        secure = true
+        XCTAssertNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
+        XCTAssertTrue(flagWrites.isEmpty)
+    }
 }

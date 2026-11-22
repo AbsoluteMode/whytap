@@ -114,6 +114,9 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         /// The focus lookup with a failed query told apart from no focused
         /// element. Without it, `focusedElement` nil counts as none.
         var focus: (() -> DropEditFocus)? = nil
+        /// Secure event input right now, without an AX call (it cannot
+        /// block). Without it, the app element's metadata is asked.
+        var secureInput: (() -> Bool)? = nil
     }
 
     /// Electron answers `AXManualAccessibility`; Chromium browsers and other
@@ -256,13 +259,19 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         }
     }
 
-    /// Focus (element or confirmed absence), process and front app are
-    /// still those of `target`, checked in that order so the front app is
-    /// the last thing confirmed.
+    /// Focus (element or confirmed absence), process, front app and no
+    /// secure input, checked in that order: the focus lookup is the last
+    /// blocking AX call, and the checks after it cannot block.
     private func stillHolds(_ target: ExposureTarget, pid: pid_t) -> Bool {
         guard let focused = exposureFocus(pid),
               ExposureTarget(identity: target.identity, focused: focused).same(as: target) else { return false }
         return system.processIdentity(pid) == target.identity && system.frontmostPID() == pid
+            && !secureInputActive(pid)
+    }
+
+    private func secureInputActive(_ pid: pid_t) -> Bool {
+        if let secureInput = system.secureInput { return secureInput() }
+        return system.facts(AXUIElementCreateApplication(pid), pid).secureEventInput
     }
 
     /// nil unless every check passes. The metadata query blocks, so focus,
@@ -348,7 +357,8 @@ extension AXDropEditFieldAccess.System {
                 return "\(app.bundleIdentifier ?? "-")@\(app.launchDate?.timeIntervalSince1970 ?? 0)"
             },
             watch: { handle, onChange in AXDropEditFieldWatch(handle: handle, onChange: onChange) },
-            focus: liveFocus
+            focus: liveFocus,
+            secureInput: { IsSecureEventInputEnabled() }
         )
     }
 

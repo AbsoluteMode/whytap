@@ -100,7 +100,10 @@ it.
   app again after its own blocking metadata query. Right before the write
   the flag must still read off (another client turning it on during the
   checks makes it theirs) and focus, process and front app are confirmed
-  once more, last. A focus lookup that fails is not treated as "no field"
+  once more. The focus lookup is the last blocking AX call; after it come
+  only checks that cannot block, ending with a fresh secure input sample
+  (`IsSecureEventInputEnabled`), so secure input that starts during any
+  of the final queries stops the write. A focus lookup that fails is not treated as "no field"
   and exposes nothing. It is turned off again when the field is no longer watched, when
   the next take goes to another app, 11 minutes after a take start that
   produced no paste, when learning and calibration are switched off, and
@@ -171,7 +174,10 @@ it.
     as focus left;
   - focus moving within the app, or another client turning the flag on,
     during the second metadata read writes nothing, for both attributes;
-    the same setup without the race is exposed and restored.
+    the same setup without the race is exposed and restored;
+  - secure input starting during the final flag read or the final focus
+    lookup writes nothing, for both attributes, and the secure input
+    sample is the last check before the write.
 - Not verified here: real Electron, Slack, Telegram and browser fields need
   the built app, because a feature session does not launch it. These are
   the acceptance checks for the builder and the maintainer.

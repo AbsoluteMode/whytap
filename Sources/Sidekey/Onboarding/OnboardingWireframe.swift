@@ -71,14 +71,23 @@ struct OnboardingSpring {
 
 /// How a solid is drawn this frame.
 struct OnboardingWireStyle {
+    /// Light caught on the facets that face it (Kajiya-Kay on the wires): the
+    /// design pass's "light on the edges" instead of a coloured spot.
+    struct Specular {
+        var rgb: OnboardingWireframeInk.RGB
+        var strength: Double
+        var light: (x: Double, y: Double, z: Double)
+        var power = 6.0
+        /// Dots catch the light too (step 2).
+        var dots = false
+        /// The x of a light running along the figure while a key is checked.
+        var waveX: Double?
+    }
+
     var fade = 1.0
-    /// Hover light: near wires warm toward rose, a soft veil sits behind.
+    /// Hover: a dark veil behind and slightly stronger wires.
     var lit = 0.0
-    /// A state tint of the near wires (checking, accepted, refused).
-    var tint: OnboardingWireframeInk.RGB?
-    var tintStrength = 0.0
-    /// The x of a light running along the dots while a key is checked.
-    var dotWaveX: Double?
+    var specular: Specular?
 }
 
 // MARK: - Wire solid
@@ -114,6 +123,22 @@ struct OnboardingWireSolid {
         self.wave = wave.map { WavePoint(index: $0.index, f: $0.f, baseY: $0.baseY / maxR) }
     }
 
+    /// Vertices already in the unit scale (the padlock's parts share one).
+    init(normalized: [Vec3], edges: [(Int, Int)], dotIndices: [Int]) {
+        var total = 0.0
+        for (a, b) in edges {
+            let dx = normalized[a].x - normalized[b].x, dy = normalized[a].y - normalized[b].y
+            let dz = normalized[a].z - normalized[b].z
+            total += sqrt(dx * dx + dy * dy + dz * dz)
+        }
+        vertices = normalized
+        self.edges = edges
+        self.dotIndices = dotIndices
+        inkWeight = total > 0 ? min(1.0, max(0.58, sqrt(26.0 / total))) : 1.0
+        rawScale = 1
+        wave = []
+    }
+
     static func apparentRadius(_ radius: Double, worldZ: Double) -> Double {
         radius * (cameraDistance / max(1.2, cameraDistance - worldZ))
     }
@@ -131,102 +156,145 @@ struct OnboardingWireSolid {
         return moved
     }
 
-    /// A padlock's shackle, opened by `amount` (0…1): it lifts out of the
-    /// body, then swings around its long leg.
-    func shackle(_ indices: [Int], open amount: Double) -> [Int: Vec3] {
-        guard amount > 0.001 else { return [:] }
-        let lift = 0.18 * rawScale * min(1, amount * 1.6)
-        let swing = max(0, amount - 0.35) / 0.65 * 1.15
-        let pivot = 0.36 * rawScale
-        var moved: [Int: Vec3] = [:]
-        for index in indices {
-            let v = vertices[index]
-            let dx = v.x - pivot
-            moved[index] = Vec3(x: pivot + dx * cos(swing) - v.z * sin(swing), y: v.y - lift,
-                                z: dx * sin(swing) + v.z * cos(swing))
-        }
-        return moved
-    }
-
-    /// Projects and draws back to front in depth buckets.
+    /// Projects and draws back to front in depth buckets, then the facets
+    /// that catch the light.
     func draw(in context: inout GraphicsContext, center: CGPoint, worldZ: Double, radius: Double,
               angles: (ax: Double, ay: Double, az: Double), style: OnboardingWireStyle, moved: [Int: Vec3] = [:]) {
         guard style.fade > 0.01 else { return }
-        let cx = cos(angles.ax), sx = sin(angles.ax)
-        let cy = cos(angles.ay), sy = sin(angles.ay)
-        let cz = cos(angles.az), sz = sin(angles.az)
-        let m0 = cz * cy, m1 = cz * sy * sx - sz * cx, m2 = cz * sy * cx + sz * sx
-        let m3 = sz * cy, m4 = sz * sy * sx + cz * cx, m5 = sz * sy * cx - cz * sx
-        let m6 = -sy, m7 = cy * sx, m8 = cy * cx
-
-        var points = [CGPoint](repeating: .zero, count: vertices.count)
-        var depths = [Double](repeating: 0, count: vertices.count)
+        let m = Self.matrix(angles)
+        let n = vertices.count
+        var points = [CGPoint](repeating: .zero, count: n)
+        var depths = [Double](repeating: 0, count: n)
+        var q = [Vec3](repeating: Vec3(x: 0, y: 0, z: 0), count: n)
         var meanX = 0.0, meanY = 0.0
-        for i in vertices.indices {
+        for i in 0..<n {
             let v = moved[i] ?? vertices[i]
-            let qx = m0 * v.x + m1 * v.y + m2 * v.z
-            let qy = m3 * v.x + m4 * v.y + m5 * v.z
-            let qz = m6 * v.x + m7 * v.y + m8 * v.z
-            let k = Self.cameraDistance / max(1.2, Self.cameraDistance - (worldZ + qz * 0.55))
-            points[i] = CGPoint(x: center.x + qx * k * radius, y: center.y + qy * k * radius)
-            depths[i] = min(1, max(-1, qz * 0.78 + worldZ * 0.28))
+            let r = Vec3(x: m[0] * v.x + m[1] * v.y + m[2] * v.z,
+                         y: m[3] * v.x + m[4] * v.y + m[5] * v.z,
+                         z: m[6] * v.x + m[7] * v.y + m[8] * v.z)
+            q[i] = r
+            let k = Self.cameraDistance / max(1.2, Self.cameraDistance - (worldZ + r.z * 0.55))
+            points[i] = CGPoint(x: center.x + r.x * k * radius, y: center.y + r.y * k * radius)
+            depths[i] = min(1, max(-1, r.z * 0.78 + worldZ * 0.28))
             meanX += points[i].x
             meanY += points[i].y
         }
-        meanX /= Double(max(1, vertices.count))
-        meanY /= Double(max(1, vertices.count))
+        meanX /= Double(max(1, n))
+        meanY /= Double(max(1, n))
         let apparent = Self.apparentRadius(radius, worldZ: worldZ)
         let fine = min(1.14, max(0.58, apparent / 68))
         let lit = style.lit, fade = style.fade
 
+        // A neutral veil only: no coloured spot behind the figure.
         if lit > 0.03 {
-            let veil = apparent * 1.15
+            let veil = apparent * 1.08
             context.fill(Path(ellipseIn: CGRect(x: meanX - veil, y: meanY - veil, width: veil * 2, height: veil * 2)),
-                         with: .radialGradient(Gradient(colors: [OnboardingWireframeInk.veil.opacity(0.54 * lit * fade),
+                         with: .radialGradient(Gradient(colors: [OnboardingWireframeInk.veil.opacity(0.52 * lit * fade),
                                                                  OnboardingWireframeInk.veil.opacity(0)]),
                                                center: CGPoint(x: meanX, y: meanY),
-                                               startRadius: apparent * 0.15, endRadius: veil))
+                                               startRadius: apparent * 0.12, endRadius: veil))
         }
 
         func bucket(_ depth: Double) -> Int {
             min(Self.depthLevels - 1, Int(min(1, max(0, (depth + 1) * 0.5)) * Double(Self.depthLevels)))
         }
         var edgePaths = [Path](repeating: Path(), count: Self.depthLevels)
-        var dots = [[CGPoint]](repeating: [], count: Self.depthLevels)
+        var dotPaths = [Path](repeating: Path(), count: Self.depthLevels)
+        var specEdges = [Path](repeating: Path(), count: 3)
+        var specDots = [[CGPoint]](repeating: [], count: 3)
+
+        // The light and its half-vector toward the viewer.
+        var hx = 0.0, hy = 0.0, hz = 0.0, lx = 0.0, ly = 0.0, lz = 0.0
+        if let spec = style.specular {
+            let lLen = max(0.0001, sqrt(spec.light.x * spec.light.x + spec.light.y * spec.light.y + spec.light.z * spec.light.z))
+            lx = spec.light.x / lLen; ly = spec.light.y / lLen; lz = spec.light.z / lLen
+            let hLen = sqrt(lx * lx + ly * ly + (lz + 1) * (lz + 1))
+            hx = lx / hLen; hy = ly / hLen; hz = (lz + 1) / hLen
+        }
+        let specular = style.specular.flatMap { $0.strength > 0.02 ? $0 : nil }
+
         for (a, b) in edges {
             let level = bucket((depths[a] + depths[b]) * 0.5)
             edgePaths[level].move(to: points[a])
             edgePaths[level].addLine(to: points[b])
+            guard let spec = specular else { continue }
+            let tx = q[b].x - q[a].x, ty = q[b].y - q[a].y, tz = q[b].z - q[a].z
+            let tLen = max(0.0001, sqrt(tx * tx + ty * ty + tz * tz))
+            let dotTH = (tx * hx + ty * hy + tz * hz) / tLen
+            let sinTH = sqrt(max(0, 1 - dotTH * dotTH))
+            let nx = (q[a].x + q[b].x) * 0.5, ny = (q[a].y + q[b].y) * 0.5, nz = (q[a].z + q[b].z) * 0.5
+            let nLen = max(0.0001, sqrt(nx * nx + ny * ny + nz * nz))
+            let nDotL = (nx * lx + ny * ly + nz * lz) / nLen
+            let front = min(1, max(0, (nz + 0.35) / 1.15))
+            let midX = (points[a].x + points[b].x) * 0.5
+            let wave = spec.waveX.map { exp(-pow((midX - $0) / 28, 2)) * 0.55 } ?? 0
+            guard nDotL > -0.12, front > 0.10 else { continue }
+            let value = spec.strength * front * max(0, nDotL * 0.72 + 0.28) * pow(sinTH, spec.power) + wave
+            let tier = value > 0.52 ? 2 : value > 0.27 ? 1 : value > 0.12 ? 0 : -1
+            if tier >= 0 {
+                specEdges[tier].move(to: points[a])
+                specEdges[tier].addLine(to: points[b])
+            }
         }
-        for index in dotIndices { dots[bucket(depths[index])].append(points[index]) }
+        for index in dotIndices {
+            let level = bucket(depths[index])
+            let t = (Double(level) + 0.5) / Double(Self.depthLevels)
+            let r = (0.82 + 1.30 * t + lit * 0.16 * t) * fine
+            let p = points[index]
+            dotPaths[level].addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            guard let spec = specular, spec.dots else { continue }
+            let v = q[index]
+            let nLen = max(0.0001, sqrt(v.x * v.x + v.y * v.y + v.z * v.z))
+            let nDotH = (v.x * hx + v.y * hy + v.z * hz) / nLen
+            let front = min(1, max(0, (v.z + 0.25) / 1.1))
+            let wave = spec.waveX.map { exp(-pow((p.x - $0) / 26, 2)) * 0.65 } ?? 0
+            let value = spec.strength * front * pow(max(0, nDotH), 3) + wave
+            let tier = value > 0.46 ? 2 : value > 0.22 ? 1 : value > 0.10 ? 0 : -1
+            if tier >= 0 { specDots[tier].append(p) }
+        }
 
         let base = OnboardingWireframeInk.wire
+        let baseColor = Color(red: base.0, green: base.1, blue: base.2)
         for level in 0..<Self.depthLevels {
             let t = (Double(level) + 0.5) / Double(Self.depthLevels)
-            let roseMix = lit * pow(t, 2.2) * 0.52
-            let stateMix = style.tint == nil ? 0 : style.tintStrength * pow(t, 1.6)
-            let target = style.tint ?? OnboardingWireframeInk.rose
-            let mix = style.tint == nil ? roseMix : stateMix
-            let color = Color(red: base.0 + (target.0 - base.0) * mix, green: base.1 + (target.1 - base.1) * mix,
-                              blue: base.2 + (target.2 - base.2) * mix)
             if !edgePaths[level].isEmpty {
-                let alpha = min(0.95, (0.11 + 0.50 * t + lit * 0.16 * t + stateMix * 0.22) * inkWeight * fade)
-                context.stroke(edgePaths[level], with: .color(color.opacity(alpha)),
-                               style: StrokeStyle(lineWidth: (0.56 + 0.95 * t + lit * 0.22 * t + stateMix * 0.2) * fine,
+                let alpha = min(0.92, (0.11 + 0.48 * t + lit * 0.08 * t) * inkWeight * fade)
+                context.stroke(edgePaths[level], with: .color(baseColor.opacity(alpha)),
+                               style: StrokeStyle(lineWidth: (0.56 + 0.92 * t + lit * 0.10 * t) * fine,
                                                   lineCap: .round, lineJoin: .round))
             }
-            if !dots[level].isEmpty {
-                let r = (0.82 + 1.35 * t + lit * 0.34 * t + stateMix * 0.3) * fine
-                var path = Path()
-                for p in dots[level] {
-                    let boost = style.dotWaveX.map { exp(-pow((p.x - $0) / 26, 2)) * 1.15 } ?? 0
-                    let rr = r + boost
-                    path.addEllipse(in: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2))
-                }
-                let alpha = min(0.98, (0.30 + 0.54 * t + lit * 0.18 + stateMix * 0.2) * (0.65 + 0.35 * inkWeight) * fade)
-                context.fill(path, with: .color(color.opacity(alpha)))
+            if !dotPaths[level].isEmpty {
+                let alpha = min(0.95, (0.28 + 0.52 * t + lit * 0.08) * (0.65 + 0.35 * inkWeight) * fade)
+                context.fill(dotPaths[level], with: .color(baseColor.opacity(alpha)))
             }
         }
+        guard let spec = specular else { return }
+        for tier in 0..<3 {
+            let st = [0.23, 0.47, 0.75][tier]
+            let mix = 0.56 + 0.39 * st
+            let color = Color(red: base.0 + (spec.rgb.0 - base.0) * mix, green: base.1 + (spec.rgb.1 - base.1) * mix,
+                              blue: base.2 + (spec.rgb.2 - base.2) * mix)
+            if !specEdges[tier].isEmpty {
+                context.stroke(specEdges[tier], with: .color(color.opacity(min(0.89, (0.21 + st * 0.51) * fade))),
+                               style: StrokeStyle(lineWidth: (0.93 + st * 0.60) * fine, lineCap: .round, lineJoin: .round))
+            }
+            if !specDots[tier].isEmpty {
+                let r = (1.30 + st * 0.72) * fine
+                var path = Path()
+                for p in specDots[tier] { path.addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)) }
+                context.fill(path, with: .color(color.opacity(min(0.94, (0.32 + st * 0.52) * fade))))
+            }
+        }
+    }
+
+    /// The rotation the solids use: z · y · x Euler angles, row-major.
+    static func matrix(_ angles: (ax: Double, ay: Double, az: Double)) -> [Double] {
+        let cx = cos(angles.ax), sx = sin(angles.ax)
+        let cy = cos(angles.ay), sy = sin(angles.ay)
+        let cz = cos(angles.az), sz = sin(angles.az)
+        return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+                sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+                -sy, cy * sx, cy * cx]
     }
 }
 
@@ -343,60 +411,111 @@ enum OnboardingWireCatalog {
         return OnboardingWireSolid(rawVertices: v, edges: e, dotIndices: dots)
     }()
 
-    /// The padlock the key opens on step 2: a body with the keyhole on the
-    /// side facing the key, and a shackle (indices returned) that opens.
-    static let padlock: (solid: OnboardingWireSolid, shackle: [Int]) = {
+    /// The design pass's padlock (step 2): a chamfered body with the keyhole
+    /// on the face toward the key, and a tubular shackle that lifts out and
+    /// swings open around its heel.
+    static let padlockBody: OnboardingWireSolid = {
         var v: [OnboardingWireSolid.Vec3] = []
         var e: [(Int, Int)] = []
         var dots: [Int] = []
-        var shackle: [Int] = []
-        func pt(_ x: Double, _ y: Double, _ z: Double, dot: Bool = false, moves: Bool = false) -> Int {
-            // The keyhole (y 0.36) is the origin: it sits on the key's line.
-            v.append(.init(x: x, y: y - 0.36, z: z))
+        func pt(_ x: Double, _ y: Double, _ z: Double, dot: Bool = false) -> Int {
+            v.append(OnboardingPadlock.normalize(x, y, z))
             if dot { dots.append(v.count - 1) }
-            if moves { shackle.append(v.count - 1) }
             return v.count - 1
         }
-        // The body: a box, its front face banded.
-        let hx = 0.56, y0 = 0.0, y1 = 0.80, hz = 0.24
-        let c = [pt(-hx, y0, -hz, dot: true), pt(hx, y0, -hz, dot: true), pt(hx, y0, hz, dot: true), pt(-hx, y0, hz, dot: true),
-                 pt(-hx, y1, -hz, dot: true), pt(hx, y1, -hz, dot: true), pt(hx, y1, hz, dot: true), pt(-hx, y1, hz, dot: true)]
-        for i in 0..<4 {
-            e.append((c[i], c[(i + 1) % 4]))
-            e.append((c[i + 4], c[(i + 1) % 4 + 4]))
-            e.append((c[i], c[i + 4]))
-        }
-        for band in [0.27, 0.54] {
-            e.append((pt(-hx, band, hz), pt(hx, band, hz)))
-            e.append((pt(-hx, band, -hz), pt(-hx, band, hz)))
-        }
-        // The keyhole on the side the key comes from.
-        var hole: [Int] = []
+        let xF = -0.26, xB = 0.26, yT = -0.04, yBot = 0.88, zW = 0.58, ch = 0.13
+        let profile: [(Double, Double)] = [(yT, -zW + ch), (yT, zW - ch), (yT + ch, zW), (yBot - ch, zW),
+                                           (yBot, zW - ch), (yBot, -zW + ch), (yBot - ch, -zW), (yT + ch, -zW)]
+        let front = profile.map { pt(xF, $0.0, $0.1, dot: true) }
+        let back = profile.map { pt(xB, $0.0, $0.1, dot: true) }
         for i in 0..<8 {
-            let a = Double(i) / 8 * .pi * 2
-            hole.append(pt(-hx, 0.36 + 0.075 * sin(a), 0.075 * cos(a)))
+            let n = (i + 1) % 8
+            e.append(contentsOf: [(front[i], front[n]), (back[i], back[n]), (front[i], back[i])])
         }
-        for i in 0..<8 { e.append((hole[i], hole[(i + 1) % 8])) }
-        e.append((pt(-hx, 0.43, -0.03), pt(-hx, 0.56, -0.03)))
-        e.append((pt(-hx, 0.43, 0.03), pt(-hx, 0.56, 0.03)))
-        // The shackle: a U of two rails; the right leg is the long one.
-        for z in [-0.09, 0.09] {
-            var rail: [Int] = []
-            rail.append(pt(-0.36, 0.02, z, moves: true))
-            rail.append(pt(-0.36, -0.24, z, moves: true))
-            for s in 1..<8 {
-                let t = Double(s) / 8 * .pi
-                rail.append(pt(-0.36 * cos(t), -0.24 - 0.36 * sin(t), z, dot: s == 4, moves: true))
+        // The collar seam.
+        let seam = [pt(xF, 0.14, -zW), pt(xF, 0.14, zW), pt(xB, 0.14, zW), pt(xB, 0.14, -zW)]
+        for i in 0..<4 { e.append((seam[i], seam[(i + 1) % 4])) }
+        // The shackle's sockets on the top deck.
+        for zc in [-0.34, 0.34] {
+            let socket = (0..<6).map { i -> Int in
+                let a = Double(i) / 6 * .pi * 2
+                return pt(0.105 * cos(a), yT, zc + 0.105 * sin(a))
             }
-            rail.append(pt(0.36, -0.24, z, moves: true))
-            rail.append(pt(0.36, 0.14, z, dot: true, moves: true))
-            for i in 0..<(rail.count - 1) { e.append((rail[i], rail[i + 1])) }
+            for i in 0..<6 { e.append((socket[i], socket[(i + 1) % 6])) }
         }
-        let rails = shackle.count / 2
-        for i in stride(from: 1, to: rails - 1, by: 3) { e.append((shackle[i], shackle[i + rails])) }
-        let solid = OnboardingWireSolid(rawVertices: v, edges: e, dotIndices: dots)
-        return (solid, shackle)
+        // The keyhole's escutcheon and slot, facing the key.
+        let ring = (0..<10).map { i -> Int in
+            let a = Double(i) / 10 * .pi * 2
+            return pt(xF - 0.008, 0.44 + 0.20 * sin(a), 0.20 * cos(a), dot: i % 5 == 0)
+        }
+        for i in 0..<10 { e.append((ring[i], ring[(i + 1) % 10])) }
+        let slot = [pt(xF - 0.01, 0.35, -0.035, dot: true), pt(xF - 0.01, 0.35, 0.035, dot: true),
+                    pt(xF - 0.01, 0.54, 0.026), pt(xF - 0.01, 0.54, -0.026)]
+        for i in 0..<4 { e.append((slot[i], slot[(i + 1) % 4])) }
+        return OnboardingWireSolid(normalized: v, edges: e, dotIndices: dots)
     }()
+}
+
+/// The padlock's shared unit scale and its moving shackle.
+enum OnboardingPadlock {
+    static let norm = 1 / 0.92
+
+    static func normalize(_ x: Double, _ y: Double, _ z: Double) -> OnboardingWireSolid.Vec3 {
+        .init(x: x * norm, y: (y - 0.06) * norm, z: z * norm)
+    }
+
+    /// The keyhole, in the padlock's unit space.
+    static let keyhole = normalize(-0.26, 0.44, 0)
+
+    private struct Spine { let y: Double; let z: Double; let ny: Double; let nz: Double; let dot: Bool }
+
+    /// The shackle's tube before it moves: (x, y, z) rings along its spine.
+    private static let rest: (points: [(Double, Double, Double)], edges: [(Int, Int)], dots: [Int]) = {
+        let r = 0.34, tube = 0.082, archY = -0.36
+        var spine: [Spine] = [.init(y: 0.42, z: r, ny: 0, nz: 1, dot: false), .init(y: -0.04, z: r, ny: 0, nz: 1, dot: true)]
+        for s in 0...8 {
+            let a = Double(s) / 8 * .pi
+            spine.append(.init(y: archY - r * sin(a), z: r * cos(a), ny: -sin(a), nz: cos(a), dot: s % 2 == 0))
+        }
+        spine.append(.init(y: -0.06, z: -r, ny: 0, nz: -1, dot: true))
+        spine.append(.init(y: 0.11, z: -r, ny: 0, nz: -1, dot: true))
+        var points: [(Double, Double, Double)] = []
+        var dots: [Int] = []
+        var rings: [[Int]] = []
+        for node in spine {
+            var ring: [Int] = []
+            for c in 0..<6 {
+                let phi = Double(c) / 6 * .pi * 2
+                let cr = sin(phi) * tube
+                points.append((cos(phi) * tube, node.y + node.ny * cr, node.z + node.nz * cr))
+                if node.dot && (c == 0 || c == 3) { dots.append(points.count - 1) }
+                ring.append(points.count - 1)
+            }
+            rings.append(ring)
+        }
+        var edges: [(Int, Int)] = []
+        for i in rings.indices {
+            if i % 2 == 1 || i == rings.count - 1 { for c in 0..<6 { edges.append((rings[i][c], rings[i][(c + 1) % 6])) } }
+            if i + 1 < rings.count { for c in [0, 1, 2, 4] { edges.append((rings[i][c], rings[i + 1][c])) } }
+        }
+        edges.append((rings[rings.count - 1][0], rings[rings.count - 1][3]))
+        return (points, edges, dots)
+    }()
+
+    /// The shackle lifted by `lift` and swung by `swing` around its heel, with
+    /// the prototype's slight outward cant while it lifts.
+    static func shackle(lift: Double, swing: Double) -> OnboardingWireSolid {
+        let pivotZ = 0.34, pivotY = -0.04
+        let cant = lift / 0.42 * 0.16
+        let cosCant = cos(cant), sinCant = sin(cant), cosSwing = cos(swing), sinSwing = sin(swing)
+        let moved = rest.points.map { p -> OnboardingWireSolid.Vec3 in
+            let dy0 = (p.1 - lift) - pivotY, dz0 = p.2 - pivotZ
+            let y = pivotY + dy0 * cosCant - dz0 * sinCant
+            let dz = dy0 * sinCant + dz0 * cosCant
+            return normalize(p.0 * cosSwing + dz * sinSwing, y, -p.0 * sinSwing + dz * cosSwing + pivotZ)
+        }
+        return OnboardingWireSolid(normalized: moved, edges: rest.edges, dotIndices: rest.dots)
+    }
 }
 
 // MARK: - Steps 1 and 2: one scene
@@ -415,52 +534,51 @@ final class OnboardingWireScene {
     enum KeyPhase: Equatable { case empty, pasted, checking, accepted, refused, format, network }
 
     struct Actor {
-        var x: OnboardingSpring, y: OnboardingSpring, z = OnboardingSpring(0), r: OnboardingSpring
+        var x: OnboardingSpring, y: OnboardingSpring, z = OnboardingSpring(0)
         var fade = OnboardingSpring(1), lit = OnboardingSpring(0)
         var kx = 0.0, ky = 0.0, impulse = 0.0
         var turn = OnboardingSpring(0), targetTurn = 0.0
         var apparent = 0.0
-        init(x: Double, y: Double, r: Double) {
-            self.x = OnboardingSpring(x); self.y = OnboardingSpring(y); self.r = OnboardingSpring(r)
-        }
+        init(x: Double, y: Double) { self.x = OnboardingSpring(x); self.y = OnboardingSpring(y) }
     }
 
     // Reported by the steps, in the page's coordinates.
     var pageWidth = 520.0
+    var pageHeight = 440.0
     var sourceTop = 0.0
     var sourceHeight = 0.0
     var keyBandY = 0.0
+    var fieldY = 0.0
     var step: Step = .source
     var offersLaptop = true
     var hovered: Figure?
     var chosen: Figure?
-    var keyPhase: KeyPhase = .empty
-    /// Step 2's turn: a quarter when accepted, a catch on a pin when refused.
-    var keyTargetTurn = 0.0
+    var keyPhase: KeyPhase = .empty {
+        didSet { if keyPhase != oldValue { phaseChanged(from: oldValue) } }
+    }
     var laptopCaption = ("", "")
     var keyCaption = ("", "")
+    var reduceMotion = false
 
-    private(set) var laptop = Actor(x: 0, y: 0, r: 0)
-    private(set) var key = Actor(x: 0, y: 0, r: 0)
+    private(set) var laptop = Actor(x: 0, y: 0)
+    private(set) var key = Actor(x: 0, y: 0)
+    /// 0: step 1's poses; 1: step 2's. The key flies on this spring.
     private var stage = OnboardingSpring(0)
-    private var lockFade = OnboardingSpring(0)
-    /// The padlock's shackle: opens once an accepted key has turned.
-    private var shackle = OnboardingSpring(0)
+    // Step 2's mechanics, the design pass's springs.
+    private var insert = OnboardingSpring(0)
+    private var lockTurn = OnboardingSpring(0)
+    private var lockTargetTurn = 0.0
+    private var lift = OnboardingSpring(0), targetLift = 0.0
+    private var swing = OnboardingSpring(0), targetSwing = 0.0
+    private var bodyY = OnboardingSpring(0)
+    private var jolt = OnboardingSpring(0)
     private var pointer: CGPoint?
     private var lastPointer: CGPoint?
     private var pointerVelocity = CGVector.zero
     private(set) var clock = 1.35
     private var lastTime: TimeInterval?
     private var placed = false
-    private var catchGeneration = 0
-
-    /// Step 2 draws the prototype's 540 pt key stage at the key's radius.
-    static let keyRadius = 50.0
-    private static let keyScale = keyRadius / 54
-    /// The padlock stands to the key's right, its keyhole at the key's tip
-    /// once the key is in.
-    static let lockRadius = 40.0
-    static let lockOffset = 52.0
+    private var generation = 0
 
     // Step 1's layout: the prototype's 540 pt stage, scaled to the band.
     private var scale: Double { min(pageWidth / 540, 1) }
@@ -469,51 +587,53 @@ final class OnboardingWireScene {
     var radius: Double { min(64, max(40, sourceHeight * 0.24)) }
     private var onKeyStep: Bool { step != .source }
 
-    private var keyGoalX: Double {
-        switch keyPhase {
-        case .empty: return -30
-        case .pasted: return -20
-        case .checking, .accepted, .refused: return -4
-        case .format: return -34
-        case .network: return -26
-        }
-    }
+    // Step 2's layout: the prototype's padlock and key, centred like its page.
+    static let keyRadius = 48.0
+    static let lockRadius = 38.0
+    private var lockX: Double { midX + 48 }
 
     private func home(_ figure: Figure) -> CGPoint {
         guard offersLaptop else { return CGPoint(x: midX, y: homeY) }
         return CGPoint(x: midX + (figure == .laptop ? -112 : 112) * scale, y: homeY)
     }
 
-    private func target(_ figure: Figure) -> (x: Double, y: Double, z: Double, r: Double, fade: Double, lit: Double) {
-        if onKeyStep {
-            // Step 2: the key over its lock; the laptop has receded away.
-            if figure == .key { return (midX + keyGoalX * Self.keyScale, keyBandY, 0, Self.keyRadius, 1, 0) }
-            return (midX - 106 * scale, homeY - 30, -1.5, radius * 0.8, 0, 0)
-        }
+    /// Step 1's pose of a figure (also held while step 2 shows: Back returns there).
+    private func target(_ figure: Figure) -> (x: Double, y: Double, z: Double, fade: Double, lit: Double) {
         let focus = hovered ?? chosen
         let h = home(figure)
-        if focus == figure { return (midX, homeY + 2, 0.68, radius, 1, 1) }
+        if focus == figure { return (midX, homeY + 2, 0.68, 1, 1) }
         if focus != nil, offersLaptop {
-            return (midX + (figure == .laptop ? -106 : 106) * scale, homeY - 30, -1.22, radius, 0.28, 0)
+            return (midX + (figure == .laptop ? -106 : 106) * scale, homeY - 30, -1.22, 0.28, 0)
         }
-        return (h.x, h.y, 0, radius, 1, 0)
+        return (h.x, h.y, 0, 1, 0)
+    }
+
+    private var insertGoal: Double {
+        switch keyPhase {
+        case .empty: return 0
+        case .pasted: return 0.30
+        case .checking, .accepted, .refused: return 1
+        case .format: return -0.22
+        case .network: return 0.12
+        }
     }
 
     private var layoutKnown: Bool { onKeyStep ? keyBandY > 0 : sourceHeight > 0 }
 
     private func place() {
         stage = OnboardingSpring(onKeyStep ? 1 : 0)
-        lockFade = OnboardingSpring(onKeyStep ? 0.78 : 0)
+        insert = OnboardingSpring(onKeyStep ? insertGoal : 0)
+        if onKeyStep, keyPhase == .accepted {
+            lockTargetTurn = .pi * 0.5; lockTurn = OnboardingSpring(lockTargetTurn)
+            targetLift = 0.42; targetSwing = -0.54
+            lift = OnboardingSpring(targetLift); swing = OnboardingSpring(targetSwing)
+        }
         for figure in [Figure.laptop, .key] {
             let t = target(figure)
             update(figure) {
-                $0 = Actor(x: t.x, y: t.y, r: t.r)
+                $0 = Actor(x: t.x, y: t.y)
                 $0.z = OnboardingSpring(t.z); $0.fade = OnboardingSpring(t.fade); $0.lit = OnboardingSpring(t.lit)
             }
-        }
-        if onKeyStep {
-            key.turn = OnboardingSpring(keyTargetTurn)
-            if keyPhase == .accepted { shackle = OnboardingSpring(1) }
         }
     }
 
@@ -559,19 +679,47 @@ final class OnboardingWireScene {
         }
     }
 
-    /// A key that is not a key slides back a little (step 2).
-    func nudgeBack() { key.x.velocity -= 42 * Self.keyScale }
+    /// The design pass's reactions on step 2: an accepted key turns, then the
+    /// shackle pops up and swings open with a small kick of the body; a
+    /// refused key goes in, tries to turn, the padlock shudders, and the key
+    /// eases back; a malformed key stops short; any typing resets it.
+    private func phaseChanged(from old: KeyPhase) {
+        generation += 1
+        let current = generation
+        let still = reduceMotion
+        switch keyPhase {
+        case .accepted:
+            lockTargetTurn = .pi * 0.5
+            after(still ? 0 : 0.09, current) {
+                $0.targetLift = 0.42
+                $0.targetSwing = -0.54
+                if !still { $0.bodyY.velocity += 34; $0.jolt.velocity += 0.55 }
+            }
+        case .refused:
+            targetLift = 0; targetSwing = 0
+            guard !still else { lockTargetTurn = 0; return }
+            lockTargetTurn = refusedAngle
+            jolt.velocity -= 0.72
+            after(0.26, current) {
+                $0.lockTargetTurn = 0
+                $0.jolt.velocity += 0.35
+            }
+        case .format:
+            targetLift = 0; targetSwing = 0; lockTargetTurn = 0
+            if !still { insert.velocity -= 2.4 }
+        case .empty, .pasted, .checking, .network:
+            targetLift = 0; targetSwing = 0; lockTargetTurn = 0
+        }
+    }
 
-    /// The key catches on a pin, then eases back (step 2).
-    func catchOnPin(_ angle: Double, still: Bool) {
-        guard !still else { return }
-        keyTargetTurn = angle
-        catchGeneration += 1
-        let generation = catchGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
-            guard let self, self.catchGeneration == generation,
-                  [.refused, .format, .network].contains(self.keyPhase) else { return }
-            self.keyTargetTurn = 0
+    /// 0.36 rad for a refused key, 0.46 for no credit or no access.
+    var refusedAngle = 0.36
+
+    private func after(_ delay: TimeInterval, _ current: Int, _ change: @escaping (OnboardingWireScene) -> Void) {
+        guard delay > 0 else { change(self); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.generation == current else { return }
+            change(self)
         }
     }
 
@@ -580,6 +728,7 @@ final class OnboardingWireScene {
     func advance(time: TimeInterval, still: Bool) {
         let dt = min(0.04, lastTime.map { max(0, time - $0) } ?? 0.016)
         lastTime = time
+        reduceMotion = still
         guard layoutKnown else { return }
         if !placed { place(); placed = true }
         if !still { clock += dt }
@@ -592,28 +741,26 @@ final class OnboardingWireScene {
         }
         lastPointer = pointer
         stage.step(to: onKeyStep ? 1 : 0, stiffness: 135, damping: 19.5, dt: dt, still: still)
-        lockFade.step(to: onKeyStep ? (keyPhase == .network ? 0.28 : 0.78) : 0, stiffness: 150, damping: 22, dt: dt, still: still)
-        // The shackle opens only after the accepted key has turned in the lock.
-        let opens = onKeyStep && keyPhase == .accepted && key.turn.value > 1.0
-        shackle.step(to: opens ? 1 : 0, stiffness: 120, damping: 16, dt: dt, still: still)
+        // Step 2: insertion 150/19, turn 185/18, shackle lift 230/14.5 and
+        // swing 180/14, body recoil 210/16, shudder 260/15.
+        insert.step(to: onKeyStep ? insertGoal : 0, stiffness: 150, damping: 19, dt: dt, still: still)
+        lockTurn.step(to: lockTargetTurn, stiffness: 185, damping: 18, dt: dt, still: still)
+        lift.step(to: targetLift, stiffness: 230, damping: 14.5, dt: dt, still: still)
+        swing.step(to: targetSwing, stiffness: 180, damping: 14, dt: dt, still: still)
+        bodyY.step(to: 0, stiffness: 210, damping: 16, dt: dt, still: still)
+        jolt.step(to: 0, stiffness: 260, damping: 15, dt: dt, still: still)
         let decay = exp(-dt * 2.4)
         for figure in [Figure.laptop, .key] {
             let t = target(figure)
-            let onLock = onKeyStep && figure == .key
             update(figure) { a in
-                // Pose: 135/19.5 (the key's slide on step 2: 140/20); fade and light 150/22.
-                a.x.step(to: t.x, stiffness: onLock ? 140 : 135, damping: onLock ? 20 : 19.5, dt: dt, still: still)
+                // Pose: 135/19.5; fade and light: 150/22; the click's turn 160/18.
+                a.x.step(to: t.x, stiffness: 135, damping: 19.5, dt: dt, still: still)
                 a.y.step(to: t.y, stiffness: 135, damping: 19.5, dt: dt, still: still)
                 a.z.step(to: t.z, stiffness: 135, damping: 19.5, dt: dt, still: still)
-                a.r.step(to: t.r, stiffness: 135, damping: 19.5, dt: dt, still: still)
                 a.fade.step(to: t.fade, stiffness: 150, damping: 22, dt: dt, still: still)
                 a.lit.step(to: t.lit, stiffness: 150, damping: 22, dt: dt, still: still)
-                if onLock {
-                    a.turn.step(to: keyTargetTurn, stiffness: 175, damping: 19, dt: dt, still: still)
-                } else {
-                    a.turn.step(to: a.targetTurn, stiffness: 160, damping: 18, dt: dt, still: still)
-                }
-                a.apparent = OnboardingWireSolid.apparentRadius(a.r.value, worldZ: a.z.value)
+                a.turn.step(to: a.targetTurn, stiffness: 160, damping: 18, dt: dt, still: still)
+                a.apparent = OnboardingWireSolid.apparentRadius(radius, worldZ: a.z.value)
                 // A pointer passing near gives the figure a small spin.
                 if let pointer, !still, a.fade.value > 0.35 {
                     let d = hypot(pointer.x - a.x.value, pointer.y - a.y.value)
@@ -639,80 +786,129 @@ final class OnboardingWireScene {
                 0.40 + (still ? 0 : sin(clock * 0.62) * 0.14) + tiltY + laptop.ky, 0)
     }
 
-    /// Step 1's pose blended into step 2's by the same spring that moves it.
-    private func keyAngles(still: Bool) -> (Double, Double, Double) {
+    private func keyAnglesOnStepOne(still: Bool) -> (Double, Double, Double) {
         let focus = hovered ?? chosen
         let tiltY = focus == .key && pointer != nil && !still ? Double((pointer!.x - key.x.value) / 160) * 0.15 : 0
-        let first = (-0.26 + (still ? 0 : cos(clock * 0.72 + 0.6) * 0.22) + key.kx,
-                     -0.44 + (still ? 0 : sin(clock * 0.56 + 1.4) * 0.15) + tiltY + key.ky,
-                     0.38 + (still ? 0 : sin(clock * 0.41) * 0.04))
-        let second = (-0.20 + (still ? 0 : cos(clock * 0.46) * 0.05),
-                      -0.40 + (still ? 0 : sin(clock * 0.58) * 0.08), 0.03)
-        let b = min(1.1, max(-0.1, stage.value))
-        return (first.0 + (second.0 - first.0) * b + key.turn.value,
-                first.1 + (second.1 - first.1) * b,
-                first.2 + (second.2 - first.2) * b)
+        return (-0.26 + (still ? 0 : cos(clock * 0.72 + 0.6) * 0.22) + key.kx + key.turn.value,
+                -0.44 + (still ? 0 : sin(clock * 0.56 + 1.4) * 0.15) + tiltY + key.ky,
+                0.38 + (still ? 0 : sin(clock * 0.41) * 0.04))
+    }
+
+    /// Step 2's shared camera: a 3/4 view that shows the key's profile and the
+    /// padlock's face; the shudder rolls both.
+    private func lockAngles(still: Bool) -> (Double, Double, Double) {
+        (-0.20 + (still ? 0 : cos(clock * 0.44) * 0.042), -0.68 + (still ? 0 : sin(clock * 0.56) * 0.065),
+         0.02 + jolt.value * 0.14)
     }
 
     // MARK: Drawing
 
+    /// Step 1's light: a grazing key light catching the near facets in a calm
+    /// rose-pearl.
+    private func hoverLight(_ lit: Double) -> OnboardingWireStyle.Specular? {
+        lit > 0.02 ? .init(rgb: (0.925, 0.596, 0.769), strength: lit, light: (0.52, -0.56, 0.64), power: 7) : nil
+    }
+
+    /// Step 2's light, from the field below: rose-pearl at rest and while
+    /// checking, green when accepted, amber on a problem.
+    private func islandLight(waveX: Double?) -> OnboardingWireStyle.Specular {
+        var rgb: OnboardingWireframeInk.RGB = (0.925, 0.596, 0.769)
+        var strength = 0.54
+        switch keyPhase {
+        case .checking: strength = 0.92
+        case .accepted: rgb = OnboardingWireframeInk.green; strength = 0.88
+        case .refused, .format, .network: rgb = OnboardingWireframeInk.amber; strength = 0.82
+        case .empty, .pasted: break
+        }
+        let lx = -0.18 + (reduceMotion ? 0 : sin(clock * 0.62) * 0.16)
+        return .init(rgb: rgb, strength: strength, light: (lx, 0.72, 0.66), power: 6, dots: true, waveX: waveX)
+    }
+
     func draw(in context: inout GraphicsContext, still: Bool) {
         guard placed else { return }
         let b = min(1, max(0, stage.value))
-        let s = Self.keyScale
-        let swayY = still ? 0 : sin(clock * 0.58) * 0.08
-        let swayX = still ? 0 : cos(clock * 0.46) * 0.05
-        var tint: OnboardingWireframeInk.RGB?
-        var strength = 0.0
-        if onKeyStep {
-            switch keyPhase {
-            case .checking: tint = OnboardingWireframeInk.rose; strength = 0.65
-            case .accepted: tint = OnboardingWireframeInk.green; strength = 0.78
-            case .refused, .format, .network: tint = OnboardingWireframeInk.amber; strength = 0.68
-            case .empty, .pasted: break
+
+        // The calm blush under the field (step 2).
+        if b > 0.01, fieldY > 0 {
+            let scale: Double = keyPhase == .checking ? 1.35
+                : [.accepted, .refused, .format, .network].contains(keyPhase) ? 0.35 : 1
+            var glow = context
+            glow.opacity = b * scale
+            glow.draw(Image(nsImage: OnboardingAmbientGlow.image), in: CGRect(x: midX - 270, y: fieldY - 222, width: 540, height: 420))
+        }
+
+        // Step 2's padlock and the keyway its keyhole looks along.
+        let angles = lockAngles(still: still)
+        let m = OnboardingWireSolid.matrix(angles)
+        let hole = OnboardingPadlock.keyhole
+        let hx = m[0] * hole.x + m[1] * hole.y + m[2] * hole.z
+        let hy = m[3] * hole.x + m[4] * hole.y + m[5] * hole.z
+        let hz = m[6] * hole.x + m[7] * hole.y + m[8] * hole.z
+        let lockCenter = CGPoint(x: lockX, y: keyBandY + bodyY.value)
+        let holeScale = OnboardingWireSolid.cameraDistance / (OnboardingWireSolid.cameraDistance - hz * 0.55) * Self.lockRadius
+        let holeX = lockCenter.x + hx * holeScale, holeY = lockCenter.y + hy * holeScale
+        let axisLength = max(0.0001, hypot(m[0], m[3]))
+        let dirX = m[0] / axisLength, dirY = m[3] / axisLength
+        let distance = 76 - insert.value * 51
+        let seated = CGPoint(x: holeX - dirX * distance, y: holeY - dirY * distance)
+        let waveX: Double? = onKeyStep && keyPhase == .checking && !still
+            ? seated.x - 42 + (clock * 110).truncatingRemainder(dividingBy: 146) : nil
+        let light = islandLight(waveX: waveX)
+
+        if b > 0.01 {
+            let fade = (keyPhase == .network ? 0.32 : 0.92) * b
+            var shackleLight = light; shackleLight.strength *= 0.95
+            var bodyLight = light; bodyLight.strength *= 0.80
+            OnboardingPadlock.shackle(lift: lift.value, swing: swing.value).draw(
+                in: &context, center: lockCenter, worldZ: 0, radius: Self.lockRadius, angles: angles,
+                style: OnboardingWireStyle(fade: fade, specular: shackleLight))
+            OnboardingWireCatalog.padlockBody.draw(
+                in: &context, center: lockCenter, worldZ: 0, radius: Self.lockRadius, angles: angles,
+                style: OnboardingWireStyle(fade: fade, specular: bodyLight))
+            if keyPhase == .network {
+                // Dots dimming toward the lock that does not answer.
+                for d in 0..<3 {
+                    let base = [0.48, 0.24, 0.09][d]
+                    let pulse = still ? base : base * (0.55 + 0.45 * max(0, sin(clock * 2 - Double(d) * 1.1)))
+                    let distance = 12 + Double(2 - d) * 8.5
+                    let p = CGPoint(x: holeX - dirX * distance, y: holeY - dirY * distance)
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - 1.45, y: p.y - 1.45, width: 2.9, height: 2.9)),
+                                 with: .color(OnboardingWireframeInk.amberColor.opacity(pulse * b)))
+                }
             }
         }
-        // The lock sits behind the key.
-        if lockFade.value > 0.01 {
-            let padlock = OnboardingWireCatalog.padlock
-            padlock.solid.draw(
-                in: &context, center: CGPoint(x: midX + Self.lockOffset, y: keyBandY), worldZ: 0, radius: Self.lockRadius,
-                angles: (-0.18 + swayX, -0.40 + swayY, 0.03),
-                style: OnboardingWireStyle(fade: lockFade.value, tint: tint, tintStrength: strength * 0.6 * b),
-                moved: padlock.solid.shackle(padlock.shackle, open: shackle.value))
-        }
-        if onKeyStep, keyPhase == .network {
-            // No answer: three quiet dots between the key and the lock.
-            var dots = Path()
-            for d in 0..<3 {
-                let cx = midX + (12 + Double(d) * 6) * s
-                dots.addEllipse(in: CGRect(x: cx - 1.1, y: keyBandY + 2 * s - 1.1, width: 2.2, height: 2.2))
-            }
-            context.fill(dots, with: .color(OnboardingWireframeInk.amberColor.opacity(0.45 * b)))
-        }
-        // Captions belong to step 1: gone in the first third of the flight.
+
+        // Step 1's figures; the key blends into step 2's pose along a slight arc.
         let captions = max(0, 1 - b * 3)
         let figures: [Figure] = laptop.z.value <= key.z.value ? [.laptop, .key] : [.key, .laptop]
         for figure in figures {
             if figure == .laptop {
-                guard offersLaptop, laptop.fade.value > 0.01 else { continue }
+                let fade = laptop.fade.value * (1 - b)
+                guard offersLaptop, fade > 0.01 else { continue }
                 let amplitude = still ? 0.045 : 0.032 + laptop.lit.value * 0.075 + laptop.impulse * 0.09
                 OnboardingWireCatalog.laptop.draw(
                     in: &context, center: CGPoint(x: laptop.x.value, y: laptop.y.value), worldZ: laptop.z.value,
-                    radius: laptop.r.value, angles: laptopAngles(still: still),
-                    style: OnboardingWireStyle(fade: laptop.fade.value, lit: laptop.lit.value),
+                    radius: radius, angles: laptopAngles(still: still),
+                    style: OnboardingWireStyle(fade: fade, lit: laptop.lit.value, specular: hoverLight(laptop.lit.value)),
                     moved: OnboardingWireCatalog.laptop.waveOffsets(amplitude: amplitude, clock: clock,
                                                                    speed: 2.2 + laptop.lit.value * 2))
                 drawCaption(in: &context, actor: laptop, text: laptopCaption, visible: captions)
             } else {
-                let keyX = key.x.value
-                let waveX: Double? = onKeyStep && keyPhase == .checking && !still
-                    ? keyX + (-48 + (clock * 95).truncatingRemainder(dividingBy: 108)) * s : nil
+                let first = keyAnglesOnStepOne(still: still)
+                let second = (angles.0 + lockTurn.value, angles.1, angles.2)
+                let raw = min(1.1, max(-0.1, stage.value))
+                let blended = (first.0 + (second.0 - first.0) * raw, first.1 + (second.1 - first.1) * raw,
+                               first.2 + (second.2 - first.2) * raw)
+                let arc = sin(.pi * b) * 14
+                let center = CGPoint(x: key.x.value + (seated.x - key.x.value) * b,
+                                     y: key.y.value + (seated.y - key.y.value) * b - arc)
+                let z = key.z.value * (1 - b)
+                let lit = key.lit.value * (1 - b)
+                var style = OnboardingWireStyle(fade: key.fade.value + (1 - key.fade.value) * b, lit: lit)
+                if b > 0.5 { style.specular = light } else { style.specular = hoverLight(lit) }
                 OnboardingWireCatalog.key.draw(
-                    in: &context, center: CGPoint(x: keyX, y: key.y.value), worldZ: key.z.value,
-                    radius: key.r.value, angles: keyAngles(still: still),
-                    style: OnboardingWireStyle(fade: key.fade.value, lit: key.lit.value, tint: tint,
-                                               tintStrength: strength * b, dotWaveX: waveX))
+                    in: &context, center: center, worldZ: z, radius: radius + (Self.keyRadius - radius) * b,
+                    angles: blended, style: style)
                 drawCaption(in: &context, actor: key, text: keyCaption, visible: captions)
             }
         }
@@ -736,6 +932,43 @@ final class OnboardingWireScene {
         caption.draw(Text(text.1).font(OnboardingTheme.sans(12.5)).foregroundColor(OnboardingTheme.muted),
                      at: CGPoint(x: 0, y: 22 + (1 - detailOpacity) * 4), anchor: .top)
     }
+}
+
+/// The design pass's blush under the field: a smooth super-Gaussian in a calm
+/// rose, dithered with interleaved gradient noise so 8-bit displays show no
+/// bands. Built once, at the prototype's 540 × 420.
+enum OnboardingAmbientGlow {
+    static let image: NSImage = {
+        let width = 540, height = 420
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let peak = 0.056, cx = Double(width) * 0.5, cy = 222.0, rx = 216.0, ry = 66.0
+        func fract(_ v: Double) -> Double { v - floor(v) }
+        for y in 0..<height {
+            let dy = (Double(y) - cy) / ry
+            for x in 0..<width {
+                let dx = (Double(x) - cx) / rx
+                let r2 = dx * dx + dy * dy
+                let glow = r2 < 4.5 ? peak * exp(-r2 * 1.15) : 0
+                let n1 = fract(52.9829189 * fract(0.06711056 * Double(x) + 0.00583715 * Double(y)))
+                let n2 = fract(52.9829189 * fract(0.06711056 * Double(x + 29) + 0.00583715 * Double(y + 13)))
+                let dither = (n1 - n2) * 1.35
+                let i = (y * width + x) * 4
+                guard glow > 0.001 else { continue }
+                let alpha = max(0, min(255, (glow * 255 + dither).rounded()))
+                // Premultiplied rose (206, 96, 150).
+                bytes[i] = UInt8(206 * alpha / 255)
+                bytes[i + 1] = UInt8(96 * alpha / 255)
+                bytes[i + 2] = UInt8(150 * alpha / 255)
+                bytes[i + 3] = UInt8(alpha)
+            }
+        }
+        let image = bytes.withUnsafeMutableBytes { buffer -> CGImage? in
+            CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage()
+        }
+        return image.map { NSImage(cgImage: $0, size: NSSize(width: width, height: height)) } ?? NSImage()
+    }()
 }
 
 /// The page's layer for the scene: one canvas over steps 1 and 2 at the
@@ -918,16 +1151,26 @@ struct OnboardingSpeechKeyProvider: Equatable {
     }
 }
 
-/// The start and the last four characters stay visible.
+/// Hides the middle of what looks like a key: Latin letters, digits, "-" and
+/// "_", 20 characters or more. Anything else (short, Cyrillic, spaces) shows
+/// as typed, so a mistyped word is visible and named as a format problem.
+/// The mask keeps the length (one dot per hidden character, in a monospaced
+/// font), so the caret stays where the typed character is.
 enum OnboardingKeyMask {
-    static func masked(_ raw: String, prefix: Int?) -> String {
-        let count = raw.count
-        guard count > 0 else { return "" }
-        if count <= 4 { return String(raw.prefix(1)) + String(repeating: "•", count: count - 1) }
-        if count <= 9 { return String(raw.prefix(2)) + String(repeating: "•", count: count - 4) + String(raw.suffix(2)) }
-        let head = min(prefix ?? 4, count - 5)
-        let middle = min(12, max(6, count - head - 4))
-        return String(raw.prefix(head)) + String(repeating: "•", count: middle) + String(raw.suffix(4))
+    static let minimumLength = 20
+
+    static func looksLikeAKey(_ raw: String) -> Bool {
+        raw.count >= minimumLength && raw.unicodeScalars.allSatisfy {
+            ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "-" || $0 == "_"
+        }
+    }
+
+    /// The start (the provider's prefix, or four characters) and the last
+    /// four stay visible; nil when the input does not look like a key.
+    static func masked(_ raw: String, prefix: Int?) -> String? {
+        guard looksLikeAKey(raw) else { return nil }
+        let head = min(prefix ?? 4, raw.count - 8)
+        return String(raw.prefix(head)) + String(repeating: "•", count: raw.count - head - 4) + String(raw.suffix(4))
     }
 }
 
@@ -1011,11 +1254,13 @@ struct OnboardingSpeechKeyStage: View {
         }
         .frame(maxWidth: .infinity)
         .onChange(of: outcome) { _, new in react(to: new) }
-        .onChange(of: phase) { _, new in scene.keyPhase = new }
+        .onChange(of: phase) { _, new in
+            scene.refusedAngle = problem == .noCredit || problem == .noSpeechAccess ? 0.46 : 0.36
+            scene.keyPhase = new
+        }
         .onAppear {
             focused = true
             scene.keyPhase = phase
-            scene.keyTargetTurn = accepted ? .pi * 0.5 : 0
             if saved || accepted { picked = model.speechProvider }
         }
     }
@@ -1036,12 +1281,15 @@ struct OnboardingSpeechKeyStage: View {
     private var field: some View {
         HStack(spacing: 10) {
             if let known {
-                ProviderBrandIcon(assetName: known.assetName, size: 15, color: OnboardingTheme.ink2)
-                    .frame(width: 18)
+                ProviderBrandIcon(assetName: known.assetName, size: 14, color: OnboardingTheme.ink)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.white.opacity(0.07)))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
                     .accessibilityHidden(true)
                     .transition(.opacity)
             }
             ZStack(alignment: .leading) {
+                let masked = OnboardingKeyMask.masked(draft, prefix: detected?.prefix)
                 if draft.isEmpty {
                     Text(accepted ? "\(active.kind.displayName) key saved"
                          : saved ? "Saved \(active.kind.displayName) key · press Return to use it"
@@ -1049,22 +1297,29 @@ struct OnboardingSpeechKeyStage: View {
                         .font(OnboardingTheme.sans(14))
                         .foregroundColor(OnboardingTheme.faint)
                         .lineLimit(1)
-                } else {
-                    Text(OnboardingKeyMask.masked(draft, prefix: detected?.prefix))
-                        .font(OnboardingTheme.mono(13))
-                        .foregroundColor(OnboardingTheme.ink)
-                        .lineLimit(1)
-                        .accessibilityHidden(true)
+                } else if let masked {
+                    // Same length and font as the typed text: the caret and the
+                    // field's scrolling stay where they are.
+                    GeometryReader { proxy in
+                        let overflows = Self.monoWidth(masked) > proxy.size.width
+                        Text(masked)
+                            .font(OnboardingTheme.mono(13))
+                            .foregroundColor(OnboardingTheme.ink)
+                            .fixedSize()
+                            .frame(width: proxy.size.width, height: proxy.size.height,
+                                   alignment: overflows ? .trailing : .leading)
+                    }
+                    .clipped()
+                    .accessibilityHidden(true)
                 }
                 TextField("", text: $draft)
                     .textFieldStyle(.plain)
                     .font(OnboardingTheme.mono(13))
-                    .foregroundColor(.clear)
+                    .foregroundColor(masked == nil ? OnboardingTheme.ink : .clear)
                     .focused($focused)
                     .disabled(checking)
                     .onSubmit(submit)
                     .onChange(of: draft) { old, new in
-                        scene.keyTargetTurn = 0
                         if let provider = OnboardingSpeechKeyProvider.detect(new, among: providers)?.provider {
                             model.speechProvider = provider.kind
                         }
@@ -1076,7 +1331,7 @@ struct OnboardingSpeechKeyStage: View {
             .frame(maxWidth: .infinity)
             trailing
         }
-        .padding(.leading, known == nil ? 20 : 16)
+        .padding(.leading, known == nil ? 20 : 12)
         .padding(.trailing, 8)
         .frame(height: 50)
         .background(Capsule().fill(Color(red: 0.086, green: 0.086, blue: 0.098)))
@@ -1084,6 +1339,12 @@ struct OnboardingSpeechKeyStage: View {
         // A soft halo, not a neon band.
         .shadow(color: halo, radius: 14, x: 0, y: 0)
         .shadow(color: .black.opacity(0.30), radius: 16, x: 0, y: 10)
+        .background(GeometryReader { proxy in
+            let y = proxy.frame(in: .named(OnboardingWireScene.space)).midY
+            Color.clear
+                .onAppear { scene.fieldY = y }
+                .onChange(of: y) { _, new in scene.fieldY = new }
+        })
         .animation(OnboardingMotion.resolve(OnboardingMotion.slotMorph, reduceMotion: reduceMotion), value: outcome)
         .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: focused)
         .animation(OnboardingMotion.resolve(OnboardingMotion.pressRelease, reduceMotion: reduceMotion), value: known?.kind)
@@ -1212,6 +1473,11 @@ struct OnboardingSpeechKeyStage: View {
                    value: known?.kind)
     }
 
+    private static func monoWidth(_ text: String) -> CGFloat {
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
     private var border: Color {
         if accepted, draft.isEmpty { return OnboardingTheme.green.opacity(0.55) }
         if problem != nil { return OnboardingTheme.orange.opacity(0.50) }
@@ -1240,23 +1506,12 @@ struct OnboardingSpeechKeyStage: View {
         }
     }
 
+    /// The provider that answered keeps its mark open; the scene plays the
+    /// key and the padlock from the phase.
     private func react(to outcome: OnboardingStepOutcome) {
         switch outcome {
-        case .done:
-            picked = model.speechProvider
-            scene.keyTargetTurn = .pi * 0.5
-        case .failed:
-            // The mark of the provider that answered stays open.
-            picked = model.speechProvider
-            guard let problem else { return }
-            switch problem {
-            case .format: scene.nudgeBack()
-            case .refused, .noSpeechAccess: scene.catchOnPin(0.32, still: reduceMotion)
-            case .noCredit: scene.catchOnPin(0.48, still: reduceMotion)
-            default: break
-            }
-        case .idle, .working:
-            scene.keyTargetTurn = 0
+        case .done, .failed: picked = model.speechProvider
+        case .idle, .working: break
         }
     }
 }

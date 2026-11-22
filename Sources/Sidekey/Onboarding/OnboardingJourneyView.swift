@@ -84,13 +84,6 @@ struct OnboardingJourneyView: View {
             Group {
                 RadialGradient(colors: [OnboardingWireframeInk.groundCenter, OnboardingTheme.bg],
                                center: UnitPoint(x: 0.5, y: 0.47), startRadius: 10, endRadius: 330)
-                // A calm rose light low behind the figures, as on whytap.ai:
-                // wide and faint, never a band on the field.
-                RadialGradient(colors: [OnboardingWireframeInk.roseColor.opacity(0.055),
-                                        OnboardingWireframeInk.roseColor.opacity(0.018),
-                                        OnboardingWireframeInk.roseColor.opacity(0)],
-                               center: UnitPoint(x: 0.5, y: 0.52), startRadius: 0, endRadius: 250)
-                    .scaleEffect(x: 1.35, y: 0.8)
             }
             .opacity(Self.isWireframe(model.step) ? 1 : 0)
             .animation(OnboardingMotion.resolve(OnboardingMotion.crossDissolve, reduceMotion: reduceMotion), value: model.step)

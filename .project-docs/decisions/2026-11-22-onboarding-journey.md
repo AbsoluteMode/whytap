@@ -198,14 +198,25 @@ window, Back and a progress bar.
   and reappear. The steps report only their bands' vertical place (the step
   slide is sideways), and step 1's captions fade in the first third of the
   flight.
-- **A wire padlock, and a calm light.** Step 2's lock is a padlock with its
-  keyhole on the key's line: an accepted key goes in and turns a quarter,
-  then the shackle lifts and swings open; a refused key goes in, catches on
-  a pin and eases back. The ground keeps a wide, faint rose light low behind
-  the figures (no band on the field) and a ±1-level static grain over the
-  dark gradients so 8-bit displays show no banding. The design pass is
-  still refining the glow and the padlock; these follow its current
-  prototypes until then.
+- **The design pass's padlock and light (delivered 2026-11-22).** Step 2
+  uses its meshes and springs one to one: a chamfered padlock body with the
+  keyhole toward the key and a tubular shackle; the key slides along the
+  keyway (insertion 150/19: resting outside, a little in when pasted, seated
+  while checking, short of the hole for a malformed key) and turns 185/18.
+  Accepted: a quarter turn, then the shackle lifts (230/14.5) and swings
+  open (180/14) with a small kick of the body. Refused: the key tries to
+  turn (0.36 rad, 0.46 for credit or access), the padlock shudders and the
+  key eases back. No answer: the lock dims and three dots fade toward it.
+  The light is on the wires, not behind them: facets catching a grazing
+  light turn rose-pearl on hover (step 1), and on step 2 a light from the
+  field below goes rose, green when accepted and amber on a problem; the
+  only glow is a faint dithered blush under the field, so nothing bands.
+- **Only what looks like a key is masked.** Latin letters, digits, "-" and
+  "_", 20 characters or more, show the start and the last four. Anything
+  else (a typed word, Cyrillic, spaces, short input) shows as typed and is
+  named as a format problem; the owner had seen a typed Cyrillic word shown masked. The
+  mask keeps the length in the monospaced font, so typing a key by hand
+  never moves the caret when the mask begins.
 - **Step 2's layout follows the design pass.** One centred axis: title, the
   key over its lock, the field ("Paste your API key…"), one quiet line under
   it (empty at rest), four monochrome provider marks of one optical height

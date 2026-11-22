@@ -111,7 +111,7 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertTrue(model.outcome(.speechKey).isDone)
     }
 
-    func testOnlyRealKeyPrefixesPickTheProviderAndTheMiddleIsMasked() {
+    func testOnlyRealKeyPrefixesPickTheProviderAndTheMiddleIsMasked() throws {
         let speech = [AIProviderKind.soniox, .deepgram, .elevenLabs].compactMap(OnboardingSpeechKeyProvider.of)
         XCTAssertEqual(OnboardingSpeechKeyProvider.detect("sk_0123456789abcdef", among: speech)?.provider.kind, .elevenLabs)
         XCTAssertNil(OnboardingSpeechKeyProvider.detect("0123456789abcdef0123", among: speech),
@@ -121,9 +121,41 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(OnboardingSpeechKeyProvider.detect("sk-proj-0123456789", among: withOpenAI)?.provider.kind, .openAI)
         XCTAssertNil(OnboardingSpeechKeyProvider.detect("sk-ant-0123456789", among: withOpenAI), "an Anthropic key is not speech")
 
-        let masked = OnboardingKeyMask.masked("sk_0123456789abcdefWXYZ", prefix: 3)
+        let masked = try XCTUnwrap(OnboardingKeyMask.masked("sk_0123456789abcdefWXYZ", prefix: 3))
         XCTAssertTrue(masked.hasPrefix("sk_"))
         XCTAssertTrue(masked.hasSuffix("WXYZ"))
         XCTAssertFalse(masked.contains("0123"), "the middle is hidden")
+    }
+
+    /// "фывааф" typed by hand showed as "фы•••аф". Only key-like input is
+    /// masked; the rest shows as typed and is named as a format problem.
+    func testOnlyKeyLikeInputIsMaskedAndTypingKeepsTheCaret() async throws {
+        for typed in ["фывааф", "фыва", "short-key", "key with spaces 0123456789", "фываолдж0123456789abcdef"] {
+            XCTAssertNil(OnboardingKeyMask.masked(typed, prefix: nil), "\(typed) shows as typed")
+        }
+        // Typing a key by hand, one character at a time: plain until it looks
+        // like a key, then masked at the same length (the caret does not move).
+        let key = "sk_live0123456789abcdefWXYZ"
+        for length in 1...key.count {
+            let typed = String(key.prefix(length))
+            let masked = OnboardingKeyMask.masked(typed, prefix: 3)
+            if length < OnboardingKeyMask.minimumLength {
+                XCTAssertNil(masked, "\(length) characters are not masked yet")
+            } else {
+                let masked = try XCTUnwrap(masked)
+                XCTAssertEqual(masked.count, typed.count, "same length, so the caret stays at \(length)")
+                XCTAssertTrue(masked.hasPrefix("sk_"))
+                XCTAssertEqual(String(masked.suffix(4)), String(typed.suffix(4)))
+            }
+        }
+
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        await model.useSpeechKey("фывааф", provider: .soniox)
+        XCTAssertEqual(model.keyProblems[.speechKey], .format, "a typed word is a calm format problem, no request")
+        XCTAssertEqual(model.outcome(.speechKey), .failed(OnboardingKeyProblem.format.message(provider: "Soniox")))
     }
 }

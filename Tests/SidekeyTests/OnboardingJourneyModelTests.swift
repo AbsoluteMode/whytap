@@ -795,8 +795,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
                                                           shownState: .failed(OnboardingJourneyModel.noSpeech)))),
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
-            ("finish", AnyView(OnboardingFinishStage(model: model))),
-            ("finish-open", AnyView(OnboardingFinishStage(model: model, shownOpen: true))),
+            ("finish", AnyView(OnboardingFinishStage(model: model, still: true))),
         ]
         for (name, view) in finale {
             let stage = view

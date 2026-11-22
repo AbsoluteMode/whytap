@@ -456,15 +456,15 @@ final class OnboardingCarousel {
 
 // MARK: - Finish
 
-/// The last step: "Enjoy Whytap.", a stack of questions worth asking the
-/// agent on whytap.ai that turns over by itself and opens into a list under
-/// the pointer, the one Ask line, and Finish. It took the place of a separate
-/// whytap.ai page; the stack took the place of a constellation of figures.
+/// The last step: "Enjoy Whytap.", a list of questions worth asking the
+/// agent on whytap.ai whose rows give way to other questions one at a time,
+/// the one Ask line, and Finish. It took the place of a separate whytap.ai
+/// page; the list took the place of a constellation of figures.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingFinishStage: View {
     @ObservedObject var model: OnboardingJourneyModel
-    /// Offscreen renders show the stack opened.
-    var shownOpen = false
+    /// Offscreen renders show the list without its turn.
+    var still = false
     @Environment(\.openURL) private var openURL
 
     static let site = URL(string: "https://whytap.ai")!
@@ -472,25 +472,25 @@ struct OnboardingFinishStage: View {
     var body: some View {
         VStack(spacing: 0) {
             OnboardingWireTitle(title: "Enjoy Whytap.", lede: "We hope you’ll love having it on your Mac.")
-            OnboardingQuestionStack(shownOpen: shownOpen) { openURL(OnboardingQuestionStack.link(for: $0)) }
-                .frame(height: 150)
-                .padding(.top, 8)
+            OnboardingQuestionList(still: still) { openURL(OnboardingQuestionList.link(for: $0)) }
+                .padding(.top, 12)
             OnboardingAskLine { openURL(Self.site) }
-                .padding(.top, 8)
+                .padding(.top, 12)
             OnboardingWirePill("Finish", disc: .finish, isDefault: true, action: model.finish)
-                .padding(.top, 16)
+                .padding(.top, 12)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
     }
 }
 
-/// Questions a new person can ask the agent on whytap.ai, as cards in a
-/// stack: the front card turns over to the next every few seconds; under the
-/// pointer the stack opens into a list of four; a click asks that question on
+/// Questions a new person can ask the agent on whytap.ai, always shown as a
+/// list of rows (icon, question, ↗). Every few seconds one row gives way to
+/// another question, softly and one row at a time, the rows in turn; the
+/// pointer (or focus) on the list holds it. A click asks that question on
 /// whytap.ai (`?q=` asks it as the page opens).
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-struct OnboardingQuestionStack: View {
+struct OnboardingQuestionList: View {
     /// Real questions the Ask agent answers (its eval pool), short enough for
     /// one line.
     static let questions = [
@@ -511,74 +511,81 @@ struct OnboardingQuestionStack: View {
         return parts.url!
     }
 
-    /// The `count` questions shown from `front` on, wrapping around.
-    static func shown(from front: Int, count: Int) -> [String] {
-        (0..<count).map { questions[(front + $0) % questions.count] }
+    static let rows = 4
+    static let rowHeight: CGFloat = 30
+    static let rowSpacing: CGFloat = 6
+    static let width: CGFloat = 404
+    /// The list's whole height: every row in full.
+    static var height: CGFloat { CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing }
+
+    /// One soft change: the row `turn` (rows in turn) takes the next question
+    /// not on the list. Returns the new rows and the next question to offer.
+    static func change(_ shown: [Int], turn: Int, next: Int) -> (shown: [Int], next: Int) {
+        var shown = shown
+        var candidate = next % questions.count
+        while shown.contains(candidate) { candidate = (candidate + 1) % questions.count }
+        shown[turn % shown.count] = candidate
+        return (shown, (candidate + 1) % questions.count)
     }
 
-    var shownOpen = false
+    var still = false
     let ask: (String) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var front = 0
+    @State private var shown = Array(0..<Self.rows)
+    @State private var next = Self.rows
+    @State private var turn = 0
     @State private var hovered = false
     @FocusState private var focused: Int?
 
-    private static let rows = 4
-    private static let rowHeight: CGFloat = 30
-    private static let width: CGFloat = 404
-
-    private var open: Bool { shownOpen || hovered || focused != nil }
-
     var body: some View {
-        let open = self.open
-        let count = Self.questions.count
-        ZStack {
-            // Every card keeps its identity: turning over sends the front card
-            // to the back and moves the others forward.
-            ForEach(0..<count, id: \.self) { index in
-                let depth = (index - front + count) % count
-                let visible = open ? depth < Self.rows : depth < 3
-                card(Self.questions[index], index: index, depth: depth, open: open)
-                    .offset(y: open ? (CGFloat(min(depth, Self.rows)) - CGFloat(Self.rows - 1) / 2) * (Self.rowHeight + 6)
-                                    : -CGFloat(min(depth, 3)) * 7 + 7)
-                    .scaleEffect(open ? 1 : 1 - CGFloat(min(depth, 3)) * 0.05)
-                    .opacity(visible ? (open ? 1 : 1 - Double(depth) * 0.3) : 0)
-                    .zIndex(Double(count - depth))
+        VStack(spacing: Self.rowSpacing) {
+            ForEach(0..<Self.rows, id: \.self) { slot in
+                ZStack {
+                    let index = shown[slot]
+                    row(index)
+                        .id(index)
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
+                                                removal: .opacity.combined(with: .offset(y: -6))))
+                }
+                .frame(width: Self.width, height: Self.rowHeight)
+                .clipped()
             }
         }
-        .frame(width: Self.width, height: 150)
+        .frame(width: Self.width, height: Self.height)
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
-        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.82), value: open)
         .task {
-            // The front card turns over while the stack is closed.
-            guard !shownOpen else { return }
+            guard !still else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_400_000_000)
-                guard !Task.isCancelled, !open else { continue }
-                if reduceMotion { front = (front + 1) % Self.questions.count } else {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { front = (front + 1) % Self.questions.count }
+                try? await Task.sleep(nanoseconds: 3_200_000_000)
+                guard !Task.isCancelled, !hovered, focused == nil else { continue }
+                let changed = Self.change(shown, turn: turn, next: next)
+                if reduceMotion {
+                    shown = changed.shown
+                } else {
+                    withAnimation(.easeInOut(duration: 0.6)) { shown = changed.shown }
                 }
+                next = changed.next
+                turn = (turn + 1) % Self.rows
             }
         }
     }
 
-    private func card(_ question: String, index: Int, depth: Int, open: Bool) -> some View {
-        let lit = (open && depth < Self.rows) || depth == 0
+    private func row(_ index: Int) -> some View {
+        let question = Self.questions[index]
         return Button { ask(question) } label: {
             HStack(spacing: 10) {
                 Image(systemName: "text.bubble")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(OnboardingWireframeInk.roseColor.opacity(lit ? 0.9 : 0))
+                    .foregroundColor(OnboardingWireframeInk.roseColor.opacity(0.9))
                 Text(question)
                     .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.ink.opacity(lit ? 0.92 : 0))
+                    .foregroundColor(OnboardingTheme.ink.opacity(0.92))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 6)
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 9.5, weight: .bold))
-                    .foregroundColor(OnboardingTheme.muted.opacity(lit ? 1 : 0))
+                    .foregroundColor(OnboardingTheme.muted)
             }
             .padding(.horizontal, 14)
             .frame(width: Self.width, height: Self.rowHeight)
@@ -592,10 +599,7 @@ struct OnboardingQuestionStack: View {
         .buttonStyle(.plain)
         .focusEffectDisabled()
         .focused($focused, equals: index)
-        .allowsHitTesting(depth == 0 || (open && depth < Self.rows))
-        .disabled(!(depth == 0 || (open && depth < Self.rows)))
         .accessibilityLabel("Ask on whytap.ai: \(question)")
-        .accessibilityHidden(!(depth == 0 || (open && depth < Self.rows)))
     }
 }
 

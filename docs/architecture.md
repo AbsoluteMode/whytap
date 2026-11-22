@@ -1250,8 +1250,11 @@ the field from the start and works once a take arrived, with Skip beside it;
 in the app Drop itself listens, while the standalone preview, which starts no
 hotkeys, listens for the person's Drop shortcut in its own window
 (OnboardingDropStandIn, implemented by OnboardingPreviewKit's
-OnboardingPreviewDrop: swallowed so Space is never typed, and a take always
-ends on release, focus loss, a 30 s limit or leaving the step); while Drop records
+OnboardingPreviewDrop, which runs a held Space or hold combo through Drop's own
+SpaceHoldDetector with SpaceHoldMonitor's mapping and swallow rule: a short tap
+types a space, a hold past the threshold erases what printed, records and
+swallows its repeats and release; a take always ends on release, focus loss, a
+30 s limit or leaving the step); while Drop records
 (OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
 lede becomes soft waves that follow the voice, with no island chip; a take that
 ends with nothing in the field gets one calm line ("No speech heard - try
@@ -1263,9 +1266,10 @@ tilted ring of 38 pt tiles that turns slowly like a carousel
 Motion) around a small card; a pointed or focused tile stops the turn, lights
 and is named on the card with HoverToolRegistry's description, and the turn
 goes on when the pointer leaves. The last step, "Enjoy Whytap.", has no
-summary: a stack of real questions for the Ask agent (OnboardingQuestionStack)
-turns over every few seconds and opens into a list of four under the pointer;
-a click opens whytap.ai/?q=<question>, which the page asks on load; then one
+summary: a list of four real questions for the Ask agent
+(OnboardingQuestionList) whose rows give way to other questions softly, one at
+a time, held while the pointer is on the list; a click opens
+whytap.ai/?q=<question>, which the page asks on load; then one
 Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
 Toolbox and the last step have no timer: they wait for Continue or Finish (or
 Return), and their progress segment does not fill by time.

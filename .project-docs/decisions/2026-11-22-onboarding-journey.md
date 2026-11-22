@@ -465,9 +465,14 @@ window, Back and a progress bar.
   hotkeys. Now the preview listens for the person's own Drop shortcut in
   its window with a local event monitor (OnboardingPreviewDrop in
   OnboardingPreviewKit, behind the app's OnboardingDropStandIn protocol, so
-  nothing of it is in the app), whatever has the focus, and swallows it so
-  Space is never typed into the field; hold starts a take and letting go
-  ends it (a tap shortcut toggles), and a take always ends: on release, on
+  nothing of it is in the app), whatever has the focus. The owner then saw
+  spaces still typed while holding ("with us they are not typed"): a held
+  Space or hold combo now runs through Drop's own SpaceHoldDetector with
+  SpaceHoldMonitor.mapEvent and tapDecision, so the preview behaves as Drop
+  does in the app: a short tap types a space, a hold past the 300 ms
+  threshold erases the spaces it printed (Drop's Backspace), records, and
+  swallows its auto-repeats and release; a tap shortcut toggles; and a take
+  always ends: on release, on
   the window or the app losing focus, after 30 s, and when the step goes
   away. Skip and Back work during a take. The other steps were
   checked the same way: an access step's waiting copy no longer names
@@ -492,13 +497,17 @@ window, Back and a progress bar.
   never touch, never cover the card and never leave the area. REV 66, on
   the last screen: use the middle for a carousel of questions worth asking
   on the landing, a stack that shows example requests on hover. The
-  constellation is gone; OnboardingQuestionStack holds eight real questions
+  constellation is gone; the list (OnboardingQuestionList) holds eight real questions
   from the Ask agent's eval pool (models to start with, tap instead of
   hold, Russian dictation into English, custom words, Case with Claude
   Code, fully local with Ollama, meeting speakers, the microphone), one
-  line each (at most 52 characters); the front card turns over to the next every 3.4 s while
-  closed, the pointer (or focus) opens the stack into a list of four, and a
-  click opens whytap.ai/?q=<question>: the landing's Ask page reads `q`
+  line each (at most 52 characters). REV 68 replaced the stack: "leave the
+  last one just like this and let them change slowly" (the opened list on
+  the owner's screenshot, whose fourth row was cut). Four rows are always
+  shown (icon, question, arrow) in a fixed 138 pt block above the Ask
+  capsule and Finish, so no row is cut or covers them; every 3.2 s one row,
+  the rows in turn, fades to a question not on the list, and the pointer
+  or focus on the list holds it. A click opens whytap.ai/?q=<question>: the landing's Ask page reads `q`
   and asks it once its scripts are in (site/ask/ask.js in the landing
   repository; /ask/ keeps `?q=` too, and Ask caps a question at 300
   characters). The Ask capsule and Finish stay.
@@ -601,6 +610,14 @@ window, Back and a progress bar.
 
 ## What was tested
 
+- REV 68: the preview's Space follows Drop's detector (a quick tap types a
+  space and records nothing; a hold erases the printed spaces, records,
+  swallows repeats and the release, then drops the text; outside a text
+  field a hold does nothing), end to end in a real window and in the whole
+  onboarding window reached by walking the steps; the last step's list
+  changes one row at a time, never shows a question twice and brings every
+  question round; offscreen render of the last step with all four rows in
+  full above the Ask capsule and Finish.
 - REV 64 to 66: the flow goes Try Drop, Toolbox, Enjoy Whytap with ten
   segments by default; Try Drop's key keeps the Drop key's legend; the
   Toolbox ring keeps every tile clear of the others, the card and the area

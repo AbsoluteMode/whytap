@@ -821,16 +821,19 @@ final class OnboardingPreviewTests: XCTestCase {
 
     // MARK: - The preview's Drop on Try Drop
 
-    private final class Takes { var texts: [String] = [] }
+    private final class Takes { var texts: [String] = []; var erased: [Int] = [] }
 
     private func previewDrop(_ shortcut: HotkeyShortcut = .holdSpace, gesture: HotkeyGesture = .hold)
         -> (OnboardingPreviewDrop, OnboardingVoiceSignal, Takes, () -> Void) {
         let drop = OnboardingPreviewDrop()
         drop.transcribing = 0.01
+        drop.threshold = 0.05
         var clock = Date()
         drop.now = { clock }
-        let voice = OnboardingVoiceSignal(appState: nil)
         let takes = Takes()
+        drop.isEditable = { true }
+        drop.eraseLeaked = { takes.erased.append($0) }
+        let voice = OnboardingVoiceSignal(appState: nil)
         drop.attach(shortcut: shortcut, gesture: gesture, voice: voice) { takes.texts.append($0) }
         return (drop, voice, takes, { clock = clock.addingTimeInterval(1.5) })
     }
@@ -842,31 +845,52 @@ final class OnboardingPreviewTests: XCTestCase {
                          keyCode: code)!
     }
 
-    /// Holding Space anywhere in the preview's window records and letting go
-    /// drops the text; Space never reaches the field, other keys do.
-    func testThePreviewHoldsTheDropKeyInItsWindow() async throws {
+    /// Held Space behaves as Drop's own Space hold in the app (the same
+    /// SpaceHoldDetector and swallow rule): the first space prints, the hold
+    /// past the threshold erases what printed and records, its auto-repeats
+    /// and its release are swallowed, and letting go drops the text.
+    func testThePreviewHoldsSpaceLikeDrop() async throws {
         let (drop, voice, takes, later) = previewDrop()
         defer { drop.detach() }
         XCTAssertNotNil(drop.handle(key(.keyDown, 0, "a")), "other keys still type")
-        XCTAssertNil(drop.handle(key(.keyDown, 49)), "Space is swallowed, not typed")
-        XCTAssertTrue(voice.recording)
-        XCTAssertNil(drop.handle(key(.keyDown, 49, isRepeat: true)))
-        XCTAssertTrue(voice.recording, "a held key's repeats change nothing")
+        XCTAssertNotNil(drop.handle(key(.keyDown, 49)), "the first space prints, as in the app")
+        XCTAssertNotNil(drop.handle(key(.keyDown, 49, isRepeat: true)), "before the threshold it is still typing")
+        try await eventually { voice.recording }
+        XCTAssertEqual(takes.erased, [2], "the two spaces that printed are erased when the hold is confirmed")
+        XCTAssertNil(drop.handle(key(.keyDown, 49, isRepeat: true)), "repeats while recording never reach the field")
         later()
-        XCTAssertNil(drop.handle(key(.keyUp, 49)))
+        XCTAssertNil(drop.handle(key(.keyUp, 49)), "the release is Drop's too")
         XCTAssertFalse(voice.recording, "letting go ends the take")
         try await eventually { !voice.working }
         XCTAssertEqual(takes.texts, [OnboardingPreviewDrop.text])
     }
 
-    func testAQuickTapBringsNothing() async throws {
+    /// A short Space tap is just a space, as with Drop in the app.
+    func testAQuickSpaceTapIsJustASpace() async throws {
         let (drop, voice, takes, _) = previewDrop()
         defer { drop.detach() }
-        _ = drop.handle(key(.keyDown, 49))
-        _ = drop.handle(key(.keyUp, 49))
+        XCTAssertNotNil(drop.handle(key(.keyDown, 49)))
+        XCTAssertNotNil(drop.handle(key(.keyUp, 49)))
+        try await Task.sleep(nanoseconds: 120_000_000)
         XCTAssertFalse(voice.recording)
-        try await eventually { !voice.working }
-        XCTAssertEqual(takes.texts, [], "like a real empty take")
+        XCTAssertEqual(takes.erased, [], "nothing to erase")
+        XCTAssertEqual(takes.texts, [])
+    }
+
+    /// Outside a text field a hold records nothing, as Drop's check decides.
+    func testAHoldOutsideATextFieldDoesNothing() async throws {
+        let (drop, voice, _, _) = previewDrop()
+        defer { drop.detach() }
+        drop.isEditable = { false }
+        _ = drop.handle(key(.keyDown, 49))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertFalse(voice.recording)
+        XCTAssertNotNil(drop.handle(key(.keyUp, 49)))
+    }
+
+    private func recording(_ drop: OnboardingPreviewDrop, _ voice: OnboardingVoiceSignal) async throws {
+        _ = drop.handle(key(.keyDown, 49))
+        try await eventually { voice.recording }
     }
 
     /// A key released while the window is not in front never arrives: the
@@ -874,12 +898,12 @@ final class OnboardingPreviewTests: XCTestCase {
     func testLosingFocusEndsTheTake() async throws {
         for name in [NSWindow.didResignKeyNotification, NSApplication.didResignActiveNotification] {
             let (drop, voice, _, later) = previewDrop()
-            _ = drop.handle(key(.keyDown, 49))
-            XCTAssertTrue(voice.recording)
+            try await recording(drop, voice)
             later()
             NotificationCenter.default.post(name: name, object: nil)
             XCTAssertFalse(voice.recording, "\(name.rawValue) ends the take")
             try await eventually { !voice.working }
+            XCTAssertNotNil(drop.handle(key(.keyUp, 49)), "the late release is ordinary again")
             drop.detach()
         }
     }
@@ -888,8 +912,7 @@ final class OnboardingPreviewTests: XCTestCase {
         let (drop, voice, _, _) = previewDrop()
         defer { drop.detach() }
         drop.longestTake = 0.15
-        _ = drop.handle(key(.keyDown, 49))
-        XCTAssertTrue(voice.recording)
+        try await recording(drop, voice)
         try await eventually({ !voice.recording }, timeout: 2)
         try await eventually { !voice.working }
     }
@@ -898,7 +921,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// arrives afterwards.
     func testLeavingTryDropEndsTheTake() async throws {
         let (drop, voice, takes, later) = previewDrop()
-        _ = drop.handle(key(.keyDown, 49))
+        try await recording(drop, voice)
         later()
         drop.detach()
         XCTAssertFalse(voice.recording)
@@ -937,6 +960,7 @@ final class OnboardingPreviewTests: XCTestCase {
         let drop = try XCTUnwrap(model.dropStandIn as? OnboardingPreviewDrop)
         drop.transcribing = 0.01
         drop.shortestTake = 0
+        drop.threshold = 0.05
         let configuration = model.hotkeys.configuration
         let stage = OnboardingTryDropStage(model: model, shortcut: configuration.dropVoiceShortcut,
                                            gesture: configuration.normalizedDropGesture)
@@ -949,6 +973,72 @@ final class OnboardingPreviewTests: XCTestCase {
         try await eventually { drop.isListening }
         let field = try XCTUnwrap(Self.textView(in: host))
         window.makeFirstResponder(field)
+        // This window is never key in a test; Drop's check looks at the field.
+        drop.isEditable = { field.isEditable }
+        drop.eraseLeaked = { count in for _ in 0..<count { field.deleteBackward(nil) } }
+        func send(_ type: NSEvent.EventType, isRepeat: Bool = false) {
+            let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                         windowNumber: window.windowNumber, context: nil, characters: " ",
+                                         charactersIgnoringModifiers: " ", isARepeat: isRepeat, keyCode: 49)!
+            NSApp.sendEvent(event)
+        }
+        // A short tap is a space, as with Drop in the app: the monitor lets
+        // it through to the field (a test window is never key, so the passed
+        // event is handed to the field the way AppKit would).
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                                         windowNumber: window.windowNumber, context: nil, characters: " ",
+                                         charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+            if let passed = drop.handle(event), type == .keyDown { field.keyDown(with: passed) }
+        }
+        XCTAssertEqual(field.string, " ")
+        field.string = ""
+        // A hold: the space that printed is erased, repeats never print.
+        send(.keyDown)
+        try await eventually { model.voice.recording }
+        XCTAssertEqual(field.string, "", "the printed space is erased when the hold is confirmed")
+        for _ in 0..<5 { send(.keyDown, isRepeat: true) }
+        XCTAssertEqual(field.string, "", "no spaces while held")
+        send(.keyUp)
+        XCTAssertFalse(model.voice.recording, "letting go ends it")
+        try await eventually { field.string == OnboardingPreviewDrop.text }
+        try await eventually { model.outcome(.tryDrop).isDone }
+        window.contentView = nil
+        window.close()
+        try await eventually { !drop.isListening }
+    }
+
+    /// The same in the whole onboarding window: Try Drop reached by walking
+    /// the steps (with their transitions), then Space held and released.
+    func testSpaceInTheWholeWindowNeverTypesIntoTryDrop() async throws {
+        let session = OnboardingPreviewSession(suiteName: "OnboardingPreviewTests-\(UUID().uuidString)")
+        defer { session.clear() }
+        let model = session.model
+        let drop = try XCTUnwrap(model.dropStandIn as? OnboardingPreviewDrop)
+        drop.transcribing = 0.01
+        drop.shortestTake = 0
+        drop.threshold = 0.05
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 440), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: OnboardingJourneyView(model: model))
+        window.contentView = host
+        model.chooseYourKey()
+        try await eventually { model.step == .speechKey }
+        await model.useSpeechKey("sk-preview-0123456789abcdef", provider: .elevenLabs)
+        var guardSteps = 0
+        while model.step != .tryDrop, guardSteps < 30 {
+            model.next(); guardSteps += 1
+            try await Task.sleep(nanoseconds: 60_000_000)
+        }
+        XCTAssertEqual(model.step, .tryDrop)
+        try await Task.sleep(nanoseconds: 900_000_000)  // the step's glide ends
+        host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(drop.isListening, "Try Drop listens once it has arrived")
+        let field = try XCTUnwrap(Self.textView(in: host))
+        window.makeFirstResponder(field)
+        drop.isEditable = { field.isEditable }
+        drop.eraseLeaked = { count in for _ in 0..<count { field.deleteBackward(nil) } }
         func send(_ type: NSEvent.EventType, isRepeat: Bool = false) {
             let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
                                          windowNumber: window.windowNumber, context: nil, characters: " ",
@@ -956,16 +1046,13 @@ final class OnboardingPreviewTests: XCTestCase {
             NSApp.sendEvent(event)
         }
         send(.keyDown)
-        XCTAssertTrue(model.voice.recording, "Space starts the take")
-        send(.keyDown, isRepeat: true)
+        try await eventually { model.voice.recording }
+        for _ in 0..<5 { send(.keyDown, isRepeat: true) }
+        XCTAssertEqual(field.string, "", "no spaces while held")
         send(.keyUp)
-        XCTAssertFalse(model.voice.recording, "letting go ends it")
         try await eventually { field.string == OnboardingPreviewDrop.text }
-        XCTAssertFalse(field.string.hasPrefix(" "), "Space never reached the field")
-        try await eventually { model.outcome(.tryDrop).isDone }
         window.contentView = nil
         window.close()
-        try await eventually { !drop.isListening }
     }
 
     private static func textView(in view: NSView) -> NSTextView? {
@@ -1000,24 +1087,34 @@ final class OnboardingPreviewTests: XCTestCase {
         model.voice.phaseChanged(.idle)
     }
 
-    /// The last step's stack holds real questions for the Ask agent, each
+    /// The last step's list holds real questions for the Ask agent, each
     /// short enough for one line and under Ask's 300-character limit; a
     /// click opens whytap.ai with the question in the link, which the page
     /// asks on load (REV 66).
     func testTheLastStepAsksRealQuestionsOnWhytapAI() throws {
-        let questions = OnboardingQuestionStack.questions
+        let questions = OnboardingQuestionList.questions
         XCTAssertGreaterThanOrEqual(questions.count, 6)
         XCTAssertEqual(Set(questions).count, questions.count)
         for question in questions {
             XCTAssertLessThanOrEqual(question.count, 52, "one line: \(question)")
             XCTAssertTrue(question.hasSuffix("?"))
         }
-        let url = OnboardingQuestionStack.link(for: "Can I run Whytap fully local with Ollama?")
+        let url = OnboardingQuestionList.link(for: "Can I run Whytap fully local with Ollama?")
         XCTAssertEqual(url.host, "whytap.ai")
         let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         XCTAssertEqual(query, [URLQueryItem(name: "q", value: "Can I run Whytap fully local with Ollama?")])
-        XCTAssertEqual(OnboardingQuestionStack.shown(from: questions.count - 1, count: 2),
-                       [questions[questions.count - 1], questions[0]], "the stack wraps around")
+        // Rows give way one at a time, in turn, never showing a question
+        // twice, and every question comes round (REV 68).
+        var shown = Array(0..<OnboardingQuestionList.rows), next = OnboardingQuestionList.rows
+        var seen = Set(shown)
+        for turn in 0..<(questions.count * 2) {
+            let before = shown
+            (shown, next) = OnboardingQuestionList.change(shown, turn: turn % OnboardingQuestionList.rows, next: next)
+            XCTAssertEqual(Set(shown).count, shown.count, "no question twice")
+            XCTAssertEqual(zip(before, shown).filter { $0 != $1 }.count, 1, "one row at a time")
+            seen.formUnion(shown)
+        }
+        XCTAssertEqual(seen.count, questions.count, "every question comes round")
     }
 
     /// The ring shows the whole Toolbox catalog Settings lists (every tool

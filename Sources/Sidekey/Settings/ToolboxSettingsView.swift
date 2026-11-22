@@ -705,6 +705,15 @@ struct ToolboxTileView: View {
     let onTap: () -> Void
 
     private static let tileSize: CGFloat = 56
+    private static let pressSlop: CGFloat = 4
+    @State private var isHovered = false
+    @GestureState private var isPressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Hover and press tint over the circle: MacButton's 10 % / 18 %.
+    static func highlightOpacity(hovered: Bool, pressed: Bool) -> Double {
+        pressed ? 0.18 : hovered ? 0.10 : 0
+    }
     /// Accent wash behind the symbol of the selected tile.
     static let selectedWashOpacity: Double = 0.2
 
@@ -752,6 +761,12 @@ struct ToolboxTileView: View {
                             .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 1)
                             .opacity(isSelected ? 0 : 1)
                     )
+                    .overlay(
+                        // Hover and press over the whole tile tint the circle,
+                        // as MacButton does: selection and focus stay distinct.
+                        Circle().fill(MacSettingsTheme.text.opacity(Self.highlightOpacity(
+                            hovered: isHovered, pressed: isPressed)))
+                    )
                     .frame(width: Self.tileSize, height: Self.tileSize)
 
                 Image(systemName: sfSymbol)
@@ -792,14 +807,24 @@ struct ToolboxTileView: View {
             Text(title.uppercased())
                 .font(.system(size: 8.5, weight: isSelected ? .semibold : .medium, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(isSelected ? MacSettingsTheme.text : MacSettingsTheme.text2)
+                .foregroundStyle(isSelected || isHovered ? MacSettingsTheme.text : MacSettingsTheme.text2)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .frame(width: Self.tileSize, height: 26)
         }
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
+        // Pressed state only: the gesture never completes, so the tap above
+        // still selects; release, or moving more than a few points (a drag),
+        // ends it and `@GestureState` resets the tint.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: .infinity, maximumDistance: Self.pressSlop)
+                .updating($isPressed) { pressing, state, _ in state = pressing }
+        )
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: isHovered)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: isPressed)
         // Like a native button: reached by keyboard navigation, never focused
         // by a click, and its focus ring follows the circle, not the tile.
         .focusable(interactions: .activate)

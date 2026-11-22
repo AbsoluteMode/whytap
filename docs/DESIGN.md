@@ -16,7 +16,10 @@ change the tool's settings below.
   the circle and appears only with keyboard navigation (tiles are not focused by
   a click). Why: the click-focus ring drew a thick rectangle around circle and
   caption; ring/solid variants were rejected because a ring reads as focus and
-  a solid fill as an "on" state. Variants and reasons:
+  a solid fill as an "on" state. Hover and press anywhere on the tile tint
+  the circle with MacButton's 10 % / 18 % label-color highlight; hover also
+  lifts the caption to the label color; a drag cancels the press. Variants
+  and reasons:
   `.project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md`.
 - Offscreen renders cover the minimum content size in both appearances; the
   live focus ring and VoiceOver remain installed-app checks.

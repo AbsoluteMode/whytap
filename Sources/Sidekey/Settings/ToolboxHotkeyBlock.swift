@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Hotkey block at the top of a selected Toolbox tool: Set, or the current
@@ -8,32 +9,45 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-22-toolbox-tool-hotkey.md
 @MainActor
 struct ToolboxHotkeyBlock: View {
-    let tool: HoverTool
     @ObservedObject var preferences: HotkeyPreferences
-    @StateObject private var recording = HotkeyRecordingSession<HoverTool>()
-    @State private var conflicts: [HotkeyConflict] = []
+    @StateObject private var controller: ToolboxHotkeyController
 
     init(tool: HoverTool, preferences: HotkeyPreferences = .shared) {
-        self.tool = tool
         self.preferences = preferences
+        _controller = StateObject(wrappedValue: ToolboxHotkeyController(tool: tool, preferences: preferences))
     }
 
     var body: some View {
-        let shortcut = preferences.toolShortcuts[tool]
-        let isRecording = recording.isRecording(tool)
         ToolboxHotkeyRow(
-            title: Self.title(for: tool),
-            contents: isRecording ? recording.contents : (shortcut?.contents ?? []),
-            isRecording: isRecording,
-            notice: notice(shortcut: shortcut, isRecording: isRecording),
-            onRecord: startRecording,
-            onCancel: stopRecording,
-            onClear: shortcut == nil ? nil : {
-                stopRecording()
-                preferences.assignToolShortcut(nil, to: tool)
-            }
+            title: ToolboxHotkeyController.title(for: controller.tool),
+            contents: controller.contents,
+            isRecording: controller.isRecording,
+            notice: controller.notice,
+            onRecord: { controller.startRecording() },
+            onCancel: { controller.cancel() },
+            onClear: controller.shortcut == nil ? nil : { controller.remove() }
         )
-        .onDisappear(perform: stopRecording)
+        .onDisappear { controller.cancel() }
+    }
+}
+
+/// State of one tool's Hotkey block, kept out of the view so Escape, Cancel,
+/// start-over and saving are testable without a window.
+@MainActor
+final class ToolboxHotkeyController: ObservableObject {
+    let tool: HoverTool
+    let preferences: HotkeyPreferences
+    let recording = HotkeyRecordingSession<HoverTool>()
+    /// Conflicts of the last rejected shortcut. They belong to the open
+    /// recording: every way it ends (Escape, Cancel, a saved shortcut,
+    /// leaving the pane) clears them through the session's `onStop`.
+    @Published private(set) var conflicts: [HotkeyConflict] = []
+    private var forward: AnyCancellable?
+
+    init(tool: HoverTool, preferences: HotkeyPreferences) {
+        self.tool = tool
+        self.preferences = preferences
+        forward = recording.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     static func title(for tool: HoverTool) -> String {
@@ -41,8 +55,12 @@ struct ToolboxHotkeyBlock: View {
         tool == .meetingRecord ? "Extra hotkey" : "Hotkey"
     }
 
-    private func notice(shortcut: HotkeyShortcut?, isRecording: Bool) -> ToolboxHotkeyRow.Notice? {
-        if let conflict = conflicts.first { return .warning(conflict.message) }
+    var shortcut: HotkeyShortcut? { preferences.toolShortcuts[tool] }
+    var isRecording: Bool { recording.isRecording(tool) }
+    var contents: [KeycapContent] { isRecording ? recording.contents : (shortcut?.contents ?? []) }
+
+    var notice: ToolboxHotkeyRow.Notice? {
+        if isRecording, let conflict = conflicts.first { return .warning(conflict.message) }
         if isRecording { return .hint("Press a shortcut, then release all keys. Esc cancels.") }
         if tool.isComingSoon, shortcut != nil {
             return .hint("\(CalendarAvailability.badge): a shortcut saved here stays inactive.")
@@ -56,25 +74,32 @@ struct ToolboxHotkeyBlock: View {
         return nil
     }
 
-    private func startRecording() {
+    /// Set and Change. Starting over drops the previous attempt's conflict.
+    func startRecording(monitorsEvents: Bool = true) {
         conflicts = []
-        recording.start(tool, current: preferences.toolShortcuts[tool]) { shortcut, tool in
-            switch preferences.assignToolShortcut(shortcut, to: tool) {
+        recording.start(tool, current: shortcut, monitorsEvents: monitorsEvents,
+                        onStop: { [weak self] in self?.conflicts = [] }) { [weak self] shortcut, tool in
+            guard let self else { return }
+            switch self.preferences.assignToolShortcut(shortcut, to: tool) {
             case .saved, .unchanged:
-                conflicts = []
-                recording.stop()
+                self.recording.stop()
             case .conflict(let found):
                 // Nothing saved; recording stays open for another shortcut.
-                conflicts = found
+                self.conflicts = found
             case .rejectedHoldSpace:
                 break
             }
         }
     }
 
-    private func stopRecording() {
+    func cancel() {
         recording.stop()
         conflicts = []
+    }
+
+    func remove() {
+        cancel()
+        preferences.assignToolShortcut(nil, to: tool)
     }
 }
 

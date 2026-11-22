@@ -185,6 +185,100 @@ final class ToolboxHotkeyBlockTests: XCTestCase {
         XCTAssertNil(session.target)
     }
 
+    // MARK: - Installed monitor handler (builder finding 1)
+
+    func test_installed_handler_swallows_what_the_session_consumes() {
+        let session = HotkeyRecordingSession<HoverTool>()
+        let handler = session.monitorHandler()
+        session.start(.notifs, current: nil, monitorsEvents: false) { _, _ in }
+
+        XCTAssertNil(handler(flags(.option)), "a recorded modifier never reaches the app")
+        XCTAssertNil(handler(key(.keyDown, kVK_ANSI_N, "n", .option)))
+        let escape = key(.keyDown, kVK_Escape, "\u{1b}")
+        XCTAssertNil(handler(escape), "Escape cancels and is swallowed, not returned")
+        XCTAssertNil(session.target)
+
+        let after = key(.keyDown, kVK_ANSI_A, "a")
+        XCTAssertTrue(handler(after) === after, "a stopped session passes events through")
+    }
+
+    func test_handler_of_a_released_session_passes_events_through() {
+        var session: HotkeyRecordingSession<HoverTool>? = HotkeyRecordingSession<HoverTool>()
+        let handler = session!.monitorHandler()
+        session!.start(.notifs, current: nil, monitorsEvents: false) { _, _ in }
+        session!.stop()
+        session = nil
+        let event = key(.keyDown, kVK_Escape, "\u{1b}")
+        XCTAssertTrue(handler(event) === event)
+    }
+
+    func test_both_settings_views_install_the_same_handler() throws {
+        let sessionSource = try source("Sources/Sidekey/Hotkeys/HotkeyRecordingSession.swift")
+        XCTAssertTrue(sessionSource.contains("handler: monitorHandler())"))
+        XCTAssertFalse(sessionSource.contains("self?.handle(event) ?? event"))
+        XCTAssertTrue(try source("Sources/Sidekey/Hotkeys/HotkeysSettingsView.swift").contains("recording.start(target"))
+        XCTAssertTrue(try source("Sources/Sidekey/Settings/ToolboxHotkeyBlock.swift").contains("recording.start(tool"))
+    }
+
+    // MARK: - Conflict lifetime in Toolbox (builder finding 2)
+
+    private func conflictedController() -> (ToolboxHotkeyController, (NSEvent) -> NSEvent?) {
+        let preferences = HotkeyPreferences(defaults: makeDefaults())
+        preferences.assignToolShortcut(.combo(.optionD), to: .brightness)
+        let controller = ToolboxHotkeyController(tool: .notifs, preferences: preferences)
+        controller.startRecording(monitorsEvents: false)
+        let handler = controller.recording.monitorHandler()
+        for event in [flags(.option), key(.keyDown, kVK_ANSI_D, "d", .option),
+                      key(.keyUp, kVK_ANSI_D, "d", .option), flags([])] {
+            _ = handler(event)
+        }
+        XCTAssertFalse(controller.conflicts.isEmpty)
+        guard case .warning? = controller.notice else {
+            XCTFail("a conflict shows a warning while recording")
+            return (controller, handler)
+        }
+        return (controller, handler)
+    }
+
+    func test_escape_after_a_conflict_clears_the_warning() {
+        let (controller, handler) = conflictedController()
+        XCTAssertNil(handler(key(.keyDown, kVK_Escape, "\u{1b}")))
+        XCTAssertFalse(controller.isRecording)
+        XCTAssertTrue(controller.conflicts.isEmpty)
+        XCTAssertNil(controller.notice, "no stale conflict after Escape")
+        XCTAssertNil(controller.shortcut)
+    }
+
+    func test_cancel_after_a_conflict_clears_the_warning() {
+        let (controller, _) = conflictedController()
+        controller.cancel()
+        XCTAssertTrue(controller.conflicts.isEmpty)
+        XCTAssertNil(controller.notice)
+    }
+
+    func test_starting_over_after_a_conflict_clears_the_warning() {
+        let (controller, _) = conflictedController()
+        controller.startRecording(monitorsEvents: false)
+        XCTAssertTrue(controller.isRecording)
+        XCTAssertTrue(controller.conflicts.isEmpty)
+        XCTAssertEqual(controller.notice, .hint("Press a shortcut, then release all keys. Esc cancels."))
+    }
+
+    func test_a_free_shortcut_after_a_conflict_saves_and_clears_the_warning() {
+        let (controller, handler) = conflictedController()
+        for event in [flags(.option), key(.keyDown, kVK_ANSI_N, "n", .option),
+                      key(.keyUp, kVK_ANSI_N, "n", .option), flags([])] {
+            _ = handler(event)
+        }
+        XCTAssertEqual(controller.shortcut, .combo(Self.optionN))
+        XCTAssertFalse(controller.isRecording)
+        XCTAssertTrue(controller.conflicts.isEmpty)
+        XCTAssertNil(controller.notice)
+        XCTAssertEqual(controller.contents, HotkeyShortcut.combo(Self.optionN).contents)
+        controller.remove()
+        XCTAssertNil(controller.shortcut)
+    }
+
     // MARK: - Layout contracts
 
     private func source(_ path: String) throws -> String {

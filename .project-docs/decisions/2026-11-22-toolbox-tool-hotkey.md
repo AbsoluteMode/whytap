@@ -24,6 +24,9 @@ sources:
     reference: Sources/Sidekey/Settings/ToolboxSettingsView.swift
     confirmed_at: 2026-11-22
   - type: repository
+    reference: Tests/SidekeyTests/Settings/ToolboxTileInteractionTests.swift
+    confirmed_at: 2026-11-22
+  - type: repository
     reference: Tests/SidekeyTests/Settings/ToolboxHotkeyBlockTests.swift
     confirmed_at: 2026-11-22
 related: [2026-10-20-toolbox-mini-apps.md, 2026-10-18-toolbox-drag-feedback.md, 2026-11-20-toolbox-system-background.md]
@@ -54,7 +57,15 @@ and caption. That rectangle was what looked crude.
   no unsaved edits), Help and the island hints read the same configuration.
 - `HotkeyRecordingSession` is the one recorder for both places: the local key
   monitor, `HotkeyShortcutRecorder`, Escape to cancel and the
-  `hotkeyRecordingActive` gate that pauses global hotkeys.
+  `hotkeyRecordingActive` gate that pauses global hotkeys. Its installed
+  handler (`monitorHandler()`) returns `handle`'s result as is, so consumed
+  keys, Escape included, never reach the app; only a released session passes
+  events through. Builder review of the first head found the earlier
+  `self?.handle(event) ?? event` returning every consumed event.
+- A conflict belongs to the open recording: `ToolboxHotkeyController` clears it
+  through the session's `onStop` on Escape, Cancel, a saved shortcut or
+  leaving the pane, and on starting over; the warning shows only while
+  recording.
 - The Action pane is compacter: smaller title icon, 10 pt spacing, and the
   viewport's minimum content height is 260 pt instead of 330 pt, so the
   Hotkey block and the start of the tool fit at the minimum Settings size.
@@ -63,6 +74,12 @@ and caption. That rectangle was what looked crude.
   use `.focusable(interactions: .activate)`: like native buttons they are
   reached by keyboard navigation and are never focused by a click, and
   `ToolboxTileFocusShape` gives the system focus ring the circle's shape.
+  Hover and press over the whole tile tint the circle like `MacButton`
+  (10 % / 18 % of the label color) and hover lifts the caption to the label
+  color. Press is a never-completing `LongPressGesture` with a 4 pt slop in
+  `@GestureState`, simultaneous with the tap, so a click still selects and a
+  drag ends the press; the tile stays a plain view for `.draggable`
+  (FB14518001).
 
 # Why
 
@@ -90,11 +107,20 @@ means it is not shown by color alone.
   pauses global hotkeys and cancels on Escape; conflict-then-free-key flow;
   the block is pinned above the viewport; both views use the shared recorder;
   the tile uses the wash and the circular focus shape.
+- `ToolboxHotkeyBlockTests` also: the installed handler swallows recorded keys
+  and Escape and passes events after stop or release; both views install it;
+  Escape, Cancel, start-over and a free shortcut after a conflict leave no
+  stale warning.
+- `ToolboxTileInteractionTests`: synthetic mouse down/up still selects, the
+  circle is darker only while held, a drag past the slop clears the press and
+  does not select. SwiftUI gestures need an ordered window, so this one is
+  ordered far outside every display at zero opacity and never key.
 - Offscreen renders (`WHYTAP_TOOLBOX_HOTKEY_RENDER_DIR`): the whole Toolbox at
   the minimum content size with and without a hotkey, and every block state,
   light and dark.
 - Not checked: the live focus ring with keyboard navigation on, a real click
-  not focusing a tile, VoiceOver, and the installed app.
+  not focusing a tile, hover with a real pointer, dragging a tile onto the
+  hover row with the press gesture present, VoiceOver, and the installed app.
 
 # Rejected
 

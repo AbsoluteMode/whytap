@@ -1136,7 +1136,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// asks on load (REV 66).
     func testTheLastStepAsksRealQuestionsOnWhytapAI() throws {
         let questions = OnboardingQuestionList.questions
-        XCTAssertGreaterThanOrEqual(questions.count, 6)
+        XCTAssertGreaterThanOrEqual(questions.count, 16, "REV 69: a bigger pool")
         XCTAssertEqual(Set(questions).count, questions.count)
         for question in questions {
             XCTAssertLessThanOrEqual(question.count, 52, "one line: \(question)")
@@ -1146,18 +1146,35 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(url.host, "whytap.ai")
         let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         XCTAssertEqual(query, [URLQueryItem(name: "q", value: "Can I run Whytap fully local with Ollama?")])
-        // Rows give way one at a time, in turn, never showing a question
-        // twice, and every question comes round (REV 68).
-        var shown = Array(0..<OnboardingQuestionList.rows), next = OnboardingQuestionList.rows
-        var seen = Set(shown)
-        for turn in 0..<(questions.count * 2) {
-            let before = shown
-            (shown, next) = OnboardingQuestionList.change(shown, turn: turn % OnboardingQuestionList.rows, next: next)
-            XCTAssertEqual(Set(shown).count, shown.count, "no question twice")
-            XCTAssertEqual(zip(before, shown).filter { $0 != $1 }.count, 1, "one row at a time")
-            seen.formUnion(shown)
-        }
+        // REV 69: the whole list drifts from the bottom up, four rows in
+        // view, the loop closing without a seam; the pointer holds it.
+        let list = OnboardingQuestionList.self
+        XCTAssertEqual(list.visible(at: 0, inFull: true), [0, 1, 2, 3], "four rows in full at rest, none dimmed")
+        XCTAssertEqual(list.visible(at: list.step, inFull: true), [1, 2, 3, 4])
+        XCTAssertEqual(list.visible(at: list.step / 2), [0, 1, 2, 3, 4], "the next rises in as the top one leaves")
+        XCTAssertEqual(list.visible(at: list.step / 2, inFull: true), [1, 2, 3])
+        XCTAssertEqual(list.offset(list.round, wholeRows: false), 0, accuracy: 0.001, "the loop closes")
+        XCTAssertEqual(list.visible(at: list.round - list.step, inFull: true), [questions.count - 1, 0, 1, 2],
+                       "the last row leads back to the first")
+        XCTAssertEqual(list.offset(list.step * 1.6, wholeRows: true), list.step, "Reduce Motion: whole rows")
+        var seen = Set<Int>()
+        var travel: CGFloat = 0
+        while travel < list.round { seen.formUnion(list.visible(at: list.offset(travel, wholeRows: false))); travel += 3 }
         XCTAssertEqual(seen.count, questions.count, "every question comes round")
+        let drift = OnboardingQuestionDrift()
+        _ = drift.advance(to: 0, paused: false, still: false)
+        var time = 0.0
+        for _ in 0..<60 { time += 1.0 / 60; _ = drift.advance(to: time, paused: false, still: false) }
+        XCTAssertEqual(drift.travel, list.speed, accuracy: 0.5, "a slow drift: \(list.speed) pt a second")
+        let held = drift.travel
+        for _ in 0..<60 { time += 1.0 / 60; _ = drift.advance(to: time, paused: true, still: false) }
+        XCTAssertEqual(drift.travel, held, "the pointer on the list holds it")
+        time += 30
+        _ = drift.advance(to: time, paused: false, still: false)
+        XCTAssertLessThanOrEqual(drift.travel - held, list.speed * 0.6 + 0.001, "a long gap does not jump ahead")
+        let quiet = OnboardingQuestionDrift()
+        for step in 0..<60 { _ = quiet.advance(to: Double(step) / 60, paused: false, still: true) }
+        XCTAssertEqual(quiet.travel, 0, "offscreen renders hold still")
     }
 
     /// The ring shows the whole Toolbox catalog Settings lists (every tool

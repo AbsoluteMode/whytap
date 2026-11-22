@@ -463,8 +463,11 @@ final class OnboardingCarousel {
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingFinishStage: View {
     @ObservedObject var model: OnboardingJourneyModel
-    /// Offscreen renders show the list without its turn.
+    /// Offscreen renders show the list without its drift.
     var still = false
+    /// Offscreen renders: a point of the drift and a row under the pointer.
+    var shownOffset: CGFloat?
+    var shownPointed: Int?
     @Environment(\.openURL) private var openURL
 
     static let site = URL(string: "https://whytap.ai")!
@@ -472,10 +475,12 @@ struct OnboardingFinishStage: View {
     var body: some View {
         VStack(spacing: 0) {
             OnboardingWireTitle(title: "Enjoy Whytap.", lede: "We hope you’ll love having it on your Mac.")
-            OnboardingQuestionList(still: still) { openURL(OnboardingQuestionList.link(for: $0)) }
-                .padding(.top, 12)
+            // The list's own fades stand in for the gaps above and below it.
+            OnboardingQuestionList(still: still, shownOffset: shownOffset, shownPointed: shownPointed) {
+                openURL(OnboardingQuestionList.link(for: $0))
+            }
             OnboardingAskLine { openURL(Self.site) }
-                .padding(.top, 12)
+                .padding(.top, 4)
             OnboardingWirePill("Finish", disc: .finish, isDefault: true, action: model.finish)
                 .padding(.top, 12)
             Spacer(minLength: 0)
@@ -484,24 +489,37 @@ struct OnboardingFinishStage: View {
     }
 }
 
-/// Questions a new person can ask the agent on whytap.ai, always shown as a
-/// list of rows (icon, question, ↗). Every few seconds one row gives way to
-/// another question, softly and one row at a time, the rows in turn; the
-/// pointer (or focus) on the list holds it. A click asks that question on
-/// whytap.ai (`?q=` asks it as the page opens).
+/// Questions a new person can ask the agent on whytap.ai: a long loop of
+/// rows (icon, question, ↗) that drifts slowly from the bottom up, four rows
+/// in view, new ones rising in at the bottom and the top one leaving, the
+/// edges fading. The pointer on the list stops the drift and lights the row
+/// under it; a click asks that question on whytap.ai (`?q=` asks it as the
+/// page opens). Reduce Motion moves a whole row at a time, without motion.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 struct OnboardingQuestionList: View {
-    /// Real questions the Ask agent answers (its eval pool), short enough for
-    /// one line.
+    /// Real questions the Ask agent answers (its eval pool,
+    /// whytap-landing `ask/eval/pool.json`), short enough for one line.
     static let questions = [
         "Which models should I pick in API & Models to start?",
         "Can I tap to start dictation and tap again to stop?",
         "Can Whytap turn Russian speech into English text?",
         "Can I teach Whytap custom words and names?",
         "How do I let Claude Code use my Case keys safely?",
-        "Can I run Whytap fully local with Ollama?",
+        "Can Whytap show live translated subtitles on calls?",
         "How do I split my meeting transcript by speaker?",
         "How do I pick which microphone Whytap uses?",
+        "Can Whytap dictate without sending my voice online?",
+        "What do I set up for the Right Command agent?",
+        "How do I add Whytap Case as an MCP server in Codex?",
+        "Where are my meeting notes kept?",
+        "How do I move Whytap to a new MacBook?",
+        "How do I share meeting notes with a colleague?",
+        "How do I switch dictation from Fast to Smart?",
+        "Can Whytap make my screen brighter than max?",
+        "Where do I see what I spent on APIs this month?",
+        "Can Whytap cut filler words from my dictation?",
+        "Can I run Whytap fully local with Ollama?",
+        "How do I quit Whytap completely?",
     ]
 
     /// whytap.ai with the question in the link; the page asks it on load.
@@ -515,91 +533,146 @@ struct OnboardingQuestionList: View {
     static let rowHeight: CGFloat = 30
     static let rowSpacing: CGFloat = 6
     static let width: CGFloat = 404
-    /// The list's whole height: every row in full.
-    static var height: CGFloat { CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing }
+    /// One row and its gap: the drift's step.
+    static var step: CGFloat { rowHeight + rowSpacing }
+    /// Four rows in full.
+    static var rowsHeight: CGFloat { CGFloat(rows) * rowHeight + CGFloat(rows - 1) * rowSpacing }
+    /// The fade at the top and bottom edges: a margin of its own, so the four
+    /// rows at rest are never dimmed; only rows coming and going fade.
+    static let fade: CGFloat = 14
+    /// The window: the four rows and a fade above and below them.
+    static var height: CGFloat { rowsHeight + 2 * fade }
+    /// Slow enough to read a row as it passes: a row every 4.5 s.
+    static let speed: CGFloat = 8
 
-    /// One soft change: the row `turn` (rows in turn) takes the next question
-    /// not on the list. Returns the new rows and the next question to offer.
-    static func change(_ shown: [Int], turn: Int, next: Int) -> (shown: [Int], next: Int) {
-        var shown = shown
-        var candidate = next % questions.count
-        while shown.contains(candidate) { candidate = (candidate + 1) % questions.count }
-        shown[turn % shown.count] = candidate
-        return (shown, (candidate + 1) % questions.count)
+    /// The questions laid out once round and then the first rows again, so
+    /// the loop's end meets its start without a seam.
+    static var tape: [Int] { Array(questions.indices) + Array(0...rows) }
+    /// One whole round of the loop, in points.
+    static var round: CGFloat { CGFloat(questions.count) * step }
+
+    /// The window's position on the loop for a drift `travel` points long:
+    /// smooth, or whole rows under Reduce Motion.
+    static func offset(_ travel: CGFloat, wholeRows: Bool) -> CGFloat {
+        let along = travel.truncatingRemainder(dividingBy: round)
+        return wholeRows ? (along / step).rounded(.down) * step : along
+    }
+
+    /// The questions in the window at `offset`: any part of a row (`inFull`
+    /// false), or only rows wholly clear of the fades (`inFull` true).
+    static func visible(at offset: CGFloat, inFull: Bool = false) -> [Int] {
+        let tape = tape
+        let first = max(0, Int((offset / step).rounded(.down)) - 1)
+        return (first..<tape.count).filter { index in
+            let top = fade + CGFloat(index) * step - offset
+            return inFull ? top >= fade - 0.001 && top + rowHeight <= height - fade + 0.001
+                          : top < height && top + rowHeight > 0
+        }.map { tape[$0] }
     }
 
     var still = false
+    /// Offscreen renders: a point of the drift and a row (tape slot) under
+    /// the pointer.
+    var shownOffset: CGFloat?
+    var shownPointed: Int?
     let ask: (String) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shown = Array(0..<Self.rows)
-    @State private var next = Self.rows
-    @State private var turn = 0
+    @State private var drift = OnboardingQuestionDrift()
     @State private var hovered = false
+    @State private var pointed: Int?
     @FocusState private var focused: Int?
 
     var body: some View {
-        VStack(spacing: Self.rowSpacing) {
-            ForEach(0..<Self.rows, id: \.self) { slot in
-                ZStack {
-                    let index = shown[slot]
-                    row(index)
-                        .id(index)
-                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
-                                                removal: .opacity.combined(with: .offset(y: -6))))
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.5 : nil, paused: still)) { context in
+            let travel = drift.advance(to: context.date.timeIntervalSinceReferenceDate,
+                                       paused: hovered || focused != nil, still: still)
+            let offset = shownOffset ?? Self.offset(travel, wholeRows: reduceMotion)
+            VStack(spacing: Self.rowSpacing) {
+                ForEach(Array(Self.tape.enumerated()), id: \.offset) { slot, index in
+                    row(index, slot: slot)
                 }
-                .frame(width: Self.width, height: Self.rowHeight)
-                .clipped()
             }
+            .frame(width: Self.width, alignment: .top)
+            .offset(y: Self.fade - offset)
+            .frame(width: Self.width, height: Self.height, alignment: .top)
+            .clipped()
+            .mask(Self.edges)
         }
         .frame(width: Self.width, height: Self.height)
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
-        .task {
-            guard !still else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_200_000_000)
-                guard !Task.isCancelled, !hovered, focused == nil else { continue }
-                let changed = Self.change(shown, turn: turn, next: next)
-                if reduceMotion {
-                    shown = changed.shown
-                } else {
-                    withAnimation(.easeInOut(duration: 0.6)) { shown = changed.shown }
-                }
-                next = changed.next
-                turn = (turn + 1) % Self.rows
-            }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Questions to ask on whytap.ai")
+    }
+
+    /// The top and bottom edges fade, so rows rise in and leave softly.
+    static var edges: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: fade)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: fade)
         }
     }
 
-    private func row(_ index: Int) -> some View {
+    private func row(_ index: Int, slot: Int) -> some View {
         let question = Self.questions[index]
+        let lit = (pointed ?? shownPointed) == slot
         return Button { ask(question) } label: {
             HStack(spacing: 10) {
                 Image(systemName: "text.bubble")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(OnboardingWireframeInk.roseColor.opacity(0.9))
+                    .foregroundColor(OnboardingWireframeInk.roseColor.opacity(lit ? 1 : 0.9))
                 Text(question)
                     .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.ink.opacity(0.92))
+                    .foregroundColor(OnboardingTheme.ink.opacity(lit ? 1 : 0.92))
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 9.5, weight: .bold))
-                    .foregroundColor(OnboardingTheme.muted)
+                    .foregroundColor(lit ? OnboardingTheme.ink : OnboardingTheme.muted)
             }
             .padding(.horizontal, 14)
             .frame(width: Self.width, height: Self.rowHeight)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(red: 0.12, green: 0.12, blue: 0.135)))
+                .fill(lit ? Color(red: 0.17, green: 0.17, blue: 0.19) : Color(red: 0.12, green: 0.12, blue: 0.135)))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(focused == index ? OnboardingTheme.accent : Color.white.opacity(0.10),
-                              lineWidth: focused == index ? 2 : 1))
+                .strokeBorder(focused == slot ? OnboardingTheme.accent
+                              : lit ? OnboardingWireframeInk.roseColor.opacity(0.45) : Color.white.opacity(0.10),
+                              lineWidth: focused == slot ? 2 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
+            .animation(.easeOut(duration: 0.12), value: lit)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
-        .focused($focused, equals: index)
+        .focused($focused, equals: slot)
+        .onHover { inside in
+            if inside {
+                pointed = slot
+                NSCursor.pointingHand.set()
+            } else if pointed == slot {
+                pointed = nil
+                NSCursor.arrow.set()
+            }
+        }
         .accessibilityLabel("Ask on whytap.ai: \(question)")
+    }
+}
+
+/// The question list's drift, stepped per display frame: `speed` points a
+/// second, held while the pointer or focus is on the list and still in
+/// offscreen renders.
+final class OnboardingQuestionDrift {
+    var speed: CGFloat = OnboardingQuestionList.speed
+    private(set) var travel: CGFloat = 0
+    private var last: TimeInterval?
+
+    func advance(to time: TimeInterval, paused: Bool, still: Bool) -> CGFloat {
+        // Reduce Motion ticks twice a second; a longer gap (a hidden window)
+        // does not jump the list ahead.
+        let dt = min(0.6, last.map { max(0, time - $0) } ?? 0)
+        last = time
+        if !paused, !still { travel += CGFloat(dt) * speed }
+        return travel
     }
 }
 

@@ -796,6 +796,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
             ("finish", AnyView(OnboardingFinishStage(model: model, still: true))),
+            // REV 69: mid-drift (a row rising in, the top one leaving) with
+            // the pointer on the second row.
+            ("finish-drift-hover", AnyView(OnboardingFinishStage(model: model, still: true,
+                                                                 shownOffset: OnboardingQuestionList.step * 0.5,
+                                                                 shownPointed: 2))),
         ]
         for (name, view) in finale {
             let stage = view

@@ -507,7 +507,21 @@ window, Back and a progress bar.
   shown (icon, question, arrow) in a fixed 138 pt block above the Ask
   capsule and Finish, so no row is cut or covers them; every 3.2 s one row,
   the rows in turn, fades to a question not on the list, and the pointer
-  or focus on the list holds it. A click opens whytap.ai/?q=<question>: the landing's Ask page reads `q`
+  or focus on the list holds it. REV 69 replaced the turn (the owner:
+  "only the top one changes, and there is no reaction to hover ... a bigger
+  pool, slowly scrolled, four on the window, bottom to top"): the pool has
+  twenty questions from the eval pool (adding live subtitles, offline
+  dictation, the Right Command agent, Case in Codex, where meeting notes
+  live, moving to a new MacBook, sharing notes, Fast to Smart, extra
+  brightness, API spend, filler words, quitting), and the whole loop drifts
+  up at 8 pt/s, a row every 4.5 s, so one changing row is never the only
+  motion. The window shows four rows in full with a 14 pt fade margin above
+  and below them, so rows at rest are never dimmed and only rows coming and
+  going fade; the tape repeats its first rows after the last, so the loop
+  closes without a seam. The pointer on the list stops the drift (rows do
+  not slide from under it) and the row under it lights: brighter fill, rose
+  outline, bright arrow, pointing-hand cursor. Reduce Motion moves a whole
+  row at a time without motion. A click opens whytap.ai/?q=<question>: the landing's Ask page reads `q`
   and asks it once its scripts are in (site/ask/ask.js in the landing
   repository; /ask/ keeps `?q=` too, and Ask caps a question at 300
   characters). The Ask capsule and Finish stay.
@@ -618,6 +632,14 @@ window, Back and a progress bar.
 
 ## What was tested
 
+- REV 69: the question pool has at least sixteen distinct one-line
+  questions; four rows in full at rest and after each whole row, a fifth
+  rising in mid-step, the last row leading back to the first, every
+  question coming round; the drift runs at its speed, holds while pointed
+  at, does not jump after a long gap and stands still in renders; Reduce
+  Motion moves whole rows; offscreen renders at rest and mid-drift with a
+  lit row. The "Choose model" panel keeps one width for no query, two
+  results, none and many, with no name or ID cut.
 - REV 68: the preview's Space follows Drop's detector (a quick tap types a
   space and records nothing; a hold erases the printed spaces, records,
   swallows repeats and the release, then drops the text; outside a text

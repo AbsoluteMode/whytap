@@ -1455,9 +1455,11 @@ tilted ring of 38 pt tiles that turns slowly like a carousel
 Motion) around a small card; a pointed or focused tile stops the turn, lights
 and is named on the card with HoverToolRegistry's description, and the turn
 goes on when the pointer leaves. The last step, "Enjoy Whytap.", has no
-summary: a list of four real questions for the Ask agent
-(OnboardingQuestionList) whose rows give way to other questions softly, one at
-a time, held while the pointer is on the list; a click opens
+summary: a loop of twenty real questions for the Ask agent
+(OnboardingQuestionList) that drifts slowly from the bottom up (8 pt/s, four
+rows in view, soft fades at the edges, whole rows without motion under Reduce
+Motion); the pointer on the list stops the drift and lights the row under it
+(brighter fill, rose outline, bright ↗, pointing-hand cursor); a click opens
 whytap.ai/?q=<question>, which the page asks on load; then one
 Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
 Toolbox and the last step have no timer: they wait for Continue or Finish (or

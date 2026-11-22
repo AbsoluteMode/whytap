@@ -1,78 +1,75 @@
 ---
 id: history-hint-keycaps-2026-11-22
 type: decision
-title: History footer hints are separate keycap blocks
-summary: The History footer was one grey line ("Click for copy   ⌘-click for several   Enter to paste to <app>") that read as one sentence; each hint is now its own block of keycaps and a short action, divided by hairlines, and only the app name shortens.
+title: History footer hints are separate plain-text blocks
+summary: The History footer was one grey line that read as one sentence; each hint is now its own plain-text block divided by hairlines. A keycap and icon version shipped in build 1724 and was removed at the maintainer's request.
 status: confirmed
-tags: [history, island, toolbox, hotkeys, design]
+tags: [history, island, toolbox, design]
 canonical_for: [history-hint-keycaps]
-verified_at: 2026-11-22
+verified_at: 2026-11-23
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer sent a screenshot of the footer "Click for copy   ⌘-click for several   Enter to paste to Clash Verge", said he likes the info block but its layout is confusing, and asked to separate the blocks visually.
     confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: On 2026-11-23, after build 1724 showed keycaps and SF Symbol icons in the footer, the maintainer said nobody asked for icons in History and asked to remove them.
+    confirmed_at: 2026-11-23
   - type: repository
     reference: Sources/Sidekey/History/HistoryHoverView.swift
-    confirmed_at: 2026-11-22
+    confirmed_at: 2026-11-23
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
-    confirmed_at: 2026-11-22
+    confirmed_at: 2026-11-23
 related: [2026-11-22-history-multi-paste.md, 2026-11-22-history-multi-copy.md]
 ---
 
 # Context
 
-The footer under History rows teaches the gestures. It was a single 9.5 pt
-grey `Text` with three phrases split by three spaces. Without a visual break
-the phrases ran together, and "Click for copy" next to "⌘-click for several"
-did not say at a glance which key does what.
+The footer under History rows teaches the gestures. It was a single grey
+`Text` with three phrases split by three spaces and scaled down to fit
+(`minimumScaleFactor(0.7)`). Without a visual break the phrases ran together.
 
 # Decision
 
 `HistoryHoverView.hints(targetAppName:selectedCount:escapeClears:)` returns
-the footer as a list of `HistoryHint` values (keys, action, optional target
-app). `HistoryHintBar` draws each one as a block: compact keycaps through
-`HotkeyHintView(style: .keycaps, size: .compact)`, then the action, with a
-1 pt hairline between blocks. Every hint reads "key → what happens":
+the footer as a list of `HistoryHint` values (text and optional target app).
+`HistoryHintBar` draws each as a plain-text block, with a 1 pt vertical
+hairline between blocks. No icons, no keycaps.
 
-- no marks: [click] Copy | [⌘][click] Select | [↩] Paste to <app>
-- marks: [click] Copy N | [↩] Paste N to <app> | [esc] Clear
-- Toolbox with marks: [click] Copy N | [⌘][click] Unmark
+- no marks: Click to copy | ⌘-click for several | Enter to paste to <app>
+- marks: Click to copy N | Enter to paste N to <app> | Esc to clear
+- no target: no Enter block; Toolbox with marks ends with ⌘-click to unmark
 
-The click is the SF Symbol `cursorarrow.click` in a keycap, Return the
-`return` symbol, Escape the text "esc". Without a paste target the Paste
-block is absent. The app name is its own `Text` with the lowest layout
-priority and tail truncation, so a long name shortens and the hints stay
-whole. Colors are `IslandInk` and the keycaps follow the color scheme, so the
-Toolbox pane works in light and dark.
+The row is tried at 9.5, 9, 8.5 and 8 pt (`ViewThatFits`); the first size at
+which everything fits wins, as the old line scaled to fit. Only when 8 pt is
+still too wide does the app name, its own `Text` with the lowest layout
+priority, shorten with "…"; the hints stay whole. Colors are `IslandInk`, so
+the Toolbox pane works in light and dark.
 
 # Why
 
-Keycaps are how Whytap shows keys everywhere else (`docs/hotkey.md`: one
-entry point, caps side by side, modifiers as glyphs), so the key part is
-recognisable without reading. Short verbs after the caps make every block the
-same shape. "Select" instead of "for several": ⌘-click adds to a selection in
-macOS, and the full "Select several" left the paste target only four letters
-in a 312 pt island ("Clas…").
+Hairlines make three phrases three blocks without new vocabulary; the
+wording is the one the maintainer already knew from the footer. Stepping the
+font keeps the target app readable: at a fixed 9.5 pt "Telegram" became "T…"
+in the island's 312 pt width.
 
 # What was tested
 
 `HistoryMultiPasteTests` pin the blocks for every state (target, no target,
 marks, Toolbox, empty app name), that only the app name is the target field,
-that the keys are keycaps and that both SF Symbols exist on this macOS.
-Offscreen renders at the island's 312 pt width, dark and light, for Telegram,
-Clash Verge, a 29-character app name with and without marks, no target, marks
-without target and Toolbox: "Paste to Clash Verge" fits whole; the long name
-ends in "…" while every hint and "esc Clear" stay whole. Not verified in the
+and that the footer source has no `HotkeyHintView`, `Image(` or
+`cursorarrow.click`. Offscreen renders at 312 pt, dark and light, before
+(keycaps, build 1724) and after: Telegram and Clash Verge fit whole, a
+29-character name ends in "…" with every hint whole. Not verified in the
 installed app.
 
 # Rejected
 
-- A text keycap "Click": `KeycapView` has no side padding for words, the
-  letters touch the cap edges, and it is wider than the symbol.
-- Changing word caps in `KeycapView` to add padding: also changes "Space" and
-  other word caps on unrelated surfaces.
-- Shrinking the font until "Select several" and the app fit: below 10 pt the
-  footer is harder to read than the one it replaces.
+- Keycaps through `HotkeyHintView` with SF Symbol icons for click and Return
+  (shipped 2026-11-22 in build 1724): the maintainer did not ask for icons
+  and asked to remove them.
+- A fixed font with truncation only: the app name was cut to its first
+  letter.
 
-2026-11-22, branch feature/history-hint-keycaps.
+2026-11-22, branch feature/history-hint-keycaps; revised 2026-11-23, branch
+feature/history-hint-plain.

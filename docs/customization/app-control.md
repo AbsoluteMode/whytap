@@ -131,14 +131,21 @@ Whytap -> Case -> Connect; the application tools of the same server work as
 before. Connect is offered for Claude Code and Cursor and adds this same
 `whytap` server there; Disconnect removes only the older `case` entry it wrote
 and leaves `whytap`. Whytap changes an entry only when it is exactly what
-Whytap writes (`<helper> mcp`, or the older `<helper> case mcp`, with nothing
-else). Any other `whytap` entry (your env, a disabled flag, a timeout, a tool
-filter, `app mcp`, another path, another server) stays as it is: Connect shows
-"Configured manually — Whytap left it as is" and changes nothing, the older
-`case` entry included. To let Connect manage it, remove that `whytap` entry
-and connect again. An older `case` entry left in a host still works,
-but shows the Case tools twice next to `whytap`; remove it once `whytap` is
-connected (`claude mcp remove -s user case`, `codex mcp remove case`).
+Whytap writes now or wrote before: a plain command (nothing but the command
+and its arguments) running `mcp`, `app mcp` or `case mcp` on this app's helper,
+or on the same app's helper at its older install path
+(`/Applications/Exodia.app`, `/Applications/Exodia-Beta.app` for beta).
+Connect replaces such a `whytap` entry with `<helper> mcp` and removes such a
+`case` entry, so a host that had `whytap` -> `app mcp` and `case` -> `case mcp`
+ends with one `whytap` -> `mcp`; connecting again changes nothing. Any other
+`whytap` entry (your env, a disabled flag, a timeout, a tool filter, an extra
+argument, another path, the beta app's or a dev build's helper, another
+server) stays as it is: Connect shows "Configured manually — Whytap left it
+as is" and changes nothing, the older `case` entry included. To let Connect
+manage it, remove that `whytap` entry and connect again. A `case` entry with
+your own settings stays too; it still works, but shows the Case tools twice
+next to `whytap`; remove it once `whytap` is connected
+(`claude mcp remove -s user case`, `codex mcp remove case`).
 
 Codex is not in the Connect list (see the 2026-10-21 Case Connect decision).
 Add the server with the `codex mcp add whytap -- … mcp` line above. Its
@@ -209,8 +216,9 @@ Codex also needs no checkout:
 codex mcp add whytap -- /Applications/Whytap.app/Contents/Helpers/whytap mcp
 ```
 
-A host that already has `whytap` pointing at `app mcp` keeps working; to move
-it to the one server, remove it and add it again with the line above.
+A host that already has `whytap` pointing at `app mcp` keeps working. Connect
+moves a plain one to the one server; otherwise remove it and add it again with
+the line above.
 
 To install the whole plugin with the current Codex CLI, run from this checkout:
 

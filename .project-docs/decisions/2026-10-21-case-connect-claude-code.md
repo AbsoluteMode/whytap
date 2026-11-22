@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Case/Clients/CaseClientConnector.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-21-one-whytap-mcp-server.md]
+related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-22-connect-replaces-older-whytap-entries.md]
 ---
 
 # Case Connect offers Claude Code again

@@ -72,7 +72,7 @@ final class CodexCLIConfigReadingTests: XCTestCase {
                       ("empty tool allowlist", "enabled_tools = []\n"), ("empty tool blocklist", "disabled_tools = []\n"),
                       ("env", "[mcp_servers.whytap.env]\nTOKEN = \"synthetic-value-4821\"\n")]
         for args in ["[\"mcp\"]", "[\"app\", \"mcp\"]"] {
-            for (label, extra) in extras + (args == "[\"mcp\"]" ? [] : [("plain older", "")]) {
+            for (label, extra) in extras {
                 let (home, helper) = try sandbox(nil)
                 let toml = "[mcp_servers.case]\ncommand = \"\(helper)\"\nargs = [\"case\", \"mcp\"]\n"
                     + "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = \(args)\n" + extra
@@ -86,6 +86,31 @@ final class CodexCLIConfigReadingTests: XCTestCase {
                 XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8), toml)
             }
         }
+    }
+
+    /// The reported case on the real CLI and the real config: an earlier
+    /// Whytap's `whytap` -> `app mcp` and `case` -> `case mcp` become one
+    /// `whytap` -> `<helper> mcp`; a second Connect changes nothing.
+    // WHY: .project-docs/decisions/2026-11-22-connect-replaces-older-whytap-entries.md
+    func test_real_codex_replaces_earlier_whytap_entries() throws {
+        let (home, helper) = try sandbox(nil)
+        let config = home.appendingPathComponent(".codex/config.toml")
+        try ("[mcp_servers.case]\ncommand = \"\(helper)\"\nargs = [\"case\", \"mcp\"]\n"
+            + "[mcp_servers.whytap]\ncommand = \"\(helper)\"\nargs = [\"app\", \"mcp\"]\n"
+            + "[mcp_servers.github]\ncommand = \"gh-mcp\"\n").write(to: config, atomically: true, encoding: .utf8)
+        let system = SystemCaseCommandRunner()
+        let connector = CodexCaseConnector(home: home, runner: system, reader: system, locate: { self.codex })
+        try connector.install(helperPath: helper)
+        let codex = try XCTUnwrap(self.codex)
+        XCTAssertEqual(connector.entry("whytap", codex: codex), .stdio(command: helper, args: ["mcp"]))
+        XCTAssertEqual(connector.entry("case", codex: codex), .absent)
+        XCTAssertEqual(connector.entry("github", codex: codex), .stdio(command: "gh-mcp", args: []))
+
+        let after = try Data(contentsOf: config)
+        let fake = FakeCommandRunner()
+        try CodexCaseConnector(home: home, runner: fake, reader: system, locate: { self.codex }).install(helperPath: helper)
+        XCTAssertEqual(fake.calls, [], "second Connect")
+        XCTAssertEqual(try Data(contentsOf: config), after)
     }
 
     /// The real CLI: a plain entry (only `env_vars = []` reported) is plain,

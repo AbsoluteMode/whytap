@@ -10,6 +10,8 @@
 
 > Актуализация 21.10.2026: [плитки ключей и прямые LLM API](../../.project-docs/decisions/2026-10-21-provider-key-tiles.md) заменяют ряд чипов, ограничение Anthropic только агентом и ручные действия в футере выбора моделей. OpenAI и Anthropic доступны для всех LLM-маршрутов; прежние решения ниже сохранены как история исходной постановки.
 
+> Актуализация 22.11.2026: [OpenAI снова провайдер речи](../../.project-docs/decisions/2026-11-22-openai-speech-provider.md) на общем OpenAI-ключе: секция OpenAI в пикерах Speech (общая строка и Advanced) и чип OpenAI. `gpt-live-transcribe` (по умолчанию) и `gpt-realtime-whisper` стримят слова; `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` и `whisper-1` из каталога идут через server VAD с подсказкой «text after each pause». Meetings у OpenAI нет (Speech-строка пишет «OpenAI can't serve Meetings»), recorded-модель Drop — `gpt-transcribe`.
+
 > Вкладка называется «API & Models» (решение Максима 19.10; раньше в обсуждении — «Keys & models»).
 
 > Статус: реализовано в ветке `claude/keys-and-models` (19.10.2026), ждёт PR и приёмки на рабочем приложении.
@@ -165,6 +167,7 @@ Deepgram, ElevenLabs, OpenRouter и Claude Max. В карточках — зна
 **Провайдеры v1:**
 
 - Soniox, Deepgram, ElevenLabs — транскрибация;
+- OpenAI — транскрибация (live) и LLM на одном ключе (добавлено 22.11.2026);
 - OpenRouter — LLM;
 - OpenAI-compatible server — свой сервер: base URL и необязательный ключ. Таких
   серверов может быть несколько.

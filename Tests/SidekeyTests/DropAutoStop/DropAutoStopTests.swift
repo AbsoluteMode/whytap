@@ -244,6 +244,11 @@ final class DropAutoStopTests: XCTestCase {
         }
         // No words before a commit: nothing could show the speaker finished.
         XCTAssertFalse(starts(speech: FeatureRoute(account: .server(UUID()), model: "whisper")))
+        // OpenAI: the live model sends words while the user speaks; a
+        // turn-based one only after a pause.
+        // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
+        XCTAssertTrue(starts(speech: FeatureRoute(account: .openAI, model: "gpt-live-transcribe")))
+        XCTAssertFalse(starts(speech: FeatureRoute(account: .openAI, model: "gpt-4o-mini-transcribe")))
     }
 
     func testSettingIsOffUntilTheUserTurnsItOnAndPersists() {

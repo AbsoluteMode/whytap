@@ -47,6 +47,8 @@ struct AIUsageEvent: Equatable, Sendable {
             // pricing, 2026-11-21): $3.06 per hour of audio.
             rate = (OpenAIRealtimeTranslateAdapter.usdPerMinute
                 + OpenAIRealtimeTranslateAdapter.inputTranscriptionUSDPerMinute) * 60
+        } else if context.account == .openAI, let perMinute = ModelRegistry.openAISpeechUSDPerMinute(context.model) {
+            rate = perMinute * 60
         } else { rate = nil }
         let duration = seconds.isFinite ? max(0, seconds) : 0
         return Self(id: id, createdAt: date, context: context, currency: context.currency,

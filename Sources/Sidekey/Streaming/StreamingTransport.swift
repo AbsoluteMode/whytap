@@ -22,13 +22,19 @@ protocol StreamingTransporting: AnyObject, Sendable {
     func cancel(reason: String?)
     func send(_ frame: StreamingFrame) async throws
     func receive() async -> Result<StreamingFrame, Error>
+    /// A WebSocket ping; returns when the pong arrives, throws when the
+    /// connection is gone.
+    func sendPing() async throws
 }
 
-/// Concrete `StreamingTransporting` backed by `URLSessionWebSocketTask`.
 extension StreamingTransporting {
     var responseRequestID: String? { nil }
     var responseStatusCode: Int? { nil }
+    /// Transports without a ping (test stubs) answer at once.
+    func sendPing() async throws {}
 }
+
+/// Concrete `StreamingTransporting` backed by `URLSessionWebSocketTask`.
 
 final class URLSessionWebSocketTransport: StreamingTransporting, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
@@ -60,6 +66,14 @@ final class URLSessionWebSocketTransport: StreamingTransporting, @unchecked Send
             try await task.send(.string(s))
         case .data(let d):
             try await task.send(.data(d))
+        }
+    }
+
+    func sendPing() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            task.sendPing { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            }
         }
     }
 

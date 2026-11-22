@@ -51,6 +51,7 @@ struct SettingsOtherView: View {
     /// on init and re-read on appear; written back on every toggle.
     @State private var volumeDuckEnabled: Bool
     @State private var dropAutoStopEnabled = false
+    @State private var dropLearningEnabled = false
 
     /// Local mirror of the island auto-hide flag. Seeded from
     /// `islandIdlePreferences` on init and re-read on appear; written back on
@@ -150,6 +151,15 @@ struct SettingsOtherView: View {
                         } trailing: {
                             MacSwitch(isOn: dropAutoStopToggleBinding, label: "Stop Drop automatically")
                         }
+
+                        MacRowSeparator()
+                        // WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+                        MacRow(
+                            title: "Learn from my edits",
+                            subtitle: "When you fix the same word after Drop twice, Whytap offers to add it to Vocab, Replace or Filler. Answer with ⌃Y or ⌃N. Reads the field once, on this Mac."
+                        ) {
+                            MacSwitch(isOn: dropLearningToggleBinding, label: "Learn from my edits")
+                        }
                     }
                 }
 
@@ -240,6 +250,7 @@ struct SettingsOtherView: View {
             // never shows a stale toggle state.
             volumeDuckEnabled = volumeDuckConfig.isEnabled
             dropAutoStopEnabled = DropAutoStopPreferences.shared.isEnabled
+            dropLearningEnabled = UserDefaults.standard.bool(forKey: DropLearningSettings.enabledKey)
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
             meetingsEnabled = meetingsEnabledProvider()
             googleEnabled = googleEnabledProvider()
@@ -261,6 +272,17 @@ struct SettingsOtherView: View {
     }
 
     /// Binding: persists to `DropAutoStopPreferences`; read when a take starts.
+    /// Off by default. Turning it off also stops a read already scheduled.
+    private var dropLearningToggleBinding: Binding<Bool> {
+        Binding(
+            get: { dropLearningEnabled },
+            set: { newValue in
+                dropLearningEnabled = newValue
+                UserDefaults.standard.set(newValue, forKey: DropLearningSettings.enabledKey)
+            }
+        )
+    }
+
     private var dropAutoStopToggleBinding: Binding<Bool> {
         Binding(
             get: { dropAutoStopEnabled },

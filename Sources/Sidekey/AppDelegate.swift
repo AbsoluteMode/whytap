@@ -173,6 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var dropLearning = DropLearningCoordinator.live { [weak self] in
         self?.show(.hoverPanel(.vocabularyEditor))
     }
+    /// The liquid-glass drops right of the island that ask about a learned
+    /// correction. WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+    private var dropLearningDrops: (controller: DropLearningDropsController, panel: DropLearningDropsPanel)?
     /// How this take's speech request carried Vocab. Batch recovery, Retry
     /// and the recorder fallback send none.
     private var dropLearningVocabTransport: VocabularyTransport = .none
@@ -377,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Creating it runs calibration expiry and opt-out cleanup now and
             // hourly. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
             _ = self.dropLearning
+            self.dropLearningDrops = DropLearningDropsController.live(coordinator: self.dropLearning)
             self.acceptsLinkRequests = true
             if let request = self.pendingLinkRequest {
                 self.pendingLinkRequest = nil
@@ -620,6 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caseBrokerServer = nil
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
+        dropLearningDrops?.controller.model.dismissForBusyIsland()
         meetingsEventConsumer?.cancel()
         meetingsEventConsumer = nil
     }
@@ -991,6 +996,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.orderOut(nil)
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
+        dropLearningDrops?.controller.model.dismissForBusyIsland()
 
         Task { @MainActor in
             await BackgroundLuminanceObserver.shared.stop()
@@ -1320,9 +1326,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsWindowController() -> SettingsWindowController {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                screenshotProtectionChanged: { enabled in
+                screenshotProtectionChanged: { [weak self] enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
+                    self?.dropLearningDrops?.panel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController

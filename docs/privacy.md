@@ -59,7 +59,8 @@ is a verifiable claim rather than a slogan.
   address; these are not sent with the request or logged.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
-- Learning from your edits after Drop (off unless you turn it on) reads the
+- Learning from your edits after Drop (off unless you turn it on in Settings
+  → Other → Learn from my edits) reads the
   field a take was pasted into once, five seconds later, through
   Accessibility, only if it is still the same focused field. Password fields,
   secure input, terminals, password managers, Whytap's own fields and fields

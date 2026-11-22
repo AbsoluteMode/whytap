@@ -172,6 +172,16 @@ enum WhytapLink {
         return HotkeyTapCombo(keyCode: UInt32(key.code), modifiers: modifiers, keyTitle: key.title)
     }
 
+    /// The `option+shift+s` form of a combo, the inverse of `linkCombo(from:)`
+    /// for every combo it accepts. Other recorded keys (arrows, Space) use
+    /// their lowercased key title, which `linkCombo` then refuses.
+    static func linkKeys(for combo: HotkeyTapCombo) -> String {
+        let masks: [(Int, String)] = [(controlKey, "control"), (optionKey, "option"), (shiftKey, "shift"), (cmdKey, "command")]
+        let modifiers = masks.filter { combo.modifiers & UInt32($0.0) != 0 }.map(\.1)
+        let key = linkKeys.first { $0.value.code == Int(combo.keyCode) }?.key ?? combo.keyTitle.lowercased()
+        return (modifiers + [key]).joined(separator: "+")
+    }
+
     private static let linkKeys: [String: (code: Int, title: String)] = {
         let letters = [kVK_ANSI_A, kVK_ANSI_B, kVK_ANSI_C, kVK_ANSI_D, kVK_ANSI_E, kVK_ANSI_F,
                        kVK_ANSI_G, kVK_ANSI_H, kVK_ANSI_I, kVK_ANSI_J, kVK_ANSI_K, kVK_ANSI_L,

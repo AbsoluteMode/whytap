@@ -24,13 +24,16 @@ set up with them. Other clients can invoke the CLI directly:
 
 | MCP tool | CLI subcommand | Behavior |
 | --- | --- | --- |
-| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route, the Agent workspace folder (`agentWorkspace`) |
+| `whytap_get_state` | `status` | Live build/source, activity flags, every feature's route, the shared Speech and LLM rows (`shared`: label, Mixed, the model most features follow, custom and unset features), the Agent workspace folder (`agentWorkspace`) |
 | `whytap_get_settings` | `settings` | Current supported settings and accepted values |
 | `whytap_list_models` | `models` | Search the app's cached compatible models; optional account and limit (1–100) |
-| `whytap_set_model` | `set-model` | Validate and select one account/model through Settings; preserve other routes |
+| `whytap_set_model` | `set-model` | Validate and select one account/model for one feature through Settings; preserve other routes. There is no shared write: set each feature of `shared.<kind>.features` the same way |
 | `whytap_list_providers` | `providers` | OpenRouter endpoints for the current model; free metadata request |
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |
+| `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
+| `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
+| `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
 | `whytap_todo_update` | `whytap todo set/done/reopen` | Edit title, status, parent or completion of one task (closing cascades to subtasks) |
 | `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
@@ -44,7 +47,33 @@ Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
 Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
-no arbitrary UserDefaults operation. Keys, permissions, security controls,
+no arbitrary UserDefaults operation.
+
+## Island tools and their hotkeys
+
+`whytap_toolbox_get` returns `pinned` (tool ids shown in the island, in order;
+Settings always stays last and is not listed) and `tools`: every tool with
+`tool`, `title`, `description`, `pinned`, `position`, `comingSoon`, `hotkey`
+(`{keys, display}`, e.g. `option+s` / `⌥S`, or `null`) and
+`hotkeyAssignable`. `whytap_toolbox_set` takes `tool`, `pinned`, an optional
+`position` (1 is the first tool) and `expected`, the exact `pinned` list; it
+uses the same layout store as Settings → Toolbox, so the island and Settings
+show the change at once. Removing a tool keeps its hotkey. Settings cannot be
+moved or removed (`not_movable`).
+
+`whytap_hotkey_set` takes `tool`, `keys` (or `null` to clear) and `expected`,
+the tool's current `keys` (any modifier order) or `null`. Keys follow the
+`whytap://hotkey` link rule: Control or Option plus A–Z, 0–9, F1–F20 or US
+punctuation, so ⌘ and ⇧ shortcuts of macOS and other apps stay free; Quit and
+coming-soon tools are refused (`hotkey_not_allowed`), other keys
+`invalid_hotkey`. The change goes through the Hotkeys Save path
+(`HotkeyPreferences.assignToolShortcut`): keys another action uses are refused
+as `hotkey_conflict` naming that action, never taken over, and refusals name
+the nearest free keys (the same key with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or ⌃). An Option combo
+that types a character in text fields (⌥F is ƒ on US) is assigned and the
+reply's `typesInTextFields` names that character; the Hotkeys pane,
+Help and the registered shortcut update at once. A repeated identical request
+answers `changed: false`. Unknown tool ids answer `unknown_tool`. Keys, permissions, security controls,
 Case contents, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
 
@@ -244,6 +273,11 @@ arguments string), which keeps every provider's strict tool limits. Ask it, for 
 anthropic/claude-sonnet-5.5", "add a task: send the report" or "where did we
 discuss the budget?". Every change still needs the exact current value, and
 each confirmed change appears as one line above the answer, such as
-`Drop Smart cleanup → anthropic/claude-sonnet-5.5`. Meetings need no harness
+`Drop Smart cleanup → anthropic/claude-sonnet-5.5`, `Toolbox + Shot` or
+`Hotkey: Shot — ⌥S`. "Add Shot to my quick actions (hover) and give it option
+f" pins the tool and assigns the keys in one line,
+`Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)`; a hotkey the rules
+refuse or another action uses is reported with the nearest free keys, not
+moved. Meetings need no harness
 prompt there: the request comes from you at this Mac. The Agent still cannot
 read key values, the clipboard or run commands through these tools.

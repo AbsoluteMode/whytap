@@ -24,6 +24,26 @@ change the tool's settings below.
 - Offscreen renders cover the minimum content size in both appearances; the
   live focus ring and VoiceOver remain installed-app checks.
 
+## Shared Speech and LLM rows — 2026-11-22
+
+- Models opens with two cards, Speech ("Drop, voice, Meetings") and LLM
+  ("Cleanup, notes, Agent"), each a single model menu that sets every feature
+  of its kind. Subtitles keeps its own card below them.
+- The menu label tells the whole state in one line: "Choose a model",
+  "ElevenLabs · scribe_v3_live", "Anthropic · claude-opus-5 · 1 custom",
+  "· 2 not set", or "Mixed · 4 custom". A card with no model or with features
+  still unset keeps the orange setup contour.
+- Under the menu, one line per feature the pick could not serve, with the
+  reason ("Agent: no tool support · kept …"), and "Checking…" while the single
+  probe runs.
+- "Advanced · a model per feature" (chevron, collapsed by default) holds the
+  former per-feature groups unchanged. It starts expanded for Mixed, a link
+  to one feature, and "Show" for features without a model.
+- Re-picking with custom features asks in a native dialog: Keep custom models
+  (default), Replace them too, Cancel; the message names those features.
+
+See the [shared model rows decision](../.project-docs/decisions/2026-11-22-shared-model-rows.md).
+
 ## History: several rows in one paste — 2026-11-22
 
 - ⌘-click marks a History row; a blue badge at its right edge shows its paste
@@ -1745,7 +1765,9 @@ The former paid onboarding's look, with today's content. One always-dark
 surface steps, purple accent, green for success and free offers). Left pane
 380 pt: a mono step caption ("SPEECH · 1 / 5"), a 44 pt Instrument Serif
 headline with one italic word, at most one short line, the page's controls,
-and a footer aligned right (quiet text actions beside one white capsule).
+and a footer aligned right (quiet text actions beside one white capsule), with a
+quiet ‹ Back on its left on every page but the first (← and ⌘[ outside text
+fields do the same).
 Right: a stage with a soft purple wash (green on the try page after success)
 showing mock windows with traffic lights, the real island orb, or a 16:9 clip
 with the person's own keycaps under it. Pages fade (0.28 s); the left pane
@@ -1755,7 +1777,9 @@ Speech: the language picker (a dark label opening a searchable list), the On
 this Mac card with its white button, and a card of seven provider tiles in a
 4-column grid (muted badge, logo, name, offer). Selected tiles get the accent
 outline; the key field and Save appear under the grid and Get offer beside the
-card title. Permissions: two cards with Allow / Open Settings / a green check,
+card title. The saved speech key Drop will use says For Drop in the accent with
+the same outline; the footer's right place is Continue with "Drop will use X"
+(or the refusal in orange) on its own line above, else the quiet Set up later. Permissions: two cards with Allow / Open Settings / a green check,
 and a dashed secondary row for Screen Recording ("Optional · for Shot").
 Try: three numbered italic verbs, the real field in a note window. Make it
 yours and Turn on more: selectable cards (accent outline) that pick the stage's

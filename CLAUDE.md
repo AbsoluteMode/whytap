@@ -1053,6 +1053,22 @@ processing routes: never switch where existing users send audio or text. A
 retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
+Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
+above Subtitles; "Advanced · a model per feature" discloses the per-feature
+list. A shared pick writes every feature route of its kind
+(SharedModelKind.features): the same model where that feature's picker offers
+it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
+a feature it cannot serve (the Agent without tools, a provider without a
+recorded model, a server for the Agent) keeps its route and the row says why.
+A model the feature's picker rules out is refused even where a server takes
+a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
+never from full picker lists. One probe per pick (a tools probe also passes
+plain chat). The row is read
+from the saved routes, never stored: the model more than half of the routed
+features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
+re-picking asks before replacing custom models. app-control get_state has a
+read-only `shared`; set_model stays per feature. WHY:
+.project-docs/decisions/2026-11-22-shared-model-rows.md
 
 Costs: the local ai-usage.sqlite journal records only feature/provider/model,
 request ID, time, duration, currency and expense metadata from actual runtime
@@ -1193,7 +1209,9 @@ OnboardingWindowController, accessory app, no Dock icon) in place of the former
 Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
 onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
 word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done. 1 Speech (hidden when Drop's speech
+five pages, each skippable, closing = Done; every page but the first has Back
+(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
+OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
 route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
 Lang setting; searchable list, English or native name, arrows and Return), On
 this Mac card ("Download and use for Drop", about 470 MB; when the download
@@ -1202,7 +1220,11 @@ cannot run, nothing else; hidden on Intel), and one tile per keyed provider
 (OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
 Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
 badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; "Restore from another Mac"; the
+speech key also sets that provider for Drop; one footer place: Continue when a
+saved speech key (not refused) or the downloaded model can run Drop, with "Drop
+will use X" above it (preselected: Drop's running provider, else Soniox,
+Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
+the free key check before a new provider), else Set up later; "Restore from another Mac"; the
 stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
 and Keyboard control on PermissionsSettingsViewModel, done at
 dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
@@ -1542,6 +1564,21 @@ is added only with the tool and never mentions the reply language. Offered
 only when the app installed the controller (packaged app), never in tests or
 swift run. The CLI providers are not reachable (only native connects). WHY:
 .project-docs/decisions/2026-11-22-native-agent-app-control.md
+Island tools and hotkeys (Agent and `whytap mcp`): whytap_toolbox_get lists
+the pinned order and every tool with its hotkey; whytap_toolbox_set pins
+(optionally at a place) or removes a tool through HoverLayoutStore
+placeTool/removeTool (Settings stays last, a removed tool keeps its hotkey);
+whytap_hotkey_set assigns or clears a tool's hotkey through
+HotkeyPreferences.assignToolShortcut (Hotkeys Save, shared with the Toolbox
+Hotkey block). Keys follow the whytap://hotkey rule (⌃ or ⌥, no Quit, no Soon
+tool); another action's keys are refused as hotkey_conflict, never taken over.
+Refusals name the nearest free keys; an Option combo that types a character
+is assigned with typesInTextFields (current layout, UCKeyTranslate). Both need
+the exact current value as expected; lines "Toolbox + Shot", "Toolbox −
+Monitor", "Hotkey: Shot — ⌥S", joined as "Toolbox + Shot · ⌥F (no longer
+types “<character>” in text fields)" in one turn; repeats are quiet. Descriptions call
+them hover tools / quick actions / Toolbox / menu. WHY:
+.project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only

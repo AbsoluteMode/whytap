@@ -184,8 +184,8 @@ final class NativeAgentProvider: CLIProvider {
                 else if screenCount > 2 && call.name == "capture_screen" { result = .init(text: "Screen capture limit reached for this request.") }
                 else { result = await tools.execute(call) }
                 if let change = result.change {
-                    changes.append(change)
-                    continuation.yield(.toolExecuting(tool: call.name, label: change))
+                    let line = NativeAgentAppControl.record(change, into: &changes)
+                    continuation.yield(.toolExecuting(tool: call.name, label: line))
                 }
                 try Task.checkCancellation()
                 results.append((call, result))

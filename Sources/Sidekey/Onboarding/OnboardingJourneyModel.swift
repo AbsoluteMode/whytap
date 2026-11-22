@@ -870,14 +870,21 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         let modelKind: ServerModel.Kind = kind == .speech ? .transcription : .llm
         if !models.serverHasModel(name, kind: modelKind, on: account) {
-            let check = await models.runServerModelCheck(name, kind: modelKind, on: account)
+            let connection: ServerSheetConnection
+            switch models.serverSheetConnection(baseURL: address, typedKey: key, account: account) {
+            case .success(let made): connection = made
+            case .failure(let problem): outcomes[step] = .failed(problem.message); return
+            }
+            let result = await models.checkServerModel(name, kind: modelKind, on: connection)
             guard isLatest(action, shared) else { return }
-            switch check.result {
+            switch result {
             case .passed: break
             case .failed(let text): outcomes[step] = .failed(text); return
             case .unreachable(let text): keyProblems[step] = .unreachable; outcomes[step] = .failed(text); return
             }
-            if let problem = models.addServerModel(after: check, to: account) { outcomes[step] = .failed(problem); return }
+            if let problem = models.addServerModel(name, kind: modelKind, checked: true, to: account) {
+                outcomes[step] = .failed(problem); return
+            }
         }
         let applied = await models.selectShared(model: name, account: account, kind: shared, replaceCustom: false)
         guard isLatest(action, shared) else { return }

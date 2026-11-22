@@ -673,7 +673,8 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertTrue(listed.allSatisfy { choice in catalog.contains { $0.id == choice.id } })
         if let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] {
             // Offscreen review images of the list, closed field and searching.
-            for (name, query) in [("model-search-openrouter", ""), ("model-search-openrouter-gemini", "gemini")] {
+            for (name, query) in [("model-search-openrouter", ""), ("model-search-openrouter-gemini", "gemini"),
+                                  ("model-search-openrouter-sol", "sol"), ("model-search-openrouter-none", "llama")] {
                 let list = OnboardingModelList(choices: listed, catalog: catalog, selected: nil,
                                                recommended: model.recommendedModel(.llmKey), query: query) { _ in }
                 let host = NSHostingView(rootView: list)
@@ -691,6 +692,48 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.chooseModel(unlisted.id, on: .llmKey)
         XCTAssertEqual(model.currentModel(.llmKey), unlisted.id, "a model found by search is set like any pick")
         XCTAssertEqual(model.checkedModel(.llmKey), unlisted.id)
+    }
+
+    /// Typing in "Choose model" keeps the panel's form (Maxim: "sol" made the
+    /// field narrower, indented the results and resized the panel): one
+    /// width with and without a query, results in the rows' own grid, a
+    /// height that follows the rows, and one calm row when nothing matches.
+    func testSearchingKeepsTheModelPanelsShape() async throws {
+        let (session, model) = try await atLanguageModelStep()
+        defer { session.clear() }
+        model.llmProvider = .openRouter
+        await model.useLLMKey("sk-or-v1-good-0123456789abcdef", provider: .openRouter)
+        let catalog = model.modelCatalog(.llmKey)
+        let listed = model.modelChoices(.llmKey)
+        let recommended = model.recommendedModel(.llmKey)
+        XCTAssertEqual(OnboardingModelSearch.matches("sol", in: catalog).count, 2, "the case Maxim saw")
+        func size(_ query: String) -> CGSize {
+            let list = OnboardingModelList(choices: listed, catalog: catalog, selected: nil,
+                                           recommended: recommended, query: query) { _ in }
+            return NSHostingView(rootView: list).fittingSize
+        }
+        let idle = size(""), sol = size("sol"), none = size("llama"), many = size("a")
+        let width = OnboardingModelList.panelWidth(choices: listed, catalog: catalog, recommended: recommended)
+        for (query, got) in [("", idle), ("sol", sol), ("llama", none), ("a", many)] {
+            XCTAssertEqual(got.width, width, accuracy: 0.5, "the same width for “\(query)”")
+        }
+        XCTAssertGreaterThanOrEqual(width, OnboardingModelList.minWidth)
+        XCTAssertLessThanOrEqual(width, OnboardingModelList.maxWidth)
+        let field: CGFloat = 32 + 4 + 1
+        XCTAssertEqual(sol.height, 12 + field + 2 * 40 + 1, accuracy: 0.5, "two results, two rows")
+        XCTAssertEqual(none.height, 12 + field + 40, accuracy: 0.5, "no result: one row")
+        XCTAssertEqual(many.height, 12 + field + OnboardingModelList.resultsHeight, accuracy: 0.5, "many results scroll")
+        // Names never cut: each row's name and ID fit at their natural width.
+        let inner = width - 12 - 16 - 12 - 8
+        for choice in listed + catalog {
+            let name = NSHostingView(rootView: Text(OnboardingModelPick.readableName(choice.id))
+                .font(OnboardingTheme.sans(13, weight: .medium))).fittingSize.width
+            let price = choice.price.map { NSHostingView(rootView: Text($0).font(OnboardingTheme.sans(11.5))).fittingSize.width + 32 } ?? 24
+            let tag: CGFloat = choice.id == recommended ? 90 : 0
+            XCTAssertLessThanOrEqual(name + tag + price, inner + 0.5, "\(choice.id) fits")
+        }
+        XCTAssertEqual(OnboardingModelList.listHeight(rows: 0, typed: true), 40)
+        XCTAssertEqual(OnboardingModelList.listHeight(rows: 3, typed: false), 122)
     }
 
     /// REV 56: in the app "Choose model" lists the provider's real catalog

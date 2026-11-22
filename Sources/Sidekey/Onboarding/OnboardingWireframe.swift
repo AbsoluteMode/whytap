@@ -1872,7 +1872,51 @@ struct OnboardingModelList: View {
     private var typed: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
     private var shown: [OnboardingModelChoice] { typed ? OnboardingModelSearch.matches(query, in: catalog) : choices }
 
+    static let rowHeight: CGFloat = 40
+    static let rowSpacing: CGFloat = 1
+    static let resultsHeight: CGFloat = 330
+    static let minWidth: CGFloat = 280
+    static let maxWidth: CGFloat = 480
+
+    /// One width for the panel with and without a query: as wide as its
+    /// widest row among the selection and the whole catalog, within the
+    /// window. A width that followed what was shown jumped with every letter
+    /// typed and centred narrow results in a wide scroll view.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    static func panelWidth(choices: [OnboardingModelChoice], catalog: [OnboardingModelChoice], recommended: String?) -> CGFloat {
+        let name = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let id = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        let price = NSFont.systemFont(ofSize: 11.5)
+        let tag = ("RECOMMENDED" as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 8.5, weight: .semibold), .kern: 0.4
+        ]).width + 10 + 6
+        func width(_ text: String, _ font: NSFont) -> CGFloat {
+            ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        }
+        let widest = (choices + catalog).map { choice -> CGFloat in
+            let title = width(OnboardingModelPick.readableName(choice.id), name) + (choice.id == recommended ? tag : 0)
+            let text = max(title, width(choice.id, id))
+            // The spacer (16) with the row's spacing (8) on each side of it.
+            let gap: CGFloat = 32
+            let cost: CGFloat = choice.price.map { gap + width($0, price) } ?? 24
+            // Padding, checkmark slot and its spacing, the text, the price,
+            // padding; 4 pt spare so a name never cuts on rounding.
+            let frame: CGFloat = 8 + 12 + 8 + 8 + 4
+            return frame + text + cost
+        }.max() ?? 0
+        return min(max(ceil(widest) + 12, minWidth), maxWidth)
+    }
+
+    /// The height of the rows below the field: the selection in full, search
+    /// results up to `resultsHeight` (they scroll), one row for no result.
+    static func listHeight(rows: Int, typed: Bool) -> CGFloat {
+        let count = max(rows, 1)
+        let height = CGFloat(count) * rowHeight + CGFloat(count - 1) * rowSpacing
+        return typed ? min(height, resultsHeight) : height
+    }
+
     var body: some View {
+        let shown = shown
         VStack(spacing: 1) {
             if searchable {
                 HStack(spacing: 7) {
@@ -1901,31 +1945,42 @@ struct OnboardingModelList: View {
                 .padding(.bottom, 4)
                 .onAppear { searching = true }
             }
-            if typed, shown.isEmpty {
-                Text("No model matches “\(query.trimmingCharacters(in: .whitespaces))”")
-                    .font(OnboardingTheme.sans(12))
-                    .foregroundColor(OnboardingTheme.faint)
-                    .frame(height: 40)
-            } else if typed {
-                // Search results may be many: they scroll, the field stays.
-                ScrollView {
+            Group {
+                if typed, shown.isEmpty {
+                    // A calm row in the rows' own slot: no result, nothing to pick.
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: 12)
+                        Text("No models found")
+                            .font(OnboardingTheme.sans(12.5))
+                            .foregroundColor(OnboardingTheme.faint)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: Self.rowHeight)
+                    .accessibilityElement(children: .combine)
+                } else if typed {
+                    // Search results may be many: they scroll, the field stays.
+                    ScrollView {
+                        rows(shown)
+                    }
+                    .scrollIndicators(.automatic)
+                } else {
                     rows(shown)
                 }
-                .frame(height: min(CGFloat(shown.count) * 41, 330))
-            } else {
-                rows(shown)
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: Self.listHeight(rows: shown.count, typed: typed), alignment: .top)
+            .clipped()
         }
         .padding(6)
-        // As wide as the longest name needs, within the window.
-        .fixedSize()
-        .frame(minWidth: 280, maxWidth: 480)
+        .frame(width: Self.panelWidth(choices: choices, catalog: catalog, recommended: recommended), alignment: .top)
+        .animation(.easeOut(duration: 0.18), value: Self.listHeight(rows: shown.count, typed: typed))
         .background(Color(red: 0.086, green: 0.086, blue: 0.098))
         .preferredColorScheme(.dark)
     }
 
     private func rows(_ list: [OnboardingModelChoice]) -> some View {
-        VStack(spacing: 1) {
+        VStack(spacing: Self.rowSpacing) {
             ForEach(list) { choice in
                 OnboardingModelRow(choice: choice, isSelected: choice.id == selected,
                                    isRecommended: choice.id == recommended) { pick(choice.id) }
@@ -1956,7 +2011,8 @@ private struct OnboardingModelRow: View {
                         Text(OnboardingModelPick.readableName(choice.id))
                             .font(OnboardingTheme.sans(13, weight: .medium))
                             .foregroundColor(OnboardingTheme.ink)
-                            .fixedSize()
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if isRecommended {
                             Text("RECOMMENDED")
                                 .font(OnboardingTheme.sans(8.5, weight: .semibold))
@@ -1971,7 +2027,8 @@ private struct OnboardingModelRow: View {
                     Text(choice.id)
                         .font(OnboardingTheme.mono(10.5))
                         .foregroundColor(OnboardingTheme.faint)
-                        .fixedSize()
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
                 Spacer(minLength: 16)
                 if let price = choice.price {
@@ -1982,7 +2039,8 @@ private struct OnboardingModelRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .frame(height: 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: OnboardingModelList.rowHeight)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovered ? 0.08 : 0)))
             .contentShape(Rectangle())
         }

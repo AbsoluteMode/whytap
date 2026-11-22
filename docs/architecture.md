@@ -1398,7 +1398,9 @@ generation, highest known output price). On the language model step only
 (the speech step sets the provider's one Settings speech model and moves on),
 when the provider has several models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
 names never cut (OnboardingModelPick.readableName) with the ID under each,
-prices, the recommended one first with a small tag; no model is checked
+prices, the recommended one first with a small tag; the panel keeps one width (from its widest row in the
+selection and the whole catalog, `OnboardingModelList.panelWidth`) with and without a search query, results
+use the same row grid and "No models found" is one quiet row; no model is checked
 until the person picks one, then the list checks it and the button names it. The step waits for a pick or
 Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
 through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).

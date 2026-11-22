@@ -523,7 +523,15 @@ window, Back and a progress bar.
   (`modelCatalog`, OpenRouter's every model) by readable name and ID, words
   in any order, case and dashes ignored, names that start with the text
   first and newest first, scrolling past about eight rows; Return takes the
-  first. Ten or fewer: no field. A model found by search is set like any
+  first. The panel keeps one form while typing (the owner, REV 68: with
+  "sol" on OpenRouter the field narrowed and moved, the results sat with a
+  wide left indent and the panel changed size): its width is set once from
+  the widest row among the selection and the whole catalog, 280 to 480 pt
+  (`OnboardingModelList.panelWidth`), because a width that followed the
+  shown rows jumped with each letter and centred narrow results in a wide
+  scroll view; results use the rows' grid (checkmark slot, name, ID, price
+  at the right); the height follows the rows with a short ease; no match is
+  one quiet "No models found" row. Ten or fewer: no field. A model found by search is set like any
   pick; the checkmark, Recommended tag and uncut names stay as before.
 - **"Accepted" belongs to the provider or server that answered.** The owner
   saw "Anthropic · dsfadfdas · dafdasfdasf · key saved in your Keychain"

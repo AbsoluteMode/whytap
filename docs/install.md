@@ -170,8 +170,11 @@ Whytap is free (MIT) and has no plans, accounts or credits of its own. It is
 built for people and teams who already have one of these:
 
 - **Provider keys**, billed by the provider per use: Soniox, Deepgram or
-  ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models;
-  Tavily for the Agent's web search.
+  ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models.
+  They also run the Agent's web search: about $10 per 1,000 searches plus
+  result tokens on Anthropic and OpenAI, Exa at about $7 per 1,000 through
+  OpenRouter (Claude models there use Anthropic's search). Tavily is for an
+  Agent model without search, or when chosen in Models → Search.
 - **A ChatGPT or Claude plan with monthly API credits.** OpenAI gives ChatGPT
   Pro ($100, $200 or $500 a month, by tier) and Business seats API credit;
   Anthropic gives Claude Max ($100), Ultra ($200) and Team seats. Both must be
@@ -189,7 +192,7 @@ built for people and teams who already have one of these:
 | --- | --- | --- |
 | Drop Fast | On this Mac | a speech provider or server on Intel |
 | Drop Smart | speech only | a language model for the cleanup |
-| Agent (text) | no | a language model (OpenRouter, OpenAI or Anthropic); Tavily for web search |
+| Agent (text) | no | a language model (OpenRouter, OpenAI or Anthropic), which also searches the web; Tavily for search with a model that cannot |
 | Agent voice, Voice search | On this Mac | a speech provider or server on Intel |
 | Meeting Notes | no: a meeting waits until both rows are set | a language model for the notes, plus speech (On this Mac gives no speaker labels; Soniox, Deepgram or ElevenLabs label speakers) |
 | Translate | no | a language model |

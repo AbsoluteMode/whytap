@@ -38,6 +38,40 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
+    /// The Search row under Speech and LLM: built-in, Tavily and Off.
+    func test_render_search_row() async throws {
+        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
+            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
+        }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for state in ["builtin", "tavily", "off"] {
+            let suite = UUID().uuidString
+            let defaults = UserDefaults(suiteName: suite)!
+            let file = directory.appendingPathComponent("search-catalog.json")
+            try Data("{}".utf8).write(to: file)
+            defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
+            let routing = AIRoutingStore(defaults: defaults)
+            let box = InMemoryTokenStore.Box()
+            let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
+            let account: ProviderAccount = state == "builtin" ? .anthropic : .openAI
+            try keys.save("synthetic-key", account: XCTUnwrap(account.keychainAccount(in: routing)))
+            if state == "tavily" { try keys.save("synthetic-key", account: TavilySearch.keychainAccount) }
+            routing.setRoute(FeatureRoute(account: account, model: state == "builtin" ? "claude-sonnet-5-5" : "gpt-4.1-nano"), for: .agent)
+            let stub = NoNetwork(list: [])
+            let catalogs = ModelCatalogStore(fileURL: file, fetcher: stub)
+            let vm = APIAndModelsViewModel(routing: routing, keys: keys, catalogs: catalogs,
+                checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
+                keyChecker: stub, probe: stub, endpoints: stub,
+                agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs))
+            for dark in [false, true] {
+                try await render(APIAndModelsView(viewModel: vm, focusedFeature: .constant(nil)),
+                    size: NSSize(width: 640, height: 620), dark: dark,
+                    to: directory.appendingPathComponent("search-\(state)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
     func test_render_smart_editor_pass() async throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
             throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")

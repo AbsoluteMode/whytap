@@ -357,11 +357,68 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
+  Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
+  server-side tool when the model has it (Anthropic web_search_20250305 with
+  max_uses 2, OpenAI Responses web_search with max_tool_calls 2 and
+  web_search_call.action.sources, OpenRouter openrouter:web_search with
+  max_uses 2); else the Tavily web_search function when its key exists; else
+  no search tool and a prompt line telling the model to say so. Anthropic's
+  catalog flag capabilities.server_tools.web_search.supported decides when
+  present; a few OpenAI families without search are excluded by ID. API &
+  Models -> Models -> Search (AgentSearchRow, under Speech and LLM) shows the
+  resolved search ("Anthropic · built-in", "OpenRouter · web", "Tavily",
+  "Off — add a Tavily key") and a menu of the built-in search or Tavily;
+  agent.native.webSearch is auto (default) or tavily, and tavily applies only
+  while its key exists. When the turn does not use Tavily, the function is not
+  offered and a call to it gets an "unavailable" tool result without reaching
+  Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
+  the row updates. Without any search the prompt asks for a one-line answer
+  pointing to a Tavily key in API keys. An error never moves the query to
+  Tavily: Tavily is used only when picked or when the model is known before
+  the turn to lack search. A 400 on the turn's first request with built-in
+  search retries once on the same route without search (NativeAgentWebSearch
+  .refused: the model says search is unavailable) only on tool-specific evidence
+  (ErrorShape.refusesWebSearch from a bounded body read of `message` only: the
+  request carried a search tool; no typed category or unrelated OpenAI code;
+  a param or leading path must be the search tool's own index: its type with
+  a refusal code or word, or the entry itself with the tool named as the
+  refusal's subject, never one of its options or any other location; a
+  message about an option, parameter, field or setting never qualifies, even
+  when it names the tool; otherwise, with quoted text removed and no
+  size/context wording, the tool's identifier and a refusal in one clause, or
+  a message opening with an account or model policy); an ambiguous error stays
+  on the route and later failures are never retried. The two-search budget is per
+  turn: Anthropic's max_uses counts across its provider turn (pause_turn and
+  tool_result continuations), so the tool stays unchanged there and a new
+  provider turn (the app's "Continue" message) gets what is left; OpenAI
+  (max_tool_calls, counting every web_search_call action) and OpenRouter
+  (max_uses; engine exa except for anthropic/ models, because other native
+  engines ignore max_uses and nothing else caps them before they run; a 403 on
+  the first request from a workspace whose locked Server Tools policy excludes
+  Exa (or any other first-request 403 there: the body is not read) retries
+  once without the search tool, like a refusal) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
+  (an OpenAI open_page, OpenRouter usage.server_tool_use_details
+  web_search_requests or tool_calls_executed without citations, Anthropic
+  end_turn after a search or after a deferred web_search_tool_result)
+  with no function call continues the turn; only pause_turn is replayed
+  verbatim, every other continuation adds the user "Continue" message because
+  current Claude models reject prefill. Anthropic's catalog capabilities decode
+  independently, and AgentSettingsStore.selectedWebSearchSupport feeds both the
+  next turn and the Search row even without token limits. A synced
+  agent.native.webSearch reloads through SettingsSyncLiveReload, which also
+  refreshes the row for a synced Tavily key. Anthropic server blocks, including
+  encrypted_content, are replayed verbatim; pause_turn and a search without a
+  function call continue the same turn (OpenAI/OpenRouter add a short user
+  "Continue" message). A finish_answer beside an Anthropic search whose result
+  has not arrived gets a tool result asking to wait. When finish_answer has no
+  source links, up to five provider citations (then results) become link cards.
+  Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
+  OpenRouter's reported cost includes search; OpenAI stays unpriced.
+  WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
   Settings -> API & Models -> API keys saves a separate Tavily key in Keychain
   (byok.tavily.search_api_key), after a GET /usage check without a search. The
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
-  No key means an actionable tool error, never an alternative search provider.
   Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
   structured finish_answer completion and Case key names. The existing action preference
   agent.opencode.allowActions is preserved: Allow file edits and commands is
@@ -1091,7 +1148,8 @@ retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
 Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
-above Subtitles; "Advanced · a model per feature" discloses the per-feature
+then Search (the Agent's web search, AgentSearchRow; see the native Agent
+section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
 list. A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);

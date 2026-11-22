@@ -116,7 +116,9 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual(first["tool_choice"] as? String, "required")
         let tools = try XCTUnwrap(first["tools"] as? [[String: Any]])
         let functions = tools.compactMap { $0["function"] as? [String: Any] }
-        XCTAssertTrue(functions.contains { $0["name"] as? String == "web_search" })
+        // No Tavily key: OpenRouter's own search tool replaces the Tavily function.
+        XCTAssertFalse(functions.contains { $0["name"] as? String == "web_search" })
+        XCTAssertTrue(tools.contains { $0["type"] as? String == "openrouter:web_search" })
         XCTAssertFalse(functions.contains { ["run_command", "show_actions"].contains($0["name"] as? String ?? "") })
         XCTAssertEqual(functions.first { $0["name"] as? String == "finish_answer" }?["strict"] as? Bool, true)
         XCTAssertEqual(StubURLProtocol.capturedRequests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer router-secret")
@@ -619,7 +621,7 @@ final class NativeAgentTests: XCTestCase {
         for await event in provider.run(prompt: "weather", resumeSessionID: nil,
             options: .init(model: "qwen/qwen3.8-27b", openRouterProvider: "cerebras/fp16")) { events.append(event) }
         XCTAssertEqual(modelCalls, 2)
-        XCTAssertEqual(searchCalls, 1)
+        XCTAssertEqual(searchCalls, 0, "OpenRouter has its own search: the absent Tavily function never runs")
         XCTAssertTrue(events.contains { if case .error(_, let text, _) = $0 { return text.contains("invalid_prompt") && !text.contains("SYNTHETIC_PRIVATE_CONTENT") }; return false })
         XCTAssertFalse(events.contains(.done(sources: [])))
         XCTAssertNil(provider.lastSessionID)

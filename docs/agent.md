@@ -26,11 +26,43 @@ the answer.
 
 ## Web search
 
-Add a **Tavily** key in **Settings → API & Models → API keys**. Saving checks
-the key without running a search. Only the search query goes to Tavily (at
-most two searches per request); the returned excerpts and links go to your
-selected model. Without a key, search reports an error instead of using
-another service.
+When the Agent model is on **Anthropic**, **OpenAI** or **OpenRouter**, it
+searches with that provider's own web search tool: no extra key, billed by
+the same provider (at most two searches per request).
+
+| Agent route | Search | Price (checked 2026-11-22) |
+| --- | --- | --- |
+| Anthropic | Claude web search (`web_search_20250305`) | $10 per 1,000 searches plus the results as input tokens; failed searches are not billed. Included in the Agent's estimated cost |
+| OpenAI | Responses `web_search` | $10 per 1,000 calls plus search content tokens. OpenAI reports no charge, so the cost stays unknown |
+| OpenRouter | `openrouter:web_search` | Exa at about $7 per 1,000 searches; `anthropic/` models use Anthropic's own search (about $10 per 1,000). Exa is chosen because OpenRouter caps it before a search runs, while other native engines ignore the cap. A workspace that locks out Exa refuses with 403; the Agent then retries once without OpenRouter's search and answers in text, because other engines cannot be capped. An error never switches the Agent to Tavily; pick Tavily in Search for that. Included in the cost OpenRouter reports |
+
+The provider runs the search and sends its results to the model; Whytap
+never sees a separate search request. "Searching the web" appears once the
+provider's response reports a search, not while it runs. At most two built-in
+searches (OpenAI: web calls) per request you make, across all of the Agent's
+model calls for it; each provider enforces it before a search runs, and the
+app stops offering the tool once two are spent. The pages the model cites appear as
+source cards. If the model lists none itself, Whytap shows the provider's
+citations (up to five).
+
+**Settings → API & Models → Models → Search** (under Speech and LLM) shows
+what the Agent searches with now: *Anthropic · built-in*, *OpenAI · built-in*,
+*OpenRouter · web*, *Tavily* or *Off — add a Tavily key*, with the price
+below. Its menu works like the Speech and LLM menus: the built-in search of
+the Agent model (the default) or Tavily.
+
+**Tavily** serves a model without web search of its own (the Anthropic catalog
+says so, or a few old OpenAI models such as `gpt-4.1-nano`) and anyone who
+picks it in Search. If the provider refuses its own search on the first
+request, the Agent answers without search on the same provider and says so;
+it never switches to Tavily after an error. (The Agent runs only on Anthropic, OpenAI and OpenRouter today; Tavily
+would also serve your own servers if they become Agent routes.) A saved Tavily
+key alone never replaces built-in search.
+Add the key in **Settings → API & Models → API keys** (saving checks the key
+without running a search). Only the search query goes to Tavily; the returned
+excerpts and links go to your selected model. With neither, the
+Agent has no search tool; asked to search, it answers in one line that web
+search is off for this model and that a Tavily key in API keys turns it on.
 
 ## Off by default; what it can do once on
 
@@ -43,7 +75,7 @@ tools:
 | --- | --- | --- |
 | `list_directory`, `read_file`, `search_files` | yes | yes |
 | `capture_screen` (when your request needs the screen) | yes | yes |
-| `web_search` (Tavily key), `fetch_url` (public HTTPS) | yes | yes |
+| web search (the provider's own, or a Tavily key), `fetch_url` (public HTTPS) | yes | yes |
 | `write_file`: create or replace a file | yes | removed and refused |
 | `run_command`: run a shell command | yes | removed and refused |
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |

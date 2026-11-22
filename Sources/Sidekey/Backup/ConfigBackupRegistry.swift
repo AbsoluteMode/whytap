@@ -64,7 +64,7 @@ enum ConfigBackupRegistry {
         add(.other, .strings, [CalendarAccountSettings.hiddenFeedsKey])
         add(.other, .bool, [CalendarAccountSettings.appleEnabledKey])
         add(.other, .propertyList, ["notifications.sourceSounds"])
-        add(.agents, .string, ["agent.opencode.model", "agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier"])
+        add(.agents, .string, ["agent.native.webSearch", "agent.opencode.model", "agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier"])
         add(.agents, .bool, ["agent.opencode.allowActions"])
         return result
     }()

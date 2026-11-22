@@ -57,6 +57,16 @@ is a verifiable claim rather than a slogan.
   existing bounded screen-context envelope can still contain visible URLs.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
+- Learning from your edits after Drop (off unless you turn it on) reads the
+  field a take was pasted into once, five seconds later, through
+  Accessibility, only if it is still the same focused field. Password fields,
+  secure input, terminals, password managers, Whytap's own fields and fields
+  that do not expose their text are never read. The words of a correction stay
+  in memory until you accept a suggestion; on disk there are only salted
+  hashes and day counts, outside backups, settings sync and logs. Nothing is
+  sent anywhere and no model is asked. A hidden developer calibration mode
+  writes a local journal of the edited words (readable only by you) and
+  deletes it after 14 days.
 - Logs go to the unified system log (`os_log`, subsystem
   `com.rootwise.sidekey`). They never contain transcripts, prompts, replies
   or keys; `Tests/SidekeyTests/LLM/LocalPathLoggingInvariantTests.swift`
@@ -135,7 +145,8 @@ Data-use policies depend on the selected provider and its account settings.
 ## Permissions
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
-  editable text field before recording and, only when Brightness keys is
+  editable text field before recording, the one read of the field after a
+  take when learning from edits is on and, only when Brightness keys is
   switched on in Settings → Toolbox → Display, the Mac's brightness keys.
 - Microphone: dictation and meetings.
 - System Audio Recording: the other side of a call, only while a meeting is

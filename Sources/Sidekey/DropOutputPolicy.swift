@@ -6,13 +6,40 @@ import Foundation
 struct DropOutputPolicy {
     let mode: TranscriptionMode
 
+    /// What reached the paste step, plus which user rules changed it. The
+    /// learning step needs both to tell its own edits from the user's.
+    struct Prepared: Equatable {
+        let text: String
+        let firedReplacements: [DropReplacement]
+        let firedFillers: [String]
+    }
+
     @MainActor
     func prepare(
         rawText: String,
         fillerTerms: [String],
+        replacements: [DropReplacement] = [],
         preservingMarkdown: () -> Bool = { false },
         cleanup: () async throws -> String
     ) async throws -> String {
+        try await prepareDetailed(
+            rawText: rawText, fillerTerms: fillerTerms, replacements: replacements,
+            preservingMarkdown: preservingMarkdown, cleanup: cleanup
+        ).text
+    }
+
+    /// Order: Smart cleanup -> Replace (one pass) -> Filler -> punctuation.
+    /// Replace runs before Filler so a rule can never resurrect a cut filler
+    /// and Filler sees the user's spelling.
+    /// WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    @MainActor
+    func prepareDetailed(
+        rawText: String,
+        fillerTerms: [String],
+        replacements: [DropReplacement] = [],
+        preservingMarkdown: () -> Bool = { false },
+        cleanup: () async throws -> String
+    ) async throws -> Prepared {
         try Task.checkCancellation()
         let output: String
         switch mode {
@@ -20,10 +47,12 @@ struct DropOutputPolicy {
         case .smart: output = try await cleanup()
         }
         try Task.checkCancellation()
+        let replaced = DropReplaceFilter.apply(output, rules: replacements)
+        let firedFillers = DropFillerFilter.matchedTerms(in: replaced.text, terms: fillerTerms)
         let filter: (String) -> String = { DropFillerFilter.apply($0, removing: fillerTerms) }
         let markdown = mode == .smart && preservingMarkdown()
         let withoutFillers = markdown
-            ? SmartMarkdownProtection.filtering(output, apply: filter) : filter(output)
+            ? SmartMarkdownProtection.filtering(replaced.text, apply: filter) : filter(replaced.text)
         // Both modes: a provider can leave a space before a mark ("слово ?").
         // Run on the real text, not the masked one, so a mark right after
         // inline code is tightened while code bytes and links stay intact.
@@ -33,9 +62,9 @@ struct DropOutputPolicy {
         )
         if filtered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard mode == .fast else { throw OpenRouterLLMError.emptyContent }
-            return rawText
+            return Prepared(text: rawText, firedReplacements: [], firedFillers: [])
         }
-        return filtered
+        return Prepared(text: filtered, firedReplacements: replaced.fired, firedFillers: firedFillers)
     }
 
     /// Provider bodies and URLs can include dictated content or credentials.

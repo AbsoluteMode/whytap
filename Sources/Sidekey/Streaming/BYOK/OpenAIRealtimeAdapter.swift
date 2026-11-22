@@ -72,7 +72,8 @@ final class OpenAIRealtimeSession: BYOKUpstreamSession, @unchecked Sendable {
     func start(model: String, language: String?, terms: [String]) async throws {
         var tx: [String: Any] = ["model": model]
         if let language { tx["language"] = language }
-        if !terms.isEmpty { tx["prompt"] = terms.joined(separator: ", ") }
+        let sent = VocabularyBudget.terms(terms, for: .openAIPrompt)
+        if !sent.isEmpty { tx["prompt"] = sent.joined(separator: ", ") }
         // OpenAI Realtime GA transcription shape: config nested under
         // session.audio.input; PCM rate must be >= 24 kHz (we upsample the
         // 16 kHz capture in sendAudio); turn_detection=null gives push-to-talk

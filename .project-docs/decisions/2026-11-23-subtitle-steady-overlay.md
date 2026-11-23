@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Translation/SubtitleSpeechPairer.swift
     confirmed_at: 2026-11-23
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md]
 ---
 
 # A steady subtitle overlay with a clickable Stop and a blurred background
@@ -121,11 +121,13 @@ a box that still changed size. Added:
   one shows its newest lines (`NewestLinesColumn`), and both columns then start
   at the row's top. A 500-character original without punctuation no longer
   pushes its translation out of sight.
-- **One size through the whole session.** From Connecting to the end of
-  Finishing the caption keeps its size (`TranslationView.overlayCaption`). The
-  audio permissions link moved inside the caption. A Stop before the first
-  words shows "Finishing…" instead of collapsing the box. A problem's message
-  is smaller and hugs its text, so it and its button fit the 190 pt panel.
+- **One size while connecting or listening.** The caption keeps its size
+  (`TranslationView.overlayCaption`) and contains the audio permissions link.
+  Since 2026-11-23-subtitle-pairs-close-speed.md, Stop shows Start at once
+  while the last translation finishes in the background. The stopped box
+  keeps a shorter caption if it has rows, and shows only its controls
+  otherwise. A problem's message hugs its text so it and its button fit
+  the 190 pt panel.
 - **Narrow panels.** The panel can be resized down to 360 pt. The caption takes
   the width it is given up to 708 pt (`SteadyPairsLayout.width(proposed:)`);
   the columns still depend only on that width. The view no longer demands

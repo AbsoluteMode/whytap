@@ -18,9 +18,12 @@ final class SpeechTranslationLiveProbeTests: XCTestCase {
         let target = environment["WHYTAP_TRANSLATE_PROBE_TARGET"] ?? "ru"
         var lines: [String] = []
         let begin = Date()
+        let sentLock = NSLock()
+        nonisolated(unsafe) var sentMs = 0
         func log(_ object: [String: Any]) {
             var object = object
             object["t"] = (Date().timeIntervalSince(begin) * 1000).rounded()
+            object["sent_ms"] = sentLock.withLock { sentMs }
             if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
                 lines.append(String(decoding: data, as: UTF8.self))
             }
@@ -45,18 +48,26 @@ final class SpeechTranslationLiveProbeTests: XCTestCase {
                 }
             }
         }
+        // Real speed on an absolute schedule: chunk n goes out at n x 100 ms
+        // after the first, so send time never slows the audio down (the
+        // 2026-11-21 recording slept 100 ms after each send and fell about 4 %
+        // behind real time). Every event logs how much audio was sent by
+        // then, so `sent_ms - elapsed` is how far the model trails its input.
         let chunk = 3_200 // 100 ms at 16 kHz
+        let audio = pcm + Data(count: chunk * 20) // trailing silence like a video's pause
+        let streamStart = ProcessInfo.processInfo.systemUptime
+        log(["type": "audio_start"])
         var offset = 0
-        while offset < pcm.count {
-            let end = min(offset + chunk, pcm.count)
-            await session.sendAudio(pcm.subdata(in: offset..<end))
+        var index = 0
+        while offset < audio.count {
+            let due = streamStart + Double(index) * 0.1
+            let wait = due - ProcessInfo.processInfo.systemUptime
+            if wait > 0 { try await Task.sleep(for: .milliseconds(Int(wait * 1_000))) }
+            let end = min(offset + chunk, audio.count)
+            await session.sendAudio(audio.subdata(in: offset..<end))
+            sentLock.withLock { sentMs = end / 32 }
             offset = end
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        // Trailing silence like a video's pause, then finish.
-        for _ in 0..<20 {
-            await session.sendAudio(Data(count: chunk))
-            try await Task.sleep(for: .milliseconds(100))
+            index += 1
         }
         log(["type": "end_input"])
         await session.endInput()

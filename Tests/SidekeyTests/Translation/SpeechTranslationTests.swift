@@ -141,6 +141,73 @@ final class SpeechTranslationModelTests: XCTestCase {
         XCTAssertEqual(model.issue?.message, "OpenAI live translation does not support Kazakh. Choose another target language.")
     }
 
+    /// Stop shows a stopped session at once: the recorded provider took 5.7 s
+    /// from session.close to session.closed, and the overlay used to show a
+    /// spinner all that time. The last translation still settles after it,
+    /// and Start right away drops that tail and begins a new session.
+    func testStopShowsAStoppedSessionAtOnceAndTheTailSettlesAfter() async throws {
+        let first = FakeSpeechTranslation()
+        first.closesOnEndInput = false // a provider still finishing
+        let second = FakeSpeechTranslation()
+        var sessions = [first, second]
+        let model = makeModel(translator: { sessions.removeFirst() })
+        model.start()
+        try await wait(model.phase == .listening)
+        first.pair.continuation.yield(.source(" Thank you all.", elapsedMs: 600))
+        first.pair.continuation.yield(.source(" See", elapsedMs: 1_400))
+        first.pair.continuation.yield(.translation("Спасибо всем", elapsedMs: 1_000))
+        try await wait(model.liveTranslation == "Спасибо")
+
+        model.stop()
+        // Same run loop turn: no longer running, the stopped box and Start.
+        XCTAssertFalse(model.phase.isRunning)
+        XCTAssertEqual(TranslationView.overlayCaption(phase: model.phase, hasRows: true, hasIssue: false),
+                       .fixed(TranslationView.stoppedCaptionHeight))
+        XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: model.phase, issue: nil))
+
+        // The tail arrives after Stop and settles in place.
+        try await wait(first.endInputCount == 1)
+        first.pair.continuation.yield(.translation(".", elapsedMs: 1_200))
+        first.pair.continuation.yield(.closed)
+        first.pair.continuation.finish()
+        try await wait(model.phase == .idle)
+        XCTAssertEqual(model.lines.map(\.translation), ["Спасибо всем."])
+
+        // Start during a slow finish drops it and starts again at once.
+        let slow = FakeSpeechTranslation()
+        slow.closesOnEndInput = false
+        sessions = [slow, second]
+        model.start()
+        try await wait(model.phase == .listening)
+        model.stop()
+        XCTAssertFalse(model.phase.isRunning)
+        model.start()
+        try await wait(model.phase == .listening)
+        XCTAssertEqual(slow.closeCount, 1, "the old session is closed")
+        XCTAssertTrue(sessions.isEmpty, "a new session was opened")
+        XCTAssertTrue(model.lines.isEmpty)
+        model.cancel()
+    }
+
+    /// Start during Stop's tail, then closing the overlay before the old
+    /// session is released: the queued Start never opens a session or capture.
+    func testClosingWhileAStartWaitsForTheOldSessionStartsNothing() async throws {
+        let first = FakeSpeechTranslation()
+        first.closesOnEndInput = false
+        var opened = 0
+        let audio = FixtureSubtitleAudio()
+        let model = makeModel(translator: { opened += 1; return opened == 1 ? first : FakeSpeechTranslation() }, audio: audio)
+        model.start()
+        try await wait(model.phase == .listening)
+        model.stop()
+        XCTAssertNotNil(model.start(), "Start queues behind the finishing session")
+        await model.cancel().value // the overlay closes before the cleanup ends
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(opened, 1, "no second provider session")
+        XCTAssertFalse(model.phase.isRunning)
+        XCTAssertFalse(model.phase.isActive)
+    }
+
     func testAProviderThatNeverClosesIsBoundedByTheStopWatchdog() async throws {
         let session = FakeSpeechTranslation()
         session.closesOnEndInput = false

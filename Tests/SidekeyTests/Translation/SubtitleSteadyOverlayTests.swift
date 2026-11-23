@@ -38,12 +38,15 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         model.start()
         try await wait(model.phase == .listening)
         var shots: [[SubtitleCaption.Row]] = []
-        for event in events {
+        for (index, event) in events.enumerated() {
             switch event.stream {
             case .source: speech.pair.continuation.yield(.source(event.text, elapsedMs: event.elapsed))
             case .translation: speech.pair.continuation.yield(.translation(event.text, elapsedMs: event.elapsed))
             }
-            try await Task.sleep(for: .milliseconds(12))
+            // Sample once the caption reflects this event (publishing is
+            // throttled, so time alone is not enough under load).
+            try await wait(model.publishedEvents >= index + 1)
+            XCTAssertGreaterThanOrEqual(model.publishedEvents, index + 1, "event \(index) was never published")
             let rows = SubtitleCaption.rows(lines: model.lines, live: model.live,
                                             liveTranslation: model.liveTranslation, liveID: model.liveID)
             if shots.last != rows { shots.append(rows) }
@@ -317,21 +320,23 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         XCTAssertLessThanOrEqual(column.fittingSize.height, 100.5)
     }
 
-    /// From Connecting to the end of Finishing the caption keeps one size,
-    /// whatever it shows: no audio yet, no words yet, or Stop before them.
-    func testTheRunningBoxKeepsOneSizeInEveryPhase() {
-        for phase in [SubtitlePhase.connecting, .listening, .finishing] {
+    /// While capture runs (Connecting, listening) the caption keeps one size,
+    /// whatever it shows. Stop shows the stopped box at once, while the last
+    /// translation still settles (finishing).
+    func testTheRunningBoxKeepsOneSizeAndStopShowsTheStoppedBoxAtOnce() {
+        for phase in [SubtitlePhase.connecting, .listening] {
             for hasRows in [false, true] {
                 XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: hasRows, hasIssue: false),
                                .fixed(TranslationView.captionHeight), "\(phase), rows: \(hasRows)")
             }
         }
-        XCTAssertEqual(TranslationView.overlayCaption(phase: .idle, hasRows: true, hasIssue: false),
-                       .fixed(TranslationView.stoppedCaptionHeight))
-        XCTAssertEqual(TranslationView.overlayCaption(phase: .idle, hasRows: false, hasIssue: false), .hidden)
+        for phase in [SubtitlePhase.finishing, .idle] {
+            XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: true, hasIssue: false),
+                           .fixed(TranslationView.stoppedCaptionHeight), "\(phase)")
+            XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: false, hasIssue: false), .hidden)
+        }
         XCTAssertEqual(TranslationView.overlayCaption(phase: .failed, hasRows: true, hasIssue: true), .hugging)
-        // Stop before the first words still says what is happening.
-        XCTAssertEqual(SubtitleCaption.status(hasRows: false, phase: .finishing, issue: nil), "Finishing…")
+        XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: .finishing, issue: nil))
     }
 
     /// The panel can be resized down to its minimum width: the caption takes

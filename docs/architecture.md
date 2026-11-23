@@ -480,10 +480,10 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  From Connecting to the end of Finishing the box has one fixed size (146 pt
-  caption; 108 pt for pairs after Stop), also with no audio yet (the
-  permissions link sits inside the caption) and after a Stop before the first
-  words ("Finishing…"); a problem hugs its message. The caption takes the
+  The caption is 146 pt high while connecting or listening. The audio
+  permissions link sits inside it. Stop immediately shows Start and a
+  108 pt caption if there are rows. With no rows the stopped box shows
+  only its controls, and a problem hugs its message. The caption takes the
   panel's width up to 708 pt and the height the controls leave, so the
   360 x 190 pt minimum panel fits every state. The live pair
   settles in place under LiveSubtitleModel.liveID; its original shows only up
@@ -493,8 +493,9 @@ Translation tools:
   newest lines (NewestLinesColumn), so a long original never hides its
   translation; older lines leave at the top behind a fade, a line at a time. On hover
   the controls cover the caption's top instead of resizing it, so Stop and ×
-  never move; FirstClickHostingView takes the first click on the non-key
-  panel. The box blurs what is under it (behind-window HUD material, 45 %
+  never move; their clicks go through the panel's sendEvent
+  (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
+  acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
@@ -514,8 +515,24 @@ Translation tools:
   input transcription, the heard original. SubtitleSpeechPairer cuts the
   translation at sentence ends (SubtitleSegmenter's sentence rules), 1.2 s
   pauses or a clause past 160 characters and matches the original's
-  sentence that ended (elapsed_ms) before it; the live pair shows whole
-  words only. Refused key, no credit, busy, unsupported language and a
+  sentence that ended (elapsed_ms) before it, plus later sentences the model
+  joined: of the sentence ends heard by the cut, the one whose length (the
+  session's translation-to-original ratio) and delay (the session's median)
+  fit the translation best. The live pair shows whole words only; a held last
+  word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
+  TranslationPanel.sendEvent from frames they measured
+  (SubtitleOverlayHitTargets), like the island: a press acts only on the
+  button view, action and frame it began on, while the panel shows
+  (SubtitleSessionAction: Start, Cancel or Stop with its session, run by
+  LiveSubtitleModel.perform only while it is still the action shown), and
+  dims the button since SwiftUI never sees it; the running overlay keeps
+  them 1 s after hover ends. Stop shows the stopped box at once
+  (SubtitlePhase.isRunning) while the tail settles; Start then drops it.
+  Audio is sent off the main actor. A delta can publish the caption once
+  80 ms have passed since the last flush, and an 80 ms timer also flushes.
+  The adapter and LiveSubtitleModel log only numbers: how far
+  elapsed_ms trails the audio sent. WHY:
+  .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md Refused key, no credit, busy, unsupported language and a
   dropped socket end the session with a named message; Costs estimates
   $3.06 per audio hour. WHY:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md

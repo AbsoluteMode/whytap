@@ -108,7 +108,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: false, microphoneStatus: .authorized) },
             accessibilityRequester: { events.append("request") },
             openAccessibilitySettings: { events.append("settings") },
-            accessibilityIsAddedByHand: { false },
+            usesProtectionOverridePane: { false },
             runtimeRefresh: { _, _ in })
         XCTAssertFalse(model.accessibilityRequested)
         model.requestAccessibility()
@@ -129,7 +129,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
             accessibilityRequester: { events.append("request") },
             openAccessibilitySettings: { events.append("settings") },
-            accessibilityIsAddedByHand: { true },
+            usesProtectionOverridePane: { true },
             runtimeRefresh: { _, _ in })
         model.requestAccessibility()
         XCTAssertEqual(events, ["request", "settings"])
@@ -147,7 +147,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
             accessibilityRequester: { events.append("request") },
             openAccessibilitySettings: { events.append("settings") },
-            accessibilityIsAddedByHand: { false },
+            usesProtectionOverridePane: { false },
             runtimeRefresh: { _, _ in })
         model.requestAccessibility()
         granted = true

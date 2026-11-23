@@ -156,7 +156,7 @@ struct OnboardingJourneyView: View {
         let outcome = model.outcome(model.step)
         // Toolbox names its Settings tab in the lede; a second "Open …"
         // button here said it twice.
-        if model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
+        if model.step != .language, model.step != .source, model.step != .screenRecording, !Self.hasOwnActions(model.step),
                   !model.step.isInformational, !outcome.isDone, dwell.state == .idle {
             // Step 1 has no skip: its two figures are the choice. Screen
             // Recording and Try Drop have their own Skip under the capsule.

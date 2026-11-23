@@ -51,16 +51,15 @@ enum OnboardingAccessKind: CaseIterable {
         case .inputMonitoring: return "This Mac also asks for it before Drop can see its shortcut."
         case .screenRecording:
             return PermissionsHelper.screenPaneNamesSystemAudio
-                ? "Optional. For Shot and the Agent to see your screen, and for Meeting Notes and Subtitles to hear your Mac’s sound."
+                ? "Shot and the Agent use the screen. Meetings and Subtitles ask for system audio when recording starts."
                 : "Optional. For Shot, and when you ask the Agent about your screen."
         }
     }
 
     /// macOS 27.3 lists apps that control the Mac under System & App
-    /// Protection Override, where the Accessibility link now lands, and an
-    /// app's request no longer adds its row: the person adds it with +.
+    /// Protection Override, where the Accessibility link lands on this build.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    static var protectionOverride: Bool { PermissionsHelper.accessibilityIsAddedByHand }
+    static var protectionOverride: Bool { PermissionsHelper.usesProtectionOverridePane }
 
     /// The pane under Privacy & Security, named as this Mac shows it.
     var pane: String {
@@ -72,15 +71,12 @@ enum OnboardingAccessKind: CaseIterable {
         }
     }
 
-    /// Whether the pane has no Whytap row until the person adds one.
-    var addsWithPlus: Bool { self == .keyboard && Self.protectionOverride }
-
     var grantedLine: String {
         switch self {
         case .keyboard: return "Ready to type anywhere."
         case .microphone: return "Drop can hear you now."
         case .inputMonitoring: return "Drop can see its shortcut."
-        case .screenRecording: return PermissionsHelper.screenPaneNamesSystemAudio ? "Ready for Shot, the Agent and your Mac’s sound." : "Ready for Shot and the Agent."
+        case .screenRecording: return "Ready for Shot and the Agent."
         }
     }
 
@@ -635,10 +631,8 @@ struct OnboardingAccessStage: View {
             line(kind.purpose, color: OnboardingTheme.muted)
         case .waiting:
             VStack(spacing: 5) {
-                (kind.addsWithPlus
-                    ? Text("Click +, choose ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                        + Text(", then ") + Text("Override System Protections").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                        + Text(".")
+                (kind == .keyboard && OnboardingAccessKind.protectionOverride
+                    ? Text("Drop is waiting for keyboard control across apps.")
                     : Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
                         + Text(", then come back here."))
                     .font(OnboardingTheme.sans(13.5))

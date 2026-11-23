@@ -160,7 +160,7 @@ final class OnboardingPreviewSession {
             snapshotProvider: { system.snapshot }, screenRecordingAccessProvider: { system.screen },
             screenRecordingRequester: {}, accessibilityRequester: { system.ask("keyboard") { $0.accessibility = true } },
             openAccessibilitySettings: { system.grant { $0.accessibility = true } },
-            accessibilityIsAddedByHand: { false },
+            usesProtectionOverridePane: { false },
             openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
         system.permissions = permissions
         let screenRecording = ScreenRecordingAccess(isGranted: { system.screen },
@@ -173,10 +173,11 @@ final class OnboardingPreviewSession {
             models: models, permissions: permissions,
             onDevice: OnDeviceSpeechModelController(store: speechModel),
             dropSpeech: OnboardingDropSpeech(routing: routing, keys: keys, onDevice: readiness, mode: { .fast }),
+            supportsOnDevice: true, // The preview includes its own simulated speech download on every host.
             preferences: PrivacyPreferences(defaults: defaults),
             screenRecording: screenRecording,
             openScreenRecordingSettings: { system.grant { $0.screen = true } },
-            screenRecordingShowsNoDialog: { false },
+            opensScreenSettingsAfterRequest: { false },
             defaultsChanges: NotificationCenter(),
             dwellWait: dwellWait,
             tavily: tavily,

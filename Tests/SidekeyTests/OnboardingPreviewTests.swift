@@ -13,10 +13,13 @@ import XCTest
 final class OnboardingPreviewTests: XCTestCase {
     /// The preview's animation ticks can be throttled in an unattended test process.
     /// Keep the actual dwell duration while testing transitions independently of its frame rate.
-    private func makeSession(suiteName: String = "OnboardingPreviewTests-\(UUID().uuidString)") -> OnboardingPreviewSession {
-        OnboardingPreviewSession(suiteName: suiteName, dwellWait: { seconds in
+    private func makeSession(suiteName: String = "OnboardingPreviewTests-\(UUID().uuidString)",
+                             skipLanguage: Bool = true) -> OnboardingPreviewSession {
+        let session = OnboardingPreviewSession(suiteName: suiteName, dwellWait: { seconds in
             try? await Task.sleep(for: .seconds(seconds))
         })
+        if skipLanguage, session.model.step == .language { session.model.skip() }
+        return session
     }
 
     private func eventually(_ condition: @MainActor () -> Bool, timeout: Double = 6,
@@ -28,11 +31,13 @@ final class OnboardingPreviewTests: XCTestCase {
 
     func testThePreviewWalksEveryStepWithoutTheSystem() async throws {
         let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
-        let session = makeSession(suiteName: suite)
+        let session = makeSession(suiteName: suite, skipLanguage: false)
         defer { session.clear() }
         let model = session.model
         XCTAssertTrue(model.isPreview)
-        XCTAssertEqual(model.step, .source, "it starts at the first step")
+        XCTAssertEqual(model.step, .language)
+        model.setLanguage(nil)
+        try await eventually { model.step == .source }
 
         model.chooseYourKey()
         try await eventually { model.step == .speechKey }
@@ -48,7 +53,7 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
-        XCTAssertEqual(model.step, .language, "Anthropic searches the web itself: no Tavily step")
+        XCTAssertEqual(model.step, .keyboard, "Anthropic searches the web itself: no Tavily step")
         model.back()
         XCTAssertEqual(model.step, .llmKey)
         model.useOwnServer(.languageModel)
@@ -61,9 +66,6 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useSearchKey("tvly-preview-0123456789abcdef")
         XCTAssertTrue(model.outcome(.search).isDone, "the stubbed Tavily check passes without a network request")
 
-        model.next()
-        XCTAssertEqual(model.step, .language)
-        model.setLanguage(nil)
         model.next()
         // Each access step: Allow, back without the switch (Not on yet),
         // Allow again, allowed (REV 57).
@@ -828,22 +830,20 @@ final class OnboardingPreviewTests: XCTestCase {
             XCTAssertEqual(kind.isOptional, kind.step.isOptional)
             XCTAssertFalse(kind.notOnLine.isEmpty)
         }
-        let override = PermissionsHelper.accessibilityIsAddedByHand
-        defer { PermissionsHelper.accessibilityIsAddedByHand = override }
-        PermissionsHelper.accessibilityIsAddedByHand = false
+        let override = PermissionsHelper.usesProtectionOverridePane
+        defer { PermissionsHelper.usesProtectionOverridePane = override }
+        PermissionsHelper.usesProtectionOverridePane = false
         XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "Accessibility")
-        XCTAssertFalse(OnboardingAccessKind.keyboard.addsWithPlus)
         XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine, "Whytap isn’t on in Accessibility yet.")
         // macOS 27.3: the Accessibility link lands on System & App Protection
         // Override, which lists no Whytap until the person adds it with +.
-        PermissionsHelper.accessibilityIsAddedByHand = true
+        PermissionsHelper.usesProtectionOverridePane = true
         XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "System & App Protection Override")
-        XCTAssertTrue(OnboardingAccessKind.keyboard.addsWithPlus)
         XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine,
                        "Whytap isn’t on in System & App Protection Override yet.")
         // The other panes keep their names and their switches.
         XCTAssertEqual(OnboardingAccessKind.microphone.pane, "Microphone")
-        XCTAssertFalse(OnboardingAccessKind.screenRecording.addsWithPlus)
+        XCTAssertEqual(OnboardingAccessKind.screenRecording.grantedLine, "Ready for Shot and the Agent.")
         XCTAssertNil(OnboardingAccessKind(step: .language))
         XCTAssertTrue(OnboardingJourneyView.isWireframe(.screenRecording))
         // The ⌘ is closed strokes: four sides and four 270-degree loops whose

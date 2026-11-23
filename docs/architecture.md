@@ -1335,26 +1335,21 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
-OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
-Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
+OnboardingJourneyWindowController + OnboardingJourneyModel, temporarily visible in the app switcher): one dark 520x440 window with Back (also ← and ⌘[ outside text
 fields), a progress rail with one segment per step (a passed step reached by
 Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10"
 ("NN / 11" with the search step), one step at
-a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
-(On this Mac or API keys, two wire figures), Speech key, Language model key
-(optional), Web search for the Agent (Tavily, only after a Self-hosted language
-model: a server has no web search of its own; no segment otherwise), Language (a
-wireframe globe: drag to turn, click a country or type a country or language;
-OnboardingLanguageStage, OnboardingGlobe; only the speech route's languages;
-English, Portuguese and Spanish offer variants, stored beside the language in
-PrivacyPreferences.selectedLanguageVariant while providers keep the base code;
-outlines from scripts/onboarding_globe_data.py), Keyboard control, Microphone, Input Monitoring (only when the Drop
+a time and a footer. The journey starts with the language globe. Drag, click
+a country or type a language. English, Portuguese and Spanish offer variants,
+stored in PrivacyPreferences.selectedLanguageVariant. Source (On this Mac or
+API keys), Speech key, optional Language model key, and optional Tavily for
+a self-hosted language model follow. The access steps are Keyboard control, Microphone, Input Monitoring (only when the Drop
 shortcut needs it), Screen Recording (optional), Try Drop, Toolbox,
 and the last step (Enjoy Whytap, with whytap.ai and Finish); a step whose result already holds is left out. A step whose
 action succeeds moves on by itself after its dwell (OnboardingDwellController;
 1.15 s on the key steps so the padlock opens first) with no chip or Continue;
 Return goes on at once, Back keeps what was done and a step reached by Back
-offers a plain Next. Step 1 and the three key steps share one wire scene
+offers a plain Next. The source and key steps share one wire scene
 (OnboardingWireScene, drawn per display frame): the chosen key flies to its
 padlock, turns and opens it when a key is accepted and catches when refused.
 The key field (OnboardingKeyStage) shows every input as dots; a provider is
@@ -1394,19 +1389,14 @@ display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
 (OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
 Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
-no spinner). On macOS 27.3 and later the Accessibility request shows no dialog
-and adds no row for an app without Apple's assistive-technology entitlement, and
-the Accessibility link opens System & App Protection Override. There the first
-Allow also opens that pane (PermissionsHelper.accessibilityIsAddedByHand), and
-Keyboard control names it and says "Click +, choose Whytap, then Override System
-Protections."; only the global grant ("Control your entire Mac and all apps")
-makes AXIsProcessTrusted true. Key steps name the providers whose key is already
-in the Keychain under an empty field ("Saved in your Keychain: Soniox ·
-ElevenLabs"); a name picks its tab and Return uses that key. The Screen
-Recording step is named "Screen & system audio." on macOS 15 and later and
-points at "Screen & System Audio Recording"; on macOS 27.3 that request shows
-no dialog, so the pane opens once it returned
-(PermissionsHelper.screenRecordingShowsNoDialog). The step on screen is kept in
+no spinner). On the owner's 27.3 beta 2 the Accessibility link opens
+System & App Protection Override. The first Allow opens the pane. A clean
+no-Add grant for Whytap is still an acceptance blocker. The screen step names
+both settings and confirms only the screen preflight. It opens Settings once
+after the framework returns on 27.3 while the step is still waiting. Audio-only
+consent is requested by the first recording from the Core Audio tap's aggregate
+device. Key steps offer the sole saved provider up front and list saved accounts
+by name. Return checks the selected saved key. The step on screen is kept in
 `sidekey.onboarding.step.v1`, and a quit (System Settings' Quit & Reopen after a
 privacy switch) does not finish the onboarding (AppDelegate.isTerminating): the
 relaunch continues at that step, or the next one still on the way. Whytap is an

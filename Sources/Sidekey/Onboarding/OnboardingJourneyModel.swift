@@ -237,7 +237,8 @@ final class OnboardingJourneyModel: ObservableObject {
     let screenRecording: ScreenRecordingAccess
     private let dropSpeech: OnboardingDropSpeech
     private let openScreenRecordingSettings: () -> Void
-    private let screenRecordingShowsNoDialog: () -> Bool
+    private let opensScreenSettingsAfterRequest: () -> Bool
+    private var awaitingScreenRequest = false
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -271,7 +272,6 @@ final class OnboardingJourneyModel: ObservableObject {
     private var latest: [SharedModelKind: Int] = [:]
     private var granted: Set<OnboardingStep> = []
     private var pollTimer: Timer?
-    private var pollBudget = DropHotkeyRecoveryPollBudget()
     private var subscriptions: Set<AnyCancellable> = []
 
     var onFinish: () -> Void = {}
@@ -295,7 +295,7 @@ final class OnboardingJourneyModel: ObservableObject {
         preferences: PrivacyPreferences? = nil,
         screenRecording: ScreenRecordingAccess? = nil,
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
-        screenRecordingShowsNoDialog: @escaping () -> Bool = { PermissionsHelper.screenRecordingShowsNoDialog },
+        opensScreenSettingsAfterRequest: @escaping () -> Bool = { PermissionsHelper.opensScreenSettingsAfterRequest },
         defaultsChanges: NotificationCenter = .default,
         dwellWait: ((TimeInterval) async -> Void)? = nil,
         tavily: TavilySettings? = nil,
@@ -324,7 +324,7 @@ final class OnboardingJourneyModel: ObservableObject {
         self.preferences = preferences
         self.screenRecording = screenRecording
         self.openScreenRecordingSettings = openScreenRecordingSettings
-        self.screenRecordingShowsNoDialog = screenRecordingShowsNoDialog
+        self.opensScreenSettingsAfterRequest = opensScreenSettingsAfterRequest
         dwell = OnboardingDwellController(wait: dwellWait)
         pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
@@ -472,6 +472,9 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The window closed: nothing keeps polling. A running download goes on.
     func stop() {
         stopPolling()
+        dwell.cancel()
+        sourceMove?.cancel()
+        tryCheck?.cancel()
     }
 
     private func show(_ next: OnboardingStep, direction: OnboardingNavDirection) {
@@ -501,6 +504,10 @@ final class OnboardingJourneyModel: ObservableObject {
             if !latest(step).isDone { requested.remove(step) }
             permissions.refresh(restartRecoveryPolling: false)
             startPolling()
+            if direction == .forward, case .done(let text) = latest(step) {
+                // macOS can grant this access while the preceding step is still visible.
+                succeed(step, text)
+            }
         default:
             stopPolling()
         }
@@ -513,8 +520,16 @@ final class OnboardingJourneyModel: ObservableObject {
         switch step {
         case .llmKey where Self.llmProviders.contains(speechProvider) && keySaved(speechProvider):
             llmProvider = speechProvider
-        case .speechKey where speechProviders.contains(llmProvider) && keySaved(llmProvider) && !keySaved(speechProvider):
-            speechProvider = llmProvider
+        case .speechKey where !keySaved(speechProvider):
+            let saved = savedKeyProviders(.speech)
+            if saved.contains(llmProvider) {
+                speechProvider = llmProvider
+            } else if !leftSteps.contains(.speechKey), saved.count == 1, let only = saved.first {
+                speechProvider = only
+            }
+        case .llmKey where !keySaved(llmProvider) && !leftSteps.contains(.llmKey):
+            let saved = savedKeyProviders(.languageModel)
+            if saved.count == 1, let only = saved.first { llmProvider = only }
         default:
             break
         }
@@ -616,6 +631,13 @@ final class OnboardingJourneyModel: ObservableObject {
         guard model != nil || isPreview else { return }
         let action = begin(.speech)
         attempts[.speechKey] = .provider(provider)
+        if provider == .deepgram, let model,
+           let error = DeepgramLanguagePolicy.configurationError(model: model, language: language?.code) {
+            let message = error.localizedDescription + " Go back to Language or choose another speech provider."
+            keyProblems[.speechKey] = .other(message)
+            outcomes[.speechKey] = .failed(message)
+            return
+        }
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         // A newer speech choice answers for this step now; this key stays saved.
@@ -1176,23 +1198,28 @@ final class OnboardingJourneyModel: ObservableObject {
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
     func requestScreenRecording() {
         asking(.screenRecording)
-        // macOS 27.3 shows no dialog for this request: the pane opens once
-        // the request returned, so Whytap is registered before it loads.
+        // The reported 27.3 flow needed Settings after the framework request.
+        // A returned request alone establishes neither a grant nor a Settings row.
         // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
         var after: (@MainActor () -> Void)?
-        if screenRecordingShowsNoDialog() {
-            after = { [weak self] in self?.openScreenPaneUnlessGranted() }
+        if opensScreenSettingsAfterRequest() {
+            guard !awaitingScreenRequest else { return }
+            after = { [weak self] in
+                self?.awaitingScreenRequest = false
+                self?.openScreenPaneUnlessGranted()
+            }
         }
         switch screenRecording.requestOnce(afterRequest: after) {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
-        case .requested: break
+        case .requested: awaitingScreenRequest = after != nil
         case .alreadyRequested: openScreenRecordingSettings()
         }
     }
 
     private func openScreenPaneUnlessGranted() {
         permissions.refresh(restartRecoveryPolling: false)
-        guard !permissions.screenRecordingGranted else { return }
+        guard step == .screenRecording, requested.contains(.screenRecording),
+              pollTimer != nil, !permissions.screenRecordingGranted else { return }
         openScreenRecordingSettings()
     }
 
@@ -1241,12 +1268,12 @@ final class OnboardingJourneyModel: ObservableObject {
 
     private func startPolling() {
         stopPolling()
-        pollBudget = DropHotkeyRecoveryPollBudget()
-        // Permissions are granted in System Settings, outside the app.
+        // A person can spend several minutes in System Settings before confirming.
+        // Leaving a permission step or closing the window invalidates this timer.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.pollBudget.consume() else { return self.stopPolling() }
+                guard self.pollTimer != nil else { return }
                 self.permissions.refresh(restartRecoveryPolling: false)
             }
         }

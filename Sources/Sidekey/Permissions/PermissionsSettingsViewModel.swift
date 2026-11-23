@@ -22,7 +22,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
     private let screenRecordingRequester: () async -> Void
     private let accessibilityRequester: () -> Void
     private let openAccessibilitySettings: () -> Void
-    private let accessibilityIsAddedByHand: () -> Bool
+    private let usesProtectionOverridePane: () -> Bool
     private let openScreenRecordingSettings: () -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
@@ -40,7 +40,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         screenRecordingRequester: @escaping () async -> Void = PermissionsHelper.requestScreenRecording,
         accessibilityRequester: @escaping () -> Void = { PermissionsHelper.promptAccessibility() },
         openAccessibilitySettings: @escaping () -> Void = PermissionsHelper.openAccessibilitySettings,
-        accessibilityIsAddedByHand: @escaping () -> Bool = { PermissionsHelper.accessibilityIsAddedByHand },
+        usesProtectionOverridePane: @escaping () -> Bool = { PermissionsHelper.usesProtectionOverridePane },
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
@@ -54,7 +54,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         self.screenRecordingRequester = screenRecordingRequester
         self.accessibilityRequester = accessibilityRequester
         self.openAccessibilitySettings = openAccessibilitySettings
-        self.accessibilityIsAddedByHand = accessibilityIsAddedByHand
+        self.usesProtectionOverridePane = usesProtectionOverridePane
         self.openScreenRecordingSettings = openScreenRecordingSettings
         self.runtimeRefresh = runtimeRefresh
         self.snapshot = snapshotProvider()
@@ -126,8 +126,6 @@ final class PermissionsSettingsViewModel: ObservableObject {
     }
 
     func requestAccessibility() {
-        // Stay menu-bar-only — no Dock icon flip. The first press only asks
-        // macOS, whose dialog leads to System Settings itself.
         if snapshotProvider().accessibilityGranted {
             // Nothing to ask.
         } else if accessibilityRequested {
@@ -135,10 +133,9 @@ final class PermissionsSettingsViewModel: ObservableObject {
         } else {
             accessibilityRequested = true
             accessibilityRequester()
-            // macOS 27.3 shows no dialog and adds no row, so nothing can race
-            // the pane: open it now, where the person adds Whytap with +.
+            // The installed app's AX request returned without a visible prompt on 27.3.
             // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-            if accessibilityIsAddedByHand() { openAccessibilitySettings() }
+            if usesProtectionOverridePane() { openAccessibilitySettings() }
         }
         refresh()
     }

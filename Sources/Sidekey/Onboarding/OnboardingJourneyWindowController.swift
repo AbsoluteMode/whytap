@@ -1,9 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Hosts the onboarding in one small fixed-size window beside the island. The app
-/// stays an accessory (no Dock icon), as Settings does. Closing the window
-/// finishes the onboarding just like Done.
+/// Hosts the onboarding window and participates in the app switcher while visible.
+/// Closing it explicitly finishes onboarding. Quitting the app preserves the step.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingJourneyWindowController: NSWindowController, NSWindowDelegate {

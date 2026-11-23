@@ -153,7 +153,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            heldForTeardown: Bool = true,
                            openScreenSettings: @escaping () -> Void = {},
                            screenShowsNoDialog: Bool = false,
-                           resumeDefaults: UserDefaults? = nil) throws -> OnboardingJourneyModel {
+                           screenRequest: @escaping () async -> Void = {},
+                           resumeDefaults: UserDefaults? = nil,
+                           skipLanguage: Bool = true) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -191,15 +193,16 @@ final class OnboardingJourneyModelTests: XCTestCase {
             dropSpeech: OnboardingDropSpeech(routing: env.routing, keys: env.keys, onDevice: readiness, mode: { .fast }),
             supportsOnDevice: supportsOnDevice,
             preferences: PrivacyPreferences(defaults: env.defaults),
-            screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
+            screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: screenRequest),
             openScreenRecordingSettings: openScreenSettings,
-            screenRecordingShowsNoDialog: { screenShowsNoDialog },
+            opensScreenSettingsAfterRequest: { screenShowsNoDialog },
             defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
             tavily: tavily,
             isPreview: isPreview,
             offersOpenAISpeech: offersOpenAISpeech,
             resumeDefaults: resumeDefaults)
+        if skipLanguage, model.step == .language { model.skip() }
         if heldForTeardown { addTeardownBlock { model.stop() } }
         return model
     }
@@ -419,7 +422,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let env = try makeEnv()
         let model = try makeModel(env)
         XCTAssertEqual(model.step, .source)
-        XCTAssertFalse(model.canGoBack, "the first step has no Back")
+        XCTAssertTrue(model.canGoBack, "Back returns to the language choice")
 
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
@@ -455,7 +458,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertTrue(model.keySaved(.deepgram))
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("", provider: .deepgram)
+        XCTAssertEqual(model.speechProvider, .deepgram, "the only saved speech key is offered on arrival")
+        await model.useSavedKey(on: .speech)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
     }
 
@@ -474,6 +478,29 @@ final class OnboardingJourneyModelTests: XCTestCase {
             // Allow again opens the pane on both.
             model.requestAccess(.screenRecording)
             XCTAssertEqual(opened, noDialog ? 2 : 1, "noDialog=\(noDialog)")
+        }
+    }
+
+    func testPendingScreenRequestOpensNoPaneAfterSkipOrClose() async throws {
+        for close in [false, true] {
+            let env = try makeEnv()
+            var opened = 0
+            let request = Beat()
+            var returned = false
+            let model = try makeModel(env, openScreenSettings: { opened += 1 },
+                                      screenShowsNoDialog: true, screenRequest: {
+                await request.wait()
+                returned = true
+            })
+            for _ in 0..<20 where model.step != .screenRecording { model.next() }
+            model.requestScreenRecording()
+            try await eventually { request.count == 1 }
+            model.requestScreenRecording()
+            XCTAssertEqual(opened, 0, "a second press while asking must not open Settings")
+            if close { model.stop() } else { model.skip() }
+            request.end()
+            try await eventually { returned }
+            XCTAssertEqual(opened, 0)
         }
     }
 
@@ -528,6 +555,44 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(model.speechProvider, .elevenLabs)
         await model.useSavedKey(on: .speech)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+    }
+
+    func testLanguageChosenFirstMustWorkWithTheSpeechProvider() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, skipLanguage: false)
+        let speechModel = try XCTUnwrap(ModelRegistry.recommended(for: .dropFast, kind: .deepgram))
+        let supported = try XCTUnwrap(DeepgramLanguagePolicy.supportedLanguageCodes(for: speechModel))
+        let unsupported = try XCTUnwrap(AppLanguage.all.first { !supported.contains($0.code) })
+        model.setLanguage(unsupported)
+        try await endBeat(env, until: .source, in: model)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        await model.useSpeechKey("test-key-0123456789abcdef", provider: .deepgram)
+        XCTAssertTrue(model.outcome(.speechKey).failureText?.contains("Go back to Language") == true)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+    }
+
+    func testFreshPreferencesOfferRetainedElevenLabsAndAnthropicKeys() async throws {
+        let env = try makeEnv()
+        for provider in [AIProviderKind.elevenLabs, .anthropic] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: provider)?.keychainAccount(in: env.routing))
+            try env.keys.save("test-retained-provider", account: account)
+        }
+        XCTAssertTrue(OnboardingLaunch.consume(in: env.defaults))
+        let model = try makeModel(env, resumeDefaults: env.defaults, skipLanguage: false)
+        XCTAssertEqual(model.step, .language)
+        model.setLanguage(nil)
+        try await endBeat(env, until: .source, in: model)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        XCTAssertEqual(model.speechProvider, .elevenLabs)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        await model.useSavedKey(on: .speech)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+        try await endBeat(env, until: .llmKey, in: model)
+        XCTAssertEqual(model.savedKeyProviders(.languageModel), [.anthropic])
+        await model.useSavedKey(on: .languageModel)
+        XCTAssertEqual(env.routing.route(for: .agent)?.account, .anthropic)
     }
 
     func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {
@@ -668,7 +733,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         }
         XCTAssertEqual(model.summary, "LLM: Anthropic \(expected)")
         XCTAssertFalse(model.steps.contains(.search), "Anthropic searches the web itself")
-        try await endBeat(env, until: .language, in: model)
+        try await endBeat(env, until: .keyboard, in: model)
     }
 
     /// A server's model has no web search: the Tavily step comes after it;
@@ -721,7 +786,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .speechKey, in: model)
         model.next()
         model.next() // skip the LLM
-        XCTAssertEqual(model.step, .language)
+        XCTAssertEqual(model.step, .keyboard)
     }
 
     func testTheSummaryNamesSpeechAndLLM() async throws {
@@ -879,11 +944,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try env.keys.save("sx", account: account)
         env.routing.setRoute(FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRealtimeModel), for: .dropFast)
         env.routing.setRoute(FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRealtimeModel), for: .dropSmart)
-        let model = try makeModel(env)
-        model.next() // skip the LLM
+        let model = try makeModel(env, skipLanguage: false)
         XCTAssertEqual(model.step, .language)
+        XCTAssertFalse(model.canGoBack)
         model.setLanguage(AppLanguage.find(code: "ru"))
-        try await endBeat(env, until: .keyboard, in: model)
+        try await endBeat(env, until: .llmKey, in: model)
         XCTAssertEqual(PrivacyPreferences(defaults: env.defaults).selectedLanguage?.code, "ru")
     }
 
@@ -901,6 +966,22 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.permissions.refresh(restartRecoveryPolling: false)
         try await endBeat(env, until: .screenRecording, in: model)
         XCTAssertFalse(model.steps.contains(.inputMonitoring))
+    }
+
+    func testAnEarlyMicrophoneGrantAdvancesWhenItsStepIsReached() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        while model.step != .keyboard { model.next() }
+        env.snapshot.value = .init(accessibilityGranted: false, microphoneStatus: .authorized)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.step, .keyboard)
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .authorized)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        try await endBeat(env, until: .microphone, in: model)
+        try await endBeat(env, until: .screenRecording, in: model)
+        model.back()
+        XCTAssertEqual(model.step, .microphone)
+        XCTAssertFalse(model.dwell.isCounting, "Back lets the person review the granted step")
     }
 
     /// A switch turned off after it was granted: the step no longer says
@@ -1048,7 +1129,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
-        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true, realCatalogs: true)
+        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true, realCatalogs: true, skipLanguage: false)
         let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
         var window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
@@ -1067,6 +1148,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
             XCTAssertFalse(window.isVisible)
         }
 
+        try await snap("language")
+        model.setLanguage(nil)
+        try await endBeat(env, until: .source, in: model)
         try await snap("source")
         model.chooseYourKey()
         try await snap("source-clicked", after: 160)
@@ -1103,7 +1187,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         await model.chooseModel("claude-fable-5-2", on: .llmKey)
         try await snap("llm-key-model-picked")
         // Anthropic searches the web itself: no Tavily step.
-        try await endBeat(env, until: .language, in: model)
+        try await endBeat(env, until: .keyboard, in: model)
         while true {
             try await snap(model.step.rawValue)
             if model.step == .thanks { break }

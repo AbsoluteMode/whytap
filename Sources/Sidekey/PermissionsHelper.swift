@@ -50,23 +50,17 @@ enum PermissionsHelper {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// macOS 27.3 and later: the Accessibility link opens System & App
-    /// Protection Override, a request shows no dialog and adds no row for an
-    /// app without Apple's assistive-technology entitlement, and the person
-    /// adds the app with + and Override System Protections. Settable in tests.
+    /// The Accessibility settings link on 27.3 opens the protection override pane.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    static var accessibilityIsAddedByHand = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+    static var usesProtectionOverridePane = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
 
-    /// macOS 27.3 and later: the Screen Recording request shows no dialog
-    /// ("Service kTCCServiceScreenCapture does not allow prompting"), so the
-    /// pane opens once the request returned. Settable in tests.
+    /// After a screen request on 27.3 the onboarding also offers the system pane.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    static var screenRecordingShowsNoDialog = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+    static var opensScreenSettingsAfterRequest = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
 
-    /// macOS 15 and later name the pane "Screen & System Audio Recording": a
-    /// switch there also lets the app record the Mac's audio.
+    /// macOS 15 and later put screen capture and audio-only consent in the same pane.
     static var screenPaneNamesSystemAudio = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
 
@@ -197,9 +191,8 @@ enum PermissionsHelper {
     /// known to be USABLE for opening a CoreAudio process tap.
     ///
     /// macOS exposes **no API** to read this bucket's status, and surfaces
-    /// its prompt exactly once — the first time the process creates a
-    /// process tap (`AudioHardwareCreateProcessTap`). So there is nothing to
-    /// preflight: creating the tap IS the request-if-undetermined, and a
+    /// its prompt exactly once — when the process first starts recording from
+    /// an aggregate device containing a tap. There is no public status preflight. A
     /// previously-denied grant is indistinguishable at runtime from silence
     /// (the tap starts without error and yields zero buffers forever). The
     /// contract therefore always returns `true` — "go ahead and create the

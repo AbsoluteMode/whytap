@@ -106,10 +106,23 @@ which nothing told the person to make.
   - that the four steps above end with the step moving on. The log shows global
     access is what makes other apps trusted, but no one has finished that path
     for Whytap yet;
-  - Microphone, Screen Recording and Input Monitoring after a reset on 27.3.
-    Their anchors (`Privacy_Microphone`, `Privacy_ScreenCapture`,
-    `Privacy_ListenEvent`) and system prompts still exist in the 27.3 bundles,
-    but the owner's pass stopped before them.
+  - Microphone, Screen Recording and Input Monitoring for Whytap itself
+    after a reset on 27.3: the owner's pass stopped before them.
+- A probe app with its own bundle id (`dev.claudeprobe.tcc27`, signed with a
+  local identity, registered with LaunchServices) on the same Mac:
+  - the Microphone request shows the system dialog;
+  - `CGRequestPostEventAccess`, `CGRequestListenEventAccess` and
+    `CGRequestScreenCaptureAccess` show nothing; tccd logs "does not allow
+    prompting; returning denied";
+  - nothing is added to the lists.
+  The probe was removed afterwards.
+- The owner then required that a person never press + (2026-11-23). No
+  27.3 path without + was found for Keyboard control. The keyboard part of
+  this change waits for the owner's choice; the pull request is a draft.
+- Saved keys (model test with test keys):
+  - the speech step names Soniox and ElevenLabs;
+  - a mark without a key keeps the list, and Return checks nothing;
+  - a click on ElevenLabs, then Return, routes Drop to ElevenLabs.
 
 # Rejected
 

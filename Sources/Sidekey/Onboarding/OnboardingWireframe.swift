@@ -1294,6 +1294,7 @@ struct OnboardingKeyStage: View {
     /// without the key's own format.
     @State private var picked: OnboardingKeyVendor?
     @State private var hoveredLogo: OnboardingKeyVendor?
+    @State private var hoveredSaved: OnboardingKeyVendor?
     @State private var hoveredServer = false
     /// The key field and the own-server fields share one capsule.
     @Namespace private var morph
@@ -1354,9 +1355,11 @@ struct OnboardingKeyStage: View {
     /// settings asked for two keys by hand).
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     private var savedProviders: [OnboardingKeyProvider] {
-        guard kind != .search else { return [] }
-        return providers.filter { if case .provider(let p) = $0.kind { return model.keySaved(p) } else { return false } }
+        model.savedKeyProviders(kind).compactMap { OnboardingKeyProvider.of(.provider($0)) }
     }
+    /// The saved line stays under the field while it is empty, also after a
+    /// mark without a key was picked.
+    private var showsSavedLine: Bool { !server && draft.isEmpty && !savedProviders.isEmpty }
 
     private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
@@ -1602,10 +1605,13 @@ struct OnboardingKeyStage: View {
                      : "Press Return to check it, or pick its provider below.")
                     .foregroundColor(OnboardingTheme.muted)
             } else if let known, !saved {
-                Link(destination: known.keysURL) {
-                    Text(offerLine(known)).foregroundColor(OnboardingTheme.muted)
+                VStack(spacing: 4) {
+                    Link(destination: known.keysURL) {
+                        Text(offerLine(known)).foregroundColor(OnboardingTheme.muted)
+                    }
+                    if showsSavedLine { savedLine }
                 }
-            } else if !server, !savedProviders.isEmpty {
+            } else if showsSavedLine {
                 savedLine
             } else {
                 Color.clear.frame(height: 1)
@@ -1615,7 +1621,8 @@ struct OnboardingKeyStage: View {
         .multilineTextAlignment(.center)
         .lineLimit(2)
         .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        // The saved names are buttons of their own for VoiceOver.
+        .accessibilityElement(children: showsSavedLine ? .contain : .combine)
     }
 
     /// "Saved in your Keychain: Soniox · ElevenLabs": a name picks its tab,
@@ -1625,15 +1632,21 @@ struct OnboardingKeyStage: View {
             Text("Saved in your Keychain:").foregroundColor(OnboardingTheme.muted)
             ForEach(Array(savedProviders.enumerated()), id: \.element.kind) { index, provider in
                 if index > 0 { Text("·").foregroundColor(OnboardingTheme.faint) }
-                let isCurrent = provider.kind == current
+                let isCurrent = !server && provider.kind == current
+                let hovered = hoveredSaved == provider.kind
                 Button(provider.kind.displayName) {
                     picked = provider.kind
-                    setCurrent(provider.kind)
+                    if let kind = provider.kind.provider { model.pickSavedKey(kind, on: self.kind) }
                     focused = true
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(isCurrent ? OnboardingTheme.ink : OnboardingTheme.muted)
+                .foregroundColor(isCurrent || hovered ? OnboardingTheme.ink : OnboardingTheme.muted)
                 .fontWeight(isCurrent ? .semibold : .regular)
+                .underline(hovered && !isCurrent)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { hoveredSaved = provider.kind } else if hoveredSaved == provider.kind { hoveredSaved = nil }
+                }
                 .disabled(checking)
                 .accessibilityLabel("Use the saved \(provider.kind.displayName) key")
                 .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
@@ -1784,7 +1797,8 @@ struct OnboardingKeyStage: View {
         if key.isEmpty {
             // An empty field uses the key already saved for this step.
             guard saved, !outcome.isDone else { return }
-            use("", provider: current)
+            let kind = self.kind
+            Task { await model.useSavedKey(on: kind) }
             return
         }
         // Nobody named: neither the key's format nor a picked mark.

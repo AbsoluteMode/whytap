@@ -432,6 +432,35 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
     }
 
+    // Settings cleared, Keychain kept (the owner, 2026-11-23): the speech step
+    // names Soniox and ElevenLabs; a click on ElevenLabs then Return uses
+    // its saved key; a mark without a key keeps the list and Return does nothing.
+    func testSavedKeysAreNamedAndAClickThenReturnUsesThePickedOne() async throws {
+        let env = try makeEnv()
+        for (kind, key) in [(AIProviderKind.soniox, "test-soniox-key"), (.elevenLabs, "test-elevenlabs-key")] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: kind)?.keychainAccount(in: env.routing))
+            try env.keys.save(key, account: account)
+        }
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+        XCTAssertEqual(model.savedKeyProviders(.languageModel), [])
+        XCTAssertEqual(model.savedKeyProviders(.search), [])
+
+        // A mark without a key: the list stays, Return checks nothing.
+        model.pickSavedKey(.deepgram, on: .speech)
+        await model.useSavedKey(on: .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+
+        // Click ElevenLabs, then Return.
+        model.pickSavedKey(.elevenLabs, on: .speech)
+        XCTAssertEqual(model.speechProvider, .elevenLabs)
+        await model.useSavedKey(on: .speech)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+    }
+
     func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {
         let env = try makeEnv()
         let checker = GatedChecker(gated: ["sk-soniox-0123456789abcdef"])
@@ -926,6 +955,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("speech")
         model.speechProvider = .elevenLabs
         try await snap("speech-elevenlabs")
+        model.pickSavedKey(.deepgram, on: .speech)
+        try await snap("speech-deepgram-without-key")
         XCTAssertTrue(model.keySaved(.elevenLabs))
         XCTAssertFalse(model.keySaved(.deepgram))
     }

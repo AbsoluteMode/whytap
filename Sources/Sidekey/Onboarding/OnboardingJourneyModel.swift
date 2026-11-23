@@ -986,6 +986,44 @@ final class OnboardingJourneyModel: ObservableObject {
         return models.accountIsAvailableForSelection(account)
     }
 
+    /// The step's providers whose key is already in the Keychain, in the
+    /// order of the step's marks: named under the empty field so a key kept
+    /// from an earlier setup is found without guessing its mark.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    func savedKeyProviders(_ kind: OnboardingKeyStageKind) -> [AIProviderKind] {
+        switch kind {
+        case .speech: return speechProviders.filter(keySaved)
+        case .languageModel: return Self.llmProviders.filter(keySaved)
+        case .search: return []
+        }
+    }
+
+    /// A click on a saved provider's name: its tab opens, and Return then
+    /// uses its key (`useSavedKey`).
+    func pickSavedKey(_ provider: AIProviderKind, on kind: OnboardingKeyStageKind) {
+        switch kind {
+        case .speech: speechProvider = provider
+        case .languageModel: llmProvider = provider
+        case .search: break
+        }
+    }
+
+    /// Return in an empty key field: checks the key already saved for the
+    /// open tab's provider; nothing when it has none.
+    func useSavedKey(on kind: OnboardingKeyStageKind) async {
+        switch kind {
+        case .speech:
+            guard keySaved(speechProvider) else { return }
+            await useSpeechKey("", provider: speechProvider)
+        case .languageModel:
+            guard keySaved(llmProvider) else { return }
+            await useLLMKey("", provider: llmProvider)
+        case .search:
+            guard tavily.configured else { return }
+            await useSearchKey("")
+        }
+    }
+
     // MARK: - 4. Search
 
     func useSearchKey(_ key: String) async {

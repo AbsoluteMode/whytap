@@ -94,9 +94,15 @@ let package = Package(
             dependencies: ["WhytapCaseKit"],
             path: "Tests/WhytapCaseKitTests"
         ),
+        // Test-only load hook: installs the guard that keeps test runs from
+        // playing the system alert sound (Tests/SidekeyTests/Support/SystemSoundGuard.swift).
+        .target(
+            name: "SidekeyTestBootstrap",
+            path: "Tests/SidekeyTestBootstrap"
+        ),
         .testTarget(
             name: "SidekeyTests",
-            dependencies: ["Sidekey", "OnboardingPreviewKit"],
+            dependencies: ["Sidekey", "OnboardingPreviewKit", "SidekeyTestBootstrap"],
             path: "Tests/SidekeyTests"
         )
     ],

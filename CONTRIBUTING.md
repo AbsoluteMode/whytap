@@ -28,6 +28,8 @@ name the files to change and how to check the result.
    ```
 
    Documentation-only changes do not need the Swift checks; say so in the PR.
+   The run is silent and ends with a `SystemSoundGuard` line; a test that
+   sends a key nothing takes fails, because the app would beep there too.
 5. **Open a pull request** against `main`. Say what changed, why, and how you
    checked it. A maintainer reviews it and squash-merges.
 

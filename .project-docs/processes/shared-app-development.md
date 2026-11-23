@@ -65,7 +65,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md]
 ---
 
 # Parallel development, one working Whytap
@@ -130,6 +130,9 @@ taps. Keep the user's working instance; do not launch a second app for testing.
    `swift test --filter ...` and other relevant non-launching checks. Keep each
    worktree's build output separate. Tests use temporary stores and fake
    providers rather than the user's notes, clipboard, keys or paid requests.
+   A run plays no sound: a test that asks for one is named in the run's
+   `SystemSoundGuard` report, and a key nobody takes in a window fails it
+   ([decision](../decisions/2026-11-23-silent-test-runs.md)).
 4. Do **not** invoke `scripts/dev-run.sh`, `customize.py build/run`, `swift run`,
    `open` on a feature bundle, or LaunchServices registration. On branches
    older than the one-running-copy change (2026-10-19), even `dev-run.sh`

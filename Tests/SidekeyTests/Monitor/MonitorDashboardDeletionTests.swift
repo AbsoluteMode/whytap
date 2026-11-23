@@ -256,6 +256,149 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertEqual(calls.servers, ["sferyx"])
     }
 
+    // MARK: - Server status is not a default board
+
+    /// A new user never set servers up: Monitor lists nothing, connects to
+    /// nothing and shows its empty text instead of a Server status row.
+    func testFreshMonitorHasNoServerStatusBoard() async throws {
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        XCTAssertFalse(store.serverStatusListed)
+        XCTAssertFalse(store.serverStatusRemoved)
+        XCTAssertNil(store.serverError)
+        XCTAssertNil(store.dashboardError)
+        XCTAssertTrue(store.readings.isEmpty)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, [])
+        XCTAssertTrue(MonitorHoverPanel.pickerIsEmpty(serverStatusListed: store.serverStatusListed,
+                                                      dashboardCount: store.dashboards.count))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("servers.json").path),
+                       "Whytap never writes servers.json itself")
+    }
+
+    func testServersFileWithoutServersListsNoBoard() async throws {
+        try Data(#"{"refreshSeconds":15,"servers":[]}"#.utf8).write(to: root.appendingPathComponent("servers.json"))
+        try writeDashboard("openai-usage", title: "OpenAI")
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        XCTAssertFalse(store.serverStatusListed)
+        XCTAssertNil(store.serverError)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, [])
+        XCTAssertEqual(store.dashboards.map(\.id), ["openai-usage"])
+        XCTAssertFalse(MonitorHoverPanel.pickerIsEmpty(serverStatusListed: false, dashboardCount: 1))
+    }
+
+    /// The agent adds servers while Monitor is open: the board appears on the
+    /// next reload, and goes away again when the servers are taken out.
+    func testServerStatusAppearsOnceServersAreSetUpAndLeavesWithThem() async throws {
+        let calls = SSHCalls()
+        let store = serverStore(calls)
+        XCTAssertFalse(store.serverStatusListed)
+
+        _ = try writeServers()
+        store.reloadFiles()
+        XCTAssertTrue(store.serverStatusListed)
+        XCTAssertEqual(store.readings.map(\.server.id), ["sferyx"])
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"])
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("servers.json"))
+        store.reloadFiles()
+        XCTAssertFalse(store.serverStatusListed)
+        XCTAssertTrue(store.readings.isEmpty)
+        await store.refreshServers()
+        XCTAssertEqual(calls.servers, ["sferyx"], "no SSH once the servers are gone")
+    }
+
+    /// A servers.json that cannot be read is a setup attempt: the board is
+    /// listed and says what is wrong, instead of silently disappearing.
+    func testBrokenServersFileKeepsTheBoardWithItsError() throws {
+        try Data("{ not json".utf8).write(to: root.appendingPathComponent("servers.json"))
+        let store = makeStore()
+        XCTAssertTrue(store.serverStatusListed)
+        XCTAssertNotNil(store.serverError)
+        XCTAssertTrue(store.readings.isEmpty)
+    }
+
+    func testDeletedServerStatusStaysUnlistedWithServersSetUp() async throws {
+        _ = try writeServers()
+        let store = serverStore(SSHCalls())
+        XCTAssertTrue(store.serverStatusListed)
+        _ = await MonitorDashboardDeletion(store: store, prompts: prompts(answer: true))
+            .delete(id: MonitorStore.serverStatusID, title: "Server status")
+        XCTAssertFalse(store.serverStatusListed)
+        XCTAssertFalse(serverStore(SSHCalls()).serverStatusListed, "still unlisted after relaunch")
+    }
+
+    /// An unreadable deleted list pauses a set-up Server status with a
+    /// notice, but does not invent the board for a user without servers.
+    func testUnreadableListDoesNotListServerStatusWithoutServers() throws {
+        try Data("invalid".utf8).write(to: MonitorRemovedDashboards.url(root: root), options: .atomic)
+        let store = makeStore()
+        XCTAssertNotNil(store.dashboardError)
+        XCTAssertFalse(store.serverStatusListed)
+        XCTAssertNil(store.serverError)
+
+        _ = try writeServers()
+        store.reloadFiles()
+        XCTAssertTrue(store.serverStatusListed)
+        XCTAssertNotNil(store.serverError, "set-up Server status says it is paused")
+        XCTAssertTrue(store.readings.isEmpty)
+    }
+
+    func testBothMonitorSurfacesListServerStatusOnlyWhenSetUp() throws {
+        let monitor = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Sidekey/Monitor")
+        for name in ["MonitorHoverPanel.swift", "MonitorWindowController.swift"] {
+            let source = try String(contentsOf: monitor.appendingPathComponent(name), encoding: .utf8)
+            XCTAssertTrue(source.contains("if store.serverStatusListed {"), name)
+            XCTAssertFalse(source.contains("!store.serverStatusRemoved"), name)
+            XCTAssertFalse(source.contains("Open Server status"), name)
+        }
+    }
+
+    func testEmptyMonitorTextNamesNoLocalPath() {
+        XCTAssertEqual(MonitorHoverPanel.emptyTitle, "No dashboards yet")
+        XCTAssertFalse(MonitorHoverPanel.emptyText.contains("servers.json"), "no local paths in the picker")
+        XCTAssertTrue(MonitorHoverPanel.emptyText.contains("agent"))
+    }
+
+    /// The empty text must not give the panel a minimum height: a first
+    /// version (fixedSize) grew a 290 pt host to 1265 pt and moved every
+    /// click target with it.
+    func testEmptyMonitorKeepsItsHostSize() throws {
+        _ = NSApplication.shared
+        let store = makeStore()
+        XCTAssertTrue(MonitorHoverPanel.pickerIsEmpty(serverStatusListed: store.serverStatusListed,
+                                                      dashboardCount: store.dashboards.count))
+        for size in [NSSize(width: 310, height: 290), NSSize(width: 312, height: 159)] {
+            let view = NSHostingView(rootView: MonitorHoverPanel(store: store, onBack: {}))
+            let window = NSPanel(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size),
+                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+            window.isReleasedWhenClosed = false
+            window.contentView = view
+            view.frame = NSRect(origin: .zero, size: size)
+            for _ in 0..<3 {
+                view.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            XCTAssertEqual(view.frame.size, size)
+            store.stop()
+            window.contentView = nil
+            window.close()
+        }
+    }
+
+    func testAgentInstructionsSayServerStatusIsOptional() {
+        let text = WhytapCustomizationContext.promptInstructions
+        XCTAssertFalse(text.contains("Built-in Server status"))
+        XCTAssertFalse(text.contains("built-in dashboard"))
+        XCTAssertTrue(text.contains("not listed until the user sets it up"))
+        XCTAssertTrue(text.contains("Do not create servers.json unless the user asks"))
+    }
+
     /// The builder's reproducer (queue ticket 315): a poll paused before SSH,
     /// as during a credential lookup, must not connect after Delete.
     func testDeletionCancelsAPollStillPreparingItsConnection() async throws {
@@ -283,6 +426,113 @@ final class MonitorDashboardDeletionTests: XCTestCase {
 
         XCTAssertEqual(contacted.value, 0, "confirmed deletion must stop a poll still preparing its connection")
         XCTAssertTrue(store.readings.isEmpty)
+    }
+
+    /// Builder's reproducer (queue ticket 463): a hidden or unconfigured
+    /// board makes no connection, so a poll still preparing its connection
+    /// must not connect once its configuration is removed, emptied, made
+    /// unreadable or replaced by other servers.
+    func testPollPreparingItsConnectionStopsWhenItsConfigurationGoesAway() async throws {
+        let file = root.appendingPathComponent("servers.json")
+        let changes: [(name: String, listed: Bool, rows: [String], change: () throws -> Void)] = [
+            ("remove", false, [], { try FileManager.default.removeItem(at: file) }),
+            ("empty", false, [], { try Data(#"{"servers":[]}"#.utf8).write(to: file) }),
+            ("invalid", true, ["sferyx"], { try Data("{ not json".utf8).write(to: file) }),
+            ("replace", true, ["other"], {
+                try Data(#"{"servers":[{"id":"other","name":"Other","group":"Team","sshTarget":"other"}]}"#.utf8)
+                    .write(to: file)
+            }),
+        ]
+        for step in changes {
+            _ = try writeServers()
+            let began = XCTestExpectation(description: "\(step.name): poll reached authentication before SSH")
+            let release = AsyncStream<Void>.makeStream()
+            let contacted = SSHCalls()
+            let store = MonitorStore(root: root) { server in
+                if server.id == "sferyx" {
+                    began.fulfill()
+                    for await _ in release.stream { break }
+                }
+                try Task.checkCancellation()
+                await MainActor.run { contacted.servers.append(server.id) }
+                throw CancellationError()
+            }
+            store.reloadFiles()
+            let poll = Task { await store.refreshServers() }
+            await fulfillment(of: [began], timeout: 2)
+
+            try step.change()
+            store.reloadFiles()
+            release.continuation.yield(())
+            release.continuation.finish()
+            let finished = await poll.value
+
+            XCTAssertFalse(finished, "\(step.name): the obsolete poll is reported as cancelled")
+            XCTAssertEqual(contacted.servers, [], "\(step.name): the obsolete poll must not connect")
+            XCTAssertEqual(store.serverStatusListed, step.listed, step.name)
+            XCTAssertEqual(store.readings.map(\.server.id), step.rows, step.name)
+            XCTAssertFalse(store.readings.contains { $0.refreshing }, step.name)
+            XCTAssertEqual(store.serverError != nil, step.name == "invalid", step.name)
+
+            // The servers that replaced the old ones are polled normally.
+            await store.refreshServers()
+            XCTAssertEqual(contacted.servers, step.name == "replace" ? ["other"] : [], step.name)
+        }
+    }
+
+    /// An unchanged servers.json reread by the 2 s loop keeps its poll.
+    func testRereadingTheSameConfigurationKeepsThePollInFlight() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "poll reached authentication before SSH")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = SSHCalls()
+        let store = MonitorStore(root: root) { server in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.servers.append(server.id) }
+            throw CancellationError()
+        }
+        store.reloadFiles()
+        let poll = Task { await store.refreshServers() }
+        await fulfillment(of: [began], timeout: 2)
+        store.reloadFiles()
+        store.reloadFiles()
+        release.continuation.yield(())
+        release.continuation.finish()
+        let finished = await poll.value
+        XCTAssertTrue(finished)
+        XCTAssertEqual(contacted.servers, ["sferyx"])
+    }
+
+    /// The running loop polls replaced servers at once, not an interval later.
+    func testRunningStorePollsReplacedServersWithoutWaitingAnInterval() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "first poll preparing")
+        let other = XCTestExpectation(description: "replacement server polled")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = SSHCalls()
+        let store = MonitorStore(root: root) { server in
+            if server.id == "sferyx" {
+                began.fulfill()
+                for await _ in release.stream { break }
+            }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.servers.append(server.id) }
+            if server.id == "other" { other.fulfill() }
+            throw CancellationError()
+        }
+        store.start()
+        defer { store.stop() }
+        await fulfillment(of: [began], timeout: 2)
+        try Data(#"{"servers":[{"id":"other","name":"Other","group":"Team","sshTarget":"other"}]}"#.utf8)
+            .write(to: root.appendingPathComponent("servers.json"))
+        store.reloadFiles()
+        release.continuation.yield(())
+        release.continuation.finish()
+        // Well under refreshSeconds (15 s): the next 2 s loop turn polls it.
+        await fulfillment(of: [other], timeout: 6)
+        XCTAssertEqual(contacted.servers, ["other"])
     }
 
     /// Builder's reproducer (queue ticket 317): island and Toolbox have their

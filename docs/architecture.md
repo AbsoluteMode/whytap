@@ -806,6 +806,13 @@ Monitor inside hover:
   Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
+  Server status is not a default board: MonitorStore.serverStatusListed is
+  true only while servers.json names at least one server (or cannot be read)
+  and server-status is not deleted; without it both surfaces show no row and
+  an empty picker says "No dashboards yet". Whytap never writes servers.json.
+  A reload that finds the polled configuration removed, emptied, unreadable
+  or replaced cancels the poll in flight before it reaches SSH.
+  WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
   A listed server-status hides Server status and stops its SSH polling,
   cancelling a poll in flight on every live surface (an in-process notice per
   Monitor folder); an unreadable list pauses polling too.

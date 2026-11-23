@@ -35,7 +35,7 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-21 the user reported the delete confirmation alert could not be clicked under the island and asked for only the question "are you sure you want to delete the dashboard".
     confirmed_at: 2026-11-21
-related: []
+related: [2026-11-23-monitor-server-status-optional.md]
 ---
 
 # Deleting Monitor dashboards

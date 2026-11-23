@@ -25,7 +25,7 @@ enum WhytapCustomizationContext {
         You can help the user customize Whytap and add local monitoring dashboards.
         Monitor data directory on this Mac: \(MonitorPaths.root.path)
         Custom snapshot directory: \(MonitorPaths.dashboards.path)
-        Built-in Server status configuration: \(MonitorPaths.servers.path)
+        Optional Server status configuration: \(MonitorPaths.servers.path)
 
         Custom dashboards are passive JSON files named <id>.json in the snapshot
         directory. The app rereads them; no app rebuild is needed. The JSON root has
@@ -33,7 +33,8 @@ enum WhytapCustomizationContext {
         optional updatedAt (ISO 8601 with seconds and timezone), optional
         staleAfterSeconds (default 60), and widgets. Use a unique id containing letters,
         digits, dot, underscore or hyphen; start with a letter or digit. The id
-        server-status is reserved for the built-in dashboard. The user can delete any
+        server-status is reserved for Server status. Monitor starts with no
+        dashboards: it lists only what the user or their agent added. The user can delete any
         dashboard in Monitor, Server status included; its id is then listed in
         removed-dashboards.json in the Monitor data directory and hidden (Server status
         stops polling its servers). To bring one back, run
@@ -51,7 +52,10 @@ enum WhytapCustomizationContext {
         JSON never executes commands. Never put keys or passwords in snapshots,
         repository files, arguments or logs. Preserve unrelated dashboards.
 
-        Server status uses servers.json with refreshSeconds (10...3600, default 15)
+        Server status is optional and is not listed until the user sets it up: the
+        dashboard appears in Monitor only while servers.json names at least one
+        server. Do not create servers.json unless the user asks to watch servers.
+        It has refreshSeconds (10...3600, default 15)
         and servers [{id, name, group, sshTarget: "existing-ssh-alias"}]. Use only
         existing user-authorized SSH connections. The built-in collector obtains
         Linux CPU, RAM and supported NVIDIA GPU metrics with fixed read-only probes.

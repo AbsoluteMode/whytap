@@ -266,6 +266,17 @@ Live text in the recording wing (Drop and agent voice):
   shorter rewrite (ElevenLabs removes repeated words and false starts) keeps
   the text before it in place and leaves free space at the right edge. WHY:
   .project-docs/decisions/2026-11-21-live-text-forward-only.md
+  LiveTextStabilizer first decides which snapshots the line shows at all. It
+  compares each one with the text on screen word by word: words after the
+  last common word are shown at once and replace the live guess after it; a
+  snapshot that only ends earlier is not shown; a change before that word (or
+  a shorter phrase) is shown in one step after the provider has kept that
+  same change for 1.5 s. Text delivered but not revealed yet follows the
+  newest snapshot. The plain line (IslandPlainLiveText) uses the same rule.
+  ElevenLabs scribe_v3_live alternates between readings of a phrase for a
+  second or two. Display only: paste and auto-stop read the provider's
+  text. Any provider. WHY:
+  .project-docs/decisions/2026-11-23-live-text-stable-display.md
   Soniox publishes the complete live snapshot once per token frame.
   WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
   A face rebuilt mid-take shows its text at once; text revealed past its
@@ -1370,52 +1381,123 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
-OnboardingWindowController, accessory app, no Dock icon) in place of the former
-Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
-onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
-word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done; every page but the first has Back
-(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
-OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
-route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
-Lang setting; searchable list, English or native name, arrows and Return), On
-this Mac card ("Download and use for Drop", about 470 MB; when the download
-lands OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that
-cannot run, nothing else; hidden on Intel), and one tile per keyed provider
-(OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
-Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
-badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; one footer place: Continue when a
-saved speech key (not refused) or the downloaded model can run Drop, with "Drop
-will use X" above it (preselected: Drop's running provider, else Soniox,
-Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
-the free key check before a new provider), else Set up later; "Restore from another Mac"; the
-stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
-and Keyboard control on PermissionsSettingsViewModel, done at
-dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
-the shortcut is not installed), plus an optional Screen Recording row for Shot
-(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
-never holds Continue); hidden when ready.
-3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
-DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
-onboarding is visible a Drop press with no route says so on the page (no
-Settings over it) and one with a missing permission returns to page 2.
-4 Make it yours: tool shortcuts and hover tools, each with a bundled clip
-(Resources/FeatureVideos/onboarding-hotkeys.mp4, onboarding-hover.mp4) and Open
-for Settings -> Hotkeys or Toolbox. 5 Turn on more: Google search / Meeting
-Notes / Agent with switch and clip, "Add a model" when the feature's model does
-not run, and Coding agents (OnboardingCodingTools: Claude Code and Codex when
-installed; Connect runs CaseClientSetup.connect, the Case -> Connect setup,
-without a Case registration); Done. No Calendar. System Audio Recording, Input
-Monitoring, Automation and Calendar are asked at first use. OnboardingLaunch:
-firstLaunchPresented (any launch since 2026-10-26) or the former onboarding's
-key = ran before, never shown on update; sidekey.onboarding.pending.v1 brings
-it back after a quit until Done; neither key is in backups or sync. A first
-Drop press with the microphone never asked asks it and records nothing
+OnboardingJourneyWindowController + OnboardingJourneyModel, accessory app, no
+Dock icon): one dark 520x440 window with Back (also ← and ⌘[ outside text
+fields), a progress rail with one segment per step (a passed step reached by
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10"
+("NN / 11" with the search step), one step at
+a time and a footer. Steps (OnboardingStep, OnboardingJourney.steps): Source
+(On this Mac or API keys, two wire figures), Speech key, Language model key
+(optional), Web search for the Agent (Tavily, only after a Self-hosted language
+model: a server has no web search of its own; no segment otherwise), Language (a
+wireframe globe: drag to turn, click a country or type a country or language;
+OnboardingLanguageStage, OnboardingGlobe; only the speech route's languages;
+English, Portuguese and Spanish offer variants, stored beside the language in
+PrivacyPreferences.selectedLanguageVariant while providers keep the base code;
+outlines from scripts/onboarding_globe_data.py), Keyboard control, Microphone, Input Monitoring (only when the Drop
+shortcut needs it), Screen Recording (optional), Try Drop, Toolbox,
+and the last step (Enjoy Whytap, with whytap.ai and Finish); a step whose result already holds is left out. A step whose
+action succeeds moves on by itself after its dwell (OnboardingDwellController;
+1.15 s on the key steps so the padlock opens first) with no chip or Continue;
+Return goes on at once, Back keeps what was done and a step reached by Back
+offers a plain Next. Step 1 and the three key steps share one wire scene
+(OnboardingWireScene, drawn per display frame): the chosen key flies to its
+padlock, turns and opens it when a key is accepted and catches when refused.
+The key field (OnboardingKeyStage) shows every input as dots; a provider is
+named only by its key's own format (prefix or Deepgram's 40 hex characters)
+or a clicked mark, otherwise Return is a format problem; five problems are
+named (format, refused, no credit or access, no answer with Retry; Tavily's
+429 is "busy" with Retry). An accepted language model key starts on the
+recommended model, the provider's newest Sonnet or Sol in its catalog
+(OnboardingModelPick.recommended), otherwise its newest flagship (newest
+generation, highest known output price). On the language model step only
+(the speech step sets the provider's one Settings speech model and moves on),
+when the provider has several models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
+names never cut (OnboardingModelPick.readableName) with the ID under each,
+prices, the recommended one first with a small tag; the panel keeps one width (from its widest row in the
+selection and the whole catalog, `OnboardingModelList.panelWidth`) with and without a search query, results
+use the same row grid and "No models found" is one quiet row; no model is checked
+until the person picks one, then the list checks it and the button names it. The step waits for a pick or
+Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
+through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
+The provider row ends with a "Self-hosted" mark; it turns the step's key
+field into Base URL, an optional key and one model on the same step
+(OnboardingServerFields): a transcription
+model on the speech step, an LLM on the language model step, and a server
+added on one comes back filled in on the other; Return adds the server and its checked model like
+Settings does (addServer, runServerModelCheck, addServerModel), sets the
+shared row and moves on; a provider mark or Escape turns the fields back.
+"Accepted" belongs to the route that answered (OnboardingJourneyModel.accepted:
+a provider, the server or Tavily; `outcome(_:for:)`): another mark shows its
+own state (its try, "Saved X key · press Return" or an empty field), the
+server fields stay open, and the route, model, Self-hosted mark and Tavily
+step change only after a new check passes; "Choose model" picks only on the
+accepted provider. Above ten models the list opens with a search over the
+provider's whole catalog (OnboardingModelSearch, modelCatalog). The four access
+steps share one template (OnboardingAccessStage): a title, the step's own wire
+figure (a Command keycap on its switch, a microphone capsule, an aperture, a
+display with viewfinder corners; OnboardingAccessFigures, drawn per display
+frame), one line and an Allow capsule. Allow asks macOS and the step waits
+(OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
+Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
+no spinner); only the
+system's own check (polling and a return to the app) makes it granted, then
+the figure plays its click and the step moves on after 1.05 s. A return to the
+app with the switch still off shows one calm line and Allow again
+(OnboardingJourneyModel.recheckPermissions; not while macOS's own microphone
+dialog is open); reaching the step again starts at Allow. Screen Recording has
+Skip for now under Allow instead of the footer's Skip. The last three steps
+(OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
+key as a wire key and once as keys in the real field's header ("Hold Space
+and speak"); the field says "Your text will appear here", a take that brought
+nothing says so inside the field (no line under it), and Continue sits under
+the field from the start and works once a take arrived, with Skip beside it;
+in the app Drop itself listens, while the standalone preview, which starts no
+hotkeys, listens for the person's Drop shortcut in its own window
+(OnboardingDropStandIn, implemented by OnboardingPreviewKit's
+OnboardingPreviewDrop, which runs a held Space or hold combo through Drop's own
+SpaceHoldDetector with SpaceHoldMonitor's mapping and swallow rule: a short tap
+types a space, a hold past the threshold erases what printed, records and
+swallows its repeats and release; a take always ends on release, focus loss, a
+30 s limit or leaving the step); while Drop records
+(OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
+lede becomes soft waves that follow the voice, with no island chip; a take that
+ends with nothing in the field gets one calm line ("No speech heard - try
+again.", the text went to another field, or Drop's delivery failure) and a new
+take clears it. There is no Shortcuts step (REV 64). Toolbox puts the whole
+Toolbox catalog (every tool but Settings, as Settings → Toolbox lists it) on a
+tilted ring of 38 pt tiles that turns slowly like a carousel
+(OnboardingCarousel, one round in 70 s, per display frame; still under Reduce
+Motion) around a small card; a pointed or focused tile stops the turn, lights
+and is named on the card with HoverToolRegistry's description, and the turn
+goes on when the pointer leaves. The last step, "Enjoy Whytap.", has no
+summary: a loop of twenty real questions for the Ask agent
+(OnboardingQuestionList) that drifts slowly from the bottom up (8 pt/s, four
+rows in view, soft fades at the edges, whole rows without motion under Reduce
+Motion); the pointer on the list stops the drift and lights the row under it
+(brighter fill, rose outline, bright ↗, pointing-hand cursor); a click opens
+whytap.ai/?q=<question>, which the page asks on load; then one
+Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
+Skip / Set up later invalidate a running key or model check of that step (`OnboardingJourneyModel.skip`,
+`selectShared(stillWanted:)`), so no route changes after a skip; On this Mac's download keeps the model alive
+until it lands and then applies its route unless a newer speech choice came first; a permission revoked after
+it was granted clears the step's allowed state. Footer Skip and a key's Submit/Retry use
+OnboardingFeedbackButtonStyle (hover, press, focus, unavailable).
+Toolbox and the last step have no timer: they wait for Continue or Finish (or
+Return), and their progress segment does not fill by time.
+`scripts/onboarding-preview.sh` runs the same window standalone with fakes,
+outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
+does not link. System Audio Recording, Automation and Calendar are asked at
+first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
+or the former onboarding's key = ran before, never shown on update;
+sidekey.onboarding.pending.v1 brings it back after a quit until it is
+finished; neither key is in backups or sync. A first Drop press with the
+microphone never asked asks it and records nothing
 (DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
 onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
-and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+and relaunch. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
+.project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow
@@ -1793,11 +1875,11 @@ images one item each, mixed rows one item per group in order) and clears the
 marks; without a target Enter leaves the marks alone. Whether Enter may paste
 marks follows the target name live: the island sets it in the same panelMode
 change that shows History, after the panel appeared. The footer is a row of
-HistoryHint blocks (HistoryHoverView.hints), each compact keycaps through
-HotkeyHintView(style: .keycaps) and a short action, hairlines between them:
-[click] Copy | [⌘][click] Select | [↩] Paste to <app>; with marks [click]
-Copy N | [↩] Paste N to <app> | [esc] Clear (Toolbox: [⌘][click] Unmark, it
-has no key monitor). Only the app name truncates. Multi-row pastes and copies
+plain-text HistoryHint blocks (HistoryHoverView.hints) with hairlines between
+them, no icons or keycaps: "Click to copy | ⌘-click for several | Enter to
+paste to <app>"; with marks "Click to copy N | Enter to paste N to <app> | Esc
+to clear" (Toolbox: "⌘-click to unmark", it has no key monitor). The row steps
+from 9.5 pt to 8 pt (ViewThatFits); only then the app name truncates. Multi-row pastes and copies
 stay out of clipboard history. WHY:
 .project-docs/decisions/2026-11-22-history-multi-paste.md,
 .project-docs/decisions/2026-11-22-history-multi-copy.md,

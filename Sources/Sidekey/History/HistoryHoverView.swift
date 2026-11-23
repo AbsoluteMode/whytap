@@ -157,26 +157,21 @@ struct HistoryHoverView: View {
 
     /// Footer. Without marks it teaches the gestures; with marks it says what
     /// a click and Enter will do with them. `escapeClears` is false where no
-    /// key monitor runs (Toolbox): there ⌘-click unmarks. Every hint is
-    /// "key → what happens"; the view draws the keys as keycaps.
+    /// key monitor runs (Toolbox): there ⌘-click unmarks. Each hint is one
+    /// plain-text block; the view separates them with hairlines.
     // WHY: .project-docs/decisions/2026-11-22-history-hint-keycaps.md
     static func hints(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> [HistoryHint] {
         let target = (targetAppName?.isEmpty == false) ? targetAppName : nil
         guard selectedCount > 0 else {
-            var hints = [
-                HistoryHint(keys: [.click], action: "Copy"),
-                HistoryHint(keys: [.command, .click], action: "Select"),
-            ]
-            if let target { hints.append(HistoryHint(keys: [.returnKey], action: "Paste to", target: target)) }
+            var hints = [HistoryHint(text: "Click to copy"), HistoryHint(text: "⌘-click for several")]
+            if let target { hints.append(HistoryHint(text: "Enter to paste to", target: target)) }
             return hints
         }
-        var hints = [HistoryHint(keys: [.click], action: "Copy \(selectedCount)")]
+        var hints = [HistoryHint(text: "Click to copy \(selectedCount)")]
         if let target {
-            hints.append(HistoryHint(keys: [.returnKey], action: "Paste \(selectedCount) to", target: target))
+            hints.append(HistoryHint(text: "Enter to paste \(selectedCount) to", target: target))
         }
-        hints.append(escapeClears
-            ? HistoryHint(keys: [.escape], action: "Clear")
-            : HistoryHint(keys: [.command, .click], action: "Unmark"))
+        hints.append(HistoryHint(text: escapeClears ? "Esc to clear" : "⌘-click to unmark"))
         return hints
     }
 
@@ -384,73 +379,68 @@ struct HistoryHoverView: View {
     }
 }
 
-/// One footer hint: the key or gesture, then what it does.
+/// One footer hint in plain text.
 struct HistoryHint: Equatable {
-    enum Key: Equatable {
-        case click
-        case command
-        case returnKey
-        case escape
-
-        var keycap: KeycapContent {
-            switch self {
-            case .click: return .symbol("cursorarrow.click", accessibilityLabel: "Click")
-            case .command: return .text(HotkeyGlyph.command)
-            case .returnKey: return .symbol("return", accessibilityLabel: "Return key")
-            case .escape: return .text("esc")
-            }
-        }
-    }
-
-    let keys: [Key]
-    /// Short verb phrase ("Copy", "Paste 3 to").
-    let action: String
-    /// App the paste goes to. Drawn after the action and the only text that
+    /// The hint up to the app name ("Click to copy", "Enter to paste 3 to").
+    let text: String
+    /// App the paste goes to. Drawn after the text and the only part that
     /// shortens when the footer is narrow, so the hints stay whole.
     var target: String? = nil
 
-    var spokenText: String {
-        let keyNames = keys.map { $0 == .escape ? "Escape key" : $0.keycap.spokenName }
-        return keyNames.joined(separator: " ") + ": " + [action, target].compactMap { $0 }.joined(separator: " ")
-    }
+    var fullText: String { [text, target].compactMap { $0 }.joined(separator: " ") }
 }
 
-/// The footer's hints as separate blocks: keycaps, then the action, with a
-/// hairline between blocks.
+/// The footer's hints as separate plain-text blocks with a hairline between
+/// them. The whole row steps down from 9.5 pt to 8 pt (as the old one-line
+/// footer scaled to fit); only when 8 pt is still too wide does the app
+/// name, and nothing else, shorten.
 private struct HistoryHintBar: View {
     let hints: [HistoryHint]
 
+    static let fontSizes: [CGFloat] = [9.5, 9, 8.5, 8]
+
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(Self.fontSizes, id: \.self) { size in
+                row(size: size, truncatesTarget: false)
+            }
+            row(size: Self.fontSizes.last ?? 8, truncatesTarget: true)
+        }
+    }
+
+    private func row(size: CGFloat, truncatesTarget: Bool) -> some View {
         HStack(spacing: 6) {
             ForEach(Array(hints.enumerated()), id: \.offset) { index, hint in
                 if index > 0 {
                     Capsule()
-                        .fill(IslandInk.color.opacity(0.2))
+                        .fill(IslandInk.color.opacity(0.22))
                         .frame(width: 1, height: 10)
                 }
-                block(hint)
+                block(hint, truncatesTarget: truncatesTarget)
             }
         }
+        .font(.system(size: size, weight: .medium))
+        .foregroundStyle(IslandInk.color.opacity(0.55))
         .lineLimit(1)
     }
 
-    private func block(_ hint: HistoryHint) -> some View {
+    @ViewBuilder
+    private func block(_ hint: HistoryHint, truncatesTarget: Bool) -> some View {
         HStack(spacing: 3) {
-            HotkeyHintView(contents: hint.keys.map(\.keycap), style: .keycaps, size: .compact)
-                .accessibilityHidden(true)
-            Text(hint.action)
-                .foregroundStyle(IslandInk.color.opacity(0.72))
+            Text(hint.text)
                 .fixedSize()
             if let target = hint.target {
-                Text(target)
-                    .foregroundStyle(IslandInk.color.opacity(0.92))
-                    .truncationMode(.tail)
-                    .layoutPriority(-1)
+                if truncatesTarget {
+                    Text(target)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
+                } else {
+                    Text(target).fixedSize()
+                }
             }
         }
-        .font(.system(size: 10, weight: .medium))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(hint.spokenText)
+        .accessibilityLabel(hint.fullText)
     }
 }
 

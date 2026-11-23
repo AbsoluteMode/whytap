@@ -242,32 +242,32 @@ final class HistoryMultiPasteTests: XCTestCase {
     // MARK: - Hint and availability
 
     func testHintTeachesCommandClickAndCountsMarks() {
-        func spoken(_ hints: [HistoryHint]) -> [String] { hints.map(\.spokenText) }
+        func blocks(_ hints: [HistoryHint]) -> [String] { hints.map(\.fullText) }
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: "Telegram")),
-            ["Click: Copy", "Command key Click: Select", "Return key: Paste to Telegram"]
+            blocks(HistoryHoverView.hints(targetAppName: "Telegram")),
+            ["Click to copy", "⌘-click for several", "Enter to paste to Telegram"]
         )
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: "Telegram", selectedCount: 3)),
-            ["Click: Copy 3", "Return key: Paste 3 to Telegram", "Escape key: Clear"]
+            blocks(HistoryHoverView.hints(targetAppName: "Telegram", selectedCount: 3)),
+            ["Click to copy 3", "Enter to paste 3 to Telegram", "Esc to clear"]
         )
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2)),
-            ["Click: Copy 2", "Escape key: Clear"],
+            blocks(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2)),
+            ["Click to copy 2", "Esc to clear"],
             "Without a target the marks are for copying"
         )
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2, escapeClears: false)),
-            ["Click: Copy 2", "Command key Click: Unmark"],
+            blocks(HistoryHoverView.hints(targetAppName: nil, selectedCount: 2, escapeClears: false)),
+            ["Click to copy 2", "⌘-click to unmark"],
             "Toolbox has no key monitor: ⌘-click unmarks there"
         )
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: nil)),
-            ["Click: Copy", "Command key Click: Select"]
+            blocks(HistoryHoverView.hints(targetAppName: nil)),
+            ["Click to copy", "⌘-click for several"]
         )
         XCTAssertEqual(
-            spoken(HistoryHoverView.hints(targetAppName: "", selectedCount: 1)),
-            ["Click: Copy 1", "Escape key: Clear"],
+            blocks(HistoryHoverView.hints(targetAppName: "", selectedCount: 1)),
+            ["Click to copy 1", "Esc to clear"],
             "An empty app name is no target"
         )
     }
@@ -275,23 +275,19 @@ final class HistoryMultiPasteTests: XCTestCase {
     func testHintKeepsTheAppNameApartSoOnlyItShortens() {
         let hints = HistoryHoverView.hints(targetAppName: "Microsoft Remote Desktop Beta", selectedCount: 2)
         XCTAssertEqual(hints.compactMap(\.target), ["Microsoft Remote Desktop Beta"])
-        XCTAssertEqual(hints[1].action, "Paste 2 to")
-        XCTAssertEqual(hints[1].keys, [.returnKey])
-        XCTAssertTrue(hints.allSatisfy { !$0.action.contains("Microsoft") })
+        XCTAssertEqual(hints[1].text, "Enter to paste 2 to")
+        XCTAssertTrue(hints.allSatisfy { !$0.text.contains("Microsoft") })
     }
 
-    func testHintKeysAreKeycapsNotWords() {
-        let hints = HistoryHoverView.hints(targetAppName: "Telegram")
-        XCTAssertEqual(hints.map(\.keys), [[.click], [.command, .click], [.returnKey]])
-        XCTAssertEqual(HistoryHint.Key.command.keycap, .text(HotkeyGlyph.command))
-        XCTAssertEqual(HistoryHint.Key.click.keycap, .symbol("cursorarrow.click", accessibilityLabel: "Click"))
-        XCTAssertEqual(HistoryHint.Key.returnKey.keycap, .symbol("return", accessibilityLabel: "Return key"))
-        XCTAssertEqual(HistoryHint.Key.escape.keycap, .text("esc"))
-        for key in [HistoryHint.Key.click, .returnKey] {
-            if case .symbol(let name, _) = key.keycap {
-                XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), name)
-            }
-        }
+    func testFooterIsPlainTextWithoutKeycapsOrIcons() throws {
+        let source = try String(contentsOfFile: #filePath
+            .replacingOccurrences(of: "Tests/SidekeyTests/History/HistoryMultiPasteTests.swift",
+                                  with: "Sources/Sidekey/History/HistoryHoverView.swift"), encoding: .utf8)
+        let bar = try XCTUnwrap(source.range(of: "private struct HistoryHintBar"))
+        let barSource = String(source[bar.lowerBound...].prefix(1500))
+        XCTAssertFalse(barSource.contains("HotkeyHintView"), "No keycap plates in the History footer")
+        XCTAssertFalse(barSource.contains("Image("), "No icons in the History footer")
+        XCTAssertFalse(source.contains("cursorarrow.click"))
     }
 
     func testEnterPastesOnlyWhereThereIsATarget() {

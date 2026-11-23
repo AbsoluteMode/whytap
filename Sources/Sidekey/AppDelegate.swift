@@ -264,7 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardWatcher: ClipboardWatcher?
     private var assetsDirectory: URL?
     private var permissionRepairWindowController: PermissionRepairWindowController?
-    private var onboardingWindowController: OnboardingWindowController?
+    private var onboardingWindowController: OnboardingJourneyWindowController?
     private var didCompleteReadyStartup = false
     private var runtimeAccessibilityGranted = false
     private var runtimePermissionsObserver: NSObjectProtocol?
@@ -554,11 +554,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             existing.show()
             return
         }
-        let model = OnboardingModel()
+        let model = OnboardingJourneyModel()
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
-        let controller = OnboardingWindowController(model: model) { [weak self] in
+        let controller = OnboardingJourneyWindowController(model: model) { [weak self] in
             OnboardingLaunch.finish(in: .standard)
             NowPlayingAutomationConsent.promptsDeferred = false
             // Released after AppKit finishes closing the window.
@@ -571,7 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The onboarding on screen, if any: Drop's setup problems are shown in it
     /// instead of opening a second window over it.
-    private var visibleOnboarding: OnboardingWindowController? {
+    private var visibleOnboarding: OnboardingJourneyWindowController? {
         onboardingWindowController.flatMap { $0.isVisible ? $0 : nil }
     }
 
@@ -2911,7 +2911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // row, where its key and model are one click away.
                 if case StreamingSessionSetupError.byokMisconfigured(let routeError) = error {
                     if let onboarding = visibleOnboarding {
-                        // The try page says Drop is not set up yet (or still
+                        // The try step says Drop is not set up yet (or still
                         // downloading) instead of Settings opening over it.
                         onboarding.model.noteDropSetupFailure(routeError.feature)
                     } else {

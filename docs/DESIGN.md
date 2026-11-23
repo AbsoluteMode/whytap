@@ -113,12 +113,15 @@ See the [provider web search decision](../.project-docs/decisions/2026-11-22-age
   nothing copied).
 - With marks, a plain click on any row copies all marked rows in mark order
   and clears the marks; Enter pastes them where there is a target.
-- The footer is separate blocks, each keycaps then a short action, with a
-  hairline between them: [click] Copy | [⌘][click] Select | [↩] Paste to <app>;
-  with marks [click] Copy N | [↩] Paste N to <app> | [esc] Clear (no Paste
-  block without a target; Toolbox ends with [⌘][click] Unmark). Only the app
-  name shortens when the row is narrow (2026-11-22, after the one-line footer
-  read as one confusing sentence; [decision](../.project-docs/decisions/2026-11-22-history-hint-keycaps.md)).
+- The footer is separate plain-text blocks with a thin vertical hairline
+  between them, no icons or keycaps: "Click to copy | ⌘-click for several |
+  Enter to paste to <app>"; with marks "Click to copy N | Enter to paste N to
+  <app> | Esc to clear" (no Enter block without a target; Toolbox ends with
+  "⌘-click to unmark"). The row steps from 9.5 pt down to 8 pt to fit; only
+  then the app name, never a hint, shortens with "…" (2026-11-23: the
+  one-line footer read as one sentence; a keycap/icon version shipped in
+  build 1724 and the maintainer asked to remove the icons;
+  [decision](../.project-docs/decisions/2026-11-22-history-hint-keycaps.md)).
   Without marks plain click and Enter keep their meaning.
 - Marked rows stay marked while switching Agent, Drop and Clipboard, so text
   and files from different tabs can go out together in mark order.

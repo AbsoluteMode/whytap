@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/LiveText/LiveTextTickerTests.swift
     confirmed_at: 2026-11-19
-related: [2026-11-15-live-text-rewrites.md, 2026-11-13-live-text-sand.md, 2026-11-21-live-text-forward-only.md]
+related: [2026-11-15-live-text-rewrites.md, 2026-11-13-live-text-sand.md, 2026-11-21-live-text-forward-only.md, 2026-11-23-live-text-stable-display.md]
 ---
 
 # Rewrites of visible text are held briefly
@@ -49,6 +49,10 @@ The rule is the same for every provider: only the text is compared.
 Changed 2026-11-21 ([forward-only scroll](2026-11-21-live-text-forward-only.md)):
 the hold is 0.35 s, and a rewrite of only the last two revealed characters or
 of closing marks is not held.
+
+Changed 2026-11-23 ([stable display](2026-11-23-live-text-stable-display.md)):
+snapshots pass `LiveTextStabilizer` first. The hold now sees only a rewrite
+of the words after the last common word, and a confirmed earlier change.
 
 ## Why
 

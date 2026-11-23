@@ -292,6 +292,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testShortCorrectionKeepsPrefixStillAndRevisedLettersVisible() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        model.confirmSeconds = 0
         model.prime("я говорю", now: 0)
         _ = render(model, now: 1, name: "rewrite-before")
         model.textArrived("Я говорю дальше", now: 1.01)
@@ -306,6 +307,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testOverflowingCorrectionGlidesAsOneRigidLine() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        model.confirmSeconds = 0
         let phrase = String(repeating: "привет ", count: 10)
         model.prime(phrase + "узко", now: 0)
         _ = render(model, now: 1, name: "overflow-before")
@@ -336,6 +338,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testAWordRemovedMidLineNeverMovesTheStartBack() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        model.confirmSeconds = 0
         let start = String(repeating: "привет ", count: 8)
         model.prime(start + "лишнее слово в конце", now: 0)
         _ = render(model, now: 1, name: "mid-before")
@@ -365,6 +368,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testAShorterPartialLeavesTheLineWhereItIs() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0
+        model.confirmSeconds = 0
         let start = String(repeating: "привет ", count: 8)
         model.prime(start + "подготовить короткий отчёт", now: 0)
         _ = render(model, now: 1, name: "short-before")
@@ -391,6 +395,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testNewWordsAfterAShorterRewriteDoNotSnapTheLine() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0
+        model.confirmSeconds = 0
         let start = String(repeating: "привет ", count: 8)
         model.prime(start + "лишнее длинное слово в конце", now: 0)
         _ = render(model, now: 1, name: "snap-before")
@@ -416,6 +421,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testWordsAfterACutEndAreNotDisplaced() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0
+        model.confirmSeconds = 0
         let start = String(repeating: "привет ", count: 8)
         model.prime(start + "подготовить короткий отчёт", now: 0)
         _ = render(model, now: 1, name: "cut-before")
@@ -440,6 +446,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testCommittedTextAfterAPartialOnlyMovesTheLineForward() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0
+        model.confirmSeconds = 0
         let start = String(repeating: "привет ", count: 8)
         model.prime(start + "не забыть написать реб-", now: 0)
         _ = render(model, now: 1, name: "commit-before")
@@ -463,6 +470,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testPunctuationToggledBehindTheLiveWordNeverMovesTheLineBack() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // every toggle reaches the screen
+        model.confirmSeconds = 0
         var commas = 0
         let start = String(repeating: "привет ", count: 8)
         let plain = start + "на три часа дня и попросить их подготовить"
@@ -496,6 +504,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testAClauseTakenBackAndRestoredKeepsTheLiveWordsStill() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        model.confirmSeconds = 0
         let start = "Что у тебя нового? Подумай насчёт завтра. "
         model.prime(start + "Чем стоит по", now: 0)
         _ = render(model, now: 1, name: "restore-before")
@@ -515,6 +524,7 @@ final class LiveTextTickerTests: XCTestCase {
     func testARewriteOfTheVisibleStartDoesNotJumpTheLine() {
         let model = IslandLiveTextTickerModel()
         model.rewriteHoldSeconds = 0  // geometry of the rewrite itself
+        model.confirmSeconds = 0
         let phrase = String(repeating: "привет ", count: 10)
         model.prime(phrase, now: 0)
         _ = render(model, now: 1, name: "start-before")

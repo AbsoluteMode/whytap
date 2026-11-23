@@ -177,19 +177,19 @@ struct IslandAgentWingView: View {
                     }
                     let animated = !reduceMotion && LiveTextTicker.canDrawPerCharacter(transcript)
                     ZStack(alignment: .leading) {
-                        if !animated || transcript.isEmpty {
-                            Text(transcript.isEmpty ? Self.recordingPlaceholder : transcript)
+                        if transcript.isEmpty {
+                            Text(Self.recordingPlaceholder)
                                 .font(.system(size: IslandLiveTextTickerModel.fontSize, weight: .medium))
-                                .foregroundStyle(.white.opacity(transcript.isEmpty ? 0.45 : 0.9))
+                                .foregroundStyle(.white.opacity(0.45))
                                 .lineLimit(1)
-                                .truncationMode(.head)   // виден ХВОСТ транскрипта
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .onChange(of: transcript, initial: true) { _, text in
-                                    // The plain-text fallback draws the whole shaped line at once.
-                                    if !animated, !text.isEmpty {
-                                        onRecordingTextWidthChange(Self.measuredRecordingTextWidth(text), text)
-                                    }
-                                }
+                        } else if !animated {
+                            // The plain-text fallback draws the whole shaped
+                            // line at once; the tail of the transcript shows.
+                            IslandPlainLiveText(text: transcript) { shown, text in
+                                guard !shown.isEmpty else { return }
+                                onRecordingTextWidthChange(Self.measuredRecordingTextWidth(shown), text)
+                            }
                         }
                         if animated {
                             // Always in the tree while recording, so the first

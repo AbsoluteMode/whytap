@@ -389,5 +389,43 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(later["environment_wait_minutes"], {"screen locked": 60})
 
 
+    def test_metrics_take_times_from_events_not_the_requeue_date(self):
+        ticket = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(ticket, "blocked")
+        self.update(ticket, "queued")  # requeue resets tickets.queued_at
+        self.call("claim")
+        self.update(ticket, "done")
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        ids = [r[0] for r in db.execute("SELECT id FROM events WHERE ticket=? ORDER BY id",
+                                        (ticket,))]
+        clocks = ["00:00", "00:10", "00:20", "01:05", "01:15", "01:25"]
+        for event_id, clock in zip(ids, clocks):
+            db.execute("UPDATE events SET created_at=? WHERE id=?",
+                       (f"2026-01-01T{clock}:00+00:00", event_id))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T01:05:00+00:00' WHERE id=?",
+                   (ticket,))
+        db.commit()
+        db.close()
+        early = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:55:00+00:00")
+        self.assertEqual(early["queue_wait_minutes"]["max"], 10)
+        whole = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(whole["queue_wait_minutes"], {"n": 2, "median": 10.0, "p75": 10.0,
+                                                       "p90": 10.0, "max": 10.0})
+        self.assertEqual(whole["pr_to_done_minutes"]["with_returns"]["max"], 85)
+
+    def test_meeting_wait_spans_its_rechecks_and_ends_at_idle(self):
+        self.enqueue()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T00:05:00+00:00 deferred install: next meeting check not due",
+            "2026-01-01T00:06:00+00:00 watchdog: install waits",
+            "2026-01-01T00:10:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T00:12:00+00:00 idle"]) + "\n")
+        metrics = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:30:00+00:00")
+        self.assertEqual(metrics["environment_wait_minutes"], {"meeting gate": 12})
+
 if __name__ == "__main__":
     unittest.main()

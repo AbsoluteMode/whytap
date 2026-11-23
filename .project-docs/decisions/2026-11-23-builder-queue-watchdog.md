@@ -73,16 +73,20 @@ for the microphone; 16 author events were unacknowledged (11 of them `other`).
   without a queue event for 60 minutes during a session, open work waiting
   for the environment for 60 minutes, two sessions in a row without progress
   (queued work or a deferred install), a deferred install older than two
-  hours, and author events unacknowledged after 20 minutes. An episode clears
-  only when its condition is resolved; an event in scope never expires. A
+  hours, and author events unacknowledged after 20 minutes. The scope for
+  author events starts when the watcher is activated or first started, before
+  its first session. An episode clears only when its condition is resolved;
+  an event in scope never expires. A
   record a destination cannot take waits in an outbox and is written once the
   destination works. It keeps a heartbeat file, shows no notifications, never
   changes the queue, the lock or the session, and its own failures are only
-  logged. A failed, malformed or oddly shaped environment probe is unknown and
-  never blocks.
+  logged. A failed, malformed or oddly shaped environment probe (including a
+  number too large for a float) is unknown and never blocks.
 - `scripts/build-queue-metrics.py` measures a period read-only from the
   events inside it, with the status as of the cutoff, and clips waits that
-  cross either end, so the effect of each later step can be compared with
+  cross either end. Submission and requeue times come from `queued` events,
+  because a requeue resets the ticket's `queued_at`; a meeting-gate wait spans
+  its rechecks and ends at the next other decision, idle included. So the effect of each later step can be compared with
   this baseline.
 
 ## Rationale

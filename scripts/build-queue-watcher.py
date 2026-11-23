@@ -172,11 +172,16 @@ def console_locked():
     return True
 
 
-def number(value):
-    """A finite real number, or None (bools and strings are not numbers here)."""
+def number(value, low=0.0, high=1e6):
+    """A finite real number within [low, high], or None: bools, strings, integers too
+    large for a float and absurd magnitudes are unknown, never an exception."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if value == value and abs(value) != float("inf") else None
+    try:
+        value = float(value)
+    except OverflowError:
+        return None
+    return value if value == value and low <= value <= high else None
 
 
 def environment(config):
@@ -204,9 +209,9 @@ def environment(config):
     locked = probe.get("screen_locked") if isinstance(probe.get("screen_locked"), bool) else None
     load = number(probe.get("load"))
     cpus = probe.get("cpus")
-    if isinstance(cpus, bool) or not isinstance(cpus, int) or cpus < 1:
+    if isinstance(cpus, bool) or not isinstance(cpus, int) or not 1 <= cpus <= 4096:
         cpus = os.cpu_count() or 1
-    per_cpu = number(config.get("load_limit_per_cpu"))
+    per_cpu = number(config.get("load_limit_per_cpu"), high=1000)
     if per_cpu is None or per_cpu <= 0:
         per_cpu = DEFAULTS["load_limit_per_cpu"]
     limit = per_cpu * cpus
@@ -220,8 +225,16 @@ def environment(config):
 
 
 def waiting_kind(reason):
-    """One log line per wait: a changing load figure is the same wait."""
-    return "waiting: load" if reason.startswith("waiting: load") else reason
+    """One log line per wait: a changing load figure is the same wait, and a deferred
+    install between meeting checks is one wait until it starts or the queue changes."""
+    for prefix in ("waiting: load", "deferred install"):
+        if reason.startswith(prefix):
+            return prefix
+    return reason
+
+
+def is_wait(reason):
+    return reason.startswith(("waiting:", "deferred install"))
 
 
 def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}):
@@ -739,8 +752,24 @@ def command_run(root):
         os.close(lock_fd)
 
 
+def ensure_watchdog_scope(root, now=None):
+    """Fix the watchdog's lower bound for author events once, before any session this
+    watcher starts: events from then on are in scope; history from before the watcher
+    was enabled is not."""
+    path = root / WATCHDOG
+    state = read_json(path, {})
+    if not state.get("undelivered_since"):
+        state["undelivered_since"] = datetime.fromtimestamp(
+            now or time.time(), timezone.utc).isoformat(timespec="seconds")
+        write_json(path, state)
+
+
 def watch(root):
     config = load_config(root)
+    try:
+        ensure_watchdog_scope(root)
+    except OSError as error:
+        log(f"watchdog scope could not be recorded: {error}")
     while True:
         # Before every start, also after our own session: while anything of an
         # earlier session is left, its record and lock stay and nothing new starts.
@@ -754,7 +783,7 @@ def watch(root):
             watchdog(root, config, {"reason": reason, "no_progress": state.get("no_progress", 0)})
             last = str(state.get("last_reason", ""))
             if waiting_kind(last) != waiting_kind(reason) and (
-                    reason != "idle" or last.startswith("waiting:")):
+                    reason != "idle" or is_wait(last)):
                 log(reason)  # a wait is logged when it starts, changes kind and ends
             state["last_reason"] = reason
             if json.dumps(state, sort_keys=True) != before:
@@ -863,6 +892,7 @@ def activate(root, arguments):
         raise ValueError(config["engine"] + " is not on PATH")
     template = (SOURCES / "build-queue-watcher.plist.template").read_text()
     helper(root, "", "install")
+    ensure_watchdog_scope(root)
     shutil.copyfile(Path(__file__).resolve(), root / INSTALLED_WATCHER)
     shutil.copyfile(SOURCES / "build-queue-builder-prompt.md", root / INSTALLED_PROMPT)
     write_json(root / CONFIG, config)

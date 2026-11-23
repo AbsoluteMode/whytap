@@ -278,15 +278,18 @@ session, open work waiting for the screen or the load for
 progress (for queued work or a deferred install), a deferred install older
 than `install_alert_minutes` (120), and an author event unacknowledged after
 `undelivered_minutes` (20), including every event of a `--source other`
-ticket, which no Harness Link address reaches. Events created before the
-watchdog's first check are out of its scope; one in scope stays raised until
-it is acknowledged.
+ticket, which no Harness Link address reaches. The scope starts when the
+new watcher is activated or first started, before its first session; events
+created earlier are out of it, and one in scope stays raised until it is
+acknowledged.
 `whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
 current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
 [--until <date>]` measures returns, waits, builder time, deferred installs and
 environment waits read-only from the events inside the period (status as of
 the cutoff; waits and attempts that started earlier count from the period's
-start or when they end in it), for comparing the queue before and after a change (see the
+start or when they end in it; times come from the event history, never from
+the requeue-reset `queued_at`; a deferred install's meeting wait spans its
+rechecks until the watcher logs another decision), for comparing the queue before and after a change (see the
 [watchdog decision](../decisions/2026-11-23-builder-queue-watchdog.md)).
 The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this

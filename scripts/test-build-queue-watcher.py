@@ -559,6 +559,44 @@ class WatcherTests(unittest.TestCase):
                          "deferred install: next meeting check not due")
         self.assertIn("no_progress", [a["condition"] for a in self.alerts()])
 
+    def test_events_of_the_first_session_are_in_the_watchdog_scope(self):
+        self.enqueue(1)
+        self.watcher("run")  # a fresh watcher: its first tick starts a session at once
+        self.assertEqual(self.statuses(), {1: "done"})
+        self.configure_watcher(undelivered_minutes=-1)
+        self.watcher("run")
+        self.assertIn("undelivered:1", [a["condition"] for a in self.alerts()])
+
+    def test_deferred_install_wait_ends_when_the_queue_moves_on(self):
+        (self.control / "defer").touch()
+        (self.control / "meeting").touch()
+        ticket = self.enqueue(1)
+        output = self.watcher("run").stdout  # the session defers the install
+        output += self.watcher("run").stdout  # meeting gate not clear
+        output += self.watcher("run").stdout  # next meeting check not due: the same wait
+        db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
+        db.execute("UPDATE tickets SET status='superseded' WHERE id=?", (ticket,))
+        db.commit()
+        db.close()
+        output += self.watcher("run").stdout
+        decisions = [line.split(" ", 1)[1] for line in output.splitlines()
+                     if not line.split(" ", 1)[1].startswith(("watchdog", "starting",
+                                                              "builder session"))]
+        self.assertEqual([d.split(":")[0] for d in decisions], ["deferred install", "idle"], output)
+
+    def test_oversized_numbers_in_the_probe_are_unknown(self):
+        huge = "1" + "0" * 400
+        for output in ('{"load": %s, "cpus": 8}' % huge, '{"load": 1, "cpus": %s}' % huge,
+                       '{"load": %s, "cpus": %s}' % (huge, huge), '{"load": 1e308, "cpus": 4}'):
+            (self.control / "environment.json").write_text(output)
+            result = self.watcher("environment")
+            self.assertTrue(json.loads(result.stdout)["clear"], output)
+        self.configure_watcher(load_limit_per_cpu=int(huge))
+        self.assertTrue(json.loads(self.watcher("environment").stdout)["clear"])
+        self.enqueue(1)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {1: "done"})
+
     def test_malformed_or_failed_probes_are_unknown_and_never_block(self):
         for output in ("[]", '"locked"', '{"screen_locked": "yes", "load": "317", "cpus": 0}',
                        "{not json"):
@@ -645,6 +683,12 @@ class ActivationTests(WatcherTests):
         (self.control / "bootstrap-fails").touch()
         self.watcher("activate", "--allow-local", ok=False)
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
+
+    def test_activation_fixes_the_watchdog_scope_before_any_session(self):
+        path = self.root / "whytap-build-queue-watchdog.json"
+        self.assertFalse(path.exists())
+        self.watcher("activate", "--allow-local")
+        self.assertTrue(json.loads(path.read_text())["undelivered_since"])
 
     def merged_scripts(self, **changed):
         names = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",

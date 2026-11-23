@@ -43,8 +43,10 @@ def minutes(start, end):
     return (end - start).total_seconds() / 60
 
 
+# Every `deferred install: …` line (gate not clear, next check not due) is the same
+# meeting-gate wait; it ends at the next other decision the watcher logs (idle included).
 WAIT_KINDS = (("waiting: screen locked", "screen locked"), ("waiting: load", "load"),
-              ("deferred install: meeting gate", "meeting gate"))
+              ("deferred install", "meeting gate"))
 
 
 def environment_waits(log_path, since, until):
@@ -107,16 +109,25 @@ def measure(root, since, until):
     for ticket in sorted(tickets.values(), key=lambda t: t["id"]):
         chains[ticket["pr"]].append(ticket)
 
+    # Times come from the event history only: `tickets.queued_at` is reset by every
+    # requeue, so it would make earlier waits negative. A queue wait runs from a
+    # `queued` event (submission or requeue) to the claim that follows it.
+    def submitted(ticket):
+        first = next((e for e in events[ticket["id"]] if e["status"] == "queued"), None)
+        return parse(first["created_at"] if first else ticket["queued_at"])
+
     waits, work, open_attempts = [], [], 0
     for ticket_id, ticket in tickets.items():
-        started, first = None, True
+        started, waiting_since = None, submitted(ticket)
         for e in events[ticket_id]:
             at = parse(e["created_at"])
-            if e["status"] == "in_progress":
-                if first and inside(e):
-                    waits.append(minutes(parse(ticket["queued_at"]), at))
-                first, started = False, at
-            elif started and e["status"] in ENDS:
+            if e["status"] == "queued":
+                waiting_since = waiting_since or at
+            elif e["status"] == "in_progress":
+                if waiting_since and inside(e):
+                    waits.append(minutes(waiting_since, at))
+                waiting_since, started = None, at
+            if started and e["status"] in ENDS:
                 if inside(e):
                     work.append(minutes(started, at))
                 started = None
@@ -133,7 +144,7 @@ def measure(root, since, until):
             before = sum(1 for e in chain_events if e["status"] == "blocked"
                          and parse(e["created_at"]) <= max(done))
             (with_returns if before else without_returns).append(
-                minutes(parse(chain[0]["queued_at"]), max(done)))
+                minutes(min(submitted(t) for t in chain), max(done)))
     deferred = Counter()
     for ticket_id in tickets:
         for e in events[ticket_id]:

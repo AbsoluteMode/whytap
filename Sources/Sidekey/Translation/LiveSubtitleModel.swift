@@ -196,6 +196,17 @@ final class LiveSubtitleModel: ObservableObject {
         return task
     }
 
+    /// The current session's identity: a control drawn for one session never
+    /// stops another.
+    var sessionID: UUID { generation }
+
+    /// Stop (or Cancel while connecting) for the session `session` only, if it
+    /// still runs: a click that began on another session's button does nothing.
+    func stop(session: UUID) {
+        guard generation == session, phase.isRunning else { return }
+        stop()
+    }
+
     func stop() {
         guard phase == .listening else { cancel(); return }
         sessionLimit?.cancel(); sessionLimit = nil

@@ -144,6 +144,47 @@ final class SubtitleOverlayCloseTests: XCTestCase {
         XCTAssertFalse(targets.handle(event(.leftMouseDown, 100), in: panel))
     }
 
+    /// The build queue's #484 case: a press begun on Start, the model started
+    /// by something else, the mouse-up before SwiftUI redraws the button.
+    /// Releasing it never runs Stop; a held Stop never stops a newer session.
+    func testAPressBegunOnStartNeverStopsASessionStartedMeanwhile() async throws {
+        let speech = FakeSpeechTranslation()
+        let model = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in speech })
+        let controller = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }), subtitleModel: model,
+            defaults: try XCTUnwrap(UserDefaults(suiteName: "subtitle-press-phase-\(UUID())")),
+            openSettings: { _ in }, activityChanged: { _ in })
+        controller.presentation.mode = .subtitles
+        controller.resize(for: .subtitles)
+        let panel = controller.window
+        panel.setFrame(NSRect(x: -20_000, y: -20_000, width: 760, height: 190), display: false)
+        panel.orderFrontRegardless()
+        defer { controller.dismiss() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let start = try XCTUnwrap(controller.hitTargets.frame(of: .session, in: panel))
+        func mouse(_ type: NSEvent.EventType) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: start.midX, y: start.midY),
+                                             modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: panel.windowNumber, context: nil, eventNumber: 0,
+                                             clickCount: 1, pressure: 1))
+        }
+        panel.sendEvent(try mouse(.leftMouseDown))
+        XCTAssertEqual(controller.hitTargets.pressed, .session)
+        XCTAssertNotNil(model.start())
+        XCTAssertEqual(model.phase, .connecting)
+        panel.sendEvent(try mouse(.leftMouseUp))
+        XCTAssertEqual(model.phase, .connecting, "releasing a press begun on Start ran Stop")
+
+        // A Stop drawn for one session leaves a newer one running.
+        let old = model.sessionID
+        await model.cancel().value
+        XCTAssertNotNil(model.start())
+        model.stop(session: old)
+        XCTAssertTrue(model.phase.isRunning, "a stale Stop stopped the new session")
+        await controller.cancel().value
+    }
+
     /// The running overlay keeps its controls a moment after hover ends, so
     /// a press that loses hover still reaches Stop or ×.
     func testTheRunningControlsOutlastAShortLossOfHover() {

@@ -449,21 +449,23 @@ struct TranslationView: View {
         }
     }
 
-    /// What the session button does now ("stop" or "start"): the window
-    /// dispatches its click through `hitTargets`, which fires only the action
-    /// a press began on.
-    private var sessionActionName: String { subtitles.phase.isRunning ? "stop" : "start" }
-
-    private func sessionAction() {
-        if subtitles.phase.isRunning { subtitles.stop() } else { subtitles.start() }
-    }
-
+    /// The session button's click goes through the window (`hitTargets`)
+    /// bound to the action drawn now, never to the phase at mouse-up: Start
+    /// only starts while nothing runs, and Stop / Cancel only stop the session
+    /// they were drawn for. A press whose action changes is dropped.
     private var sessionButton: some View {
-        sessionButtonBody
+        let running = subtitles.phase.isRunning
+        let session = subtitles.sessionID
+        let model = subtitles
+        return sessionButtonBody
             // The window takes the click, so the button shows the press itself.
             .opacity(hitTargets.pressed == .session ? 0.6 : 1)
-            .background(SubtitleOverlayHitReporter(control: .session, targets: hitTargets,
-                                                   action: sessionActionName, activate: sessionAction))
+            .background(SubtitleOverlayHitReporter(
+                control: .session, targets: hitTargets,
+                action: running ? "stop:\(session.uuidString)" : "start",
+                activate: {
+                    if running { model.stop(session: session) } else if !model.phase.isRunning { model.start() }
+                }))
     }
 
     @ViewBuilder private var sessionButtonBody: some View {

@@ -270,6 +270,20 @@ The build queue found three problems in the first version:
   row. It now waits until the caption reflects each event
   (`LiveSubtitleModel.publishedEvents`).
 
+## After the second build check (ticket #484)
+
+A press begun on Start, a session started meanwhile by something else, and
+a mouse-up before SwiftUI redrew the button: the button's action was chosen
+from the live phase at mouse-up, so it ran Stop. The session button's
+window action is now bound to the action drawn:
+
+- Start only starts while nothing runs.
+- Stop and Cancel only stop the session they were drawn for
+  (`LiveSubtitleModel.stop(session:)`, `sessionID`).
+
+`testAPressBegunOnStartNeverStopsASessionStartedMeanwhile` (the queue's
+fixture) fails on the previous head.
+
 ## Rejected
 
 - A shorter merge gap alone: a short sentence with its own translation

@@ -1394,10 +1394,15 @@ display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
 (OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
 Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
-no spinner). On macOS 27.3 and later the Accessibility link lands on System &
-App Protection Override, which lists no Whytap until the person adds it, so
-Keyboard control names that pane and says "Click + under the list, add Whytap,
-then come back here." (OnboardingAccessKind.protectionOverride); only the
+no spinner). On macOS 27.3 and later the Accessibility request shows no dialog
+and adds no row for an app without Apple's assistive-technology entitlement, and
+the Accessibility link opens System & App Protection Override. There the first
+Allow also opens that pane (PermissionsHelper.accessibilityIsAddedByHand), and
+Keyboard control names it and says "Click +, choose Whytap, then Override System
+Protections."; only the global grant ("Control your entire Mac and all apps")
+makes AXIsProcessTrusted true. Key steps name the providers whose key is already
+in the Keychain under an empty field ("Saved in your Keychain: Soniox ·
+ElevenLabs"); a name picks its tab and Return uses that key. Only the
 system's own check (polling and a return to the app) makes it granted, then
 the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again

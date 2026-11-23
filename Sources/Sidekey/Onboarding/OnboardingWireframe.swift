@@ -1348,6 +1348,15 @@ struct OnboardingKeyStage: View {
         if case .provider(let provider) = current { return model.keySaved(provider) }
         return model.tavily.configured
     }
+    /// This step's providers whose key is already in the Keychain: named under
+    /// an empty field, so a key kept from an earlier setup is found without
+    /// knowing which mark hides it (the owner, 2026-11-23, after clearing
+    /// settings asked for two keys by hand).
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    private var savedProviders: [OnboardingKeyProvider] {
+        guard kind != .search else { return [] }
+        return providers.filter { if case .provider(let p) = $0.kind { return model.keySaved(p) } else { return false } }
+    }
 
     private var phase: OnboardingWireScene.KeyPhase {
         if checking { return .checking }
@@ -1596,6 +1605,8 @@ struct OnboardingKeyStage: View {
                 Link(destination: known.keysURL) {
                     Text(offerLine(known)).foregroundColor(OnboardingTheme.muted)
                 }
+            } else if !server, !savedProviders.isEmpty {
+                savedLine
             } else {
                 Color.clear.frame(height: 1)
             }
@@ -1605,6 +1616,29 @@ struct OnboardingKeyStage: View {
         .lineLimit(2)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+
+    /// "Saved in your Keychain: Soniox · ElevenLabs": a name picks its tab,
+    /// whose empty field then uses that key on Return.
+    private var savedLine: some View {
+        HStack(spacing: 6) {
+            Text("Saved in your Keychain:").foregroundColor(OnboardingTheme.muted)
+            ForEach(Array(savedProviders.enumerated()), id: \.element.kind) { index, provider in
+                if index > 0 { Text("·").foregroundColor(OnboardingTheme.faint) }
+                let isCurrent = provider.kind == current
+                Button(provider.kind.displayName) {
+                    picked = provider.kind
+                    setCurrent(provider.kind)
+                    focused = true
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(isCurrent ? OnboardingTheme.ink : OnboardingTheme.muted)
+                .fontWeight(isCurrent ? .semibold : .regular)
+                .disabled(checking)
+                .accessibilityLabel("Use the saved \(provider.kind.displayName) key")
+                .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
+            }
+        }
     }
 
     private var choices: [OnboardingModelChoice] { model.modelChoices(step) }

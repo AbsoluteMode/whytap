@@ -57,8 +57,7 @@ enum OnboardingAccessKind: CaseIterable {
     /// Protection Override, where the Accessibility link now lands, and an
     /// app's request no longer adds its row: the person adds it with +.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    static var protectionOverride = ProcessInfo.processInfo.isOperatingSystemAtLeast(
-        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
+    static var protectionOverride: Bool { PermissionsHelper.accessibilityIsAddedByHand }
 
     /// The pane under Privacy & Security, named as this Mac shows it.
     var pane: String {
@@ -633,9 +632,12 @@ struct OnboardingAccessStage: View {
             line(kind.purpose, color: OnboardingTheme.muted)
         case .waiting:
             VStack(spacing: 5) {
-                (Text(kind.addsWithPlus ? "Click + under the list, add " : "Turn on ")
-                    + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                    + Text(", then come back here."))
+                (kind.addsWithPlus
+                    ? Text("Click +, choose ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                        + Text(", then ") + Text("Override System Protections").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                        + Text(".")
+                    : Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                        + Text(", then come back here."))
                     .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.muted)
                 HStack(spacing: 7) {

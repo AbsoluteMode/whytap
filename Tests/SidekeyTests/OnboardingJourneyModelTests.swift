@@ -886,6 +886,50 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // MARK: - Review images
 
+    /// Keys kept from an earlier setup (settings cleared, Keychain kept) are
+    /// named under the empty field; a name picks its tab and Return uses it.
+    func testRenderSavedKeysAfterSettingsWereCleared() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
+        }
+        _ = NSApplication.shared
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources")
+        for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
+            CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
+        }
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons"))
+        defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
+        let env = try makeEnv()
+        for kind in [AIProviderKind.soniox, .elevenLabs, .anthropic] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: kind)?.keychainAccount(in: env.routing))
+            try env.keys.save("saved-\(kind)", account: account)
+        }
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        func snap(_ name: String) async throws {
+            try await Task.sleep(for: .milliseconds(700))
+            let frameView = try XCTUnwrap(window.contentView?.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("saved-keys-\(name).png"))
+        }
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        try await snap("speech")
+        model.speechProvider = .elevenLabs
+        try await snap("speech-elevenlabs")
+        XCTAssertTrue(model.keySaved(.elevenLabs))
+        XCTAssertFalse(model.keySaved(.deepgram))
+    }
+
     /// Offscreen PNGs of every step of the frame, walked the way a new Mac
     /// goes through them, in the real window; never shown on screen.
     func testRenderEveryStep() async throws {

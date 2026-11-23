@@ -1,71 +1,124 @@
 ---
 id: keyboard-control-protection-override-2026-11-23
 type: decision
-title: Keyboard control names System & App Protection Override on macOS 27.3
-summary: On macOS 27.3 and later the onboarding's Keyboard control step names the pane the Accessibility link opens, System & App Protection Override, and tells the person to add Whytap with +, because that list has no Whytap row until they do.
+title: Keyboard control on macOS 27.3 opens System & App Protection Override and says what to press
+summary: On macOS 27.3 an app without Apple's assistive-technology entitlement cannot make the system list it for Accessibility, so the first Allow of Keyboard control also opens System & App Protection Override and the step says "Click +, choose Whytap, then Override System Protections". Key steps name every provider whose key is already in the Keychain.
 status: confirmed
-tags: [onboarding, permissions, accessibility, macos-27]
-canonical_for: [keyboard-control-pane-name]
+tags: [onboarding, permissions, accessibility, macos-27, keys]
+canonical_for: [keyboard-control-pane-name, onboarding-saved-keys-line]
 verified_at: 2026-11-23
 sources:
   - type: user-confirmed
-    reference: On 2026-11-23 the owner went through the onboarding from cleared settings in build 1737 on macOS 27.3. Open System Settings showed a pane titled System & App Protection Override with no Whytap row, while the step said Privacy & Security › Accessibility.
+    reference: On 2026-11-23 the owner went through the onboarding from cleared settings and reset permissions in build 1737 on macOS 27.3 (26C5047e). Open System Settings showed System & App Protection Override with no Whytap row; adding Whytap with + did not move the step; the owner asked twice for provider keys by hand.
+    confirmed_at: 2026-11-23
+  - type: trace
+    reference: Unified log on the owner's Mac, 2026-11-23 15:03-15:09, subsystem com.apple.accessibility.per-app-access and process tccd (read only)
+    confirmed_at: 2026-11-23
+  - type: trace
+    reference: macOS 27.3 system files /System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex (English strings ACCESSIBILITY, ACCESSIBILITY_APPS, ACCESSIBILITY_ADD_BYPASS, ACCESSIBILITY_APPS_PANE_FOOTER; anchors Privacy_Accessibility and Privacy_AccessibilityApps) and universalAccessAuthWarn (com.apple.developer.assistive-technology)
     confirmed_at: 2026-11-23
   - type: url
-    reference: https://mjtsai.com/blog/2026/11/17/system-app-protection-override/ and https://www.macrumors.com/2026/11/16/macos-27-3-full-desk-access/ (macOS 27.3 splits Device Control and Data Access into System & App Protection Override and Accessibility; apps are added with +)
+    reference: https://mjtsai.com/blog/2026/11/17/system-app-protection-override/ and https://www.macrumors.com/2026/11/16/macos-27-3-full-desk-access/
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/PermissionsHelper.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Permissions/PermissionsSettingsViewModel.swift
     confirmed_at: 2026-11-23
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingAccessStage.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingWireframe.swift
     confirmed_at: 2026-11-23
 related: [2026-11-19-permission-request-before-settings.md, 2026-11-22-onboarding-journey.md]
 ---
 
 # Context
 
-On macOS 27.3 the `Privacy_Accessibility` link that Keyboard control opens lands
-on a pane titled System & App Protection Override. Its rows read "Control your
-entire Mac and all apps" or "Not Allowed". After the permissions were reset,
-Whytap was not in the list, and the step still said "Turn on Whytap · Privacy &
-Security › Accessibility". The owner did not know what to do there.
+On macOS 27.3, from cleared settings and a `tccutil reset`, Keyboard control
+waited forever. What the system log on that Mac showed:
 
-Reports on the 27.3 betas say Apple split Device Control and Data Access into
-System & App Protection Override (apps that control other apps) and
-Accessibility (assistive technologies). An app's request no longer adds its
-row; the person adds it with +.
+- Allow called `AXIsProcessTrustedWithOptions` with the prompt option. The
+  per-app-access client sent `display=forceShow` to universalAccessAuthWarn,
+  which answered `phase=notEntitled`. No dialog appeared and tccd wrote no
+  record, so Whytap had no row.
+- `Privacy_Accessibility` opens the pane whose English title is "System & App
+  Protection Override" (string key `ACCESSIBILITY`). The separate
+  "Accessibility" pane (`Privacy_AccessibilityApps`) is "Only apps with an
+  Accessibility designation, such as screen readers and voice control tools".
+  The designation is the `com.apple.developer.assistive-technology`
+  entitlement, which universalAccessAuthWarn checks.
+- After the person's + at 15:08:41, tccd modified kTCCServiceAccessibility and
+  kTCCServiceAccessibilityPerTarget for Whytap. Whytap's check right after
+  returned `result=0 access=none`. At 15:08:56 both records were deleted. The
+  row never got the global grant.
+- Every process that the log shows as trusted has `result=1 access=global`
+  (Claude, Raycast, and Whytap before the reset). The global grant is the "+ →
+  Override System Protections" path (`ACCESSIBILITY_ADD_BYPASS`); "Choose Apps"
+  gives per-app control only.
+
+The key steps offered a saved key only as the faint placeholder of the
+provider tab that was open: Soniox by default for speech. A key kept for
+another provider (ElevenLabs on the owner's Mac) needed a click on its mark,
+which nothing told the person to make.
 
 # Decision
 
-- On macOS 27.3 and later, Keyboard control names the pane System & App
-  Protection Override. Its waiting line reads "Click + under the list, add
-  Whytap, then come back here.", and its not-on line names the same pane.
-- The link is unchanged: `Privacy_Accessibility` already opens this pane.
-- Allow and the request order of `2026-11-19-permission-request-before-settings.md`
-  are unchanged. Only the system's own check moves the step on.
-- Older macOS keeps "Accessibility" and "Turn on Whytap".
+- On macOS 27.3 and later (`PermissionsHelper.accessibilityIsAddedByHand`):
+  - The first Allow asks macOS and opens the pane in the same press.
+  - The step names System & App Protection Override.
+  - The waiting line reads "Click +, choose Whytap, then Override System
+    Protections."
+  - Polling and the return to the app still move the step on once
+    `AXIsProcessTrusted` is true.
+- Older macOS keeps the 2026-11-19 order (ask first, pane on the next press)
+  and the "Accessibility" wording.
+- Key steps name every provider of the step whose key is in the Keychain
+  under an empty field: "Saved in your Keychain: Soniox · ElevenLabs". A name
+  picks its tab, whose placeholder then says "press Return to use it".
 
 # Why
 
-The step should name what the person actually sees. The version check reads the
-running system, so one build tells both kinds of Mac the right thing.
+- Nothing can race the pane on 27.3: the request registers nothing. Leaving
+  the person in Waiting with a quiet link was the failure.
+- The minimum macOS itself requires on 27.3, for an app without the
+  entitlement, is:
+  1. + in that pane;
+  2. pick Whytap;
+  3. Override System Protections;
+  4. the system's password or Touch ID confirmation.
+- The app cannot do any of these steps for the person.
+- Naming the saved providers costs one line and removes the guess about which
+  mark hides a key.
 
 # What was checked
 
-- Unit test: with the flag off the step says Accessibility; with it on it says
-  System & App Protection Override and "add with +"; the other panes are
-  unchanged.
-- Not checked: that granting System & App Protection Override makes
-  `AXIsProcessTrusted` true for Whytap. No public documentation covers it yet;
-  the owner's live step will show it. If it stays on Waiting, the separate
-  Accessibility pane is the next thing to try.
-- Not checked: whether 27.3's final release keeps the pane name of the beta
-  reports. The owner's Mac runs 27.3 (build 26C5047e) and shows this name.
+- Unit tests:
+  - first Allow on 27.3 asks and opens the pane; later presses open the pane; a
+    grant stops both;
+  - older macOS is unchanged;
+  - the pane name and lines follow the flag.
+- Offscreen renders: the waiting and not-on lines fit at 520 pt; the saved
+  keys line under the speech key field with Soniox and ElevenLabs saved.
+- Not checked on a Mac:
+  - that the four steps above end with the step moving on. The log shows global
+    access is what makes other apps trusted, but no one has finished that path
+    for Whytap yet;
+  - Microphone, Screen Recording and Input Monitoring after a reset on 27.3.
+    Their anchors (`Privacy_Microphone`, `Privacy_ScreenCapture`,
+    `Privacy_ListenEvent`) and system prompts still exist in the 27.3 bundles,
+    but the owner's pass stopped before them.
 
 # Rejected
 
-- Opening the pane on the first Allow: still the 2026-11-19 race on Macs where
-  the request does register the app.
-- Naming a button of the + dialog ("Override System Protections"): no source
-  shows that dialog on the owner's build, and a wrong button name misleads more
-  than none.
+- Asking for `com.apple.developer.assistive-technology`: Apple limits it to
+  assistive technologies and has not published how to request it; Whytap is
+  not one.
+- Sending people to the Accessibility pane: it lists only apps with that
+  entitlement.
+- Picking a speech tab from Keychain item dates: a guess about which provider
+  the person wants.
 
 2026-11-23 · branch `feature/onboarding-accessibility-macos27`

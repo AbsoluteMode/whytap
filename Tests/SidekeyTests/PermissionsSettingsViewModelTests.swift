@@ -108,12 +108,34 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: false, microphoneStatus: .authorized) },
             accessibilityRequester: { events.append("request") },
             openAccessibilitySettings: { events.append("settings") },
+            accessibilityIsAddedByHand: { false },
             runtimeRefresh: { _, _ in })
         XCTAssertFalse(model.accessibilityRequested)
         model.requestAccessibility()
         XCTAssertEqual(events, ["request"])
         XCTAssertTrue(model.accessibilityRequested)
         model.requestAccessibility()
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request", "settings", "settings"])
+    }
+
+    // macOS 27.3: the request shows no dialog and adds no row, so the first
+    // Allow also opens System & App Protection Override, where Whytap is
+    // added with +; a grant still stops both.
+    func testOnMacOS27_3TheFirstKeyboardAllowAsksAndOpensTheOverridePane() {
+        var events: [String] = []
+        var granted = false
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
+            accessibilityRequester: { events.append("request") },
+            openAccessibilitySettings: { events.append("settings") },
+            accessibilityIsAddedByHand: { true },
+            runtimeRefresh: { _, _ in })
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request", "settings"])
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request", "settings", "settings"])
+        granted = true
         model.requestAccessibility()
         XCTAssertEqual(events, ["request", "settings", "settings"])
     }
@@ -125,6 +147,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
             accessibilityRequester: { events.append("request") },
             openAccessibilitySettings: { events.append("settings") },
+            accessibilityIsAddedByHand: { false },
             runtimeRefresh: { _, _ in })
         model.requestAccessibility()
         granted = true

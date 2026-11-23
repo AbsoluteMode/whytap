@@ -160,6 +160,7 @@ final class OnboardingPreviewSession {
             snapshotProvider: { system.snapshot }, screenRecordingAccessProvider: { system.screen },
             screenRecordingRequester: {}, accessibilityRequester: { system.ask("keyboard") { $0.accessibility = true } },
             openAccessibilitySettings: { system.grant { $0.accessibility = true } },
+            accessibilityIsAddedByHand: { false },
             openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
         system.permissions = permissions
         let screenRecording = ScreenRecordingAccess(isGranted: { system.screen },

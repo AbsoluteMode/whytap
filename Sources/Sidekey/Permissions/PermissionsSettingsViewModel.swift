@@ -22,6 +22,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
     private let screenRecordingRequester: () async -> Void
     private let accessibilityRequester: () -> Void
     private let openAccessibilitySettings: () -> Void
+    private let accessibilityIsAddedByHand: () -> Bool
     private let openScreenRecordingSettings: () -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
@@ -39,6 +40,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         screenRecordingRequester: @escaping () async -> Void = PermissionsHelper.requestScreenRecording,
         accessibilityRequester: @escaping () -> Void = { PermissionsHelper.promptAccessibility() },
         openAccessibilitySettings: @escaping () -> Void = PermissionsHelper.openAccessibilitySettings,
+        accessibilityIsAddedByHand: @escaping () -> Bool = { PermissionsHelper.accessibilityIsAddedByHand },
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
@@ -52,6 +54,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         self.screenRecordingRequester = screenRecordingRequester
         self.accessibilityRequester = accessibilityRequester
         self.openAccessibilitySettings = openAccessibilitySettings
+        self.accessibilityIsAddedByHand = accessibilityIsAddedByHand
         self.openScreenRecordingSettings = openScreenRecordingSettings
         self.runtimeRefresh = runtimeRefresh
         self.snapshot = snapshotProvider()
@@ -132,6 +135,10 @@ final class PermissionsSettingsViewModel: ObservableObject {
         } else {
             accessibilityRequested = true
             accessibilityRequester()
+            // macOS 27.3 shows no dialog and adds no row, so nothing can race
+            // the pane: open it now, where the person adds Whytap with +.
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            if accessibilityIsAddedByHand() { openAccessibilitySettings() }
         }
         refresh()
     }

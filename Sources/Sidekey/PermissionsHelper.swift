@@ -50,6 +50,14 @@ enum PermissionsHelper {
         return AXIsProcessTrustedWithOptions(options)
     }
 
+    /// macOS 27.3 and later: the Accessibility link opens System & App
+    /// Protection Override, a request shows no dialog and adds no row for an
+    /// app without Apple's assistive-technology entitlement, and the person
+    /// adds the app with + and Override System Protections. Settable in tests.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static var accessibilityIsAddedByHand = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
+
     /// Asks macOS to register Whytap and show its own Accessibility dialog.
     /// Never opens System Settings in the same action: that dialog has its
     /// own button, and a pane opened beside the request listed no Whytap.

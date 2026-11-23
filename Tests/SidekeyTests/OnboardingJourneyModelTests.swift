@@ -1712,4 +1712,3 @@ extension OnboardingJourneyModelTests {
         }
     }
 }
-

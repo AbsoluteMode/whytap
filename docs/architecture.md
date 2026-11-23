@@ -471,13 +471,28 @@ Translation tools:
   when idle or hovered, one row of source/target language, Start/Stop and ×.
   It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
   .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
-  The box shows phrase pairs: original (left, at most 45 %) and its
-  translation running to the box's edge (PairGridLayout); the box hugs its
-  widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
-  still being heard last as a dim live original; Toolbox stacks original over
-  translation. Every other pair sits on a faint band that follows the pair's
-  position in the session. WHY:
+  The box shows phrase pairs: original (left, a fixed 38 %) and its
+  translation (SteadyPairsLayout), the phrase still being heard last as a dim
+  live pair; Toolbox stacks original over translation (whole pairs,
+  NewestRowsLayout). Every other pair sits on a faint band that follows the
+  pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  From Connecting to the end of Finishing the box has one fixed size (146 pt
+  caption; 108 pt for pairs after Stop), also with no audio yet (the
+  permissions link sits inside the caption) and after a Stop before the first
+  words ("Finishing…"); a problem hugs its message. The caption takes the
+  panel's width up to 708 pt and the height the controls leave, so the
+  360 x 190 pt minimum panel fits every state. The live pair
+  settles in place under LiveSubtitleModel.liveID; its original shows only up
+  to the audio position its translation has reached (and its first sentence
+  end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
+  the settled pair keeps at least that much of both streams through any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
+  newest lines (NewestLinesColumn), so a long original never hides its
+  translation; older lines leave at the top behind a fade, a line at a time. On hover
+  the controls cover the caption's top instead of resizing it, so Stop and ×
+  never move; FirstClickHostingView takes the first click on the non-key
+  panel. The box blurs what is under it (behind-window HUD material, 45 %
+  black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
   holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM

@@ -176,13 +176,80 @@ final class SubtitleOverlayCloseTests: XCTestCase {
         panel.sendEvent(try mouse(.leftMouseUp))
         XCTAssertEqual(model.phase, .connecting, "releasing a press begun on Start ran Stop")
 
-        // A Stop drawn for one session leaves a newer one running.
-        let old = model.sessionID
+        // A Cancel or Stop drawn for one session leaves a newer one running.
+        let oldCancel = model.sessionAction
+        guard case .cancel = oldCancel else { return XCTFail("connecting shows Cancel, not \(oldCancel)") }
         await model.cancel().value
         XCTAssertNotNil(model.start())
-        model.stop(session: old)
-        XCTAssertTrue(model.phase.isRunning, "a stale Stop stopped the new session")
+        model.perform(oldCancel)
+        XCTAssertTrue(model.phase.isRunning, "a stale Cancel cancelled the new session")
         await controller.cancel().value
+    }
+
+    /// The build queue's #485 case: a press begun on Cancel, the same session
+    /// connects, the mouse-up before SwiftUI redraws Cancel as Stop. Releasing
+    /// it never runs the graceful Stop: Cancel and Stop are different actions.
+    func testAPressBegunOnCancelNeverStopsTheSessionThatConnectedMeanwhile() async throws {
+        let speech = FakeSpeechTranslation()
+        let connection = AsyncStream<Void>.makeStream()
+        let model = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in
+            for await _ in connection.stream { break }
+            return speech
+        })
+        let controller = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }), subtitleModel: model,
+            defaults: try XCTUnwrap(UserDefaults(suiteName: "subtitle-press-cancel-\(UUID())")),
+            openSettings: { _ in }, activityChanged: { _ in })
+        controller.presentation.mode = .subtitles
+        controller.resize(for: .subtitles)
+        let panel = controller.window
+        panel.setFrame(NSRect(x: -20_000, y: -20_000, width: 760, height: 190), display: false)
+        let task = try XCTUnwrap(model.start())
+        // The embedded layout shows the session button without hover; the
+        // panel dispatches its click through the same measured reporter.
+        panel.contentView = FirstClickHostingView(rootView: TranslationView(
+            text: controller.text, subtitles: model, presentation: controller.presentation,
+            openSettings: { _ in }, embedded: true, hitTargets: controller.hitTargets))
+        panel.orderFrontRegardless()
+        defer { connection.continuation.finish(); controller.dismiss() }
+        try await Task.sleep(for: .milliseconds(300))
+        panel.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(model.phase, .connecting)
+        let drawnCancel = model.sessionAction
+        let cancel = try XCTUnwrap(controller.hitTargets.frame(of: .session, in: panel))
+        func mouse(_ type: NSEvent.EventType) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: cancel.midX, y: cancel.midY),
+                                             modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: panel.windowNumber, context: nil, eventNumber: 0,
+                                             clickCount: 1, pressure: 1))
+        }
+        panel.sendEvent(try mouse(.leftMouseDown))
+        XCTAssertEqual(controller.hitTargets.pressed, .session)
+        let release = try mouse(.leftMouseUp)
+        let released = expectation(description: "the mouse-up arrived as the session connected")
+        var sent = false
+        model.onActivityChange = {
+            guard model.phase == .listening, !sent else { return }
+            sent = true
+            XCTAssertEqual(controller.hitTargets.pressed, .session, "the press is still on the Cancel drawn")
+            panel.sendEvent(release)
+            XCTAssertEqual(model.phase, .listening, "a press begun on Cancel ran the graceful Stop")
+            released.fulfill()
+        }
+        connection.continuation.yield(())
+        connection.continuation.finish()
+        await fulfillment(of: [released], timeout: 3)
+        model.onActivityChange = nil
+
+        // Cancel drawn while connecting does nothing once the session listens;
+        // the Stop drawn now does stop it.
+        guard case .cancel = drawnCancel else { return XCTFail("connecting shows Cancel, not \(drawnCancel)") }
+        model.perform(drawnCancel)
+        XCTAssertEqual(model.phase, .listening)
+        model.perform(model.sessionAction)
+        XCTAssertEqual(model.phase, .finishing)
+        await controller.cancel().value
+        await task.value
     }
 
     /// The running overlay keeps its controls a moment after hover ends, so

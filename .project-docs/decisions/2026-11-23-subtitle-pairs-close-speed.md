@@ -278,11 +278,25 @@ from the live phase at mouse-up, so it ran Stop. The session button's
 window action is now bound to the action drawn:
 
 - Start only starts while nothing runs.
-- Stop and Cancel only stop the session they were drawn for
-  (`LiveSubtitleModel.stop(session:)`, `sessionID`).
+- Stop and Cancel only act on the session they were drawn for.
 
 `testAPressBegunOnStartNeverStopsASessionStartedMeanwhile` (the queue's
 fixture) fails on the previous head.
+
+## After the third build check (ticket #485)
+
+Cancel and Stop still shared one action, and the model chose cancel or the
+graceful Stop from the phase at mouse-up. A press begun on Cancel, the same
+session connecting meanwhile, and a mouse-up before SwiftUI redrew the
+button ran the graceful Stop. The button's action is now a value,
+`SubtitleSessionAction` (`start`, `cancel(session)`, `stop(session)`), read
+from `LiveSubtitleModel.sessionAction` when the button is drawn.
+`LiveSubtitleModel.perform` runs it only while it equals the action the
+model shows now, so the phase and the session are both checked. A press
+whose action is no longer shown does nothing.
+
+`testAPressBegunOnCancelNeverStopsTheSessionThatConnectedMeanwhile` (the
+queue's #485 fixture) fails with the shared action and passes with this one.
 
 ## Rejected
 

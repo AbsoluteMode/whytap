@@ -450,36 +450,33 @@ struct TranslationView: View {
     }
 
     /// The session button's click goes through the window (`hitTargets`)
-    /// bound to the action drawn now, never to the phase at mouse-up: Start
-    /// only starts while nothing runs, and Stop / Cancel only stop the session
-    /// they were drawn for. A press whose action changes is dropped.
+    /// bound to the action drawn now (Start, Cancel or Stop, with its
+    /// session), never to the phase at mouse-up: the model runs it only while
+    /// it is still the action shown. A press whose action changes is dropped.
     private var sessionButton: some View {
-        let running = subtitles.phase.isRunning
-        let session = subtitles.sessionID
+        let action = subtitles.sessionAction
         let model = subtitles
-        return sessionButtonBody
+        return sessionButtonBody(action)
             // The window takes the click, so the button shows the press itself.
             .opacity(hitTargets.pressed == .session ? 0.6 : 1)
             .background(SubtitleOverlayHitReporter(
                 control: .session, targets: hitTargets,
-                action: running ? "stop:\(session.uuidString)" : "start",
-                activate: {
-                    if running { model.stop(session: session) } else if !model.phase.isRunning { model.start() }
-                }))
+                action: String(describing: action),
+                activate: { model.perform(action) }))
     }
 
-    @ViewBuilder private var sessionButtonBody: some View {
-        switch subtitles.phase {
-        case .connecting:
-            Button("Cancel") { subtitles.stop() }
-        case .listening:
-            Button("Stop", systemImage: "stop.fill") { subtitles.stop() }
+    @ViewBuilder private func sessionButtonBody(_ action: SubtitleSessionAction) -> some View {
+        switch action {
+        case .cancel:
+            Button("Cancel") { subtitles.perform(action) }
+        case .stop:
+            Button("Stop", systemImage: "stop.fill") { subtitles.perform(action) }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Stop subtitles")
-        case .idle, .failed, .finishing:
+        case .start:
             // After Stop the session shows as stopped at once; the last
             // translation still settles in the background.
-            Button("Start", systemImage: "play.fill") { subtitles.start() }
+            Button("Start", systemImage: "play.fill") { subtitles.perform(action) }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Start subtitles")
         }

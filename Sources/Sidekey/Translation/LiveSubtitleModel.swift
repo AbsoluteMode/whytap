@@ -29,6 +29,15 @@ enum SubtitlePhase: Equatable {
     var isRunning: Bool { self == .connecting || self == .listening }
 }
 
+/// The session button's action as drawn. Cancel and Stop carry the session
+/// they were drawn for.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+enum SubtitleSessionAction: Hashable {
+    case start
+    case cancel(UUID)
+    case stop(UUID)
+}
+
 /// A bounded handoff prevents a slow socket from retaining unlimited system audio.
 /// Overflow ends the session visibly; it never silently drops captured speech.
 final class SubtitleAudioRelay: @unchecked Sendable {
@@ -196,15 +205,26 @@ final class LiveSubtitleModel: ObservableObject {
         return task
     }
 
-    /// The current session's identity: a control drawn for one session never
-    /// stops another.
-    var sessionID: UUID { generation }
+    /// What the session button shows now, bound to this session: Start while
+    /// nothing runs, Cancel while connecting, Stop while listening.
+    var sessionAction: SubtitleSessionAction {
+        switch phase {
+        case .connecting: .cancel(generation)
+        case .listening: .stop(generation)
+        case .idle, .failed, .finishing: .start
+        }
+    }
 
-    /// Stop (or Cancel while connecting) for the session `session` only, if it
-    /// still runs: a click that began on another session's button does nothing.
-    func stop(session: UUID) {
-        guard generation == session, phase.isRunning else { return }
-        stop()
+    /// Runs `action` only while it is still the action the button shows: a
+    /// click that began on Start, Cancel or Stop never runs another one, or
+    /// acts on another session.
+    func perform(_ action: SubtitleSessionAction) {
+        guard action == sessionAction else { return }
+        switch action {
+        case .start: start()
+        case .cancel: cancel()
+        case .stop: stop()
+        }
     }
 
     func stop() {

@@ -522,8 +522,9 @@ Translation tools:
   word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
   TranslationPanel.sendEvent from frames they measured
   (SubtitleOverlayHitTargets), like the island: a press acts only on the
-  button view, action and frame it began on, while the panel shows (Stop
-  bound to its own session, Start only while nothing runs), and
+  button view, action and frame it began on, while the panel shows
+  (SubtitleSessionAction: Start, Cancel or Stop with its session, run by
+  LiveSubtitleModel.perform only while it is still the action shown), and
   dims the button since SwiftUI never sees it; the running overlay keeps
   them 1 s after hover ends. Stop shows the stopped box at once
   (SubtitlePhase.isRunning) while the tail settles; Start then drops it.

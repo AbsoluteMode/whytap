@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md]
 ---
 
 # Parallel development, one working Whytap
@@ -520,7 +520,44 @@ Under the lock:
    SHA and base. If either moves, reconcile and validate the affected result.
    Fetch and verify the merged source/tree before packaging. Do not force-push
    shared main or bypass existing review/release gates.
-4. For a runtime update, prepare a signed production candidate from clean,
+4. Group the install, never the review or the tests: each PR is still checked,
+   tested and merged alone. The helper marks each ticket `runtime` at
+   submission (any changed path outside documentation, tests, `.github/` and
+   the queue's own scripts). After merging a runtime PR, count the merged
+   runtime tickets waiting for an automatic install, including this one. While
+   that count is below four, another runtime ticket can be claimed now, and
+   neither this PR nor any of them changes stored-data formats or migrations,
+   permissions (TCC), Keychain items, signing or entitlements, or the updater,
+   do not package yet: record `set --status pending_install --retry-install`
+   with "merged at <main SHA>; install grouped", list the PR under **Merged,
+   not installed** in build/CURRENT_BUILD.md, tell its author, and take the
+   next ticket. The watcher takes queued work before such an install, so the
+   group installs once no runtime ticket can be claimed, through the usual
+   meeting gate. The install boundary holds in both directions, also while
+   the gate is busy or a person must act: four waiting installs, or one
+   marked `--install-first` or `--hold`, make `claim` and the watcher skip
+   runtime tickets (they keep their place) and put the install first; work
+   that does not change the app still runs. At four the builder marks the
+   group `--install-first`. A PR of the kinds above installs alone: claimed
+   while a group waits, it goes back with `set --status queued` and the group
+   is marked `--install-first`; merged but not installable now, it is
+   recorded `--hold` (a person must act) or `--install-first` (only the gate
+   is busy). `pending_install -> pending_install` records a prepared
+   candidate or changes the flag without leaving the group. The boundary is
+   sticky in the helper: once a waiting install is `--install-first` or
+   `--hold`, a later `--retry-install` keeps it `first` and a deferral
+   without a flag makes it `hold`, so no install-step deferral lets other
+   runtime work pass. A `--hold` on any ticket of a group stops the watcher's
+   automatic install of the whole group until it is set `--install-first`
+   again. The install
+   session packages one candidate from current main, which contains every PR
+   of the group; after the verified install every ticket of the group is
+   `done` with that running build and its own acceptance steps, and the
+   section is emptied. This starts with the helper and watcher that `activate`
+   installs; until then each runtime PR installs as before (see the
+   [group install decision](../decisions/2026-11-23-builder-queue-group-install.md)).
+   Otherwise, and for that install,
+   prepare a signed production candidate from clean,
    committed main using the current local build-only packaging procedure in
    `docs/build-and-release.md`. Building must leave the installed app running.
    Verify the candidate's strict code signature and compare its signing
@@ -624,6 +661,7 @@ Update the local build/CURRENT_BUILD.md under the lock. Keep these separate:
 | --- | --- |
 | Ready | PR/head SHA, checks, dependencies and acceptance steps |
 | Merged | Verified main SHA; no claim that the app changed |
+| Merged, not installed | PRs of a waiting install group with their main SHAs, kept current at each merge |
 | Candidate / pending | Source SHA, signed artifact path, reason it is waiting |
 | Running | Verified launched process, bundle/channel, version/build, source SHA and smoke result |
 

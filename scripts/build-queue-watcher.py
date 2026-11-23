@@ -30,6 +30,7 @@ import time
 
 
 ACTOR = "whytap-on-demand-builder"
+GROUP_LIMIT = 4  # merged runtime PRs one install may carry (as in the helper)
 LABEL = "ai.whytap.build-queue-watcher"
 QUEUE = "exodia-build-queue.sqlite3"
 HELPER = "exodia-build-queue.py"
@@ -110,7 +111,7 @@ def open_work(root):
     ticket waiting for a `--depends-on` PR that is not merged yet needs none."""
     path = root / QUEUE
     work = {"queued": [], "in_progress": [], "retry_install": [], "waiting_install": [],
-            "waiting_dependency": []}
+            "waiting_dependency": [], "install_first": [], "held_for_install": []}
     if not path.is_file():
         return {**work, "fingerprint": ""}
     def read():
@@ -119,17 +120,19 @@ def open_work(root):
             columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
             retry = "retry" if "retry" in columns else "''"
             depends = "depends_on" if "depends_on" in columns else "'[]'"
+            runtime = "runtime" if "runtime" in columns else "1"
             # The latest ticket of each PR: a dependency is met once it is merged.
             merged = {pr for pr, status in db.execute(
                 "SELECT pr, status FROM tickets WHERE id IN (SELECT MAX(id) FROM tickets "
                 "GROUP BY pr)") if status in ("done", "pending_install")}
             rows = db.execute(
-                "SELECT id, status, updated_at, queued_at, " + retry + ", " + depends +
-                " FROM tickets WHERE status IN ('queued', 'in_progress', 'pending_install') "
-                "ORDER BY queued_at, id").fetchall()
+                "SELECT id, status, updated_at, queued_at, " + retry + ", " + depends + ", " +
+                runtime + " FROM tickets WHERE status IN "
+                "('queued', 'in_progress', 'pending_install') ORDER BY queued_at, id").fetchall()
             return [(ticket, status, updated, queued, retry_value,
-                     any(pr not in merged for pr in json.loads(needs or "[]")))
-                    for ticket, status, updated, queued, retry_value, needs in rows]
+                     any(pr not in merged for pr in json.loads(needs or "[]")), changes_app)
+                    for ticket, status, updated, queued, retry_value, needs, changes_app
+                    in rows]
         finally:
             db.close()
 
@@ -145,18 +148,33 @@ def open_work(root):
             db.close()
         rows = read()
     seen = []
-    for ticket, status, updated, queued, retry, waiting in rows:
+    # The install boundary (as in the helper): an install marked first or held for a
+    # person, or a full group, comes before any other runtime work.
+    # WHY: .project-docs/decisions/2026-11-23-builder-queue-group-install.md
+    waiting_installs = [(ticket, retry) for ticket, status, _u, _q, retry, _w, _r in rows
+                        if status == "pending_install"]
+    automatic = [ticket for ticket, retry in waiting_installs if retry in ("meeting", "first")]
+    full = len(automatic) >= GROUP_LIMIT
+    boundary = full or any(retry in ("first", "hold") for _t, retry in waiting_installs)
+    # One candidate installs the whole group: a person holding any of it holds all.
+    held = any(retry == "hold" for _t, retry in waiting_installs)
+    for ticket, status, updated, queued, retry, waiting, changes_app in rows:
         if status == "pending_install":
-            status = "retry_install" if retry == "meeting" else "waiting_install"
+            status = ("retry_install" if retry in ("meeting", "first") and not held
+                      else "waiting_install")
+            if status == "retry_install" and (full or retry == "first"):
+                work["install_first"].append(ticket)
         if status == "queued" and waiting:
             status = "waiting_dependency"  # no session until its dependency is merged
+        elif status == "queued" and boundary and changes_app:
+            status = "held_for_install"  # keeps its place until the install is done
         work[status].append(ticket)
         if status == "queued":
             # A ticket returned without a block keeps its queued_at: the same queued
             # work again is no progress. A retry after a block gets a new queued_at
             # and resets the backoff.
             seen.append([ticket, status, queued])
-        elif status not in ("waiting_install", "waiting_dependency"):
+        elif status not in ("waiting_install", "waiting_dependency", "held_for_install"):
             seen.append([ticket, status, updated])
     work["fingerprint"] = hashlib.sha256(json.dumps(seen).encode()).hexdigest() if seen else ""
     return work
@@ -259,6 +277,12 @@ def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}
     A locked screen or an overloaded Mac only waits: no backoff, no blame."""
     if not work["retry_install"]:
         state.pop("meeting_blocked", None)
+    # An install that must come first goes before queued work (only work that does not
+    # change the app is still queued then); while it waits, that work may run.
+    if work.get("install_first") and not work["in_progress"]:
+        start, reason = install(work, state, config, now, gate, ready)
+        if start or not work["queued"]:
+            return start, reason
     if work["queued"] or work["in_progress"]:
         failures = state.get("no_progress", 0)
         if failures and state.get("fingerprint") == work["fingerprint"]:
@@ -271,26 +295,31 @@ def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}
             return False, "waiting: " + check["reason"]
         return True, "recover_in_progress" if work["in_progress"] else "queued"
     if work["retry_install"]:
-        wait = config["retry_install_seconds"]
-        failures = state.get("no_progress", 0)
-        if failures and state.get("fingerprint") == work["fingerprint"]:
-            # The gate was clear but the install still did not happen: slow down too.
-            wait = max(wait, BACKOFF_SECONDS[min(failures, len(BACKOFF_SECONDS)) - 1])
-        if now - state.get("last_install_attempt", 0) < wait:
-            # Only a gate that said "not clear" is a meeting wait; a retry after a
-            # clear gate and a failed install is a backoff under its own text.
-            return False, ("deferred install: meeting gate is not clear; next check not due"
-                           if state.get("meeting_blocked")
-                           else "deferred install: next meeting check not due")
-        check = ready(config)
-        if not check["clear"]:
-            return False, "waiting: " + check["reason"]
-        state["last_install_attempt"] = now
-        state["meeting_blocked"] = not gate(config)
-        if state["meeting_blocked"]:
-            return False, "deferred install: meeting gate is not clear"
-        return True, "retry_install"
+        return install(work, state, config, now, gate, ready)
     return False, "idle"
+
+
+def install(work, state, config, now, gate, ready):
+    """The deferred-install branch of `decide`: retry interval, environment, gate."""
+    wait = config["retry_install_seconds"]
+    failures = state.get("no_progress", 0)
+    if failures and state.get("fingerprint") == work["fingerprint"]:
+        # The gate was clear but the install still did not happen: slow down too.
+        wait = max(wait, BACKOFF_SECONDS[min(failures, len(BACKOFF_SECONDS)) - 1])
+    if now - state.get("last_install_attempt", 0) < wait:
+        # Only a gate that said "not clear" is a meeting wait; a retry after a
+        # clear gate and a failed install is a backoff under its own text.
+        return False, ("deferred install: meeting gate is not clear; next check not due"
+                       if state.get("meeting_blocked")
+                       else "deferred install: next meeting check not due")
+    check = ready(config)
+    if not check["clear"]:
+        return False, "waiting: " + check["reason"]
+    state["last_install_attempt"] = now
+    state["meeting_blocked"] = not gate(config)
+    if state["meeting_blocked"]:
+        return False, "deferred install: meeting gate is not clear"
+    return True, "retry_install"
 
 
 def engine_command(config, worktree):

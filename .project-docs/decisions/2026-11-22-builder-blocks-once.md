@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-builder-prompt.md
     confirmed_at: 2026-11-22
-related: [2026-11-19-on-demand-build-queue-builder.md, ../processes/shared-app-development.md]
+related: [2026-11-19-on-demand-build-queue-builder.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-watchdog.md]
 ---
 
 # The builder blocks a PR once with every finding

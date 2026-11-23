@@ -11,7 +11,7 @@ that the installed application or a host's plugin connection has been updated.
 
 ## Which client can use what
 
-| Client | Settings, models, languages | To-do | Meetings | Case key names and `whytap case run` |
+| Client | Settings, models, languages | To-do | Meetings, Vocab and Filler words | Case key names and `whytap case run` |
 | --- | --- | --- | --- | --- |
 | Claude Code | yes | yes | after a one-time Yes in Whytap | after **Case → Connect → Claude Code** |
 | Codex | yes | yes | after a one-time Yes in Whytap | no: Case → Connect does not offer Codex, so Case refuses it (access denied) |
@@ -21,7 +21,9 @@ that the installed application or a host's plugin connection has been updated.
 
 - Settings and model tools need Whytap running; To-do works while Whytap is
   closed. Island tools and their hotkeys (`whytap_toolbox_*`,
-  `whytap_hotkey_set`) come with the next version after 2.2.26.
+  `whytap_hotkey_set`) come with the next version after 2.2.26, and so do
+  `whytap_vocab_add` and `whytap_filler_add`; they need Whytap running and,
+  from a coding tool, the same one-time Yes as meetings.
 - Meetings are recognized only when Claude Code or Codex started the server
   itself (the helper's direct parent, checked by Apple-vouched signature). A
   new Codex user can use meetings after the Yes but not Case.
@@ -58,6 +60,8 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |
 | `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
+| `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated (needs the Yes) |
+| `whytap_filler_add` | — | Add words Drop removes from dictation (Filler; needs the Yes) |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
 | `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
@@ -74,6 +78,34 @@ code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
 Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation.
+
+## Vocab and Filler
+
+These are Drop's hand-filled lists, the ones the island's Vocab and Filler
+editors fill. Each operation adds through that list's own store and checks,
+so an open editor shows the entry and the next dictation reads it. Neither
+reads a list back or removes an entry; remove entries in the island. An
+entry already there is reported and left as it is, so a retry is safe. One
+invalid entry (empty, too long, a line break or control character) adds
+nothing (`invalid_term`); joiners such as the Persian zero-width non-joiner
+stay part of a word. A full list answers `list_full`. A coding tool needs
+the user's one-time Yes for these, as for meetings (they change the user's
+speech profile); the built-in Agent adds what your request names.
+
+`whytap_vocab_add` takes `terms`: 1–20 words or short phrases, at most 50
+characters each; Vocab holds 1,000. A term already there in any letter case
+is `existing` with its saved spelling. Each speech route sends the part of
+Vocab its model supports, so a saved term is not a promise that a given
+model uses it (On this Mac dictation uses no Vocab). The built-in Agent
+shows `Vocab + whytap` above its answer, with the spelling exactly as saved.
+
+`whytap_filler_add` takes `terms` (1–20, at most 50 characters; the list
+holds 100): words Drop removes from dictation, Fast and Smart (`um`, `ну`).
+When removing them would leave a Fast take empty, Drop pastes the take
+unfiltered. The Agent shows `Filler + ну`.
+
+There is no Replace list: it came with Drop learning, which was shelved on
+2026-11-23.
 
 ## Island tools and their hotkeys
 

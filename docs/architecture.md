@@ -1402,7 +1402,14 @@ Keyboard control names it and says "Click +, choose Whytap, then Override System
 Protections."; only the global grant ("Control your entire Mac and all apps")
 makes AXIsProcessTrusted true. Key steps name the providers whose key is already
 in the Keychain under an empty field ("Saved in your Keychain: Soniox ·
-ElevenLabs"); a name picks its tab and Return uses that key. Only the
+ElevenLabs"); a name picks its tab and Return uses that key. The Screen
+Recording step is named "Screen & system audio." on macOS 15 and later and
+points at "Screen & System Audio Recording"; on macOS 27.3 that request shows
+no dialog, so the pane opens once it returned
+(PermissionsHelper.screenRecordingShowsNoDialog). The step on screen is kept in
+`sidekey.onboarding.step.v1`, and a quit (System Settings' Quit & Reopen after a
+privacy switch) does not finish the onboarding (AppDelegate.isTerminating): the
+relaunch continues at that step, or the next one still on the way. Only the
 system's own check (polling and a return to the app) makes it granted, then
 the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again

@@ -40,7 +40,7 @@ enum OnboardingAccessKind: CaseIterable {
         case .keyboard: return "Keyboard control."
         case .microphone: return "Microphone."
         case .inputMonitoring: return "Input Monitoring."
-        case .screenRecording: return "Screen Recording."
+        case .screenRecording: return PermissionsHelper.screenPaneNamesSystemAudio ? "Screen & system audio." : "Screen Recording."
         }
     }
 
@@ -49,7 +49,10 @@ enum OnboardingAccessKind: CaseIterable {
         case .keyboard: return "To hear your Drop shortcut and type the text where your cursor is."
         case .microphone: return "To hear you, only while Drop is recording."
         case .inputMonitoring: return "This Mac also asks for it before Drop can see its shortcut."
-        case .screenRecording: return "Optional. For Shot, and when you ask the Agent about your screen."
+        case .screenRecording:
+            return PermissionsHelper.screenPaneNamesSystemAudio
+                ? "Optional. For Shot and the Agent to see your screen, and for Meeting Notes and Subtitles to hear your Mac’s sound."
+                : "Optional. For Shot, and when you ask the Agent about your screen."
         }
     }
 
@@ -65,7 +68,7 @@ enum OnboardingAccessKind: CaseIterable {
         case .keyboard: return Self.protectionOverride ? "System & App Protection Override" : "Accessibility"
         case .microphone: return "Microphone"
         case .inputMonitoring: return "Input Monitoring"
-        case .screenRecording: return "Screen Recording"
+        case .screenRecording: return PermissionsHelper.screenPaneNamesSystemAudio ? "Screen & System Audio Recording" : "Screen Recording"
         }
     }
 
@@ -77,7 +80,7 @@ enum OnboardingAccessKind: CaseIterable {
         case .keyboard: return "Ready to type anywhere."
         case .microphone: return "Drop can hear you now."
         case .inputMonitoring: return "Drop can see its shortcut."
-        case .screenRecording: return "Ready for Shot and the Agent."
+        case .screenRecording: return PermissionsHelper.screenPaneNamesSystemAudio ? "Ready for Shot, the Agent and your Mac’s sound." : "Ready for Shot and the Agent."
         }
     }
 
@@ -86,7 +89,7 @@ enum OnboardingAccessKind: CaseIterable {
         case .keyboard: return "Whytap isn’t on in \(pane) yet."
         case .microphone: return "Microphone access is still off."
         case .inputMonitoring: return "Input Monitoring isn’t on yet."
-        case .screenRecording: return "Screen Recording isn’t on yet."
+        case .screenRecording: return "\(pane) isn’t on yet."
         }
     }
 

@@ -150,7 +150,10 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            keyChecker: ProviderKeyChecking? = nil,
                            offersOpenAISpeech: Bool = false, isPreview: Bool = false,
                            realCatalogs: Bool = false, probe: ModelProbing? = nil,
-                           heldForTeardown: Bool = true) throws -> OnboardingJourneyModel {
+                           heldForTeardown: Bool = true,
+                           openScreenSettings: @escaping () -> Void = {},
+                           screenShowsNoDialog: Bool = false,
+                           resumeDefaults: UserDefaults? = nil) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -189,11 +192,14 @@ final class OnboardingJourneyModelTests: XCTestCase {
             supportsOnDevice: supportsOnDevice,
             preferences: PrivacyPreferences(defaults: env.defaults),
             screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
-            openScreenRecordingSettings: {}, defaultsChanges: NotificationCenter(),
+            openScreenRecordingSettings: openScreenSettings,
+            screenRecordingShowsNoDialog: { screenShowsNoDialog },
+            defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
             tavily: tavily,
             isPreview: isPreview,
-            offersOpenAISpeech: offersOpenAISpeech)
+            offersOpenAISpeech: offersOpenAISpeech,
+            resumeDefaults: resumeDefaults)
         if heldForTeardown { addTeardownBlock { model.stop() } }
         return model
     }
@@ -430,6 +436,48 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .speechKey, in: model)
         await model.useSpeechKey("", provider: .deepgram)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+    }
+
+    // macOS 27.3 shows no Screen Recording dialog: the pane opens once the
+    // request returned; older macOS leaves the first press to macOS's dialog.
+    func testOnMacOS27_3TheScreenAllowOpensTheScreenAndSystemAudioPane() async throws {
+        for noDialog in [true, false] {
+            let env = try makeEnv(accessibility: true, microphone: .authorized)
+            var opened = 0
+            let model = try makeModel(env, openScreenSettings: { opened += 1 }, screenShowsNoDialog: noDialog)
+            for _ in 0..<20 where model.step != .screenRecording { model.next() }
+            XCTAssertEqual(model.step, .screenRecording)
+            model.requestAccess(.screenRecording)
+            try await Task.sleep(for: .milliseconds(150))
+            XCTAssertEqual(opened, noDialog ? 1 : 0, "noDialog=\(noDialog)")
+            // Allow again opens the pane on both.
+            model.requestAccess(.screenRecording)
+            XCTAssertEqual(opened, noDialog ? 2 : 1, "noDialog=\(noDialog)")
+        }
+    }
+
+    // System Settings' Quit & Reopen after a privacy switch: the relaunch
+    // continues at the step that was shown, or the next one still on the way.
+    func testARelaunchContinuesAtTheStepThatWasShown() throws {
+        let suite = "journey-resume-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let env = try makeEnv()
+        let first = try makeModel(env, resumeDefaults: defaults)
+        for _ in 0..<20 where first.step != .microphone { first.next() }
+        XCTAssertEqual(first.step, .microphone)
+        XCTAssertEqual(defaults.string(forKey: OnboardingLaunch.stepKey), "microphone")
+        let again = try makeModel(env, resumeDefaults: defaults)
+        XCTAssertEqual(again.step, .microphone)
+        OnboardingLaunch.finish(in: defaults)
+        XCTAssertNil(defaults.string(forKey: OnboardingLaunch.stepKey))
+
+        let steps: [OnboardingStep] = [.keyboard, .microphone, .toolbox, .thanks]
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "microphone", on: steps), .microphone)
+        // Screen Recording turned on before the relaunch: the next step on the way.
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "screenRecording", on: steps), .toolbox)
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: nil, on: steps), .keyboard)
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "gone", on: steps), .keyboard)
     }
 
     // Settings cleared, Keychain kept (the owner, 2026-11-23): the speech step

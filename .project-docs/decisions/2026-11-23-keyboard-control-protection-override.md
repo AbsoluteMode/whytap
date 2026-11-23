@@ -124,6 +124,26 @@ which nothing told the person to make.
   - a mark without a key keeps the list, and Return checks nothing;
   - a click on ElevenLabs, then Return, routes Drop to ElevenLabs.
 
+# Screen, system audio and relaunch (REV 73)
+
+- On macOS 27.3 `CGRequestScreenCaptureAccess` shows no dialog (the probe
+  above). The first Allow now opens the pane once the request returned, so
+  Whytap is registered before the pane loads.
+- The pane has been called "Screen & System Audio Recording" since macOS 15,
+  with a second list, "System Audio Recording Only" (`kTCCServiceAudioCapture`).
+  Whytap records the Mac's audio with a CoreAudio process tap; that service is
+  separate from `kTCCServiceScreenCapture`. A `tccutil reset ScreenCapture`
+  leaves it alone, which is why the owner's audio switch was still on. On a new
+  Mac it is asked when a process tap is first created. That prompt is not
+  verified on 27.3.
+- The step is named "Screen & system audio." and says what each part is for.
+- System Settings' Quit & Reopen sends a Quit Apple Event. The log on the
+  owner's Mac showed the relaunched process with no window: the window's close
+  during the quit had cleared `sidekey.onboarding.pending.v1`. A quit no longer
+  finishes the onboarding, and the shown step is kept in
+  `sidekey.onboarding.step.v1`. The relaunch opens there, or at the next step
+  still on the way.
+
 # Rejected
 
 - Asking for `com.apple.developer.assistive-technology`: Apple limits it to

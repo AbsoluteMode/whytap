@@ -193,7 +193,11 @@ struct OnboardingAcceptance: Equatable {
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingJourneyModel: ObservableObject {
-    @Published private(set) var step: OnboardingStep
+    @Published private(set) var step: OnboardingStep {
+        didSet { resumeDefaults?.set(step.rawValue, forKey: OnboardingLaunch.stepKey) }
+    }
+    /// Where the shown step is kept for a relaunch; nil in tests and the preview.
+    private let resumeDefaults: UserDefaults?
     @Published private(set) var progress: OnboardingProgress
     /// What each step's action did in this onboarding. On a key step it is
     /// the latest attempt; the route that holds is in `accepted`.
@@ -233,6 +237,7 @@ final class OnboardingJourneyModel: ObservableObject {
     let screenRecording: ScreenRecordingAccess
     private let dropSpeech: OnboardingDropSpeech
     private let openScreenRecordingSettings: () -> Void
+    private let screenRecordingShowsNoDialog: () -> Bool
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -290,6 +295,7 @@ final class OnboardingJourneyModel: ObservableObject {
         preferences: PrivacyPreferences? = nil,
         screenRecording: ScreenRecordingAccess? = nil,
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
+        screenRecordingShowsNoDialog: @escaping () -> Bool = { PermissionsHelper.screenRecordingShowsNoDialog },
         defaultsChanges: NotificationCenter = .default,
         dwellWait: ((TimeInterval) async -> Void)? = nil,
         tavily: TavilySettings? = nil,
@@ -300,8 +306,10 @@ final class OnboardingJourneyModel: ObservableObject {
         voice: OnboardingVoiceSignal? = nil,
         dropStandIn: OnboardingDropStandIn? = nil,
         isPreview: Bool = false,
-        offersOpenAISpeech: Bool? = nil
+        offersOpenAISpeech: Bool? = nil,
+        resumeDefaults: UserDefaults? = nil
     ) {
+        self.resumeDefaults = resumeDefaults
         let openAI = offersOpenAISpeech ?? Self.offersOpenAISpeech
         speechProviders = OnboardingDropSpeech.keyProviders + (openAI ? [.openAI] : [])
         let models = models ?? APIAndModelsViewModel()
@@ -316,6 +324,7 @@ final class OnboardingJourneyModel: ObservableObject {
         self.preferences = preferences
         self.screenRecording = screenRecording
         self.openScreenRecordingSettings = openScreenRecordingSettings
+        self.screenRecordingShowsNoDialog = screenRecordingShowsNoDialog
         dwell = OnboardingDwellController(wait: dwellWait)
         pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
@@ -347,7 +356,8 @@ final class OnboardingJourneyModel: ObservableObject {
         progress.needsInputMonitoring = permissions.dropHotkeyStatus == .inputMonitoringRequired
         progress.speechExpected = start.speechReady
         self.progress = progress
-        step = OnboardingJourney.steps(start: start, progress: progress).first ?? .thanks
+        step = OnboardingLaunch.resumedStep(saved: resumeDefaults?.string(forKey: OnboardingLaunch.stepKey),
+                                            on: OnboardingJourney.steps(start: start, progress: progress))
 
         observePermissions()
         observeVoice()
@@ -1166,11 +1176,24 @@ final class OnboardingJourneyModel: ObservableObject {
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
     func requestScreenRecording() {
         asking(.screenRecording)
-        switch screenRecording.requestOnce() {
+        // macOS 27.3 shows no dialog for this request: the pane opens once
+        // the request returned, so Whytap is registered before it loads.
+        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+        var after: (@MainActor () -> Void)?
+        if screenRecordingShowsNoDialog() {
+            after = { [weak self] in self?.openScreenPaneUnlessGranted() }
+        }
+        switch screenRecording.requestOnce(afterRequest: after) {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
         case .requested: break
         case .alreadyRequested: openScreenRecordingSettings()
         }
+    }
+
+    private func openScreenPaneUnlessGranted() {
+        permissions.refresh(restartRecoveryPolling: false)
+        guard !permissions.screenRecordingGranted else { return }
+        openScreenRecordingSettings()
     }
 
     /// A permission that turns granted while its step is shown moves on; one

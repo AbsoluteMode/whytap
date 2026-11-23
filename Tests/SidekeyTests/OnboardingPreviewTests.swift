@@ -763,7 +763,7 @@ final class OnboardingPreviewTests: XCTestCase {
             }
         }
         let delegate = try String(contentsOf: app.appendingPathComponent("AppDelegate.swift"), encoding: .utf8)
-        XCTAssertTrue(delegate.contains("let model = OnboardingJourneyModel()"),
+        XCTAssertTrue(delegate.contains("let model = OnboardingJourneyModel(resumeDefaults: .standard)"),
                       "the app's onboarding builds on the default APIAndModelsViewModel, the Settings catalog")
         let manifest = try String(contentsOf: root.appendingPathComponent("Package.swift"), encoding: .utf8)
         let appTarget = try XCTUnwrap(manifest.range(of: #"name: "SidekeyApp",\s*dependencies: \["Sidekey"\]"#,

@@ -58,6 +58,18 @@ enum PermissionsHelper {
     static var accessibilityIsAddedByHand = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
 
+    /// macOS 27.3 and later: the Screen Recording request shows no dialog
+    /// ("Service kTCCServiceScreenCapture does not allow prompting"), so the
+    /// pane opens once the request returned. Settable in tests.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static var screenRecordingShowsNoDialog = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
+
+    /// macOS 15 and later name the pane "Screen & System Audio Recording": a
+    /// switch there also lets the app record the Mac's audio.
+    static var screenPaneNamesSystemAudio = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
+
     /// Asks macOS to register Whytap and show its own Accessibility dialog.
     /// Never opens System Settings in the same action: that dialog has its
     /// own button, and a pane opened beside the request listed no Whytap.

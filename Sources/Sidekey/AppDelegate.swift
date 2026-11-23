@@ -546,12 +546,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             existing.show()
             return
         }
-        let model = OnboardingJourneyModel()
+        let model = OnboardingJourneyModel(resumeDefaults: .standard)
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
         let controller = OnboardingJourneyWindowController(model: model) { [weak self] in
-            OnboardingLaunch.finish(in: .standard)
+            // A quit (System Settings' Quit & Reopen after a privacy switch)
+            // is not the end of the onboarding: the relaunch continues it.
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            if self?.isTerminating != true { OnboardingLaunch.finish(in: .standard) }
             NowPlayingAutomationConsent.promptsDeferred = false
             // Released after AppKit finishes closing the window.
             DispatchQueue.main.async { self?.onboardingWindowController = nil }
@@ -583,7 +586,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerIslandHotkeyActivity()
     }
 
+    /// Set once the app agreed to quit, before AppKit takes its windows down.
+    private(set) var isTerminating = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        isTerminating = true
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()

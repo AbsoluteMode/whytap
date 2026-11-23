@@ -8,8 +8,9 @@ import SwiftUI
 /// WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
 struct DropLearningDropsView: View {
     @ObservedObject var model: DropLearningDropsModel
-    /// The row's frame in the view, for the panel's hit area.
-    var onRowFrame: (CGRect) -> Void = { _ in }
+    /// The row's and Y/N's frames in the view's top-left space: the panel
+    /// answers the pointer itself (see `DropLearningDropsPointer`).
+    var onFrame: (DropLearningDropsPointer.Area, CGRect) -> Void = { _, _ in }
 
     enum Metrics {
         static let gap: CGFloat = 7
@@ -32,13 +33,7 @@ struct DropLearningDropsView: View {
             HStack(spacing: 0) {
                 Color.clear.frame(width: Metrics.islandOverlap)
                 container
-                    .onHover { model.setHovered($0) }
-                    .background(GeometryReader { geometry in
-                        let frame = geometry.frame(in: .named(Self.space))
-                        Color.clear
-                            .onAppear { onRowFrame(frame) }
-                            .onChange(of: frame) { _, value in onRowFrame(value) }
-                    })
+                    .background(frameReader(.row))
                 Spacer(minLength: 0)
             }
             .frame(maxHeight: .infinity, alignment: .center)
@@ -48,6 +43,15 @@ struct DropLearningDropsView: View {
     }
 
     private static let space = "drop-learning-drops"
+
+    private func frameReader(_ area: DropLearningDropsPointer.Area) -> some View {
+        GeometryReader { geometry in
+            let frame = geometry.frame(in: .named(Self.space))
+            Color.clear
+                .onAppear { onFrame(area, frame) }
+                .onChange(of: frame) { _, value in onFrame(area, value) }
+        }
+    }
 
     @ViewBuilder
     private var container: some View {
@@ -166,9 +170,10 @@ struct DropLearningDropsView: View {
             yesOpens: model.content?.yesOpens == true,
             hovered: model.hoveredButton == button,
             controlHeld: model.controlHeld,
-            action: { model.answer(button) },
-            onHover: { model.setHoveredButton($0 ? button : (model.hoveredButton == button ? nil : model.hoveredButton)) }
+            pressed: model.pressedButton == button,
+            action: { model.answer(button, via: .click) }
         )
+        .background(frameReader(button == .yes ? .yes : .no))
     }
 }
 
@@ -179,8 +184,8 @@ private struct DropLearningAnswerDrop: View {
     let yesOpens: Bool
     let hovered: Bool
     let controlHeld: Bool
+    let pressed: Bool
     let action: () -> Void
-    let onHover: (Bool) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -201,9 +206,9 @@ private struct DropLearningAnswerDrop: View {
         .buttonStyle(DropLearningAnswerStyle(
             tint: button == .yes ? Color(nsColor: .systemGreen) : Color(nsColor: .systemRed),
             lit: hovered || controlHeld,
+            pressed: pressed,
             dark: colorScheme == .dark
         ))
-        .onHover(perform: onHover)
         .accessibilityLabel(button == .yes ? (yesOpens ? "Open Vocab" : "Yes") : "No")
         .accessibilityHint(button == .yes ? "Control-Y" : "Control-N")
     }
@@ -221,11 +226,14 @@ private struct DropLearningAnswerDrop: View {
 private struct DropLearningAnswerStyle: ButtonStyle {
     let tint: Color
     let lit: Bool
+    /// The panel tracks the press itself (SwiftUI never sees it there).
+    let pressed: Bool
     let dark: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let rim = lit ? 0.95 : (dark ? 0.75 : 0.70)
-        let glow = configuration.isPressed ? 0.70 : (lit ? 0.55 : (dark ? 0.38 : 0.30))
+        let isPressed = pressed || configuration.isPressed
+        let glow = isPressed ? 0.70 : (lit ? 0.55 : (dark ? 0.38 : 0.30))
         return configuration.label
             .dropGlass(Circle())
             .overlay(
@@ -235,7 +243,7 @@ private struct DropLearningAnswerStyle: ButtonStyle {
             )
             .contentShape(Circle())
             .animation(.easeOut(duration: 0.14), value: lit)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.14), value: isPressed)
     }
 }
 

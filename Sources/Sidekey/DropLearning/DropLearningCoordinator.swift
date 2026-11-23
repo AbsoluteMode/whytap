@@ -515,7 +515,10 @@ final class DropLearningCoordinator {
     // MARK: - Answers from the drops
 
     /// Y. Saves through the same stores the Vocab and Filler editors use.
-    func accept(_ suggestion: DropLearningSuggestion) {
+    /// `via` says how the answer came (click, keys, timer, island) for the
+    /// reason counters and the developer journal; it carries no key data.
+    func accept(_ suggestion: DropLearningSuggestion, via: String = "-") {
+        recordAnswer("accepted", suggestion: suggestion, via: via)
         ledger(for: suggestion).reset(suggestion.candidate)
         guard !suggestion.dryRun else { return }
         switch suggestion.candidate {
@@ -530,13 +533,30 @@ final class DropLearningCoordinator {
     }
 
     /// N: never offered again.
-    func decline(_ suggestion: DropLearningSuggestion) {
+    func decline(_ suggestion: DropLearningSuggestion, via: String = "-") {
+        recordAnswer("declined", suggestion: suggestion, via: via)
         ledger(for: suggestion).decline(suggestion.candidate)
     }
 
     /// Shown for 10 s and let go: counting starts over.
-    func expired(_ suggestion: DropLearningSuggestion) {
+    func expired(_ suggestion: DropLearningSuggestion, via: String = "-") {
+        recordAnswer("expired", suggestion: suggestion, via: via)
         ledger(for: suggestion).reset(suggestion.candidate)
+    }
+
+    /// Every shown suggestion ends in one counted answer, so a drop that
+    /// never hears Y or N shows up as "answer.expired.timer".
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+    private func recordAnswer(_ outcome: String, suggestion: DropLearningSuggestion, via: String) {
+        guard capturesFields else { return }
+        stats.add(["answer.\(outcome).\(via)"])
+        guard settings.isCalibrating() else { return }
+        var record: [String: Any] = [
+            "at": ISO8601DateFormatter().string(from: deps.now()),
+            "event": "answered", "outcome": outcome, "via": via, "dryRun": suggestion.dryRun,
+        ]
+        if let candidate = describe([suggestion.candidate]).first { record["candidate"] = candidate }
+        deps.journal.append(record)
     }
 
     private func ledger(for suggestion: DropLearningSuggestion) -> DropLearningLedger {

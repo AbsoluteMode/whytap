@@ -1128,7 +1128,15 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   letters at rest, check/cross under the pointer. Answers: click, or
   Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
   the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
-  conflict check and listed in Help. An active Drop or Agent phase, an open
+  conflict check and listed in Help. The panel answers clicks itself in
+  sendEvent against the measured Y/N frames (DropLearningDropsPointer: a
+  press must start and end on the same button), because an inactive app's
+  non-activating panel never hands the first click to SwiftUI; mouse
+  monitors drive hover and let the panel take the mouse only over the row,
+  so menu bar extras under the rest of it keep their clicks. Every shown
+  suggestion ends in one counted answer, answer.<accepted|declined|expired>.
+  <click|keys|timer|island>, and with calibration on a journal "answered"
+  entry. An active Drop or Agent phase, an open
   Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
   .project-docs/decisions/2026-11-22-drop-learning-drops.md
 

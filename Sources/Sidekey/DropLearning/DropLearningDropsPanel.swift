@@ -1,28 +1,92 @@
 import AppKit
 import Carbon.HIToolbox
 import Combine
+import os.log
 import SwiftUI
 
 private final class DropsHostingView<Content: View>: NSHostingView<Content> {
-    var interactiveRect: NSRect = .zero
+    var accepts: (CGPoint) -> Bool = { _ in false }
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard interactiveRect.contains(point) else { return nil }
+        let local = convert(point, from: superview)
+        let topLeft = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
+        guard accepts(topLeft) else { return nil }
         return super.hitTest(point)
     }
-    /// A click answers without activating Whytap: the field keeps focus.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Where the row and Y/N are, in the drops view's top-left space, and the
+/// press in flight. The panel answers the pointer itself: in an inactive
+/// app's non-activating panel AppKit never hands the first click to SwiftUI,
+/// not even with `acceptsFirstMouse` (the island's ✕ had the same bug,
+/// docs/bugs/2026-09-04-island-answer-close-first-mouse.md), so a SwiftUI
+/// Button there never fires.
+/// WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
+struct DropLearningDropsPointer: Equatable {
+    enum Area: Hashable { case row, yes, no }
+    /// Room around the row and the buttons that still counts as on them.
+    static let slop: CGFloat = 3
+
+    private(set) var frames: [Area: CGRect] = [:]
+    private(set) var pressed: DropLearningDropsModel.Button?
+    /// A press began on the row: its drags and release are ours too, so
+    /// nothing reaches the menu bar under it.
+    private(set) var ownsSequence = false
+
+    mutating func set(_ area: Area, frame: CGRect) { frames[area] = frame }
+
+    func isOnRow(_ point: CGPoint) -> Bool {
+        frames[.row].map { $0.insetBy(dx: -Self.slop, dy: -Self.slop).contains(point) } ?? false
+    }
+
+    func button(at point: CGPoint) -> DropLearningDropsModel.Button? {
+        let on = { (area: Area) in frames[area]?.insetBy(dx: -Self.slop, dy: -Self.slop).contains(point) == true }
+        if on(.yes) { return .yes }
+        if on(.no) { return .no }
+        return nil
+    }
+
+    /// Returns whether the press is ours.
+    mutating func down(at point: CGPoint) -> Bool {
+        pressed = button(at: point)
+        ownsSequence = pressed != nil || isOnRow(point)
+        return ownsSequence
+    }
+
+    /// The button the press began and ended on, if any: that is the answer.
+    mutating func up(at point: CGPoint) -> DropLearningDropsModel.Button? {
+        defer { cancel() }
+        guard let pressed, button(at: point) == pressed else { return nil }
+        return pressed
+    }
+
+    mutating func cancel() {
+        pressed = nil
+        ownsSequence = false
+    }
 }
 
 /// The non-activating panel the suggestion drops live in, in the menu bar
 /// right of the island and just under its edge, so the first drop buds from
 /// the island. It follows the system appearance (the island window is always
-/// dark). Never key, never main; shown only while drops are on screen.
+/// dark). Never key, never main; shown only while drops are on screen. It
+/// takes the mouse only while the pointer is over the row, so the menu bar
+/// extras under the rest of it keep working.
 /// WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
 @MainActor
 final class DropLearningDropsPanel: NSPanel {
     static let width: CGFloat = 520
 
+    /// A click on Y or N.
+    var onAnswer: ((DropLearningDropsModel.Button) -> Void)?
+    /// The pointer is on the row, and on which button.
+    var onPointer: ((Bool, DropLearningDropsModel.Button?) -> Void)?
+    /// The button the mouse is down on, nil once it is up.
+    var onPress: ((DropLearningDropsModel.Button?) -> Void)?
+
     private var host: DropsHostingView<DropLearningDropsView>!
+    private(set) var pointer = DropLearningDropsPointer()
+    private var mouseMonitors: [Any] = []
 
     init(model: DropLearningDropsModel) {
         let frame = Self.frame(on: IslandScreenResolver.currentDescriptor())
@@ -38,15 +102,10 @@ final class DropLearningDropsPanel: NSPanel {
         level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue - 1)
         let host = DropsHostingView(rootView: DropLearningDropsView(model: model))
         self.host = host
-        host.rootView = DropLearningDropsView(model: model, onRowFrame: { [weak self] rect in
-            guard let self else { return }
-            let height = self.host.bounds.height
-            self.host.interactiveRect = NSRect(
-                x: rect.minX - 4,
-                y: self.host.isFlipped ? rect.minY - 4 : height - rect.maxY - 4,
-                width: rect.width + 8, height: rect.height + 8
-            )
+        host.rootView = DropLearningDropsView(model: model, onFrame: { [weak self] area, rect in
+            self?.pointer.set(area, frame: rect)
         })
+        host.accepts = { [weak self] point in self?.pointer.isOnRow(point) ?? false }
         host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: frame.size)
         host.autoresizingMask = [.width, .height]
@@ -64,13 +123,77 @@ final class DropLearningDropsPanel: NSPanel {
 
     func present() {
         reposition()
-        ignoresMouseEvents = false
+        pointer.cancel()
+        startPointerRouting()
         orderFrontRegardless()
+        refreshPointer()
     }
 
     func dismiss() {
+        stopPointerRouting()
+        pointer.cancel()
+        onPress?(nil)
         ignoresMouseEvents = true
         orderOut(nil)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            if pointer.down(at: viewPoint(window: event.locationInWindow)) {
+                onPress?(pointer.pressed)
+                return
+            }
+        case .leftMouseDragged where pointer.ownsSequence:
+            return
+        case .leftMouseUp where pointer.ownsSequence:
+            let answer = pointer.up(at: viewPoint(window: event.locationInWindow))
+            onPress?(nil)
+            if let answer { onAnswer?(answer) }
+            refreshPointer()
+            return
+        default:
+            break
+        }
+        super.sendEvent(event)
+    }
+
+    // MARK: - Pointer
+
+    private func startPointerRouting() {
+        guard mouseMonitors.isEmpty else { return }
+        let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .scrollWheel]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPointer() }
+        }) {
+            mouseMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self] event in
+            self?.refreshPointer()
+            return event
+        }) {
+            mouseMonitors.append(local)
+        }
+    }
+
+    private func stopPointerRouting() {
+        mouseMonitors.forEach(NSEvent.removeMonitor)
+        mouseMonitors.removeAll()
+    }
+
+    /// Claims the mouse only over the row, and tells the model where the
+    /// pointer is (hover pauses the 10 s; Y/N show ✓/✕).
+    private func refreshPointer() {
+        guard isVisible else { return }
+        let point = viewPoint(window: convertPoint(fromScreen: NSEvent.mouseLocation))
+        let onRow = pointer.isOnRow(point)
+        if !pointer.ownsSequence, ignoresMouseEvents == onRow { ignoresMouseEvents = !onRow }
+        onPointer?(onRow, onRow ? pointer.button(at: point) : nil)
+    }
+
+    private func viewPoint(window point: NSPoint) -> CGPoint {
+        let local = host.convert(point, from: nil)
+        return CGPoint(x: local.x, y: host.isFlipped ? local.y : host.bounds.height - local.y)
     }
 
     func setScreenshotProtectionEnabled(_ enabled: Bool) {
@@ -119,6 +242,7 @@ enum DropLearningKeyCombos {
 @MainActor
 final class DropLearningKeys: DropLearningKeyCapturing {
 
+    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "drop-learning")
     private var monitors: [CarbonHotkeyMonitor] = []
     private var flagMonitors: [Any] = []
 
@@ -129,7 +253,11 @@ final class DropLearningKeys: DropLearningKeyCapturing {
                                     (DropLearningKeyCombos.no, CarbonHotkeyMonitor.dropLearningNoHotKeyID, .no)] {
             let monitor = CarbonHotkeyMonitor(
                 keyCode: combo.keyCode, modifiers: combo.modifiers, hotKeyIDValue: id,
-                onHotkey: { MainActor.assumeIsolated { onAnswer(button) } }
+                onHotkey: {
+                    // No key data: only that ⌃Y or ⌃N reached Whytap.
+                    os_log("drop_learning_answer_key yes=%{public}d", log: Self.log, type: .info, button == .yes ? 1 : 0)
+                    MainActor.assumeIsolated { onAnswer(button) }
+                }
             )
             // A combination another app holds just stays with it; the
             // drops still answer to a click.
@@ -182,11 +310,11 @@ final class DropLearningDropsController {
             guard let self, self.islandIsIdle else { return false }
             return self.model.show(suggestion)
         }
-        model.onOutcome = { [weak coordinator] suggestion, outcome in
+        model.onOutcome = { [weak coordinator] suggestion, outcome, via in
             switch outcome {
-            case .accepted: coordinator?.accept(suggestion)
-            case .declined: coordinator?.decline(suggestion)
-            case .expired: coordinator?.expired(suggestion)
+            case .accepted: coordinator?.accept(suggestion, via: via.rawValue)
+            case .declined: coordinator?.decline(suggestion, via: via.rawValue)
+            case .expired: coordinator?.expired(suggestion, via: via.rawValue)
             }
         }
         model.onVisibleChange = { [weak self] visible in self?.visibilityChanged(visible) }
@@ -212,10 +340,21 @@ final class DropLearningDropsController {
         }
     }
 
+    /// Clicks and the pointer on the panel reach the model.
+    static func wire(_ panel: DropLearningDropsPanel, to model: DropLearningDropsModel) {
+        panel.onAnswer = { [weak model] in model?.answer($0, via: .click) }
+        panel.onPress = { [weak model] in model?.setPressedButton($0) }
+        panel.onPointer = { [weak model] onRow, button in
+            model?.setHovered(onRow)
+            model?.setHoveredButton(button)
+        }
+    }
+
     /// The app's controller.
     static func live(coordinator: DropLearningCoordinator) -> (DropLearningDropsController, DropLearningDropsPanel) {
         let model = DropLearningDropsModel(reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion })
         let panel = DropLearningDropsPanel(model: model)
+        wire(panel, to: model)
         let controller = DropLearningDropsController(
             coordinator: coordinator, model: model, keys: DropLearningKeys(),
             present: { [weak panel] visible in visible ? panel?.present() : panel?.dismiss() },

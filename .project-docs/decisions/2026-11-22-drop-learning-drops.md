@@ -6,7 +6,7 @@ summary: A learned suggestion shows as four liquid-glass drops in the menu bar r
 status: confirmed
 tags: [drop, vocab, filler, replace, island, hotkeys, design]
 canonical_for: [drop-learning-drops]
-verified_at: 2026-11-22
+verified_at: 2026-11-23
 sources:
   - type: user-confirmed
     reference: ORCH-TASK 72, REV 13 and REV 14 forwarded by the orchestrator. The user approved the v7 prototype close-ups (light and dark, rest and hover) with "Yes, wire it in" (translated) and asked for no fill inside Y and N, only a contour around the whole edge with a soft glow.
@@ -23,6 +23,9 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropLearning/DropLearningDropsTests.swift
     confirmed_at: 2026-11-22
+  - type: user-confirmed
+    reference: ORCH-TASK 72, REV 21 forwarded by the orchestrator. In build 1732 the "Add jev?" drop showed but did not react to Y/N (translated).
+    confirmed_at: 2026-11-23
 related: [2026-11-22-drop-edit-learning.md, 2026-11-22-drop-learning-default-on.md, 2026-11-22-drop-edit-observation.md]
 ---
 
@@ -70,6 +73,13 @@ and the answer must never cost the field a letter.
   reach the field. ⌃Y / ⌃N are reserved in the Hotkeys conflict check ("Suggestion
   yes / no") so no tool can take them, and the Help window lists them. If
   another app holds a combination, the drops still answer to a click.
+- **Clicks (2026-11-23):** the panel answers a click itself in `sendEvent`
+  against the Y/N frames the view measures: a press that starts and ends on
+  the same button answers, a press anywhere on the row is consumed, and the
+  panel takes the mouse only while the pointer is over the row (mouse
+  monitors also drive hover). Every shown suggestion ends in one counted
+  answer (`answer.<outcome>.<click|keys|timer|island>`), journaled while
+  calibrating.
 - **Switch:** Settings, Other, Drop: "Learn from my edits", on unless the
   user switched it off ([default on](2026-11-22-drop-learning-default-on.md)).
 
@@ -81,6 +91,14 @@ and the answer must never cost the field a letter.
   next word. Capturing them only while the drops are shown keeps ⌃Y (yank in
   Cocoa text) for the app the rest of the time.
 - A non-activating panel lets a click answer while the field keeps focus.
+  But in it, with Whytap inactive, AppKit never hands the first click to
+  SwiftUI, not even with `acceptsFirstMouse`: the island's answer close
+  button had the same bug (docs/bugs/2026-09-04-island-answer-close-first-mouse.md).
+  In build 1732 the user saw "Add jev?" and Y/N did nothing; the log shows
+  ⌃Y/⌃N registered at show and released at expiry with no answer. So the
+  window takes the click, as the island does. The panel used to claim the
+  mouse over its whole 520 pt width for 10 s, which also blocked menu bar
+  extras right of the island.
 - Colour only on the contour keeps the glass readable over any wallpaper; the
   user found filled and tinted variants heavy.
 
@@ -92,7 +110,11 @@ resumes the rest; Y accepts once and confirms before retracting; N declines;
 answers before open are ignored; ⌃ lights only while open; a second
 suggestion is not shown; a busy island hides at once and lets go, but not
 after Y; Reduce Motion only fades. Controller: keys captured only while the
-drops are on screen, ⌃Y saves to Vocab, a busy phase releases them. Content
+drops are on screen, ⌃Y saves to Vocab, a busy phase releases them. Pointer:
+a press answers only on the button it started on, a press on the row is
+consumed, right of the row is not; a synthesized click on Y in the real
+panel saves to Vocab and on N declines; every shown suggestion is counted
+once (keys, timer). Content
 for all seven kinds; the full-Vocab limit. Hotkeys: ⌃Y / ⌃N conflict with a
 tool; defaults have no conflict; Help rows. Offscreen renders of the real view
 in light and dark (text, signs, contours, hover and ⌃ states); the glass

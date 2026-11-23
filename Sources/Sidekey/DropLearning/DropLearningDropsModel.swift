@@ -10,6 +10,8 @@ final class DropLearningDropsModel: ObservableObject {
     enum Stage: Equatable { case hidden, emerging, open, confirming, retracting }
     enum Outcome: Equatable { case accepted, declined, expired }
     enum Button: Equatable { case yes, no }
+    /// How an answer came, for the reason counters and the journal.
+    enum Via: String { case click, keys, timer, island }
 
     /// The whole chain stays under 0.8 s each way.
     enum Timing {
@@ -35,13 +37,15 @@ final class DropLearningDropsModel: ObservableObject {
     @Published private(set) var hovered = false
     /// The pointer is on Y or N: that drop shows ✓/✕ instead of its letter.
     @Published private(set) var hoveredButton: Button?
+    /// The mouse is down on Y or N (the panel tracks the press itself).
+    @Published private(set) var pressedButton: Button?
     /// ⌃ is held while the drops are open: Y and N light up.
     @Published private var controlModifierDown = false
     /// The icon drop swells once and shows ✓ (or ↗ for a full Vocab).
     @Published private(set) var confirmed = false
 
     /// Answers go to the learning coordinator.
-    var onOutcome: ((DropLearningSuggestion, Outcome) -> Void)?
+    var onOutcome: ((DropLearningSuggestion, Outcome, Via) -> Void)?
     /// True when the drops start to show, false once they are gone: the panel
     /// orders in and out and ⌃Y/⌃N are captured only in between.
     var onVisibleChange: ((Bool) -> Void)?
@@ -99,17 +103,17 @@ final class DropLearningDropsModel: ObservableObject {
 
     // MARK: - Input
 
-    func answer(_ button: Button) {
+    func answer(_ button: Button, via: Via = .keys) {
         guard stage == .open, let suggestion else { return }
         stopExpiry()
         switch button {
         case .yes:
-            onOutcome?(suggestion, .accepted)
+            onOutcome?(suggestion, .accepted, via)
             stage = .confirming
             confirmed = true
             after(reduceMotion() ? Timing.fade : Timing.confirm) { $0.retract() }
         case .no:
-            onOutcome?(suggestion, .declined)
+            onOutcome?(suggestion, .declined, via)
             retract()
         }
     }
@@ -129,6 +133,11 @@ final class DropLearningDropsModel: ObservableObject {
         hoveredButton = stage == .open || stage == .emerging ? button : nil
     }
 
+    func setPressedButton(_ button: Button?) {
+        let button = stage == .open ? button : nil
+        if pressedButton != button { pressedButton = button }
+    }
+
     func setControlHeld(_ held: Bool) {
         if controlModifierDown != held { controlModifierDown = held }
     }
@@ -138,7 +147,7 @@ final class DropLearningDropsModel: ObservableObject {
     func dismissForBusyIsland() {
         guard stage != .hidden else { return }
         if let suggestion, stage == .emerging || stage == .open {
-            onOutcome?(suggestion, .expired)
+            onOutcome?(suggestion, .expired, .island)
         }
         cancelAll()
         dropsOut = 0
@@ -156,7 +165,7 @@ final class DropLearningDropsModel: ObservableObject {
 
     private func expire() {
         guard stage == .open, let suggestion else { return }
-        onOutcome?(suggestion, .expired)
+        onOutcome?(suggestion, .expired, .timer)
         retract()
     }
 
@@ -166,6 +175,7 @@ final class DropLearningDropsModel: ObservableObject {
         stage = .retracting
         hovered = false
         hoveredButton = nil
+        pressedButton = nil
         controlModifierDown = false
         if reduceMotion() {
             dropsOut = 0
@@ -192,6 +202,7 @@ final class DropLearningDropsModel: ObservableObject {
         confirmed = false
         hovered = false
         hoveredButton = nil
+        pressedButton = nil
         controlModifierDown = false
         onVisibleChange?(false)
     }

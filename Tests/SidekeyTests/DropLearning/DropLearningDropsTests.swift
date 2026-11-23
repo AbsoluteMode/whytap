@@ -79,7 +79,7 @@ final class DropLearningDropsTests: XCTestCase {
             now: { [unowned self] in clock.now },
             reduceMotion: { [unowned self] in reduceMotion }
         )
-        model.onOutcome = { [unowned self] in outcomes.append(($0.candidate, $1)) }
+        model.onOutcome = { [unowned self] suggestion, outcome, _ in outcomes.append((suggestion.candidate, outcome)) }
         model.onVisibleChange = { [unowned self] in visibility.append($0) }
         return model
     }
@@ -299,6 +299,127 @@ final class DropLearningDropsTests: XCTestCase {
         agentAnswerVisible.send(false)
         coordinator.onSuggestion?(whytap)
         XCTAssertTrue(keys.capturing)
+        withExtendedLifetime(controller) {}
+    }
+
+    // MARK: - Pointer
+
+    func testAPressAnswersOnlyWhenItStartsAndEndsOnTheSameButton() {
+        var pointer = DropLearningDropsPointer()
+        pointer.set(.row, frame: CGRect(x: 16, y: 2, width: 260, height: 32))
+        pointer.set(.yes, frame: CGRect(x: 210, y: 4, width: 26, height: 26))
+        pointer.set(.no, frame: CGRect(x: 243, y: 4, width: 26, height: 26))
+        let yes = CGPoint(x: 223, y: 17), no = CGPoint(x: 256, y: 17)
+
+        XCTAssertTrue(pointer.down(at: yes))
+        XCTAssertEqual(pointer.up(at: yes), .yes)
+        XCTAssertFalse(pointer.ownsSequence)
+
+        XCTAssertTrue(pointer.down(at: yes))
+        XCTAssertNil(pointer.up(at: no), "Dragging off Y onto N answers nothing")
+
+        XCTAssertTrue(pointer.down(at: CGPoint(x: 100, y: 17)), "A press on the action drop is ours: the menu bar under it does not get it")
+        XCTAssertNil(pointer.up(at: CGPoint(x: 100, y: 17)))
+
+        XCTAssertFalse(pointer.down(at: CGPoint(x: 400, y: 17)), "Right of the row the menu bar keeps its clicks")
+        XCTAssertEqual(pointer.button(at: CGPoint(x: 238, y: 17)), .yes, "A little room around Y still counts")
+        XCTAssertTrue(pointer.isOnRow(CGPoint(x: 17, y: 1)))
+        XCTAssertFalse(pointer.isOnRow(CGPoint(x: 300, y: 17)))
+    }
+
+    /// The live failure of build 1732: the drops showed but a click on Y did
+    /// nothing, because the SwiftUI Button never gets the first click in an
+    /// inactive app's non-activating panel. The real panel now takes the
+    /// click in `sendEvent` and the word reaches Vocab.
+    func testAClickOnYInTheRealPanelSavesTheWordAndOnNDeclines() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "drops-\(UUID().uuidString)"))
+        defaults.set(true, forKey: DropLearningSettings.enabledKey)
+        let journal = DropLearningJournal(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathComponent("j.jsonl"))
+        let vocabulary = VocabularyCache(defaults: defaults)
+        let coordinator = DropLearningCoordinator(dependencies: .init(
+            fieldAccess: NoField(), lexicon: NoWords(), defaults: defaults, now: Date.init, journal: journal,
+            lists: { DropLearningLists(vocabulary: [], fillers: [], replacements: []) },
+            sleep: { _ in }, isIdle: { true }, openVocabulary: {},
+            vocabulary: vocabulary, fillers: FillerTermsStore(defaults: defaults),
+            replacements: DropReplacementStore(defaults: defaults)
+        ))
+        let model = model()
+        let panel = DropLearningDropsPanel(model: model)
+        defer { panel.close() }
+        DropLearningDropsController.wire(panel, to: model)
+        let idle = CurrentValueSubject<Bool, Never>(false)
+        let controller = DropLearningDropsController(
+            coordinator: coordinator, model: model, keys: FakeKeys(), present: { _ in },
+            phase: CurrentValueSubject<AppPhase, Never>(.idle).eraseToAnyPublisher(),
+            agentPhase: CurrentValueSubject<AgentPhase, Never>(.idle).eraseToAnyPublisher(),
+            agentAnswerVisible: idle.eraseToAnyPublisher()
+        )
+
+        func click(_ area: DropLearningDropsPointer.Area) throws {
+            let host = try XCTUnwrap(panel.contentView)
+            for _ in 0..<20 where panel.pointer.frames[area] == nil {
+                host.layoutSubtreeIfNeeded()
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+            }
+            let frame = try XCTUnwrap(panel.pointer.frames[area], "The view reports where \(area) is")
+            let local = CGPoint(x: frame.midX, y: host.isFlipped ? frame.midY : host.bounds.height - frame.midY)
+            let point = host.convert(local, to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = try XCTUnwrap(NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: 0,
+                    windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                panel.sendEvent(event)
+                if type == .leftMouseDown {
+                    XCTAssertEqual(model.pressedButton, area == .yes ? .yes : .no, "The pressed button glows")
+                }
+            }
+            XCTAssertNil(model.pressedButton)
+        }
+
+        XCTAssertTrue(coordinator.onSuggestion?(whytap) ?? false)
+        clock.advance(0.7)
+        try click(.yes)
+        XCTAssertTrue(vocabulary.terms.contains("Whytap"), "A click on Y saves through the Vocab store")
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["answer.accepted.click"], 1)
+
+        clock.advance(2)
+        XCTAssertTrue(coordinator.onSuggestion?(typa) ?? false)
+        clock.advance(0.7)
+        try click(.no)
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["answer.declined.click"], 1)
+        withExtendedLifetime(controller) {}
+    }
+
+    func testEveryShownSuggestionEndsInOneCountedAnswer() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "drops-\(UUID().uuidString)"))
+        defaults.set(true, forKey: DropLearningSettings.enabledKey)
+        let journal = DropLearningJournal(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathComponent("j.jsonl"))
+        let coordinator = DropLearningCoordinator(dependencies: .init(
+            fieldAccess: NoField(), lexicon: NoWords(), defaults: defaults, now: Date.init, journal: journal,
+            lists: { DropLearningLists(vocabulary: [], fillers: [], replacements: []) },
+            sleep: { _ in }, isIdle: { true }, openVocabulary: {},
+            vocabulary: VocabularyCache(defaults: defaults), fillers: FillerTermsStore(defaults: defaults),
+            replacements: DropReplacementStore(defaults: defaults)
+        ))
+        let keys = FakeKeys()
+        let model = model()
+        let controller = DropLearningDropsController(
+            coordinator: coordinator, model: model, keys: keys, present: { _ in },
+            phase: CurrentValueSubject<AppPhase, Never>(.idle).eraseToAnyPublisher(),
+            agentPhase: CurrentValueSubject<AgentPhase, Never>(.idle).eraseToAnyPublisher(),
+            agentAnswerVisible: CurrentValueSubject<Bool, Never>(false).eraseToAnyPublisher()
+        )
+        coordinator.onSuggestion?(whytap)
+        clock.advance(0.7)
+        keys.onAnswer?(.yes)
+        clock.advance(2)
+        coordinator.onSuggestion?(typa)
+        clock.advance(11)
+        let counts = DropLearningStats(defaults: defaults).counts
+        XCTAssertEqual(counts["answer.accepted.keys"], 1)
+        XCTAssertEqual(counts["answer.expired.timer"], 1, "A drop nobody answered says so")
         withExtendedLifetime(controller) {}
     }
 

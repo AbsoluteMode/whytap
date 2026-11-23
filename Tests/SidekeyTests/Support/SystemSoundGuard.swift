@@ -232,7 +232,7 @@ final class SystemSoundGuard: NSObject, XCTestObservation {
         var order: [String] = []
         var grouped: [String: (count: Int, record: Record)] = [:]
         for record in records {
-            let key = "\(record.test)|\(record.kind.rawValue)|\(record.detail)"
+            let key = "\(record.test)|\(record.kind.rawValue)|\(record.detail)|\(record.expected)"
             if let existing = grouped[key] {
                 grouped[key] = (existing.count + 1, record)
             } else {

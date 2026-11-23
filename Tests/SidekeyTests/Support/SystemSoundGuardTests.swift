@@ -81,10 +81,12 @@ final class SystemSoundGuardTests: XCTestCase {
         let report = SystemSoundGuard.report([
             Record(test: "-[A testOne]", kind: .unhandledKey, detail: "end of chain: NSWindow", expected: false),
             Record(test: "-[A testOne]", kind: .unhandledKey, detail: "end of chain: NSWindow", expected: false),
+            Record(test: "-[A testOne]", kind: .unhandledKey, detail: "end of chain: NSWindow", expected: true),
             Record(test: "-[B testTwo]", kind: .noKeyWindow, detail: "key code 49", expected: true)
         ])
-        XCTAssertTrue(report.hasPrefix("SystemSoundGuard: 3 sound(s) kept silent, 2 unexpected."))
+        XCTAssertTrue(report.hasPrefix("SystemSoundGuard: 4 sound(s) kept silent, 2 unexpected."))
         XCTAssertTrue(report.contains("[UNEXPECTED] -[A testOne] ×2"))
+        XCTAssertTrue(report.contains("[expected] -[A testOne] ×1"))
         XCTAssertTrue(report.contains("[artifact] -[B testTwo] ×1"))
     }
 }

@@ -12,16 +12,19 @@ final class ElevenLabsLiveTextReplayTests: XCTestCase {
     }
 
     @MainActor
-    static func replay(wing: CGFloat = 226, hold: TimeInterval? = nil) -> [Frame] {
+    static func replay(
+        _ events: [ElevenLabsRecordedTake.Event] = ElevenLabsRecordedTake.events,
+        wing: CGFloat = 226, hold: TimeInterval? = nil, confirm: TimeInterval? = nil
+    ) -> [Frame] {
         let model = IslandLiveTextTickerModel()
         if let hold { model.rewriteHoldSeconds = hold }
+        if let confirm { model.confirmSeconds = confirm }
         model.wingWidth = wing
         model.prime("", now: 0)
         var committed = ""
         var last = ""
         var next = 0
         var frames: [Frame] = []
-        let events = ElevenLabsRecordedTake.events
         let end = (events.last?.at ?? 0) + 3
         var frame = 0
         while Double(frame) / 60 < end {

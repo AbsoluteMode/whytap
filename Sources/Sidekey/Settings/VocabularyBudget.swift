@@ -3,7 +3,7 @@ import Foundation
 /// How a request carries the Vocab list. One saved list; each request takes the
 /// part its provider accepts, in list order, when it is built. A term that does
 /// not fit is left out of that request only.
-/// WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+/// WHY: .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
 enum VocabularyTransport: Equatable, Sendable {
     /// `keyterm` query parameters: about 500 tokens for all terms (Nova-3).
     case deepgram

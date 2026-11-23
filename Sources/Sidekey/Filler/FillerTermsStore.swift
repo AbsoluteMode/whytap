@@ -11,10 +11,6 @@ struct FillerTermsStore {
     enum Rejection: Equatable { case empty, tooLong, duplicate, tooMany }
     enum AddResult: Equatable { case added, rejected(Rejection) }
 
-    /// Posted after every write so an open editor shows a term added or
-    /// removed by a learning suggestion's Y.
-    static let didChangeNotification = Notification.Name("sidekey.filler.didChange")
-
     private let defaults: UserDefaults
     // legacy key name kept across the Replace→Filler rename so saved lists survive
     private let key = "sidekey.replace.terms"
@@ -39,13 +35,11 @@ struct FillerTermsStore {
         guard current.count < Self.maxTermCount else { return .rejected(.tooMany) }
         current.append(trimmed)
         defaults.set(current, forKey: key)
-        NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
         return .added
     }
 
     func remove(_ term: String) {
         let next = terms().filter { $0.caseInsensitiveCompare(term) != .orderedSame }
         defaults.set(next, forKey: key)
-        NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }
 }

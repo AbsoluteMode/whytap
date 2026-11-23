@@ -51,7 +51,6 @@ struct SettingsOtherView: View {
     /// on init and re-read on appear; written back on every toggle.
     @State private var volumeDuckEnabled: Bool
     @State private var dropAutoStopEnabled = false
-    @State private var dropLearningEnabled = true
 
     /// Local mirror of the island auto-hide flag. Seeded from
     /// `islandIdlePreferences` on init and re-read on appear; written back on
@@ -124,13 +123,6 @@ struct SettingsOtherView: View {
         [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents)]
     }
 
-    /// The clip dictates with the Drop key and answers with ⌃Y (fixed, not
-    /// remappable: DropLearningKeyCombos).
-    static func dropLearningVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
-        [FeatureVideoShortcut(label: "Drop", contents: configuration.dropVoiceShortcut.contents),
-         FeatureVideoShortcut(label: "Yes", contents: DropLearningKeyCombos.yes.contents)]
-    }
-
     static func googleSearchVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
         [FeatureVideoShortcut(label: "Text", contents: configuration.googleSearchTextShortcut.contents),
          FeatureVideoShortcut(label: "Voice", contents: configuration.googleSearchVoiceShortcut.contents)]
@@ -140,7 +132,7 @@ struct SettingsOtherView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 0) {
-                    // WHY: .project-docs/decisions/2026-11-22-drop-learning-default-on.md
+                    // Named Recording until 2026-11-22: its switches are all about Drop.
                     MacGroupTitle(title: "Drop")
                     MacCard {
                         MacRow(
@@ -158,17 +150,6 @@ struct SettingsOtherView: View {
                             FeatureVideoButton(video: .dropAutoStop, shortcuts: { Self.dropAutoStopVideoShortcuts(hotkeys()) })
                         } trailing: {
                             MacSwitch(isOn: dropAutoStopToggleBinding, label: "Stop Drop automatically")
-                        }
-
-                        MacRowSeparator()
-                        // WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
-                        MacRow(
-                            title: "Learn from my edits",
-                            subtitle: "When you fix the same word after Drop twice, Whytap offers to add it to Vocab, Replace or Filler. Answer with ⌃Y or ⌃N. Watches that field until you send or leave it, on this Mac."
-                        ) {
-                            FeatureVideoButton(video: .dropLearning, shortcuts: { Self.dropLearningVideoShortcuts(hotkeys()) })
-                        } trailing: {
-                            MacSwitch(isOn: dropLearningToggleBinding, label: "Learn from my edits")
                         }
                     }
                 }
@@ -260,7 +241,6 @@ struct SettingsOtherView: View {
             // never shows a stale toggle state.
             volumeDuckEnabled = volumeDuckConfig.isEnabled
             dropAutoStopEnabled = DropAutoStopPreferences.shared.isEnabled
-            dropLearningEnabled = DropLearningSettings.isEnabled(in: .standard)
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
             meetingsEnabled = meetingsEnabledProvider()
             googleEnabled = googleEnabledProvider()
@@ -282,18 +262,6 @@ struct SettingsOtherView: View {
     }
 
     /// Binding: persists to `DropAutoStopPreferences`; read when a take starts.
-    /// On by default; turning it off is remembered and also stops a read
-    /// already scheduled.
-    private var dropLearningToggleBinding: Binding<Bool> {
-        Binding(
-            get: { dropLearningEnabled },
-            set: { newValue in
-                dropLearningEnabled = newValue
-                UserDefaults.standard.set(newValue, forKey: DropLearningSettings.enabledKey)
-            }
-        )
-    }
-
     private var dropAutoStopToggleBinding: Binding<Bool> {
         Binding(
             get: { dropAutoStopEnabled },

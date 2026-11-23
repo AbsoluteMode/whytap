@@ -12,21 +12,10 @@ final class IslandFillerViewModel: ObservableObject {
     @Published private(set) var lastRejection: FillerTermsStore.Rejection?
 
     private let store: FillerTermsStore
-    private var changeObserver: NSObjectProtocol?
 
     init(store: FillerTermsStore = FillerTermsStore()) {
         self.store = store
         self.terms = store.terms()
-        // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-        changeObserver = NotificationCenter.default.addObserver(
-            forName: FillerTermsStore.didChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { guard let self else { return }; self.terms = self.store.terms() }
-        }
-    }
-
-    deinit {
-        if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
     }
 
     /// Newest-first for display, filtered by the current query.

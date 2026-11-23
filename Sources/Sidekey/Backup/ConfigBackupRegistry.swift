@@ -52,7 +52,7 @@ enum ConfigBackupRegistry {
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
             "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
-        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms", DropReplacementStore.key])
+        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms"])
         add(.toolbox, .strings, ["sidekey.b2b.hover.layout"])
         add(.other, .bool, ["sidekey.privacy.screenshotProtectionEnabled", "sidekey.preferences.hideHelpers",
             "sidekey.preferences.hideIslandHoverWidgets", "sidekey.preferences.agentEnabled", "sidekey.preferences.meetingsEnabled",

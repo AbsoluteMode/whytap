@@ -1338,12 +1338,7 @@ extension HotkeyConfiguration {
                 binding: HotkeyBinding(gesture: .tap, key: shortcut.bindingKey)
             )
         } + [
-            HotkeyBindingAssignment(actionTitle: "Help", binding: HotkeyBinding(gesture: .tap, key: .combo(HotkeyTapCombo(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(optionKey), keyTitle: "H")))),
-            // Answers to a learning suggestion; captured only while its drops
-            // are on screen, never assignable to anything else.
-            // WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
-            HotkeyBindingAssignment(actionTitle: "Suggestion yes", binding: HotkeyBinding(gesture: .tap, key: .combo(DropLearningKeyCombos.yes))),
-            HotkeyBindingAssignment(actionTitle: "Suggestion no", binding: HotkeyBinding(gesture: .tap, key: .combo(DropLearningKeyCombos.no)))
+            HotkeyBindingAssignment(actionTitle: "Help", binding: HotkeyBinding(gesture: .tap, key: .combo(HotkeyTapCombo(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(optionKey), keyTitle: "H"))))
         ]
     }
 

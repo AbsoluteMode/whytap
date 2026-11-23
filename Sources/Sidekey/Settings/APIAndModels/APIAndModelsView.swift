@@ -794,7 +794,7 @@ struct APIAndModelsView: View {
 }
 
 /// The one place a provider kind becomes a brand mark. A kind without a brand
-/// asset (Anthropic, a user's server) shows an SF Symbol.
+/// asset (a user's server, this Mac) shows an SF Symbol.
 @MainActor
 struct ProviderKindIcon: View {
     private let assetName: String?
@@ -824,9 +824,8 @@ struct ProviderKindIcon: View {
 
     static func systemName(for kind: AIProviderKind) -> String {
         switch kind {
-        case .anthropic: return TranscriptionProviderBrand.anthropicSystemName
         case .onDevice: return "laptopcomputer"
-        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .openAICompatible: return "server.rack"
+        case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic, .openAICompatible: return "server.rack"
         }
     }
 
@@ -836,8 +835,9 @@ struct ProviderKindIcon: View {
         case .deepgram: return "deepgram"
         case .elevenLabs: return "elevenlabs"
         case .openRouter: return "openrouter"
-        case .openAI: return "openai"
-        case .anthropic, .openAICompatible, .onDevice: return nil
+        case .openAI: return TranscriptionProviderBrand.openAI.assetName
+        case .anthropic: return TranscriptionProviderBrand.anthropic.assetName
+        case .openAICompatible, .onDevice: return nil
         }
     }
 }

@@ -13,6 +13,11 @@ import unittest
 SCRIPT = Path(__file__).with_name("build-queue.py")
 
 
+# The suite runs inside agent sessions; their own identities must not leak into fixtures.
+HERMETIC_ENV = {k: v for k, v in os.environ.items()
+                if k not in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID")}
+
+
 class QueueTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -32,7 +37,7 @@ class QueueTests(unittest.TestCase):
     def call(self, *args, actor="builder", cwd=None, ok=True, env=None):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
-                                env={**os.environ, **(env or {})})
+                                env={**HERMETIC_ENV, **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -268,6 +273,56 @@ class QueueTests(unittest.TestCase):
                                 env={**os.environ, "WHYTAP_BUILD_QUEUE_ACTOR": "builder",
                                      "CODEX_THREAD_ID": "some-other-thread"})
         self.assertTrue(json.loads(result.stdout)["claimed"])
+
+    def submit(self, *extra, env=None, ok=True):
+        return self.call("enqueue", "--pr", "https://github.com/example/app/pull/9", "--head",
+                         self.head, "--title", "Fixture", "--checks", "Fixture",
+                         "--acceptance", "Fixture", *extra, env=env, ok=ok)
+
+    def test_claude_code_author_is_detected_from_its_session_uuid(self):
+        session = "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"
+        result = self.submit(env={"CLAUDE_CODE_SESSION_ID": session})
+        self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
+                         ("claude", session))
+        self.assertEqual(result["delivery"], "harness_link")
+
+    def test_codex_thread_wins_over_a_claude_session_in_the_environment(self):
+        result = self.submit(env={"CODEX_THREAD_ID": "thread-1",
+                                  "CLAUDE_CODE_SESSION_ID": "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"})
+        self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
+                         ("codex", "thread-1"))
+
+    def test_claude_display_name_is_refused_and_other_is_inbox_only(self):
+        error = self.submit("--source", "claude", "--session", "one-mcp", ok=False)["error"]
+        self.assertIn("UUID", error)
+        result = self.submit("--source", "other", "--session", "one-mcp")
+        self.assertEqual(result["delivery"], "inbox_only")
+
+    def test_metrics_count_returns_and_waits_without_writing(self):
+        first = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(first, "blocked")
+        second = self.commit({"fix.txt": "fixed"})
+        self.enqueue(head=second)
+        self.enqueue(2)
+        self.call("claim")
+        self.update(first + 1, "done")
+        self.call("claim")
+        self.call("set", "--ticket", str(first + 2), "--status", "pending_install",
+                  "--note", "Candidate signed; microphone in use", "--retry-install")
+        queue = self.repo / ".git" / "exodia-build-queue.sqlite3"
+        before = queue.stat().st_mtime_ns
+        result = subprocess.run(["python3", str(SCRIPT.with_name("build-queue-metrics.py")),
+                                 "--since", "2000-01-01"], cwd=self.repo, capture_output=True,
+                                text=True, env=HERMETIC_ENV, check=True)
+        metrics = json.loads(result.stdout)
+        self.assertEqual((metrics["tickets"], metrics["prs"]), (3, 2))
+        self.assertEqual(metrics["returns"]["total"], 1)
+        self.assertEqual(metrics["returns"]["per_pr"], {"0": 1, "1": 1})
+        self.assertEqual(metrics["pr_to_done_minutes"]["with_returns"]["n"], 1)
+        self.assertEqual(metrics["deferred_installs"], {"meeting or microphone": 1})
+        self.assertEqual(metrics["queue_wait_minutes"]["n"], 3)
+        self.assertEqual(queue.stat().st_mtime_ns, before)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ SCRIPTS = Path(__file__).resolve().parent
 QUEUE = SCRIPTS / "build-queue.py"
 WATCHER = SCRIPTS / "build-queue-watcher.py"
 ACTOR = "whytap-on-demand-builder"
+WORKER = "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"
 
 FAKE_SESSION = r'''
 import json, os, subprocess, sys, time
@@ -35,6 +36,7 @@ prompt = sys.stdin.read()
 with open(control / "sessions.log", "a") as output:
     output.write(json.dumps({"pid": os.getpid(), "lease": lease,
                              "prompt": "## This run" in prompt and "FIFO" in prompt,
+                             "origin_rules": "ORIGIN MAIN RULES" in prompt,
                              "cwd": os.getcwd()}) + "\n")
 if (control / "noop").exists():
     sys.exit(0)
@@ -79,6 +81,14 @@ print(json.dumps({"status": "busy" if busy else "clear"}))
 sys.exit(1 if busy else 0)
 '''
 
+FAKE_ENVIRONMENT = r'''
+import json, os
+from pathlib import Path
+path = Path(os.environ["FAKE_CONTROL"]) / "environment.json"
+print(path.read_text() if path.exists() else json.dumps({"screen_locked": False, "load": 1,
+                                                          "cpus": 8}))
+'''
+
 FAKE_LAUNCHCTL = r'''#!/bin/sh
 [ "$1" = print ] && exit 113
 echo "$@" >> "$FAKE_CONTROL/launchctl.log"
@@ -105,6 +115,7 @@ class WatcherTests(unittest.TestCase):
         self.head = self.git("rev-parse", "HEAD").strip()
         self.root = self.repo / ".git"
         for name, body in (("session.py", FAKE_SESSION), ("gate.py", FAKE_GATE),
+                           ("environment.py", FAKE_ENVIRONMENT),
                            ("launchctl", FAKE_LAUNCHCTL)):
             (base / name).write_text(body)
         (base / "launchctl").chmod(0o755)
@@ -113,6 +124,8 @@ class WatcherTests(unittest.TestCase):
                     "WHYTAP_WATCHER_LAUNCHCTL": str(base / "launchctl"),
                     "WHYTAP_WATCHER_LAUNCH_AGENTS": str(base / "LaunchAgents")}
         self.env.pop("CODEX_THREAD_ID", None)
+        self.env.pop("CLAUDE_CODE_SESSION_ID", None)
+        self.env["WHYTAP_WATCHER_SKIP_FETCH"] = "1"
         self.configure_watcher()
         self.queue("configure", "--builder-thread", self.builder)
 
@@ -120,8 +133,9 @@ class WatcherTests(unittest.TestCase):
         (self.root / "whytap-build-queue-builder.json").write_text(json.dumps({
             "engine": "custom", "command": [sys.executable, str(self.base / "session.py")],
             "meeting_gate_command": [sys.executable, str(self.base / "gate.py")],
+            "environment_command": [sys.executable, str(self.base / "environment.py")],
             "worktree": str(self.base / "integration"), "retry_install_seconds": 0,
-            "poll_seconds": 0.1, "notify": False, **overrides}))
+            "poll_seconds": 0.1, "notify": False, "prompt_from_origin": False, **overrides}))
 
     def git(self, *args):
         return subprocess.check_output(["git", *args], cwd=self.repo, text=True)
@@ -136,7 +150,7 @@ class WatcherTests(unittest.TestCase):
         return self.queue("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
                           "--head", self.head, "--title", "Fixture", "--checks", "Fixture",
                           "--acceptance", "Fixture", "--source", "claude",
-                          "--session", "worker")["ticket"]["id"]
+                          "--session", WORKER)["ticket"]["id"]
 
     def watcher(self, *args, ok=True):
         result = subprocess.run([sys.executable, str(WATCHER), "--git-dir", str(self.root),
@@ -366,6 +380,135 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(self.alive(session))
 
 
+    # Environment gate and watchdog (.project-docs/decisions/2026-11-23-builder-queue-watchdog.md)
+
+    def set_environment(self, **values):
+        (self.control / "environment.json").write_text(json.dumps(
+            {"screen_locked": False, "load": 1, "cpus": 8, **values}))
+
+    def alerts(self, path=None):
+        path = path or self.root / "whytap-build-queue-alerts.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] \
+            if path.exists() else []
+
+    def state(self):
+        return json.loads((self.root / "whytap-build-queue-watcher-state.json").read_text())
+
+    def test_locked_screen_waits_without_backoff_and_starts_after_unlock(self):
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertEqual(self.state()["last_reason"], "waiting: screen locked")
+        self.assertEqual(self.state().get("no_progress", 0), 0)
+        self.assertEqual(json.loads(self.watcher("status").stdout)["reason"],
+                         "waiting: screen locked")
+        self.set_environment(screen_locked=False)
+        self.watcher("run")
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_overloaded_mac_waits_for_the_load_to_fall(self):
+        self.enqueue(1)
+        self.set_environment(load=317, cpus=14)
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertTrue(self.state()["last_reason"].startswith("waiting: load 317 on 14 CPUs"))
+        self.set_environment(load=20, cpus=14)  # below 2 x 14
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_deferred_install_waits_for_unlock_before_asking_the_meeting_gate(self):
+        (self.control / "defer").touch()
+        (self.control / "meeting").touch()
+        self.enqueue(1)
+        self.watcher("run")
+        (self.control / "defer").unlink()
+        (self.control / "meeting").unlink()
+        attempts = self.state().get("last_install_attempt")
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertEqual(self.state().get("last_install_attempt"), attempts)
+        self.assertEqual(self.state()["last_reason"], "waiting: screen locked")
+        self.set_environment(screen_locked=False)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_environment_command_reports_the_gate(self):
+        self.set_environment(screen_locked=True)
+        result = self.watcher("environment", ok=False)
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(json.loads(result.stdout)["reason"], "screen locked")
+
+    def test_watchdog_raises_and_clears_a_long_environment_wait_once(self):
+        mirror = self.base / "orchestrator" / "alerts.jsonl"
+        self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        self.watcher("run")
+        self.watcher("run")
+        raised = [a for a in self.alerts() if a["state"] == "raised"]
+        self.assertEqual([a["condition"] for a in raised], ["environment_wait"])
+        self.assertIn("screen locked", raised[0]["detail"])
+        self.set_environment(screen_locked=False)
+        self.watcher("run")
+        self.assertEqual([(a["state"], a["condition"]) for a in self.alerts()],
+                         [("raised", "environment_wait"), ("cleared", "environment_wait")])
+        self.assertEqual(self.alerts(mirror), self.alerts())
+        heartbeat = json.loads((self.root / "whytap-build-queue-watchdog.json").read_text())
+        self.assertEqual(heartbeat["active"], {})
+
+    def test_watchdog_reports_a_ticket_without_events_during_a_live_session(self):
+        self.configure_watcher(stall_minutes=0, watchdog_seconds=0.05)
+        (self.control / "hold").touch()
+        self.enqueue(1)
+        running = self.start_watcher()
+        self.wait_for((self.control / "holding").exists, "the session to hold its build")
+        self.wait_for(lambda: any(a["condition"] == "ticket_stalled:1" for a in self.alerts()),
+                      "the stall alert")
+        (self.control / "holding").unlink()
+        self.assertEqual(running.wait(timeout=30), 0)
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_watchdog_reports_an_author_the_builder_cannot_reach(self):
+        self.configure_watcher(undelivered_minutes=0)
+        self.queue("enqueue", "--pr", "https://github.com/example/app/pull/7", "--head",
+                   self.head, "--title", "Fixture", "--checks", "Fixture", "--acceptance",
+                   "Fixture", "--source", "other", "--session", "agent-app-control")
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        alert = next(a for a in self.alerts() if a["condition"] == "undelivered:1")
+        self.assertIn("inbox only", alert["detail"])
+
+    def test_a_broken_queue_file_never_stops_the_watcher(self):
+        self.enqueue(1)
+        self.configure_watcher(environment_command=["/nonexistent/probe"])
+        self.watcher("run")  # unknown environment does not block
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_session_reads_the_builder_rules_from_origin_main(self):
+        origin = self.base / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        source = self.base / "source"
+        subprocess.run(["git", "clone", "-q", str(origin), str(source)], check=True,
+                       capture_output=True)
+        (source / "scripts").mkdir()
+        (source / "scripts" / "build-queue-builder-prompt.md").write_text(
+            "ORIGIN MAIN RULES\nFIFO\n")
+        for args in (("add", "-A"), ("-c", "user.name=T", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", "rules"), ("push", "-q", "origin",
+                                                                 "HEAD:main")):
+            subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+        self.enqueue(1)
+        self.git("remote", "set-url", "origin", str(origin))
+        self.configure_watcher(prompt_from_origin=True)
+        self.watcher("run")
+        self.assertTrue(self.sessions()[0]["origin_rules"])
+
+
 class ActivationTests(WatcherTests):
     builder = "previous-builder-chat"
 
@@ -373,7 +516,7 @@ class ActivationTests(WatcherTests):
         return self.base / "LaunchAgents" / "ai.whytap.build-queue-watcher.plist"
 
     def test_activate_installs_everything_and_deactivate_restores_the_builder(self):
-        result = json.loads(self.watcher("activate").stdout)
+        result = json.loads(self.watcher("activate", "--allow-local").stdout)
         self.assertEqual(result["previous_builder"], self.builder)
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], ACTOR)
         for name in ("exodia-build-queue.py", "whytap-build-queue-watcher.py",
@@ -402,27 +545,34 @@ class ActivationTests(WatcherTests):
     def test_activation_waits_for_the_active_build_and_a_free_lock(self):
         self.enqueue(1)
         self.queue("claim")
-        self.assertIn("in progress", json.loads(self.watcher("activate", ok=False).stderr)["error"])
+        self.assertIn("in progress", json.loads(self.watcher("activate", "--allow-local", ok=False).stderr)["error"])
         self.queue("set", "--ticket", "1", "--status", "done", "--note", "x")
         (self.root / "exodia-integration.lock").mkdir()
-        self.assertIn("lock", json.loads(self.watcher("activate", ok=False).stderr)["error"])
+        self.assertIn("lock", json.loads(self.watcher("activate", "--allow-local", ok=False).stderr)["error"])
         self.assertFalse(self.launch_agent().exists())
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
 
     def test_activation_that_cannot_load_the_agent_keeps_the_previous_builder(self):
         (self.control / "bootstrap-fails").touch()
-        self.watcher("activate", ok=False)
+        self.watcher("activate", "--allow-local", ok=False)
+        self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
+
+    def test_activation_refuses_scripts_that_differ_from_origin_main(self):
+        error = json.loads(self.watcher("activate", ok=False).stderr)["error"]
+        self.assertIn("origin/main", error)
+        self.assertIn("build-queue-watcher.py", error)
+        self.assertFalse(self.launch_agent().exists())
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
 
     def test_activation_never_interrupts_a_running_session(self):
-        self.watcher("activate")
+        self.watcher("activate", "--allow-local")
         (self.control / "hold").touch()
         self.enqueue(1)
         self.env["WHYTAP_BUILD_QUEUE_ACTOR"] = ACTOR
         running = self.start_watcher()
         self.wait_for((self.control / "holding").exists, "the session to hold its build")
         log = len(self.lines("launchctl.log"))
-        self.assertIn("running", json.loads(self.watcher("activate", ok=False).stderr)["error"])
+        self.assertIn("running", json.loads(self.watcher("activate", "--allow-local", ok=False).stderr)["error"])
         self.assertIn("running", json.loads(self.watcher("deactivate", ok=False).stderr)["error"])
         self.assertEqual(len(self.lines("launchctl.log")), log)
         (self.control / "holding").unlink()

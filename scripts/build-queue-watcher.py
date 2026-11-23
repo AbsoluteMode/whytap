@@ -6,6 +6,9 @@ A launchd agent runs `run` every minute and when the queue file changes. No
 model is involved while the queue is idle. This script never merges, builds,
 signs, installs or quits anything itself: it only decides whether a builder
 session is needed, keeps it single, logs it and cleans up its own lease.
+It also waits while the screen is locked or the Mac is overloaded, and a
+model-free watchdog records stalls and waits in an alerts file for the
+maintainer's orchestrator (WHY: .project-docs/decisions/2026-11-23-builder-queue-watchdog.md).
 Only Python's standard library is required.
 """
 
@@ -16,6 +19,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import signal
 import sqlite3
@@ -35,6 +39,11 @@ STATE = "whytap-build-queue-watcher-state.json"
 SESSION_LOCK = "whytap-build-queue-watcher.lock"
 LOGS = "whytap-build-queue-logs"
 INTEGRATION_LOCK = "exodia-integration.lock"
+ALERTS = "whytap-build-queue-alerts.jsonl"
+WATCHDOG = "whytap-build-queue-watchdog.json"
+PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
+ACTIVATED_SOURCES = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
+                     "build-queue-watcher.plist.template")
 DEFAULTS = {
     "engine": "codex",             # "codex", "claude" or "custom" (uses "command")
     "model": "",                   # empty: the engine's own configured default
@@ -43,6 +52,15 @@ DEFAULTS = {
     "max_session_seconds": 6 * 3600,
     "poll_seconds": 2,             # how often the session's process tree is recorded
     "notify": True,
+    "prompt_from_origin": True,    # each session reads the builder prompt from origin/main
+    "load_limit_per_cpu": 2.0,     # 5-minute load average above this x CPUs: wait
+    "environment_command": None,   # tests: a probe printing the environment JSON
+    "watchdog_seconds": 60,        # how often a running session is checked for stalls
+    "stall_minutes": 60,           # an in_progress ticket without a new event this long
+    "environment_alert_minutes": 60,  # open work waiting for the screen or the load
+    "install_alert_minutes": 120,  # a deferred install still waiting
+    "undelivered_minutes": 20,     # an author event still unacknowledged
+    "alerts_mirror": "",           # optional second JSONL path, e.g. the orchestrator's folder
 }
 BACKOFF_SECONDS = (300, 900, 3600)
 KEPT_LOGS = 40
@@ -136,8 +154,49 @@ def meeting_gate_clear(config):
         return False
 
 
-def decide(work, state, config, now, gate):
-    """Return (start, reason). `state` is updated when the meeting gate was consulted."""
+def console_locked():
+    """True when this user's console is locked or not in front (logged out, another
+    user's session); None when unknown. Reads `ioreg`, like the login window does."""
+    try:
+        result = subprocess.run(["ioreg", "-n", "Root", "-d1", "-a"], capture_output=True,
+                                timeout=10)
+        users = plistlib.loads(result.stdout).get("IOConsoleUsers", [])
+    except (OSError, ValueError, subprocess.TimeoutExpired, plistlib.InvalidFileException,
+            AttributeError):
+        return None
+    for user in users:
+        if user.get("kCGSSessionUserIDKey") == os.getuid() and user.get("kCGSSessionOnConsoleKey"):
+            return bool(user.get("CGSSessionScreenIsLocked", False))
+    return True
+
+
+def environment(config):
+    """Whether the Mac can run a build now: screen unlocked and load below the limit.
+    Unknown values never block; the builder checks again before the full suite."""
+    if config.get("environment_command"):
+        try:
+            result = subprocess.run(config["environment_command"], capture_output=True,
+                                    text=True, timeout=30)
+            probe = json.loads(result.stdout)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            probe = {}
+    else:
+        probe = {"screen_locked": console_locked(), "load": os.getloadavg()[1],
+                 "cpus": os.cpu_count() or 1}
+    locked, load, cpus = probe.get("screen_locked"), probe.get("load"), probe.get("cpus") or 1
+    limit = config["load_limit_per_cpu"] * cpus
+    reason = ""
+    if locked:
+        reason = "screen locked"
+    elif load is not None and load > limit:
+        reason = f"load {load:.0f} on {cpus} CPUs (limit {limit:.0f})"
+    return {"clear": not reason, "reason": reason, "screen_locked": locked,
+            "load": load, "cpus": cpus, "load_limit": limit}
+
+
+def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}):
+    """Return (start, reason). `state` is updated when the meeting gate was consulted.
+    A locked screen or an overloaded Mac only waits: no backoff, no blame."""
     if work["queued"] or work["in_progress"]:
         failures = state.get("no_progress", 0)
         if failures and state.get("fingerprint") == work["fingerprint"]:
@@ -145,6 +204,9 @@ def decide(work, state, config, now, gate):
             if now - state.get("last_exit", 0) < wait:
                 return False, f"backoff: {failures} session(s) changed nothing, next try in " \
                               f"{int(wait - (now - state.get('last_exit', 0)))}s"
+        check = ready(config)
+        if not check["clear"]:
+            return False, "waiting: " + check["reason"]
         return True, "recover_in_progress" if work["in_progress"] else "queued"
     if work["retry_install"]:
         wait = config["retry_install_seconds"]
@@ -154,6 +216,9 @@ def decide(work, state, config, now, gate):
             wait = max(wait, BACKOFF_SECONDS[min(failures, len(BACKOFF_SECONDS)) - 1])
         if now - state.get("last_install_attempt", 0) < wait:
             return False, "deferred install: next meeting check not due"
+        check = ready(config)
+        if not check["clear"]:
+            return False, "waiting: " + check["reason"]
         state["last_install_attempt"] = now
         if not gate(config):
             return False, "deferred install: meeting gate is not clear"
@@ -307,6 +372,148 @@ def reap_orphan(root, state):
     return True
 
 
+def git_in(root, *arguments, timeout=60):
+    return subprocess.run(["git", "--git-dir", str(root), *arguments], capture_output=True,
+                          timeout=timeout)
+
+
+def builder_prompt(root, config):
+    """The builder's rules as merged: origin/main's prompt, so a rule change reaches the
+    next session without reinstalling. Falls back to the installed copy offline."""
+    if config.get("prompt_from_origin", True):
+        try:
+            git_in(root, "fetch", "--quiet", "origin", "main")
+            shown = git_in(root, "show", "origin/main:" + PROMPT_SOURCE)
+            commit = git_in(root, "rev-parse", "--short", "origin/main")
+            if shown.returncode == 0 and shown.stdout.strip():
+                return shown.stdout.decode(), "origin/main " + commit.stdout.decode().strip()
+        except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+            pass
+    prompt_path = root / INSTALLED_PROMPT
+    if not prompt_path.is_file():
+        prompt_path = SOURCES / "build-queue-builder-prompt.md"
+    return prompt_path.read_text(), str(prompt_path)
+
+
+def ticket_rows(root):
+    """Read-only snapshot for the watchdog: tickets plus each one's latest event."""
+    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    db.row_factory = sqlite3.Row
+    try:
+        columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+        retry = "t.retry" if "retry" in columns else "''"
+        tickets = [dict(r) for r in db.execute(
+            "SELECT t.id, t.pr, t.status, t.updated_at, t.source, " + retry + " AS retry, "
+            "(SELECT MAX(created_at) FROM events e WHERE e.ticket = t.id) AS last_event "
+            "FROM tickets t WHERE t.status IN ('queued', 'in_progress', 'pending_install')")]
+        undelivered = [dict(r) for r in db.execute(
+            "SELECT e.id, e.ticket, e.status, e.created_at, t.pr, t.source FROM events e "
+            "JOIN tickets t ON t.id = e.ticket WHERE e.acknowledged_at IS NULL "
+            "AND e.created_at >= ? ORDER BY e.id",
+            (datetime.fromtimestamp(time.time() - 86400, timezone.utc).isoformat(),))]
+    finally:
+        db.close()
+    return tickets, undelivered
+
+
+def age_minutes(stamp, now):
+    try:
+        return (now - datetime.fromisoformat(stamp).timestamp()) / 60
+    except (TypeError, ValueError):
+        return 0
+
+
+def findings(root, config, context, previous, now):
+    """Conditions worth a person's attention, keyed so one episode raises once."""
+    tickets, undelivered = ticket_rows(root)
+    found = {}
+    open_work = any(t["status"] in ("queued", "in_progress") or t["retry"] == "meeting"
+                    for t in tickets)
+    for t in tickets:
+        name = f"#{t['id']} (PR {t['pr'].rsplit('/', 1)[-1]})"
+        if t["status"] == "in_progress" and context.get("session"):
+            quiet = age_minutes(t["last_event"], now)
+            if quiet > config["stall_minutes"]:
+                found[f"ticket_stalled:{t['id']}"] = {
+                    "ticket": t["id"], "pr": t["pr"], "minutes": round(quiet),
+                    "detail": f"{name} in progress for {round(quiet)} min without a queue event"}
+        if t["status"] == "pending_install" and t["retry"] == "meeting":
+            waited = age_minutes(t["updated_at"], now)
+            if waited > config["install_alert_minutes"]:
+                found[f"install_waiting:{t['id']}"] = {
+                    "ticket": t["id"], "pr": t["pr"], "minutes": round(waited),
+                    "detail": f"{name} merged, install deferred for {round(waited)} min"}
+    reason = context.get("reason", "")
+    if open_work and reason.startswith("waiting:"):
+        since = previous.get("waiting_since") or now
+        if (now - since) / 60 > config["environment_alert_minutes"]:
+            found["environment_wait"] = {
+                "minutes": round((now - since) / 60),
+                "detail": f"queue waits: {reason[len('waiting: '):]}"}
+    if open_work and reason.startswith("backoff:") and context.get("no_progress", 0) >= 2:
+        found["backoff"] = {"detail": reason}
+    for e in undelivered:
+        late = age_minutes(e["created_at"], now)
+        if late > config["undelivered_minutes"]:
+            key = f"undelivered:{e['ticket']}"
+            entry = found.setdefault(key, {
+                "ticket": e["ticket"], "pr": e["pr"], "events": [],
+                "detail": f"#{e['ticket']} ({e['source']}) author not told: "
+                          + ("no Harness Link address, inbox only" if e["source"] == "other"
+                             else "event not acknowledged")})
+            entry["events"].append(e["id"])
+            entry["minutes"] = max(entry.get("minutes", 0), round(late))
+    return found
+
+
+def append_alert(root, config, record):
+    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+    targets = [root / ALERTS]
+    if config.get("alerts_mirror"):
+        targets.append(Path(config["alerts_mirror"]).expanduser())
+    for target in targets:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "a") as output:
+                output.write(line)
+        except OSError as error:
+            log(f"watchdog could not write {target}: {error}")
+
+
+def watchdog(root, config, context):
+    """Model-free: compare the current findings with the last check, append raised and
+    cleared episodes to the alerts file and keep a heartbeat. Never changes the queue,
+    the lock or the session, and never raises into the caller."""
+    try:
+        now = time.time()
+        path = root / WATCHDOG
+        previous = read_json(path, {})
+        found = findings(root, config, context, previous, now) if (root / QUEUE).is_file() \
+            else {}
+        active = previous.get("active", {})
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for key, detail in found.items():
+            if key not in active:
+                append_alert(root, config, {"at": stamp, "state": "raised", "condition": key,
+                                            **detail})
+                log("watchdog: " + detail["detail"])
+                notify(config, detail["detail"])
+        for key, detail in active.items():
+            if key not in found:
+                append_alert(root, config, {"at": stamp, "state": "cleared", "condition": key,
+                                            "detail": detail.get("detail", "")})
+        waiting = context.get("reason", "").startswith("waiting:")
+        write_json(path, {"checked_at": stamp, "watcher_pid": os.getpid(),
+                          "reason": context.get("reason", ""),
+                          "session": bool(context.get("session")),
+                          "waiting_since": (previous.get("waiting_since") or now) if waiting
+                          else None,
+                          "active": {k: {"detail": v["detail"], "since": active.get(k, {}).get(
+                              "since", stamp)} for k, v in found.items()}})
+    except Exception as error:  # the watchdog must never stop a build
+        log(f"watchdog failed: {type(error).__name__}: {error}")
+
+
 def prune_logs(directory):
     sessions = sorted(directory.glob("session-*.log"))
     for old in sessions[:-KEPT_LOGS]:
@@ -329,15 +536,15 @@ def run_session(root, config, reason, work):
         "open_tickets": {k: work[k] for k in ("queued", "in_progress", "retry_install")},
         "session_log": str(session_log),
     }
-    prompt_path = root / INSTALLED_PROMPT
-    if not prompt_path.is_file():
-        prompt_path = SOURCES / "build-queue-builder-prompt.md"
-    prompt = prompt_path.read_text() + "\n\n## This run (written by the watcher)\n\n```json\n" \
+    rules, rules_source = builder_prompt(root, config)
+    context["builder_prompt"] = rules_source
+    prompt = rules + "\n\n## This run (written by the watcher)\n\n```json\n" \
         + json.dumps(context, indent=2) + "\n```\n"
     environment = {**os.environ, "WHYTAP_BUILD_QUEUE_ACTOR": ACTOR,
                    "WHYTAP_BUILDER_LEASE_PID": str(os.getpid()),
                    "WHYTAP_BUILD_QUEUE_GIT_DIR": str(root)}
-    log(f"starting {config['engine']} builder session ({reason}); log {session_log.name}")
+    log(f"starting {config['engine']} builder session ({reason}); log {session_log.name}; "
+        f"rules from {rules_source}")
     stops = {signal.SIGTERM, signal.SIGINT}
     known = {}
     with open(session_log, "ab") as output:
@@ -391,6 +598,7 @@ def run_session(root, config, reason, work):
             except BrokenPipeError:
                 pass
             deadline = time.monotonic() + config["max_session_seconds"]
+            next_check = time.monotonic() + config["watchdog_seconds"]
             while True:
                 try:
                     code = process.wait(timeout=config["poll_seconds"])
@@ -400,6 +608,9 @@ def run_session(root, config, reason, work):
                     remember_tree(known, pgid)
                     if known != before:
                         record()
+                if time.monotonic() > next_check:
+                    next_check = time.monotonic() + config["watchdog_seconds"]
+                    watchdog(root, config, {"reason": "session " + reason, "session": True})
                 if time.monotonic() > deadline:
                     log("session exceeded max_session_seconds; stopping it")
                     stop_group(pgid, 60, process.poll, known)
@@ -455,9 +666,12 @@ def watch(root):
         state = read_json(root / STATE, {})
         work = open_work(root)
         before = json.dumps(state, sort_keys=True)
-        start, reason = decide(work, state, config, time.time(), meeting_gate_clear)
+        start, reason = decide(work, state, config, time.time(), meeting_gate_clear, environment)
         if not start:
-            if state.get("last_reason") != reason and reason != "idle":
+            watchdog(root, config, {"reason": reason, "no_progress": state.get("no_progress", 0)})
+            if state.get("last_reason") != reason and reason != "idle" and not (
+                    reason.startswith("waiting:")
+                    and str(state.get("last_reason", "")).startswith("waiting:")):
                 log(reason)
             state["last_reason"] = reason
             if json.dumps(state, sort_keys=True) != before:
@@ -487,8 +701,10 @@ def summary(root):
     probe = acquire(root)
     if probe is not None:
         os.close(probe)
-    start, reason = decide(work, dict(state), config, time.time(), lambda _config: True)
+    start, reason = decide(work, dict(state), config, time.time(), lambda _config: True,
+                           environment)
     return {"session_running": probe is None, "would_start": start, "reason": reason,
+            "watchdog": read_json(root / WATCHDOG, {}),
             "open": {k: v for k, v in work.items() if k != "fingerprint"},
             "engine": config["engine"], "worktree": str(worktree_path(config)),
             "state": state, "logs": str(root / LOGS)}
@@ -530,7 +746,25 @@ def command_activate(root, arguments):
         os.close(probe)
 
 
+def unmerged_sources(root):
+    """Files that would be installed but differ from origin/main (activation must install
+    what was reviewed and merged, not a stale or edited checkout)."""
+    if not os.environ.get("WHYTAP_WATCHER_SKIP_FETCH"):
+        git_in(root, "fetch", "--quiet", "origin", "main")
+    different = []
+    for name in ACTIVATED_SOURCES:
+        merged = git_in(root, "show", "origin/main:scripts/" + name)
+        if merged.returncode != 0 or merged.stdout != (SOURCES / name).read_bytes():
+            different.append(name)
+    return different
+
+
 def activate(root, arguments):
+    if not arguments.allow_local:
+        different = unmerged_sources(root)
+        if different:
+            raise ValueError("Run activate from a checkout of origin/main; these differ: "
+                             + ", ".join(different) + " (--allow-local to install them anyway)")
     status = helper(root, "", "status")
     previous = status["builder"].get("builder_thread")
     if not previous:
@@ -612,7 +846,11 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run", help="What launchd calls: start a session if work is open")
     commands.add_parser("status", help="Show the decision without starting anything")
+    commands.add_parser("environment", help="Can a build run now (screen and load)? "
+                        "Exit 0 when clear, 3 when not")
     activate = commands.add_parser("activate", help="Install and load the LaunchAgent")
+    activate.add_argument("--allow-local", action="store_true",
+                          help="Install this checkout's scripts even if they differ from main")
     activate.add_argument("--engine", choices=("claude", "codex"))
     activate.add_argument("--model")
     commands.add_parser("deactivate", help="Unload the LaunchAgent, restore the builder")
@@ -621,6 +859,10 @@ def main():
         root = git_dir(arguments.git_dir)
         if arguments.command == "run":
             return command_run(root)
+        if arguments.command == "environment":
+            result = environment(load_config(root))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["clear"] else 3
         if arguments.command == "status":
             result = summary(root)
         elif arguments.command == "activate":

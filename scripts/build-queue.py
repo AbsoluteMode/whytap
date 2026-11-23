@@ -208,14 +208,35 @@ def ticket_json(db, ticket):
     return result
 
 
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def author_address(args):
+    """Fill the submitting session from the harness environment when not given, so the
+    builder can reach it through Harness Link. A Claude Code address is its session UUID
+    (CLAUDE_CODE_SESSION_ID); a display name like `one-mcp` reaches nobody."""
+    if not args.source:
+        args.source = "codex" if os.environ.get("CODEX_THREAD_ID") else (
+            "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else "codex")
+    if not args.session:
+        args.session = os.environ.get(
+            {"codex": "CODEX_THREAD_ID", "claude": "CLAUDE_CODE_SESSION_ID"}.get(args.source, ""),
+            "")
+    if args.source == "claude" and not UUID.match(args.session.lower()):
+        raise ValueError("A Claude Code session is addressed by its UUID "
+                         "(CLAUDE_CODE_SESSION_ID), not a display name: " + args.session)
+
+
 def submitted(db, args):
     """Cheap argument checks; returns the ticket this exact PR/head already has."""
     if not config(db).get("builder_thread"):
         raise ValueError("Configure the builder before submitting work")
     args.pr = canonical_pr(args.pr)
     validate_head(args.head)
+    author_address(args)
     if not args.session:
-        raise ValueError("Set --session (Codex defaults to CODEX_THREAD_ID)")
+        raise ValueError("Set --session (detected from CODEX_THREAD_ID or "
+                         "CLAUDE_CODE_SESSION_ID when present)")
     return db.execute("SELECT * FROM tickets WHERE pr=? AND head=?",
                       (args.pr, args.head)).fetchone()
 
@@ -263,6 +284,7 @@ def run(args):
                   "checks at submission: " + args.documentation_checks)
             return {"created": True, "builder": config(db),
                     "documentation_checks": args.documentation_checks,
+                    "delivery": "inbox_only" if args.source == "other" else "harness_link",
                     "ticket": ticket_json(db, cursor.lastrowid)}
 
         if args.command == "status":
@@ -339,8 +361,10 @@ def main():
         enqueue.add_argument("--" + flag, required=True)
     enqueue.add_argument("--acceptance", action="append", required=True)
     enqueue.add_argument("--dependencies", default="none")
-    enqueue.add_argument("--source", choices=("codex", "claude", "other"), default="codex")
-    enqueue.add_argument("--session", default=os.environ.get("CODEX_THREAD_ID", ""))
+    enqueue.add_argument("--source", choices=("codex", "claude", "other"),
+                         help="default: detected from CODEX_THREAD_ID / CLAUDE_CODE_SESSION_ID")
+    enqueue.add_argument("--session", default="",
+                         help="default: that harness's session ID from the environment")
     enqueue.add_argument("--host", default="local")
     status = commands.add_parser("status")
     status.add_argument("--ticket", type=int)

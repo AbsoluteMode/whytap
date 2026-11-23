@@ -28,24 +28,26 @@ related: [2026-11-19-on-demand-build-queue-builder.md, 2026-11-22-builder-blocks
 ## Context
 
 The queue was measured with `scripts/build-queue-metrics.py` from its own
-journal. From 2026-11-20 to 2026-11-22 22:49 UTC: 215 tickets for 111 PRs,
-98 returns to authors, 56 PRs returned at least once. A PR without returns
-reached `done` in a median of 16 minutes, with returns 63 minutes (p90 186).
-The queue waited 11 hours on one night while the screen was locked: sessions
-started, the full suite failed on protected files, and each session exited
-without progress. On 2026-11-22 ticket 461 sat `in_progress` for an hour
-without a queue event and was then returned because three full suites failed
-in unchanged timing tests while unrelated work held the load average at 317 on
-14 CPUs. Nobody was told about either until someone looked. Events of tickets
-submitted with `--source other` and a display name (ticket 476 among them)
-never reached their author, because Harness Link addresses sessions by UUID.
-The installed builder prompt dated from 2026-11-20 and lacked later rule
-changes, including "block once with every finding".
+journal (events inside each period; carry-in work counts where it ends). From
+2026-11-20 to 2026-11-22 22:49 UTC: 220 tickets for 113 PRs, 96 returns to
+authors, 56 PRs returned at least once. A PR without returns reached `done` in
+a median of 16 minutes, with returns 65 minutes (p75 125). The queue waited
+11 hours on one night while the screen was locked: sessions started, the full
+suite failed on protected files, and each session exited without progress. On
+2026-11-22 ticket 461 sat `in_progress` for an hour without a queue event and
+was then returned because three full suites failed in unchanged timing tests
+while unrelated work held the load average at 317 on 14 CPUs. Nobody was told
+about either until someone looked. Events of tickets submitted with
+`--source other` and a display name (ticket 476 among them) never reached
+their author, because Harness Link addresses sessions by UUID. The installed
+builder prompt dated from 2026-11-20 and lacked later rule changes, including
+"block once with every finding".
 
-From 2026-11-22 22:49 to 2026-11-23 12:37 UTC, after that rule: 22 tickets
-for 13 PRs, 10 returns, 7 PRs returned; median builder time per attempt 12.6
-minutes; PRs with returns took a median of 76 minutes; two installs waited for
-the microphone; 17 author events were unacknowledged (11 of them `other`).
+From 2026-11-22 22:49 to 2026-11-23 12:37 UTC, after that rule: 27 tickets
+for 13 PRs, 14 returns, 10 PRs returned; median builder time per attempt 10.8
+minutes; queue wait median 8 minutes but p90 385 (another locked night); PRs
+with returns took a median of 480 minutes, PRs without 19; two installs waited
+for the microphone; 16 author events were unacknowledged (11 of them `other`).
 
 ## Decision
 
@@ -56,22 +58,32 @@ the microphone; 17 author events were unacknowledged (11 of them `other`).
   `build-queue-watcher.py environment` exposes the same check; the builder runs
   it before the full suite and does not run the suite, or blame the PR, while
   it is not clear.
-- Each session's prompt is read from `origin/main`, falling back to the
-  installed copy offline. `activate` refuses scripts that differ from
-  `origin/main` unless `--allow-local` is given.
+- Each session's prompt is read from `origin/main` only after a successful
+  fetch, from that fetched commit and labelled with its SHA; a failed fetch
+  uses the installed copy, never a cached `origin/main`. `activate` refuses
+  scripts that differ from freshly fetched `origin/main`, and refuses when the
+  fetch fails, unless `--allow-local` is given.
 - `enqueue` takes the author's address from `CODEX_THREAD_ID` or
-  `CLAUDE_CODE_SESSION_ID`, refuses a Claude Code display name, and marks
-  `--source other` tickets `inbox_only`.
+  `CLAUDE_CODE_SESSION_ID`, validates the whole field (a Claude Code address is
+  a UUID stored in lower case, no whitespace anywhere), refuses a display name,
+  and marks `--source other` tickets `inbox_only`.
 - A watchdog without a model runs on idle ticks and every minute inside a
   running session. It appends `raised` and `cleared` episodes to an alerts
   JSONL file (and an optional mirror for the orchestrator) for: a ticket
   without a queue event for 60 minutes during a session, open work waiting
-  for the environment for 60 minutes, repeated sessions without progress, a
-  deferred install older than two hours, and author events unacknowledged
-  after 20 minutes. It also keeps a heartbeat file. It never changes the
-  queue, the lock or the session, and its own failures are only logged.
-- `scripts/build-queue-metrics.py` measures a period read-only so the effect
-  of each later step can be compared with this baseline.
+  for the environment for 60 minutes, two sessions in a row without progress
+  (queued work or a deferred install), a deferred install older than two
+  hours, and author events unacknowledged after 20 minutes. An episode clears
+  only when its condition is resolved; an event in scope never expires. A
+  record a destination cannot take waits in an outbox and is written once the
+  destination works. It keeps a heartbeat file, shows no notifications, never
+  changes the queue, the lock or the session, and its own failures are only
+  logged. A failed, malformed or oddly shaped environment probe is unknown and
+  never blocks.
+- `scripts/build-queue-metrics.py` measures a period read-only from the
+  events inside it, with the status as of the cutoff, and clips waits that
+  cross either end, so the effect of each later step can be compared with
+  this baseline.
 
 ## Rationale
 

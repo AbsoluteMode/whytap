@@ -208,13 +208,16 @@ def ticket_json(db, ticket):
     return result
 
 
-UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+SESSION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 
 
 def author_address(args):
     """Fill the submitting session from the harness environment when not given, so the
-    builder can reach it through Harness Link. A Claude Code address is its session UUID
-    (CLAUDE_CODE_SESSION_ID); a display name like `one-mcp` reaches nobody."""
+    builder can reach it through Harness Link, and validate the whole field. A Claude
+    Code address is its session UUID (CLAUDE_CODE_SESSION_ID), stored in lower case; a
+    display name like `one-mcp` reaches nobody. No whitespace or control characters,
+    whether given as a flag or taken from the environment."""
     if not args.source:
         args.source = "codex" if os.environ.get("CODEX_THREAD_ID") else (
             "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else "codex")
@@ -222,9 +225,17 @@ def author_address(args):
         args.session = os.environ.get(
             {"codex": "CODEX_THREAD_ID", "claude": "CLAUDE_CODE_SESSION_ID"}.get(args.source, ""),
             "")
-    if args.source == "claude" and not UUID.match(args.session.lower()):
-        raise ValueError("A Claude Code session is addressed by its UUID "
-                         "(CLAUDE_CODE_SESSION_ID), not a display name: " + args.session)
+    if not args.session:
+        return
+    if args.source == "claude":
+        if not UUID.fullmatch(args.session.lower()):
+            raise ValueError("A Claude Code session is addressed by its UUID "
+                             "(CLAUDE_CODE_SESSION_ID), not a display name: "
+                             + json.dumps(args.session))
+        args.session = args.session.lower()
+    elif not SESSION_NAME.fullmatch(args.session):
+        raise ValueError("Session IDs are letters, digits and . _ : - only: "
+                         + json.dumps(args.session))
 
 
 def submitted(db, args):

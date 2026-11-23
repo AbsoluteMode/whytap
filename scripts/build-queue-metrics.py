@@ -43,13 +43,27 @@ def minutes(start, end):
     return (end - start).total_seconds() / 60
 
 
+WAIT_KINDS = (("waiting: screen locked", "screen locked"), ("waiting: load", "load"),
+              ("deferred install: meeting gate", "meeting gate"))
+
+
 def environment_waits(log_path, since, until):
-    """Episodes the watcher logged as `waiting: …` (screen, load) or a deferred install,
-    each lasting until the watcher logged anything else."""
+    """Minutes of each wait the watcher logged, clipped to the period. A wait starts at
+    its `waiting: …` (or deferred-install) line and lasts until the watcher logs a
+    different decision or starts a session; watchdog lines do not end it. A wait still
+    open at the end of the log or the period counts up to `until`, and one that started
+    before `since` counts from `since`."""
     waits = defaultdict(float)
     if not log_path.is_file():
         return {}
-    current = None
+    current = None  # (kind, start)
+
+    def close(at):
+        start = max(current[1], since)
+        end = min(at, until)
+        if end > start:
+            waits[current[0]] += minutes(start, end)
+
     for line in log_path.read_text(errors="replace").splitlines():
         match = re.match(r"(\S+) (.*)", line)
         if not match:
@@ -59,84 +73,97 @@ def environment_waits(log_path, since, until):
         except ValueError:
             continue
         text = match.group(2)
-        if current and since <= current[1] < until:
-            waits[current[0]] += minutes(current[1], min(at, until))
-        current = None
-        if text.startswith("waiting: screen locked"):
-            current = ("screen locked", at)
-        elif text.startswith("waiting: load"):
-            current = ("load", at)
-        elif text.startswith("deferred install: meeting gate"):
-            current = ("meeting gate", at)
-    return {kind: round(value) for kind, value in waits.items()}
+        if text.startswith("watchdog"):
+            continue
+        kind = next((name for prefix, name in WAIT_KINDS if text.startswith(prefix)), None)
+        if current and kind == current[0]:
+            continue  # the same wait logged again
+        if current:
+            close(at)
+        current = (kind, at) if kind else None
+    if current:
+        close(until)
+    return {kind: round(value) for kind, value in sorted(waits.items())}
 
 
 def measure(root, since, until):
+    """Counts and durations from events inside [since, until) only. Tickets are those
+    with any event in the period (submission included); their status is the last one
+    recorded before `until`. Durations that began before `since` (carry-in) count when
+    they end in the period."""
     db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
     db.row_factory = sqlite3.Row
     try:
-        tickets = {r["id"]: dict(r) for r in db.execute(
-            "SELECT * FROM tickets WHERE queued_at >= ? AND queued_at < ?",
-            (since.isoformat(), until.isoformat()))}
+        tickets = {r["id"]: dict(r) for r in db.execute("SELECT * FROM tickets")}
         events = defaultdict(list)
         for r in db.execute("SELECT * FROM events ORDER BY id"):
-            if r["ticket"] in tickets:
+            if r["ticket"] in tickets and parse(r["created_at"]) < until:
                 events[r["ticket"]].append(dict(r))
     finally:
         db.close()
-    by_pr = defaultdict(list)
+    inside = lambda e: since <= parse(e["created_at"]) < until
+    queued = {i: t for i, t in tickets.items() if any(inside(e) for e in events[i])}
+    chains = defaultdict(list)
     for ticket in sorted(tickets.values(), key=lambda t: t["id"]):
-        by_pr[ticket["pr"]].append(ticket)
+        chains[ticket["pr"]].append(ticket)
 
-    waits, work = [], []
+    waits, work, open_attempts = [], [], 0
     for ticket_id, ticket in tickets.items():
-        queued = parse(ticket["queued_at"])
-        started = None
-        first_start = True
+        started, first = None, True
         for e in events[ticket_id]:
             at = parse(e["created_at"])
             if e["status"] == "in_progress":
-                if first_start:
-                    waits.append(minutes(queued, at))
-                    first_start = False
-                started = at
+                if first and inside(e):
+                    waits.append(minutes(parse(ticket["queued_at"]), at))
+                first, started = False, at
             elif started and e["status"] in ENDS:
-                work.append(minutes(started, at))
+                if inside(e):
+                    work.append(minutes(started, at))
                 started = None
+        if started:
+            open_attempts += 1  # still in progress at the cutoff
     returns = Counter()
     with_returns, without_returns = [], []
-    for pr, chain in by_pr.items():
+    for pr, chain in chains.items():
         chain_events = [e for t in chain for e in events[t["id"]]]
-        returns[pr] = sum(1 for e in chain_events if e["status"] == "blocked")
-        done = [parse(e["created_at"]) for e in chain_events if e["status"] == "done"]
+        returns[pr] = sum(1 for e in chain_events if e["status"] == "blocked" and inside(e))
+        done = [parse(e["created_at"]) for e in chain_events if e["status"] == "done"
+                and inside(e)]
         if done:
-            (with_returns if returns[pr] else without_returns).append(
+            before = sum(1 for e in chain_events if e["status"] == "blocked"
+                         and parse(e["created_at"]) <= max(done))
+            (with_returns if before else without_returns).append(
                 minutes(parse(chain[0]["queued_at"]), max(done)))
     deferred = Counter()
     for ticket_id in tickets:
         for e in events[ticket_id]:
-            if e["status"] == "pending_install":
+            if e["status"] == "pending_install" and inside(e):
                 note = e["note"].lower()
                 deferred["meeting or microphone" if re.search(r"microphone|meeting", note)
                          else "screen locked" if "lock" in note else "other"] += 1
-    unreachable = Counter(tickets[t]["source"] for t in tickets for e in events[t]
-                          if e["acknowledged_at"] is None)
+    unacknowledged = Counter(
+        tickets[t]["source"] for t in tickets for e in events[t]
+        if inside(e) and (e["acknowledged_at"] is None or parse(e["acknowledged_at"]) >= until))
+    status_at_cutoff = Counter(
+        (events[i][-1]["status"] if events[i] else "queued") for i in queued)
     return {
         "period": {"since": since.isoformat(), "until": until.isoformat()},
-        "tickets": len(tickets), "prs": len(by_pr),
-        "final_status": dict(Counter(t["status"] for t in tickets.values())),
+        "tickets": len(queued), "prs": len({t["pr"] for t in queued.values()}),
+        "status_at_cutoff": dict(status_at_cutoff),
         "returns": {"total": sum(returns.values()),
                     "prs_returned": sum(1 for v in returns.values() if v),
-                    "per_pr": {str(k): v for k, v in sorted(Counter(returns.values()).items())},
+                    "per_pr": {str(k): v for k, v in sorted(Counter(
+                        returns[pr] for pr in {t["pr"] for t in queued.values()}).items())},
                     "most": [{"pr": pr.rsplit("/", 1)[-1], "returns": n}
                              for pr, n in returns.most_common(5) if n]},
         "queue_wait_minutes": spread(waits),
         "builder_minutes_per_attempt": spread(work),
+        "attempts_open_at_cutoff": open_attempts,
         "pr_to_done_minutes": {"without_returns": spread(without_returns),
                                "with_returns": spread(with_returns)},
         "deferred_installs": dict(deferred),
         "environment_wait_minutes": environment_waits(root / WATCHER_LOG, since, until),
-        "unacknowledged_events_by_source": dict(unreachable),
+        "unacknowledged_events_by_source": dict(unacknowledged),
     }
 
 

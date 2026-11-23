@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -323,6 +324,69 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(metrics["deferred_installs"], {"meeting or microphone": 1})
         self.assertEqual(metrics["queue_wait_minutes"]["n"], 3)
         self.assertEqual(queue.stat().st_mtime_ns, before)
+
+    def test_author_addresses_are_validated_whole_and_stored_canonically(self):
+        session = "0B0E6F3A-5D1C-4A8E-9F2B-7C3D1E2F4A5B"
+        stored = self.submit("--source", "claude", "--session", session)["ticket"]["session"]
+        self.assertEqual(stored, session.lower())
+        for bad in (session.lower() + "\n", " " + session.lower()):
+            self.assertIn("UUID", self.submit("--source", "claude", "--session", bad,
+                                              ok=False)["error"])
+            self.assertIn("UUID", self.submit(env={"CLAUDE_CODE_SESSION_ID": bad},
+                                              ok=False)["error"])
+        self.assertIn("letters", self.submit("--source", "codex", "--session", "thread 1",
+                                             ok=False)["error"])
+        self.assertIn("letters", self.submit(env={"CODEX_THREAD_ID": "thread-1\n"},
+                                             ok=False)["error"])
+
+    def metrics(self, since, until):
+        result = subprocess.run(["python3", str(SCRIPT.with_name("build-queue-metrics.py")),
+                                 "--since", since, "--until", until], cwd=self.repo,
+                                capture_output=True, text=True, env=HERMETIC_ENV, check=True)
+        return json.loads(result.stdout)
+
+    def test_metrics_use_only_events_before_the_cutoff_and_clip_waits(self):
+        first = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(first, "blocked")
+        second = self.enqueue(head=self.commit({"fix.txt": "fixed"}))["ticket"]["id"]
+        self.call("claim")
+        self.update(second, "done")
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        stamps = {"queued": "00:00", "in_progress": "00:10", "blocked": "01:05",
+                  "superseded": "01:06", "done": "01:08"}
+        for status, clock in stamps.items():
+            db.execute("UPDATE events SET created_at=? WHERE ticket=? AND status=?",
+                       (f"2026-01-01T{clock}:00+00:00", first, status))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T00:00:00+00:00' WHERE id=?",
+                   (first,))
+        for status, clock in (("queued", "01:06"), ("in_progress", "01:07"), ("done", "01:08")):
+            db.execute("UPDATE events SET created_at=? WHERE ticket=? AND status=?",
+                       (f"2026-01-01T{clock}:00+00:00", second, status))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T01:06:00+00:00' WHERE id=?",
+                   (second,))
+        db.commit()
+        db.close()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 waiting: screen locked",
+            "2026-01-01T00:10:00+00:00 watchdog: queue waits: screen locked",
+            "2026-01-01T00:30:00+00:00 waiting: load 50 on 14 CPUs (limit 28)",
+            "2026-01-01T00:40:00+00:00 starting codex builder session (queued)",
+            "2026-01-01T00:50:00+00:00 waiting: screen locked"]) + "\n")
+        metrics = self.metrics("2026-01-01T00:05:00+00:00", "2026-01-01T01:00:00+00:00")
+        self.assertEqual(metrics["returns"]["total"], 0)
+        self.assertEqual(metrics["status_at_cutoff"], {"in_progress": 1})
+        self.assertEqual(metrics["pr_to_done_minutes"]["with_returns"]["n"], 0)
+        self.assertEqual(metrics["attempts_open_at_cutoff"], 1)
+        self.assertEqual(metrics["queue_wait_minutes"]["n"], 1)  # carry-in queued at 00:00
+        self.assertEqual(metrics["environment_wait_minutes"], {"load": 10, "screen locked": 35})
+        later = self.metrics("2026-01-01T01:00:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(later["returns"]["total"], 1)
+        self.assertEqual(later["pr_to_done_minutes"]["with_returns"]["n"], 1)
+        self.assertEqual(later["builder_minutes_per_attempt"]["n"], 2)
+        self.assertEqual(later["environment_wait_minutes"], {"screen locked": 60})
 
 
 if __name__ == "__main__":

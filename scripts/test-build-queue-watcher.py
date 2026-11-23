@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -125,7 +126,6 @@ class WatcherTests(unittest.TestCase):
                     "WHYTAP_WATCHER_LAUNCH_AGENTS": str(base / "LaunchAgents")}
         self.env.pop("CODEX_THREAD_ID", None)
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
-        self.env["WHYTAP_WATCHER_SKIP_FETCH"] = "1"
         self.configure_watcher()
         self.queue("configure", "--builder-thread", self.builder)
 
@@ -139,6 +139,24 @@ class WatcherTests(unittest.TestCase):
 
     def git(self, *args):
         return subprocess.check_output(["git", *args], cwd=self.repo, text=True)
+
+    def make_origin(self, files):
+        """A local bare `origin` whose main holds `files` (path -> bytes or str)."""
+        origin = self.base / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        source = self.base / "source"
+        subprocess.run(["git", "clone", "-q", str(origin), str(source)], check=True,
+                       capture_output=True)
+        for name, body in files.items():
+            path = source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(body if isinstance(body, bytes) else body.encode())
+        for args in (("add", "-A"), ("-c", "user.name=T", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", "main"), ("push", "-q", "origin",
+                                                                "HEAD:main")):
+            subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+        self.git("remote", "set-url", "origin", str(origin))
+        return origin
 
     def queue(self, *args, actor=None, ok=True):
         result = subprocess.run([sys.executable, str(QUEUE), "--actor", actor or self.builder,
@@ -475,6 +493,9 @@ class WatcherTests(unittest.TestCase):
 
     def test_watchdog_reports_an_author_the_builder_cannot_reach(self):
         self.configure_watcher(undelivered_minutes=0)
+        self.set_environment(screen_locked=True)
+        self.watcher("run")  # the watchdog's scope starts with its first check
+        time.sleep(0.01)
         self.queue("enqueue", "--pr", "https://github.com/example/app/pull/7", "--head",
                    self.head, "--title", "Fixture", "--checks", "Fixture", "--acceptance",
                    "Fixture", "--source", "other", "--session", "agent-app-control")
@@ -489,25 +510,93 @@ class WatcherTests(unittest.TestCase):
         self.watcher("run")  # unknown environment does not block
         self.assertEqual(self.statuses(), {1: "done"})
 
-    def test_session_reads_the_builder_rules_from_origin_main(self):
-        origin = self.base / "origin.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-        source = self.base / "source"
-        subprocess.run(["git", "clone", "-q", str(origin), str(source)], check=True,
-                       capture_output=True)
-        (source / "scripts").mkdir()
-        (source / "scripts" / "build-queue-builder-prompt.md").write_text(
-            "ORIGIN MAIN RULES\nFIFO\n")
-        for args in (("add", "-A"), ("-c", "user.name=T", "-c", "user.email=t@example.invalid",
-                                     "commit", "-qm", "rules"), ("push", "-q", "origin",
-                                                                 "HEAD:main")):
-            subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
-        self.enqueue(1)
-        self.git("remote", "set-url", "origin", str(origin))
-        self.configure_watcher(prompt_from_origin=True)
-        self.watcher("run")
-        self.assertTrue(self.sessions()[0]["origin_rules"])
+    def watchdog_state(self):
+        return json.loads((self.root / "whytap-build-queue-watchdog.json").read_text())
 
+    def test_unacknowledged_event_stays_raised_after_a_day(self):
+        self.configure_watcher(undelivered_minutes=0)
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        state = self.watchdog_state()
+        state["undelivered_since"] = "2000-01-01T00:00:00+00:00"
+        (self.root / "whytap-build-queue-watchdog.json").write_text(json.dumps(state))
+        self.enqueue(1)
+        db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
+        db.execute("UPDATE events SET created_at = '2026-01-01T00:00:00+00:00'")
+        db.commit()
+        db.close()
+        self.watcher("run")
+        self.watcher("run")
+        states = [(a["state"], a["condition"]) for a in self.alerts()]
+        self.assertEqual(states, [("raised", "undelivered:1")])
+
+    def test_an_unwritable_mirror_receives_the_episode_once_it_is_restored(self):
+        blocker = self.base / "blocked-parent"
+        blocker.write_text("not a directory")
+        mirror = blocker / "alerts.jsonl"
+        self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        self.watcher("run")
+        self.watcher("run")
+        self.assertEqual([a["state"] for a in self.alerts()], ["raised"])
+        self.assertTrue(self.watchdog_state()["outbox"][str(mirror)])
+        blocker.unlink()
+        self.watcher("run")
+        self.assertEqual(self.alerts(mirror), self.alerts())
+        self.assertEqual(self.watchdog_state()["outbox"], {})
+
+    def test_deferred_install_without_progress_is_reported(self):
+        (self.control / "defer").touch()
+        (self.control / "meeting").touch()
+        self.enqueue(1)
+        self.watcher("run")
+        state = self.state()
+        state.update(no_progress=2, last_exit=time.time(), last_install_attempt=time.time())
+        (self.root / "whytap-build-queue-watcher-state.json").write_text(json.dumps(state))
+        self.watcher("run")
+        self.assertEqual(self.state()["last_reason"],
+                         "deferred install: next meeting check not due")
+        self.assertIn("no_progress", [a["condition"] for a in self.alerts()])
+
+    def test_malformed_or_failed_probes_are_unknown_and_never_block(self):
+        for output in ("[]", '"locked"', '{"screen_locked": "yes", "load": "317", "cpus": 0}',
+                       "{not json"):
+            (self.control / "environment.json").write_text(output)
+            result = json.loads(self.watcher("environment").stdout)
+            self.assertTrue(result["clear"], output)
+        failing = self.base / "failing-probe.py"
+        failing.write_text('print(\'{"screen_locked": true}\'); raise SystemExit(2)\n')
+        self.configure_watcher(environment_command=[sys.executable, str(failing)],
+                               load_limit_per_cpu="x")
+        result = json.loads(self.watcher("environment").stdout)
+        self.assertTrue(result["clear"])
+        self.assertEqual(result["load_limit"], 2.0 * result["cpus"])
+        (self.control / "environment.json").write_text("[]")
+        self.configure_watcher()
+        self.enqueue(1)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {1: "done"})
+
+    def test_session_reads_the_builder_rules_from_origin_main(self):
+        self.enqueue(1)
+        self.make_origin({"scripts/build-queue-builder-prompt.md": "ORIGIN MAIN RULES\nFIFO\n"})
+        self.configure_watcher(prompt_from_origin=True)
+        result = self.watcher("run")
+        self.assertTrue(self.sessions()[0]["origin_rules"])
+        merged = subprocess.check_output(["git", "--git-dir", str(self.base / "origin.git"),
+                                          "rev-parse", "main"], text=True).strip()
+        self.assertIn("rules from origin/main " + merged, result.stdout)
+
+    def test_failed_fetch_uses_the_installed_rules_not_a_cached_main(self):
+        self.enqueue(1)
+        self.make_origin({"scripts/build-queue-builder-prompt.md": "ORIGIN MAIN RULES\nFIFO\n"})
+        self.git("fetch", "-q", "origin")  # a cached origin/main exists
+        self.git("remote", "set-url", "origin", str(self.base / "missing.git"))
+        self.configure_watcher(prompt_from_origin=True)
+        result = self.watcher("run")
+        self.assertFalse(self.sessions()[0]["origin_rules"])
+        self.assertNotIn("rules from origin/main", result.stdout + result.stderr)
 
 class ActivationTests(WatcherTests):
     builder = "previous-builder-chat"
@@ -557,12 +646,31 @@ class ActivationTests(WatcherTests):
         self.watcher("activate", "--allow-local", ok=False)
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
 
+    def merged_scripts(self, **changed):
+        names = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
+                 "build-queue-watcher.plist.template")
+        return {"scripts/" + n: changed.get(n, (SCRIPTS / n).read_bytes()) for n in names}
+
     def test_activation_refuses_scripts_that_differ_from_origin_main(self):
+        self.make_origin(self.merged_scripts(**{"build-queue-watcher.py": b"# merged\n"}))
         error = json.loads(self.watcher("activate", ok=False).stderr)["error"]
         self.assertIn("origin/main", error)
         self.assertIn("build-queue-watcher.py", error)
+        self.assertNotIn("build-queue.py,", error)
         self.assertFalse(self.launch_agent().exists())
         self.assertEqual(self.queue("status")["builder"]["builder_thread"], self.builder)
+
+    def test_activation_installs_scripts_identical_to_origin_main(self):
+        self.make_origin(self.merged_scripts())
+        self.assertTrue(json.loads(self.watcher("activate").stdout)["activated"])
+
+    def test_activation_refuses_a_cached_main_when_the_fetch_fails(self):
+        self.make_origin(self.merged_scripts())
+        self.git("fetch", "-q", "origin")
+        self.git("remote", "set-url", "origin", str(self.base / "missing.git"))
+        error = json.loads(self.watcher("activate", ok=False).stderr)["error"]
+        self.assertIn("Could not fetch", error)
+        self.assertFalse(self.launch_agent().exists())
 
     def test_activation_never_interrupts_a_running_session(self):
         self.watcher("activate", "--allow-local")

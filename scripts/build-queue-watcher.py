@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import signal
 import sqlite3
@@ -42,6 +43,7 @@ INTEGRATION_LOCK = "exodia-integration.lock"
 ALERTS = "whytap-build-queue-alerts.jsonl"
 WATCHDOG = "whytap-build-queue-watchdog.json"
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
+OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
 ACTIVATED_SOURCES = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
                      "build-queue-watcher.plist.template")
 DEFAULTS = {
@@ -170,21 +172,44 @@ def console_locked():
     return True
 
 
+def number(value):
+    """A finite real number, or None (bools and strings are not numbers here)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if value == value and abs(value) != float("inf") else None
+
+
 def environment(config):
     """Whether the Mac can run a build now: screen unlocked and load below the limit.
-    Unknown values never block; the builder checks again before the full suite."""
+    Unknown values never block (a failed, malformed or odd-shaped probe is unknown);
+    the builder checks again before the full suite."""
+    probe = {}
     if config.get("environment_command"):
         try:
             result = subprocess.run(config["environment_command"], capture_output=True,
                                     text=True, timeout=30)
-            probe = json.loads(result.stdout)
+            if result.returncode == 0:
+                probe = json.loads(result.stdout)
         except (OSError, ValueError, subprocess.TimeoutExpired):
             probe = {}
     else:
-        probe = {"screen_locked": console_locked(), "load": os.getloadavg()[1],
-                 "cpus": os.cpu_count() or 1}
-    locked, load, cpus = probe.get("screen_locked"), probe.get("load"), probe.get("cpus") or 1
-    limit = config["load_limit_per_cpu"] * cpus
+        try:
+            load_average = os.getloadavg()[1]
+        except OSError:
+            load_average = None
+        probe = {"screen_locked": console_locked(), "load": load_average,
+                 "cpus": os.cpu_count()}
+    if not isinstance(probe, dict):
+        probe = {}
+    locked = probe.get("screen_locked") if isinstance(probe.get("screen_locked"), bool) else None
+    load = number(probe.get("load"))
+    cpus = probe.get("cpus")
+    if isinstance(cpus, bool) or not isinstance(cpus, int) or cpus < 1:
+        cpus = os.cpu_count() or 1
+    per_cpu = number(config.get("load_limit_per_cpu"))
+    if per_cpu is None or per_cpu <= 0:
+        per_cpu = DEFAULTS["load_limit_per_cpu"]
+    limit = per_cpu * cpus
     reason = ""
     if locked:
         reason = "screen locked"
@@ -192,6 +217,11 @@ def environment(config):
         reason = f"load {load:.0f} on {cpus} CPUs (limit {limit:.0f})"
     return {"clear": not reason, "reason": reason, "screen_locked": locked,
             "load": load, "cpus": cpus, "load_limit": limit}
+
+
+def waiting_kind(reason):
+    """One log line per wait: a changing load figure is the same wait."""
+    return "waiting: load" if reason.startswith("waiting: load") else reason
 
 
 def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}):
@@ -377,17 +407,39 @@ def git_in(root, *arguments, timeout=60):
                           timeout=timeout)
 
 
+def fetched_main(root):
+    """The commit of origin/main right after a successful fetch, or None. A cached
+    origin/main after a failed fetch is not current and is never used as such."""
+    try:
+        if git_in(root, "fetch", "--quiet", "origin", "main").returncode != 0:
+            return None
+        commit = git_in(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}")
+        sha = commit.stdout.decode().strip()
+        return sha if commit.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return None
+
+
+def show(root, commit, path):
+    """A file at one immutable commit (bytes), or None."""
+    try:
+        shown = git_in(root, "show", f"{commit}:{path}")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
+
+
 def builder_prompt(root, config):
     """The builder's rules as merged: origin/main's prompt, so a rule change reaches the
-    next session without reinstalling. Falls back to the installed copy offline."""
+    next session without reinstalling. Only after a successful fetch, read and labelled
+    from the same commit; otherwise the installed copy, labelled as such."""
     if config.get("prompt_from_origin", True):
+        commit = fetched_main(root)
+        text = show(root, commit, PROMPT_SOURCE) if commit else None
         try:
-            git_in(root, "fetch", "--quiet", "origin", "main")
-            shown = git_in(root, "show", "origin/main:" + PROMPT_SOURCE)
-            commit = git_in(root, "rev-parse", "--short", "origin/main")
-            if shown.returncode == 0 and shown.stdout.strip():
-                return shown.stdout.decode(), "origin/main " + commit.stdout.decode().strip()
-        except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+            if text and text.strip():
+                return text.decode(), "origin/main " + commit
+        except UnicodeDecodeError:
             pass
     prompt_path = root / INSTALLED_PROMPT
     if not prompt_path.is_file():
@@ -395,8 +447,10 @@ def builder_prompt(root, config):
     return prompt_path.read_text(), str(prompt_path)
 
 
-def ticket_rows(root):
-    """Read-only snapshot for the watchdog: tickets plus each one's latest event."""
+def ticket_rows(root, undelivered_since):
+    """Read-only snapshot for the watchdog: open tickets with each one's latest event,
+    and author events still unacknowledged that were created since the watchdog began
+    (older backlog is out of scope; nothing in scope expires while unacknowledged)."""
     db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
     db.row_factory = sqlite3.Row
     try:
@@ -407,10 +461,9 @@ def ticket_rows(root):
             "(SELECT MAX(created_at) FROM events e WHERE e.ticket = t.id) AS last_event "
             "FROM tickets t WHERE t.status IN ('queued', 'in_progress', 'pending_install')")]
         undelivered = [dict(r) for r in db.execute(
-            "SELECT e.id, e.ticket, e.status, e.created_at, t.pr, t.source FROM events e "
+            "SELECT e.id, e.ticket, e.created_at, t.pr, t.source FROM events e "
             "JOIN tickets t ON t.id = e.ticket WHERE e.acknowledged_at IS NULL "
-            "AND e.created_at >= ? ORDER BY e.id",
-            (datetime.fromtimestamp(time.time() - 86400, timezone.utc).isoformat(),))]
+            "AND e.created_at >= ? ORDER BY e.id", (undelivered_since,))]
     finally:
         db.close()
     return tickets, undelivered
@@ -418,14 +471,17 @@ def ticket_rows(root):
 
 def age_minutes(stamp, now):
     try:
-        return (now - datetime.fromisoformat(stamp).timestamp()) / 60
+        value = datetime.fromisoformat(stamp)
+        value = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return (now - value.timestamp()) / 60
     except (TypeError, ValueError):
         return 0
 
 
 def findings(root, config, context, previous, now):
-    """Conditions worth a person's attention, keyed so one episode raises once."""
-    tickets, undelivered = ticket_rows(root)
+    """Conditions worth a person's attention, keyed so one episode raises once and
+    clears only when its condition is resolved."""
+    tickets, undelivered = ticket_rows(root, previous["undelivered_since"])
     found = {}
     open_work = any(t["status"] in ("queued", "in_progress") or t["retry"] == "meeting"
                     for t in tickets)
@@ -450,8 +506,12 @@ def findings(root, config, context, previous, now):
             found["environment_wait"] = {
                 "minutes": round((now - since) / 60),
                 "detail": f"queue waits: {reason[len('waiting: '):]}"}
-    if open_work and reason.startswith("backoff:") and context.get("no_progress", 0) >= 2:
-        found["backoff"] = {"detail": reason}
+    # Sessions (queued work or a deferred install) that keep ending without changing the
+    # queue, whatever the decision text of the current tick says.
+    if open_work and context.get("no_progress", 0) >= 2:
+        found["no_progress"] = {"sessions": context["no_progress"],
+                                "detail": f"{context['no_progress']} builder sessions in a row "
+                                          "ended without changing the queue"}
     for e in undelivered:
         late = age_minutes(e["created_at"], now)
         if late > config["undelivered_minutes"]:
@@ -466,48 +526,69 @@ def findings(root, config, context, previous, now):
     return found
 
 
-def append_alert(root, config, record):
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
-    targets = [root / ALERTS]
+def alert_targets(root, config):
+    targets = [str(root / ALERTS)]
     if config.get("alerts_mirror"):
-        targets.append(Path(config["alerts_mirror"]).expanduser())
-    for target in targets:
+        targets.append(str(Path(config["alerts_mirror"]).expanduser()))
+    return targets
+
+
+def flush(outbox):
+    """Append each target's pending lines; a target that fails keeps them for the next
+    check, so a destination restored later still receives every record in order."""
+    remaining = {}
+    for target, lines in outbox.items():
+        if not lines:
+            continue
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            Path(target).parent.mkdir(parents=True, exist_ok=True)
             with open(target, "a") as output:
-                output.write(line)
+                output.write("".join(lines))
         except OSError as error:
             log(f"watchdog could not write {target}: {error}")
+            remaining[target] = lines[-OUTBOX_LIMIT:]
+    return remaining
 
 
 def watchdog(root, config, context):
-    """Model-free: compare the current findings with the last check, append raised and
-    cleared episodes to the alerts file and keep a heartbeat. Never changes the queue,
-    the lock or the session, and never raises into the caller."""
+    """Model-free: compare the current findings with the last check, queue raised and
+    cleared episodes for the alerts file(s) and keep a heartbeat. Delivery is the file
+    only; it never notifies, changes the queue, the lock or the session, and never
+    raises into the caller."""
     try:
         now = time.time()
         path = root / WATCHDOG
         previous = read_json(path, {})
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        previous.setdefault("undelivered_since",
+                            datetime.fromtimestamp(now, timezone.utc).isoformat())
         found = findings(root, config, context, previous, now) if (root / QUEUE).is_file() \
             else {}
         active = previous.get("active", {})
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        outbox = previous.get("outbox", {})
+        targets = alert_targets(root, config)
+        records = []
         for key, detail in found.items():
             if key not in active:
-                append_alert(root, config, {"at": stamp, "state": "raised", "condition": key,
-                                            **detail})
+                records.append({"at": stamp, "state": "raised", "condition": key, **detail})
                 log("watchdog: " + detail["detail"])
-                notify(config, detail["detail"])
         for key, detail in active.items():
             if key not in found:
-                append_alert(root, config, {"at": stamp, "state": "cleared", "condition": key,
-                                            "detail": detail.get("detail", "")})
+                records.append({"at": stamp, "state": "cleared", "condition": key,
+                                "detail": detail.get("detail", "")})
+        for record in records:
+            line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+            for target in targets:
+                outbox.setdefault(target, []).append(line)
+        outbox = flush(outbox)
         waiting = context.get("reason", "").startswith("waiting:")
         write_json(path, {"checked_at": stamp, "watcher_pid": os.getpid(),
                           "reason": context.get("reason", ""),
                           "session": bool(context.get("session")),
+                          "undelivered_since": previous["undelivered_since"],
                           "waiting_since": (previous.get("waiting_since") or now) if waiting
                           else None,
+                          "outbox": outbox,
                           "active": {k: {"detail": v["detail"], "since": active.get(k, {}).get(
                               "since", stamp)} for k, v in found.items()}})
     except Exception as error:  # the watchdog must never stop a build
@@ -610,7 +691,9 @@ def run_session(root, config, reason, work):
                         record()
                 if time.monotonic() > next_check:
                     next_check = time.monotonic() + config["watchdog_seconds"]
-                    watchdog(root, config, {"reason": "session " + reason, "session": True})
+                    watchdog(root, config, {"reason": "session " + reason, "session": True,
+                                            "no_progress": read_json(root / STATE, {}).get(
+                                                "no_progress", 0)})
                 if time.monotonic() > deadline:
                     log("session exceeded max_session_seconds; stopping it")
                     stop_group(pgid, 60, process.poll, known)
@@ -669,10 +752,10 @@ def watch(root):
         start, reason = decide(work, state, config, time.time(), meeting_gate_clear, environment)
         if not start:
             watchdog(root, config, {"reason": reason, "no_progress": state.get("no_progress", 0)})
-            if state.get("last_reason") != reason and reason != "idle" and not (
-                    reason.startswith("waiting:")
-                    and str(state.get("last_reason", "")).startswith("waiting:")):
-                log(reason)
+            last = str(state.get("last_reason", ""))
+            if waiting_kind(last) != waiting_kind(reason) and (
+                    reason != "idle" or last.startswith("waiting:")):
+                log(reason)  # a wait is logged when it starts, changes kind and ends
             state["last_reason"] = reason
             if json.dumps(state, sort_keys=True) != before:
                 write_json(root / STATE, state)
@@ -747,16 +830,14 @@ def command_activate(root, arguments):
 
 
 def unmerged_sources(root):
-    """Files that would be installed but differ from origin/main (activation must install
-    what was reviewed and merged, not a stale or edited checkout)."""
-    if not os.environ.get("WHYTAP_WATCHER_SKIP_FETCH"):
-        git_in(root, "fetch", "--quiet", "origin", "main")
-    different = []
-    for name in ACTIVATED_SOURCES:
-        merged = git_in(root, "show", "origin/main:scripts/" + name)
-        if merged.returncode != 0 or merged.stdout != (SOURCES / name).read_bytes():
-            different.append(name)
-    return different
+    """Files that would be installed but differ from freshly fetched origin/main
+    (activation installs what was reviewed and merged, not a stale or edited checkout)."""
+    commit = fetched_main(root)
+    if not commit:
+        raise ValueError("Could not fetch origin main to compare the scripts with it; "
+                         "retry online, or pass --allow-local to install this checkout anyway")
+    return [name for name in ACTIVATED_SOURCES
+            if show(root, commit, "scripts/" + name) != (SOURCES / name).read_bytes()]
 
 
 def activate(root, arguments):

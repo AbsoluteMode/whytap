@@ -256,29 +256,37 @@ the session once the screen is unlocked and the load has fallen. Unknown
 values never block. `build-queue-watcher.py environment` prints the same check
 (exit 0 clear, 3 not clear) for the builder.
 
-Each session reads the builder prompt from `origin/main` (the watcher fetches
-`main` first), so a merged rule change reaches the next session without
-reinstalling; offline it falls back to the installed copy, and the watcher log
-names the source. `activate` installs only scripts identical to
-`origin/main`'s and refuses a stale or edited checkout (`--allow-local`
-overrides this deliberately).
+Each session reads the builder prompt from `origin/main`, so a merged rule
+change reaches the next session without reinstalling. Only a successful fetch
+counts: the prompt is then read from that fetched commit and labelled with its
+SHA in the watcher log. A failed fetch uses the installed copy, labelled as
+such, never a cached `origin/main`. `activate` installs only scripts identical
+to freshly fetched `origin/main`'s; a stale or edited checkout, or a failed
+fetch, is refused (`--allow-local` overrides this deliberately).
 
 A model-free watchdog runs on every tick without a session and every minute
-inside a running one. It never changes the queue, the lock or the session. It
-appends one `raised` line per episode and one `cleared` line when the episode
-ends to `whytap-build-queue-alerts.jsonl` in the Git common directory, and to
-the optional `alerts_mirror` path in the builder configuration (the
-maintainer's orchestrator reads that file). Its conditions: an `in_progress`
+inside a running one. It never changes the queue, the lock or the session and
+shows no notifications. It appends one `raised` line per episode and one
+`cleared` line when the condition is resolved to
+`whytap-build-queue-alerts.jsonl` in the Git common directory, and to the
+optional `alerts_mirror` path in the builder configuration (the maintainer's
+orchestrator reads that file). A record that cannot be written stays in the
+watchdog's outbox and is written, in order, once that destination works. Its conditions: an `in_progress`
 ticket without a new queue event for `stall_minutes` (60) during a live
 session, open work waiting for the screen or the load for
-`environment_alert_minutes` (60), repeated sessions without progress, a
-deferred install older than `install_alert_minutes` (120), and an author event
-unacknowledged after `undelivered_minutes` (20), including every event of a
-`--source other` ticket, which no Harness Link address reaches.
-`whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat and
-current episodes. `scripts/build-queue-metrics.py --since <date>` measures
-returns, waits, builder time, deferred installs and environment waits
-read-only, for comparing the queue before and after a change (see the
+`environment_alert_minutes` (60), two or more sessions in a row without
+progress (for queued work or a deferred install), a deferred install older
+than `install_alert_minutes` (120), and an author event unacknowledged after
+`undelivered_minutes` (20), including every event of a `--source other`
+ticket, which no Harness Link address reaches. Events created before the
+watchdog's first check are out of its scope; one in scope stays raised until
+it is acknowledged.
+`whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
+current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
+[--until <date>]` measures returns, waits, builder time, deferred installs and
+environment waits read-only from the events inside the period (status as of
+the cutoff; waits and attempts that started earlier count from the period's
+start or when they end in it), for comparing the queue before and after a change (see the
 [watchdog decision](../decisions/2026-11-23-builder-queue-watchdog.md)).
 The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this
@@ -299,8 +307,10 @@ python3 "$queue_git_dir/exodia-build-queue.py" enqueue \
 Use actual values, not literal placeholders. Repeat `--acceptance` for up to
 three concrete checks. Without `--source`/`--session` the helper takes the
 author's address from the environment: Codex's `CODEX_THREAD_ID`, otherwise
-Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID; a display name such as
-`one-mcp` is refused because Harness Link cannot reach it). Other harnesses use
+Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID, stored in lower case; a
+display name such as `one-mcp` is refused because Harness Link cannot reach
+it). Session IDs are validated whole, from flags and the environment alike:
+no whitespace or control characters. Other harnesses use
 `--source other --session <actual-session-id>`; the response then says
 `delivery: inbox_only`, and that author must read `events --ticket <id>`
 itself. Never invent a Codex ID for a CLI session. No keys, user content or arbitrary executable

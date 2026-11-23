@@ -27,7 +27,8 @@ enum SpeechTranslationFailure: Error, Equatable {
 /// One live audio-in, translation-out session (OpenAI `gpt-realtime-translate`).
 protocol SpeechTranslationSession: AnyObject {
     var events: AsyncStream<SpeechTranslationEvent> { get }
-    /// Mono PCM16 at 16 kHz, the system-audio capture's format.
+    /// Mono PCM16 at 24 kHz, the rate the provider takes; Subtitles capture
+    /// at it directly (`LiveSubtitleModel.captureSampleRate`).
     func sendAudio(_ pcm: Data) async
     /// Sends what is buffered and asks the provider to finish; `.closed`
     /// follows once the last translation has arrived.
@@ -56,6 +57,9 @@ struct OpenAIRealtimeTranslateAdapter {
     private let makeTransport: TransportFactory
     private let model: String
     var startDeadline: Duration = .seconds(10)
+    /// Subtitles always want the original; the live probe turns it off to
+    /// measure whether the transcript costs the translation any time.
+    var transcribesInput = true
 
     init(apiKey: String, model: String = Self.model) {
         self.model = model
@@ -79,7 +83,7 @@ struct OpenAIRealtimeTranslateAdapter {
         let transport = makeTransport()
         transport.resume()
         let session = OpenAIRealtimeTranslateSession(transport: transport)
-        try await session.start(target: target, deadline: startDeadline)
+        try await session.start(target: target, transcribesInput: transcribesInput, deadline: startDeadline)
         return session
     }
 }
@@ -111,14 +115,12 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         (events, continuation) = AsyncStream.makeStream(of: SpeechTranslationEvent.self)
     }
 
-    func start(target: String, deadline: Duration) async throws {
-        let update: [String: Any] = [
-            "type": "session.update",
-            "session": ["audio": [
-                "output": ["language": target],
-                "input": ["transcription": ["model": OpenAIRealtimeTranslateAdapter.inputTranscriptionModel]],
-            ]],
-        ]
+    func start(target: String, transcribesInput: Bool = true, deadline: Duration) async throws {
+        var audio: [String: Any] = ["output": ["language": target]]
+        if transcribesInput {
+            audio["input"] = ["transcription": ["model": OpenAIRealtimeTranslateAdapter.inputTranscriptionModel]]
+        }
+        let update: [String: Any] = ["type": "session.update", "session": ["audio": audio]]
         startReceiveLoop()
         do {
             try await send(update)
@@ -287,7 +289,10 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     func sendAudio(_ pcm: Data) async {
         let frames: [Data] = lock.withLock {
             guard !finished, !closing else { return [] }
-            pending.append(OpenAIRealtimeSession.upsample16kTo24k(pcm))
+            // Already 24 kHz: an upsampled 16 kHz capture carried folded
+            // high frequencies and a seam every callback.
+            // WHY: .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md
+            pending.append(pcm)
             var frames: [Data] = []
             while pending.count >= Self.frameBytes {
                 frames.append(pending.prefix(Self.frameBytes))

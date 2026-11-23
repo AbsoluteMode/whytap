@@ -43,7 +43,7 @@ rows (instead of the hovered one) and closes History as before. Escape clears
 the marks; without marks it passes on as before. Plain click (copy) and plain
 Enter on one row are unchanged. The footer says "⌘-click for several" and,
 once rows are marked, "Enter to paste N to <app>   Esc to clear" (later
-keycap blocks: `2026-11-22-history-hint-keycaps.md`).
+separate plain-text blocks: `2026-11-22-history-hint-keycaps.md`).
 
 `HistoryPastePlan` keeps mark order and merges neighbouring rows of one kind:
 files and images become one pasteboard write with one item each (one Cmd+V,

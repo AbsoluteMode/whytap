@@ -128,6 +128,18 @@ struct AssignProposal: Equatable {
 /// removing one un-sets, and neither moves a feature to another provider.
 /// Keys go from the Keychain straight to the checker, catalog and probe; none
 /// is kept in published state.
+/// Why a key was not saved: the text Settings shows and, when a provider
+/// answered, its check result.
+struct KeyStoreFailure: Equatable {
+    let message: String
+    let status: KeyStatus?
+
+    init(_ message: String, status: KeyStatus? = nil) {
+        self.message = message
+        self.status = status
+    }
+}
+
 @MainActor
 final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var chips: [KeyChip] = []
@@ -286,7 +298,7 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Never assigns a feature: it opens the "Use <Provider> for" proposal.
     func addKey(_ key: String, kind: AIProviderKind) async -> String? {
         guard let account = Self.builtInAccount(for: kind) else { return "Add a server with its base URL" }
-        return await store(key, for: account, proposing: true)
+        return await store(key, for: account, proposing: true)?.message
     }
 
     /// Adds a user's own OpenAI-compatible server. A blank key means the server
@@ -331,6 +343,12 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Saves an inline-form key without opening a model proposal, including the
     /// first key. A rejected replacement leaves the previous saved key in place.
     func replaceKey(_ key: String, for account: ProviderAccount) async -> String? {
+        await store(key, for: account, proposing: false)?.message
+    }
+
+    /// `replaceKey` with the check's answer kept, so the onboarding can say
+    /// which refusal it was (`nil` status: not a provider's answer).
+    func replaceKeyReportingStatus(_ key: String, for account: ProviderAccount) async -> KeyStoreFailure? {
         await store(key, for: account, proposing: false)
     }
 
@@ -354,6 +372,13 @@ final class APIAndModelsViewModel: ObservableObject {
         return Array(Set(ids)).filter { name in
             !ServerModel.Kind.allCases.allSatisfy { server.hasModel(name, kind: $0) }
         }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Whether the server already has `name` as `kind` (the onboarding's
+    /// server step tried again after the model was added).
+    func serverHasModel(_ name: String, kind: ServerModel.Kind, on account: ProviderAccount) -> Bool {
+        guard case .server(let id) = account else { return false }
+        return routing.server(id)?.hasModel(name, kind: kind) ?? false
     }
 
     /// Why `name` cannot be added as `kind`, before any request; `nil` when it can.
@@ -669,6 +694,10 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Shared Speech / LLM
 
+    /// The route a feature runs on now (onboarding reads it to leave a
+    /// newer choice alone).
+    func currentRoute(for feature: AIFeature) -> FeatureRoute? { routing.route(for: feature) }
+
     func sharedRow(_ kind: SharedModelKind) -> SharedModelRow? {
         sharedRows.first { $0.kind == kind }
     }
@@ -685,8 +714,12 @@ final class APIAndModelsViewModel: ObservableObject {
     /// passed tool-use check also covers plain text on the same model. Nothing
     /// changes for a model whose check fails.
     // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
+    /// `stillWanted` is asked once the checks are done, right before any
+    /// route changes: a caller whose person moved on (onboarding's Skip)
+    /// answers false and nothing is assigned.
     @discardableResult
-    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool) async -> Bool {
+    func selectShared(model: String, account: ProviderAccount, kind: SharedModelKind, replaceCustom: Bool,
+                      stillWanted: @MainActor () -> Bool = { true }) async -> Bool {
         guard !sharedChecking.contains(kind) else { return false }
         let planner = makePlanner()
         let before = planner.row(kind: kind, title: title(of:))
@@ -746,7 +779,7 @@ final class APIAndModelsViewModel: ObservableObject {
             }
         }
         sharedChecking.remove(kind)
-        guard !Task.isCancelled else { recompute(); return false }
+        guard !Task.isCancelled, stillWanted() else { recompute(); return false }
 
         var assigned = 0
         for target in targets where !refused.contains(target.feature) {
@@ -877,30 +910,30 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Key flow
 
-    private func store(_ rawKey: String, for account: ProviderAccount, proposing: Bool) async -> String? {
+    private func store(_ rawKey: String, for account: ProviderAccount, proposing: Bool) async -> KeyStoreFailure? {
         let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let server: ServerEndpoint?
         switch account {
         case .server(let id):
-            guard let endpoint = routing.server(id) else { return "This server was removed" }
+            guard let endpoint = routing.server(id) else { return KeyStoreFailure("This server was removed") }
             server = endpoint
         case .thisMac:
-            return "On this Mac needs no key"
+            return KeyStoreFailure("On this Mac needs no key")
         case .soniox, .deepgram, .elevenLabs, .openRouter, .openAI, .anthropic:
-            guard !key.isEmpty else { return "Enter a key" }
+            guard !key.isEmpty else { return KeyStoreFailure("Enter a key") }
             server = nil
         }
-        guard let keychainAccount = account.keychainAccount(in: routing) else { return "This server was removed" }
+        guard let keychainAccount = account.keychainAccount(in: routing) else { return KeyStoreFailure("This server was removed") }
         let apiKey = key.nilIfEmpty
 
         // Checked before it is stored, so a key the provider turns down never
         // replaces anything.
         let status = await keyChecker.check(account, apiKey: apiKey, server: server, allowPaidProbe: true)
         if account == .openAI, status == .limited {
-            return "Allow model-list access for this OpenAI key, then try again."
+            return KeyStoreFailure("Allow model-list access for this OpenAI key, then try again.", status: status)
         }
         guard status == .valid || status == .limited else {
-            return Self.statusText(for: status, account: account)
+            return KeyStoreFailure(Self.statusText(for: status, account: account), status: status)
         }
         do {
             if let apiKey {
@@ -909,7 +942,7 @@ final class APIAndModelsViewModel: ObservableObject {
                 try keys.delete(account: keychainAccount)
             }
         } catch {
-            return "Couldn't save the key"
+            return KeyStoreFailure("Couldn't save the key")
         }
         keyStatuses.set(status, for: account, at: now())
         await catalogs.refresh(account, apiKey: apiKey, server: server)

@@ -25,6 +25,8 @@ final class PrivacyPreferences {
         /// `nil` / absent key means Auto (the STT provider detects it from audio).
         static let selectedLanguage = "sidekey.preferences.selectedLanguage"
         static let targetLanguage = "sidekey.preferences.targetLanguage"
+        /// The variant picked with the language (BCP 47, e.g. "en-GB").
+        static let selectedLanguageVariant = "sidekey.preferences.selectedLanguageVariant"
     }
 
     private let defaults: UserDefaults
@@ -73,6 +75,24 @@ final class PrivacyPreferences {
             } else {
                 defaults.removeObject(forKey: Key.selectedLanguage)
             }
+        }
+    }
+
+    /// The variant picked with the language on the onboarding globe (BCP 47,
+    /// "en-GB", "pt-BR", "es-MX"). Kept beside the language only: every
+    /// provider still gets the language's ISO 639-1 code. It counts only
+    /// while its language is the selected one, so a language changed
+    /// elsewhere leaves no stale variant.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    var selectedLanguageVariant: String? {
+        get {
+            guard let tag = defaults.string(forKey: Key.selectedLanguageVariant),
+                  let code = selectedLanguage?.code, tag.hasPrefix(code + "-") else { return nil }
+            return tag
+        }
+        set {
+            if let newValue { defaults.set(newValue, forKey: Key.selectedLanguageVariant) }
+            else { defaults.removeObject(forKey: Key.selectedLanguageVariant) }
         }
     }
 

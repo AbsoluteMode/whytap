@@ -480,10 +480,10 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  From Connecting to the end of Finishing the box has one fixed size (146 pt
-  caption; 108 pt for pairs after Stop), also with no audio yet (the
-  permissions link sits inside the caption) and after a Stop before the first
-  words ("Finishing…"); a problem hugs its message. The caption takes the
+  The caption is 146 pt high while connecting or listening. The audio
+  permissions link sits inside it. Stop immediately shows Start and a
+  108 pt caption if there are rows. With no rows the stopped box shows
+  only its controls, and a problem hugs its message. The caption takes the
   panel's width up to 708 pt and the height the controls leave, so the
   360 x 190 pt minimum panel fits every state. The live pair
   settles in place under LiveSubtitleModel.liveID; its original shows only up
@@ -528,8 +528,9 @@ Translation tools:
   dims the button since SwiftUI never sees it; the running overlay keeps
   them 1 s after hover ends. Stop shows the stopped box at once
   (SubtitlePhase.isRunning) while the tail settles; Start then drops it.
-  Audio is sent off the main actor; the caption publishes at most every
-  80 ms. The adapter and LiveSubtitleModel log only numbers: how far
+  Audio is sent off the main actor. A delta can publish the caption once
+  80 ms have passed since the last flush, and an 80 ms timer also flushes.
+  The adapter and LiveSubtitleModel log only numbers: how far
   elapsed_ms trails the audio sent. WHY:
   .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md Refused key, no credit, busy, unsupported language and a
   dropped socket end the session with a named message; Costs estimates

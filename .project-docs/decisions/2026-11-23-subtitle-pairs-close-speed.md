@@ -2,7 +2,7 @@
 id: subtitle-pairs-close-speed-2026-11-23
 type: decision
 title: Subtitle pairs that keep a joined sentence, × and Stop that act at once, and where the delay comes from
-summary: When the speech-translation model joins a short sentence to the one before it, the pairer keeps that sentence with the translation, choosing among the original's sentence ends by the session's own length ratio and translation delay instead of a fixed 5 s gap. × and the session button take their click in the panel's sendEvent from measured frames. Stop shows the stopped overlay at once while the last translation settles in the background. Audio is sent off the main actor, the caption is published at most every 80 ms, and a last translated word is held back for at most 0.3 s. Most of the delay is the model's; a numbers-only log now shows where it grows. Showing the original as heard is a one-constant switch left to the user.
+summary: When the speech-translation model joins a short sentence to the one before it, the pairer keeps that sentence with the translation, choosing among the original's sentence ends by the session's own length ratio and translation delay instead of a fixed 5 s gap. × and the session button take their click in the panel's sendEvent from measured frames. Stop shows the stopped overlay at once while the last translation settles in the background. Audio is sent off the main actor, caption changes are batched with an 80 ms interval, and a held last word can appear on the first flush after 0.3 s. Most of the delay is the model's; a numbers-only log now shows where it grows. Showing the original as heard is a one-constant switch left to the user.
 status: confirmed
 tags: [translation, subtitles, overlay, latency]
 canonical_for: [subtitle-pairs-close-speed]
@@ -102,11 +102,10 @@ where they were not.
   a provider that never finishes.
 - **Audio off the main actor.** Captured audio is sent from a detached task,
   so a busy caption never holds it back.
-- **Publishing at most every 80 ms.** A delta publishes the caption at once
-  when the last publish is 80 ms old. Otherwise the 80 ms flush timer
-  publishes it, so a burst of deltas redraws once
-  (`LiveSubtitleModel.publishInterval`).
-- **A held word waits at most 0.3 s.** The translation's last word is held
+- **Batching caption updates.** A delta publishes the caption if 80 ms
+  have passed since the last flush (`LiveSubtitleModel.publishInterval`).
+  An independent timer also flushes every 80 ms.
+- **A held word can appear after 0.3 s.** The translation's last word is held
   back until the next delta shows it was whole (a third of the recorded deltas
   continue a word). Once nothing has followed it for 0.3 s
   (`SubtitleSpeechPairer.wordHold`), the next flush shows it: the 80 ms

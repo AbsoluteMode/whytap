@@ -1175,10 +1175,10 @@ struct OnboardingKeyProvider: Equatable {
         case .elevenLabs:
             return provider("elevenlabs", "https://elevenlabs.io/app/settings/api-keys", "https://elevenlabs.io/app/subscription")
         case .openAI:
-            return provider("openai", "https://platform.openai.com/api-keys",
+            return provider(AgentModelBrand.openai.assetName, "https://platform.openai.com/api-keys",
                             "https://platform.openai.com/settings/organization/billing/overview")
         case .anthropic:
-            return provider("model-anthropic", "https://console.anthropic.com/settings/keys",
+            return provider(AgentModelBrand.anthropic.assetName, "https://console.anthropic.com/settings/keys",
                             "https://console.anthropic.com/settings/billing")
         case .openRouter:
             return provider("openrouter", "https://openrouter.ai/settings/keys", "https://openrouter.ai/settings/credits")

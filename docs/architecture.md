@@ -314,6 +314,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   of the generic star; OpenRouter's hosting-provider pin does not change authorship.
   OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Mistral, Cohere and Perplexity have
   prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
+  One provider has one mark: an OpenAI or Anthropic account shows that same
+  bundled model-author mark wherever its provider is drawn (Drop and cleanup
+  tickers, API & Models, first-run keys), never a second asset or an SF Symbol.
   A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
   without keys/content/model requests; recording never waits for it. Cache I/O
   is off the main actor, failed refreshes retain usable artwork, and stale view

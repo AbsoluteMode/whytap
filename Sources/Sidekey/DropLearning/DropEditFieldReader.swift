@@ -19,6 +19,8 @@ protocol DropEditFieldAccess: AnyObject {
     /// The focused field of the frontmost target app, if the gate allows it.
     /// Reads no text.
     func capture(pid: pid_t) -> DropEditFieldHandle?
+    /// Why the last capture returned nil, as a fixed name.
+    var lastRefusal: String? { get }
     /// The same element still has keyboard focus and is still allowed.
     func isStillFocused(_ handle: DropEditFieldHandle) -> Bool
     /// The field's text; `.focusLeft` when keyboard focus verifiably moved
@@ -37,8 +39,15 @@ protocol DropEditFieldAccess: AnyObject {
     func exposeFields(pid: pid_t) -> DropEditAccessibilityLease?
 }
 
+extension DropEditFieldAccess {
+    var lastRefusal: String? { nil }
+}
+
 enum DropEditFieldRead: Equatable {
-    case text(String)
+    /// The field's text and, when the field reports it, the end of its
+    /// selection (the caret, UTF-16 offset): right after a paste it sits at
+    /// the end of the pasted text.
+    case text(String, caret: Int? = nil)
     case focusLeft
     case unreadable
 }
@@ -102,6 +111,8 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         var characterCount: (AXUIElement) -> Int?
         /// `AXStringForRange`: transfers only the requested range.
         var string: (AXUIElement, CFRange) -> String?
+        /// `AXSelectedTextRange`; nil when the field does not report it.
+        var selection: ((AXUIElement) -> CFRange?)? = nil
         /// A Boolean attribute of the app element; nil when it cannot be read.
         var appFlag: (pid_t, String) -> Bool?
         /// Sets a Boolean attribute of the app element; true on success.
@@ -127,8 +138,26 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
 
     init(system: System = .live) { self.system = system }
 
+    private(set) var lastRefusal: String?
+
     func capture(pid: pid_t) -> DropEditFieldHandle? {
-        guard let element = focusedElement(ofFrontmost: pid), allowed(element, pid: pid) else { return nil }
+        lastRefusal = nil
+        guard system.frontmostPID() == pid else { lastRefusal = "notFrontmost"; return nil }
+        let element: AXUIElement
+        switch lookupFocus() {
+        case .failed: lastRefusal = "axError"; return nil
+        case .none: lastRefusal = "noFocusedElement"; return nil
+        case .element(let focused):
+            guard system.elementPID(focused) == pid, system.frontmostPID() == pid else {
+                lastRefusal = "focusInOtherApp"
+                return nil
+            }
+            element = focused
+        }
+        if let refusal = DropEditFieldGate.refusal(system.facts(element, pid)) {
+            lastRefusal = refusal
+            return nil
+        }
         return DropEditFieldHandle(pid: pid, element: element)
     }
 
@@ -184,9 +213,16 @@ final class AXDropEditFieldAccess: DropEditFieldAccess {
         guard let text = system.string(handle.element, CFRange(location: 0, length: length)),
               (text as NSString).length <= DropEditFieldLimits.maxFieldLength
         else { return stop(handle) ?? .unreadable }
+        // Where the caret is tells a new paste from an identical older draft.
+        // Only a collapsed selection (a caret, no selected text) inside the
+        // text counts.
+        let caret = system.selection?(handle.element).flatMap { range -> Int? in
+            range.length == 0 && range.location >= 0 && range.location <= (text as NSString).length
+                ? range.location : nil
+        }
         // A field that lost focus during the transfer is not used.
         if let stop = stop(handle) { return stop }
-        return .text(text)
+        return .text(text, caret: caret)
     }
 
     func watch(_ handle: DropEditFieldHandle,
@@ -341,6 +377,14 @@ extension AXDropEditFieldAccess.System {
                     element, kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &value
                 ) == .success else { return nil }
                 return value as? String
+            },
+            selection: { element in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+                      let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+                var range = CFRange()
+                guard AXValueGetValue(value as! AXValue, .cfRange, &range) else { return nil }
+                return range
             },
             appFlag: { pid, attribute in
                 var value: CFTypeRef?

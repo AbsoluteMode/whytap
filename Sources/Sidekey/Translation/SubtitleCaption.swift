@@ -6,8 +6,10 @@ import Foundation
 // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md,
 // .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
 enum SubtitleCaption {
-    /// Enough pairs to fill the box; older pairs are never visible.
-    static let maxPairs = 4
+    /// More pairs than the box holds: the oldest visible one leaves at the top
+    /// a line at a time as new text pushes it up, never as a whole pair.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    static let maxPairs = 12
 
     struct Row: Identifiable, Equatable {
         enum Translation: Equatable {
@@ -30,10 +32,13 @@ enum SubtitleCaption {
         var ordinal = 0
     }
 
-    /// The live row keeps one identity, so it updates in place while growing.
+    /// The live row's identity when the caller has none of its own.
     static let liveID = UUID(uuidString: "00000000-0000-0000-0000-00000000117E")!
 
-    static func rows(lines: [SubtitleLine], live: String, liveTranslation: String = "") -> [Row] {
+    /// `liveID` is the identity the next committed pair will take, so the live
+    /// row settles in place.
+    static func rows(lines: [SubtitleLine], live: String, liveTranslation: String = "",
+                     liveID: UUID = SubtitleCaption.liveID) -> [Row] {
         var rows = lines.compactMap { line -> Row? in
             let source = line.source.trimmingCharacters(in: .whitespacesAndNewlines)
             let hasTranslation = !(line.translation ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -51,24 +56,13 @@ enum SubtitleCaption {
             }
             return Row(id: line.id, source: source, translation: translation, isLive: false, ordinal: line.ordinal)
         }
-        let heard = tail(live.trimmingCharacters(in: .whitespacesAndNewlines))
+        let heard = live.trimmingCharacters(in: .whitespacesAndNewlines)
         let spoken = liveTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !heard.isEmpty || !spoken.isEmpty {
             rows.append(Row(id: liveID, source: heard, translation: spoken.isEmpty ? .pending : .live(spoken),
                             isLive: true, ordinal: (lines.last?.ordinal ?? -1) + 1))
         }
         return Array(rows.suffix(maxPairs))
-    }
-
-    /// The phrase still being heard shows its newest words only, so a long
-    /// sentence waiting for its translation never pushes finished pairs out.
-    static let liveSourceLimit = 90
-
-    static func tail(_ text: String) -> String {
-        guard text.count > liveSourceLimit else { return text }
-        let start = text.index(text.endIndex, offsetBy: -liveSourceLimit)
-        let words = text[start...].drop { !$0.isWhitespace }.drop(while: \.isWhitespace)
-        return "…" + (words.isEmpty ? text[start...] : words)
     }
 
     /// The one line shown instead of pairs: an error, or the session's state
@@ -79,7 +73,8 @@ enum SubtitleCaption {
         switch phase {
         case .connecting: return "Connecting…"
         case .listening: return "Waiting for speech…"
-        case .idle, .finishing, .failed: return nil
+        case .finishing: return "Finishing…"
+        case .idle, .failed: return nil
         }
     }
 }

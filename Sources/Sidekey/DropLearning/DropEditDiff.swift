@@ -14,11 +14,15 @@ struct DropEditToken: Equatable {
     /// Words with letters or digits, keeping inner `'`, `-`, `.`, `+`, `#`
     /// ("don't", "Wi-Fi", "Node.js", "C++", "C#").
     static func tokenize(_ text: String) -> [DropEditToken] {
+        let ns = text as NSString
+        return ranges(text).map { DropEditToken(text: ns.substring(with: $0)) }
+    }
+
+    /// Where each word of `tokenize` sits (UTF-16 ranges).
+    static func ranges(_ text: String) -> [NSRange] {
         let pattern = "[\\p{L}\\p{N}_](?:[\\p{L}\\p{N}_'’\\-.]*[\\p{L}\\p{N}_])?[+#]*"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let ns = text as NSString
-        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-            .map { DropEditToken(text: ns.substring(with: $0.range)) }
+        return regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)).map(\.range)
     }
 }
 
@@ -32,95 +36,230 @@ struct DropEditHunk: Equatable {
     let pastedIndex: Int
 }
 
-/// Semi-global word alignment: the pasted text is found inside the field's
-/// text (anything before or after it is free), then the user's edits inside it
-/// are read as hunks. Deterministic, no model.
+/// Word alignment of the pasted text with the field. The first time the
+/// paste is seen it must appear verbatim somewhere in the field (semi-global:
+/// anything before or after it is free); the field's words before and after
+/// it are kept as the paste's `Context`. Later reads compare the paste only
+/// with the words between that context (global alignment), so text typed or
+/// cut at the paste's edges and an older draft around it stay apart.
+/// Deterministic, no model.
 /// WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
 enum DropEditDiff {
     static let maxPastedWords = 400
     static let maxFieldWords = 4_000
-    /// More than this share of the pasted words changed = a rewrite, not
-    /// corrections: nothing is learned from the take.
+    /// More than this share of the kept pasted words changed = a rewrite,
+    /// not corrections: nothing is learned from the take. Words cut from the
+    /// start or the end of the take (a made-up tail the provider added) and
+    /// words typed before or after it are not counted.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
     static let maxChangedShare = 0.5
+
+    /// The field's words (comparison keys) before and after the paste when
+    /// it was first seen.
+    struct Context: Equatable {
+        let before: [String]
+        let after: [String]
+    }
 
     struct Result: Equatable {
         let hunks: [DropEditHunk]
         let pastedWordCount: Int
-        /// The field's words right before and after the matched text: a
-        /// filler typed back at the edge of the take lands outside the match.
+        /// The field's words right before and after the matched text when no
+        /// context is known: a filler typed back at the edge of the take
+        /// lands outside the match.
         let wordBefore: DropEditToken?
         let wordAfter: DropEditToken?
+        /// Where the paste sits in this field.
+        let context: Context
+        /// The paste appears verbatim.
+        var isExact: Bool { hunks.isEmpty }
     }
 
-    static func diff(pasted: String, field: String) -> Result? {
+    private enum Step { case same(Int, Int), sub(Int, Int), del(Int), ins(Int) }
+
+    static func diff(pasted: String, field: String, context: Context? = nil) -> Result? {
         let a = DropEditToken.tokenize(pasted)
         let b = DropEditToken.tokenize(field)
         guard !a.isEmpty, !b.isEmpty, a.count <= maxPastedWords, b.count <= maxFieldWords else { return nil }
         let n = a.count, m = b.count
         let ak = a.map(\.key), bk = b.map(\.key)
-        // cost[i][j]: aligning a[0..<i] so that it ends at b[j].
-        var cost = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+        // The region of the field compared with the paste.
+        let low: Int, high: Int
+        if let context {
+            guard context.before.count + context.after.count < m,
+                  Array(bk.prefix(context.before.count)) == context.before,
+                  Array(bk.suffix(context.after.count)) == context.after else { return nil }
+            low = context.before.count
+            high = m - context.after.count
+        } else {
+            low = 0
+            high = m
+        }
+        let width = high - low
+        // cost[i][j]: aligning a[0..<i] with the region's first j words. Without
+        // a context the field's words before the paste are free (row 0 is 0)
+        // and its end is chosen below.
+        var cost = [[Int]](repeating: [Int](repeating: 0, count: width + 1), count: n + 1)
         for i in 1...n { cost[i][0] = i }
+        if context != nil { for j in 0...width { cost[0][j] = j } }
         for i in 1...n {
-            for j in 1...m {
-                let match = cost[i - 1][j - 1] + (ak[i - 1] == bk[j - 1] ? 0 : 1)
+            for j in 1...width {
+                let match = cost[i - 1][j - 1] + (ak[i - 1] == bk[low + j - 1] ? 0 : 1)
                 cost[i][j] = min(match, cost[i - 1][j] + 1, cost[i][j - 1] + 1)
             }
         }
-        var end = 0
-        // Ties prefer the longer match: a changed last word is a substitution,
-        // not a deletion followed by text typed after the take.
-        for j in 0...m where cost[n][j] <= cost[n][end] { end = j }
-        guard Double(cost[n][end]) <= Double(n) * maxChangedShare else { return nil }
+        var end = width
+        if context == nil {
+            end = 0
+            // Ties prefer the longer match: a changed last word is a
+            // substitution, not a deletion followed by text typed after it.
+            for j in 0...width where cost[n][j] <= cost[n][end] { end = j }
+        }
 
-        // Backtrack into aligned pairs, then group runs of non-matches.
-        enum Step { case same, sub(Int, Int), del(Int), ins(Int) }
+        // Backtrack into aligned pairs.
         var steps: [Step] = []
         var i = n, j = end
-        while i > 0 {
+        while i > 0 || (context != nil && j > 0) {
             // Matches first, then a typed or removed word, then a changed one:
             // "Скажи привет" -> "Скажи типа привет" is an insertion, not
             // "Скажи" changed into "типа".
-            if j > 0, ak[i - 1] == bk[j - 1], cost[i][j] == cost[i - 1][j - 1] {
-                steps.append(.same); i -= 1; j -= 1
+            if i > 0, j > 0, ak[i - 1] == bk[low + j - 1], cost[i][j] == cost[i - 1][j - 1] {
+                steps.append(.same(i - 1, low + j - 1)); i -= 1; j -= 1
             } else if j > 0, cost[i][j] == cost[i][j - 1] + 1 {
-                steps.append(.ins(j - 1)); j -= 1
-            } else if cost[i][j] == cost[i - 1][j] + 1 {
+                steps.append(.ins(low + j - 1)); j -= 1
+            } else if i > 0, cost[i][j] == cost[i - 1][j] + 1 {
                 steps.append(.del(i - 1)); i -= 1
             } else {
-                steps.append(.sub(i - 1, j - 1)); i -= 1; j -= 1
+                steps.append(.sub(i - 1, low + j - 1)); i -= 1; j -= 1
             }
         }
         steps.reverse()
+        let start = low + j
+        guard let first = steps.firstIndex(where: { if case .same = $0 { return true } else { return false } }),
+              let last = steps.lastIndex(where: { if case .same = $0 { return true } else { return false } })
+        else { return nil }
+
+        // Edges: before the first and after the last matched word. Changed
+        // words there sit next to the kept text; the rest of the edge was
+        // cut (pasted words) or typed around the paste (field words).
+        let lead = edge(Array(steps[..<first]), ak: ak, bk: bk, leading: true)
+        let tail = edge(Array(steps[(last + 1)...]), ak: ak, bk: bk, leading: false)
+        let middle = Array(steps[first...last])
+        let changedInside = middle.filter { if case .same = $0 { return false } else { return true } }.count
+        let cutWords = lead.cut.count + tail.cut.count
+        let kept = n - cutWords
+        func isChange(_ step: Step) -> Bool { if case .same = step { return false } else { return true } }
+        let changed = changedInside + lead.changed.filter(isChange).count + tail.changed.filter(isChange).count
+        guard kept > 0, Double(changed) <= Double(kept) * maxChangedShare else { return nil }
+
         var hunks: [DropEditHunk] = []
-        var removed: [DropEditToken] = [], inserted: [DropEditToken] = []
-        var start: Int?
-        var pastedCursor = 0
-        func flush() {
-            if !removed.isEmpty || !inserted.isEmpty {
-                hunks.append(DropEditHunk(removed: removed, inserted: inserted, pastedIndex: start ?? pastedCursor))
-            }
-            removed = []; inserted = []; start = nil
+        func hunk(_ removed: [Int], _ inserted: [Int]) {
+            guard !removed.isEmpty || !inserted.isEmpty else { return }
+            hunks.append(DropEditHunk(removed: removed.map { a[$0] }, inserted: inserted.map { b[$0] },
+                                      pastedIndex: removed.first ?? 0))
         }
-        for step in steps {
+        // Cut words and typed words are separate hunks: neither is a
+        // substitution of the other.
+        hunk(lead.cut, [])
+        hunk([], lead.typed)
+        var removed: [Int] = [], inserted: [Int] = []
+        func flush() { hunk(removed, inserted); removed = []; inserted = [] }
+        for step in lead.changed + middle + tail.changed {
             switch step {
-            case .same:
-                flush(); pastedCursor += 1
-            case .sub(let x, let y):
-                if start == nil { start = pastedCursor }
-                removed.append(a[x]); inserted.append(b[y]); pastedCursor += 1
-            case .del(let x):
-                if start == nil { start = pastedCursor }
-                removed.append(a[x]); pastedCursor += 1
-            case .ins(let y):
-                if start == nil { start = pastedCursor }
-                inserted.append(b[y])
+            case .same: flush()
+            case .sub(let x, let y): removed.append(x); inserted.append(y)
+            case .del(let x): removed.append(x)
+            case .ins(let y): inserted.append(y)
             }
         }
         flush()
-        return Result(
-            hunks: hunks, pastedWordCount: n,
-            wordBefore: j > 0 ? b[j - 1] : nil, wordAfter: end < m ? b[end] : nil
-        )
+        hunk(tail.cut, [])
+        hunk([], tail.typed)
+        let resolved = context ?? Context(before: Array(bk[..<start]), after: Array(bk[end...]))
+        // The word right next to the take: without a context, the field word
+        // outside the match; with one, the typed word nearest the take inside
+        // the watched region (typed since the paste, never an older draft),
+        // even when the whole typed run is too long to be one edit.
+        let before: DropEditToken? = context == nil
+            ? (start > 0 ? b[start - 1] : nil)
+            : lead.typed.last.map { b[$0] }
+        let after: DropEditToken? = context == nil
+            ? (end < m ? b[end] : nil)
+            : tail.typed.first.map { b[$0] }
+        return Result(hunks: hunks, pastedWordCount: n, wordBefore: before, wordAfter: after, context: resolved)
+    }
+
+    /// One place where the paste appears verbatim: its context and the index
+    /// of the field word right after it.
+    struct Place: Equatable {
+        let context: Context
+        let end: Int
+    }
+
+    /// Every place the paste appears verbatim in the field, in field order.
+    /// More than one (a new paste next to an identical older draft) is
+    /// ambiguous unless the caret tells which copy was just pasted.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+    static func exactPlaces(pasted: String, field: String) -> [Place] {
+        let ak = DropEditToken.tokenize(pasted).map(\.key)
+        let bk = DropEditToken.tokenize(field).map(\.key)
+        guard !ak.isEmpty, ak.count <= maxPastedWords, bk.count <= maxFieldWords, ak.count <= bk.count else { return [] }
+        return (0...(bk.count - ak.count)).compactMap { start in
+            guard Array(bk[start..<(start + ak.count)]) == ak else { return nil }
+            let end = start + ak.count
+            return Place(context: Context(before: Array(bk[..<start]), after: Array(bk[end...])), end: end)
+        }
+    }
+
+    /// The copy the paste just made, told by the caret a paste leaves right
+    /// after the delivered text. The delivered text itself (with its own
+    /// spaces and punctuation, or the same text trimmed when the app dropped
+    /// outer whitespace) must end exactly at the caret; a caret anywhere else,
+    /// even just past an older copy's punctuation, identifies nothing.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+    static func placeAtCaret(pasted: String, field: String, caret: Int, places: [Place]) -> Place? {
+        let ns = field as NSString
+        guard caret >= 0, caret <= ns.length else { return nil }
+        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = DropEditToken.ranges(field)
+        let wordCount = DropEditToken.tokenize(pasted).count
+        for delivered in Set([pasted, trimmed]) where !delivered.isEmpty {
+            let length = (delivered as NSString).length
+            guard length <= caret else { continue }
+            let span = NSRange(location: caret - length, length: length)
+            guard ns.substring(with: span) == delivered else { continue }
+            // The delivered span must hold exactly one copy's words: none cut
+            // at its edges.
+            guard !words.contains(where: { NSIntersectionRange($0, span).length > 0
+                && ($0.location < span.location || NSMaxRange($0) > NSMaxRange(span)) }) else { continue }
+            let end = words.filter { NSMaxRange($0) <= NSMaxRange(span) }.count
+            let start = words.filter { NSMaxRange($0) <= span.location }.count
+            guard end - start == wordCount, let place = places.first(where: { $0.end == end }) else { continue }
+            return place
+        }
+        return nil
+    }
+
+    /// An edge run rebuilt so that its changed pairs sit next to the kept
+    /// text and its cut and typed words are outermost. The run's own number
+    /// of changed pairs is kept, so its cost is never higher.
+    private static func edge(_ run: [Step], ak: [String], bk: [String], leading: Bool)
+        -> (changed: [Step], cut: [Int], typed: [Int]) {
+        var pastedWords: [Int] = [], fieldWords: [Int] = []
+        var pairs = 0
+        for step in run {
+            switch step {
+            case .same(let x, let y): pastedWords.append(x); fieldWords.append(y)
+            case .sub(let x, let y): pastedWords.append(x); fieldWords.append(y); pairs += 1
+            case .del(let x): pastedWords.append(x)
+            case .ins(let y): fieldWords.append(y)
+            }
+        }
+        let p = leading ? Array(pastedWords.suffix(pairs)) : Array(pastedWords.prefix(pairs))
+        let f = leading ? Array(fieldWords.suffix(pairs)) : Array(fieldWords.prefix(pairs))
+        let changed: [Step] = zip(p, f).map { ak[$0] == bk[$1] ? .same($0, $1) : .sub($0, $1) }
+        let cut = leading ? Array(pastedWords.dropLast(pairs)) : Array(pastedWords.dropFirst(pairs))
+        let typed = leading ? Array(fieldWords.dropLast(pairs)) : Array(fieldWords.dropFirst(pairs))
+        return (changed, cut, typed)
     }
 }

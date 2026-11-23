@@ -38,7 +38,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Streaming/BYOK/ElevenLabsBYOKAdapter.swift
     confirmed_at: 2026-11-21
-related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-23-subtitle-steady-overlay.md, 2026-11-21-subtitle-speech-translation.md, 2026-11-21-compact-subtitle-overlay.md, 2026-10-20-translation-tools.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-22-subtitle-audio-translate-slot.md]
 ---
 
 # Subtitle phrase pairs
@@ -83,6 +83,10 @@ Superseded in part on 2026-11-22: Subtitles run only on OpenAI Audio
 translate (2026-11-22-subtitle-audio-translate-slot.md), so the phrase
 segmenter, parallel per-phrase LLM translation, ElevenLabs partial lock and
 their tests below are removed. The pair layout and bands stay.
+
+> Updated on 2026-11-23: the box no longer hugs its pairs, the column split is
+> fixed and old pairs leave a line at a time
+> (2026-11-23-subtitle-steady-overlay.md).
 
 - **Pairs.** The box shows the newest phrases as pairs: the original in a
   narrower left column (smaller, dimmed) and the translation in the right

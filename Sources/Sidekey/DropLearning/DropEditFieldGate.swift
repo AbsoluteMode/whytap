@@ -34,15 +34,22 @@ enum DropEditFieldGate {
     static let secureSubroles: Set<String> = ["AXSecureTextField"]
     static let textRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
 
-    static func allowsRead(_ facts: DropEditFieldFacts) -> Bool {
-        guard !facts.accessibilityError, !facts.secureEventInput, !facts.isOwnProcess else { return false }
-        guard let bundleID = facts.bundleID, !deniedBundleIDs.contains(bundleID) else { return false }
-        if let subrole = facts.subrole, secureSubroles.contains(subrole) { return false }
-        guard let role = facts.role, textRoles.contains(role) else { return false }
+    static func allowsRead(_ facts: DropEditFieldFacts) -> Bool { refusal(facts) == nil }
+
+    /// Why the gate says no, as a fixed name (the dev journal and the
+    /// reason counters); nil when it allows the read.
+    static func refusal(_ facts: DropEditFieldFacts) -> String? {
+        if facts.accessibilityError { return "axError" }
+        if facts.secureEventInput { return "secureInput" }
+        if facts.isOwnProcess { return "ownProcess" }
+        guard let bundleID = facts.bundleID else { return "unknownApp" }
+        if deniedBundleIDs.contains(bundleID) { return "deniedApp" }
+        if let subrole = facts.subrole, secureSubroles.contains(subrole) { return "secureField" }
         // A field that does not expose its text as a string is skipped at
         // the read; Electron and web views first get their tree turned on
         // (`mayExpose`).
-        return true
+        guard let role = facts.role, textRoles.contains(role) else { return "notTextRole" }
+        return nil
     }
 
     /// The app may be asked to expose its fields: everything the read gate

@@ -471,13 +471,28 @@ Translation tools:
   when idle or hovered, one row of source/target language, Start/Stop and ×.
   It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
   .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
-  The box shows phrase pairs: original (left, at most 45 %) and its
-  translation running to the box's edge (PairGridLayout); the box hugs its
-  widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
-  still being heard last as a dim live original; Toolbox stacks original over
-  translation. Every other pair sits on a faint band that follows the pair's
-  position in the session. WHY:
+  The box shows phrase pairs: original (left, a fixed 38 %) and its
+  translation (SteadyPairsLayout), the phrase still being heard last as a dim
+  live pair; Toolbox stacks original over translation (whole pairs,
+  NewestRowsLayout). Every other pair sits on a faint band that follows the
+  pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  From Connecting to the end of Finishing the box has one fixed size (146 pt
+  caption; 108 pt for pairs after Stop), also with no audio yet (the
+  permissions link sits inside the caption) and after a Stop before the first
+  words ("Finishing…"); a problem hugs its message. The caption takes the
+  panel's width up to 708 pt and the height the controls leave, so the
+  360 x 190 pt minimum panel fits every state. The live pair
+  settles in place under LiveSubtitleModel.liveID; its original shows only up
+  to the audio position its translation has reached (and its first sentence
+  end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
+  the settled pair keeps at least that much of both streams through any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
+  newest lines (NewestLinesColumn), so a long original never hides its
+  translation; older lines leave at the top behind a fade, a line at a time. On hover
+  the controls cover the caption's top instead of resizing it, so Stop and ×
+  never move; FirstClickHostingView takes the first click on the non-key
+  panel. The box blurs what is under it (behind-window HUD material, 45 %
+  black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
   holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
@@ -1041,14 +1056,30 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   capture callback is passed and the paste path is unchanged.
   Switching learning or calibration off stops the watch. It
   compares with what reached the field (a rich paste's plainText), aligns
-  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
+  the take inside the field word by word (DropEditDiff: the paste counts
+  once it is seen verbatim, which records the field words around it; two
+  identical copies are told apart by the caret (AXSelectedTextRange, right
+  after the new copy), else the take is `ambiguous` and teaches nothing; later
+  reads compare only the region between them and a changed surrounding is
+  not compared, so a draft around the paste never becomes an edit; >50%
+  of the kept words changed = rewrite; words cut from either edge of the
+  take, such as a made-up tail, are their own hunks and are not counted;
+  WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md) and
   DropLearningClassifier turns edits into candidates without a model: a
-  sound-alike term -> Vocab (only if the wrong word is in the provider's raw
+  sound-alike term (transliterated spelling, or the consonant skeleton with
+  voiced and voiceless pairs as one sound; one changed part of a
+  hyphenated word is the term) -> Vocab (only if the wrong word is in the provider's raw
   text); On this Mac / batch / Retry / recorder fallback, a full route list,
   a term already in Vocab or a Smart-only error -> Replace (never for
   dictionary words or grammar endings); full list without Replace -> Vocab
   full with the route's limit (Y opens Vocab); undone replacement / Vocab
   term written where not said -> remove; deleted spoken word -> Filler;
+  DropLearningStats counts why each take did or did not teach anything as
+  fixed reason names only (sidekey.dropLearning.stats.v1, local, not backed
+  up, deleted when learning and calibration are off; `suggested` only when
+  the drops really showed, else `suggestion.notShown`; a delivery with no
+  learnable paste is `delivery.<reason>`; a capture refusal such as
+  `axError` belongs to its own take);
   retyped cut filler -> Stop cutting. Translated takes teach nothing. The
   same correction in two takes within 14 days becomes one suggestion; N is
   forever, an expired one starts over; never while the island is not idle;
@@ -1056,10 +1087,16 @@ Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
   HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
   stay in memory until Y, which saves through VocabularyCache /
   FillerTermsStore / DropReplacementStore (editors reload on their change
-  notification). Hidden calibration (sidekey.dropLearning.calibration):
-  reads until the field holds still (<=30 s), journals to Application
-  Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
-  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
+  notification). Hidden calibration (sidekey.dropLearning.calibration,
+  `defaults write` only): the developer journal, Application
+  Support/<bundle id>/drop-learning/calibration.jsonl (0600), one entry
+  per Drop with app, capture refusal or end reason, whether the field was
+  readable and whether the paste aligned, refusal reasons, candidates with
+  counts, the edited words and whether a drop was shown; a watch that saw
+  calibration off is never journaled.
+  With learning on it runs beside real learning; with learning off it is
+  a dry run with a separate ledger and dry-run Y (WHY:
+  .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md); 0700 folder / 0600 single-name file without following
   links, ends itself after 14 days (checked at launch, hourly and before
   every read) and deletes its data. Fired fillers come from the same masked Filler pass.
   Replace is its own DropOutputPolicy step after Smart and before Filler

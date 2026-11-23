@@ -179,8 +179,8 @@ final class DropLearningDropsController {
         self.keys = keys
         self.present = present
         coordinator.onSuggestion = { [weak self] suggestion in
-            guard let self, self.islandIsIdle else { return }
-            self.model.show(suggestion)
+            guard let self, self.islandIsIdle else { return false }
+            return self.model.show(suggestion)
         }
         model.onOutcome = { [weak coordinator] suggestion, outcome in
             switch outcome {

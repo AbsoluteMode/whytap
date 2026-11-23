@@ -156,14 +156,6 @@ final class SpeechTranslationModelTests: XCTestCase {
         XCTAssertFalse(model.lines.isEmpty)
     }
 
-    func testALongLiveOriginalShowsItsNewestWholeWords() {
-        let heard = String(repeating: "word ", count: 30) + "last words here"
-        let row = SubtitleCaption.rows(lines: [], live: heard).first
-        XCTAssertEqual(row?.source.hasPrefix("…word"), true)
-        XCTAssertEqual(row?.source.hasSuffix("last words here"), true)
-        XCTAssertLessThanOrEqual(row?.source.count ?? 0, SubtitleCaption.liveSourceLimit + 1)
-    }
-
     func testAConnectionLostAfterStopKeepsTheTranslatedTailAndSaysSo() async throws {
         let session = FakeSpeechTranslation()
         session.closesOnEndInput = false

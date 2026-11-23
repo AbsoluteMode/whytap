@@ -86,7 +86,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         }
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: TranslationView(
+        panel.contentView = FirstClickHostingView(rootView: TranslationView(
             text: text, subtitles: subtitles, presentation: presentation,
             openSettings: { [weak self] feature in
                 self?.dismiss()
@@ -147,12 +147,17 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
     static let subtitleSize = NSSize(width: 760, height: 190)
+    static let minimumWidth: CGFloat = 360
 
     /// Internal so tests can check the layout without putting the panel on screen.
     func resize(for mode: Mode) {
         let isText = mode == .text
         configureChrome(for: mode)
-        panel.minSize = NSSize(width: 360, height: isText ? 120 : 140)
+        // Subtitles: never shorter than the overlay's own height, so the
+        // controls, a problem with its fix and the caption all fit at the
+        // narrowest width (the caption shrinks to what the controls leave).
+        // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+        panel.minSize = NSSize(width: Self.minimumWidth, height: isText ? 120 : Self.subtitleSize.height)
         let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
         if laidOutMode == .text { rememberTextWidth(frame.width) }
@@ -293,6 +298,14 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         menuObservers.forEach(NotificationCenter.default.removeObserver)
     }
+}
+
+/// The subtitle overlay never takes keyboard focus, so it is not the key
+/// window when the user reaches for Stop or ×. Without this, AppKit spends
+/// that first click making the panel key and the button never sees it.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 private final class TranslationPanel: NSPanel {

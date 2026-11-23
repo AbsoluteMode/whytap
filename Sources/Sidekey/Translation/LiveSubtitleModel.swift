@@ -13,8 +13,8 @@ struct SubtitleLine: Identifiable, Equatable {
     /// Position in the session, kept when older pairs leave, so alternating
     /// bands never move from one pair to another.
     var ordinal = 0
-    init(source: String, translation: String? = nil, failed: Bool = false, ordinal: Int = 0) {
-        id = UUID(); self.source = source; self.translation = translation; self.failed = failed; self.ordinal = ordinal
+    init(id: UUID = UUID(), source: String, translation: String? = nil, failed: Bool = false, ordinal: Int = 0) {
+        self.id = id; self.source = source; self.translation = translation; self.failed = failed; self.ordinal = ordinal
     }
     var isSettled: Bool { translation != nil || failed }
 }
@@ -70,6 +70,11 @@ final class LiveSubtitleModel: ObservableObject {
     @Published private(set) var live = ""
     /// Its translation so far, in whole words: the live pair's right column.
     @Published private(set) var liveTranslation = ""
+    /// The identity the live pair shows under and the next committed pair
+    /// keeps, so a pair settles in place instead of leaving and coming back
+    /// as a new row.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    @Published private(set) var liveID = UUID()
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
     var onActivityChange: (() -> Void)?
@@ -132,7 +137,7 @@ final class LiveSubtitleModel: ObservableObject {
         let token = generation
         let language = sourceCode == "auto" ? nil : sourceCode
         lines = []; live = ""; liveTranslation = ""; issue = nil
-        pairer = SubtitleSpeechPairer(); nextOrdinal = 0
+        pairer = SubtitleSpeechPairer(); nextOrdinal = 0; liveID = UUID()
         hasAudio = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
@@ -315,12 +320,14 @@ final class LiveSubtitleModel: ObservableObject {
         if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
         for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
             let translated = !pair.translation.isEmpty
-            lines.append(SubtitleLine(source: pair.source, translation: translated ? pair.translation : nil,
+            lines.append(SubtitleLine(id: liveID, source: pair.source, translation: translated ? pair.translation : nil,
                                       failed: !translated, ordinal: nextOrdinal))
             nextOrdinal += 1
+            liveID = UUID()
             if lines.count > 40 { lines.removeFirst() }
         }
-        if live != pairer.liveSource { live = pairer.liveSource }
-        if liveTranslation != pairer.liveTranslation { liveTranslation = pairer.liveTranslation }
+        let row = pairer.showLive()
+        if live != row.source { live = row.source }
+        if liveTranslation != row.translation { liveTranslation = row.translation }
     }
 }

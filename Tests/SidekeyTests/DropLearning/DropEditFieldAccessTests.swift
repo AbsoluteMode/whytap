@@ -47,7 +47,10 @@ final class DropEditFieldAccessTests: XCTestCase {
         settable = []
         flagWrites = []
         identity = "app@1"
+        selection = nil
     }
+
+    private var selection: CFRange?
 
     private func access() -> AXDropEditFieldAccess {
         AXDropEditFieldAccess(system: .init(
@@ -69,6 +72,7 @@ final class DropEditFieldAccessTests: XCTestCase {
                 duringTransfer?()
                 return (text as NSString).substring(with: NSRange(location: range.location, length: range.length))
             },
+            selection: { [unowned self] _ in selection },
             appFlag: { [unowned self] _, name in flags[name] },
             setAppFlag: { [unowned self] _, name, value in
                 guard flags[name] != nil || settable.contains(name) else { return false }
@@ -90,9 +94,42 @@ final class DropEditFieldAccessTests: XCTestCase {
         XCTAssertEqual(requestedRanges.first?.length, (text as NSString).length)
     }
 
+    /// The caret (a collapsed selection) comes with the text, so a new paste
+    /// can be told from an identical older draft; an impossible one is dropped.
+    func testAReadCarriesTheCaret() throws {
+        let access = access()
+        let handle = try XCTUnwrap(access.capture(pid: targetPID))
+        selection = CFRange(location: 5, length: 0)
+        XCTAssertEqual(access.read(handle), .text(text, caret: 5))
+        selection = CFRange(location: 3, length: 2)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil), "selected text is not a caret")
+        selection = CFRange(location: (text as NSString).length + 1, length: 0)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil))
+        selection = CFRange(location: -1, length: 0)
+        XCTAssertEqual(access.read(handle), .text(text, caret: nil))
+    }
+
     func testNothingIsCapturedWhenTheTargetIsNotFrontmost() {
         frontmost = otherPID
-        XCTAssertNil(access().capture(pid: targetPID))
+        let access = access()
+        XCTAssertNil(access.capture(pid: targetPID))
+        XCTAssertEqual(access.lastRefusal, "notFrontmost")
+    }
+
+    /// The developer journal and the counters name why a field was refused.
+    func testARefusedCaptureNamesItsReason() throws {
+        let access = access()
+        for (setup, reason) in [({ self.role = "AXWebArea" }, "notTextRole"),
+                                ({ self.role = "AXTextField"; self.secureInput = true }, "secureInput"),
+                                ({ self.secureInput = false; self.bundleID = "com.apple.Terminal" }, "deniedApp"),
+                                ({ self.bundleID = "com.apple.Notes"; self.focused = nil }, "noFocusedElement")] {
+            setup()
+            XCTAssertNil(access.capture(pid: targetPID), reason)
+            XCTAssertEqual(access.lastRefusal, reason)
+        }
+        focused = field
+        XCTAssertNotNil(access.capture(pid: targetPID))
+        XCTAssertNil(access.lastRefusal)
     }
 
     /// The target app keeps its own focused element while the user works in
@@ -700,5 +737,28 @@ final class DropEditFieldAccessTests: XCTestCase {
         secure = true
         XCTAssertNil(AXDropEditFieldAccess(system: system).exposeFields(pid: targetPID))
         XCTAssertTrue(flagWrites.isEmpty)
+    }
+}
+
+// MARK: - Builder review #449 scenario
+
+
+extension DropEditFieldAccessTests {
+    func testCaptureTellsAnAXFailureFromNoFocusedElement() {
+        var focus: DropEditFocus = .failed
+        let access = AXDropEditFieldAccess(system: .init(
+            frontmostPID: { 4242 }, focusedElement: { nil }, elementPID: { _ in nil },
+            isRunning: { _ in true },
+            facts: { _, _ in fatalError("capture must not read metadata") },
+            characterCount: { _ in nil }, string: { _, _ in nil },
+            appFlag: { _, _ in nil }, setAppFlag: { _, _, _ in false },
+            processIdentity: { _ in "fixture@1" }, watch: { _, _ in nil },
+            focus: { focus }
+        ))
+        XCTAssertNil(access.capture(pid: 4242))
+        XCTAssertEqual(access.lastRefusal, "axError")
+        focus = .none
+        XCTAssertNil(access.capture(pid: 4242))
+        XCTAssertEqual(access.lastRefusal, "noFocusedElement")
     }
 }

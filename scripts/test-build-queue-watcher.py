@@ -677,6 +677,19 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.state()["no_progress"], 1)
         self.assertIn("backoff", json.loads(self.watcher("status").stdout)["reason"])
 
+    def test_an_explicit_retry_after_a_block_resets_the_backoff(self):
+        (self.control / "requeue").touch()
+        ticket = self.enqueue(1)
+        self.watcher("run")
+        self.assertIn("backoff", json.loads(self.watcher("status").stdout)["reason"])
+        (self.control / "requeue").unlink()
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "blocked", "--note", "needs a fix")
+        self.queue("set", "--ticket", str(ticket), "--status", "queued", "--note", "retry")
+        self.watcher("run")
+        self.assertEqual(len(self.sessions()), 2)
+        self.assertEqual(self.statuses(), {ticket: "done"})
+
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400
         for output in ('{"load": %s, "cpus": 8}' % huge, '{"load": 1, "cpus": %s}' % huge,

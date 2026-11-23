@@ -374,9 +374,14 @@ queue survives downtime.
    one `in_progress` ticket. Before that, the helper reads every PR's current
    head with `git ls-remote` (no model, no credentials): a queued ticket whose
    PR head moved after submission is `blocked` with the new SHA and a request
-   to enqueue it, and the next ticket is claimed. The watcher runs the same
-   `check-heads` before it starts a session for queued work, so a moved head
-   costs no session. An unreachable remote checks nothing.
+   to enqueue it, and the next ticket is claimed. Only tickets queued before
+   that read started are judged, and a pull ref that still shows an ancestor
+   of the submitted commit is GitHub lagging, not a move. The watcher runs the
+   same `check-heads` before it starts a session for queued work, so a moved
+   head costs no session. An unreachable remote checks nothing. Such a return
+   has no builder to announce it: `events --pending` lists it for Codex and
+   Claude Code authors alike until the next builder delivers and acknowledges
+   it.
    Send its start event to the originating chat immediately: include ticket,
    PR/title/head and ask that agent to follow the build and check its acceptance
    steps when notified. The worker may inspect, diagnose and report problems;
@@ -389,8 +394,10 @@ queue survives downtime.
    environment stopped it, an undeclared dependency is not merged yet), use
    `set --status queued --note <reason>`: from `in_progress` it keeps its place,
    while a requeue after `blocked` goes to the end as before. The watcher
-   counts such a return as a session without progress, so its backoff applies.
-   Do not return a ticket whose branch you already pushed to; finish or block it. Resolve routine merge conflicts with main in the clean
+   counts such a return as a session without progress, so its backoff applies;
+   a retry after a block gets a new place and resets the backoff. Do not
+   return a ticket whose branch you already pushed to; finish or block it.
+   Resolve routine merge conflicts with main in the clean
    integration worktree yourself: keep the contracts of both features, re-run
    the tests of both, push the resolution to the PR branch as a normal commit
    and record the new head and what was resolved in the ticket note. Mechanical

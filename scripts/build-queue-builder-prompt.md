@@ -72,6 +72,8 @@ holds it, leave the tickets queued and end your turn.
 1. `claim`, then message the author that work started. `claim` already
    returned queued tickets whose PR head moved (`returned_moved_heads`) and
    skipped tickets waiting for a `--depends-on` PR; deliver their events too.
+   Returns made by the watcher before your session are in `events --pending`
+   for Codex and Claude Code authors alike: deliver and acknowledge them.
 2. Check the live PR: exact queued head and base, review evidence, checks,
    dependencies, overlaps. A moved head is `blocked` with a request to
    resubmit the reviewed head. To give a ticket back without blaming the PR

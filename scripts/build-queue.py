@@ -51,8 +51,9 @@ MERGED = ("done", "pending_install")  # pending_install: merged, the install wai
 
 def remote_heads():
     """Current head of every open PR from GitHub's pull refs, without a model and
-    without credentials (`git ls-remote`). None when unknown: offline, no such remote,
-    a timeout. Unknown never blocks anything."""
+    without credentials (`git ls-remote`), with the time the read started. None when
+    unknown: offline, no such remote, a timeout. Unknown never blocks anything."""
+    started = now()
     remote = os.environ.get(PULL_REMOTE_ENV) or "origin"
     try:
         output = subprocess.run(
@@ -67,7 +68,7 @@ def remote_heads():
         match = re.fullmatch(r"([0-9a-f]{40})\trefs/pull/([1-9]\d*)/head", line.strip())
         if match:
             heads[int(match.group(2))] = match.group(1)
-    return heads
+    return {"started": started, "heads": heads}
 
 
 def pr_number(url):
@@ -86,17 +87,28 @@ def unmet_dependencies(db, ticket):
     return waiting
 
 
-def block_moved_head(db, ticket, heads):
+def block_moved_head(db, ticket, snapshot):
     """A queued ticket whose PR head moved after submission goes back to its author
-    before any builder reviews the old commit. True when it was returned."""
-    current = (heads or {}).get(pr_number(ticket["pr"]))
+    before any builder reviews the old commit. True when it was returned. Only a
+    ticket queued before the remote read started is judged: one submitted (or
+    requeued) while the read was in flight may be newer than the snapshot."""
+    if not snapshot or ticket["queued_at"] >= snapshot["started"]:
+        return False
+    current = snapshot["heads"].get(pr_number(ticket["pr"]))
     if not current or current == ticket["head"]:
+        return False
+    # GitHub moves refs/pull/<n>/head a little after a push: a ref that still shows
+    # an ancestor of the submitted commit is lagging, not moved.
+    if subprocess.run(["git", "merge-base", "--is-ancestor", current, ticket["head"]],
+                      capture_output=True).returncode == 0:
         return False
     note = (f"The PR head moved after submission: this ticket is {ticket['head']}, the PR "
             f"is now {current}. Review that commit and enqueue it with --head {current}.")
     db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
                (note, now(), ticket["id"]))
-    event(db, ticket["id"], "blocked", note)
+    # No builder wrote this: the next builder delivers it from `events --pending`,
+    # whatever the author's harness (Harness Link reaches codex and claude).
+    event(db, ticket["id"], "blocked", note, deliver=ticket["source"] in ("codex", "claude"))
     return True
 
 
@@ -228,6 +240,10 @@ def database():
         if "depends_on" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
             # JSON list of PR URLs that must be merged through the queue first.
             db.execute("ALTER TABLE tickets ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'")
+        if "deliver" not in {c[1] for c in db.execute("PRAGMA table_info(events)")}:
+            # 1 = written without a builder (a model-free return): listed by
+            # `events --pending` for any deliverable author, not only Codex.
+            db.execute("ALTER TABLE events ADD COLUMN deliver INTEGER NOT NULL DEFAULT 0")
         yield db
         db.commit()
     finally:
@@ -244,9 +260,9 @@ def require_builder(db, actor):
         raise ValueError("Only the configured builder chat may claim or update work")
 
 
-def event(db, ticket, status, note=""):
-    db.execute("INSERT INTO events(ticket, status, note, created_at) VALUES (?, ?, ?, ?)",
-               (ticket, status, note, now()))
+def event(db, ticket, status, note="", deliver=False):
+    db.execute("INSERT INTO events(ticket, status, note, created_at, deliver) "
+               "VALUES (?, ?, ?, ?, ?)", (ticket, status, note, now(), int(deliver)))
 
 
 def row(db, ticket):
@@ -407,7 +423,7 @@ def run(args):
 
         if args.command == "check-heads":
             require_builder(db, args.actor)
-            if args.remote_heads is None:
+            if not args.remote_heads:
                 return {"checked": False, "returned_moved_heads": []}
             returned = [t["id"] for t in db.execute(
                 "SELECT * FROM tickets WHERE status='queued' ORDER BY queued_at, id").fetchall()
@@ -438,7 +454,7 @@ def run(args):
                      "JOIN tickets t ON t.id=e.ticket WHERE 1=1")
             params = []
             if args.pending:
-                query += " AND e.acknowledged_at IS NULL AND t.source='codex'"
+                query += (" AND e.acknowledged_at IS NULL AND (t.source='codex' OR e.deliver=1)")
             if args.ticket:
                 query += " AND e.ticket=?"
                 params.append(args.ticket)

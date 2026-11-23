@@ -518,5 +518,40 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.call("claim", env=offline)["ticket"]["id"], ticket)
 
 
+    def test_a_ticket_queued_while_the_heads_were_read_is_not_judged(self):
+        ticket = self.enqueue(1)["ticket"]["id"]
+        moved = self.commit({"elsewhere.txt": "pushed"})
+        self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/1/head")
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        # Submitted after the remote read started (the snapshot may predate it).
+        db.execute("UPDATE tickets SET queued_at='2999-01-01T00:00:00+00:00' WHERE id=?", (ticket,))
+        db.commit()
+        db.close()
+        self.assertEqual(self.call("check-heads")["returned_moved_heads"], [])
+        claimed = self.call("claim")
+        self.assertEqual((claimed["ticket"]["id"], claimed["returned_moved_heads"]), (ticket, []))
+
+    def test_a_pull_ref_still_showing_an_ancestor_is_lagging_not_moved(self):
+        previous = self.head
+        submitted = self.commit({"next.txt": "pushed and submitted"})
+        self.git("push", "-q", str(self.pulls), f"{previous}:refs/pull/1/head")  # not updated yet
+        ticket = self.enqueue(1, head=submitted)["ticket"]["id"]
+        self.assertEqual(self.call("check-heads")["returned_moved_heads"], [])
+        self.assertEqual(self.call("claim")["ticket"]["id"], ticket)
+
+    def test_a_model_free_return_reaches_the_next_builder_for_claude_authors(self):
+        claude = "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"
+        ticket = self.call("enqueue", "--pr", "https://github.com/example/app/pull/1", "--head",
+                           self.head, "--title", "x", "--checks", "x", "--acceptance", "x",
+                           "--source", "claude", "--session", claude)["ticket"]["id"]
+        moved = self.commit({"pushed.txt": "after submission"})
+        self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/1/head")
+        self.assertEqual(self.call("check-heads")["returned_moved_heads"], [ticket])
+        pending = self.call("events", "--pending")
+        self.assertEqual([(e["ticket"], e["status"], e["session"]) for e in pending],
+                         [(ticket, "blocked", claude)])  # its queued receipt is not listed
+        self.call("ack", "--event", str(pending[0]["id"]))
+        self.assertEqual(self.call("events", "--pending"), [])
+
 if __name__ == "__main__":
     unittest.main()

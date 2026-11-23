@@ -38,16 +38,22 @@ by the environment (ticket 461 under load 317) had no way back except through
   differs is `blocked` with the new SHA and a request to enqueue it; the next
   ticket is claimed. The watcher runs the same check (`check-heads`, as the
   builder) before it starts a session for queued work, so a moved head costs
-  no session. An unreachable remote checks nothing.
+  no session. An unreachable remote checks nothing. Only tickets queued
+  before the read started are judged (a later one may be newer than the
+  snapshot), and a pull ref that still shows an ancestor of the submitted
+  commit is GitHub updating late, not a move. The return's event is marked
+  for delivery, so `events --pending` lists it for Claude Code authors as
+  well as Codex ones until the next builder delivers and acknowledges it.
 - `enqueue --depends-on <PR URL>` (repeatable) records dependencies. The
   ticket keeps its place, `claim` skips it and the watcher starts no session
   for it until the latest ticket of every dependency PR is `done` or
   `pending_install`. Self-dependencies and direct cycles are refused.
 - `set --status queued` is allowed from `in_progress` and keeps the ticket's
   `queued_at`; a requeue after `blocked` still goes to the end. The watcher's
-  progress fingerprint ignores the update time of queued tickets, so a
-  returned ticket counts as a session without progress and its backoff
-  applies.
+  progress fingerprint takes a queued ticket's `queued_at`, not its update
+  time: a returned ticket counts as a session without progress and its
+  backoff applies, while a retry after a block has a new `queued_at` and
+  resets it.
 
 ## Rationale
 
@@ -67,6 +73,9 @@ same ticket.
   needs no new state.
 - Checking the head through the GitHub API (`gh`): needs credentials in the
   launchd process; `ls-remote` of the public pull refs does not.
+- Listing every unacknowledged Claude Code event in `events --pending`: 314
+  historical ones would reach their authors again; only model-free returns
+  are marked for delivery.
 - The `priority_at` column that keeps a resubmitted PR's place: deferred by
   the council review until the effect of these fixes is measured.
 

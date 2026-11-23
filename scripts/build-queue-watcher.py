@@ -124,12 +124,12 @@ def open_work(root):
                 "SELECT pr, status FROM tickets WHERE id IN (SELECT MAX(id) FROM tickets "
                 "GROUP BY pr)") if status in ("done", "pending_install")}
             rows = db.execute(
-                "SELECT id, status, updated_at, " + retry + ", " + depends + " FROM tickets "
-                "WHERE status IN ('queued', 'in_progress', 'pending_install') "
+                "SELECT id, status, updated_at, queued_at, " + retry + ", " + depends +
+                " FROM tickets WHERE status IN ('queued', 'in_progress', 'pending_install') "
                 "ORDER BY queued_at, id").fetchall()
-            return [(ticket, status, updated, retry_value,
+            return [(ticket, status, updated, queued, retry_value,
                      any(pr not in merged for pr in json.loads(needs or "[]")))
-                    for ticket, status, updated, retry_value, needs in rows]
+                    for ticket, status, updated, queued, retry_value, needs in rows]
         finally:
             db.close()
 
@@ -145,16 +145,17 @@ def open_work(root):
             db.close()
         rows = read()
     seen = []
-    for ticket, status, updated, retry, waiting in rows:
+    for ticket, status, updated, queued, retry, waiting in rows:
         if status == "pending_install":
             status = "retry_install" if retry == "meeting" else "waiting_install"
         if status == "queued" and waiting:
             status = "waiting_dependency"  # no session until its dependency is merged
         work[status].append(ticket)
         if status == "queued":
-            # A ticket returned to the queue without a block keeps its row: the same
-            # queued work again is no progress, whatever its update time.
-            seen.append([ticket, status])
+            # A ticket returned without a block keeps its queued_at: the same queued
+            # work again is no progress. A retry after a block gets a new queued_at
+            # and resets the backoff.
+            seen.append([ticket, status, queued])
         elif status not in ("waiting_install", "waiting_dependency"):
             seen.append([ticket, status, updated])
     work["fingerprint"] = hashlib.sha256(json.dumps(seen).encode()).hexdigest() if seen else ""

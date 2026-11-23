@@ -100,9 +100,12 @@ Nothing showed which rule refused, because learning logs nothing.
   draft), the caret decides: each read also asks the field for its
   selection (`AXSelectedTextRange`, a position, never text), and right
   after Cmd+V it sits at the end of the new copy. The copy that ends at
-  the caret is watched. Only a collapsed selection counts, and only
-  between words (after the copy's last word, before the next one); a
-  caret inside a word or selected text proves nothing. Without such a
+  the caret is watched. Only a collapsed selection counts, and only at
+  the exact end of the delivered text itself (with its own punctuation
+  and spaces, or trimmed when the app dropped outer whitespace), whose
+  words must be exactly one copy's; a caret past an older copy's
+  punctuation or the space after it, inside a word, or selected text
+  proves nothing (builder review, queue #464). Without such a
   caret the take ends as `ambiguous`: nothing is learned and no words are
   journaled. A single copy needs no caret, but if a further verbatim copy
   appears after the paste was placed (a late paste next to an identical
@@ -183,7 +186,10 @@ Nothing showed which rule refused, because learning logs nothing.
   is journaled with its app and mode; a read carries the caret and drops
   an impossible one. From queue #459: a caret inside the older copy's
   last word places nothing; a late paste after the identical draft was
-  seen alone teaches and journals nothing; a selection is not a caret. The raw salvage call itself is in AppDelegate and is
+  seen alone teaches and journals nothing; a selection is not a caret.
+  From queue #464: a caret just past the older copy's "!" or the space
+  after it places nothing, while the caret at the new copy's end still
+  places it. The raw salvage call itself is in AppDelegate and is
   covered by review, not by a test.
 - Not verified here: the built app. The acceptance is the same dictation
   in Claude desktop.
@@ -192,6 +198,9 @@ Nothing showed which rule refused, because learning logs nothing.
 
 - Prefer the last copy when the paste appears twice: the older draft may
   be after it, and its edits would be learned and journaled.
+- Accept a caret anywhere between the copy's last word and the next
+  word: punctuation the user typed after an older copy would then point
+  at it.
 - Re-place the paste on the caret when a second copy appears later: a
   copy the user typed again would then be taken for the paste.
 - Read the field before the paste to find the new copy: one more read of

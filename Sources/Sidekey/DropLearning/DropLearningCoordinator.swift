@@ -418,8 +418,9 @@ final class DropLearningCoordinator {
             // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
             let places = DropEditDiff.exactPlaces(pasted: observation.take.pasted, field: text)
             if !places.isEmpty {
-                let atCaret = caret.flatMap { DropEditDiff.wordCount(text, before: $0) }
-                    .flatMap { end in places.first { $0.end == end } }
+                let atCaret = caret.flatMap {
+                    DropEditDiff.placeAtCaret(pasted: observation.take.pasted, field: text, caret: $0, places: places)
+                }
                 guard let place = places.count == 1 ? places.first : atCaret else { return end(.ambiguous) }
                 observation.context = place.context
                 observation.copies = places.count

@@ -1259,15 +1259,66 @@ extension DropLearningScenarioTests {
         XCTAssertFalse(journal.contains("Jev"))
     }
 
-    /// Only a caret between words places a copy: after punctuation or a
-    /// space it still does, inside a word it does not.
-    func testACaretCountsOnlyBetweenWords() {
-        let text = "Open model Jeb. Open model Jeb"
-        XCTAssertEqual(DropEditDiff.wordCount(text, before: 14), 3)
-        XCTAssertEqual(DropEditDiff.wordCount(text, before: 15), 3)
-        XCTAssertEqual(DropEditDiff.wordCount(text, before: 16), 3)
-        XCTAssertNil(DropEditDiff.wordCount(text, before: 13))
-        XCTAssertEqual(DropEditDiff.wordCount(text, before: (text as NSString).length), 6)
-        XCTAssertNil(DropEditDiff.wordCount(text, before: (text as NSString).length + 1))
+    /// Only the exact end of the delivered text places a copy: right after
+    /// its last character, not past an older copy's punctuation or space,
+    /// and not inside a word.
+    func testOnlyTheExactEndOfTheDeliveredTextPlacesACopy() {
+        let paste = "Open model Jeb"
+        let text = "Open model Jeb! Open model Jeb"
+        let places = DropEditDiff.exactPlaces(pasted: paste, field: text)
+        XCTAssertEqual(places.count, 2)
+        func end(_ caret: Int) -> Int? {
+            DropEditDiff.placeAtCaret(pasted: paste, field: text, caret: caret, places: places)?.end
+        }
+        XCTAssertEqual(end(14), 3)
+        XCTAssertNil(end(15), "after the older copy's punctuation")
+        XCTAssertNil(end(16), "after the space that follows it")
+        XCTAssertNil(end(13), "inside a word")
+        XCTAssertEqual(end((text as NSString).length), 6)
+        XCTAssertNil(end((text as NSString).length + 1))
+        // The delivered text's own punctuation and outer spaces count.
+        let withMark = "Open model Jeb!"
+        let field = withMark + " " + withMark
+        let marked = DropEditDiff.exactPlaces(pasted: withMark, field: field)
+        XCTAssertEqual(DropEditDiff.placeAtCaret(pasted: withMark, field: field, caret: 15, places: marked)?.end, 3)
+        XCTAssertNil(DropEditDiff.placeAtCaret(pasted: withMark, field: field, caret: 14, places: marked))
+        XCTAssertEqual(DropEditDiff.placeAtCaret(pasted: withMark + " ", field: field, caret: 16, places: marked)?.end, 3)
+        // A delivered text whose edge word continues in the field is no copy.
+        let glued = "Open model Jebx Open model Jeb"
+        let gluedPlaces = DropEditDiff.exactPlaces(pasted: paste, field: glued)
+        XCTAssertNil(DropEditDiff.placeAtCaret(pasted: paste, field: glued, caret: 14, places: gluedPlaces))
+    }
+
+    /// The builder's case: the caret just past the older copy's "!" or the
+    /// space after it does not make the older copy the paste.
+    func testACaretPastTheOlderCopysPunctuationDoesNotPlaceThePaste() async {
+        defaults.set(true, forKey: DropLearningSettings.calibrationKey)
+        let coordinator = makeCoordinator()
+        let paste = "Open model Jeb"
+        let older = paste + "!"
+        for extra in [1, 2] {
+            field.reads = [older + " " + paste, "Open model Jev! " + paste, ""]
+            field.carets = [(paste as NSString).length + extra]
+            await runReads(coordinator, take(pasted: paste))
+        }
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertEqual(DropLearningLedger(defaults: defaults).count(.vocabAdd(term: "Jev")), 0)
+        XCTAssertEqual(DropLearningStats(defaults: defaults).counts["end.ambiguous"], 2)
+        let journal = (try? String(contentsOf: journalURL, encoding: .utf8)) ?? ""
+        XCTAssertFalse(journal.contains("Jev"))
+    }
+
+    /// The same field with the caret at the end of the new copy: an edit to
+    /// the new copy counts, one to the older copy does not.
+    func testTheCaretAtTheNewCopysEndStillPlacesIt() async {
+        let coordinator = makeCoordinator()
+        let paste = "Open model Jeb"
+        let field2 = paste + "! " + paste
+        for _ in 0..<2 {
+            field.reads = [field2, paste + "! Open model Jev", ""]
+            field.carets = [(field2 as NSString).length]
+            await runReads(coordinator, take(pasted: paste))
+        }
+        XCTAssertEqual(suggestions.map(\.candidate), [.vocabAdd(term: "Jev")])
     }
 }

@@ -211,16 +211,33 @@ enum DropEditDiff {
         }
     }
 
-    /// The number of field words before a caret position (UTF-16 offset):
-    /// the `end` of the place the caret sits right after. Only a caret
-    /// between words counts (after a word's last character, before the next
-    /// word's first); a caret inside a word proves no place.
-    static func wordCount(_ field: String, before caret: Int) -> Int? {
+    /// The copy the paste just made, told by the caret a paste leaves right
+    /// after the delivered text. The delivered text itself (with its own
+    /// spaces and punctuation, or the same text trimmed when the app dropped
+    /// outer whitespace) must end exactly at the caret; a caret anywhere else,
+    /// even just past an older copy's punctuation, identifies nothing.
+    // WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md
+    static func placeAtCaret(pasted: String, field: String, caret: Int, places: [Place]) -> Place? {
         let ns = field as NSString
         guard caret >= 0, caret <= ns.length else { return nil }
-        let ranges = DropEditToken.ranges(field)
-        if ranges.contains(where: { $0.location < caret && caret < NSMaxRange($0) }) { return nil }
-        return ranges.filter { NSMaxRange($0) <= caret }.count
+        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = DropEditToken.ranges(field)
+        let wordCount = DropEditToken.tokenize(pasted).count
+        for delivered in Set([pasted, trimmed]) where !delivered.isEmpty {
+            let length = (delivered as NSString).length
+            guard length <= caret else { continue }
+            let span = NSRange(location: caret - length, length: length)
+            guard ns.substring(with: span) == delivered else { continue }
+            // The delivered span must hold exactly one copy's words: none cut
+            // at its edges.
+            guard !words.contains(where: { NSIntersectionRange($0, span).length > 0
+                && ($0.location < span.location || NSMaxRange($0) > NSMaxRange(span)) }) else { continue }
+            let end = words.filter { NSMaxRange($0) <= NSMaxRange(span) }.count
+            let start = words.filter { NSMaxRange($0) <= span.location }.count
+            guard end - start == wordCount, let place = places.first(where: { $0.end == end }) else { continue }
+            return place
+        }
+        return nil
     }
 
     /// An edge run rebuilt so that its changed pairs sit next to the kept

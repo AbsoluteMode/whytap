@@ -43,10 +43,13 @@ def minutes(start, end):
     return (end - start).total_seconds() / 60
 
 
-# Every `deferred install: …` line (gate not clear, next check not due) is the same
-# meeting-gate wait; it ends at the next other decision the watcher logs (idle included).
+# Only a meeting gate that said "not clear" starts a meeting wait. The plain "next meeting
+# check not due" line continues one that is open (older watchers logged it between checks)
+# but never starts one: after a clear gate and a failed install it is an ordinary backoff.
+# A wait ends at the next other decision the watcher logs, idle included.
 WAIT_KINDS = (("waiting: screen locked", "screen locked"), ("waiting: load", "load"),
-              ("deferred install", "meeting gate"))
+              ("deferred install: meeting gate", "meeting gate"))
+CONTINUES_MEETING = "deferred install: next meeting check not due"
 
 
 def environment_waits(log_path, since, until):
@@ -78,6 +81,8 @@ def environment_waits(log_path, since, until):
         if text.startswith("watchdog"):
             continue
         kind = next((name for prefix, name in WAIT_KINDS if text.startswith(prefix)), None)
+        if text.startswith(CONTINUES_MEETING) and current and current[0] == "meeting gate":
+            continue
         if current and kind == current[0]:
             continue  # the same wait logged again
         if current:

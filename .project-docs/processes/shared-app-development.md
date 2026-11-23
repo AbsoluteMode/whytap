@@ -288,8 +288,9 @@ current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
 environment waits read-only from the events inside the period (status as of
 the cutoff; waits and attempts that started earlier count from the period's
 start or when they end in it; times come from the event history, never from
-the requeue-reset `queued_at`; a deferred install's meeting wait spans its
-rechecks until the watcher logs another decision), for comparing the queue before and after a change (see the
+the requeue-reset `queued_at`; a meeting wait starts only when the gate says
+"not clear", spans its rechecks until the watcher logs another decision, and
+a retry backoff after a clear gate is not one), for comparing the queue before and after a change (see the
 [watchdog decision](../decisions/2026-11-23-builder-queue-watchdog.md)).
 The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this

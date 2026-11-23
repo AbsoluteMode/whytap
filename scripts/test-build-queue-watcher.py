@@ -555,8 +555,8 @@ class WatcherTests(unittest.TestCase):
         state.update(no_progress=2, last_exit=time.time(), last_install_attempt=time.time())
         (self.root / "whytap-build-queue-watcher-state.json").write_text(json.dumps(state))
         self.watcher("run")
-        self.assertEqual(self.state()["last_reason"],
-                         "deferred install: next meeting check not due")
+        self.assertEqual(self.state()["last_reason"],  # the meeting is still on
+                         "deferred install: meeting gate is not clear; next check not due")
         self.assertIn("no_progress", [a["condition"] for a in self.alerts()])
 
     def test_events_of_the_first_session_are_in_the_watchdog_scope(self):
@@ -583,6 +583,47 @@ class WatcherTests(unittest.TestCase):
                      if not line.split(" ", 1)[1].startswith(("watchdog", "starting",
                                                               "builder session"))]
         self.assertEqual([d.split(":")[0] for d in decisions], ["deferred install", "idle"], output)
+
+    def test_a_failed_install_after_a_clear_gate_is_no_meeting_wait(self):
+        (self.control / "defer").touch()
+        (self.control / "noop").touch()
+        self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", "1", "--status", "pending_install", "--note", "mic",
+                   "--retry-install")  # deferred by an earlier session
+        output = self.watcher("run").stdout  # gate clear on its only call; no progress
+        output += self.watcher("run").stdout  # retry backoff
+        self.assertEqual(self.state()["last_reason"],
+                         "deferred install: next meeting check not due")
+        self.assertNotIn("meeting gate", output)
+        logs = self.root / "whytap-build-queue-logs"
+        logs.mkdir(exist_ok=True)
+        (logs / "watcher.log").write_text(output)
+        metrics = json.loads(subprocess.check_output(
+            [sys.executable, str(SCRIPTS / "build-queue-metrics.py"), "--git-dir",
+             str(self.root), "--since", "2000-01-01"], text=True))
+        self.assertNotIn("meeting gate", metrics["environment_wait_minutes"])
+
+    def test_the_scope_keeps_sub_second_precision(self):
+        spec = importlib.util.spec_from_file_location("watcher_scope", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        watcher.ensure_watchdog_scope(self.root, now=1767225600.7)  # 2026-01-01 00:00:00.7
+        self.assertEqual(self.watchdog_state()["undelivered_since"],
+                         "2026-01-01T00:00:00.700000+00:00")
+        self.configure_watcher(undelivered_minutes=-1)
+        self.set_environment(screen_locked=True)
+        before, after = self.enqueue(1), self.enqueue(2)
+        db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
+        for ticket, stamp in ((before, "00:00:00.400000"), (after, "00:00:00.800000")):
+            db.execute("UPDATE events SET created_at=? WHERE ticket=?",
+                       (f"2026-01-01T{stamp}+00:00", ticket))
+        db.commit()
+        db.close()
+        self.watcher("run")
+        conditions = [a["condition"] for a in self.alerts()]
+        self.assertIn(f"undelivered:{after}", conditions)
+        self.assertNotIn(f"undelivered:{before}", conditions)
 
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400

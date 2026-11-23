@@ -225,9 +225,9 @@ def environment(config):
 
 
 def waiting_kind(reason):
-    """One log line per wait: a changing load figure is the same wait, and a deferred
-    install between meeting checks is one wait until it starts or the queue changes."""
-    for prefix in ("waiting: load", "deferred install"):
+    """One log line per wait: a changing load figure is the same wait, and a blocked
+    meeting gate between its checks is one wait until it clears or the queue changes."""
+    for prefix in ("waiting: load", "deferred install: meeting gate"):
         if reason.startswith(prefix):
             return prefix
     return reason
@@ -240,6 +240,8 @@ def is_wait(reason):
 def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}):
     """Return (start, reason). `state` is updated when the meeting gate was consulted.
     A locked screen or an overloaded Mac only waits: no backoff, no blame."""
+    if not work["retry_install"]:
+        state.pop("meeting_blocked", None)
     if work["queued"] or work["in_progress"]:
         failures = state.get("no_progress", 0)
         if failures and state.get("fingerprint") == work["fingerprint"]:
@@ -258,12 +260,17 @@ def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}
             # The gate was clear but the install still did not happen: slow down too.
             wait = max(wait, BACKOFF_SECONDS[min(failures, len(BACKOFF_SECONDS)) - 1])
         if now - state.get("last_install_attempt", 0) < wait:
-            return False, "deferred install: next meeting check not due"
+            # Only a gate that said "not clear" is a meeting wait; a retry after a
+            # clear gate and a failed install is a backoff under its own text.
+            return False, ("deferred install: meeting gate is not clear; next check not due"
+                           if state.get("meeting_blocked")
+                           else "deferred install: next meeting check not due")
         check = ready(config)
         if not check["clear"]:
             return False, "waiting: " + check["reason"]
         state["last_install_attempt"] = now
-        if not gate(config):
+        state["meeting_blocked"] = not gate(config)
+        if state["meeting_blocked"]:
             return False, "deferred install: meeting gate is not clear"
         return True, "retry_install"
     return False, "idle"
@@ -573,8 +580,8 @@ def watchdog(root, config, context):
         path = root / WATCHDOG
         previous = read_json(path, {})
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        previous.setdefault("undelivered_since",
-                            datetime.fromtimestamp(now, timezone.utc).isoformat())
+        previous.setdefault("undelivered_since", datetime.fromtimestamp(
+            now, timezone.utc).isoformat(timespec="microseconds"))
         found = findings(root, config, context, previous, now) if (root / QUEUE).is_file() \
             else {}
         active = previous.get("active", {})
@@ -759,8 +766,10 @@ def ensure_watchdog_scope(root, now=None):
     path = root / WATCHDOG
     state = read_json(path, {})
     if not state.get("undelivered_since"):
+        # Full precision, like the queue's event stamps: rounding down would bring in
+        # events from earlier in the same second.
         state["undelivered_since"] = datetime.fromtimestamp(
-            now or time.time(), timezone.utc).isoformat(timespec="seconds")
+            now or time.time(), timezone.utc).isoformat(timespec="microseconds")
         write_json(path, state)
 
 

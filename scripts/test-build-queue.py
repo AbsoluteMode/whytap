@@ -427,5 +427,21 @@ class QueueTests(unittest.TestCase):
         metrics = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:30:00+00:00")
         self.assertEqual(metrics["environment_wait_minutes"], {"meeting gate": 12})
 
+    def test_a_not_due_line_continues_a_meeting_wait_but_never_starts_one(self):
+        self.enqueue()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 deferred install: next meeting check not due",
+            "2026-01-01T00:04:00+00:00 idle",
+            "2026-01-01T01:00:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T01:05:00+00:00 deferred install: meeting gate is not clear; next "
+            "check not due",
+            "2026-01-01T01:07:00+00:00 idle"]) + "\n")
+        early = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:30:00+00:00")
+        self.assertEqual(early["environment_wait_minutes"], {})
+        later = self.metrics("2026-01-01T00:30:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(later["environment_wait_minutes"], {"meeting gate": 7})
+
 if __name__ == "__main__":
     unittest.main()

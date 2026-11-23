@@ -85,8 +85,10 @@ for the microphone; 16 author events were unacknowledged (11 of them `other`).
 - `scripts/build-queue-metrics.py` measures a period read-only from the
   events inside it, with the status as of the cutoff, and clips waits that
   cross either end. Submission and requeue times come from `queued` events,
-  because a requeue resets the ticket's `queued_at`; a meeting-gate wait spans
-  its rechecks and ends at the next other decision, idle included. So the effect of each later step can be compared with
+  because a requeue resets the ticket's `queued_at`. A meeting-gate wait starts
+  only when the gate says "not clear", spans its rechecks and ends at the next
+  other decision, idle included; a retry backoff after a clear gate and a
+  failed install is not a meeting wait. So the effect of each later step can be compared with
   this baseline.
 
 ## Rationale

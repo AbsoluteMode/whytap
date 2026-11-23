@@ -675,11 +675,12 @@ Case secrets manager:
   The Case drawer has a 320 pt content viewport (the outer hit band includes
   its gap/music strip) and retains the notch-derived width. Connected clients
   appear as app icons; clicking one opens that client's policy. An always-visible
-  Connect button offers Whytap Agent plus installed Claude Code and Cursor with
-  bundled logos, then grouped project scope and Accept/Bypass before registration.
-  Codex is not offered. There is no arbitrary program picker; existing legacy
+  Connect button offers Whytap Agent plus installed Claude Code, Codex and Cursor,
+  then grouped project scope and Accept/Bypass before registration. Outside
+  clients show bundled monochrome logos; Whytap Agent shows the island's Agent
+  orb in colour. There is no arbitrary program picker; existing legacy
   registrations stay editable. WHY:
-  .project-docs/decisions/2026-10-21-case-connect-claude-code.md. Mode
+  .project-docs/decisions/2026-11-23-case-connect-codex.md. Mode
   and project headings have thin horizontal dividers above their controls.
   Selected projects has a metadata search that preserves the full draft selection;
   All projects includes future projects, with its explanation in native help.

@@ -33,14 +33,21 @@ struct IslandCaseConnectedApps: View {
         .frame(height: 30)
     }
 
+    /// The monochrome bundled mark of an outside client. Whytap Agent has
+    /// none: it is drawn as the Agent orb (`usesAgentOrb`).
     static func brandAsset(for identity: CaseAppIdentity) -> String? {
         switch CaseKnownClient(identity: identity) {
         case .claudeCode: return "claude-code"
         case .codex: return "codex"
         case .cursor: return "cursor"
-        case .builtInOpenCode: return "opencode"
         default: return nil
         }
+    }
+
+    /// Whytap Agent wears the island's own Agent orb, not the OpenCode mark.
+    // WHY: .project-docs/decisions/2026-11-23-case-connect-codex.md
+    static func usesAgentOrb(_ identity: CaseAppIdentity) -> Bool {
+        identity == .builtInOpenCode
     }
 
     static func highlight(for identity: CaseAppIdentity) -> CaseAppHighlight {
@@ -116,9 +123,24 @@ struct CaseAppBrandIcon: View {
     var size: CGFloat = 18
     var color: Color = .white
 
+    /// The orb's glow fills its canvas and the ring only the middle of it, so
+    /// the artwork is drawn larger than the slot to match the other marks.
+    static let agentOrbScale: CGFloat = 1.6
+
     @ViewBuilder
     var body: some View {
-        if let asset = IslandCaseConnectedApps.brandAsset(for: identity) {
+        if IslandCaseConnectedApps.usesAgentOrb(identity) {
+            if let orb = OrbActionIcon.agent.image() {
+                Image(nsImage: orb)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size * Self.agentOrbScale, height: size * Self.agentOrbScale)
+                    .frame(width: size, height: size)
+                    .accessibilityHidden(true)
+            } else {
+                ProviderBrandIcon(systemName: "sparkle", size: size, color: color)
+            }
+        } else if let asset = IslandCaseConnectedApps.brandAsset(for: identity) {
             ProviderBrandIcon(assetName: asset, size: size, color: color)
         } else if case let .executablePath(path) = identity,
                   FileManager.default.fileExists(atPath: path) {

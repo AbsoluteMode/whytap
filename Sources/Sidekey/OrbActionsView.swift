@@ -268,12 +268,14 @@ enum OrbActionIcon: Equatable {
     /// renders a placeholder rather than crashing.
     func image() -> NSImage? {
         if let cached = Self.cache[pdfResourceName] { return cached }
-        guard let url = Bundle.main.url(
-            forResource: pdfResourceName,
-            withExtension: "pdf"
-        ) else {
-            return nil
+        let url: URL?
+        if let directory = Self.resourceDirectoryForTesting {
+            let candidate = directory.appendingPathComponent("\(pdfResourceName).pdf")
+            url = FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+        } else {
+            url = Bundle.main.url(forResource: pdfResourceName, withExtension: "pdf")
         }
+        guard let url else { return nil }
         let image = NSImage(contentsOf: url)
         // Crucially DO NOT set `isTemplate = true` — the orb icons
         // carry their pink/violet (Agent) and white (Drop) palette in
@@ -285,5 +287,11 @@ enum OrbActionIcon: Equatable {
         return image
     }
 
+    static func setResourceDirectoryForTesting(_ url: URL?) {
+        resourceDirectoryForTesting = url
+        cache.removeAll()
+    }
+
     private static var cache: [String: NSImage] = [:]
+    private static var resourceDirectoryForTesting: URL?
 }

@@ -2,10 +2,10 @@
 id: case-connect-claude-code
 type: decision
 title: Case Connect offers Claude Code again
-summary: The Connect catalog is OpenCode, Claude Code and Cursor; Codex stays a legacy registration only.
+summary: Claude Code returned to the Connect catalog; the catalog itself is now defined by the 2026-11-23 decision that adds Codex.
 status: confirmed
 tags: [case, secrets, agents, connect, claude-code]
-canonical_for: [case-connect-catalog]
+canonical_for: []
 verified_at: 2026-10-21
 sources:
   - type: user-confirmed
@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Case/Clients/CaseClientConnector.swift
     confirmed_at: 2026-10-21
-related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-21-one-whytap-mcp-server.md]
+related: [2026-10-21-claude-desktop-binary-layout.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-23-case-connect-codex.md]
 ---
 
 # Case Connect offers Claude Code again
@@ -89,5 +89,10 @@ The connector's command (`case` -> `<helper> case mcp`) is superseded by
 [one Whytap MCP server](2026-11-21-one-whytap-mcp-server.md) (2026-11-21):
 Connect now writes `whytap` -> `<helper> mcp` and removes its older `case`
 entry. The catalog is unchanged.
+
+The catalog and "Codex is not offered" are superseded by
+[Case Connect offers Codex](2026-11-23-case-connect-codex.md) (2026-11-23):
+Codex is offered like Claude Code, and Whytap Agent shows the Agent orb
+instead of the OpenCode mark.
 
 Implementation references: [Case broker](../../docs/decisions/2026-10-19-case-secrets-broker.md), [design](../../docs/DESIGN.md) and [product spec](../../docs/SPEC.md).

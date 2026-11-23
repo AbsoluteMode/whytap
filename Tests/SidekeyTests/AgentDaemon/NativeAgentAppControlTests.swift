@@ -142,7 +142,8 @@ final class NativeAgentAppControlTests: XCTestCase {
 
     /// Runs one native agent turn whose model replies with `steps` in order.
     private func turn(_ e: Env, _ prompt: String, _ steps: [[String: Any]],
-                      installed: Bool = true) async throws -> Turn {
+                      installed: Bool = true,
+                      options: AgentRunOptions = AgentRunOptions(model: "vendor/agent-model", allowActions: false)) async throws -> Turn {
         var index = 0
         StubURLProtocol.handler = { _ in
             defer { index += 1 }
@@ -156,7 +157,6 @@ final class NativeAgentAppControlTests: XCTestCase {
                                            appControl: { installedHandler },
                                            usageSink: { _ in }, diagnosticsSink: { _ in })
         var events: [AgentSSEEvent] = []
-        let options = AgentRunOptions(model: "vendor/agent-model", allowActions: false)
         for await event in provider.run(prompt: prompt, resumeSessionID: nil, options: options) {
             events.append(event)
         }
@@ -669,6 +669,28 @@ final class NativeAgentAppControlTests: XCTestCase {
         // The rule that makes the model do it instead of describing steps.
         let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
         XCTAssertTrue(system.contains("\"add whytap to vocab\" is whytap_vocab_add"))
+    }
+
+    /// Direct Anthropic at low effort: the model still calls the whytap tool,
+    /// the change is saved and shown, and its short plain-text reply after
+    /// the tool is the answer, not a failed turn.
+    func testLowEffortOnAnthropicStillRunsTheWhytapToolAndKeepsAPlainReply() async throws {
+        let e = try env()
+        try e.keys.save("anthropic-key", account: ProviderAccount.anthropicKeychainAccount)
+        let result = try await turn(e, "добавь whytap в vocab", [
+            ["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "v", "name": NativeAgentAppControl.toolName,
+                "input": ["operation": "whytap_vocab_add", "arguments": json(["terms": ["whytap"]])]]]],
+            ["stop_reason": "end_turn", "content": [["type": "text", "text": "Добавил whytap в Vocab."]]]
+        ], options: AgentRunOptions(model: "claude-sonnet-5-5", allowActions: false, openCodeProvider: .anthropic))
+        XCTAssertEqual(result.finalText, "Vocab + whytap\n\nДобавил whytap в Vocab.")
+        XCTAssertEqual(e.vocabulary.terms, ["whytap"])
+        XCTAssertEqual(result.bodies.count, 2)
+        for body in result.bodies {
+            XCTAssertEqual((body["output_config"] as? [String: Any])?["effort"] as? String, "low")
+            XCTAssertEqual((body["tool_choice"] as? [String: Any])?["type"] as? String, "auto")
+        }
+        let tools = (result.bodies[0]["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
+        XCTAssertTrue(tools.contains(NativeAgentAppControl.toolName))
     }
 
     /// Already there in another letter case: reported with the saved

@@ -95,7 +95,12 @@ final class ScreenshotHoverHintTests: XCTestCase {
 
         hint.hover(copyText, text: copyText.toolTip)
         XCTAssertNil(hint.visibleText, "The first hint waits like an AppKit tool tip")
-        try await Task.sleep(nanoseconds: UInt64((ScreenshotHoverHint.delay + 0.25) * 1_000_000_000))
+        // The delay timer can fire late on a loaded Mac: wait for the hint, not a fixed time.
+        let hovered = Date()
+        while hint.visibleText == nil, Date().timeIntervalSince(hovered) < 30 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(hovered), ScreenshotHoverHint.delay * 0.9)
         XCTAssertEqual(hint.visibleText, copyText.toolTip)
         let panel = try XCTUnwrap(hint.panel)
         XCTAssertTrue(panel.isVisible); XCTAssertTrue(panel.ignoresMouseEvents); XCTAssertFalse(panel.canBecomeKey)

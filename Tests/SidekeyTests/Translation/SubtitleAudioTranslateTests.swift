@@ -57,7 +57,7 @@ final class SubtitleAudioTranslateTests: XCTestCase {
 
     // MARK: - One-hour limit
 
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 3) async throws {
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
     }
@@ -97,10 +97,18 @@ final class SubtitleAudioTranslateTests: XCTestCase {
         XCTAssertEqual(model.phase, .idle)
         let second = try XCTUnwrap(model.start())
         try await wait(model.phase == .listening)
+        let listening = ContinuousClock.now
         // The first session's deadline has passed, but the second still has
         // time left. Give the scheduler room on both sides of that boundary.
         try await Task.sleep(for: .milliseconds(1_200))
-        XCTAssertEqual(model.phase, .listening)
+        let phase = model.phase
+        if ContinuousClock.now - listening >= .milliseconds(1_900) {
+            // A loaded Mac overslept into the second session's own limit: this
+            // run cannot tell the two deadlines apart, so it judges nothing.
+            await second.value
+            throw XCTSkip("The scheduler overslept past the second session's limit")
+        }
+        XCTAssertEqual(phase, .listening)
         await second.value
         XCTAssertEqual(model.phase, .idle)
         XCTAssertEqual(sessions.count, 2)

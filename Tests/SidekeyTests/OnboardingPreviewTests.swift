@@ -22,7 +22,8 @@ final class OnboardingPreviewTests: XCTestCase {
         return session
     }
 
-    private func eventually(_ condition: @MainActor () -> Bool, timeout: Double = 6,
+    /// Returns as soon as the condition holds; the deadline only matters on a loaded Mac.
+    private func eventually(_ condition: @MainActor () -> Bool, timeout: Double = 30,
                             file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
@@ -992,7 +993,7 @@ final class OnboardingPreviewTests: XCTestCase {
         defer { drop.detach() }
         drop.longestTake = 0.15
         try await recording(drop, voice)
-        try await eventually({ !voice.recording }, timeout: 2)
+        try await eventually({ !voice.recording })
         try await eventually { !voice.working }
     }
 

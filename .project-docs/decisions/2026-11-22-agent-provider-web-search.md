@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentWebSearchTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-22-native-agent.md, 2026-10-27-anthropic-token-costs.md, 2026-11-21-free-api-report.md, 2026-11-22-openai-agent-probe-responses.md]
+related: [2026-10-22-native-agent.md, 2026-10-27-anthropic-token-costs.md, 2026-11-21-free-api-report.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-23-agent-low-effort.md]
 ---
 
 # The Agent searches with its model provider

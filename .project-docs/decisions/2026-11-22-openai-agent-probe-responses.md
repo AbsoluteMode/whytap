@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentOpenAITests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-agent-provider-web-search.md, 2026-11-22-shared-model-rows.md, 2026-10-19-api-and-models.md]
+related: [2026-11-22-agent-provider-web-search.md, 2026-11-22-shared-model-rows.md, 2026-10-19-api-and-models.md, 2026-11-23-agent-low-effort.md]
 ---
 
 # The OpenAI Agent model check uses the Responses API

@@ -65,14 +65,23 @@ holds it, leave the tickets queued and end your turn.
 3. For `retry_install` tickets a checked candidate is waiting only for a safe
    moment. Verify the candidate is still valid and still the right one (source
    SHA contains the ticket's change, signature, identity, higher
-   `CFBundleVersion`), then continue at the install step.
+   `CFBundleVersion`), then continue at the install step. A grouped install
+   (note "install grouped") has no candidate yet: package one from current
+   main, which contains every ticket of the group, and install it once.
 
 ## Each ticket
 
-1. `claim`, then message the author that work started.
+1. `claim`, then message the author that work started. `claim` already
+   returned queued tickets whose PR head moved (`returned_moved_heads`) and
+   skipped tickets waiting for a `--depends-on` PR; deliver their events too.
+   Returns made by the watcher before your session are in `events --pending`
+   for Codex and Claude Code authors alike: deliver and acknowledge them.
 2. Check the live PR: exact queued head and base, review evidence, checks,
    dependencies, overlaps. A moved head is `blocked` with a request to
-   resubmit the reviewed head.
+   resubmit the reviewed head. To give a ticket back without blaming the PR
+   (environment, an undeclared dependency not merged yet), use
+   `set --status queued --note <reason>`: it keeps its place. Never do that
+   after pushing to its branch.
 3. Merge conflicts with `main` are yours to resolve. In the integration
    worktree, merge current `origin/main` into the PR branch (or the reverse
    order the process prescribes), read both sides' intent from their PRs and
@@ -105,12 +114,49 @@ holds it, leave the tickets queued and end your turn.
    when mechanical and safe; otherwise record it as a follow-up in the note
    and continue.
 4. Validate the final combined candidate: documentation checks, and for
-   runtime changes the build and the full `swift test`. Commands that run
+   runtime changes the build and the full `swift test`. Right before the full
+   suite run, in the integration worktree,
+   `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`.
+   While it reports a locked screen or a load above its limit, wait and check
+   again (up to 15 minutes) instead of running the suite; if it stays not
+   clear, return the ticket with `set --status queued` and a note that the
+   environment, not the PR, stopped it. Do not treat failures from a suite run under such load as PR
+   findings. When a test fails whose file and code under test the candidate
+   does not change, rerun only the failed tests
+   (`swift test --filter <Class>/<test>`), not the whole suite. If they pass,
+   it is not a finding: go on with the ticket, append the test, ticket and
+   date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git common directory, and name it
+   as a follow-up in the ticket note when the file already lists it within
+   the last seven days. If a rerun fails again, it is a finding as before. A
+   test skipped with "Protected data is unavailable" ran while the screen was
+   locked: run it again once `environment` is clear, before merging; a
+   failure there is a finding. Commands that run
    longer than a few minutes go to the background with output in a file.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.
 6. Tooling or documentation only: `done` with that explicit statement, no app
-   refresh. Runtime change: build the signed production candidate per
+   refresh. Runtime change, grouped install (with the helper `activate` installs;
+   before that, install each runtime PR as before): `status` marks each
+   ticket's `runtime`. Count the merged runtime tickets waiting for an
+   automatic install, including the one just merged. When that count is below
+   four, another runtime ticket can be claimed now, and neither this PR nor any
+   of them touches stored-data formats or migrations, permissions (TCC),
+   Keychain, signing or entitlements, or the updater: `set --status
+   pending_install --retry-install --note "merged at <main SHA>; install
+   grouped"`, list it under **Merged, not installed** in
+   `build/CURRENT_BUILD.md`, message the author and take the next ticket. At
+   four, mark every ticket of the group `--install-first`: `claim` then holds
+   runtime work until the install. A PR of those kinds installs alone: if you
+   claim one while a group waits, mark the group `--install-first` and return
+   the PR with `set --status queued` (it keeps its place). A merged PR that
+   cannot be installed now is recorded `--hold` when a person must act, or
+   `--install-first` when only the gate is busy; both hold other runtime work.
+   `set --status pending_install` again records a prepared candidate or a
+   change of flag without leaving the group. One candidate from current main
+   installs the whole group; after the verified install set each ticket
+   `done` with the running build and its own acceptance steps, and empty that
+   section.
+   Otherwise build the signed production candidate per
    `docs/build-and-release.md` (local build-only, no notarization, no upload),
    verify strict signature, Developer ID team from
    `Resources/developer-id-team.txt`, designated requirement against the
@@ -119,15 +165,19 @@ holds it, leave the tickets queued and end your turn.
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. Otherwise record
-   `set --status pending_install --retry-install --note <candidate evidence>`,
+   `set --status pending_install --retry-install --note <candidate evidence>`
+   (for a group or an isolated PR, use `--install-first`; the helper keeps an
+   existing `--install-first` or `--hold` anyway, a deferral never lifts it),
    release the lock and go on: the watcher rechecks the gate by itself and
    starts a session when it is clear. Quit normally, verify exit, keep one
    signed rollback bundle, replace the bundle without exposing a partial copy,
    launch that exact path, verify the running identity and one smoke check,
    update `build/CURRENT_BUILD.md`. If a normal quit is declined, or macOS
    asks for a permission you cannot grant, stop there, keep the working app
-   and leave the ticket `pending_install` (without `--retry-install` when a
-   person must act) with the reason.
+   and leave the ticket `pending_install` (with `--hold` when a person must
+   act; before `activate`, without `--retry-install`) with the reason. A
+   `--hold` on any ticket of a group stops automatic installs of the whole
+   group until a person has acted and it is set `--install-first` again.
 8. `set` the result with evidence and message the author: event ID, what is
    actually running, acceptance steps, what is pending.
 

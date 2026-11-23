@@ -13,7 +13,7 @@ final class OnboardingJourneyTests: XCTestCase {
     // MARK: - Which steps
 
     func testACleanMacBeforeAnyChoiceSeesEveryStepButTheConditionalOnes() {
-        XCTAssertEqual(steps(), [.source, .speechKey, .llmKey, .language, .keyboard, .microphone,
+        XCTAssertEqual(steps(), [.language, .source, .speechKey, .llmKey, .keyboard, .microphone,
                                  .screenRecording, .toolbox, .thanks])
     }
 
@@ -26,13 +26,13 @@ final class OnboardingJourneyTests: XCTestCase {
 
     func testYourKeyKeepsTheSpeechKeyStep() {
         let api = steps(.cleanMac, OnboardingProgress(source: .yourKey))
-        XCTAssertEqual(Array(api.prefix(3)), [.source, .speechKey, .llmKey])
+        XCTAssertEqual(Array(api.prefix(4)), [.language, .source, .speechKey, .llmKey])
     }
 
     func testWithoutLocalSpeechThereIsNoSourceChoice() {
         var intel = OnboardingStart.cleanMac
         intel.onDeviceSupported = false
-        XCTAssertEqual(steps(intel).first, .speechKey)
+        XCTAssertEqual(Array(steps(intel).prefix(2)), [.language, .speechKey])
     }
 
     /// The owner, 2026-11-22: the Tavily step comes only after Self-hosted
@@ -109,16 +109,16 @@ final class OnboardingJourneyTests: XCTestCase {
         var start = OnboardingStart.cleanMac
         start.keyboardGranted = true
         let progress = OnboardingProgress(source: .onThisMac, speechExpected: true)
-        let segments = OnboardingJourney.segments(start: start, progress: progress, current: .language,
-                                                  done: [.source])
+        let segments = OnboardingJourney.segments(start: start, progress: progress, current: .microphone,
+                                                  done: [.language, .source])
         func state(_ step: OnboardingStep) -> OnboardingSegmentState? { segments.first { $0.step == step }?.state }
         XCTAssertEqual(segments.count, 10, "Input Monitoring and search are not segments unless needed; whytap.ai is part of the last step")
         XCTAssertEqual(state(.source), .completed)
         XCTAssertEqual(state(.speechKey), .bypassed, "On this Mac made the key unnecessary")
         XCTAssertEqual(state(.llmKey), .bypassed, "skipped, never a false done")
-        XCTAssertEqual(state(.language), .current)
+        XCTAssertEqual(state(.language), .completed)
         XCTAssertEqual(state(.keyboard), .completed, "granted before the window opened")
-        XCTAssertEqual(state(.microphone), .upcoming)
+        XCTAssertEqual(state(.microphone), .current)
     }
 
     func testEveryStepHasADwellButTheLast() {

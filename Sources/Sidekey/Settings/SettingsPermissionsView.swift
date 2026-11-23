@@ -13,8 +13,12 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "keyboard.fill",
                             title: "Keyboard control",
-                            granted: viewModel.snapshot.accessibilityGranted,
-                            requested: viewModel.accessibilityRequested,
+                            subtitle: viewModel.keyboardNeedsRestart ? viewModel.restartBlocked
+                                : viewModel.settingsOnly && !viewModel.keyboardReady
+                                ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil,
+                            granted: viewModel.keyboardReady && !viewModel.keyboardNeedsRestart,
+                            requested: viewModel.keyboardOpensSettings,
+                            needsRestart: viewModel.keyboardNeedsRestart,
                             action: viewModel.requestAccessibility
                         )
                         MacRowSeparator()
@@ -28,10 +32,14 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "rectangle.dashed.badge.record",
                             title: "Screen Recording",
-                            subtitle: "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
-                            granted: viewModel.screenRecordingGranted,
-                            requested: viewModel.screenRecordingRequested,
+                            subtitle: viewModel.screenNeedsRestart && viewModel.restartBlocked != nil ? viewModel.restartBlocked
+                                : viewModel.settingsOnly && !viewModel.screenRecordingGranted
+                                ? PermissionsSettingsViewModel.screenSettingsGuide
+                                : "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
+                            granted: viewModel.screenRecordingGranted && !viewModel.screenNeedsRestart,
+                            requested: viewModel.screenRecordingRequested || viewModel.settingsOnly,
                             isRequesting: viewModel.isRequestingScreenRecording,
+                            needsRestart: viewModel.screenNeedsRestart,
                             action: { Task { await viewModel.requestScreenRecording() } }
                         )
                     }
@@ -57,6 +65,7 @@ struct SettingsPermissionsView: View {
         granted: Bool,
         requested: Bool = false,
         isRequesting: Bool = false,
+        needsRestart: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         MacRow(
@@ -75,6 +84,12 @@ struct SettingsPermissionsView: View {
                             .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(MacSettingsTheme.green)
                             .accessibilityLabel("\(title): Allowed")
+                    } else if needsRestart {
+                        // 27.3: the grant made in System Settings works after a restart.
+                        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+                        MacButton(title: "Restart Whytap", style: .default) { viewModel.restartWhytap() }
+                            .fixedSize()
+                            .accessibilityLabel("Restart Whytap to turn on \(title)")
                     } else if isRequesting {
                         ProgressView()
                             .controlSize(.small)

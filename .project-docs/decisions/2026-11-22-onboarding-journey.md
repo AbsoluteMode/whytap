@@ -44,7 +44,7 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-22 the orchestrating session passed on a visual and motion pass by a separate design agent (Gemini 4 Carbon) as the base for the frame, not yet approved by the maintainer, with the instruction to move its components into the onboarding code and to check every text against what is true for all providers.
     confirmed_at: 2026-11-22
-related: [2026-11-21-first-launch-onboarding.md]
+related: [2026-11-21-first-launch-onboarding.md, 2026-11-23-keyboard-control-protection-override.md]
 ---
 
 # The first-launch onboarding becomes a small window of single steps that move on by themselves
@@ -76,13 +76,11 @@ window, Back and a progress bar.
   on 2026-11-22 (`OnboardingSegmentState.revisited`). The gaps between acts
   stay.
 - **Steps, in their only order** (`OnboardingStep`):
-  1. Source: On this Mac or Your key (two cards).
-  2. Speech key: Soniox, Deepgram or ElevenLabs.
-  3. Language model key (optional): Anthropic, OpenAI or OpenRouter, with a
-     preselected model.
-  4. Web search for the Agent (optional; only after a Self-hosted language
-     model, see "Web search: a step only after Self-hosted").
-  5. Language: the wireframe globe (see "The language step is a globe").
+  1. Language, selected on the globe or detected automatically.
+  2. Source, On this Mac or Your key (two cards).
+  3. Speech key for the chosen provider.
+  4. Optional language model key and model choice.
+  5. Optional web search after a self-hosted language model.
   6. Keyboard control (Accessibility).
   7. Microphone.
   8. Input Monitoring, only when the Drop shortcut reports it needs it.

@@ -5,6 +5,8 @@ import Foundation
 /// itself, and only the informational steps have a Next button.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 enum OnboardingStep: String, CaseIterable, Equatable {
+    /// The language the user speaks, or automatic detection.
+    case language
     /// On this Mac or your own key: two cards.
     case source
     /// Your key: the speech provider's key. Its pick sets the shared Speech row.
@@ -13,8 +15,6 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     case llmKey
     /// An optional web search for the Agent. Shown only with a language model.
     case search
-    /// The language the user speaks.
-    case language
     /// Accessibility ("Keyboard control"): the Drop shortcut, the Agent key and paste.
     case keyboard
     /// Microphone: Drop, Agent voice and Meetings.
@@ -118,6 +118,9 @@ struct OnboardingStart: Equatable {
     var keyboardGranted = false
     var microphoneGranted = false
     var screenRecordingGranted = false
+    /// macOS 15+: system audio wasn't asked for yet (Meetings, Subtitles).
+    /// Screen & system audio is one step, so it stays even with the screen on.
+    var systemAudioPending = false
     /// This Mac can run speech locally (Apple Silicon).
     var onDeviceSupported = true
 
@@ -173,7 +176,7 @@ enum OnboardingJourney {
         case .inputMonitoring:
             return progress.needsInputMonitoring
         case .screenRecording:
-            return !start.screenRecordingGranted
+            return !start.screenRecordingGranted || start.systemAudioPending
         case .tryDrop:
             return start.speechReady || progress.speechExpected
         case .toolbox, .thanks:

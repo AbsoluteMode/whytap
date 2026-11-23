@@ -150,7 +150,17 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            keyChecker: ProviderKeyChecking? = nil,
                            offersOpenAISpeech: Bool = false, isPreview: Bool = false,
                            realCatalogs: Bool = false, probe: ModelProbing? = nil,
-                           heldForTeardown: Bool = true) throws -> OnboardingJourneyModel {
+                           heldForTeardown: Bool = true,
+                           openScreenSettings: @escaping () -> Void = {},
+                           settingsOnly: Bool = false,
+                           launch: PermissionsHelper.LaunchGrants? = nil,
+                           openKeyboardSettings: @escaping () -> Void = {},
+                           relaunch: @escaping () -> String? = { nil },
+                           systemAudioProbe: @escaping () async -> Void = {},
+                           asksSystemAudio: Bool = false,
+                           screenRequest: @escaping () async -> Void = {},
+                           resumeDefaults: UserDefaults? = nil,
+                           skipLanguage: Bool = true) throws -> OnboardingJourneyModel {
         AppState.shared.dropHotkeyStatus = hotkey
         let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("journey-\(UUID().uuidString).json")
         addTeardownBlock { try? FileManager.default.removeItem(at: catalogURL) }
@@ -176,8 +186,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
             snapshotProvider: { snapshot.value }, screenRecordingAccessProvider: { screen.value },
-            screenRecordingRequester: {}, accessibilityRequester: {}, openAccessibilitySettings: {},
-            openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
+            screenRecordingRequester: {}, accessibilityRequester: {}, openAccessibilitySettings: openKeyboardSettings,
+            usesProtectionOverridePane: { settingsOnly },
+            openScreenRecordingSettings: {},
+            launchGrants: launch, relaunch: relaunch,
+            runtimeRefresh: { _, _ in })
         let beat = env.beat
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
@@ -188,12 +201,17 @@ final class OnboardingJourneyModelTests: XCTestCase {
             dropSpeech: OnboardingDropSpeech(routing: env.routing, keys: env.keys, onDevice: readiness, mode: { .fast }),
             supportsOnDevice: supportsOnDevice,
             preferences: PrivacyPreferences(defaults: env.defaults),
-            screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: {}),
-            openScreenRecordingSettings: {}, defaultsChanges: NotificationCenter(),
+            screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: screenRequest),
+            openScreenRecordingSettings: openScreenSettings,
+            defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
             tavily: tavily,
             isPreview: isPreview,
-            offersOpenAISpeech: offersOpenAISpeech)
+            offersOpenAISpeech: offersOpenAISpeech,
+            resumeDefaults: resumeDefaults,
+            systemAudioProbe: systemAudioProbe,
+            asksSystemAudio: asksSystemAudio)
+        if skipLanguage, model.step == .language { model.skip() }
         if heldForTeardown { addTeardownBlock { model.stop() } }
         return model
     }
@@ -219,6 +237,27 @@ final class OnboardingJourneyModelTests: XCTestCase {
     /// The owner, 2026-11-22: no separate screen. In the app too, "Use your
     /// own server →" turns the step's key field into the server's fields;
     /// Settings does not open and the step stays.
+    /// ⌘Tab could not reach the onboarding (the owner, 2026-11-23): Whytap
+    /// has no Dock icon. Closing the onboarding hands the app back to
+    /// `.accessory` once, and the controller's own closing still finishes.
+    func testClosingTheOnboardingLeavesTheAppSwitcher() throws {
+        _ = NSApplication.shared
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        var calls: [Bool] = []
+        var closed = 0
+        let controller = OnboardingJourneyWindowController(model: model, inAppSwitcher: { calls.append($0) },
+                                                           onClosed: { closed += 1 })
+        let window = try XCTUnwrap(controller.window)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        XCTAssertEqual(calls, [], "nothing changes before the window is shown")
+        window.contentViewController = nil
+        window.close()
+        window.close()
+        XCTAssertEqual(calls, [false])
+        XCTAssertEqual(closed, 1)
+    }
+
     /// A key press nothing in the window takes is dropped without the system
     /// alert sound (the owner heard beeps with no visible cause, 2026-11-23);
     /// one the step does take still reaches it.
@@ -392,7 +431,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let env = try makeEnv()
         let model = try makeModel(env)
         XCTAssertEqual(model.step, .source)
-        XCTAssertFalse(model.canGoBack, "the first step has no Back")
+        XCTAssertTrue(model.canGoBack, "Back returns to the language choice")
 
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
@@ -428,8 +467,327 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertTrue(model.keySaved(.deepgram))
         model.chooseYourKey()
         try await endBeat(env, until: .speechKey, in: model)
-        await model.useSpeechKey("", provider: .deepgram)
+        XCTAssertEqual(model.speechProvider, .deepgram, "the only saved speech key is offered on arrival")
+        await model.useSavedKey(on: .speech)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
+    }
+
+    // macOS 27.3 (REV 77/78): keyboard control is given in System & App
+    // Protection Override with +. The step opens that pane, counts it as on
+    // only with posting and listening too (Accessibility alone is Choose
+    // Apps), and a grant made after launch restarts Whytap on the same step.
+    func testOnMacOS27_3KeyboardControlOpensTheOverridePaneAndRestartsAfterTheGrant() async throws {
+        let env = try makeEnv(accessibility: false, microphone: .notDetermined)
+        var opened = 0, restarts = 0
+        let none = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .notDetermined,
+                                              postEventGranted: false, listenEventGranted: false)
+        env.snapshot.value = none
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: none, screenRecording: false),
+                                  openKeyboardSettings: { opened += 1 }, relaunch: { restarts += 1; return nil })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        XCTAssertEqual(model.step, .keyboard)
+        XCTAssertEqual(model.keyboardSetup, .addWhytap)
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(opened, 1, "the press opens System & App Protection Override")
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.keyboard), .waiting, "no Not on yet: the grant may show after a restart")
+        // Override on, Input Monitoring still missing.
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined,
+                                   postEventGranted: true, listenEventGranted: false)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.keyboardSetup, .inputMonitoring)
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        // Everything on: restart, and stay on this step for the relaunch.
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.accessState(.keyboard), .restarting)
+        try await eventually { env.beat.count > 0 }
+        env.beat.end()
+        try await eventually { restarts == 1 }
+        XCTAssertEqual(model.step, .keyboard, "the step is kept for the reopened app")
+    }
+
+    // After the restart the grant is in the launch grants: the step is done.
+    // Accessibility without posting at launch is Choose Apps: the guide says so.
+    func testOnMacOS27_3TheRelaunchFindsKeyboardControlOnOrNamesChooseApps() throws {
+        let env = try makeEnv(accessibility: true, microphone: .notDetermined)
+        let on = PermissionsHelper.Snapshot(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        env.snapshot.value = on
+        let ready = try makeModel(env, settingsOnly: true, launch: .init(snapshot: on, screenRecording: false))
+        XCTAssertFalse(ready.steps.contains(.keyboard), "keyboard control is on: no step")
+        let chooseApps = PermissionsHelper.Snapshot(accessibilityGranted: true, microphoneStatus: .notDetermined,
+                                                    postEventGranted: false, listenEventGranted: true)
+        env.snapshot.value = chooseApps
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: chooseApps, screenRecording: false))
+        XCTAssertTrue(model.steps.contains(.keyboard), "Accessibility alone doesn't let Drop paste")
+        XCTAssertEqual(model.keyboardSetup, .chooseAppsOnly)
+    }
+
+    // Screen & system audio on 27.3: the press opens the pane (the request
+    // shows nothing), a grant after launch restarts Whytap; leaving the
+    // step first cancels the restart. "Ask for system audio" asks once.
+    func testOnMacOS27_3TheScreenStepOpensThePaneRestartsAndAsksForSystemAudio() async throws {
+        for leave in [false, true] {
+            let env = try makeEnv(accessibility: true, microphone: .authorized)
+            var opened = 0, restarts = 0, asked = 0, requests = 0
+            let model = try makeModel(env, openScreenSettings: { opened += 1 }, settingsOnly: true,
+                                      launch: .init(snapshot: env.snapshot.value, screenRecording: false),
+                                      relaunch: { restarts += 1; return nil }, systemAudioProbe: { asked += 1 },
+                                      screenRequest: { requests += 1 })
+            for _ in 0..<20 where model.step != .screenRecording { model.next() }
+            XCTAssertEqual(model.step, .screenRecording)
+            model.requestAccess(.screenRecording)
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertEqual(opened, 1)
+            XCTAssertEqual(requests, 0, "no request that shows nothing")
+            model.askSystemAudio()
+            model.askSystemAudio()
+            try await eventually { asked == 1 }
+            XCTAssertTrue(model.systemAudioAsked)
+            env.screen.value = true
+            model.permissions.refresh(restartRecoveryPolling: false)
+            XCTAssertEqual(model.accessState(.screenRecording), .restarting)
+            try await eventually { env.beat.count > 0 }
+            if leave { model.back() }
+            env.beat.end()
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(restarts, leave ? 0 : 1, "leave=\(leave)")
+        }
+    }
+
+    // Older macOS: a grant is live, nothing restarts.
+    func testBefore27_3AGrantNeedsNoRestart() throws {
+        let env = try makeEnv(accessibility: false, microphone: .notDetermined)
+        var restarts = 0
+        let model = try makeModel(env, relaunch: { restarts += 1; return nil })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.accessState(.keyboard), .granted)
+        XCTAssertEqual(restarts, 0)
+    }
+
+    // Builder review #503: a restart waits for an activity (a meeting
+    // recording…) with its reason on the step; a grant merely found here
+    // (no Open System Settings from this step) never restarts by itself;
+    // back without the grant, the pane opens again from the step.
+    func testA27_3RestartWaitsForActivityAndNeverStartsWithoutThisStepsPress() async throws {
+        let none = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .notDetermined,
+                                              postEventGranted: false, listenEventGranted: false)
+        let all = PermissionsHelper.Snapshot(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        for pressed in [true, false] {
+            let env = try makeEnv(accessibility: false, microphone: .notDetermined)
+            env.snapshot.value = none
+            var opened = 0, attempts = 0
+            let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: none, screenRecording: false),
+                                      openKeyboardSettings: { opened += 1 },
+                                      relaunch: { attempts += 1; return "Ready. Finish the meeting recording, then choose Restart." })
+            for _ in 0..<20 where model.step != .keyboard { model.next() }
+            if pressed {
+                model.requestAccess(.keyboard)
+                model.openSystemSettings(for: .keyboard)
+                XCTAssertEqual(opened, 2, "Waiting reopens the Override pane")
+            }
+            env.snapshot.value = all
+            model.permissions.refresh(restartRecoveryPolling: false)
+            XCTAssertEqual(model.accessState(.keyboard), .restarting)
+            if pressed {
+                XCTAssertTrue(model.restartPending)
+                try await eventually { env.beat.count > 0 }
+                env.beat.end()
+                try await eventually { attempts == 1 }
+                XCTAssertEqual(model.restartNote, "Ready. Finish the meeting recording, then choose Restart.")
+                XCTAssertEqual(model.step, .keyboard)
+            } else {
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertEqual(env.beat.count, 0)
+                XCTAssertEqual(attempts, 0, "a grant found here waits for Restart Whytap")
+                XCTAssertFalse(model.restartPending)
+                model.restartWhytap()
+                XCTAssertEqual(attempts, 1)
+            }
+        }
+    }
+
+    // Builder review #503: screen granted first (before the step, or after
+    // the restart) keeps Screen & system audio for its system audio ask, with
+    // the window's Next; asked once, it stays asked across a relaunch.
+    func testScreenOnFirstKeepsTheStepForSystemAudioUntilAsked() async throws {
+        let suite = "journey-audio-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        env.screen.value = true
+        var asked = 0
+        let model = try makeModel(env, systemAudioProbe: { asked += 1 }, asksSystemAudio: true, resumeDefaults: defaults)
+        XCTAssertTrue(model.steps.contains(.screenRecording), "screen on, system audio not asked yet")
+        for _ in 0..<20 where model.step != .screenRecording { model.next() }
+        XCTAssertEqual(model.step, .screenRecording)
+        XCTAssertEqual(model.accessState(.screenRecording), .granted)
+        XCTAssertTrue(model.systemAudioPending)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(env.beat.count, 0, "held: no automatic move while the audio ask is open")
+        XCTAssertEqual(model.step, .screenRecording)
+        model.askSystemAudio()
+        try await eventually { asked == 1 }
+        let again = try makeModel(env, asksSystemAudio: true, resumeDefaults: defaults)
+        XCTAssertFalse(again.steps.contains(.screenRecording), "asked once: the relaunch skips the step")
+        model.next()
+        XCTAssertNotEqual(model.step, .screenRecording, "Next leaves")
+    }
+
+    func testPendingScreenRequestOpensNoPaneAfterSkipOrClose() async throws {
+        for close in [false, true] {
+            let env = try makeEnv()
+            var opened = 0
+            let request = Beat()
+            var returned = false
+            let model = try makeModel(env, openScreenSettings: { opened += 1 },
+                                      screenRequest: {
+                await request.wait()
+                returned = true
+            })
+            for _ in 0..<20 where model.step != .screenRecording { model.next() }
+            model.requestScreenRecording()
+            try await eventually { request.count == 1 }
+            model.requestScreenRecording()
+            XCTAssertEqual(opened, 0, "a second press while asking must not open Settings")
+            if close { model.stop() } else { model.skip() }
+            request.end()
+            try await eventually { returned }
+            XCTAssertEqual(opened, 0)
+        }
+    }
+
+    // System Settings' Quit & Reopen after a privacy switch: the relaunch
+    // continues at the step that was shown, or the next one still on the way.
+    func testARelaunchContinuesAtTheStepThatWasShown() throws {
+        let suite = "journey-resume-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let env = try makeEnv()
+        let first = try makeModel(env, resumeDefaults: defaults)
+        for _ in 0..<20 where first.step != .microphone { first.next() }
+        XCTAssertEqual(first.step, .microphone)
+        XCTAssertEqual(defaults.string(forKey: OnboardingLaunch.stepKey), "microphone")
+        let again = try makeModel(env, resumeDefaults: defaults)
+        XCTAssertEqual(again.step, .microphone)
+        OnboardingLaunch.finish(in: defaults)
+        XCTAssertNil(defaults.string(forKey: OnboardingLaunch.stepKey))
+
+        let steps: [OnboardingStep] = [.keyboard, .microphone, .toolbox, .thanks]
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "microphone", on: steps), .microphone)
+        // Screen Recording turned on before the relaunch: the next step on the way.
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "screenRecording", on: steps), .toolbox)
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: nil, on: steps), .keyboard)
+        XCTAssertEqual(OnboardingLaunch.resumedStep(saved: "gone", on: steps), .keyboard)
+    }
+
+    // Settings cleared, Keychain kept (the owner, 2026-11-23): the speech step
+    // names Soniox and ElevenLabs; a click on ElevenLabs then Return uses
+    // its saved key; a mark without a key keeps the list and Return does nothing.
+    func testSavedKeysAreNamedAndAClickThenReturnUsesThePickedOne() async throws {
+        let env = try makeEnv()
+        for (kind, key) in [(AIProviderKind.soniox, "test-soniox-key"), (.elevenLabs, "test-elevenlabs-key")] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: kind)?.keychainAccount(in: env.routing))
+            try env.keys.save(key, account: account)
+        }
+        let model = try makeModel(env)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+        XCTAssertEqual(model.savedKeyProviders(.languageModel), [])
+        XCTAssertEqual(model.savedKeyProviders(.search), [])
+
+        // A mark without a key: the list stays, Return checks nothing.
+        model.pickSavedKey(.deepgram, on: .speech)
+        await model.useSavedKey(on: .speech)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+
+        // Click ElevenLabs, then Return.
+        model.pickSavedKey(.elevenLabs, on: .speech)
+        XCTAssertEqual(model.speechProvider, .elevenLabs)
+        await model.useSavedKey(on: .speech)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+    }
+
+    /// A store that counts secret reads; `exists` answers without one, as the
+    /// Keychain's attribute query does.
+    private final class CountingStore: TokenStore {
+        let inner: InMemoryTokenStore
+        let reads: Box<Int>
+        init(_ inner: InMemoryTokenStore, reads: Box<Int>) { self.inner = inner; self.reads = reads }
+        func save(_ token: String) throws { try inner.save(token) }
+        func read() throws -> String? { reads.value += 1; return try inner.read() }
+        func delete() throws { try inner.delete() }
+        func exists() -> Bool { ((try? inner.read()) ?? nil).map { !$0.isEmpty } ?? false }
+    }
+
+    // Builder review #502 item 3: naming saved keys before a choice reads no
+    // secret (a Keychain read can prompt); only using the chosen one does.
+    func testNamingSavedKeysReadsNoSecretUntilOneIsUsed() async throws {
+        let base = try makeEnv()
+        let reads = Box(0)
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: { CountingStore(InMemoryTokenStore(account: $0, box: box), reads: reads) })
+        let env = Env(defaults: base.defaults, routing: base.routing, keys: keys, modelPresent: base.modelPresent,
+                      snapshot: base.snapshot, screen: base.screen)
+        for provider in [AIProviderKind.soniox, .elevenLabs] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: provider)?.keychainAccount(in: env.routing))
+            try keys.save("key-\(provider)", account: account)
+        }
+        let model = try makeModel(env)
+        reads.value = 0
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+        model.pickSavedKey(.elevenLabs, on: .speech)
+        XCTAssertEqual(reads.value, 0, "naming and picking read no secret")
+        await model.useSavedKey(on: .speech)
+        XCTAssertGreaterThan(reads.value, 0, "Return uses the chosen key")
+    }
+
+    // The Keychain's own presence check: an absent item is absent, with no read.
+    func testKeychainPresenceCheckForAMissingItem() {
+        XCTAssertFalse(KeychainStore(service: "whytap.tests.absent", account: UUID().uuidString).exists())
+    }
+
+    func testLanguageChosenFirstMustWorkWithTheSpeechProvider() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env, skipLanguage: false)
+        let speechModel = try XCTUnwrap(ModelRegistry.recommended(for: .dropFast, kind: .deepgram))
+        let supported = try XCTUnwrap(DeepgramLanguagePolicy.supportedLanguageCodes(for: speechModel))
+        let unsupported = try XCTUnwrap(AppLanguage.all.first { !supported.contains($0.code) })
+        model.setLanguage(unsupported)
+        try await endBeat(env, until: .source, in: model)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        await model.useSpeechKey("test-key-0123456789abcdef", provider: .deepgram)
+        XCTAssertTrue(model.outcome(.speechKey).failureText?.contains("Go back to Language") == true)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+    }
+
+    func testFreshPreferencesOfferRetainedElevenLabsAndAnthropicKeys() async throws {
+        let env = try makeEnv()
+        for provider in [AIProviderKind.elevenLabs, .anthropic] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: provider)?.keychainAccount(in: env.routing))
+            try env.keys.save("test-retained-provider", account: account)
+        }
+        XCTAssertTrue(OnboardingLaunch.consume(in: env.defaults))
+        let model = try makeModel(env, resumeDefaults: env.defaults, skipLanguage: false)
+        XCTAssertEqual(model.step, .language)
+        model.setLanguage(nil)
+        try await endBeat(env, until: .source, in: model)
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        XCTAssertEqual(model.speechProvider, .elevenLabs)
+        XCTAssertNil(env.routing.route(for: .dropFast))
+        await model.useSavedKey(on: .speech)
+        XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+        try await endBeat(env, until: .llmKey, in: model)
+        XCTAssertEqual(model.savedKeyProviders(.languageModel), [.anthropic])
+        await model.useSavedKey(on: .languageModel)
+        XCTAssertEqual(env.routing.route(for: .agent)?.account, .anthropic)
     }
 
     func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {
@@ -570,7 +928,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         }
         XCTAssertEqual(model.summary, "LLM: Anthropic \(expected)")
         XCTAssertFalse(model.steps.contains(.search), "Anthropic searches the web itself")
-        try await endBeat(env, until: .language, in: model)
+        try await endBeat(env, until: .keyboard, in: model)
     }
 
     /// A server's model has no web search: the Tavily step comes after it;
@@ -623,7 +981,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .speechKey, in: model)
         model.next()
         model.next() // skip the LLM
-        XCTAssertEqual(model.step, .language)
+        XCTAssertEqual(model.step, .keyboard)
     }
 
     func testTheSummaryNamesSpeechAndLLM() async throws {
@@ -781,11 +1139,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try env.keys.save("sx", account: account)
         env.routing.setRoute(FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRealtimeModel), for: .dropFast)
         env.routing.setRoute(FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRealtimeModel), for: .dropSmart)
-        let model = try makeModel(env)
-        model.next() // skip the LLM
+        let model = try makeModel(env, skipLanguage: false)
         XCTAssertEqual(model.step, .language)
+        XCTAssertFalse(model.canGoBack)
         model.setLanguage(AppLanguage.find(code: "ru"))
-        try await endBeat(env, until: .keyboard, in: model)
+        try await endBeat(env, until: .llmKey, in: model)
         XCTAssertEqual(PrivacyPreferences(defaults: env.defaults).selectedLanguage?.code, "ru")
     }
 
@@ -803,6 +1161,22 @@ final class OnboardingJourneyModelTests: XCTestCase {
         model.permissions.refresh(restartRecoveryPolling: false)
         try await endBeat(env, until: .screenRecording, in: model)
         XCTAssertFalse(model.steps.contains(.inputMonitoring))
+    }
+
+    func testAnEarlyMicrophoneGrantAdvancesWhenItsStepIsReached() async throws {
+        let env = try makeEnv()
+        let model = try makeModel(env)
+        while model.step != .keyboard { model.next() }
+        env.snapshot.value = .init(accessibilityGranted: false, microphoneStatus: .authorized)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.step, .keyboard)
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .authorized)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        try await endBeat(env, until: .microphone, in: model)
+        try await endBeat(env, until: .screenRecording, in: model)
+        model.back()
+        XCTAssertEqual(model.step, .microphone)
+        XCTAssertFalse(model.dwell.isCounting, "Back lets the person review the granted step")
     }
 
     /// A switch turned off after it was granted: the step no longer says
@@ -886,6 +1260,52 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // MARK: - Review images
 
+    /// Keys kept from an earlier setup (settings cleared, Keychain kept) are
+    /// named under the empty field; a name picks its tab and Return uses it.
+    func testRenderSavedKeysAfterSettingsWereCleared() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
+        }
+        _ = NSApplication.shared
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources")
+        for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
+            CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
+        }
+        ProviderBrandIconAsset.setResourceDirectoryForTesting(resources.appendingPathComponent("UsefulLinkIcons"))
+        defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
+        let env = try makeEnv()
+        for kind in [AIProviderKind.soniox, .elevenLabs, .anthropic] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: kind)?.keychainAccount(in: env.routing))
+            try env.keys.save("saved-\(kind)", account: account)
+        }
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        func snap(_ name: String) async throws {
+            try await Task.sleep(for: .milliseconds(700))
+            let frameView = try XCTUnwrap(window.contentView?.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("saved-keys-\(name).png"))
+        }
+        model.chooseYourKey()
+        try await endBeat(env, until: .speechKey, in: model)
+        try await snap("speech")
+        model.speechProvider = .elevenLabs
+        try await snap("speech-elevenlabs")
+        model.pickSavedKey(.deepgram, on: .speech)
+        try await snap("speech-deepgram-without-key")
+        XCTAssertTrue(model.keySaved(.elevenLabs))
+        XCTAssertFalse(model.keySaved(.deepgram))
+    }
+
     /// Offscreen PNGs of every step of the frame, walked the way a new Mac
     /// goes through them, in the real window; never shown on screen.
     func testRenderEveryStep() async throws {
@@ -904,7 +1324,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         defer { ProviderBrandIconAsset.setResourceDirectoryForTesting(nil) }
 
         let env = try makeEnv()
-        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true, realCatalogs: true)
+        let model = try makeModel(env, refusing: [.deepgram], offersOpenAISpeech: true, isPreview: true, realCatalogs: true, asksSystemAudio: true, skipLanguage: false)
         let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
         var window = try XCTUnwrap(controller.window)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
@@ -923,6 +1343,9 @@ final class OnboardingJourneyModelTests: XCTestCase {
             XCTAssertFalse(window.isVisible)
         }
 
+        try await snap("language")
+        model.setLanguage(nil)
+        try await endBeat(env, until: .source, in: model)
         try await snap("source")
         model.chooseYourKey()
         try await snap("source-clicked", after: 160)
@@ -959,7 +1382,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         await model.chooseModel("claude-fable-5-2", on: .llmKey)
         try await snap("llm-key-model-picked")
         // Anthropic searches the web itself: no Tavily step.
-        try await endBeat(env, until: .language, in: model)
+        try await endBeat(env, until: .keyboard, in: model)
         while true {
             try await snap(model.step.rawValue)
             if model.step == .thanks { break }
@@ -995,8 +1418,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         OnboardingAccessMotion.settlesAtOnce = true
         defer { OnboardingAccessMotion.settlesAtOnce = false }
         for kind in OnboardingAccessKind.allCases {
-            for (name, state) in [("rest", OnboardingAccessState.rest), ("waiting", .waiting), ("granted", .granted),
-                                  ("not-on", .notOn)] {
+            var states: [(String, OnboardingAccessState)] = [("rest", .rest), ("waiting", .waiting), ("granted", .granted),
+                                                               ("not-on", .notOn)]
+            // REV 78: macOS 27.3, given in System Settings and restarting after it.
+            if kind == .keyboard || kind == .screenRecording { states.append(("restarting", .restarting)) }
+            for (name, state) in states {
                 let stage = OnboardingAccessStage(kind: kind, model: model, shownState: state)
                     .frame(width: 520, height: 320)
                     .background(OnboardingTheme.bg)
@@ -1013,6 +1439,42 @@ final class OnboardingJourneyModelTests: XCTestCase {
                     .write(to: directory.appendingPathComponent(String(format: "%02d-access-%@-%@.png", index,
                                                                        kind.pane.replacingOccurrences(of: " ", with: "-"), name)))
             }
+        }
+
+        // Builder review #503: Screen & system audio with the screen on and
+        // system audio still to ask (Continue, the ask).
+        do {
+            let stage = OnboardingAccessStage(kind: .screenRecording, model: model, shownState: .granted)
+                .frame(width: 520, height: 320).background(OnboardingTheme.bg).preferredColorScheme(.dark)
+            let host = NSHostingView(rootView: stage)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(80))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-access-screen-audio-held.png", index)))
+        }
+
+        // REV 78: the 27.3 keyboard guide at Choose Apps only and at Input Monitoring.
+        for (name, setup) in [("choose-apps", PermissionsSettingsViewModel.KeyboardSetup.chooseAppsOnly),
+                              ("input-monitoring", .inputMonitoring)] {
+            let stage = OnboardingAccessStage(kind: .keyboard, model: model, shownState: .waiting, shownSetup: setup)
+                .frame(width: 520, height: 320)
+                .background(OnboardingTheme.bg)
+                .preferredColorScheme(.dark)
+            let host = NSHostingView(rootView: stage)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(80))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-access-keyboard-guide-%@.png", index, name)))
         }
 
         // The last five steps (REV 58), the springs landed.
@@ -1099,5 +1561,154 @@ final class OnboardingJourneyModelTests: XCTestCase {
         second.closeServerForm(.languageModel)
         second.llmProvider = .anthropic
         try await snap("llm-server-then-anthropic")
+    }
+}
+
+// Builder review #504.
+extension OnboardingJourneyModelTests {
+    // A restart blocked by an activity is tried once: the next passive poll
+    // (every second while the step is open) does not re-arm it when the
+    // recording ends; Restart Whytap is the retry, and a fresh Open System
+    // Settings allows one more automatic try.
+    func testABlockedAutomaticRestartIsNotRetriedByThePoll() async throws {
+        let missingKeyboard = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .authorized,
+                                                         postEventGranted: false, listenEventGranted: false)
+        let reason = "Ready. Finish the meeting recording, then choose Restart."
+        for step: OnboardingStep in [.keyboard, .screenRecording] {
+            let env = try makeEnv(accessibility: step == .screenRecording, microphone: .authorized)
+            if step == .keyboard { env.snapshot.value = missingKeyboard }
+            var busy = true
+            var attempts = 0
+            let model = try makeModel(env, settingsOnly: true,
+                                      launch: .init(snapshot: env.snapshot.value, screenRecording: false),
+                                      relaunch: { attempts += 1; return busy ? reason : nil }, asksSystemAudio: true)
+            defer { model.stop(); env.beat.end() }
+            for _ in 0..<20 where model.step != step { model.next() }
+            XCTAssertEqual(model.step, step)
+            model.requestAccess(step)
+            if step == .keyboard {
+                env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .authorized)
+            } else {
+                env.screen.value = true
+            }
+            model.permissions.refresh(restartRecoveryPolling: false)
+            try await eventually { env.beat.count > 0 }
+            env.beat.end()
+            try await eventually { model.restartNote != nil }
+            XCTAssertEqual(model.restartNote, reason, "\(step)")
+            XCTAssertEqual(attempts, 1)
+            busy = false
+            for _ in 0..<3 { model.permissions.refresh(restartRecoveryPolling: false) }
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertFalse(model.restartPending, "\(step) re-armed without a press")
+            XCTAssertEqual(attempts, 1, "\(step) restarted when the recording ended, without a press")
+            XCTAssertEqual(model.accessState(step), .restarting)
+            model.restartWhytap()
+            XCTAssertEqual(attempts, 2, "the button is the retry")
+            XCTAssertNil(model.restartNote)
+        }
+    }
+
+    // Restart Whytap pressed in the guide's Waiting while a recording runs:
+    // the reason is on the step (the guide shows it in place of its purpose).
+    func testRestartPressedWhileWaitingKeepsItsReason() throws {
+        let none = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .authorized,
+                                              postEventGranted: false, listenEventGranted: false)
+        let env = try makeEnv(accessibility: false, microphone: .authorized)
+        env.snapshot.value = none
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: none, screenRecording: false),
+                                  relaunch: { "Ready. Finish the meeting recording, then choose Restart." })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.restartWhytap()
+        XCTAssertEqual(model.restartNote, "Ready. Finish the meeting recording, then choose Restart.")
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.back()
+        XCTAssertNil(model.restartNote, "leaving the step clears it")
+    }
+
+    // Request-first macOS: system audio is its own consent, offered on the
+    // step before (and without) the screen grant; asked first, a later screen
+    // grant moves on as any access step does.
+    func testRequestFirstMacOSOffersSystemAudioWithoutTheScreen() async throws {
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        var asked = 0
+        let model = try makeModel(env, systemAudioProbe: { asked += 1 }, asksSystemAudio: true)
+        for _ in 0..<20 where model.step != .screenRecording { model.next() }
+        XCTAssertEqual(model.step, .screenRecording)
+        XCTAssertEqual(model.accessState(.screenRecording), .rest)
+        XCTAssertTrue(model.offersSystemAudio)
+        model.askSystemAudio()
+        try await eventually { asked == 1 }
+        XCTAssertEqual(model.accessState(.screenRecording), .rest, "the audio ask grants no screen")
+        XCTAssertTrue(model.offersSystemAudio, "the row stays, as its asked status")
+        env.screen.value = true
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.accessState(.screenRecording), .granted)
+        try await eventually { env.beat.count > 0 }
+    }
+
+    // Helper failure keeps Whytap open with a reason; a cancelled quit stops
+    // the helper so a later Quit never reopens Whytap.
+    func testTheRelaunchHelperFailsSafely() {
+        var terminated = 0, stopped = 0
+        struct NoHelper: Error {}
+        XCTAssertEqual(AppRelauncher.relaunch(appState: AppState(), startHelper: { _, _ in throw NoHelper() },
+                                              terminate: { terminated += 1 }), AppRelauncher.helperFailed)
+        XCTAssertEqual(terminated, 0, "no quit without a helper to reopen")
+        var acceptedDuringQuit = false
+        XCTAssertNil(AppRelauncher.relaunch(appState: AppState(), startHelper: { pid, path in
+            XCTAssertEqual(pid, ProcessInfo.processInfo.processIdentifier)
+            XCTAssertEqual(path, Bundle.main.bundlePath)
+            return { stopped += 1 }
+        }, terminate: { terminated += 1; acceptedDuringQuit = AppRelauncher.restartAccepted }))
+        XCTAssertEqual(terminated, 1)
+        XCTAssertTrue(acceptedDuringQuit)
+        XCTAssertEqual(stopped, 1, "the quit returned (cancelled): the helper is stopped")
+        XCTAssertFalse(AppRelauncher.restartAccepted)
+    }
+
+    /// Offscreen: request-first Screen & system audio in each state and the
+    /// whole window before and after the audio ask (one way on: Next).
+    func testRenderSystemAudioOnEveryScreenState() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
+        }
+        _ = NSApplication.shared
+        let previous = PermissionsHelper.usesProtectionOverridePane
+        PermissionsHelper.usesProtectionOverridePane = false
+        defer { PermissionsHelper.usesProtectionOverridePane = previous }
+        OnboardingAccessMotion.settlesAtOnce = true
+        defer { OnboardingAccessMotion.settlesAtOnce = false }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func write(_ view: NSView, _ name: String) async throws {
+            view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            view.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("504-\(name).png"))
+        }
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        let model = try makeModel(env, asksSystemAudio: true)
+        for (name, state) in [("rest", OnboardingAccessState.rest), ("waiting", .waiting), ("not-on", .notOn), ("granted", .granted)] {
+            let host = NSHostingView(rootView: OnboardingAccessStage(kind: .screenRecording, model: model, shownState: state)
+                .frame(width: 520, height: 320).background(OnboardingTheme.bg).preferredColorScheme(.dark))
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            try await write(host, "audio-\(name)")
+        }
+        env.screen.value = true
+        let held = try makeModel(env, asksSystemAudio: true)
+        for _ in 0..<20 where held.step != .screenRecording { held.next() }
+        XCTAssertEqual(held.accessState(.screenRecording), .granted)
+        for asked in [false, true] {
+            if asked { held.askSystemAudio() }
+            let host = NSHostingView(rootView: OnboardingJourneyView(model: held))
+            host.frame = NSRect(origin: .zero, size: OnboardingJourneyView.size)
+            try await write(host, "window-audio-asked-\(asked)")
+        }
     }
 }

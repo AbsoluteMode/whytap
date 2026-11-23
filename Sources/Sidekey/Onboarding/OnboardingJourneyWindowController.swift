@@ -1,9 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Hosts the onboarding in one small fixed-size window beside the island. The app
-/// stays an accessory (no Dock icon), as Settings does. Closing the window
-/// finishes the onboarding just like Done.
+/// Hosts the onboarding window and participates in the app switcher while visible.
+/// Closing it explicitly finishes onboarding. Quitting the app preserves the step.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingJourneyWindowController: NSWindowController, NSWindowDelegate {
@@ -12,8 +11,17 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
     private var didClose = false
     private var keyMonitor: Any?
 
-    init(model: OnboardingJourneyModel, onClosed: @escaping () -> Void) {
+    /// Whytap lives without a Dock icon (`.accessory`), so ⌘Tab never lists
+    /// it. While the onboarding is open the app is `.regular`: in ⌘Tab and the
+    /// Dock, so a person who went to System Settings can come back; closing
+    /// it hands back `.accessory`. Hotkeys and the island do not depend on it.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    private let inAppSwitcher: (Bool) -> Void
+
+    init(model: OnboardingJourneyModel, inAppSwitcher: @escaping (Bool) -> Void = { _ in },
+         onClosed: @escaping () -> Void) {
         self.model = model
+        self.inAppSwitcher = inAppSwitcher
         self.onClosed = onClosed
         let size = OnboardingJourneyView.size
         let window = OnboardingJourneyWindow(
@@ -51,8 +59,23 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
 
     var isVisible: Bool { window?.isVisible == true }
 
+    /// ⌘Tab or a Dock click brought Whytap back: the onboarding comes forward.
+    func bringForward() {
+        guard let window, window.isVisible else { return }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// On activation (⌘Tab, the Dock): the onboarding comes up unless the
+    /// person activated Whytap through another of its windows (Settings
+    /// opened from a step), which stays in front.
+    func bringForwardOnActivation(keyWindow: NSWindow?) {
+        guard keyWindow == nil || keyWindow === window || keyWindow is NSPanel else { return }
+        bringForward()
+    }
+
     func show() {
         guard let window else { return }
+        inAppSwitcher(true)
         SidekeyWindowChrome.centerOnMainScreen(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -86,6 +109,7 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         model.stop()
+        inAppSwitcher(false)
         onClosed()
     }
 }

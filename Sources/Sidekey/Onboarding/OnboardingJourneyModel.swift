@@ -151,6 +151,10 @@ enum OnboardingAccessState: Equatable {
     case waiting
     case granted
     case notOn
+    /// macOS 27.3: the grant made in System Settings is on and takes effect
+    /// in a new process; Whytap restarts itself and comes back to this step.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    case restarting
 }
 
 /// What the shown step is doing: nothing yet, working, done (with what was
@@ -193,7 +197,11 @@ struct OnboardingAcceptance: Equatable {
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingJourneyModel: ObservableObject {
-    @Published private(set) var step: OnboardingStep
+    @Published private(set) var step: OnboardingStep {
+        didSet { resumeDefaults?.set(step.rawValue, forKey: OnboardingLaunch.stepKey) }
+    }
+    /// Where the shown step is kept for a relaunch; nil in tests and the preview.
+    private let resumeDefaults: UserDefaults?
     @Published private(set) var progress: OnboardingProgress
     /// What each step's action did in this onboarding. On a key step it is
     /// the latest attempt; the route that holds is in `accepted`.
@@ -233,6 +241,30 @@ final class OnboardingJourneyModel: ObservableObject {
     let screenRecording: ScreenRecordingAccess
     private let dropSpeech: OnboardingDropSpeech
     private let openScreenRecordingSettings: () -> Void
+    /// The screen request is out and its answer not yet seen.
+    private var screenAsking = false
+    /// The pending restart after a 27.3 grant; leaving the step cancels it.
+    private var restartTask: Task<Void, Never>?
+    /// Steps whose one automatic restart has been tried since their last
+    /// Open System Settings: a blocked try waits for the Restart button.
+    private var autoRestartTried: Set<OnboardingStep> = []
+    private let systemAudioProbe: () async -> Void
+    /// "Ask for system audio" was pressed (kept across a restart).
+    @Published private(set) var systemAudioAsked = false
+    /// This Mac's Screen & system audio step also asks for system audio.
+    private let asksSystemAudio: Bool
+    static let systemAudioAskedKey = "sidekey.onboarding.systemAudioAsked.v1"
+    /// The automatic restart after a 27.3 grant is counting down.
+    @Published private(set) var restartPending = false
+    /// Why a restart waits (a meeting recording, dictation…), from the
+    /// update restart's own rules.
+    @Published private(set) var restartNote: String?
+
+    /// System audio is still to be asked for on the Screen & system audio step.
+    var systemAudioPending: Bool { asksSystemAudio && !systemAudioAsked }
+    /// The step shows the system audio ask (or that it was asked), whatever
+    /// the screen's own state: the two are separate consents in macOS.
+    var offersSystemAudio: Bool { systemAudioPending || systemAudioAsked }
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -266,7 +298,6 @@ final class OnboardingJourneyModel: ObservableObject {
     private var latest: [SharedModelKind: Int] = [:]
     private var granted: Set<OnboardingStep> = []
     private var pollTimer: Timer?
-    private var pollBudget = DropHotkeyRecoveryPollBudget()
     private var subscriptions: Set<AnyCancellable> = []
 
     var onFinish: () -> Void = {}
@@ -300,8 +331,15 @@ final class OnboardingJourneyModel: ObservableObject {
         voice: OnboardingVoiceSignal? = nil,
         dropStandIn: OnboardingDropStandIn? = nil,
         isPreview: Bool = false,
-        offersOpenAISpeech: Bool? = nil
+        offersOpenAISpeech: Bool? = nil,
+        resumeDefaults: UserDefaults? = nil,
+        systemAudioProbe: (() async -> Void)? = nil,
+        asksSystemAudio: Bool = PermissionsHelper.screenPaneNamesSystemAudio
     ) {
+        self.systemAudioProbe = systemAudioProbe ?? { await SystemAudioPermissionProbe.ask() }
+        self.asksSystemAudio = asksSystemAudio
+        _systemAudioAsked = Published(initialValue: resumeDefaults?.bool(forKey: Self.systemAudioAskedKey) ?? false)
+        self.resumeDefaults = resumeDefaults
         let openAI = offersOpenAISpeech ?? Self.offersOpenAISpeech
         speechProviders = OnboardingDropSpeech.keyProviders + (openAI ? [.openAI] : [])
         let models = models ?? APIAndModelsViewModel()
@@ -337,9 +375,10 @@ final class OnboardingJourneyModel: ObservableObject {
         start.llmReady = llm.map { $0.choice != nil || $0.isMixed } ?? false
         start.searchReady = tavily.configured
         start.languageChosen = preferences.selectedLanguage != nil
-        start.keyboardGranted = snapshot.accessibilityGranted
+        start.keyboardGranted = PermissionsHelper.keyboardReady(snapshot, settingsOnly: permissions.settingsOnly)
         start.microphoneGranted = snapshot.microphoneGranted
         start.screenRecordingGranted = permissions.screenRecordingGranted
+        start.systemAudioPending = asksSystemAudio && !(resumeDefaults?.bool(forKey: Self.systemAudioAskedKey) ?? false)
         start.onDeviceSupported = supportsOnDevice
         self.start = start
         var progress = OnboardingProgress()
@@ -347,7 +386,8 @@ final class OnboardingJourneyModel: ObservableObject {
         progress.needsInputMonitoring = permissions.dropHotkeyStatus == .inputMonitoringRequired
         progress.speechExpected = start.speechReady
         self.progress = progress
-        step = OnboardingJourney.steps(start: start, progress: progress).first ?? .thanks
+        step = OnboardingLaunch.resumedStep(saved: resumeDefaults?.string(forKey: OnboardingLaunch.stepKey),
+                                            on: OnboardingJourney.steps(start: start, progress: progress))
 
         observePermissions()
         observeVoice()
@@ -462,10 +502,20 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The window closed: nothing keeps polling. A running download goes on.
     func stop() {
         stopPolling()
+        restartTask?.cancel()
+        restartTask = nil
+        restartPending = false
+        dwell.cancel()
+        sourceMove?.cancel()
+        tryCheck?.cancel()
     }
 
     private func show(_ next: OnboardingStep, direction: OnboardingNavDirection) {
         dwell.cancel()
+        restartTask?.cancel()
+        restartTask = nil
+        restartPending = false
+        restartNote = nil
         sourceMove?.cancel()
         self.direction = direction
         if direction == .forward { leftSteps.insert(step) }
@@ -491,6 +541,10 @@ final class OnboardingJourneyModel: ObservableObject {
             if !latest(step).isDone { requested.remove(step) }
             permissions.refresh(restartRecoveryPolling: false)
             startPolling()
+            if direction == .forward, case .done(let text) = latest(step) {
+                // macOS can grant this access while the preceding step is still visible.
+                succeed(step, text, holds: step == .screenRecording && systemAudioPending)
+            }
         default:
             stopPolling()
         }
@@ -503,8 +557,16 @@ final class OnboardingJourneyModel: ObservableObject {
         switch step {
         case .llmKey where Self.llmProviders.contains(speechProvider) && keySaved(speechProvider):
             llmProvider = speechProvider
-        case .speechKey where speechProviders.contains(llmProvider) && keySaved(llmProvider) && !keySaved(speechProvider):
-            speechProvider = llmProvider
+        case .speechKey where !keySaved(speechProvider):
+            let saved = savedKeyProviders(.speech)
+            if saved.contains(llmProvider) {
+                speechProvider = llmProvider
+            } else if !leftSteps.contains(.speechKey), saved.count == 1, let only = saved.first {
+                speechProvider = only
+            }
+        case .llmKey where !keySaved(llmProvider) && !leftSteps.contains(.llmKey):
+            let saved = savedKeyProviders(.languageModel)
+            if saved.count == 1, let only = saved.first { llmProvider = only }
         default:
             break
         }
@@ -606,6 +668,13 @@ final class OnboardingJourneyModel: ObservableObject {
         guard model != nil || isPreview else { return }
         let action = begin(.speech)
         attempts[.speechKey] = .provider(provider)
+        if provider == .deepgram, let model,
+           let error = DeepgramLanguagePolicy.configurationError(model: model, language: language?.code) {
+            let message = error.localizedDescription + " Go back to Language or choose another speech provider."
+            keyProblems[.speechKey] = .other(message)
+            outcomes[.speechKey] = .failed(message)
+            return
+        }
         outcomes[.speechKey] = .working("Checking the \(provider.displayName) key…")
         let problem = await saveOrCheck(key, account: account)
         // A newer speech choice answers for this step now; this key stays saved.
@@ -981,9 +1050,51 @@ final class OnboardingJourneyModel: ObservableObject {
         return failure.status.flatMap(OnboardingKeyProblem.init(status:)) ?? .other(failure.message)
     }
 
+    /// Whether the provider has a saved key: named before any choice, so the
+    /// secret is not read and no Keychain prompt can appear. The key is read
+    /// only when the person uses it (`useSavedKey`).
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     func keySaved(_ provider: AIProviderKind) -> Bool {
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return false }
-        return models.accountIsAvailableForSelection(account)
+        return models.hasSavedKey(account)
+    }
+
+    /// The step's providers whose key is already in the Keychain, in the
+    /// order of the step's marks: named under the empty field so a key kept
+    /// from an earlier setup is found without guessing its mark.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    func savedKeyProviders(_ kind: OnboardingKeyStageKind) -> [AIProviderKind] {
+        switch kind {
+        case .speech: return speechProviders.filter(keySaved)
+        case .languageModel: return Self.llmProviders.filter(keySaved)
+        case .search: return []
+        }
+    }
+
+    /// A click on a saved provider's name: its tab opens, and Return then
+    /// uses its key (`useSavedKey`).
+    func pickSavedKey(_ provider: AIProviderKind, on kind: OnboardingKeyStageKind) {
+        switch kind {
+        case .speech: speechProvider = provider
+        case .languageModel: llmProvider = provider
+        case .search: break
+        }
+    }
+
+    /// Return in an empty key field: checks the key already saved for the
+    /// open tab's provider; nothing when it has none.
+    func useSavedKey(on kind: OnboardingKeyStageKind) async {
+        switch kind {
+        case .speech:
+            guard keySaved(speechProvider) else { return }
+            await useSpeechKey("", provider: speechProvider)
+        case .languageModel:
+            guard keySaved(llmProvider) else { return }
+            await useLLMKey("", provider: llmProvider)
+        case .search:
+            guard tavily.configured else { return }
+            await useSearchKey("")
+        }
     }
 
     // MARK: - 4. Search
@@ -1076,6 +1187,8 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Allow (or Allow again): the step waits for System Settings.
     private func asking(_ step: OnboardingStep) {
         requested.insert(step)
+        // A fresh Open System Settings may restart once more by itself.
+        autoRestartTried.remove(step)
         if case .failed = latest(step) { outcomes[step] = .idle }
     }
 
@@ -1093,6 +1206,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Where the access step stands, from the system's own answer: only a
     /// granted check moves it on; nothing here pretends.
     func accessState(_ step: OnboardingStep) -> OnboardingAccessState {
+        if needsRestart(step), !outcome(step).isDone { return .restarting }
         switch outcome(step) {
         case .done: return .granted
         case .failed: return .notOn
@@ -1100,13 +1214,50 @@ final class OnboardingJourneyModel: ObservableObject {
         }
     }
 
+    /// 27.3: the step's grant is on but works only after a restart.
+    func needsRestart(_ step: OnboardingStep) -> Bool {
+        switch step {
+        case .keyboard: return permissions.keyboardNeedsRestart
+        case .screenRecording: return permissions.screenNeedsRestart
+        default: return false
+        }
+    }
+
+    /// Where keyboard control stands on 27.3, for the step's guide.
+    var keyboardSetup: PermissionsSettingsViewModel.KeyboardSetup { permissions.keyboardSetup }
+
+    /// The step's "Restart Whytap" (27.3): for a grant that is on but whose
+    /// check only a new process sees.
+    func restartWhytap() {
+        restartTask?.cancel()
+        restartTask = nil
+        restartNote = permissions.restartWhytap() ? nil : permissions.restartBlocked
+    }
+
+    func openInputMonitoring() {
+        if let requests { return requests.openSettings(.inputMonitoring) }
+        permissions.openInputMonitoring()
+    }
+
+    /// Asks macOS for system audio now, as a meeting's first recording would:
+    /// a moment of a process tap whose audio is thrown away. macOS shows its
+    /// question once; there is no way to read the answer.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    func askSystemAudio() {
+        guard !systemAudioAsked else { return }
+        systemAudioAsked = true
+        resumeDefaults?.set(true, forKey: Self.systemAudioAskedKey)
+        let probe = systemAudioProbe
+        Task { await probe() }
+    }
+
     /// The quiet "Open System Settings" while a step waits.
     func openSystemSettings(for step: OnboardingStep) {
         if let requests { return requests.openSettings(step) }
         switch step {
-        case .keyboard: PermissionsHelper.openAccessibilitySettings()
+        case .keyboard: permissions.openKeyboardSettings()
         case .microphone: PermissionsHelper.openMicrophoneSettings()
-        case .inputMonitoring: PermissionsHelper.openInputMonitoringSettings()
+        case .inputMonitoring: permissions.openInputMonitoring()
         case .screenRecording: openScreenRecordingSettings()
         default: break
         }
@@ -1118,19 +1269,26 @@ final class OnboardingJourneyModel: ObservableObject {
     func recheckPermissions() {
         permissions.refresh(restartRecoveryPolling: false)
         guard [.keyboard, .microphone, .inputMonitoring, .screenRecording].contains(step),
-              requested.contains(step), !latest(step).isDone else { return }
+              requested.contains(step), !latest(step).isDone, !needsRestart(step) else { return }
+        // 27.3: the grant may show only after a restart; "Not on yet" would be wrong.
+        if permissions.settingsOnly, step == .keyboard || step == .screenRecording { return }
         // macOS's own microphone dialog is still open: nothing was refused.
         if step == .microphone, permissions.snapshot.microphoneStatus == .notDetermined { return }
         outcomes[step] = .failed("Not on yet")
     }
 
     /// One request per launch, shared with Shot; afterwards System Settings.
+    /// On 27.3 the step opens the pane, where the guide says to click +.
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     func requestScreenRecording() {
         asking(.screenRecording)
-        switch screenRecording.requestOnce() {
+        // 27.3: the request shows nothing; the pane with + is the way.
+        if permissions.settingsOnly { return openScreenRecordingSettings() }
+        guard !screenAsking else { return }
+        switch screenRecording.requestOnce(afterRequest: { [weak self] in self?.screenAsking = false }) {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
-        case .requested: break
+        case .requested: screenAsking = true
         case .alreadyRequested: openScreenRecordingSettings()
         }
     }
@@ -1150,17 +1308,34 @@ final class OnboardingJourneyModel: ObservableObject {
         let needsInputMonitoring = hotkey == .inputMonitoringRequired
         if needsInputMonitoring, !progress.needsInputMonitoring { progress.needsInputMonitoring = true }
         // Granted, revoked (a switch turned off in System Settings), the step's text.
+        let settingsOnly = permissions.settingsOnly
+        let launch = permissions.launchGrants
+        let keyboard = PermissionsHelper.keyboardReady(snapshot, settingsOnly: settingsOnly)
+        let keyboardRestart = PermissionsSettingsViewModel.needsRestart(keyboard: snapshot, launch: launch, settingsOnly: settingsOnly)
+        let screenRestart = PermissionsSettingsViewModel.needsRestart(screen: screen, launch: launch, settingsOnly: settingsOnly)
+        // 27.3: a grant made in System Settings works in a new process. On its
+        // own step Whytap restarts and comes back here (the step is kept).
+        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+        // Only after this step's own Open System Settings in this window:
+        // a grant that is merely found here waits for the Restart button.
+        // One try per press: a try blocked by a recording is not repeated by
+        // this poll when the recording ends; the Restart button is the retry.
+        if requested.contains(step), !autoRestartTried.contains(step),
+           (step == .keyboard && keyboardRestart) || (step == .screenRecording && screenRestart) {
+            scheduleRestart()
+        }
         let now: [(OnboardingStep, Bool, Bool, String)] = [
-            (.keyboard, snapshot.accessibilityGranted, !snapshot.accessibilityGranted, "Keyboard control allowed"),
+            (.keyboard, keyboard && !keyboardRestart, !keyboard, "Keyboard control allowed"),
             (.microphone, snapshot.microphoneGranted, !snapshot.microphoneGranted, "Microphone allowed"),
             (.inputMonitoring, progress.needsInputMonitoring && !needsInputMonitoring && hotkey == .ready,
              needsInputMonitoring, "Keyboard access allowed"),
-            (.screenRecording, screen, !screen, "Screen Recording allowed"),
+            (.screenRecording, screen && !screenRestart, !screen, "Screen Recording allowed"),
         ]
         for (permission, isGranted, isRevoked, text) in now {
             if isGranted, !granted.contains(permission) {
                 granted.insert(permission)
-                succeed(permission, text)
+                // Screen & system audio holds while system audio is still to ask.
+                succeed(permission, text, holds: permission == .screenRecording && systemAudioPending)
             } else if isRevoked, granted.contains(permission) {
                 revoked(permission)
             }
@@ -1178,14 +1353,35 @@ final class OnboardingJourneyModel: ObservableObject {
         if permission == step, dwell.isCounting || dwell.isLatched { dwell.cancel() }
     }
 
+    /// The restart after a 27.3 grant, a short beat after "Restarting…" shows.
+    static let restartBeat: TimeInterval = 1.6
+
+    private func scheduleRestart() {
+        guard restartTask == nil, !isPreview else { return }
+        let shown = step
+        autoRestartTried.insert(shown)
+        restartPending = true
+        restartTask = Task { @MainActor [weak self] in
+            await self?.pause(Self.restartBeat)
+            guard let self else { return }
+            self.restartPending = false
+            guard !Task.isCancelled, self.step == shown, self.needsRestart(shown) else {
+                self.restartTask = nil
+                return
+            }
+            // The activity rules are checked now, at the moment of the quit.
+            self.restartWhytap()
+        }
+    }
+
     private func startPolling() {
         stopPolling()
-        pollBudget = DropHotkeyRecoveryPollBudget()
-        // Permissions are granted in System Settings, outside the app.
+        // A person can spend several minutes in System Settings before confirming.
+        // Leaving a permission step or closing the window invalidates this timer.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.pollBudget.consume() else { return self.stopPolling() }
+                guard self.pollTimer != nil else { return }
                 self.permissions.refresh(restartRecoveryPolling: false)
             }
         }
@@ -1201,7 +1397,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func showPermissions() {
         progress.permissionsMissing = true
         let snapshot = permissions.snapshot
-        show(snapshot.accessibilityGranted ? .microphone : .keyboard, direction: .forward)
+        show(PermissionsHelper.keyboardReady(snapshot, settingsOnly: permissions.settingsOnly) ? .microphone : .keyboard, direction: .forward)
     }
 
     // MARK: - 9. Try Drop

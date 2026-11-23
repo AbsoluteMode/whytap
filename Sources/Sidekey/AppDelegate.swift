@@ -348,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `static func main()` call alone was racing AppKit's Dock paint on
     /// some macOS versions (Tahoe 26 included).
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before anything is granted in this process: 27.3 grants made later need a restart.
+        PermissionsHelper.recordLaunchGrants()
         let accepted = NSApp.setActivationPolicy(.accessory)
         os_log(
             "lifecycle_activation_policy stage=will_finish accepted=%{public}@ policy=%d",
@@ -546,12 +548,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             existing.show()
             return
         }
-        let model = OnboardingJourneyModel()
+        let model = OnboardingJourneyModel(resumeDefaults: .standard)
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
-        let controller = OnboardingJourneyWindowController(model: model) { [weak self] in
-            OnboardingLaunch.finish(in: .standard)
+        let controller = OnboardingJourneyWindowController(model: model, inAppSwitcher: { shown in
+            NSApp.setActivationPolicy(shown ? .regular : .accessory)
+        }) { [weak self] in
+            // A quit (System Settings' Quit & Reopen after a privacy switch)
+            // is not the end of the onboarding: the relaunch continues it.
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            if self?.isTerminating != true { OnboardingLaunch.finish(in: .standard) }
             NowPlayingAutomationConsent.promptsDeferred = false
             // Released after AppKit finishes closing the window.
             DispatchQueue.main.async { self?.onboardingWindowController = nil }
@@ -568,11 +575,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        visibleOnboarding?.bringForwardOnActivation(keyWindow: NSApp.keyWindow)
         refreshRuntimePermissions()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showRuntimeSurfaceAfterReopen()
+        visibleOnboarding?.bringForward()
         return true
     }
 
@@ -583,7 +592,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerIslandHotkeyActivity()
     }
 
+    /// Set once the app agreed to quit, before AppKit takes its windows down.
+    private(set) var isTerminating = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        isTerminating = true
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()

@@ -20,7 +20,7 @@ sources:
   - type: user-confirmed
     reference: ORCH-TASK 72, REV 25 forwarded by the orchestrator. The user asked to take Drop learning out of the app into a branch ("too raw ... put it in a box for now", translated) and not to touch manual Vocab and Filler.
     confirmed_at: 2026-11-23
-related: [2026-11-21-recorded-meeting-models.md]
+related: [2026-11-21-recorded-meeting-models.md, 2026-11-23-drop-learning-shelved.md]
 ---
 
 ## Context

@@ -260,6 +260,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openHotkeySettingsObserver: NSObjectProtocol?
     private var permissionCaptureEndObserver: AnyCancellable?
     private var permissionRecoveryTimer: Timer?
+    /// Hourly end of the shelved Drop learning calibration journal.
+    private var shelvedDropLearningTimer: Timer?
     private var permissionRecoverySession: UUID?
     private var permissionRecoveryBudget = DropHotkeyRecoveryPollBudget()
     private var dropRegistrationFailure: DropHotkeyStatus?
@@ -385,6 +387,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.ensureSettingsWindowController().selectNoteMeeting(id: id)
         }
         NotifyScriptSupervisor.shared.start()
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+        ShelvedDropLearningData().expireCalibration()
+        shelvedDropLearningTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { _ in
+            ShelvedDropLearningData().expireCalibration()
+        }
         Task { await AgentSettingsStore.shared.refreshCodexCatalog() }
         // Final-rubber-stamp diagnostic + last-resort retry. If we reach
         // `applicationDidFinishLaunching` with a non-`.accessory` policy

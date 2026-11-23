@@ -37,7 +37,7 @@ final class VocabularyCache {
     static let maxTermLength = 50
 
     /// Posted after every write so an open editor reloads a list changed
-    /// elsewhere (a learning suggestion's Y, settings sync).
+    /// elsewhere (another editor, settings sync).
     static let didChangeNotification = Notification.Name("sidekey.vocabulary.didChange")
 
     private let defaults: UserDefaults

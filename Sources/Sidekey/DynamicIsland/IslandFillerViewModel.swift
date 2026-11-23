@@ -12,10 +12,22 @@ final class IslandFillerViewModel: ObservableObject {
     @Published private(set) var lastRejection: FillerTermsStore.Rejection?
 
     private let store: FillerTermsStore
+    private var changeObserver: NSObjectProtocol?
 
     init(store: FillerTermsStore = FillerTermsStore()) {
         self.store = store
         self.terms = store.terms()
+        // The island and Toolbox each hold an editor: a change in one shows in the other.
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: FillerTermsStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { guard let self else { return }; self.terms = self.store.terms() }
+        }
+    }
+
+    deinit {
+        if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
     }
 
     /// Newest-first for display, filtered by the current query.

@@ -52,7 +52,11 @@ enum ConfigBackupRegistry {
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
             "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
-        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms"])
+        // The shelved Drop learning's Replace rules stay readable so older
+        // archives and settings history restore; nothing applies them.
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms",
+            ShelvedDropLearningData.replacementsKey])
         add(.toolbox, .strings, ["sidekey.b2b.hover.layout"])
         add(.other, .bool, ["sidekey.privacy.screenshotProtectionEnabled", "sidekey.preferences.hideHelpers",
             "sidekey.preferences.hideIslandHoverWidgets", "sidekey.preferences.agentEnabled", "sidekey.preferences.meetingsEnabled",

@@ -1020,6 +1020,14 @@ Vocab budget: Vocab is one list of up to 1,000 terms x 50 chars;
   an open Vocab editor reloads. WHY:
   .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
 
+Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
+  accepts sidekey.drop.replacements.v1 so older archives restore (restored,
+  never read), and at launch and hourly the hidden calibration journal
+  (drop-learning/calibration.jsonl) and its keys are deleted once calibration
+  is off or 14 days old; nothing is read or collected. FillerTermsStore posts
+  a change notification and every Filler editor reloads. WHY:
+  .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> Other -> "Show island on") -> screen with a real notch ->

@@ -262,21 +262,43 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(window.silencedKeyPresses, silenced)
     }
 
-    /// Escape in the Try Drop field asks a text view for completions, which
-    /// beeps when there are none; the field offers none and stays quiet.
-    func testEscapeInTheTryDropFieldAsksForNoCompletions() {
+    /// Escape in the Try Drop field has nothing to cancel and is taken
+    /// quietly; Option-Escape stays the text view's completion command.
+    func testEscapeInTheTryDropFieldIsQuietAndOptionEscapeStillCompletes() throws {
         _ = NSApplication.shared
-        let field = OnboardingTryTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
-        field.string = "hello"
-        field.setSelectedRange(NSRange(location: 5, length: 0))
-        // Escape's key binding, and the completion request it becomes.
-        field.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
-        field.complete(nil)
-        XCTAssertEqual(field.quietEscapes, 2)
-        XCTAssertEqual(field.string, "hello")
+        final class Field: OnboardingTryTextView {
+            var completions = 0
+            override func complete(_ sender: Any?) { completions += 1 }
+        }
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window as? OnboardingJourneyWindow)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        let field = Field(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        try XCTUnwrap(window.contentView).addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        field.string = "hel"
+        field.setSelectedRange(NSRange(location: 3, length: 0))
+        func escape(_ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        }
+        // The real key events, through the key bindings.
+        field.interpretKeyEvents([try escape([])])
+        XCTAssertEqual(field.quietEscapes, 1)
+        XCTAssertEqual(field.completions, 0)
+        field.interpretKeyEvents([try escape(.option)])
+        XCTAssertEqual(field.quietEscapes, 1)
+        XCTAssertEqual(field.completions, 1)
+        XCTAssertEqual(field.string, "hel")
+        XCTAssertEqual(window.silencedKeyPresses, 0)
         // Other commands still edit.
         field.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
-        XCTAssertEqual(field.string, "hell")
+        XCTAssertEqual(field.string, "he")
     }
 
     func testTheServerLinkChangesTheStepInPlace() throws {

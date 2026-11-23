@@ -91,25 +91,25 @@ struct OnboardingTryField: NSViewRepresentable {
 /// Takes the keyboard as soon as it is on screen, so holding the shortcut
 /// right away already has a target, and draws a quiet placeholder.
 @MainActor
-final class OnboardingTryTextView: NSTextView {
+class OnboardingTryTextView: NSTextView {
     var placeholder = "" { didSet { if placeholder != oldValue { needsDisplay = true } } }
     var placeholderColor: NSColor? { didSet { if placeholderColor != oldValue { needsDisplay = true } } }
 
     override var acceptsFirstResponder: Bool { true }
 
-    /// Escape in a text view asks for word completions and beeps when there
-    /// are none; this field has nothing to complete, so Escape is taken
-    /// quietly. Drop's own Escape (cancel a take) is read before the field.
+    /// Escape (`cancelOperation:`) has nothing to cancel in this field, and
+    /// left unhandled it ends in the alert sound; it is taken quietly. The
+    /// completion command (Option-Escape, `complete:`) is a separate command
+    /// and still offers completions. Drop's own Escape (cancel a take) is
+    /// read by its event tap before the field.
     // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
     override func doCommand(by selector: Selector) {
-        if selector == #selector(NSResponder.cancelOperation(_:)) || selector == #selector(NSTextView.complete(_:)) {
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
             quietEscapes += 1
             return
         }
         super.doCommand(by: selector)
     }
-
-    override func complete(_ sender: Any?) { quietEscapes += 1 }
 
     /// Escapes taken quietly (for tests).
     private(set) var quietEscapes = 0

@@ -635,7 +635,9 @@ window, Back and a progress bar.
   field is focused, travelled up the responder chain and AppKit answered with
   the alert sound. The onboarding window and its controller (the end of the
   chain) drop a key press nobody took, silently; the Try Drop field takes
-  Escape quietly instead of asking for word completions it does not have.
+  Escape (`cancelOperation:`, nothing to cancel there) quietly, while
+  Option-Escape stays the text view's completion command (the builder's
+  review of ticket 477 found the first version silenced both).
   Text fields, buttons and Return still get their keys, and Drop's own Escape
   is read by its event tap first.
 - Re-opening the onboarding on a Mac where Whytap is set up starts at the

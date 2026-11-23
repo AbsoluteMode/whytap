@@ -78,9 +78,9 @@ Choose the spoken language (or Auto-detect), a target, then **Start subtitles**.
 Play a video or join a call. A compact dark box floats at the bottom of the
 screen over other apps and full-screen content. Each phrase is a pair: the
 original on the left and its translation on the right, newest at the bottom.
-The box keeps one size from Start until the session ends, also before any
-audio or words arrive and after an early **Stop**, and blurs the video under
-it. In a narrower window it narrows with it. Text already shown stays where it
+While it listens the box keeps one size, also before any audio or words
+arrive; **Stop** turns it into the stopped box at once. It blurs the video
+under it. In a narrower window it narrows with it. Text already shown stays where it
 is: the sentence still being heard is the last row, its original appearing
 as far as its translation has reached and the translation so far dimmed, and turns white in place when it is finished, keeping every word
 it showed; older lines move up and leave at the top one line at a time. A very

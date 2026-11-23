@@ -38,12 +38,15 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         model.start()
         try await wait(model.phase == .listening)
         var shots: [[SubtitleCaption.Row]] = []
-        for event in events {
+        for (index, event) in events.enumerated() {
             switch event.stream {
             case .source: speech.pair.continuation.yield(.source(event.text, elapsedMs: event.elapsed))
             case .translation: speech.pair.continuation.yield(.translation(event.text, elapsedMs: event.elapsed))
             }
-            try await Task.sleep(for: .milliseconds(12))
+            // Sample once the caption reflects this event (publishing is
+            // throttled, so time alone is not enough under load).
+            try await wait(model.publishedEvents >= index + 1)
+            XCTAssertGreaterThanOrEqual(model.publishedEvents, index + 1, "event \(index) was never published")
             let rows = SubtitleCaption.rows(lines: model.lines, live: model.live,
                                             liveTranslation: model.liveTranslation, liveID: model.liveID)
             if shots.last != rows { shots.append(rows) }

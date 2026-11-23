@@ -9,35 +9,73 @@ import SwiftUI
 /// help (see docs/bugs/2026-09-04-island-answer-close-first-mouse.md). The
 /// window always gets the event, so it checks the buttons' measured frames,
 /// as the island does (`IslandHoverHitBridge`).
+///
+/// A press belongs to the one button view, action and frame it began on.
+/// It acts on mouse-up only if all three are unchanged and the panel is still
+/// shown. Leaving the button, hiding the panel or a new mode cancels it for
+/// good, and its mouse-up is still consumed.
 // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
 @MainActor
-final class SubtitleOverlayHitTargets {
+final class SubtitleOverlayHitTargets: ObservableObject {
     enum Control: Hashable { case close, session }
 
+    /// The control under a press that would still act, for its pressed look.
+    @Published private(set) var pressed: Control?
+
     private struct Entry { weak var view: SubtitleOverlayHitReporterView? }
+    private struct Press {
+        let control: Control
+        weak var view: SubtitleOverlayHitReporterView?
+        let action: String
+        let frame: CGRect
+    }
     private var reporters: [Control: Entry] = [:]
-    /// The control a press began on; its mouse-up acts only inside it.
-    private var pressed: Control?
+    private var press: Press?
+    /// The current mouse-down was ours: its drags and mouse-up are consumed.
     private var consumes = false
 
-    fileprivate func register(_ view: SubtitleOverlayHitReporterView) { reporters[view.control] = Entry(view: view) }
+    fileprivate func register(_ view: SubtitleOverlayHitReporterView) {
+        if let press, press.control == view.control, press.view !== view || press.action != view.action {
+            cancelPress()
+        }
+        reporters[view.control] = Entry(view: view)
+    }
 
     fileprivate func unregister(_ view: SubtitleOverlayHitReporterView) {
         if reporters[view.control]?.view === view { reporters[view.control] = nil }
-        if pressed == view.control { pressed = nil }
+        if press?.view === view { cancelPress() }
+    }
+
+    /// Drops the press in progress (the panel hid or changed mode); its
+    /// mouse-up is still consumed and does nothing.
+    func cancelPress() {
+        press = nil
+        if pressed != nil { pressed = nil }
+    }
+
+    private func shownView(_ control: Control, in window: NSWindow) -> SubtitleOverlayHitReporterView? {
+        guard window.isVisible, let view = reporters[control]?.view, view.window === window,
+              !view.isHiddenOrHasHiddenAncestor else { return nil }
+        return view
+    }
+
+    private func frame(of view: SubtitleOverlayHitReporterView) -> CGRect {
+        view.convert(view.bounds, to: nil)
     }
 
     /// The window frame of a shown control, if it is on screen in `window`.
     func frame(of control: Control, in window: NSWindow) -> CGRect? {
-        guard let view = reporters[control]?.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else {
-            return nil
-        }
-        let frame = view.convert(view.bounds, to: nil)
+        guard let view = shownView(control, in: window) else { return nil }
+        let frame = frame(of: view)
         return frame.isEmpty ? nil : frame
     }
 
-    private func control(at point: CGPoint, in window: NSWindow) -> Control? {
-        [Control.close, .session].first { frame(of: $0, in: window)?.contains(point) == true }
+    /// True while the press is still on the view, action and frame it began on.
+    private func pressHolds(at point: CGPoint, in window: NSWindow) -> Bool {
+        guard let press, let view = press.view, shownView(press.control, in: window) === view,
+              view.action == press.action else { return false }
+        let now = frame(of: view)
+        return now == press.frame && now.contains(point)
     }
 
     /// Handles a mouse event aimed at a control; true when it was consumed.
@@ -45,18 +83,22 @@ final class SubtitleOverlayHitTargets {
         let point = event.locationInWindow
         switch event.type {
         case .leftMouseDown:
-            pressed = control(at: point, in: window)
-            consumes = pressed != nil
-            return consumes
+            cancelPress()
+            consumes = false
+            guard let control = [Control.close, .session].first(where: { frame(of: $0, in: window)?.contains(point) == true }),
+                  let view = shownView(control, in: window) else { return false }
+            press = Press(control: control, view: view, action: view.action, frame: frame(of: view))
+            pressed = control
+            consumes = true
+            return true
         case .leftMouseDragged:
-            if let current = pressed, frame(of: current, in: window)?.contains(point) != true { pressed = nil }
-            return consumes
+            guard consumes else { return false }
+            if press != nil, !pressHolds(at: point, in: window) { cancelPress() }
+            return true
         case .leftMouseUp:
             guard consumes else { return false }
-            let action = pressed.flatMap { control in
-                frame(of: control, in: window)?.contains(point) == true ? reporters[control]?.view?.activate : nil
-            }
-            pressed = nil
+            let action = pressHolds(at: point, in: window) ? press?.view?.activate : nil
+            cancelPress()
             consumes = false
             action?()
             return true
@@ -66,16 +108,21 @@ final class SubtitleOverlayHitTargets {
     }
 }
 
-/// Reports a button's frame to `SubtitleOverlayHitTargets`; it never takes
-/// the mouse itself.
+/// Reports a button's frame and current action to `SubtitleOverlayHitTargets`;
+/// it never takes the mouse itself.
 final class SubtitleOverlayHitReporterView: NSView {
     let control: SubtitleOverlayHitTargets.Control
     weak var targets: SubtitleOverlayHitTargets?
+    /// Names what `activate` does now ("stop", "start", "close"): a press
+    /// never fires an action other than the one it began on.
+    var action: String
     var activate: () -> Void
 
-    init(control: SubtitleOverlayHitTargets.Control, targets: SubtitleOverlayHitTargets?, activate: @escaping () -> Void) {
+    init(control: SubtitleOverlayHitTargets.Control, targets: SubtitleOverlayHitTargets?, action: String,
+         activate: @escaping () -> Void) {
         self.control = control
         self.targets = targets
+        self.action = action
         self.activate = activate
         super.init(frame: .zero)
     }
@@ -95,13 +142,15 @@ final class SubtitleOverlayHitReporterView: NSView {
 struct SubtitleOverlayHitReporter: NSViewRepresentable {
     let control: SubtitleOverlayHitTargets.Control
     let targets: SubtitleOverlayHitTargets?
+    let action: String
     let activate: () -> Void
 
     func makeNSView(context: Context) -> SubtitleOverlayHitReporterView {
-        SubtitleOverlayHitReporterView(control: control, targets: targets, activate: activate)
+        SubtitleOverlayHitReporterView(control: control, targets: targets, action: action, activate: activate)
     }
 
     func updateNSView(_ view: SubtitleOverlayHitReporterView, context: Context) {
+        view.action = action
         view.activate = activate
         if view.window != nil { targets?.register(view) }
     }

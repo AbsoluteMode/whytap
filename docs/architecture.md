@@ -493,8 +493,9 @@ Translation tools:
   newest lines (NewestLinesColumn), so a long original never hides its
   translation; older lines leave at the top behind a fade, a line at a time. On hover
   the controls cover the caption's top instead of resizing it, so Stop and ×
-  never move; FirstClickHostingView takes the first click on the non-key
-  panel. The box blurs what is under it (behind-window HUD material, 45 %
+  never move; their clicks go through the panel's sendEvent
+  (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
+  acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
@@ -517,10 +518,12 @@ Translation tools:
   sentence that ended (elapsed_ms) before it, plus later sentences the model
   joined: of the sentence ends heard by the cut, the one whose length (the
   session's translation-to-original ratio) and delay (the session's median)
-  fit the translation best. The live pair shows whole words only, a held last
-  word at most 0.3 s. × and the session button take their click in
+  fit the translation best. The live pair shows whole words only; a held last
+  word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
   TranslationPanel.sendEvent from frames they measured
-  (SubtitleOverlayHitTargets), like the island; the running overlay keeps
+  (SubtitleOverlayHitTargets), like the island: a press acts only on the
+  button view, action and frame it began on, while the panel shows, and
+  dims the button since SwiftUI never sees it; the running overlay keeps
   them 1 s after hover ends. Stop shows the stopped box at once
   (SubtitlePhase.isRunning) while the tail settles; Start then drops it.
   Audio is sent off the main actor; the caption publishes at most every

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 @testable import Sidekey
 import XCTest
 
@@ -76,6 +77,71 @@ final class SubtitleOverlayCloseTests: XCTestCase {
         click(panel, at: NSPoint(x: closeAgain.midX, y: closeAgain.midY))
         XCTAssertFalse(panel.isVisible, "× closed the overlay")
         panel.orderOut(nil)
+    }
+
+    /// A press acts only on the button view, action and frame it began on,
+    /// and only while the panel is shown.
+    func testAPressActsOnlyOnTheActionItBeganOnWhileThePanelShows() throws {
+        final class Probe: ObservableObject {
+            @Published var action = "stop"
+            var fired: [String] = []
+        }
+        let probe = Probe()
+        let targets = SubtitleOverlayHitTargets()
+        struct Buttons: View {
+            @ObservedObject var probe: Probe
+            let targets: SubtitleOverlayHitTargets
+            var body: some View {
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: 80, height: 40)
+                        .background(SubtitleOverlayHitReporter(control: .session, targets: targets, action: probe.action,
+                                                               activate: { [action = probe.action] in probe.fired.append(action) }))
+                    Color.clear.frame(width: 40, height: 40)
+                        .background(SubtitleOverlayHitReporter(control: .close, targets: targets, action: "close",
+                                                               activate: { probe.fired.append("close") }))
+                }
+            }
+        }
+        let panel = NSPanel(contentRect: NSRect(x: -20_000, y: -20_000, width: 120, height: 40),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.contentView = NSHostingView(rootView: Buttons(probe: probe, targets: targets))
+        panel.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        func event(_ type: NSEvent.EventType, _ x: CGFloat) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 20), modifierFlags: [], timestamp: 0,
+                               windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        func settle() { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+
+        // An ordinary click acts once, and the press shows while held.
+        XCTAssertTrue(targets.handle(event(.leftMouseDown, 40), in: panel))
+        XCTAssertEqual(targets.pressed, .session)
+        XCTAssertTrue(targets.handle(event(.leftMouseUp, 40), in: panel))
+        XCTAssertEqual(probe.fired, ["stop"])
+        XCTAssertNil(targets.pressed)
+
+        // Stop pressed, the button turns into Start under the pointer: nothing fires.
+        XCTAssertTrue(targets.handle(event(.leftMouseDown, 40), in: panel))
+        probe.action = "start"
+        settle()
+        XCTAssertNil(targets.pressed, "the press ended when its action changed")
+        XCTAssertTrue(targets.handle(event(.leftMouseUp, 40), in: panel), "its mouse-up is still consumed")
+        XCTAssertEqual(probe.fired, ["stop"])
+
+        // Leaving the button ends the press, even if the pointer comes back.
+        XCTAssertTrue(targets.handle(event(.leftMouseDown, 100), in: panel))
+        XCTAssertTrue(targets.handle(event(.leftMouseDragged, 10), in: panel))
+        XCTAssertTrue(targets.handle(event(.leftMouseDragged, 100), in: panel))
+        XCTAssertTrue(targets.handle(event(.leftMouseUp, 100), in: panel))
+        XCTAssertEqual(probe.fired, ["stop"])
+
+        // × pressed, then the panel hides before the mouse-up: nothing fires.
+        XCTAssertTrue(targets.handle(event(.leftMouseDown, 100), in: panel))
+        panel.orderOut(nil)
+        XCTAssertTrue(targets.handle(event(.leftMouseUp, 100), in: panel))
+        XCTAssertEqual(probe.fired, ["stop"])
+        // A hidden panel takes no new press.
+        XCTAssertFalse(targets.handle(event(.leftMouseDown, 100), in: panel))
     }
 
     /// The running overlay keeps its controls a moment after hover ends, so

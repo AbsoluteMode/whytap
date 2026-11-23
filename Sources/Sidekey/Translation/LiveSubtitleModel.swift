@@ -112,6 +112,13 @@ final class LiveSubtitleModel: ObservableObject {
     private var sessionLimit: Task<Void, Never>?
     private var source: TerminalSystemAudioSourceStreaming?
     private var relay: SubtitleAudioRelay?
+    /// A Start waiting for the previous session's cleanup (`start` during
+    /// `finishing`).
+    private var pendingStart: Task<Void, Never>?
+    /// Events received from the session and how many the caption reflects:
+    /// tests wait on these instead of on time.
+    private var receivedEvents = 0
+    private(set) var publishedEvents = 0
 
     init(
         flushInterval: Duration = .milliseconds(80),
@@ -141,20 +148,26 @@ final class LiveSubtitleModel: ObservableObject {
         guard !phase.isRunning else { return nil }
         if phase == .finishing {
             // Start after Stop while the last translation still arrives: drop
-            // that tail and its capture, then start fresh.
+            // that tail and its capture, then start fresh. The restart is
+            // tracked: closing, sleep or any cancel before it begins drops it.
             let cleanup = cancel()
-            return Task { [weak self] in
+            let restart = Task { [weak self] in
                 await cleanup.value
-                guard let self, self.phase == .idle || self.phase == .failed else { return }
+                guard !Task.isCancelled, let self, self.phase == .idle || self.phase == .failed else { return }
+                self.pendingStart = nil
                 await self.start()?.value
             }
+            pendingStart = restart
+            return restart
         }
+        pendingStart?.cancel(); pendingStart = nil
         cleanupTask = nil
         generation = UUID()
         let token = generation
         let language = sourceCode == "auto" ? nil : sourceCode
         lines = []; live = ""; liveTranslation = ""; issue = nil
         pairer = SubtitleSpeechPairer(); nextOrdinal = 0; liveID = UUID()
+        receivedEvents = 0; publishedEvents = 0
         hasAudio = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
@@ -203,6 +216,8 @@ final class LiveSubtitleModel: ObservableObject {
     /// Closing/sleep cancels immediately, including pending paid requests.
     /// Keep a finishing state until old capture has actually been released.
     @discardableResult func cancel() -> Task<Void, Never> {
+        // A Start queued behind a finishing session never runs after a cancel.
+        pendingStart?.cancel(); pendingStart = nil
         if let cleanupTask { return cleanupTask }
         generation = UUID()
         let token = generation
@@ -307,9 +322,11 @@ final class LiveSubtitleModel: ObservableObject {
             guard generation == token, !Task.isCancelled else { return }
             switch event {
             case .source(let text, let elapsed):
+                receivedEvents += 1
                 pairer.addSource(text, elapsedMs: elapsed)
                 publishSoon(token: token)
             case .translation(let text, let elapsed):
+                receivedEvents += 1
                 pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
                 publishSoon(token: token)
                 // Numbers only: with the adapter's arrival log, whether a delay
@@ -358,6 +375,7 @@ final class LiveSubtitleModel: ObservableObject {
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
         lastPublish = ProcessInfo.processInfo.systemUptime
+        publishedEvents = receivedEvents
         let carry = pairer.takeCarry()
         if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
         for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {

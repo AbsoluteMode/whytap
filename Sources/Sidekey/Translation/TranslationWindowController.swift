@@ -155,6 +155,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     /// Internal so tests can check the layout without putting the panel on screen.
     func resize(for mode: Mode) {
+        hitTargets.cancelPress()
         let isText = mode == .text
         configureChrome(for: mode)
         // Subtitles: never shorter than the overlay's own height, so the
@@ -244,6 +245,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 
     func dismiss() {
+        hitTargets.cancelPress()
         presentation.isTextPresented = false
         removeOutsideClickMonitors()
         panel.orderOut(nil)

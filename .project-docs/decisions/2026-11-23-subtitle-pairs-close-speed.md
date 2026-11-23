@@ -83,15 +83,22 @@ where they were not.
 - **× and the session button act through the window.** The panel's
   `sendEvent` checks a mouse-down against the frames that × and the
   Stop / Start / Cancel button measured (`SubtitleOverlayHitTargets`). The
-  click acts on mouse-up inside the same button, as the island does. The
-  SwiftUI buttons stay for their look and VoiceOver. The running overlay
+  click acts on mouse-up inside the same button, as the island does. A press
+  belongs to the one button view, action and frame it began on, and acts only
+  if all three are unchanged and the panel still shows. Leaving the button,
+  hiding the panel or a new mode cancels it. Because SwiftUI never sees the
+  press, the pressed button dims itself; × also shows its 28 pt target on
+  hover. The SwiftUI buttons stay for their look, keyboard and VoiceOver. The running overlay
   also keeps its controls for 1 s after hover ends
   (`TranslationView.controlsLinger`). × has a 28 pt target and no tooltip.
 - **Stop shows its result at once.** Stop ends capture and the overlay shows
   the stopped box in the same moment: the controls above the pairs, Start in
   place of Stop, no spinner (`SubtitlePhase.isRunning`). The last
   translation keeps settling in place in the background. Start during that
-  time drops the tail and starts a new session. The 10 s watchdog still names
+  time drops the tail and starts a new session once the old one is
+  released. That waiting Start is tracked: closing the overlay, sleep or any
+  cancel before it begins drops it, so no session or capture opens behind a
+  closed overlay. The 10 s watchdog still names
   a provider that never finishes.
 - **Audio off the main actor.** Captured audio is sent from a detached task,
   so a busy caption never holds it back.
@@ -101,9 +108,10 @@ where they were not.
   (`LiveSubtitleModel.publishInterval`).
 - **A held word waits at most 0.3 s.** The translation's last word is held
   back until the next delta shows it was whole (a third of the recorded deltas
-  continue a word). If nothing follows for 0.3 s
-  (`SubtitleSpeechPairer.wordHold`), it is shown; if the session then breaks
-  off, that word may be a fragment and goes.
+  continue a word). Once nothing has followed it for 0.3 s
+  (`SubtitleSpeechPairer.wordHold`), the next flush shows it: the 80 ms
+  flush timer can add up to one tick. If the session then breaks off, that
+  word may be a fragment and goes.
 - **A numbers-only delay log.** On arrival of each delta, the adapter logs how
   far the model's `elapsed_ms` trails the audio sent so far
   (category `openai-realtime-translate`). `LiveSubtitleModel` logs the same
@@ -225,7 +233,8 @@ words would move.
   - A last word is shown after 0.3 s without a following delta.
 - `SubtitleOverlayCloseTests`: on the overlay panel far off screen, the
   frames × and Start measured take the click in `sendEvent`. A press that
-  leaves the button does nothing, Start starts, and × closes.
+  leaves the button does nothing, Start starts, and × closes. A press whose
+  action changes, or whose panel hides, does nothing.
 - `SpeechTranslationTests`: Stop with a provider still finishing is no
   longer running in the same moment, shows the stopped box, and settles the
   tail after. Start during the finish closes the old session and opens a new
@@ -241,6 +250,25 @@ Not checked:
 - a real lecture;
 - the live delay log. The paid probe needs the OpenAI key through Case,
   which refused this session.
+
+## After the build check (ticket #483)
+
+The build queue found three problems in the first version:
+
+- **A Start that ran after closing.** Start during Stop's tail queued a
+  restart that a later close did not cancel, so OpenAI and capture could
+  reopen behind a closed overlay. Now `cancel()` drops it.
+  `testClosingWhileAStartWaitsForTheOldSessionStartsNothing` fails without
+  this.
+- **A press resolved at mouse-up.** The press kept only the control's kind,
+  so Stop pressed and released over Start fired Start, and × fired after its
+  panel hid. A press now holds its view, action and frame (above).
+  `testAPressActsOnlyOnTheActionItBeganOnWhileThePanelShows` covers both
+  cases, leaving and coming back, and the pressed look.
+- **A test that sampled on time.** The steadiness replay read the caption
+  12 ms after each event; with throttled publishing it could miss the last
+  row. It now waits until the caption reflects each event
+  (`LiveSubtitleModel.publishedEvents`).
 
 ## Rejected
 

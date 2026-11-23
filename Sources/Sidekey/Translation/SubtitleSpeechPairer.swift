@@ -89,9 +89,10 @@ struct SubtitleSpeechPairer {
     /// never moves to the next row, whatever the cut.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     ///
-    /// A last word held back as a possible fragment is shown once nothing has
-    /// followed it for `wordHold` (`now` is the clock `addTranslation` got):
-    /// the speaker paused, and the word would otherwise wait for the next one.
+    /// A last word held back as a possible fragment is shown at the first
+    /// call after nothing has followed it for `wordHold` (`now` is the clock
+    /// `addTranslation` got; the model's flush timer may add a tick): the
+    /// speaker paused, and the word would otherwise wait for the next one.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
     mutating func showLive(now: TimeInterval? = nil) -> (source: String, translation: String) {
         if let now, let last = lastTranslationAt, now - last >= Self.wordHold {

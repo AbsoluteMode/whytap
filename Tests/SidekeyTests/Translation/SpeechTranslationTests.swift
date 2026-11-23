@@ -189,6 +189,25 @@ final class SpeechTranslationModelTests: XCTestCase {
         model.cancel()
     }
 
+    /// Start during Stop's tail, then closing the overlay before the old
+    /// session is released: the queued Start never opens a session or capture.
+    func testClosingWhileAStartWaitsForTheOldSessionStartsNothing() async throws {
+        let first = FakeSpeechTranslation()
+        first.closesOnEndInput = false
+        var opened = 0
+        let audio = FixtureSubtitleAudio()
+        let model = makeModel(translator: { opened += 1; return opened == 1 ? first : FakeSpeechTranslation() }, audio: audio)
+        model.start()
+        try await wait(model.phase == .listening)
+        model.stop()
+        XCTAssertNotNil(model.start(), "Start queues behind the finishing session")
+        await model.cancel().value // the overlay closes before the cleanup ends
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(opened, 1, "no second provider session")
+        XCTAssertFalse(model.phase.isRunning)
+        XCTAssertFalse(model.phase.isActive)
+    }
+
     func testAProviderThatNeverClosesIsBoundedByTheStopWatchdog() async throws {
         let session = FakeSpeechTranslation()
         session.closesOnEndInput = false

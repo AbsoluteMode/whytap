@@ -10,8 +10,9 @@ struct TranslationView: View {
     /// Closes the floating window; the embedded Toolbox pane has no close control.
     var close: () -> Void = {}
     /// The floating overlay's window-level click dispatch for × and the
-    /// session button (nil in the Toolbox pane).
-    var hitTargets: SubtitleOverlayHitTargets?
+    /// session button; the Toolbox pane has its own, which nothing dispatches.
+    @ObservedObject var hitTargets = SubtitleOverlayHitTargets()
+    @State private var closeHovered = false
     @FocusState private var inputFocused: Bool
     @State private var inputHovered = false
     /// The running overlay's controls: shown on hover and kept for
@@ -448,18 +449,21 @@ struct TranslationView: View {
         }
     }
 
-    /// What the session button does now: the window dispatches its click
-    /// through `hitTargets` with this action.
+    /// What the session button does now ("stop" or "start"): the window
+    /// dispatches its click through `hitTargets`, which fires only the action
+    /// a press began on.
+    private var sessionActionName: String { subtitles.phase.isRunning ? "stop" : "start" }
+
     private func sessionAction() {
-        switch subtitles.phase {
-        case .connecting, .listening: subtitles.stop()
-        case .idle, .failed, .finishing: subtitles.start()
-        }
+        if subtitles.phase.isRunning { subtitles.stop() } else { subtitles.start() }
     }
 
     private var sessionButton: some View {
         sessionButtonBody
-            .background(SubtitleOverlayHitReporter(control: .session, targets: hitTargets, activate: sessionAction))
+            // The window takes the click, so the button shows the press itself.
+            .opacity(hitTargets.pressed == .session ? 0.6 : 1)
+            .background(SubtitleOverlayHitReporter(control: .session, targets: hitTargets,
+                                                   action: sessionActionName, activate: sessionAction))
     }
 
     @ViewBuilder private var sessionButtonBody: some View {
@@ -484,11 +488,15 @@ struct TranslationView: View {
             // A 28 pt target, Stop's height. No tooltip: its window could
             // take hover from the running overlay's controls mid-press.
             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                .frame(width: 28, height: 28).contentShape(Rectangle())
+                .frame(width: 28, height: 28)
+                // Hover and press show the whole 28 pt target.
+                .background(Circle().fill(.white.opacity(hitTargets.pressed == .close ? 0.22 : closeHovered ? 0.12 : 0)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .background(SubtitleOverlayHitReporter(control: .close, targets: hitTargets, activate: close))
+        .foregroundStyle(closeHovered ? .primary : .secondary)
+        .onHover { closeHovered = $0 }
+        .background(SubtitleOverlayHitReporter(control: .close, targets: hitTargets, action: "close", activate: close))
         .accessibilityLabel("Close subtitles")
     }
 

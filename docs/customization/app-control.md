@@ -21,7 +21,8 @@ that the installed application or a host's plugin connection has been updated.
 
 - Settings and model tools need Whytap running; To-do works while Whytap is
   closed. Island tools and their hotkeys (`whytap_toolbox_*`,
-  `whytap_hotkey_set`) come with the next version after 2.2.26.
+  `whytap_hotkey_set`) come with the next version after 2.2.26, and so does
+  `whytap_vocab_add`; it needs Whytap running.
 - Meetings are recognized only when Claude Code or Codex started the server
   itself (the helper's direct parent, checked by Apple-vouched signature). A
   new Codex user can use meetings after the Yes but not Case.
@@ -58,6 +59,7 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_set_provider` | `set-provider` | Validate and pin an endpoint or choose Auto (`null`) |
 | `whytap_set_setting` | `set-setting` | Change one supported setting through its existing store |
 | `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
+| `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
 | `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
@@ -74,6 +76,20 @@ code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
 Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation.
+
+## Vocab
+
+`whytap_vocab_add` takes `terms`: 1–20 words or short phrases, one line and
+at most 50 characters each. It saves them through the same store and checks as
+the island's Vocab editor and Drop learning, so an open Vocab panel shows them
+and the next dictation sends them. One invalid term (empty, too long, several
+lines) adds nothing (`invalid_term`); a full list of 1,000 terms answers
+`vocab_full`. A term already there in any letter case is `existing` with its
+saved spelling and is left as it is, so a retry is safe. `sentByCurrentDrop`
+says whether the current Drop route's limit leaves room to send the term (for
+example ElevenLabs Live sends terms of up to 20 characters). There is no read
+or removal: remove words in the island's Vocab. The built-in Agent shows
+`Vocab + whytap` above its answer.
 
 ## Island tools and their hotkeys
 

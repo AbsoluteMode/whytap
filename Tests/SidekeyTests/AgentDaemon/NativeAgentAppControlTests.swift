@@ -36,6 +36,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         let directory: URL
         let http: NativeAgentHTTP
         let layout: HoverLayoutStore
+        let vocabulary: VocabularyCache
         let hotkeys: HotkeyPreferences
         let defaults: UserDefaults
     }
@@ -67,13 +68,17 @@ final class NativeAgentAppControlTests: XCTestCase {
         let planner = PlannerStore(url: directory.appendingPathComponent("Planner/planner-v1.json"))
         let layout = HoverLayoutStore(defaults: defaults)
         let hotkeys = HotkeyPreferences(defaults: defaults)
+        let vocabulary = VocabularyCache(defaults: defaults)
+        // Drop dictates with Soniox, which sends Vocab with every take.
+        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
+        routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropSmart)
         let controller = AppControlController(routing: routing, models: models,
             preferences: UserPreferencesCache(defaults: defaults), languages: PrivacyPreferences(defaults: defaults),
             idle: IslandIdlePreferences(defaults: defaults),
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-1"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
             activity: { .object(["drop": .string("idle")]) }, planner: { planner },
             googleCalendarReview: { false }, agentWorkspace: { directory.path },
-            layout: { layout }, hotkeys: { hotkeys })
+            layout: { layout }, hotkeys: { hotkeys }, vocabulary: { vocabulary })
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -84,7 +89,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         }
         return Env(routing: routing, probe: probe, planner: planner, controller: controller, keys: keys,
                    directory: directory, http: NativeAgentHTTP(session: session),
-                   layout: layout, hotkeys: hotkeys, defaults: defaults)
+                   layout: layout, vocabulary: vocabulary, hotkeys: hotkeys, defaults: defaults)
     }
 
     // MARK: Model stub
@@ -637,6 +642,104 @@ final class NativeAgentAppControlTests: XCTestCase {
         guard let result, let object = try? JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any],
               let tools = (object["data"] as? [String: Any])?["tools"] as? [[String: Any]] else { return nil }
         return tools.first { $0["tool"] as? String == id }
+    }
+
+    // MARK: Vocab
+
+    /// Build 1732: "добавь whytap в vocab" got instructions and a copy card.
+    /// The Agent adds it itself; the island's Vocab editor and the next
+    /// dictation's request see it.
+    func testAddWordToVocabSavesItAndConfirms() async throws {
+        let e = try env()
+        let editor = IslandVocabularyViewModel(vocabulary: e.vocabulary)
+        _ = await editor.loadIfNeeded()
+        let result = try await turn(e, "добавь whytap в vocab", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            final("Добавил whytap в Vocab.")
+        ])
+        XCTAssertEqual(result.finalText, "Vocab + whytap\n\nДобавил whytap в Vocab.")
+        XCTAssertTrue(result.labels.contains("Vocab + whytap"), "\(result.labels)")
+        XCTAssertEqual(VocabularyCache(defaults: e.defaults).terms, ["whytap"])
+        XCTAssertEqual(editor.terms, ["whytap"], "an open island editor reloads it")
+        XCTAssertEqual(VocabularyBudget.terms(e.vocabulary.terms, for: .soniox), ["whytap"], "the next take sends it")
+        XCTAssertTrue(result.toolResults()[0].contains(#""sentByCurrentDrop":true"#), result.toolResults()[0])
+        // The rule that makes the model do it instead of describing steps.
+        let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.contains("\"add whytap to vocab\" is whytap_vocab_add"))
+    }
+
+    /// Already there in another letter case: reported with the saved
+    /// spelling, nothing added or rewritten, no change line.
+    func testWordAlreadyInVocabIsReportedNotDuplicated() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["WhyTap"])
+        let result = try await turn(e, "добавь whytap в vocab", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            final("WhyTap уже есть в Vocab.")
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["WhyTap"])
+        XCTAssertEqual(result.finalText, "WhyTap уже есть в Vocab.")
+        XCTAssertTrue(result.toolResults()[0].contains(#""result":"existing","sentByCurrentDrop":true,"term":"WhyTap""#), result.toolResults()[0])
+        XCTAssertFalse(result.labels.contains { $0.hasPrefix("Vocab +") })
+    }
+
+    func testSeveralWordsAtOnceShowOneLine() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Deepgram"])
+        let result = try await turn(e, "добавь в словарь Soniox, deepgram и Whytap", [
+            app("whytap_vocab_add", ["terms": [" Soniox ", "deepgram", "Whytap", "soniox"]], id: "v"),
+            final("Готово.")
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["Deepgram", "Soniox", "Whytap"])
+        XCTAssertEqual(result.finalText, "Vocab + Soniox, Whytap\n\nГотово.")
+    }
+
+    /// The term fits Vocab but not ElevenLabs Live's 20-character keyterm:
+    /// saved, and the line says the current Drop route will not send it.
+    func testWordTheCurrentDropRouteCannotSendIsSavedWithANote() async throws {
+        let e = try env()
+        e.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"), for: .dropFast)
+        e.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"), for: .dropSmart)
+        let result = try await turn(e, "добавь Kubernetes Operator SDK в vocab", [
+            app("whytap_vocab_add", ["terms": ["Kubernetes Operator SDK"]], id: "v"),
+            final("Добавил.")
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["Kubernetes Operator SDK"])
+        XCTAssertEqual(result.finalText, "Vocab + Kubernetes Operator SDK (no room in the current Drop route's limit)\n\nДобавил.")
+    }
+
+    func testInvalidVocabTermsAddNothing() async {
+        let e = try! env()
+        e.vocabulary.setTerms(["whytap"])
+        let long = String(repeating: "a", count: VocabularyCache.maxTermLength + 1)
+        let cases: [([String: Any], String)] = [
+            (["terms": [""]], "invalid_term"),
+            (["terms": ["   "]], "invalid_term"),
+            (["terms": [long]], "invalid_term"),
+            (["terms": ["Soniox", long]], "invalid_term"),
+            (["terms": ["two\nlines"]], "invalid_term"),
+            (["terms": [String]()], "invalid_arguments"),
+            (["terms": (0...VocabularyCache.maxTermLength).map { "t\($0)" }.prefix(21).map { $0 }], "invalid_arguments"),
+            (["terms": [5]], "invalid_arguments"),
+            (["terms": ["Soniox"], "replace": true], "invalid_arguments"),
+            ([:], "invalid_arguments"),
+        ]
+        for (arguments, expected) in cases {
+            let result = await NativeAgentAppControl.execute(dispatch("whytap_vocab_add", arguments)) { request in
+                await e.controller.handle(request)
+            }
+            XCTAssertTrue(result.text.contains(#""code":"\#(expected)""#), "\(arguments): \(result.text)")
+            XCTAssertNil(result.change)
+        }
+        XCTAssertEqual(e.vocabulary.terms, ["whytap"])
+        // A full list refuses a new term; one already there is still just reported.
+        e.vocabulary.setTerms((1...VocabularyCache.maxTermCount).map { "term\($0)" })
+        let full = await e.controller.handle(AppControlRequest("vocab_add", arguments: ["terms": .array([.string("Soniox")])]))
+        XCTAssertEqual(full.data.object?["code"], .string("vocab_full"))
+        XCTAssertEqual(e.vocabulary.terms.count, VocabularyCache.maxTermCount)
+        let existing = await e.controller.handle(AppControlRequest("vocab_add", arguments: ["terms": .array([.string("TERM1")])]))
+        XCTAssertTrue(existing.ok)
+        XCTAssertEqual(existing.data.object?["terms"]?.array?.first?.object?["result"], .string("existing"))
     }
 
     // MARK: Catalog contract

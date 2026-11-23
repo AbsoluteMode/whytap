@@ -27,6 +27,8 @@ final class AppControlController {
     private let agentWorkspace: () -> String
     /// The island's tools and their hotkeys, through the Settings stores.
     private let toolbox: AppControlToolbox
+    /// Vocab terms, through the store Drop reads at the next take.
+    private let vocabulary: AppControlVocabulary
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
@@ -37,11 +39,17 @@ final class AppControlController {
          googleCalendarReview: @escaping () -> Bool = { GoogleCalendarReviewSession.current.isActive },
          agentWorkspace: @escaping () -> String = { AgentDaemonWorkingDirectory.url().path },
          layout: (@MainActor () -> HoverLayoutStore)? = nil,
-         hotkeys: (@MainActor () -> HotkeyPreferences)? = nil) {
+         hotkeys: (@MainActor () -> HotkeyPreferences)? = nil,
+         vocabulary: (@MainActor () -> VocabularyCache)? = nil) {
         self.meetings = meetings
         self.toolbox = AppControlToolbox(layout: layout ?? { HoverLayoutStore.shared },
                                          hotkeys: hotkeys ?? { HotkeyPreferences.shared })
         self.agentWorkspace = agentWorkspace
+        let routingStore = routing ?? .shared
+        let preferenceStore = preferences ?? .shared
+        self.vocabulary = AppControlVocabulary(vocabulary: vocabulary ?? { VocabularyCache.shared }, dropAccount: {
+            routingStore.route(for: preferenceStore.currentMode == .smart ? .dropSmart : .dropFast)?.account
+        })
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
         self.routing = routing ?? .shared
@@ -66,6 +74,7 @@ final class AppControlController {
         let args = request.arguments
         let writes = ["set_model", "set_provider", "set_setting"].contains(request.operation)
             || AppControlToolbox.writes.contains(request.operation)
+            || AppControlVocabulary.operations.contains(request.operation)
         guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled.") }
         if writes {
             guard !mutating else { return .failure("busy", "Another application-setting change is in progress.") }
@@ -78,6 +87,9 @@ final class AppControlController {
         // WHY: .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
         case _ where AppControlToolbox.operations.contains(request.operation):
             return toolbox.handle(request.operation, args)
+        // WHY: .project-docs/decisions/2026-11-23-agent-vocab-add.md
+        case _ where AppControlVocabulary.operations.contains(request.operation):
+            return vocabulary.handle(request.operation, args)
         // The user's notes and transcripts: reachable only behind the broker's
         // harness access gate. WHY: .project-docs/decisions/2026-11-20-harness-access.md
         case _ where AppControlMeetings.operations.contains(request.operation):

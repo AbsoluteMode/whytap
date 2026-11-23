@@ -1898,6 +1898,15 @@ only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
 or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+Vocab from the Agent and `whytap mcp`: whytap_vocab_add (1–20 terms) adds
+through VocabularyCache.add, the island editor's and Drop learning's path: the
+same 50-character / 1,000-term / case-insensitive duplicate rules, and the
+change notification an open Vocab editor reloads from; the next take reads the
+list. One invalid term adds nothing; an existing term is reported with its
+saved spelling, never rewritten; sentByCurrentDrop applies VocabularyBudget to
+the current Drop route. No read or removal. The prompt says to do such a
+request instead of describing steps; line "Vocab + whytap". WHY:
+.project-docs/decisions/2026-11-23-agent-vocab-add.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only

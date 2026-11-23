@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-native-agent-app-control.md, 2026-10-21-app-control-plugin.md]
+related: [2026-11-22-native-agent-app-control.md, 2026-10-21-app-control-plugin.md, 2026-11-23-agent-vocab-add.md]
 ---
 
 # Island tools and hotkeys from the Agent and the plugin

@@ -11,6 +11,16 @@ struct AppleCalendarAccess {
     /// Shows the macOS prompt while undecided; afterwards answers at once.
     var request: @MainActor () async throws -> Bool
     var read: @MainActor (DateInterval) -> (feeds: [CalendarFeed], events: [CalendarFeedEvent])
+    /// The calendars alone, for Settings: no events, so a day open in Hover is untouched.
+    var list: @MainActor () -> [CalendarFeed]
+
+    init(status: @escaping @MainActor () -> EKAuthorizationStatus,
+         request: @escaping @MainActor () async throws -> Bool,
+         read: @escaping @MainActor (DateInterval) -> (feeds: [CalendarFeed], events: [CalendarFeedEvent]),
+         list: (@MainActor () -> [CalendarFeed])? = nil) {
+        self.status = status; self.request = request; self.read = read
+        self.list = list ?? { read(DateInterval(start: Date(), duration: 0)).feeds }
+    }
 
     /// Whytap may read events: Full Access. "Add Events Only" cannot read.
     static func canRead(_ status: EKAuthorizationStatus) -> Bool { status == .fullAccess }
@@ -19,19 +29,21 @@ struct AppleCalendarAccess {
     /// access was already granted; creating it shows no prompt by itself.
     @MainActor static let eventKit: AppleCalendarAccess = {
         let box = EventKitStoreBox()
+        func feed(_ calendar: EKCalendar) -> CalendarFeed {
+            CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
+                title: calendar.title + " · " + calendar.source.title, provider: .apple,
+                displayService: calendar.source.map {
+                    CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
+                }, sourceTitle: calendar.source?.title, calendarTitle: calendar.title,
+                sourceID: calendar.source?.sourceIdentifier)
+        }
         return AppleCalendarAccess(
             status: { EKEventStore.authorizationStatus(for: .event) },
             request: { try await box.store.requestFullAccessToEvents() },
             read: { interval in
                 let store = box.store
                 let calendars = store.calendars(for: .event)
-                let feeds = calendars.map { calendar in
-                    CalendarFeed(id: "apple:" + calendar.calendarIdentifier, accountID: nil, remoteID: calendar.calendarIdentifier,
-                        title: calendar.title + " · " + calendar.source.title, provider: .apple,
-                        displayService: calendar.source.map {
-                            CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
-                        })
-                }
+                let feeds = calendars.map(feed)
                 // EventKit reads every calendar when the list is empty; no calendars means no events.
                 guard !calendars.isEmpty else { return (feeds, []) }
                 let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
@@ -46,8 +58,33 @@ struct AppleCalendarAccess {
                         externalUID: event.calendarItemExternalIdentifier)
                 }
                 return (feeds, events)
-            })
+            },
+            list: { box.store.calendars(for: .event).map(feed) })
     }()
+}
+
+/// What Calendar on this Mac can show, for the Calendars page and Settings.
+// WHY: .project-docs/decisions/2026-11-23-calendar-macos-only.md
+enum MacCalendarAccess: Equatable {
+    /// Never connected in Whytap: one button asks macOS.
+    case notAsked
+    /// macOS refuses (denied, restricted, revoked, Add Events Only).
+    case refused
+    /// Connected, the first read has not finished.
+    case loading
+    /// Connected, but this Mac has no calendars: add accounts in Internet Accounts.
+    case noCalendars
+    case ready
+}
+
+/// One account of Internet Accounts (iCloud, an address, Exchange) and its calendars.
+struct MacCalendarGroup: Identifiable, Equatable {
+    /// EventKit's source identifier (titles can repeat).
+    let id: String
+    /// The account's name, with its service added when another account has the same name.
+    let title: String
+    let service: CalendarProvider?
+    let feeds: [CalendarFeed]
 }
 
 @MainActor
@@ -79,7 +116,87 @@ final class CalendarConnections: ObservableObject {
     /// Connect was refused in this run; nothing was saved. Cleared once access is
     /// allowed (then Connect succeeds without a prompt) or by Disconnect.
     @Published private(set) var appleConnectRefused = false
+    /// Settings read the calendar list (without events) in this run.
+    private var appleListLoaded = false
     var isConnecting: Bool { connectingProvider != nil }
+
+    var macAccess: MacCalendarAccess {
+        if appleAccessOff { return .refused }
+        guard appleEnabled else { return .notAsked }
+        if lastSynced["apple"] == nil && !appleListLoaded { return errors["apple"] == nil ? .loading : .refused }
+        return feeds.contains { $0.provider == .apple } ? .ready : .noCalendars
+    }
+
+    /// What to say while access is off: a saved connection recovers on its own,
+    /// a refused Connect needs Connect again.
+    var macAccessOffMessage: String {
+        errors["apple"] ?? (appleEnabled ? CalendarConnectionError.appleAccessOffMessage
+                                         : CalendarConnectionError.appleConnectRefusedMessage)
+    }
+
+    /// Calendars of this Mac by account, accounts and calendars in alphabetical order.
+    /// An account is its EventKit source, not its title: two accounts can both be
+    /// called "Work". Repeated titles get their service, then a number.
+    var macCalendarGroups: [MacCalendarGroup] {
+        let mac = feeds.filter { $0.provider == .apple }
+        func key(_ feed: CalendarFeed) -> String {
+            feed.sourceID ?? "\(feed.sourceTitle ?? "On My Mac")|\(feed.displayService?.rawValue ?? "")"
+        }
+        let keys = mac.reduce(into: [String]()) { list, feed in
+            if !list.contains(key(feed)) { list.append(key(feed)) }
+        }
+        let groups = keys.map { id -> (id: String, title: String, service: CalendarProvider?, feeds: [CalendarFeed]) in
+            let group = mac.filter { key($0) == id }
+                .sorted { ($0.calendarTitle ?? $0.title).localizedStandardCompare($1.calendarTitle ?? $1.title) == .orderedAscending }
+            return (id, group.first?.sourceTitle ?? "On My Mac", group.first?.displayService, group)
+        }.sorted {
+            let order = $0.title.localizedStandardCompare($1.title)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+        }
+        var used: [String: Int] = [:]
+        return groups.map { group in
+            var title = group.title
+            if groups.filter({ $0.title == group.title }).count > 1 {
+                title += " · " + Self.serviceName(group.service)
+                used[title, default: 0] += 1
+                if used[title]! > 1 { title += " \(used[title]!)" }
+            }
+            return MacCalendarGroup(id: group.id, title: title, service: group.service, feeds: group.feeds)
+        }
+    }
+
+    private static func serviceName(_ service: CalendarProvider?) -> String {
+        switch service {
+        case .google: return "Google"
+        case .microsoft: return "Exchange"
+        case .zoom: return "Zoom"
+        case .apple, nil: return "iCloud or this Mac"
+        }
+    }
+
+    /// Settings opened, Allow access finished or Whytap came back from System
+    /// Settings: reads the live status and, when a saved connection may read, the
+    /// calendar list only (no prompt; nothing for an unconnected Mac). Events stay
+    /// as Hover last read them for the day it shows.
+    func prepareMacCalendars() {
+        checkAppleAccess()
+        guard CalendarAvailability.isOpen, appleEnabled, !appleAccessOff,
+              AppleCalendarAccess.canRead(apple.status()) else { return }
+        let found = apple.list()
+        feeds.removeAll { $0.provider == .apple }
+        feeds += found
+        // Events of calendars that are gone leave with them; the rest are untouched.
+        let ids = Set(found.map(\.id))
+        events.removeAll { $0.feedID.hasPrefix("apple:") && !ids.contains($0.feedID) }
+        appleListLoaded = true
+        errors.removeValue(forKey: "apple")
+    }
+
+    /// Whether a calendar's events are shown. Only Calendar on this Mac can be
+    /// hidden; Whytap's own events and direct connections are always shown.
+    func isShown(feedID: String) -> Bool {
+        !(feedID.hasPrefix("apple:") && hiddenFeeds.contains(feedID))
+    }
     var connectionBlockReason: String? { CalendarAvailability.blockReason ?? backup?.calendarConnectionBlockReason }
     var accountConnectionIssue: String? {
         if let error = errors["accounts"] { return error }
@@ -151,11 +268,18 @@ final class CalendarConnections: ObservableObject {
     }
 
     func setVisible(_ visible: Bool, feedID: String) {
+        guard feedID.utf8.count <= 1024, !feedID.contains("\0") else { return }
+        // Entries of direct connections are inactive since 2026-11-23 (only calendars
+        // of this Mac have ticks); they make room before the limit refuses a tick.
+        if !visible, feedID.hasPrefix("apple:"), !hiddenFeeds.contains(feedID),
+           hiddenFeeds.count >= CalendarAccountSettings.maximumHiddenFeeds {
+            let overflow = hiddenFeeds.count - CalendarAccountSettings.maximumHiddenFeeds + 1
+            for legacy in hiddenFeeds.filter({ !$0.hasPrefix("apple:") }).sorted().prefix(overflow) { hiddenFeeds.remove(legacy) }
+        }
         guard visible || hiddenFeeds.contains(feedID) || hiddenFeeds.count < CalendarAccountSettings.maximumHiddenFeeds else {
             errors["visibility"] = "Too many hidden calendars. Show a calendar or disconnect an unused account first."
             return
         }
-        guard feedID.utf8.count <= 1024, !feedID.contains("\0") else { return }
         if visible { hiddenFeeds.remove(feedID) } else { hiddenFeeds.insert(feedID) }
         errors.removeValue(forKey: "visibility")
         saveHiddenFeeds()
@@ -191,6 +315,7 @@ final class CalendarConnections: ObservableObject {
         appleEnabled = false
         appleAccessOff = false
         appleConnectRefused = false
+        appleListLoaded = false
         defaults.set(false, forKey: "planner.calendar.appleEnabled")
         feeds.removeAll { $0.provider == .apple }
         events.removeAll { $0.feedID.hasPrefix("apple:") }

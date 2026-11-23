@@ -228,7 +228,7 @@ final class CalendarHoverTests: XCTestCase {
         defer { pending.continuation.finish(); flow.cancel() }
         let info: [String: Any] = ["WhytapCalendarOAuthClients": ["microsoft": ["clientID": "fixture"]]]
         let host = NSHostingView(rootView: SettingsCalendarIntegrationsView(connections: connections,
-            readiness: { _ in .available }, configurationInfo: info, flow: flow))
+            configurationInfo: info, flow: flow))
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 500, height: 800),
             styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false; window.contentView = host

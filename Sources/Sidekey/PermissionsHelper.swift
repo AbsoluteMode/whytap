@@ -159,6 +159,15 @@ enum PermissionsHelper {
         NSWorkspace.shared.open(url)
     }
 
+    /// Opens System Settings → Internet Accounts, where Google, Outlook/Exchange
+    /// and other calendar accounts are added for Calendar on this Mac.
+    static func openInternetAccountsSettings() {
+        for raw in ["x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension",
+                    "x-apple.systempreferences:com.apple.preferences.internetaccounts"] {
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) { return }
+        }
+    }
+
     static func openInputMonitoringSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else { return }
         NSWorkspace.shared.open(url)

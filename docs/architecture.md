@@ -1623,20 +1623,38 @@ fake). macOS is asked only from Connect (requestFullAccessToEvents); opening
 Hover and refreshing only read the authorization status. Anything but Full Access
 (denied, restricted, revoked, "Add Events Only") is appleAccessOff; Settings and
 the Connect page say where to allow access, with Open Privacy Settings (Privacy &
-Security -> Calendars). A refused Connect saves nothing (allow, then Connect
-again, no second prompt); a saved connection keeps itself, clears Apple events
-and its row reads Access off. checkAppleAccess() reads only the status for a
+Security -> Calendars). A refused Allow access saves nothing (allow in System
+Settings, then the same "Allow access to calendars" button, no second prompt); a
+saved connection keeps itself and Disconnect, clears Apple events. Settings calls
+prepareMacCalendars() (status, then only the calendar list of a saved, readable
+connection: no event read, so the day open in Hover keeps its events; events of
+a calendar that left the Mac are dropped) on appear, on app activation and after
+Allow.
+macCalendarGroups groups by EKSource.sourceIdentifier. Only apple: entries count
+toward the hidden-calendar limit; inactive direct-connection entries make room. checkAppleAccess() reads only the status for a
 saved or refused Apple connection when Calendar or Settings opens and when the
 app becomes active, so neither shows a stale answer.
+Since 2026-11-23 Calendar on this Mac is the only way to connect: Hover's
+Calendars page and Settings -> Integrations -> Calendars show
+CalendarConnections.macAccess (notAsked / refused / loading / noCalendars /
+ready), one Allow access button, the Mac's calendars grouped by EventKit source
+(macCalendarGroups) with a tick each (hiddenFeeds, apple: feeds only; Whytap's
+own events and direct accounts are always shown) and Open Internet Accounts.
+Google, Outlook and Zoom OAuth (CalendarOAuth, CalendarRemoteClient,
+CalendarConnectionFlow.start for those providers) stays in the code with no
+button; accounts connected by earlier builds keep refreshing and are listed
+under "Connected directly" with Disconnect. WHY:
+.project-docs/decisions/2026-11-23-calendar-macos-only.md
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
 red now line). Events are blocks from start to end in one colour, each with the
 small logo of its service (bundled official Google Calendar and Outlook icons,
 Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range and
-calendar name. Every connected calendar is shown: Hover has no calendar hiding
-or Refresh button (open, day change, account change and a 60 s poll refresh).
-WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+calendar name. Every ticked calendar is shown (ticks on the Calendars page since
+2026-11-23); there is no Refresh button (open, day change, account change and a
+60 s poll refresh). WHY: .project-docs/decisions/2026-11-21-calendar-logos.md,
+.project-docs/decisions/2026-11-23-calendar-macos-only.md
 Calendar on this Mac feeds keep provider `apple`; `CalendarFeed.displayService`
 (Exchange, or a CalDAV account titled Google/Outlook or with such an address)
 only picks the Google or Outlook logo. Blocks add, as height allows, the title's
@@ -1653,11 +1671,12 @@ joins the meeting link, else opens the event in its own calendar (Google/Outlook
 web, ical://ekevent on this Mac). There is no details page; details are in the
 hover bubble. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
-A compact day switcher and Connect stay in Hover; Connect rows carry the
-provider logos, and connection errors and Retry are listed there.
-Connect starts the provider browser or macOS permission prompt directly, using
-the same CalendarConnectionFlow as Settings → Integrations. No intermediate
-form, account-name field, Advanced app setup or Whytap account is shown.
+A compact day switcher and Connect (Calendars once connected) stay in Hover; the
+Calendars page shows the access state, the Mac's calendars with ticks, and
+connection errors and Retry. Allow access starts the macOS permission prompt
+directly, using the same CalendarConnectionFlow as Settings → Integrations. No
+intermediate form, account-name field, Advanced app setup or Whytap account is
+shown.
 Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime
 PlannerWindowController calls. CalendarConnectionFlow keeps permission work alive
 through temporary Hover hiding. Only Hover-owned connections pin its menu;

@@ -128,7 +128,11 @@ for every provider, since only the text is compared.
   ticker model, frame by frame).
 - One wait per correction: `testADifferentCorrectionDoesNotInheritTheWait`,
   `testTheSameCorrectionKeepsItsWaitWhileNewWordsArrive`,
-  `testASecondCorrectionFurtherOnStartsTheWaitAgain`.
+  `testASecondCorrectionFurtherOnStartsTheWaitAgain`. A correction is the
+  changed words and where in the line they begin, so the same word changed at
+  another place waits again:
+  `testTheSameWordCorrectedAtAnotherPlaceDoesNotInheritTheWait`,
+  `testARepeatedWordCorrectedAtAnotherPlaceWaitsInTheLine`.
 - The plain line: `testThePlainLineShowsTheSameSnapshots`,
   `testThePlainLineShowsAKeptChangeWhenTheNextSnapshotArrives`,
   `testThePlainLineStartsFromTheProvidersText`.

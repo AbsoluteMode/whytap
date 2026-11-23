@@ -40,6 +40,9 @@ struct LiveTextStabilizer {
     /// screen and the provider's words for them, without the words around
     /// them that both have. New words at the end do not change it.
     struct Correction: Equatable {
+        /// How many words from the start of the line the change begins: the
+        /// same words changed at another place are another correction.
+        let at: Int
         let old: [String]
         let new: [String]
     }
@@ -210,9 +213,11 @@ struct LiveTextStabilizer {
         // provider types it letter by letter the correction is the same.
         var before = oldKeys[..<last.old]
         var after = newKeys[..<last.new]
+        var at = 0
         while let a = before.first, let b = after.first, a == b {
             before.removeFirst()
             after.removeFirst()
+            at += 1
         }
         while let a = before.last, let b = after.last, a == b {
             before.removeLast()
@@ -220,6 +225,6 @@ struct LiveTextStabilizer {
         }
         // The words an earlier state lacks are part of what waits.
         let lacking = last.old + 1 < oldKeys.count ? ["\u{2026}"] + oldKeys[(last.old + 1)...] : []
-        return (text, Correction(old: Array(before) + lacking, new: Array(after)), earlier)
+        return (text, Correction(at: at, old: Array(before) + lacking, new: Array(after)), earlier)
     }
 }

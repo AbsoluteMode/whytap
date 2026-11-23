@@ -200,6 +200,36 @@ final class LiveTextStabilizerTests: XCTestCase {
         XCTAssertEqual(stabilizer.settled(now: 2.49 + stabilizer.confirmSeconds), "one changed two three four")
     }
 
+    func testTheSameWordCorrectedAtAnotherPlaceDoesNotInheritTheWait() {
+        var stabilizer = LiveTextStabilizer()
+        let line = "go to the store and go to the bank now"
+        stabilizer.reset(line)
+        XCTAssertEqual(stabilizer.shows("go into the store and go to the bank now", now: 1), line)
+        // The first "to" is back; the second one changes the same way.
+        XCTAssertEqual(stabilizer.shows("go to the store and go into the bank now", now: 2.48), line)
+        XCTAssertNil(stabilizer.settled(now: 2.5))
+        XCTAssertNil(stabilizer.settled(now: 2.48 + stabilizer.confirmSeconds - 0.01))
+        XCTAssertEqual(
+            stabilizer.settled(now: 2.48 + stabilizer.confirmSeconds),
+            "go to the store and go into the bank now"
+        )
+    }
+
+    @MainActor
+    func testARepeatedWordCorrectedAtAnotherPlaceWaitsInTheLine() {
+        let model = IslandLiveTextTickerModel()
+        model.wingWidth = 226
+        model.rewriteHoldSeconds = 0
+        let line = "go to the store and go to the bank now"
+        model.prime(line, now: 0)
+        model.textArrived("go into the store and go to the bank now", now: 1)
+        model.textArrived("go to the store and go into the bank now", now: 2.48)
+        model.advance(now: 2.5)
+        XCTAssertEqual(model.shownText, line)
+        model.advance(now: 2.48 + model.confirmSeconds)
+        XCTAssertEqual(model.shownText, "go to the store and go into the bank now")
+    }
+
     func testTheSameCorrectionKeepsItsWaitWhileNewWordsArrive() {
         var stabilizer = LiveTextStabilizer()
         stabilizer.reset("one two three four")

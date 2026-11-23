@@ -17,6 +17,14 @@ present; it does not prove that the provider accepts the key. Requests are
 billed by your provider. Whytap never switches to another provider or model on
 its own.
 
+## Speed
+
+On **Anthropic** and **OpenAI** the Agent asks the model for low effort, so a
+simple question is answered without long thinking; tool use stays. Models that
+do not take the setting keep their own default, and OpenRouter models are
+unchanged. An answer can be up to 16,384 tokens; a longer one says it reached
+the model's output limit.
+
 ## Answers and actions
 
 Links and returned file or folder paths appear as action cards with keyboard

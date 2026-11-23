@@ -339,14 +339,21 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Settings -> API & Models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
-  Anthropic uses Messages. Provider-native reasoning/tool items survive within
+  Anthropic uses Messages. Direct Anthropic and OpenAI requests ask for low
+  effort (NativeAgentEffort: output_config.effort / reasoning.effort, only on
+  models documented or catalogued to take it), allow 16,384 output tokens and
+  wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s and gets no effort.
+  A direct Anthropic plain-text reply is the answer, checked like finish_answer.
+  A cut answer reports the output limit. WHY:
+  .project-docs/decisions/2026-11-23-agent-low-effort.md Provider-native reasoning/tool items survive within
   the turn. OpenRouter continuations normalize tool arguments to JSON strings,
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
   raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
   reported usage is recorded. Native model requests also emit local
   unified-log events (native-agent): generated turn/request IDs, timings, counts,
-  tool/reasoning shape, status and fixed error hints only. No content, route
+  tool/reasoning shape, requested effort, token usage (input, output, thinking,
+  cache), status and fixed error hints only. No content, route
   strings, external IDs, keys or raw errors; search HTTP is not model traffic.
   The OS manages retention. Hints are mentions, not a proven cause. No provider fallback or model substitution. Connect checks only
   local key availability, model selection and writable workspace; it does not
@@ -1738,8 +1745,9 @@ meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
-only with a sole finish_answer call containing status, answer, insert_text, sources
-and actions.
+with a sole finish_answer call containing status, answer, insert_text, sources
+and actions; on direct Anthropic a plain-text reply with no tool call is also
+the answer, without cards.
 Strict tool schemas and application-required completion preserve the selected route.
 Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
 forced-tool HTTP400s; other Agent routes request required tool choice. In all cases

@@ -126,9 +126,10 @@ final class NativeAgentProvider: CLIProvider {
         for _ in 0..<12 {
             try Task.checkCancellation()
             var calls: [NativeAgentToolCall]
+            var text = ""
             do {
                 do {
-                    calls = try await model.next(tools: definitions, structuredCompletion: true).1
+                    (text, calls) = try await model.next(tools: definitions, structuredCompletion: true)
                 } catch NativeAgentError.service(_, let status, let shape) where !accepted && search.isBuiltIn
                             && ((status == 400 && shape.rejectsWebSearch == true)
                                 || (status == 403 && options.openCodeProvider == .openRouter
@@ -150,7 +151,7 @@ final class NativeAgentProvider: CLIProvider {
                     definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
                                                                          appControl: appControl != nil,
                                                                          tavilySearch: search == .tavily)
-                    calls = try await model.next(tools: definitions, structuredCompletion: true).1
+                    (text, calls) = try await model.next(tools: definitions, structuredCompletion: true)
                 }
                 accepted = true
             } catch {
@@ -170,25 +171,38 @@ final class NativeAgentProvider: CLIProvider {
             if calls.isEmpty, model.awaitingContinuation { continue }
             toolCount += calls.count
             guard toolCount <= 48 else { throw NativeAgentError.message("The agent reached its tool limit. Try a smaller task.") }
-            guard !calls.isEmpty else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-            if calls.count == 1, calls[0].name == NativeAgentFinalAnswer.toolName, model.pendingSearch {
+            let completion: NativeAgentFinalAnswer?
+            if calls.isEmpty {
+                // Direct Anthropic runs with tool_choice auto, and at low effort
+                // a short answer often comes as plain text: that text is the
+                // answer, checked like finish_answer's, without cards.
+                // WHY: .project-docs/decisions/2026-11-23-agent-low-effort.md
+                guard options.openCodeProvider == .anthropic, !model.pendingSearch,
+                      let plain = try? NativeAgentFinalAnswer(arguments: ["status": "answered", "answer": text,
+                                                                         "sources": [], "actions": []],
+                                                              openAICitations: false)
+                else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                completion = plain
+            } else if calls.count == 1, calls[0].name == NativeAgentFinalAnswer.toolName, model.pendingSearch {
                 // Anthropic runs a search requested beside a function call only
                 // in the next request; an answer written now has not seen it.
                 model.append(results: [(calls[0], .init(text: "Your web search has not returned yet. Call finish_answer again after its results."))])
                 continue
-            }
-            if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
+            } else if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
                 // Reject a mixed batch before executing it: a final response
                 // cannot know whether a sibling write/command will succeed.
                 guard calls.count == 1 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-                let final: NativeAgentFinalAnswer
                 do {
-                    final = try NativeAgentFinalAnswer(
+                    completion = try NativeAgentFinalAnswer(
                         arguments: calls[0].arguments,
                         openAICitations: options.openCodeProvider == .openAI
                             || (options.openCodeProvider == .openRouter && options.model?.lowercased().hasPrefix("openai/") == true))
                 }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+            } else {
+                completion = nil
+            }
+            if let final = completion {
                 // App-owned lines are literal text inside the Markdown answer.
                 let text = (changes.map(NativeAgentAppControl.markdownLiteral) + [final.visibleText]).joined(separator: "\n\n")
                 // Built-in search cited pages but the model listed no sources:

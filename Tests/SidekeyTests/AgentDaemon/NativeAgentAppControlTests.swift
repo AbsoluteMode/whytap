@@ -712,15 +712,15 @@ final class NativeAgentAppControlTests: XCTestCase {
         }
         XCTAssertEqual(e.vocabulary.terms, [persian])
         XCTAssertEqual(e.fillers.terms(), [persian])
-        let result = try await turn(e, "добавь __init__ в vocab", [
-            app("whytap_vocab_add", ["terms": ["__init__"]], id: "v"),
+        let result = try await turn(e, "добавь __init__ и &amp; в vocab", [
+            app("whytap_vocab_add", ["terms": ["__init__", "&amp;"]], id: "v"),
             final("Добавил.")
         ])
         let text = try XCTUnwrap(result.finalText)
-        XCTAssertEqual(text, "Vocab + \\_\\_init\\_\\_\n\nДобавил.")
+        XCTAssertEqual(text, "Vocab + \\_\\_init\\_\\_, \\&amp;\n\nДобавил.")
         let line = String(text.split(separator: "\n").first ?? "")
-        XCTAssertEqual(String(MarkdownAttributedRun.parseInline(line).characters), "Vocab + __init__")
-        XCTAssertEqual(result.labels.last { $0.hasPrefix("Vocab") }, "Vocab + __init__", "the step label is plain text")
+        XCTAssertEqual(String(MarkdownAttributedRun.parseInline(line).characters), "Vocab + __init__, &amp;")
+        XCTAssertEqual(result.labels.last { $0.hasPrefix("Vocab") }, "Vocab + __init__, &amp;", "the step label is plain text")
     }
 
     func testInvalidVocabTermsAddNothing() async {

@@ -284,7 +284,7 @@ enum NativeAgentAppControl {
     nonisolated static func markdownLiteral(_ line: String) -> String {
         var result = ""
         for character in line {
-            if "\\`*_~[]<>|#".contains(character) { result.append("\\") }
+            if "\\`*_~[]<>|#&".contains(character) { result.append("\\") }
             result.append(character)
         }
         return result

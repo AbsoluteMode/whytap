@@ -26,7 +26,7 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
     static func byok(_ provider: BYOKProvider) -> TranscriptionProviderBrand {
         switch provider {
         case .openAI:
-            return TranscriptionProviderBrand(assetName: "openai", label: "OpenAI")
+            return .openAI
         case .selfHosted:
             return TranscriptionProviderBrand(systemName: "server.rack", label: "Self-hosted")
         case .deepgram:
@@ -69,11 +69,14 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
     /// Brand shown while Drop's LLM cleanup runs directly through OpenRouter.
     static let openRouter = TranscriptionProviderBrand(assetName: "openrouter", label: "OpenRouter")
 
-    /// The SF Symbol for Anthropic, which has no brand asset in the bundle.
-    static let anthropicSystemName = "asterisk"
+    /// One mark per provider: a route on OpenAI's or Anthropic's own API shows
+    /// the bundled mark the Agent shows for that author's models.
+    static let openAI = TranscriptionProviderBrand(
+        assetName: AgentModelBrand.openai.assetName, label: "OpenAI")
 
-    /// Brand of an Agent route on Anthropic's own API.
-    static let anthropic = TranscriptionProviderBrand(systemName: anthropicSystemName, label: "Anthropic")
+    /// Brand of a route on Anthropic's own API (see `openAI`).
+    static let anthropic = TranscriptionProviderBrand(
+        assetName: AgentModelBrand.anthropic.assetName, label: "Anthropic")
 
     /// Brand shown while Drop's LLM cleanup runs through a custom
     /// OpenAI-compatible endpoint.
@@ -94,7 +97,7 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
         case .openRouter:
             return .openRouter
         case .openAI:
-            return TranscriptionProviderBrand(assetName: "openai", label: "OpenAI")
+            return .openAI
         case .anthropic:
             return .anthropic
         case .thisMac:

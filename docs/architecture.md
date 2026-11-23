@@ -314,6 +314,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   of the generic star; OpenRouter's hosting-provider pin does not change authorship.
   OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Mistral, Cohere and Perplexity have
   prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
+  One provider has one mark: an OpenAI or Anthropic account shows that same
+  bundled model-author mark wherever its provider is drawn (Drop and cleanup
+  tickers, API & Models, first-run keys), never a second asset or an SF Symbol.
   A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
   without keys/content/model requests; recording never waits for it. Cache I/O
   is off the main actor, failed refreshes retain usable artwork, and stale view
@@ -1717,8 +1720,9 @@ response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,
 whytap_meeting_transcript (by index or around a moment, bounded by replies and
-bytes, a longer reply continued by fromOffset) and whytap_meeting_open (busy
-while a note is being edited; a meeting link then shows nothing). One Yes covers future content and action tools
+bytes, a longer reply continued by fromOffset), whytap_meeting_open (busy
+while a note is being edited; a meeting link then shows nothing),
+whytap_vocab_add and whytap_filler_add. One Yes covers future content and action tools
 except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
@@ -1807,6 +1811,19 @@ only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
 or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
+(whytap_vocab_add, VocabularyCache.add/validate) and Filler
+(whytap_filler_add, FillerTermsStore.add/validate), 1–20 entries each, the
+editors' own stores and rules; open editors reload from the stores'
+notifications and every take reads the lists. One invalid entry adds nothing
+(line breaks and control characters are refused, joiners like U+200C pass);
+an existing entry is reported in its saved form, never rewritten. No read or
+removal, no per-route promise (each route sends what its model supports).
+External harnesses need HarnessAccessGate's Yes (gatedOperations), with
+HarnessConsent rechecked right before the write; the built-in Agent adds what
+the current request names. App-owned change lines are escaped as Markdown
+literals in the answer ("Vocab + __init__" renders as saved). WHY:
+.project-docs/decisions/2026-11-23-agent-drop-lists.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
@@ -2191,6 +2208,17 @@ FLAVOR=prod EXODIA_NOTARIZE=1 ./scripts/user-release.sh --build-only
 # Publishing also needs the project's Sparkle signing key and GitHub access
 FLAVOR=prod ./scripts/user-release.sh --upload-only
 ```
+
+Test runs play no sound. `SystemSoundGuard`
+(`Tests/SidekeyTests/Support/SystemSoundGuard.swift`, installed at bundle load
+by the `SidekeyTestBootstrap` target) turns the AppKit alert off for the test
+process and ends the run with a report naming each test that asked for a
+sound. A test whose key reaches the end of a window's responder chain, or that
+plays a sound file, fails: the app would beep for the user in the same place,
+so fix the app or wrap an intended case in `SystemSoundGuard.expectingSound { }`.
+A key sent through `NSApp.sendEvent` without a key window is only reported (a
+test process has no key window). WHY:
+`.project-docs/decisions/2026-11-23-silent-test-runs.md`.
 
 Whytap stays open source and uses ready-made community builds for normal installs
 and updates. The default DMG/Sparkle pipeline builds and signs locally with the

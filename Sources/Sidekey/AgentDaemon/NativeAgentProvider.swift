@@ -189,7 +189,8 @@ final class NativeAgentProvider: CLIProvider {
                             || (options.openCodeProvider == .openRouter && options.model?.lowercased().hasPrefix("openai/") == true))
                 }
                 catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-                let text = (changes + [final.visibleText]).joined(separator: "\n\n")
+                // App-owned lines are literal text inside the Markdown answer.
+                let text = (changes.map(NativeAgentAppControl.markdownLiteral) + [final.visibleText]).joined(separator: "\n\n")
                 // Built-in search cited pages but the model listed no sources:
                 // show the provider's citations, as Tavily results would be.
                 let cited = NativeAgentWebSearch.fallbackLinks(model.searchSources, existing: final.actions)

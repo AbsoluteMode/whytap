@@ -8,8 +8,9 @@ import SwiftUI
 // an aperture, a display with viewfinder corners. Rest: the purpose and
 // Allow. Waiting: where to turn Whytap on, with a quiet Open System Settings
 // and no spinner. Allowed: the figure plays its click and the step flows on.
-// Not on yet: one calm line and Allow again. Only the system's own check
-// moves a step on.
+// Not on yet: one calm line and Allow again. Unavailable (27.3 beta refused
+// the request without a dialog): an honest line and Continue. Only the
+// system's own check moves a step on.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 
 /// The four access steps and their words.
@@ -82,7 +83,7 @@ enum OnboardingAccessKind: CaseIterable {
 
     var notOnLine: String {
         switch self {
-        case .keyboard: return "Whytap isn’t on in \(pane) yet."
+        case .keyboard: return asksWithoutPane ? "Keyboard control isn’t on yet." : "Whytap isn’t on in \(pane) yet."
         case .microphone: return "Microphone access is still off."
         case .inputMonitoring: return "Input Monitoring isn’t on yet."
         case .screenRecording: return "\(pane) isn’t on yet."
@@ -90,6 +91,16 @@ enum OnboardingAccessKind: CaseIterable {
     }
 
     var isOptional: Bool { self == .screenRecording }
+
+    /// Keyboard control on 27.3: its pane lists Whytap only after "+", so the
+    /// step never points there.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    var asksWithoutPane: Bool { self == .keyboard && Self.protectionOverride }
+
+    /// A request this macOS beta refused without a dialog (27.3 beta 2).
+    static let unavailableTitle = "This macOS beta doesn’t let new apps ask yet."
+    static let unavailableDetail = "Apple’s temporary limit. Whytap asks again after an update."
+
 }
 
 // MARK: - Figures
@@ -491,6 +502,7 @@ struct OnboardingAccessFigure: View {
         case .waiting: strength = 0.86
         case .granted: tint = OnboardingWireframeInk.green; strength = 0.90
         case .notOn: tint = OnboardingWireframeInk.amber; strength = 0.80
+        case .unavailable: strength = 0.42
         }
         // While it waits, a light runs up the figure.
         let waveY: Double? = state == .waiting && !still
@@ -610,6 +622,7 @@ struct OnboardingAccessStage: View {
                 switch state {
                 case .rest, .notOn: model.requestAccess(kind.step)
                 case .waiting: model.recheckPermissions()
+                case .unavailable: model.next()
                 case .granted: break
                 }
             }
@@ -629,12 +642,14 @@ struct OnboardingAccessStage: View {
         switch state {
         case .rest:
             line(kind.purpose, color: OnboardingTheme.muted)
+        case .waiting where kind.asksWithoutPane:
+            // 27.3: the request is answered in macOS's own dialog or not at
+            // all; the pane would only offer "+".
+            line("Waiting for macOS’s answer.", color: OnboardingTheme.muted)
         case .waiting:
             VStack(spacing: 5) {
-                (kind == .keyboard && OnboardingAccessKind.protectionOverride
-                    ? Text("Drop is waiting for keyboard control across apps.")
-                    : Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
-                        + Text(", then come back here."))
+                (Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                    + Text(", then come back here."))
                     .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.muted)
                 HStack(spacing: 7) {
@@ -652,6 +667,20 @@ struct OnboardingAccessStage: View {
             line(kind.grantedLine, color: OnboardingWireframeInk.greenColor)
         case .notOn:
             line(kind.notOnLine, color: OnboardingWireframeInk.amberColor)
+        case .unavailable:
+            // macOS 27.3 beta refused the request without a dialog: say so
+            // plainly; no pane, no "+".
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            VStack(spacing: 5) {
+                Text(OnboardingAccessKind.unavailableTitle)
+                    .font(OnboardingTheme.sans(13.5, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.ink)
+                Text(OnboardingAccessKind.unavailableDetail)
+                    .font(OnboardingTheme.sans(13.5))
+                    .foregroundColor(OnboardingTheme.muted)
+            }
+            .multilineTextAlignment(.center)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -666,13 +695,13 @@ struct OnboardingAccessStage: View {
 
     @ViewBuilder private var links: some View {
         HStack(spacing: 14) {
-            if state == .waiting {
+            if state == .waiting, !kind.asksWithoutPane {
                 OnboardingWireLink(title: "Open System Settings", arrow: "arrow.up.right") {
                     motion.nudge()
                     model.openSystemSettings(for: kind.step)
                 }
             }
-            if kind.isOptional, state != .granted {
+            if kind.isOptional, state != .granted, state != .unavailable {
                 OnboardingWireLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
             }
         }
@@ -696,6 +725,9 @@ struct OnboardingAccessPill: View {
             OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
         case .notOn:
             OnboardingWirePill("Allow again", tone: .warn, isDefault: true, action: action)
+        case .unavailable:
+            OnboardingWirePill("Continue", isDefault: true, action: action)
+                .accessibilityHint("This macOS beta can't give Whytap this access yet")
         }
     }
 }

@@ -55,11 +55,6 @@ enum PermissionsHelper {
     static var usesProtectionOverridePane = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
 
-    /// After a screen request on 27.3 the onboarding also offers the system pane.
-    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    static var opensScreenSettingsAfterRequest = ProcessInfo.processInfo.isOperatingSystemAtLeast(
-        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
-
     /// macOS 15 and later put screen capture and audio-only consent in the same pane.
     static var screenPaneNamesSystemAudio = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))

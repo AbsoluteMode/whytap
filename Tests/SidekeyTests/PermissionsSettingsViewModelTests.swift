@@ -70,6 +70,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
             screenRecordingAccessProvider: { granted },
             screenRecordingRequester: { requests += 1; granted = true },
+            usesProtectionOverridePane: { false },
             runtimeRefresh: { _, _ in })
         XCTAssertEqual(requests, 0)
         await model.requestScreenRecording()
@@ -90,7 +91,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
                     continuation = pending
                     started.fulfill()
                 }
-            }, runtimeRefresh: { _, _ in })
+            }, usesProtectionOverridePane: { false }, runtimeRefresh: { _, _ in })
         let first = Task { await model.requestScreenRecording() }
         await fulfillment(of: [started], timeout: 1)
         XCTAssertTrue(model.isRequestingScreenRecording)
@@ -119,25 +120,121 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(events, ["request", "settings", "settings"])
     }
 
-    // macOS 27.3: the request shows no dialog and adds no row, so the first
-    // Allow also opens System & App Protection Override, where Whytap is
-    // added with +; a grant still stops both.
-    func testOnMacOS27_3TheFirstKeyboardAllowAsksAndOpensTheOverridePane() {
+    // macOS 27.3 beta: a new app's request shows no dialog and adds no row.
+    // Whytap never opens the Override pane (its "+" list); a request answered
+    // with neither a dialog nor access is recorded as refused, and the button
+    // stops asking.
+    func testOnMacOS27_3AKeyboardRequestWithoutADialogIsRefusedAndNeverOpensThePane() async {
         var events: [String] = []
+        let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in false }, defaults: nil)
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: false, microphoneStatus: .authorized) },
+            accessibilityRequester: { events.append("request") },
+            openAccessibilitySettings: { events.append("settings") },
+            usesProtectionOverridePane: { true }, refusals: refusals,
+            runtimeRefresh: { _, _ in })
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request"])
+        XCTAssertFalse(model.keyboardOpensSettings)
+        await eventually { model.keyboardUnavailable }
+        model.requestAccessibility()
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request"], "refused: no second request, never the pane")
+    }
+
+    // With macOS's own dialog on 27.3 nothing is refused; a press after it
+    // asks again rather than opening the pane.
+    func testOnMacOS27_3ADialogMeansNoRefusal() async {
+        var events: [String] = []
+        let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in true }, defaults: nil)
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: false, microphoneStatus: .authorized) },
+            accessibilityRequester: { events.append("request") },
+            openAccessibilitySettings: { events.append("settings") },
+            usesProtectionOverridePane: { true }, refusals: refusals,
+            runtimeRefresh: { _, _ in })
+        model.requestAccessibility()
+        await eventually { refusals.checking.isEmpty }
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(model.keyboardUnavailable)
+        model.requestAccessibility()
+        XCTAssertEqual(events, ["request", "request"])
+    }
+
+    // Access that arrives while macOS is watched is no refusal.
+    func testAGrantDuringTheWatchIsNoRefusal() async {
+        var granted = false
+        let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in
+            granted = true
+            return false
+        }, defaults: nil)
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
+            accessibilityRequester: {}, openAccessibilitySettings: {},
+            usesProtectionOverridePane: { true }, refusals: refusals,
+            runtimeRefresh: { _, _ in })
+        model.requestAccessibility()
+        await eventually { model.snapshot.accessibilityGranted }
+        XCTAssertFalse(model.keyboardUnavailable)
+        XCTAssertTrue(refusals.refused.isEmpty)
+    }
+
+    // A refusal is remembered for this macOS build only, and a later grant
+    // forgets it; where the old pane exists it never applies.
+    func testARefusalIsRememberedPerMacOSBuildAndClearedByAGrant() async throws {
+        let suite = "refusals-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let first = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in false },
+                                              defaults: defaults, build: "26C5047e")
+        let refused = await first.check(.keyboard, granted: { false })
+        XCTAssertTrue(refused)
+        XCTAssertEqual(PermissionRequestRefusals(applies: { true }, defaults: defaults, build: "26C5047e").refused, [.keyboard])
+        XCTAssertEqual(PermissionRequestRefusals(applies: { true }, defaults: defaults, build: "26C5050a").refused, [],
+                       "a macOS update asks again")
+        XCTAssertEqual(PermissionRequestRefusals(applies: { false }, defaults: defaults, build: "26C5047e").refused, [])
         var granted = false
         let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
             snapshotProvider: { .init(accessibilityGranted: granted, microphoneStatus: .authorized) },
-            accessibilityRequester: { events.append("request") },
-            openAccessibilitySettings: { events.append("settings") },
             usesProtectionOverridePane: { true },
+            refusals: PermissionRequestRefusals(applies: { true }, defaults: defaults, build: "26C5047e"),
             runtimeRefresh: { _, _ in })
-        model.requestAccessibility()
-        XCTAssertEqual(events, ["request", "settings"])
-        model.requestAccessibility()
-        XCTAssertEqual(events, ["request", "settings", "settings"])
+        XCTAssertTrue(model.keyboardUnavailable, "a relaunch shows the refusal without asking again")
         granted = true
-        model.requestAccessibility()
-        XCTAssertEqual(events, ["request", "settings", "settings"])
+        model.refresh()
+        XCTAssertFalse(model.keyboardUnavailable)
+        XCTAssertEqual(PermissionRequestRefusals(applies: { true }, defaults: defaults, build: "26C5047e").refused, [])
+    }
+
+    // Older macOS: no dialog on a repeated request is normal, never a refusal.
+    func testWithoutTheOverridePaneNothingIsEverRefused() async {
+        let refusals = PermissionRequestRefusals(applies: { false }, promptAppeared: { _ in false }, defaults: nil)
+        let refused = await refusals.check(.keyboard, granted: { false })
+        XCTAssertFalse(refused)
+        XCTAssertTrue(refusals.refused.isEmpty)
+    }
+
+    // Screen Recording on 27.3 beta: the same refusal; the next press opens
+    // no pane.
+    func testOnMacOS27_3AScreenRequestWithoutADialogIsRefusedAndOpensNoPane() async {
+        var events: [String] = []
+        let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
+            snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
+            screenRecordingAccessProvider: { false },
+            screenRecordingRequester: { events.append("request") },
+            usesProtectionOverridePane: { true },
+            openScreenRecordingSettings: { events.append("settings") },
+            refusals: PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in false }, defaults: nil),
+            runtimeRefresh: { _, _ in })
+        await model.requestScreenRecording()
+        XCTAssertTrue(model.screenUnavailable)
+        await model.requestScreenRecording()
+        XCTAssertEqual(events, ["request"])
+    }
+
+    private func eventually(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<300 where !condition() { try? await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(condition(), "Condition never became true", file: file, line: line)
     }
 
     func testKeyboardAllowAfterGrantNeitherAsksNorOpensSettings() {
@@ -162,6 +259,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
             screenRecordingAccessProvider: { false },
             screenRecordingRequester: { events.append("request") },
+            usesProtectionOverridePane: { false },
             openScreenRecordingSettings: { events.append("settings") },
             runtimeRefresh: { _, _ in })
         await model.requestScreenRecording()
@@ -179,6 +277,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
             snapshotProvider: { .init(accessibilityGranted: true, microphoneStatus: .authorized) },
             screenRecordingAccessProvider: { granted },
             screenRecordingRequester: { events.append("request") },
+            usesProtectionOverridePane: { false },
             openScreenRecordingSettings: { events.append("settings") },
             runtimeRefresh: { _, _ in })
         await model.requestScreenRecording()

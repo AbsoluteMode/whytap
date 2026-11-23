@@ -151,6 +151,10 @@ enum OnboardingAccessState: Equatable {
     case waiting
     case granted
     case notOn
+    /// This macOS refused the request without a dialog (27.3 beta): an
+    /// honest line and Continue, never the "+" list.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    case unavailable
 }
 
 /// What the shown step is doing: nothing yet, working, done (with what was
@@ -237,8 +241,8 @@ final class OnboardingJourneyModel: ObservableObject {
     let screenRecording: ScreenRecordingAccess
     private let dropSpeech: OnboardingDropSpeech
     private let openScreenRecordingSettings: () -> Void
-    private let opensScreenSettingsAfterRequest: () -> Bool
-    private var awaitingScreenRequest = false
+    /// The screen request is out and its answer not yet seen.
+    private var screenAsking = false
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -295,7 +299,6 @@ final class OnboardingJourneyModel: ObservableObject {
         preferences: PrivacyPreferences? = nil,
         screenRecording: ScreenRecordingAccess? = nil,
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
-        opensScreenSettingsAfterRequest: @escaping () -> Bool = { PermissionsHelper.opensScreenSettingsAfterRequest },
         defaultsChanges: NotificationCenter = .default,
         dwellWait: ((TimeInterval) async -> Void)? = nil,
         tavily: TavilySettings? = nil,
@@ -324,7 +327,6 @@ final class OnboardingJourneyModel: ObservableObject {
         self.preferences = preferences
         self.screenRecording = screenRecording
         self.openScreenRecordingSettings = openScreenRecordingSettings
-        self.opensScreenSettingsAfterRequest = opensScreenSettingsAfterRequest
         dwell = OnboardingDwellController(wait: dwellWait)
         pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
@@ -1163,12 +1165,25 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Where the access step stands, from the system's own answer: only a
     /// granted check moves it on; nothing here pretends.
     func accessState(_ step: OnboardingStep) -> OnboardingAccessState {
+        if accessUnavailable(step), !outcome(step).isDone { return .unavailable }
         switch outcome(step) {
         case .done: return .granted
         case .failed: return .notOn
         default: return requested.contains(step) ? .waiting : .rest
         }
     }
+
+    /// This macOS refused the step's request without a dialog.
+    func accessUnavailable(_ step: OnboardingStep) -> Bool {
+        switch step {
+        case .keyboard: return permissions.keyboardUnavailable
+        case .screenRecording: return permissions.screenUnavailable
+        default: return false
+        }
+    }
+
+    /// Drop can't run on this Mac for now: keyboard control was refused.
+    var dropUnavailable: Bool { permissions.keyboardUnavailable }
 
     /// The quiet "Open System Settings" while a step waits.
     func openSystemSettings(for step: OnboardingStep) {
@@ -1188,39 +1203,31 @@ final class OnboardingJourneyModel: ObservableObject {
     func recheckPermissions() {
         permissions.refresh(restartRecoveryPolling: false)
         guard [.keyboard, .microphone, .inputMonitoring, .screenRecording].contains(step),
-              requested.contains(step), !latest(step).isDone else { return }
+              requested.contains(step), !latest(step).isDone, !accessUnavailable(step) else { return }
         // macOS's own microphone dialog is still open: nothing was refused.
         if step == .microphone, permissions.snapshot.microphoneStatus == .notDetermined { return }
         outcomes[step] = .failed("Not on yet")
     }
 
     /// One request per launch, shared with Shot; afterwards System Settings.
+    /// On 27.3 beta the request can be refused without a dialog: the step
+    /// then says so and never opens the pane's "+" list.
     // WHY: .project-docs/decisions/2026-11-22-shot-single-permission-prompt.md
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     func requestScreenRecording() {
         asking(.screenRecording)
-        // The reported 27.3 flow needed Settings after the framework request.
-        // A returned request alone establishes neither a grant nor a Settings row.
-        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-        var after: (@MainActor () -> Void)?
-        if opensScreenSettingsAfterRequest() {
-            guard !awaitingScreenRequest else { return }
-            after = { [weak self] in
-                self?.awaitingScreenRequest = false
-                self?.openScreenPaneUnlessGranted()
+        // Refused, or the request's answer is still being watched: nothing to open.
+        guard !permissions.screenUnavailable, !screenAsking else { return }
+        switch screenRecording.requestOnce(afterRequest: { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.permissions.checkRefusal(.screen)
+                self?.screenAsking = false
             }
-        }
-        switch screenRecording.requestOnce(afterRequest: after) {
+        }) {
         case .granted: permissions.refresh(restartRecoveryPolling: false)
-        case .requested: awaitingScreenRequest = after != nil
+        case .requested: screenAsking = true
         case .alreadyRequested: openScreenRecordingSettings()
         }
-    }
-
-    private func openScreenPaneUnlessGranted() {
-        permissions.refresh(restartRecoveryPolling: false)
-        guard step == .screenRecording, requested.contains(.screenRecording),
-              pollTimer != nil, !permissions.screenRecordingGranted else { return }
-        openScreenRecordingSettings()
     }
 
     /// A permission that turns granted while its step is shown moves on; one
@@ -1231,6 +1238,10 @@ final class OnboardingJourneyModel: ObservableObject {
             .sink { [weak self] snapshot, screen, hotkey in
                 self?.permissionsChanged(snapshot: snapshot, screen: screen, hotkey: hotkey)
             }
+            .store(in: &subscriptions)
+        // A refusal found after a request changes the shown step.
+        permissions.refusals.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &subscriptions)
     }
 

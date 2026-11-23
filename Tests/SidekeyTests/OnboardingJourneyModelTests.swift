@@ -152,7 +152,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            realCatalogs: Bool = false, probe: ModelProbing? = nil,
                            heldForTeardown: Bool = true,
                            openScreenSettings: @escaping () -> Void = {},
-                           screenShowsNoDialog: Bool = false,
+                           refusals: PermissionRequestRefusals? = nil,
+                           keyboardRequest: @escaping () -> Void = {},
                            screenRequest: @escaping () async -> Void = {},
                            resumeDefaults: UserDefaults? = nil,
                            skipLanguage: Bool = true) throws -> OnboardingJourneyModel {
@@ -181,8 +182,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
             snapshotProvider: { snapshot.value }, screenRecordingAccessProvider: { screen.value },
-            screenRecordingRequester: {}, accessibilityRequester: {}, openAccessibilitySettings: {},
-            openScreenRecordingSettings: {}, runtimeRefresh: { _, _ in })
+            screenRecordingRequester: {}, accessibilityRequester: keyboardRequest, openAccessibilitySettings: {},
+            usesProtectionOverridePane: { refusals != nil },
+            openScreenRecordingSettings: {},
+            refusals: refusals ?? PermissionRequestRefusals(applies: { false }, defaults: nil),
+            runtimeRefresh: { _, _ in })
         let beat = env.beat
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
@@ -195,7 +199,6 @@ final class OnboardingJourneyModelTests: XCTestCase {
             preferences: PrivacyPreferences(defaults: env.defaults),
             screenRecording: ScreenRecordingAccess(isGranted: { screen.value }, request: screenRequest),
             openScreenRecordingSettings: openScreenSettings,
-            opensScreenSettingsAfterRequest: { screenShowsNoDialog },
             defaultsChanges: NotificationCenter(),
             dwellWait: { _ in await beat.wait() },
             tavily: tavily,
@@ -463,22 +466,60 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
     }
 
-    // macOS 27.3 shows no Screen Recording dialog: the pane opens once the
-    // request returned; older macOS leaves the first press to macOS's dialog.
-    func testOnMacOS27_3TheScreenAllowOpensTheScreenAndSystemAudioPane() async throws {
-        for noDialog in [true, false] {
+    // macOS 27.3 beta refuses a new app's Screen Recording request without
+    // a dialog: the step says so, offers Continue and never opens the pane
+    // (its "+" list). With a dialog, or on older macOS, nothing changes:
+    // the first press is macOS's, Allow again opens the pane.
+    func testAScreenRequestRefusedWithoutADialogSaysSoAndOpensNoPane() async throws {
+        for dialog in [false, true] {
             let env = try makeEnv(accessibility: true, microphone: .authorized)
             var opened = 0
-            let model = try makeModel(env, openScreenSettings: { opened += 1 }, screenShowsNoDialog: noDialog)
+            let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in dialog }, defaults: nil)
+            let model = try makeModel(env, openScreenSettings: { opened += 1 }, refusals: refusals)
             for _ in 0..<20 where model.step != .screenRecording { model.next() }
             XCTAssertEqual(model.step, .screenRecording)
             model.requestAccess(.screenRecording)
-            try await Task.sleep(for: .milliseconds(150))
-            XCTAssertEqual(opened, noDialog ? 1 : 0, "noDialog=\(noDialog)")
-            // Allow again opens the pane on both.
-            model.requestAccess(.screenRecording)
-            XCTAssertEqual(opened, noDialog ? 2 : 1, "noDialog=\(noDialog)")
+            XCTAssertEqual(model.accessState(.screenRecording), .waiting)
+            try await Task.sleep(for: .milliseconds(250))
+            if dialog {
+                XCTAssertEqual(model.accessState(.screenRecording), .waiting)
+                model.requestAccess(.screenRecording)
+                XCTAssertEqual(opened, 1, "after macOS's own dialog Allow again opens the pane")
+            } else {
+                XCTAssertEqual(model.accessState(.screenRecording), .unavailable)
+                model.requestAccess(.screenRecording)
+                model.recheckPermissions()
+                XCTAssertEqual(model.accessState(.screenRecording), .unavailable, "no Not on yet over the refusal")
+                XCTAssertEqual(opened, 0, "a refused request never opens the pane")
+                model.next()
+                XCTAssertNotEqual(model.step, .screenRecording, "Continue goes on")
+            }
         }
+    }
+
+    // The same for keyboard control: the step never hangs on Waiting and
+    // never reaches System & App Protection Override; Try Drop then says
+    // what Drop needs and lets the person continue.
+    func testAKeyboardRequestRefusedWithoutADialogSaysSoAndTryDropNeedsAccess() async throws {
+        let env = try makeEnv(accessibility: false, microphone: .notDetermined)
+        var asked = 0
+        let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in false }, defaults: nil)
+        let model = try makeModel(env, refusals: refusals, keyboardRequest: { asked += 1 })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        XCTAssertEqual(model.step, .keyboard)
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(asked, 1)
+        try await eventually { model.accessState(.keyboard) == .unavailable }
+        XCTAssertTrue(model.dropUnavailable)
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(asked, 1, "a refused request is not repeated")
+        model.next()
+        XCTAssertEqual(model.step, .microphone)
+        // A grant later (an update, or the person's own way) moves on as usual.
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertFalse(model.dropUnavailable)
+        XCTAssertTrue(refusals.refused.isEmpty)
     }
 
     func testPendingScreenRequestOpensNoPaneAfterSkipOrClose() async throws {
@@ -488,7 +529,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             let request = Beat()
             var returned = false
             let model = try makeModel(env, openScreenSettings: { opened += 1 },
-                                      screenShowsNoDialog: true, screenRequest: {
+                                      refusals: PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in true }, defaults: nil),
+                                      screenRequest: {
                 await request.wait()
                 returned = true
             })
@@ -1223,8 +1265,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
         OnboardingAccessMotion.settlesAtOnce = true
         defer { OnboardingAccessMotion.settlesAtOnce = false }
         for kind in OnboardingAccessKind.allCases {
-            for (name, state) in [("rest", OnboardingAccessState.rest), ("waiting", .waiting), ("granted", .granted),
-                                  ("not-on", .notOn)] {
+            var states: [(String, OnboardingAccessState)] = [("rest", .rest), ("waiting", .waiting), ("granted", .granted),
+                                                               ("not-on", .notOn)]
+            // REV 76: macOS 27.3 beta refused the request without a dialog.
+            if kind == .keyboard || kind == .screenRecording { states.append(("unavailable", .unavailable)) }
+            for (name, state) in states {
                 let stage = OnboardingAccessStage(kind: kind, model: model, shownState: state)
                     .frame(width: 520, height: 320)
                     .background(OnboardingTheme.bg)
@@ -1256,6 +1301,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
                                                         shownText: "Moving our sync to Thursday at 3. I’ll send the new invite tonight."))),
             ("try-failed", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
                                                           shownState: .failed(OnboardingJourneyModel.noSpeech)))),
+            ("try-needs-access", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
+                                                                shownState: .needsAccess))),
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
             ("finish", AnyView(OnboardingFinishStage(model: model, still: true))),

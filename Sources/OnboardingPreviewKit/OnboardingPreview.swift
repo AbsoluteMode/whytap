@@ -177,7 +177,6 @@ final class OnboardingPreviewSession {
             preferences: PrivacyPreferences(defaults: defaults),
             screenRecording: screenRecording,
             openScreenRecordingSettings: { system.grant { $0.screen = true } },
-            opensScreenSettingsAfterRequest: { false },
             defaultsChanges: NotificationCenter(),
             dwellWait: dwellWait,
             tavily: tavily,

@@ -8,4 +8,4 @@
 - The [Computer Use input-duplication bug](bugs/2026-10-20-computer-use-input-duplication.md)
   remains open. Its exact trigger and permanent fix are unknown; helper recovery
   and persistent-filter observations do not prove the native defect.
-- The clean macOS 27.3 beta 2 path for cross-app Drop and one-action screen capture remains open. [Evidence and acceptance limits](decisions/2026-11-23-keyboard-control-protection-override.md)
+- macOS 27.3 beta 2 refuses a new app's keyboard control and Screen Recording without a dialog; Whytap says so and lets setup continue, but Drop and Shot can't work for a new install there until Apple lifts the limit or publishes the entitlement. The refusal detector is not yet confirmed against the real dialogs. [Evidence and acceptance limits](decisions/2026-11-23-keyboard-control-protection-override.md)

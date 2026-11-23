@@ -1389,11 +1389,20 @@ display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
 (OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
 Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
-no spinner). On the owner's 27.3 beta 2 the Accessibility link opens
-System & App Protection Override. The first Allow opens the pane. A clean
-no-Add grant for Whytap is still an acceptance blocker. The screen step names
-both settings and confirms only the screen preflight. It opens Settings once
-after the framework returns on 27.3 while the step is still waiting. Audio-only
+no spinner). On 27.3 beta 2 the Accessibility link opens System & App
+Protection Override, where a new app gets in only with "+", which Whytap never
+sends a person to. After a keyboard or screen request, PermissionRequestRefusals
+watches 2.5 s for a new window of macOS's permission agents
+(universalAccessAuthWarn, UserNotificationCenter, SecurityAgent, System
+Settings); none and still no access is a refusal, checked only where the old
+pane is gone (27.3+), remembered per macOS build
+(`sidekey.permissions.refusedRequests.v1`) and cleared by any later grant. A
+refused step shows OnboardingAccessState.unavailable (an honest line about the
+beta and Continue, no pane, no Waiting), Try Drop shows `needsAccess` with
+Continue enabled, and Settings → Permissions and Drop's repair window show
+"Not available yet" instead of a button. On 27.3 the keyboard button never
+opens the Override pane. The screen step names both settings and confirms only
+the screen preflight. Audio-only
 consent is requested by the first recording from the Core Audio tap's aggregate
 device. Key steps offer the sole saved provider up front and list saved accounts
 by name. Return checks the selected saved key. The step on screen is kept in

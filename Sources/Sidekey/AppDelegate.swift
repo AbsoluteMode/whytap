@@ -573,7 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        visibleOnboarding?.bringForward()
+        visibleOnboarding?.bringForwardOnActivation(keyWindow: NSApp.keyWindow)
         refreshRuntimePermissions()
     }
 

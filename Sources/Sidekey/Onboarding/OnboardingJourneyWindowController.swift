@@ -65,6 +65,14 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// On activation (⌘Tab, the Dock): the onboarding comes up unless the
+    /// person activated Whytap through another of its windows (Settings
+    /// opened from a step), which stays in front.
+    func bringForwardOnActivation(keyWindow: NSWindow?) {
+        guard keyWindow == nil || keyWindow === window || keyWindow is NSPanel else { return }
+        bringForward()
+    }
+
     func show() {
         guard let window else { return }
         inAppSwitcher(true)

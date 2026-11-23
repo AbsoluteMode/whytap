@@ -2,7 +2,7 @@
 id: keyboard-control-protection-override-2026-11-23
 type: decision
 title: First-launch permissions and saved keys on macOS 27.3 beta 2
-summary: The draft preserves progress and distinguishes screen capture from system audio. Acceptance requires a clean user to complete the permission steps without the Add button and demonstrate Drop in another app.
+summary: Where macOS 27.3 beta refuses a new app's keyboard control or Screen Recording request without a dialog, Whytap says so plainly and lets the person continue; it never opens a pane whose only way in is the Add (+) button. Drop is not reworked for the beta.
 status: confirmed
 tags: [onboarding, permissions, accessibility, macos-27, keys]
 canonical_for: [keyboard-control-pane-name, onboarding-saved-keys-line]
@@ -32,6 +32,21 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingWireframe.swift
     confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Permissions/PermissionRequestRefusals.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Onboarding/OnboardingFinaleStages.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Permissions/PermissionRepairView.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Settings/SettingsPermissionsView.swift
+    confirmed_at: 2026-11-23
+  - type: user-confirmed
+    reference: On 2026-11-23 (onboarding specification 38 revision 76) the owner chose not to rework Drop for the beta, and asked that the refused steps say so in plain words and offer one Continue button, detected by the refused request rather than by a version number where possible.
+    confirmed_at: 2026-11-23
   - type: url
     reference: https://support.apple.com/en-us/149699
     confirmed_at: 2026-11-23
@@ -41,9 +56,27 @@ sources:
 related: [2026-11-19-permission-request-before-settings.md, 2026-11-22-onboarding-journey.md]
 ---
 
-# Release condition
+# Decision
 
-The owner requires a new user to finish setup without pressing Add in a privacy pane. The draft remains blocked until a signed, interactive acceptance run demonstrates global hold, transcription into a different app, Shot and audio capture. The owner supplied screenshots 69 through 72 and onboarding specification 38 revision 75.
+The owner requires that a new user never presses Add (+) in a privacy pane. On macOS 27.3 beta 2 a new app cannot get keyboard control or Screen Recording any other way, and Apple says known apps are not affected and entitlement details will follow. The owner chose (revision 76) not to rework Drop for a beta. So:
+
+- Where macOS shows its own dialog (every macOS before 27.3, and 27.3 if Apple lifts the limit), the steps behave as before.
+- Where the request is refused without a dialog, the keyboard step and the Screen & system audio step say "This macOS beta doesn't let new apps ask yet. Apple's temporary limit. Whytap asks again after an update." with one Continue button. They never open System & App Protection Override or the screen pane, and never sit on Waiting.
+- Try Drop then says in its field that Drop needs keyboard control which this beta doesn't give new apps yet, and Continue is enabled. Settings → Permissions and Drop's repair window show "Not available yet" with the same line instead of a button that would lead to "+".
+
+## How a refusal is detected
+
+By what happened, not by the version number alone (`PermissionRequestRefusals`):
+
+1. The request is sent (the AX prompt call, or the ScreenCaptureKit request).
+2. For 2.5 seconds Whytap watches for a new on-screen window of the agents that show permission dialogs (universalAccessAuthWarn, UserNotificationCenter, SecurityAgent) or of System Settings. Only window owners and numbers are read, which needs no Screen Recording.
+3. No new window and still no access means refused. Access during the wait, or any dialog, means not refused.
+
+The check runs only where the old Accessibility pane is gone (27.3 and later). On older macOS a request that shows no second dialog is normal (macOS asks once), and would otherwise be taken for a refusal. A refusal is stored with the macOS build (`sidekey.permissions.refusedRequests.v1`), so a relaunch or a Quit & Reopen shows it at once without asking again, and an OS update asks again. A later grant, however it came, clears it. On 27.3 the keyboard button never opens the Override pane, even after a dialog: it asks macOS again.
+
+Rejected: a pure version check (would stay wrong when Apple lifts the limit within 27.3); reading the TCC database or the unified log (needs privileges an app doesn't have); the CGPreflight results (they only say access is off, not whether macOS asked); opening the pane with instructions for "+" (the owner's hard rule).
+
+Not verified live: the detector against the real dialogs on this build and on an older macOS, and the activation guard below. Unit tests cover the refused, dialog, grant-during-wait, per-build memory and older-macOS cases with injected checks.
 
 ## Keyboard control
 
@@ -87,6 +120,6 @@ Meeting Notes and Subtitles use CoreAudioSystemAudioSource. An audio-only record
 
 ## Draft behavior and outstanding acceptance
 
-The language choice comes first. A sole saved key is offered on its provider's tab. Multiple saved keys remain available by name, with no route change until the user accepts. While the onboarding window is open, Whytap enters the app switcher, brings the visible window forward on activation, and preserves the pending step across an application quit. A permission step continues checking for a grant while it is on screen. The screen step only confirms screen access and drops a late settings action after the person leaves. Older versions retain their request-first behavior.
+The language choice comes first. A sole saved key is offered on its provider's tab. Multiple saved keys remain available by name, with no route change until the user accepts. While the onboarding window is open, Whytap enters the app switcher, brings the visible window forward on activation unless another Whytap window (Settings) was made key, and preserves the pending step across an application quit. A permission step continues checking for a grant while it is on screen, so a grant that arrives later still moves it on. Older versions retain their request-first behavior.
 
 The preview uses simulated permissions and in-memory keys. Its native window renders and model transitions exercise the owner-facing screens. It cannot verify the app switcher in the user's login, a real Quit & Reopen, a provider transcription or real permissions. Those gates require a separate interactive test login with a recognized test bundle. Product alternatives for Drop are the existing trusted event tap, an active input method, or an explicit registered shortcut with a manual paste. None is certified as the requested clean flow yet.

@@ -13,7 +13,9 @@ struct PermissionRepairView: View {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 0) {
                     MacGroupTitle(title: "Enable Drop")
-                    Text("Allow the items below, then press your Drop shortcut again. This window closes when Drop is ready.")
+                    Text(viewModel.keyboardUnavailable
+                         ? "Drop needs keyboard control, which this macOS beta doesn’t give new apps yet. Whytap asks again after a macOS update; until then this window can be closed."
+                         : "Allow the items below, then press your Drop shortcut again. This window closes when Drop is ready.")
                         .font(.system(size: 12))
                         .foregroundStyle(MacSettingsTheme.text2)
                         .padding(.horizontal, 6)
@@ -24,7 +26,8 @@ struct PermissionRepairView: View {
                     MacCard {
                         MacRow(
                             title: "Keyboard control",
-                            subtitle: "Required for Drop and the Agent. Allow Whytap under Accessibility or Device Control and Data Access in System Settings.",
+                            subtitle: viewModel.keyboardUnavailable ? PermissionsSettingsViewModel.unavailableLine
+                                : "Required for Drop and the Agent. Allow Whytap under Accessibility or Device Control and Data Access in System Settings.",
                             leading: {
                                 Image(systemName: "keyboard.fill")
                                     .font(.system(size: 14, weight: .medium))
@@ -34,11 +37,14 @@ struct PermissionRepairView: View {
                             trailing: {
                                 HStack(spacing: 10) {
                                     MacPill(
-                                        text: viewModel.snapshot.accessibilityGranted ? "Allowed" : "Required",
-                                        tone: viewModel.snapshot.accessibilityGranted ? .green : .orange,
+                                        text: viewModel.snapshot.accessibilityGranted ? "Allowed"
+                                            : viewModel.keyboardUnavailable ? "Not available yet" : "Required",
+                                        tone: viewModel.snapshot.accessibilityGranted ? .green
+                                            : viewModel.keyboardUnavailable ? .neutral : .orange,
                                         showsDot: true
                                     )
-                                    if !viewModel.snapshot.accessibilityGranted {
+                                    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+                                    if !viewModel.snapshot.accessibilityGranted, !viewModel.keyboardUnavailable {
                                         MacButton(title: "Open Settings", style: .default, action: viewModel.requestAccessibility)
                                     }
                                 }

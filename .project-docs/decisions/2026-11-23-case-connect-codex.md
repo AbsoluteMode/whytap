@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandCaseConnectedApps.swift
     confirmed_at: 2026-11-23
-related: [2026-10-21-case-connect-claude-code.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-20-harness-access.md]
+related: [2026-10-21-case-connect-claude-code.md]
 ---
 
 # Case Connect offers Codex; Whytap Agent wears the Agent orb

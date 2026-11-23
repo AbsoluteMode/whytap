@@ -87,7 +87,7 @@ it showed; older lines move up and leave at the top one line at a time. A very
 long original without a pause shows its newest lines beside the translation.
 Hover the box to
 reach the languages, **Stop** and **×**; they cover the top of the caption
-without moving it.
+without moving it and stay a second after the pointer leaves.
 In the Toolbox pane the original sits above its translation. **Copy
 translation** in the box's context menu copies the completed translations.
 
@@ -100,14 +100,16 @@ a denied grant cannot be reliably distinguished by the capture API.
 There is no separate speech model or LLM request: one OpenAI session receives the system audio and
 returns the translation together with the transcript of what it heard. Each
 translated sentence becomes a pair with the sentence of the original it
-translates; the sentence still being heard shows its original and the
+translates, also when the model translates two short sentences as one; the sentence still being heard shows its original and the
 translation so far, dimmed. A refused key, an empty OpenAI balance, a busy
 service, a target language OpenAI does not offer (Punjabi, for example) or a
 lost connection stops subtitles with a message saying which; finished pairs
 stay. It uses only the key saved in Whytap, not the standalone app's files.
 
-**Stop** stops capture, drains queued audio, waits up to ten seconds for speech
-finals and completes queued translations. Audio already captured at Stop is sent
+**Stop** shows the stopped box at once, with **Start** in place of Stop. In
+the background it drains queued audio, waits up to ten seconds for speech
+finals and completes queued translations; the last row settles where it is.
+**Start** during that time drops the unfinished tail. Audio already captured at Stop is sent
 before the speech provider receives its end-of-input signal. **Cancel**, closing the window or
 Mac sleep cancels immediately. Switching to Text leaves subtitles running;
 the Subtitles tool or the palette’s context menu reopens them. Updates defer app-initiated

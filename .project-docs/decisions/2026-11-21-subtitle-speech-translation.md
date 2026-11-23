@@ -41,7 +41,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/OpenAITranslateRecordedSession.swift
     confirmed_at: 2026-11-21
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md]
 ---
 
 # Subtitles on OpenAI live speech translation
@@ -87,7 +87,9 @@ their own OpenAI quota, with Whytap's pairs and look kept.
   a 1.2 s pause, or at a clause past 160 characters. Each cut takes the
   original's next sentence if that sentence ended (by `elapsed_ms`) no later
   than the translation; sentences that ended 5 s or more earlier join it (the
-  model merged them). Without a finished original sentence (a pause, whose
+  model merged them). Since 2026-11-23 a later sentence heard by the cut
+  joins too when the translation's length and delay fit it better
+  (2026-11-23-subtitle-pairs-close-speed.md). Without a finished original sentence (a pause, whose
   period arrives with the next word, or a sentence the model split) it takes
   the words heard up to the translation's position, whole words only. A
   period arriving after its pair closed is added to that pair.

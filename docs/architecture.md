@@ -511,8 +511,19 @@ Translation tools:
   input transcription, the heard original. SubtitleSpeechPairer cuts the
   translation at sentence ends (SubtitleSegmenter's sentence rules), 1.2 s
   pauses or a clause past 160 characters and matches the original's
-  sentence that ended (elapsed_ms) before it; the live pair shows whole
-  words only. Refused key, no credit, busy, unsupported language and a
+  sentence that ended (elapsed_ms) before it, plus later sentences the model
+  joined: of the sentence ends heard by the cut, the one whose length (the
+  session's translation-to-original ratio) and delay (the session's median)
+  fit the translation best. The live pair shows whole words only, a held last
+  word at most 0.3 s. × and the session button take their click in
+  TranslationPanel.sendEvent from frames they measured
+  (SubtitleOverlayHitTargets), like the island; the running overlay keeps
+  them 1 s after hover ends. Stop shows the stopped box at once
+  (SubtitlePhase.isRunning) while the tail settles; Start then drops it.
+  Audio is sent off the main actor; the caption publishes at most every
+  80 ms. The adapter and LiveSubtitleModel log only numbers: how far
+  elapsed_ms trails the audio sent. WHY:
+  .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md Refused key, no credit, busy, unsupported language and a
   dropped socket end the session with a named message; Costs estimates
   $3.06 per audio hour. WHY:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md

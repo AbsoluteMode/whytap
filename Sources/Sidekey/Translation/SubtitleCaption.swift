@@ -73,8 +73,7 @@ enum SubtitleCaption {
         switch phase {
         case .connecting: return "Connecting…"
         case .listening: return "Waiting for speech…"
-        case .finishing: return "Finishing…"
-        case .idle, .failed: return nil
+        case .idle, .failed, .finishing: return nil
         }
     }
 }

@@ -29,7 +29,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
     let text: TextTranslationModel
     let subtitles: LiveSubtitleModel
-    private let presentation = Presentation()
+    let presentation = Presentation()
+    /// × and the session button, clicked through the panel's `sendEvent`.
+    let hitTargets = SubtitleOverlayHitTargets()
     private var embeddingID: UUID?
     var isEmbedded: Bool { embeddingID != nil }
     private let panel: TranslationPanel
@@ -92,8 +94,10 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
                 self?.dismiss()
                 openSettings(feature)
             },
-            close: { [weak self] in self?.dismiss() }
+            close: { [weak self] in self?.dismiss() },
+            hitTargets: hitTargets
         ))
+        panel.hitTargets = hitTargets
         adoptTextWidth(restoredFrame: panel.frame)
         configureChrome(for: .text)
         let publish = { [weak self] in
@@ -309,6 +313,15 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
 }
 
 private final class TranslationPanel: NSPanel {
+    var hitTargets: SubtitleOverlayHitTargets?
     override var canBecomeKey: Bool { true }
+
+    // The overlay's buttons take their click here, where it always arrives,
+    // not through the first-mouse bridge that can drop it.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    override func sendEvent(_ event: NSEvent) {
+        if let hitTargets, hitTargets.handle(event, in: self) { return }
+        super.sendEvent(event)
+    }
     override func cancelOperation(_ sender: Any?) { close() }
 }

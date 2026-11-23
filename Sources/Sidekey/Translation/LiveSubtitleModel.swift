@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One phrase of speech and its translation, shown as a pair. The source is
 /// fixed when the phrase is committed; only its own translation fills it in.
@@ -22,6 +23,10 @@ struct SubtitleLine: Identifiable, Equatable {
 enum SubtitlePhase: Equatable {
     case idle, connecting, listening, finishing, failed
     var isActive: Bool { self == .connecting || self == .listening || self == .finishing }
+    /// Capture is on. After Stop (`finishing`) the overlay already shows the
+    /// session as stopped while the last translation arrives in the background.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    var isRunning: Bool { self == .connecting || self == .listening }
 }
 
 /// A bounded handoff prevents a slow socket from retaining unlimited system audio.
@@ -61,6 +66,8 @@ final class SubtitleAudioRelay: @unchecked Sendable {
 // WHY: .project-docs/decisions/2026-10-20-translation-tools.md
 @MainActor
 final class LiveSubtitleModel: ObservableObject {
+    /// Delay measurements only: never text, keys or audio.
+    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "subtitles")
     @Published var targetCode = "ru"
     @Published var sourceCode = "auto"
     @Published var showsOriginal = true
@@ -107,7 +114,7 @@ final class LiveSubtitleModel: ObservableObject {
     private var relay: SubtitleAudioRelay?
 
     init(
-        flushInterval: Duration = .milliseconds(100),
+        flushInterval: Duration = .milliseconds(80),
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = { CoreAudioSystemAudioSource() },
@@ -131,7 +138,17 @@ final class LiveSubtitleModel: ObservableObject {
     }
 
     @discardableResult func start() -> Task<Void, Never>? {
-        guard !phase.isActive else { return nil }
+        guard !phase.isRunning else { return nil }
+        if phase == .finishing {
+            // Start after Stop while the last translation still arrives: drop
+            // that tail and its capture, then start fresh.
+            let cleanup = cancel()
+            return Task { [weak self] in
+                await cleanup.value
+                guard let self, self.phase == .idle || self.phase == .failed else { return }
+                await self.start()?.value
+            }
+        }
         cleanupTask = nil
         generation = UUID()
         let token = generation
@@ -257,17 +274,25 @@ final class LiveSubtitleModel: ObservableObject {
             guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening else { return }
             self.stop()
         }
-        audioTask = Task { [weak self] in
+        // Audio goes out off the main actor: a busy caption never holds it
+        // back (the relay's 128 buffers would fill and stop the session).
+        // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+        nonisolated(unsafe) let session = translator
+        audioTask = Task.detached { [weak self] in
+            var heard = false
             do {
                 for try await pcm in relay.stream {
                     guard !Task.isCancelled else { return }
-                    if pcm.contains(where: { $0 != 0 }), self?.hasAudio == false { self?.hasAudio = true }
-                    await translator.sendAudio(pcm)
+                    if !heard, pcm.contains(where: { $0 != 0 }) {
+                        heard = true
+                        await MainActor.run { if self?.hasAudio == false { self?.hasAudio = true } }
+                    }
+                    await session.sendAudio(pcm)
                 }
                 guard !Task.isCancelled else { return }
-                await translator.endInput()
+                await session.endInput()
             } catch {
-                self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
+                await self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
             }
         }
         timer = Task { [weak self] in
@@ -283,10 +308,15 @@ final class LiveSubtitleModel: ObservableObject {
             switch event {
             case .source(let text, let elapsed):
                 pairer.addSource(text, elapsedMs: elapsed)
-                flushPairs(token: token)
+                publishSoon(token: token)
             case .translation(let text, let elapsed):
                 pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
-                flushPairs(token: token)
+                publishSoon(token: token)
+                // Numbers only: with the adapter's arrival log, whether a delay
+                // that grows builds up at the provider or before the caption.
+                let sent = Int(translator.acceptedAudioSeconds() * 1_000)
+                os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
+                       elapsed ?? -1, sent, sent - (elapsed ?? 0))
             case .closed:
                 closedCleanly = true
             case .failed(let failure):
@@ -314,8 +344,20 @@ final class LiveSubtitleModel: ObservableObject {
         setPhase(.idle)
     }
 
+    /// Deltas often arrive several at once: the caption is published at once
+    /// when the last publish is `publishInterval` old, otherwise by the flush
+    /// timer, so a burst redraws (and restarts its motion) once.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    static let publishInterval: TimeInterval = 0.08
+    private var lastPublish: TimeInterval = 0
+
+    private func publishSoon(token: UUID) {
+        if ProcessInfo.processInfo.systemUptime - lastPublish >= Self.publishInterval { flushPairs(token: token) }
+    }
+
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
+        lastPublish = ProcessInfo.processInfo.systemUptime
         let carry = pairer.takeCarry()
         if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
         for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
@@ -326,7 +368,7 @@ final class LiveSubtitleModel: ObservableObject {
             liveID = UUID()
             if lines.count > 40 { lines.removeFirst() }
         }
-        let row = pairer.showLive()
+        let row = pairer.showLive(now: ProcessInfo.processInfo.systemUptime)
         if live != row.source { live = row.source }
         if liveTranslation != row.translation { liveTranslation = row.translation }
     }

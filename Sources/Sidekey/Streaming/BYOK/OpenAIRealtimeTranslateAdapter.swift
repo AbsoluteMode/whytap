@@ -184,6 +184,17 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         }
     }
 
+    /// How far the model's position trails the audio sent so far, in audio
+    /// ms, when a delta arrives (numbers only). If it grows during a session,
+    /// the delay builds up at the provider; `LiveSubtitleModel` logs the same
+    /// when the delta is shown.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    private func logTrail(_ stream: StaticString, _ elapsed: Int?) {
+        let sent = lock.withLock { acceptedBytes } / 48 // 24 kHz PCM16: 48 bytes per ms
+        os_log("delta stream=%{public}s elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
+               "\(stream)", elapsed ?? -1, sent, sent - (elapsed ?? 0))
+    }
+
     /// Returns true when the session is over.
     private func handle(type: String, _ object: [String: Any]) -> Bool {
         os_log("translate event type=%{public}@", log: Self.log, type: .debug, type)
@@ -192,9 +203,15 @@ final class OpenAIRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         case "session.updated":
             resolveStart(.success(()))
         case "session.input_transcript.delta":
-            if let delta = object["delta"] as? String, !delta.isEmpty { continuation.yield(.source(delta, elapsedMs: elapsed)) }
+            if let delta = object["delta"] as? String, !delta.isEmpty {
+                logTrail("source", elapsed)
+                continuation.yield(.source(delta, elapsedMs: elapsed))
+            }
         case "session.output_transcript.delta":
-            if let delta = object["delta"] as? String, !delta.isEmpty { continuation.yield(.translation(delta, elapsedMs: elapsed)) }
+            if let delta = object["delta"] as? String, !delta.isEmpty {
+                logTrail("translation", elapsed)
+                continuation.yield(.translation(delta, elapsedMs: elapsed))
+            }
         case "session.closed":
             finish(.closed)
             return true

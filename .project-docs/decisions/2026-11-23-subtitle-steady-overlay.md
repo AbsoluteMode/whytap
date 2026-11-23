@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Translation/SubtitleSpeechPairer.swift
     confirmed_at: 2026-11-23
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md]
 ---
 
 # A steady subtitle overlay with a clickable Stop and a blurred background
@@ -122,7 +122,9 @@ a box that still changed size. Added:
   at the row's top. A 500-character original without punctuation no longer
   pushes its translation out of sight.
 - **One size through the whole session.** From Connecting to the end of
-  Finishing the caption keeps its size (`TranslationView.overlayCaption`). The
+  Finishing the caption keeps its size (`TranslationView.overlayCaption`).
+  Since 2026-11-23-subtitle-pairs-close-speed.md, Stop shows the stopped
+  box at once and Finishing runs behind it. The
   audio permissions link moved inside the caption. A Stop before the first
   words shows "Finishing…" instead of collapsing the box. A problem's message
   is smaller and hugs its text, so it and its button fit the 190 pt panel.

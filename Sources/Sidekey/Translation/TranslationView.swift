@@ -9,9 +9,17 @@ struct TranslationView: View {
     var embedded = false
     /// Closes the floating window; the embedded Toolbox pane has no close control.
     var close: () -> Void = {}
+    /// The floating overlay's window-level click dispatch for × and the
+    /// session button (nil in the Toolbox pane).
+    var hitTargets: SubtitleOverlayHitTargets?
     @FocusState private var inputFocused: Bool
     @State private var inputHovered = false
-    @State private var overlayHovered = false
+    /// The running overlay's controls: shown on hover and kept for
+    /// `controlsLinger` after the pointer leaves, so a press that briefly
+    /// loses hover (the panel turning key, a tooltip) still lands on Stop or ×.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    @State private var controlsShown = false
+    @State private var hideControls: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isText: Bool { presentation.mode == .text }
@@ -46,13 +54,13 @@ struct TranslationView: View {
         MacPopup(items: [.init(value: "auto", label: "Auto-detect")] + languageItems,
                  selection: $subtitles.sourceCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Speech")
-            .disabled(subtitles.phase.isActive)
+            .disabled(subtitles.phase.isRunning)
     }
 
     private var targetPicker: some View {
         MacPopup(items: languageItems, selection: $subtitles.targetCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Translate to")
-            .disabled(subtitles.phase.isActive)
+            .disabled(subtitles.phase.isRunning)
     }
 
     private var languageItems: [MacPopup<String>.Item] {
@@ -183,7 +191,7 @@ struct TranslationView: View {
                 let shape = Self.overlayCaption(phase: subtitles.phase, hasRows: !rows.isEmpty,
                                                 hasIssue: subtitles.issue != nil)
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
-                    if !subtitles.phase.isActive { subtitleControls }
+                    if !subtitles.phase.isRunning { subtitleControls }
                     if case .fixed(let height) = shape {
                         // As tall as the panel leaves, up to `height`.
                         caption(rows, height: height)
@@ -216,7 +224,7 @@ struct TranslationView: View {
                 // While running, the controls cover the top of the caption on
                 // hover instead of pushing it: Stop and × stay in one place.
                 .overlay(alignment: .top) {
-                    if subtitles.phase.isActive && overlayHovered {
+                    if subtitles.phase.isRunning && controlsShown {
                         subtitleControls
                             .padding(.horizontal, 16).padding(.vertical, 8)
                             .background(Color.black.opacity(0.88),
@@ -226,13 +234,26 @@ struct TranslationView: View {
                 }
                 .shadow(radius: 5)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
-                .onHover { overlayHovered = $0 }
+                .onHover(perform: overlayHover)
                 .contextMenu { subtitleMenu }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: overlayHovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controlsShown)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: subtitles.phase)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(10)
+        }
+    }
+
+    /// How long the running overlay keeps its controls after hover ends.
+    static let controlsLinger: Duration = .seconds(1)
+
+    private func overlayHover(_ hovering: Bool) {
+        hideControls?.cancel()
+        guard !hovering else { controlsShown = true; return }
+        hideControls = Task { @MainActor in
+            try? await Task.sleep(for: Self.controlsLinger)
+            guard !Task.isCancelled else { return }
+            controlsShown = false
         }
     }
 
@@ -254,16 +275,17 @@ struct TranslationView: View {
 
     enum OverlayCaption: Equatable { case hidden, hugging, fixed(CGFloat) }
 
-    /// The overlay caption's shape. While a session runs, from Connecting to
-    /// the end of Finishing, it keeps one size whatever it shows (a status,
-    /// no audio yet, a Stop before the first words), so the box and its hover
-    /// controls never move. After Stop the pairs keep a shorter fixed caption
-    /// under the controls; a problem hugs its message; idle and empty, the
-    /// box is just its controls.
+    /// The overlay caption's shape. While capture runs (Connecting and
+    /// listening) it keeps one size whatever it shows (a status, no audio
+    /// yet), so the box and its hover controls never move. Stop shows the
+    /// stopped box at once: the pairs keep a shorter fixed caption under the
+    /// controls while the last translation settles; a problem hugs its
+    /// message; empty, the box is just its controls.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
     static func overlayCaption(phase: SubtitlePhase, hasRows: Bool, hasIssue: Bool) -> OverlayCaption {
         if hasIssue { return .hugging }
-        if phase.isActive { return .fixed(captionHeight) }
+        if phase.isRunning { return .fixed(captionHeight) }
         return hasRows ? .fixed(stoppedCaptionHeight) : .hidden
     }
 
@@ -426,20 +448,31 @@ struct TranslationView: View {
         }
     }
 
-    @ViewBuilder private var sessionButton: some View {
+    /// What the session button does now: the window dispatches its click
+    /// through `hitTargets` with this action.
+    private func sessionAction() {
         switch subtitles.phase {
-        case .finishing:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Button("Cancel") { subtitles.cancel() }
-            }
+        case .connecting, .listening: subtitles.stop()
+        case .idle, .failed, .finishing: subtitles.start()
+        }
+    }
+
+    private var sessionButton: some View {
+        sessionButtonBody
+            .background(SubtitleOverlayHitReporter(control: .session, targets: hitTargets, activate: sessionAction))
+    }
+
+    @ViewBuilder private var sessionButtonBody: some View {
+        switch subtitles.phase {
         case .connecting:
             Button("Cancel") { subtitles.stop() }
         case .listening:
             Button("Stop", systemImage: "stop.fill") { subtitles.stop() }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Stop subtitles")
-        case .idle, .failed:
+        case .idle, .failed, .finishing:
+            // After Stop the session shows as stopped at once; the last
+            // translation still settles in the background.
             Button("Start", systemImage: "play.fill") { subtitles.start() }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Start subtitles")
@@ -448,12 +481,14 @@ struct TranslationView: View {
 
     private var closeButton: some View {
         Button(action: close) {
+            // A 28 pt target, Stop's height. No tooltip: its window could
+            // take hover from the running overlay's controls mid-press.
             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 22).contentShape(Rectangle())
+                .frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .help("Close")
+        .background(SubtitleOverlayHitReporter(control: .close, targets: hitTargets, activate: close))
         .accessibilityLabel("Close subtitles")
     }
 

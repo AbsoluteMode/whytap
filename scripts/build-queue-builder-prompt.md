@@ -105,7 +105,14 @@ holds it, leave the tickets queued and end your turn.
    when mechanical and safe; otherwise record it as a follow-up in the note
    and continue.
 4. Validate the final combined candidate: documentation checks, and for
-   runtime changes the build and the full `swift test`. Commands that run
+   runtime changes the build and the full `swift test`. Right before the full
+   suite run, in the integration worktree,
+   `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`.
+   While it reports a locked screen or a load above its limit, wait and check
+   again (up to 15 minutes) instead of running the suite; if it stays not
+   clear, return the ticket with a note that the environment, not the PR,
+   stopped it. Do not treat failures from a suite run under such load as PR
+   findings. Commands that run
    longer than a few minutes go to the background with output in a file.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.

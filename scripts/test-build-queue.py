@@ -5,12 +5,18 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 
 
 SCRIPT = Path(__file__).with_name("build-queue.py")
+
+
+# The suite runs inside agent sessions; their own identities must not leak into fixtures.
+HERMETIC_ENV = {k: v for k, v in os.environ.items()
+                if k not in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID")}
 
 
 class QueueTests(unittest.TestCase):
@@ -32,7 +38,7 @@ class QueueTests(unittest.TestCase):
     def call(self, *args, actor="builder", cwd=None, ok=True, env=None):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
-                                env={**os.environ, **(env or {})})
+                                env={**HERMETIC_ENV, **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -269,6 +275,173 @@ class QueueTests(unittest.TestCase):
                                      "CODEX_THREAD_ID": "some-other-thread"})
         self.assertTrue(json.loads(result.stdout)["claimed"])
 
+    def submit(self, *extra, env=None, ok=True):
+        return self.call("enqueue", "--pr", "https://github.com/example/app/pull/9", "--head",
+                         self.head, "--title", "Fixture", "--checks", "Fixture",
+                         "--acceptance", "Fixture", *extra, env=env, ok=ok)
+
+    def test_claude_code_author_is_detected_from_its_session_uuid(self):
+        session = "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"
+        result = self.submit(env={"CLAUDE_CODE_SESSION_ID": session})
+        self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
+                         ("claude", session))
+        self.assertEqual(result["delivery"], "harness_link")
+
+    def test_codex_thread_wins_over_a_claude_session_in_the_environment(self):
+        result = self.submit(env={"CODEX_THREAD_ID": "thread-1",
+                                  "CLAUDE_CODE_SESSION_ID": "0b0e6f3a-5d1c-4a8e-9f2b-7c3d1e2f4a5b"})
+        self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
+                         ("codex", "thread-1"))
+
+    def test_claude_display_name_is_refused_and_other_is_inbox_only(self):
+        error = self.submit("--source", "claude", "--session", "one-mcp", ok=False)["error"]
+        self.assertIn("UUID", error)
+        result = self.submit("--source", "other", "--session", "one-mcp")
+        self.assertEqual(result["delivery"], "inbox_only")
+
+    def test_metrics_count_returns_and_waits_without_writing(self):
+        first = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(first, "blocked")
+        second = self.commit({"fix.txt": "fixed"})
+        self.enqueue(head=second)
+        self.enqueue(2)
+        self.call("claim")
+        self.update(first + 1, "done")
+        self.call("claim")
+        self.call("set", "--ticket", str(first + 2), "--status", "pending_install",
+                  "--note", "Candidate signed; microphone in use", "--retry-install")
+        queue = self.repo / ".git" / "exodia-build-queue.sqlite3"
+        before = queue.stat().st_mtime_ns
+        result = subprocess.run(["python3", str(SCRIPT.with_name("build-queue-metrics.py")),
+                                 "--since", "2000-01-01"], cwd=self.repo, capture_output=True,
+                                text=True, env=HERMETIC_ENV, check=True)
+        metrics = json.loads(result.stdout)
+        self.assertEqual((metrics["tickets"], metrics["prs"]), (3, 2))
+        self.assertEqual(metrics["returns"]["total"], 1)
+        self.assertEqual(metrics["returns"]["per_pr"], {"0": 1, "1": 1})
+        self.assertEqual(metrics["pr_to_done_minutes"]["with_returns"]["n"], 1)
+        self.assertEqual(metrics["deferred_installs"], {"meeting or microphone": 1})
+        self.assertEqual(metrics["queue_wait_minutes"]["n"], 3)
+        self.assertEqual(queue.stat().st_mtime_ns, before)
+
+    def test_author_addresses_are_validated_whole_and_stored_canonically(self):
+        session = "0B0E6F3A-5D1C-4A8E-9F2B-7C3D1E2F4A5B"
+        stored = self.submit("--source", "claude", "--session", session)["ticket"]["session"]
+        self.assertEqual(stored, session.lower())
+        for bad in (session.lower() + "\n", " " + session.lower()):
+            self.assertIn("UUID", self.submit("--source", "claude", "--session", bad,
+                                              ok=False)["error"])
+            self.assertIn("UUID", self.submit(env={"CLAUDE_CODE_SESSION_ID": bad},
+                                              ok=False)["error"])
+        self.assertIn("letters", self.submit("--source", "codex", "--session", "thread 1",
+                                             ok=False)["error"])
+        self.assertIn("letters", self.submit(env={"CODEX_THREAD_ID": "thread-1\n"},
+                                             ok=False)["error"])
+
+    def metrics(self, since, until):
+        result = subprocess.run(["python3", str(SCRIPT.with_name("build-queue-metrics.py")),
+                                 "--since", since, "--until", until], cwd=self.repo,
+                                capture_output=True, text=True, env=HERMETIC_ENV, check=True)
+        return json.loads(result.stdout)
+
+    def test_metrics_use_only_events_before_the_cutoff_and_clip_waits(self):
+        first = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(first, "blocked")
+        second = self.enqueue(head=self.commit({"fix.txt": "fixed"}))["ticket"]["id"]
+        self.call("claim")
+        self.update(second, "done")
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        stamps = {"queued": "00:00", "in_progress": "00:10", "blocked": "01:05",
+                  "superseded": "01:06", "done": "01:08"}
+        for status, clock in stamps.items():
+            db.execute("UPDATE events SET created_at=? WHERE ticket=? AND status=?",
+                       (f"2026-01-01T{clock}:00+00:00", first, status))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T00:00:00+00:00' WHERE id=?",
+                   (first,))
+        for status, clock in (("queued", "01:06"), ("in_progress", "01:07"), ("done", "01:08")):
+            db.execute("UPDATE events SET created_at=? WHERE ticket=? AND status=?",
+                       (f"2026-01-01T{clock}:00+00:00", second, status))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T01:06:00+00:00' WHERE id=?",
+                   (second,))
+        db.commit()
+        db.close()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 waiting: screen locked",
+            "2026-01-01T00:10:00+00:00 watchdog: queue waits: screen locked",
+            "2026-01-01T00:30:00+00:00 waiting: load 50 on 14 CPUs (limit 28)",
+            "2026-01-01T00:40:00+00:00 starting codex builder session (queued)",
+            "2026-01-01T00:50:00+00:00 waiting: screen locked"]) + "\n")
+        metrics = self.metrics("2026-01-01T00:05:00+00:00", "2026-01-01T01:00:00+00:00")
+        self.assertEqual(metrics["returns"]["total"], 0)
+        self.assertEqual(metrics["status_at_cutoff"], {"in_progress": 1})
+        self.assertEqual(metrics["pr_to_done_minutes"]["with_returns"]["n"], 0)
+        self.assertEqual(metrics["attempts_open_at_cutoff"], 1)
+        self.assertEqual(metrics["queue_wait_minutes"]["n"], 1)  # carry-in queued at 00:00
+        self.assertEqual(metrics["environment_wait_minutes"], {"load": 10, "screen locked": 35})
+        later = self.metrics("2026-01-01T01:00:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(later["returns"]["total"], 1)
+        self.assertEqual(later["pr_to_done_minutes"]["with_returns"]["n"], 1)
+        self.assertEqual(later["builder_minutes_per_attempt"]["n"], 2)
+        self.assertEqual(later["environment_wait_minutes"], {"screen locked": 60})
+
+
+    def test_metrics_take_times_from_events_not_the_requeue_date(self):
+        ticket = self.enqueue()["ticket"]["id"]
+        self.call("claim")
+        self.update(ticket, "blocked")
+        self.update(ticket, "queued")  # requeue resets tickets.queued_at
+        self.call("claim")
+        self.update(ticket, "done")
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        ids = [r[0] for r in db.execute("SELECT id FROM events WHERE ticket=? ORDER BY id",
+                                        (ticket,))]
+        clocks = ["00:00", "00:10", "00:20", "01:05", "01:15", "01:25"]
+        for event_id, clock in zip(ids, clocks):
+            db.execute("UPDATE events SET created_at=? WHERE id=?",
+                       (f"2026-01-01T{clock}:00+00:00", event_id))
+        db.execute("UPDATE tickets SET queued_at='2026-01-01T01:05:00+00:00' WHERE id=?",
+                   (ticket,))
+        db.commit()
+        db.close()
+        early = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:55:00+00:00")
+        self.assertEqual(early["queue_wait_minutes"]["max"], 10)
+        whole = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(whole["queue_wait_minutes"], {"n": 2, "median": 10.0, "p75": 10.0,
+                                                       "p90": 10.0, "max": 10.0})
+        self.assertEqual(whole["pr_to_done_minutes"]["with_returns"]["max"], 85)
+
+    def test_meeting_wait_spans_its_rechecks_and_ends_at_idle(self):
+        self.enqueue()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T00:05:00+00:00 deferred install: next meeting check not due",
+            "2026-01-01T00:06:00+00:00 watchdog: install waits",
+            "2026-01-01T00:10:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T00:12:00+00:00 idle"]) + "\n")
+        metrics = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:30:00+00:00")
+        self.assertEqual(metrics["environment_wait_minutes"], {"meeting gate": 12})
+
+    def test_a_not_due_line_continues_a_meeting_wait_but_never_starts_one(self):
+        self.enqueue()
+        logs = self.repo / ".git" / "whytap-build-queue-logs"
+        logs.mkdir()
+        (logs / "watcher.log").write_text("\n".join([
+            "2026-01-01T00:00:00+00:00 deferred install: next meeting check not due",
+            "2026-01-01T00:04:00+00:00 idle",
+            "2026-01-01T01:00:00+00:00 deferred install: meeting gate is not clear",
+            "2026-01-01T01:05:00+00:00 deferred install: meeting gate is not clear; next "
+            "check not due",
+            "2026-01-01T01:07:00+00:00 idle"]) + "\n")
+        early = self.metrics("2026-01-01T00:00:00+00:00", "2026-01-01T00:30:00+00:00")
+        self.assertEqual(early["environment_wait_minutes"], {})
+        later = self.metrics("2026-01-01T00:30:00+00:00", "2026-01-01T02:00:00+00:00")
+        self.assertEqual(later["environment_wait_minutes"], {"meeting gate": 7})
 
 if __name__ == "__main__":
     unittest.main()

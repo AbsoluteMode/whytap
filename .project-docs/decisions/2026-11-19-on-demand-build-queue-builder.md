@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: scripts/test-build-queue-watcher.py
     confirmed_at: 2026-11-19
-related: [2026-10-19-build-queue.md, 2026-10-20-meeting-aware-builder-refresh.md, ../processes/shared-app-development.md, 2026-11-22-builder-blocks-once.md, 2026-11-23-builder-queue-watchdog.md, 2026-11-23-builder-queue-cheap-fixes.md]
+related: [2026-10-19-build-queue.md, 2026-10-20-meeting-aware-builder-refresh.md, ../processes/shared-app-development.md, 2026-11-22-builder-blocks-once.md, 2026-11-23-builder-queue-watchdog.md, 2026-11-23-builder-queue-cheap-fixes.md, 2026-11-23-builder-queue-group-install.md]
 ---
 
 # On-demand queue builder

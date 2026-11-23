@@ -553,5 +553,15 @@ class QueueTests(unittest.TestCase):
         self.call("ack", "--event", str(pending[0]["id"]))
         self.assertEqual(self.call("events", "--pending"), [])
 
+    def test_metrics_count_grouped_installs_apart_from_meetings(self):
+        for pr, note in ((1, "merged at abc; install grouped"), (2, "microphone in use")):
+            ticket = self.enqueue(pr)["ticket"]["id"]
+            self.call("claim")
+            self.call("set", "--ticket", str(ticket), "--status", "pending_install",
+                      "--retry-install", "--note", note)
+            self.update(ticket, "done")
+        metrics = self.metrics("2000-01-01", "2999-01-01")
+        self.assertEqual(metrics["deferred_installs"], {"grouped": 1, "meeting or microphone": 1})
+
 if __name__ == "__main__":
     unittest.main()

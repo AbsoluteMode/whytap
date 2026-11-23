@@ -155,7 +155,8 @@ def measure(root, since, until):
         for e in events[ticket_id]:
             if e["status"] == "pending_install" and inside(e):
                 note = e["note"].lower()
-                deferred["meeting or microphone" if re.search(r"microphone|meeting", note)
+                deferred["grouped" if "install grouped" in note
+                         else "meeting or microphone" if re.search(r"microphone|meeting", note)
                          else "screen locked" if "lock" in note else "other"] += 1
     unacknowledged = Counter(
         tickets[t]["source"] for t in tickets for e in events[t]

@@ -690,6 +690,17 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(len(self.sessions()), 2)
         self.assertEqual(self.statuses(), {ticket: "done"})
 
+    def test_a_grouped_install_waits_while_runtime_work_is_queued(self):
+        (self.control / "defer").touch()
+        (self.control / "meeting").touch()  # the gate would defer an install now
+        merged = self.enqueue(1)
+        self.watcher("run")  # merged, install grouped
+        (self.control / "defer").unlink()
+        self.enqueue(2)
+        result = self.watcher("run")
+        self.assertIn("builder session (queued)", result.stdout)  # no gate asked first
+        self.assertEqual(self.statuses()[merged], "done")  # the fake installs the group too
+
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400
         for output in ('{"load": %s, "cpus": 8}' % huge, '{"load": 1, "cpus": %s}' % huge,

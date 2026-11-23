@@ -65,7 +65,9 @@ holds it, leave the tickets queued and end your turn.
 3. For `retry_install` tickets a checked candidate is waiting only for a safe
    moment. Verify the candidate is still valid and still the right one (source
    SHA contains the ticket's change, signature, identity, higher
-   `CFBundleVersion`), then continue at the install step.
+   `CFBundleVersion`), then continue at the install step. A grouped install
+   (note "install grouped") has no candidate yet: package one from current
+   main, which contains every ticket of the group, and install it once.
 
 ## Each ticket
 
@@ -133,7 +135,18 @@ holds it, leave the tickets queued and end your turn.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.
 6. Tooling or documentation only: `done` with that explicit statement, no app
-   refresh. Runtime change: build the signed production candidate per
+   refresh. Runtime change, grouped install: when another runtime ticket can
+   be claimed now (`queued`, empty `waiting_for`), fewer than four merged
+   runtime tickets wait for an install, and neither this PR nor any of them
+   touches stored-data formats or migrations, permissions (TCC), Keychain,
+   signing or entitlements, or the updater, do not package: `set --status
+   pending_install --retry-install --note "merged at <main SHA>; install
+   grouped"`, list it under **Merged, not installed** in
+   `build/CURRENT_BUILD.md`, message the author and take the next ticket. A
+   PR of those kinds installs alone; install a waiting group before merging
+   it. After a verified install, set every ticket of the group `done` with
+   the running build and its own acceptance steps and empty that section.
+   Otherwise build the signed production candidate per
    `docs/build-and-release.md` (local build-only, no notarization, no upload),
    verify strict signature, Developer ID team from
    `Resources/developer-id-team.txt`, designated requirement against the

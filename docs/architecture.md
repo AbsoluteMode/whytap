@@ -1703,8 +1703,9 @@ response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,
 whytap_meeting_transcript (by index or around a moment, bounded by replies and
-bytes, a longer reply continued by fromOffset) and whytap_meeting_open (busy
-while a note is being edited; a meeting link then shows nothing). One Yes covers future content and action tools
+bytes, a longer reply continued by fromOffset), whytap_meeting_open (busy
+while a note is being edited; a meeting link then shows nothing),
+whytap_vocab_add and whytap_filler_add. One Yes covers future content and action tools
 except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
@@ -1794,16 +1795,17 @@ or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
-(whytap_vocab_add, VocabularyCache.add), Filler (whytap_filler_add,
-FillerTermsStore.add/validate) and Replace (whytap_replace_add,
-DropReplacementStore.add/validate), 1–20 entries each, the editors' and Drop
-learning's own stores and rules; open editors reload from the stores'
-notifications and every take reads the lists. One invalid entry adds nothing;
-an existing entry is reported in its saved form, never rewritten (a Replace
-rule for the same heard word that writes something else is "different" and
-kept); sentByCurrentDrop applies VocabularyBudget to the current Drop route.
-No read or removal. The prompt says to do such requests instead of describing
-steps; lines "Vocab + whytap", "Filler + ну", "Replace + гитхаб → GitHub". WHY:
+(whytap_vocab_add, VocabularyCache.add/validate) and Filler
+(whytap_filler_add, FillerTermsStore.add/validate), 1–20 entries each, the
+editors' own stores and rules; open editors reload from the stores'
+notifications and every take reads the lists. One invalid entry adds nothing
+(line breaks and control characters are refused, joiners like U+200C pass);
+an existing entry is reported in its saved form, never rewritten. No read or
+removal, no per-route promise (each route sends what its model supports).
+External harnesses need HarnessAccessGate's Yes (gatedOperations), with
+HarnessConsent rechecked right before the write; the built-in Agent adds what
+the current request names. App-owned change lines are escaped as Markdown
+literals in the answer ("Vocab + __init__" renders as saved). WHY:
 .project-docs/decisions/2026-11-23-agent-drop-lists.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and

@@ -38,7 +38,6 @@ final class NativeAgentAppControlTests: XCTestCase {
         let layout: HoverLayoutStore
         let vocabulary: VocabularyCache
         let fillers: FillerTermsStore
-        let replacements: DropReplacementStore
         let hotkeys: HotkeyPreferences
         let defaults: UserDefaults
     }
@@ -72,7 +71,6 @@ final class NativeAgentAppControlTests: XCTestCase {
         let hotkeys = HotkeyPreferences(defaults: defaults)
         let vocabulary = VocabularyCache(defaults: defaults)
         let fillers = FillerTermsStore(defaults: defaults)
-        let replacements = DropReplacementStore(defaults: defaults)
         // Drop dictates with Soniox, which sends Vocab with every take.
         routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropSmart)
@@ -83,7 +81,7 @@ final class NativeAgentAppControlTests: XCTestCase {
             activity: { .object(["drop": .string("idle")]) }, planner: { planner },
             googleCalendarReview: { false }, agentWorkspace: { directory.path },
             layout: { layout }, hotkeys: { hotkeys }, vocabulary: { vocabulary },
-            fillers: { fillers }, replacements: { replacements })
+            fillers: { fillers })
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -94,7 +92,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         }
         return Env(routing: routing, probe: probe, planner: planner, controller: controller, keys: keys,
                    directory: directory, http: NativeAgentHTTP(session: session),
-                   layout: layout, vocabulary: vocabulary, fillers: fillers, replacements: replacements,
+                   layout: layout, vocabulary: vocabulary, fillers: fillers,
                    hotkeys: hotkeys, defaults: defaults)
     }
 
@@ -668,7 +666,6 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(VocabularyCache(defaults: e.defaults).terms, ["whytap"])
         XCTAssertEqual(editor.terms, ["whytap"], "an open island editor reloads it")
         XCTAssertEqual(VocabularyBudget.terms(e.vocabulary.terms, for: .soniox), ["whytap"], "the next take sends it")
-        XCTAssertTrue(result.toolResults()[0].contains(#""sentByCurrentDrop":true"#), result.toolResults()[0])
         // The rule that makes the model do it instead of describing steps.
         let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
         XCTAssertTrue(system.contains("\"add whytap to vocab\" is whytap_vocab_add"))
@@ -685,7 +682,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         ])
         XCTAssertEqual(e.vocabulary.terms, ["WhyTap"])
         XCTAssertEqual(result.finalText, "WhyTap уже есть в Vocab.")
-        XCTAssertTrue(result.toolResults()[0].contains(#""result":"existing","sentByCurrentDrop":true,"term":"WhyTap""#), result.toolResults()[0])
+        XCTAssertTrue(result.toolResults()[0].contains(#""result":"existing","term":"WhyTap""#), result.toolResults()[0])
         XCTAssertFalse(result.labels.contains { $0.hasPrefix("Vocab +") })
     }
 
@@ -700,18 +697,30 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(result.finalText, "Vocab + Soniox, Whytap\n\nГотово.")
     }
 
-    /// The term fits Vocab but not ElevenLabs Live's 20-character keyterm:
-    /// saved, and the line says the current Drop route will not send it.
-    func testWordTheCurrentDropRouteCannotSendIsSavedWithANote() async throws {
+    /// Scripts that need joiners stay one word (Persian U+200C); a real line
+    /// break or tab does not pass. Saved spellings render literally.
+    func testJoinersPassLineBreaksDoNotAndSpellingsRenderLiterally() async throws {
         let e = try env()
-        e.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"), for: .dropFast)
-        e.routing.setRoute(FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"), for: .dropSmart)
-        let result = try await turn(e, "добавь Kubernetes Operator SDK в vocab", [
-            app("whytap_vocab_add", ["terms": ["Kubernetes Operator SDK"]], id: "v"),
+        let persian = "می\u{200C}خواهم"
+        for operation in ["vocab_add", "filler_add"] {
+            let ok = await e.controller.handle(AppControlRequest(operation, arguments: ["terms": .array([.string(persian)])]))
+            XCTAssertTrue(ok.ok, "\(operation): \(ok)")
+            for broken in ["a\u{2028}b", "a\tb", "a\rb"] {
+                let refused = await e.controller.handle(AppControlRequest(operation, arguments: ["terms": .array([.string("ok"), .string(broken)])]))
+                XCTAssertEqual(refused.data.object?["code"], .string("invalid_term"), "\(operation) \(broken.debugDescription)")
+            }
+        }
+        XCTAssertEqual(e.vocabulary.terms, [persian])
+        XCTAssertEqual(e.fillers.terms(), [persian])
+        let result = try await turn(e, "добавь __init__ в vocab", [
+            app("whytap_vocab_add", ["terms": ["__init__"]], id: "v"),
             final("Добавил.")
         ])
-        XCTAssertEqual(e.vocabulary.terms, ["Kubernetes Operator SDK"])
-        XCTAssertEqual(result.finalText, "Vocab + Kubernetes Operator SDK (no room in the current Drop route's limit)\n\nДобавил.")
+        let text = try XCTUnwrap(result.finalText)
+        XCTAssertEqual(text, "Vocab + \\_\\_init\\_\\_\n\nДобавил.")
+        let line = String(text.split(separator: "\n").first ?? "")
+        XCTAssertEqual(String(MarkdownAttributedRun.parseInline(line).characters), "Vocab + __init__")
+        XCTAssertEqual(result.labels.last { $0.hasPrefix("Vocab") }, "Vocab + __init__", "the step label is plain text")
     }
 
     func testInvalidVocabTermsAddNothing() async {
@@ -748,7 +757,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(existing.data.object?["terms"]?.array?.first?.object?["result"], .string("existing"))
     }
 
-    // MARK: Filler and Replace
+    // MARK: Filler
 
     /// "не только в vocab но и везде": Filler entries go through the Filler
     /// editor's store; an open editor reloads and the next take drops them.
@@ -765,7 +774,7 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(editor.terms, ["ну"], "an open Filler editor reloads it")
         XCTAssertFalse(DropFillerFilter.apply("ну давай созвонимся", removing: e.fillers.terms()).contains("ну "))
         let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
-        XCTAssertTrue(system.contains("is whytap_filler_add") && system.contains("is whytap_replace_add"))
+        XCTAssertTrue(system.contains("is whytap_filler_add"))
     }
 
     func testFillerDuplicatesAndLimitsAddNothing() async {
@@ -784,59 +793,6 @@ final class NativeAgentAppControlTests: XCTestCase {
         let full = await e.controller.handle(AppControlRequest("filler_add", arguments: ["terms": .array([.string("ещё")])]))
         XCTAssertEqual(full.data.object?["code"], .string("list_full"))
         XCTAssertEqual(e.fillers.terms().count, FillerTermsStore.maxTermCount)
-    }
-
-    /// A Replace rule: what dictation writes and what Drop pastes instead.
-    func testAddReplaceRuleAppliesToTheNextTake() async throws {
-        let e = try env()
-        let result = try await turn(e, "всегда пиши гитхаб как GitHub", [
-            app("whytap_replace_add", ["rules": [["heard": "гитхаб", "wanted": "GitHub"]]], id: "r"),
-            final("Готово.")
-        ])
-        XCTAssertEqual(result.finalText, "Replace + гитхаб → GitHub\n\nГотово.")
-        XCTAssertEqual(DropReplacementStore(defaults: e.defaults).replacements(), [DropReplacement(heard: "гитхаб", wanted: "GitHub")])
-        XCTAssertEqual(DropReplaceFilter.apply("открой гитхаб", rules: e.replacements.replacements()).text, "открой GitHub")
-    }
-
-    /// A rule for that word already exists: the same one is "existing", a
-    /// different one is kept and reported as "different"; nothing changes.
-    func testExistingReplaceRuleIsKept() async throws {
-        let e = try env()
-        e.replacements.add(DropReplacement(heard: "Гитхаб", wanted: "GitHub"))
-        let same = await e.controller.handle(AppControlRequest("replace_add", arguments: ["rules": .array([
-            .object(["heard": .string("гитхаб"), "wanted": .string("GitHub")])])]))
-        XCTAssertEqual(same.data.object?["rules"]?.array?.first?.object?["result"], .string("existing"))
-        let result = try await turn(e, "пиши гитхаб как github.com", [
-            app("whytap_replace_add", ["rules": [["heard": "гитхаб", "wanted": "github.com"]]], id: "r"),
-            final("Для «гитхаб» уже есть правило → GitHub, оставил его.")
-        ])
-        XCTAssertEqual(e.replacements.replacements(), [DropReplacement(heard: "Гитхаб", wanted: "GitHub")])
-        XCTAssertTrue(result.toolResults()[0].contains(#""heard":"Гитхаб","result":"different","wanted":"GitHub""#), result.toolResults()[0])
-        XCTAssertEqual(result.finalText, "Для «гитхаб» уже есть правило → GitHub, оставил его.")
-    }
-
-    func testInvalidReplaceRulesAddNothing() async {
-        let e = try! env()
-        let cases: [([String: Any], String)] = [
-            (["rules": [["heard": "GitHub", "wanted": "GitHub"]]], "invalid_term"),
-            (["rules": [["heard": " ", "wanted": "x"]]], "invalid_term"),
-            (["rules": [["heard": "раз два три четыре пять шесть", "wanted": "x"]]], "invalid_term"),
-            (["rules": [["heard": "ok", "wanted": String(repeating: "w", count: DropReplacementStore.maxWantedLength + 1)]]], "invalid_term"),
-            (["rules": [["heard": "a\nb", "wanted": "c"]]], "invalid_term"),
-            (["rules": [["heard": "гит", "wanted": "Git"], ["heard": "x", "wanted": "x"]]], "invalid_term"),
-            (["rules": [["heard": "гит"]]], "invalid_arguments"),
-            (["rules": [["heard": "гит", "wanted": "Git", "regex": true]]], "invalid_arguments"),
-            (["rules": ["гит → Git"]], "invalid_arguments"),
-            (["terms": ["гит"]], "invalid_arguments"),
-        ]
-        for (arguments, expected) in cases {
-            let result = await NativeAgentAppControl.execute(dispatch("whytap_replace_add", arguments)) { request in
-                await e.controller.handle(request)
-            }
-            XCTAssertTrue(result.text.contains(#""code":"\#(expected)""#), "\(arguments): \(result.text)")
-            XCTAssertNil(result.change)
-        }
-        XCTAssertEqual(e.replacements.replacements(), [])
     }
 
     // MARK: Catalog contract

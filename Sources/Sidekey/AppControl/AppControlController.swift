@@ -27,7 +27,7 @@ final class AppControlController {
     private let agentWorkspace: () -> String
     /// The island's tools and their hotkeys, through the Settings stores.
     private let toolbox: AppControlToolbox
-    /// Vocab, Filler and Replace entries, through the stores Drop reads at the next take.
+    /// Vocab and Filler entries, through the stores Drop reads at the next take.
     private let dropLists: AppControlDropLists
     private var mutating = false
 
@@ -41,19 +41,13 @@ final class AppControlController {
          layout: (@MainActor () -> HoverLayoutStore)? = nil,
          hotkeys: (@MainActor () -> HotkeyPreferences)? = nil,
          vocabulary: (@MainActor () -> VocabularyCache)? = nil,
-         fillers: (@MainActor () -> FillerTermsStore)? = nil,
-         replacements: (@MainActor () -> DropReplacementStore)? = nil) {
+         fillers: (@MainActor () -> FillerTermsStore)? = nil) {
         self.meetings = meetings
         self.toolbox = AppControlToolbox(layout: layout ?? { HoverLayoutStore.shared },
                                          hotkeys: hotkeys ?? { HotkeyPreferences.shared })
         self.agentWorkspace = agentWorkspace
-        let routingStore = routing ?? .shared
-        let preferenceStore = preferences ?? .shared
         self.dropLists = AppControlDropLists(vocabulary: vocabulary ?? { VocabularyCache.shared },
-                                             fillers: fillers ?? { FillerTermsStore() },
-                                             replacements: replacements ?? { DropReplacementStore() }, dropAccount: {
-            routingStore.route(for: preferenceStore.currentMode == .smart ? .dropSmart : .dropFast)?.account
-        })
+                                             fillers: fillers ?? { FillerTermsStore() })
         self.screenCapture = screenCapture ?? AgentScreenCapture()
         self.planner = planner ?? { PlannerStore.shared }
         self.routing = routing ?? .shared

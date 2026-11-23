@@ -12,7 +12,7 @@ struct HarnessAccessSettingsSection: View {
 
     static func subtitle(_ decision: HarnessDecision) -> String {
         switch decision {
-        case .allow: return "Reads your meetings and changes settings through the Whytap plugin."
+        case .allow: return "Reads your meetings, adds Vocab and Filler words and changes settings through the Whytap plugin."
         case .deny: return "Not allowed to use Whytap."
         }
     }

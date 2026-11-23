@@ -1,49 +1,40 @@
 import Foundation
 import WhytapCaseKit
 
-/// Adds entries to Drop's three lists for the application controls, each
-/// through the store and checks the app itself uses:
+/// Adds entries to Drop's hand-filled lists for the application controls,
+/// each through the store and checks the app itself uses:
 /// - Vocab (`vocab_add`): `VocabularyCache.add`, the island editor's rules;
 ///   words dictation should spell right.
 /// - Filler (`filler_add`): `FillerTermsStore.add`, the Filler editor's rules;
 ///   words Drop removes from a take.
-/// - Replace (`replace_add`): `DropReplacementStore.add`, Drop learning's
-///   rules; what Drop writes instead of a heard word.
 /// The editors reload from the stores' change notifications and every take
 /// reads the lists again. Additive and retry-safe: an entry already there is
 /// reported with its saved form, never rewritten. No read, no removal.
+/// External harnesses reach these only through `HarnessAccessGate`.
 // WHY: .project-docs/decisions/2026-11-23-agent-drop-lists.md
 @MainActor
 struct AppControlDropLists {
-    static let operations: Set<String> = ["vocab_add", "filler_add", "replace_add"]
+    static let operations: Set<String> = ["vocab_add", "filler_add"]
     static let maxBatch = 20
 
     let vocabulary: () -> VocabularyCache
     let fillers: () -> FillerTermsStore
-    let replacements: () -> DropReplacementStore
-    /// The speech account of the Drop route the next take uses, if any.
-    let dropAccount: () -> ProviderAccount?
 
     private struct Row {
-        let requested: String
+        let term: String
         let result: String
-        let saved: AppControlValue
+        let saved: String
     }
 
     func handle(_ operation: String, _ args: [String: AppControlValue]) -> AppControlResponse {
-        let field = operation == "replace_add" ? "rules" : "terms"
-        guard Set(args.keys) == [field], let items = args[field]?.array, (1...Self.maxBatch).contains(items.count) else {
-            return .failure("invalid_arguments", "Pass \(field): 1–\(Self.maxBatch) entries.")
+        guard Self.operations.contains(operation) else {
+            return .failure("unknown_operation", "Unknown application-control operation.")
         }
-        switch operation {
-        case "vocab_add": return addTerms(items, list: "Vocab")
-        case "filler_add": return addTerms(items, list: "Filler")
-        case "replace_add": return addRules(items)
-        default: return .failure("unknown_operation", "Unknown application-control operation.")
+        guard Set(args.keys) == ["terms"], let items = args["terms"]?.array, (1...Self.maxBatch).contains(items.count) else {
+            return .failure("invalid_arguments", "Pass terms: 1–\(Self.maxBatch) entries.")
         }
+        return addTerms(items, list: operation == "vocab_add" ? "Vocab" : "Filler")
     }
-
-    // MARK: Vocab and Filler
 
     private func addTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
         let vocab = list == "Vocab"
@@ -69,10 +60,10 @@ struct AppControlDropLists {
             switch reason {
             case nil:
                 planned.append(term)
-                rows.append(Row(requested: term, result: "added", saved: .string(term)))
+                rows.append(Row(term: term, result: "added", saved: term))
             case .duplicate?:
                 let saved = planned.first { $0.caseInsensitiveCompare(term) == .orderedSame } ?? term
-                rows.append(Row(requested: term, result: "existing", saved: .string(saved)))
+                rows.append(Row(term: term, result: "existing", saved: saved))
             case .empty?:
                 return Self.rejected(term, "is empty")
             case .tooLong?:
@@ -83,95 +74,33 @@ struct AppControlDropLists {
                 return .failure("list_full", "\(list) already holds \(limit) entries. Nothing was added; the user can remove some in the island's \(list).")
             }
         }
+        // Access may have been turned off while the request waited. Nothing
+        // suspends between this check and the writes.
+        if rows.contains(where: { $0.result == "added" }),
+           let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
+            return .failure("access_denied", "The user has turned this tool's access to Whytap off. Do not retry.")
+        }
         for row in rows where row.result == "added" {
-            let added = vocab ? vocabulary().add(row.requested) == .added : fillers().add(row.requested) == .added
+            let added = vocab ? vocabulary().add(row.term) == .added : fillers().add(row.term) == .added
             guard added else { return .failure("unconfirmed", "\(list) changed while adding; retry.") }
         }
         // Confirm from the saved list, not from the request.
         let saved = vocab ? vocabulary().terms : fillers().terms()
-        guard rows.allSatisfy({ row in saved.contains { .string($0) == row.saved } }) else {
+        guard rows.allSatisfy({ row in saved.contains(row.saved) }) else {
             return .failure("unconfirmed", "The saved \(list) does not contain the change.")
         }
-        let transport = vocab ? dropAccount().map(VocabularyTransport.realtime(for:)) : nil
-        let sent = transport.map { VocabularyBudget.terms(saved, for: $0) }
         return .success(.object([
-            "terms": .array(rows.map { row -> AppControlValue in
-                var object: [String: AppControlValue] = ["term": row.saved, "result": .string(row.result)]
-                if let sent, let term = row.saved.string {
-                    object["sentByCurrentDrop"] = .bool(sent.contains { $0.caseInsensitiveCompare(term) == .orderedSame })
-                }
-                return .object(object)
-            }),
-            "count": .int(saved.count)
+            "terms": .array(rows.map { .object(["term": .string($0.saved), "result": .string($0.result)]) })
         ]))
     }
 
-    // MARK: Replace
-
-    private func addRules(_ items: [AppControlValue]) -> AppControlResponse {
-        let store = replacements()
-        var planned = store.replacements()
-        var rows: [Row] = []
-        for item in items {
-            guard let object = item.object, Set(object.keys) == ["heard", "wanted"],
-                  let heardText = object["heard"]?.string, let wantedText = object["wanted"]?.string else {
-                return .failure("invalid_arguments", "Each rule is {heard, wanted}: what dictation writes and what to paste instead.")
-            }
-            let rule = DropReplacement(heard: heardText.trimmingCharacters(in: .whitespacesAndNewlines),
-                                       wanted: wantedText.trimmingCharacters(in: .whitespacesAndNewlines))
-            let shown = "\(rule.heard) → \(rule.wanted)"
-            guard Self.oneLine(rule.heard), Self.oneLine(rule.wanted) else { return Self.rejected(shown, "is not one line") }
-            switch DropReplacementStore.validate(rule, against: planned) {
-            case .added:
-                planned.append(rule)
-                rows.append(Row(requested: shown, result: "added", saved: Self.value(rule)))
-            case .rejected(.duplicate):
-                // A rule for that word exists: keep it, whatever it writes.
-                let saved = planned.first { $0.heard.caseInsensitiveCompare(rule.heard) == .orderedSame } ?? rule
-                rows.append(Row(requested: shown, result: saved.wanted == rule.wanted ? "existing" : "different",
-                                saved: Self.value(saved)))
-            case .rejected(.empty):
-                return Self.rejected(shown, "has an empty side")
-            case .rejected(.identical):
-                return Self.rejected(shown, "replaces a word with itself")
-            case .rejected(.tooLong):
-                return Self.rejected(shown, "is too long: heard is at most \(DropReplacementStore.maxHeardLength) characters and \(DropReplacementStore.maxHeardWords) words, wanted at most \(DropReplacementStore.maxWantedLength) characters")
-            case .rejected(.tooMany):
-                return .failure("list_full", "Replace already holds \(DropReplacementStore.maxCount) rules. Nothing was added.")
-            }
+    /// One line: no line breaks or control characters. Format characters such
+    /// as the zero-width non-joiner (U+200C) that Persian and other scripts
+    /// need stay, as the stores and editors accept them.
+    static func oneLine(_ text: String) -> Bool {
+        !text.unicodeScalars.contains { scalar in
+            scalar.properties.generalCategory == .control || CharacterSet.newlines.contains(scalar)
         }
-        for row in rows where row.result == "added" {
-            guard let rule = Self.rule(row.saved), store.add(rule) == .added else {
-                return .failure("unconfirmed", "Replace changed while adding; retry.")
-            }
-        }
-        let saved = store.replacements()
-        guard rows.allSatisfy({ row in Self.rule(row.saved).map(saved.contains) == true }) else {
-            return .failure("unconfirmed", "The saved Replace list does not contain the change.")
-        }
-        return .success(.object([
-            "rules": .array(rows.map { row in
-                var object = row.saved.object ?? [:]
-                object["result"] = .string(row.result)
-                return .object(object)
-            }),
-            "count": .int(saved.count)
-        ]))
-    }
-
-    private static func value(_ rule: DropReplacement) -> AppControlValue {
-        .object(["heard": .string(rule.heard), "wanted": .string(rule.wanted)])
-    }
-
-    private static func rule(_ value: AppControlValue) -> DropReplacement? {
-        guard let heard = value.object?["heard"]?.string, let wanted = value.object?["wanted"]?.string else { return nil }
-        return DropReplacement(heard: heard, wanted: wanted)
-    }
-
-    // MARK: Shared
-
-    private static func oneLine(_ text: String) -> Bool {
-        !text.unicodeScalars.contains { CharacterSet.newlines.union(.controlCharacters).contains($0) }
     }
 
     private static func rejected(_ entry: String, _ reason: String) -> AppControlResponse {

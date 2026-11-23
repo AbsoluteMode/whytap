@@ -106,7 +106,8 @@ final class AgentSettingsStore: ObservableObject {
                                    // Read from defaults: a synced choice applies at once.
                                    preferTavilySearch: defaults.string(forKey: Keys.webSearchChoice) == AgentWebSearchChoice.tavily.rawValue,
                                    webSearchSupport: selectedWebSearchSupport,
-                                   lowEffortSupport: selectedCatalogEntry?.supportsLowEffort)
+                                   lowEffortSupport: selectedCatalogEntry?.supportsLowEffort,
+                                   outputTokenLimit: selectedCatalogEntry?.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil })
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,

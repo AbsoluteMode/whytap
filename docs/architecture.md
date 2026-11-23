@@ -341,9 +341,11 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
   Anthropic uses Messages. Direct Anthropic and OpenAI requests ask for low
   effort (NativeAgentEffort: output_config.effort / reasoning.effort, only on
-  models documented or catalogued to take it), allow 16,384 output tokens and
+  models documented or catalogued to take it), allow 16,384 output tokens (or
+  the catalog's lower limit, even without a context length) and
   wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s and gets no effort.
-  A direct Anthropic plain-text reply is the answer, checked like finish_answer.
+  A finished direct Anthropic plain-text reply (end_turn, text blocks only) is
+  the answer, checked like finish_answer; cards come from its text as usual.
   A cut answer reports the output limit. WHY:
   .project-docs/decisions/2026-11-23-agent-low-effort.md Provider-native reasoning/tool items survive within
   the turn. OpenRouter continuations normalize tool arguments to JSON strings,
@@ -1746,8 +1748,9 @@ meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 with a sole finish_answer call containing status, answer, insert_text, sources
-and actions; on direct Anthropic a plain-text reply with no tool call is also
-the answer, without cards.
+and actions; on direct Anthropic a finished plain-text reply (end_turn, text
+blocks only, no tool call) is also the answer, with no sources or actions of its
+own; links, paths and commands in its text become cards as for every answer.
 Strict tool schemas and application-required completion preserve the selected route.
 Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
 forced-tool HTTP400s; other Agent routes request required tool choice. In all cases

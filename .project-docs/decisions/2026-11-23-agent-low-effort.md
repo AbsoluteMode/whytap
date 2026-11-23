@@ -2,7 +2,7 @@
 id: agent-low-effort-2026-11-23
 type: decision
 title: The built-in Agent asks Anthropic and OpenAI models for low effort
-summary: Direct Anthropic requests send output_config.effort low and direct OpenAI Responses requests send reasoning.effort low, only to models documented to take it; a plain-text Anthropic reply is the answer, the direct output cap is 16,384 tokens with a 180-second wait, a cut answer says so, and diagnostics record the effort and token usage. OpenRouter is unchanged.
+summary: Direct Anthropic requests send output_config.effort low and direct OpenAI Responses requests send reasoning.effort low, only to models documented to take it; a finished plain-text Anthropic reply (end_turn, text blocks only) is the answer, the direct output cap is 16,384 tokens or the catalog's lower limit with a 180-second wait, a cut answer says so, and diagnostics record the effort and token usage. OpenRouter is unchanged.
 status: confirmed
 tags: [agent, native-agent, anthropic, openai, effort, latency, diagnostics]
 canonical_for: [agent-effort]
@@ -61,15 +61,23 @@ chose low effort for the Agent on Anthropic and OpenAI.
     effort lets it skip thinking on simple requests.
 - **Plain-text answers on Anthropic.** Direct Anthropic runs with
   `tool_choice: auto` (forced tool choice is refused), and at low effort a
-  short answer often comes as plain text instead of `finish_answer`. That text
-  is now the answer: it goes through the same `NativeAgentFinalAnswer` checks
-  (nonempty, not a bare link list, length) as status answered with no cards,
-  is saved to the conversation, and app-owned change lines still come first.
-  An unanswered search keeps it invalid. OpenAI (required tool choice) cannot
-  produce it; OpenRouter keeps the structured-only rule.
+  short answer often comes as plain text instead of `finish_answer`. A
+  finished reply is now the answer: `stop_reason: end_turn` and only `text`
+  blocks (thinking blocks allowed), no tool call. A `tool_use` stop, a server
+  tool block or any unknown block type keeps the turn invalid, and text is
+  read only from `text` blocks. The reply goes through the same
+  `NativeAgentFinalAnswer` checks (nonempty, not a bare link list, length) as
+  status answered with no sources or actions of its own; like every answer,
+  links, paths and commands in its text become cards
+  (`NativeAgentAnswerArtifacts`), so it shows the cards a `finish_answer` with
+  the same text would. It is saved to the conversation, and app-owned change
+  lines still come first. OpenAI (required tool choice) cannot produce it;
+  OpenRouter keeps the structured-only rule.
 - **Output cap and wait.** Direct Anthropic and OpenAI requests allow 16,384
-  output tokens (thinking plus answer; a lower catalog limit wins) instead of
-  8,192, and a request may wait 180 seconds for its first bytes, the turn's
+  output tokens (thinking plus answer) instead of 8,192. The catalog's own
+  output limit wins when lower, even for an entry without a context length
+  (`AgentRunOptions.outputTokenLimit`, read apart from the model spec); a
+  snapshot saved without a limit keeps 16,384, and a request may wait 180 seconds for its first bytes, the turn's
   own limit, instead of 60: a non-streamed answer sends nothing until it is
   complete. OpenRouter keeps 8,192 and 60 seconds.
 - **A cut answer says so.** Anthropic `stop_reason: max_tokens` and OpenAI
@@ -80,7 +88,7 @@ chose low effort for the Agent on Anthropic and OpenAI.
   effort (`low` or none) and the response's token counts: input, output,
   thinking (Anthropic `output_tokens_details.thinking_tokens`, OpenAI and
   OpenRouter `reasoning_tokens`) and cache reads and writes, on accepted and
-  rejected responses. Elapsed time was already there. Counts only.
+  rejected responses, including OpenRouter's HTTP-200 error envelope. Elapsed time was already there. Counts only.
 - **Not changed:** OpenRouter, the local CLI agents (Claude Code, OpenCode),
   Drop Smart, translation, meetings; the model and provider are never switched
   automatically. Streaming, prompt caching, connection warm-up, local
@@ -104,12 +112,17 @@ chose low effort for the Agent on Anthropic and OpenAI.
 the simple question on Sonnet 5.5 (one request, effort low, no thinking field,
 max_tokens 16,384, 180-second timeout, plain reply shown and saved, usage in
 the accepted event without text); blank and link-only plain replies still
-fail, and OpenRouter still rejects plain text; a tool question on Opus 5.5
+fail, and OpenRouter still rejects plain text; a tool_use stop with text only
+and text in an unknown block fail unsaved, thinking beside text passes; a
+plain reply with a link and a bash fence gets the same cards as finish_answer
+with that text; a tool question on Opus 5.5
 (tool runs, both requests low); OpenAI reasoning models get
 `reasoning.effort` low with required tool choice while gpt-4.1,
 gpt-5-chat-latest and gpt-5-pro get none; Anthropic models by catalog flag and
 by family, OpenRouter unchanged (8,192, 60 seconds, no effort); a 20,000-character
-answer and a lower model limit; a cut answer on both routes with its usage;
+answer and a lower model limit; a catalog entry with an output limit and no
+context length (8,192 sent) and an old snapshot without one (16,384); a cut
+answer on both routes with its usage; usage on OpenRouter's HTTP-200 error;
 the Models API flag parsing; usage fields of each provider.
 `NativeAgentAppControlTests`: on Anthropic at low effort the whytap tool still
 adds a Vocab word and the plain reply after it keeps the change line. Not
@@ -124,8 +137,12 @@ tested: a live model, the installed app, how much faster the answer is.
   failed request first; the documented list and the catalog flag avoid it.
 - A repair request when the model answers in plain text: another paid round
   trip for the same answer.
+- A plain reply with no cards at all: the same text would get cards through
+  finish_answer, and links in ordinary text are cards everywhere else.
 - Showing a cut answer's partial text: it may stop mid-sentence or inside a
   card; the message says what to do.
 - Changing OpenRouter's request: outside this task.
 
-2026-11-23, branch `claude/agent-low-effort`.
+2026-11-23, branch `claude/agent-low-effort`; builder review of ticket 492
+(probes on stop reasons, cards, catalog limit, HTTP-200 usage) folded in the
+same day.

@@ -81,7 +81,11 @@ struct NativeAgentModel {
         // WHY: .project-docs/decisions/2026-11-23-agent-low-effort.md
         let direct = options.openCodeProvider != .openRouter
         let outputCap = direct ? Self.directOutputCap : 8192
-        let outputLimit = min(outputCap, options.openCodeModelSpec?.outputLimit ?? outputCap)
+        // The catalog's own output limit wins even when it gives no context
+        // length (no spec); the spec's limit defaults to 16,384 when unknown.
+        let modelLimit = direct ? options.outputTokenLimit ?? options.openCodeModelSpec?.outputLimit
+            : options.openCodeModelSpec?.outputLimit
+        let outputLimit = min(outputCap, modelLimit ?? outputCap)
         let effort = NativeAgentEffort.fields(provider: options.openCodeProvider, model: model,
                                               catalogFlag: options.lowEffortSupport)
         var request: URLRequest
@@ -160,6 +164,9 @@ struct NativeAgentModel {
         let wireMessages = options.openCodeProvider == .openRouter ? [["role": "system", "content": system]] + messages : messages
         trace.emit(.request, bytes: request.httpBody?.count, shape: .init(messages: wireMessages))
         var responseStatus: Int?, responseBytes: Int?
+        // Counts of a response that is then rejected (an HTTP-200 error, a
+        // cut or malformed answer) still reach the failed event.
+        var responseUsage: [String: Any]?
         do {
             let response: [String: Any]
             do {
@@ -171,6 +178,7 @@ struct NativeAgentModel {
                 throw error
             }
             let usage = response["usage"] as? [String: Any]
+            responseUsage = usage
             // OpenRouter reports its charge; Anthropic reports tokens, priced as an estimate.
             let cost: Double?, basis: AIUsageBasis
             switch options.openCodeProvider {
@@ -182,18 +190,12 @@ struct NativeAgentModel {
                                         currency: .usd, amount: cost, basis: cost == nil ? .unavailable : basis))
             if options.openCodeProvider == .openRouter,
                let error = NativeAgentHTTP.openRouterError(in: response) { throw error }
-            let result: (String, [NativeAgentToolCall])
-            do { result = try accept(response) } catch {
-                trace.emit(.failed, status: responseStatus, bytes: responseBytes, failure: .response, usage: .init(usage))
-                throw Reported(error: error)
-            }
+            let result = try accept(response)
             let finish = (response["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String
                 ?? response["stop_reason"] as? String ?? response["status"] as? String ?? ""
             trace.emit(.accepted, status: responseStatus, bytes: responseBytes, shape: .init(messages: messages),
                        finish: .init(rawValue: finish) ?? .other, usage: .init(usage))
             return result
-        } catch let reported as Reported {
-            throw reported.error
         } catch {
             var detail: NativeAgentDiagnostics.ErrorShape?
             if case NativeAgentError.service(_, let status, let diagnostics) = error {
@@ -205,21 +207,24 @@ struct NativeAgentModel {
                 failure = network.code == .cancelled ? .cancelled : network.code == .timedOut ? .timeout : .network
             }
             else { failure = .response }
-            trace.emit(.failed, status: responseStatus, bytes: responseBytes, error: detail, failure: failure)
+            trace.emit(.failed, status: responseStatus, bytes: responseBytes, error: detail, failure: failure,
+                       usage: .init(responseUsage))
             throw error
         }
     }
 
     /// Output cap for direct Anthropic and OpenAI requests (thinking plus
-    /// answer). OpenRouter keeps 8192.
+    /// answer); a lower catalog limit wins. OpenRouter keeps 8192.
     static let directOutputCap = 16_384
     /// A direct request may wait as long as the whole turn may run
     /// (`NativeAgentProvider`); OpenRouter keeps the 60-second idle limit.
     static let directTimeout: TimeInterval = 180
     static let outputLimitMessage = "The answer reached the model’s output limit. Ask for a shorter answer or split the task."
 
-    /// An error already traced as failed with the response's usage.
-    private struct Reported: Error { let error: Error }
+    /// The last response was a finished plain-text reply: Anthropic
+    /// `end_turn` with only text and thinking blocks and no tool call. Any
+    /// other stop reason or block (a server tool, an unknown type) is not.
+    private(set) var plainTextReply = false
 
     private mutating func accept(_ response: [String: Any]) throws -> (String, [NativeAgentToolCall]) {
         var text = ""
@@ -229,6 +234,7 @@ struct NativeAgentModel {
         // citations), which also needs the turn to continue to an answer.
         var searches = 0, paused = false, webWork = false
         pendingSearch = false
+        plainTextReply = false
         func cite(_ annotations: Any?) {
             for annotation in annotations as? [[String: Any]] ?? [] where annotation["type"] as? String == "url_citation" {
                 // OpenAI puts url/title on the annotation; OpenRouter nests them.
@@ -275,6 +281,7 @@ struct NativeAgentModel {
                     : "The model did not finish its response. Try a shorter request.")
             }
             paused = response["stop_reason"] as? String == "pause_turn"
+            var onlyText = response["stop_reason"] as? String == "end_turn"
             // Server tool blocks (with encrypted_content) stay verbatim: the
             // provider rejects a continuation that changes them.
             messages.append(["role": "assistant", "content": content])
@@ -300,7 +307,7 @@ struct NativeAgentModel {
                             resultSources.append(page)
                         }
                     }
-                default:
+                case "text":
                     text += block["text"] as? String ?? ""
                     for citation in block["citations"] as? [[String: Any]] ?? []
                         where citation["type"] as? String == "web_search_result_location" {
@@ -308,8 +315,17 @@ struct NativeAgentModel {
                             citedSources.append(page)
                         }
                     }
+                case "thinking", "redacted_thinking":
+                    break
+                default:
+                    // An unknown block is never read as answer text.
+                    onlyText = false
+                }
+                if ["server_tool_use", "web_search_tool_result", "tool_use"].contains(block["type"] as? String ?? "") {
+                    onlyText = false
                 }
             }
+            plainTextReply = onlyText && calls.isEmpty
             pendingSearch = !requested.subtracting(answered).isEmpty
         case .openRouter:
             guard let choice = (response["choices"] as? [[String: Any]])?.first,

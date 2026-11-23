@@ -82,6 +82,9 @@ struct AgentRunOptions: Equatable {
     /// The catalog's statement that the Agent model takes `effort: low`
     /// (Anthropic's Models API); `nil` when it does not say.
     var lowEffortSupport: Bool?
+    /// The catalog's output token limit for the Agent model, read even when
+    /// the catalog gives no context length; `nil` when it does not say.
+    var outputTokenLimit: Int?
 
     init(model: String? = nil, effort: String? = nil, serviceTier: String? = nil,
          workingDirectory: URL? = nil, allowActions: Bool = true,
@@ -92,7 +95,8 @@ struct AgentRunOptions: Equatable {
          openRouterProvider: String? = nil,
          preferTavilySearch: Bool = false,
          webSearchSupport: Bool? = nil,
-         lowEffortSupport: Bool? = nil) {
+         lowEffortSupport: Bool? = nil,
+         outputTokenLimit: Int? = nil) {
         self.model = model
         self.effort = effort
         self.serviceTier = serviceTier
@@ -106,5 +110,6 @@ struct AgentRunOptions: Equatable {
         self.preferTavilySearch = preferTavilySearch
         self.webSearchSupport = webSearchSupport
         self.lowEffortSupport = lowEffortSupport
+        self.outputTokenLimit = outputTokenLimit
     }
 }

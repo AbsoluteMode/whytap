@@ -125,6 +125,56 @@ final class NativeAgentLowEffortTests: XCTestCase {
         XCTAssertEqual(router.store.status, .failed)
     }
 
+    /// Only a finished reply counts: `end_turn` with text (and thinking)
+    /// blocks. A tool_use stop with text only, or text inside an unknown
+    /// block, fails and is not saved; thinking beside the text is fine.
+    func testOnlyAFinishedTextReplyIsAPlainAnswer() async throws {
+        let rejected: [[String: Any]] = [
+            ["stop_reason": "tool_use", "content": [["type": "text", "text": "19 200"]]],
+            ["stop_reason": "end_turn", "content": [["type": "future_block", "text": "19 200"]]],
+            ["stop_reason": "end_turn", "content": [["type": "text", "text": "19 200"], ["type": "future_block", "text": "x"]]],
+        ]
+        for response in rejected {
+            let result = try await run("160 умножить на 120", anthropic(), [response])
+            XCTAssertEqual(result.store.status, .failed, "\(response)")
+            XCTAssertTrue(result.store.streamingText.isEmpty)
+            XCTAssertNil(result.sessionID, "nothing is saved")
+            XCTAssertEqual(result.bodies.count, 1, "no repair request")
+        }
+        let thinking = try await run("160 умножить на 120", anthropic(), [
+            ["stop_reason": "end_turn", "content": [["type": "thinking", "thinking": "160*120", "signature": "s"],
+                                                    ["type": "text", "text": "19 200"]]]
+        ])
+        XCTAssertEqual(thinking.store.streamingText, "19 200")
+        XCTAssertNotNil(thinking.sessionID)
+    }
+
+    /// A plain reply has no sources or actions of its own, but a link and a
+    /// shell command in its text become the same cards a finish_answer with
+    /// that text gets, as for every answer.
+    func testPlainReplyWithALinkAndAShellCommandGetsTheSameCardsAsFinishAnswer() async throws {
+        let answer = "Install it:\n\n```bash\nbrew install whytap\n```\n\nDocs: https://example.com/install"
+        func cards(_ response: [String: Any]) async throws -> (String?, [String]) {
+            let (directory, keys, http) = try fixture()
+            StubURLProtocol.handler = { _ in self.serve(response) }
+            let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, appControl: { nil },
+                                               usageSink: { _ in }, diagnosticsSink: { _ in })
+            var final: String?, items: [String] = []
+            for await event in provider.run(prompt: "how do I install whytap?", resumeSessionID: nil, options: anthropic()) {
+                if case .finalAnswer(let text) = event { final = text }
+                if case .blockComplete(.usefulActions(let block)) = event { items = block.items.map(\.insertText) }
+            }
+            return (final, items)
+        }
+        let plain = try await cards(["stop_reason": "end_turn", "content": [["type": "text", "text": answer]]])
+        let structured = try await cards(anthropicFinal(answer))
+        XCTAssertEqual(plain.0, answer)
+        XCTAssertEqual(plain.0, structured.0)
+        XCTAssertEqual(plain.1, structured.1)
+        XCTAssertTrue(plain.1.contains("https://example.com/install"), "\(plain.1)")
+        XCTAssertTrue(plain.1.contains("brew install whytap"), "\(plain.1)")
+    }
+
     // MARK: Question with a tool
 
     /// A question that needs a tool: the model still calls it at low effort,
@@ -200,6 +250,51 @@ final class NativeAgentLowEffortTests: XCTestCase {
         let small = try await run("hi", anthropic(spec: OpenCodeModelSpec(toolCall: true, reasoning: true, contextLimit: 200_000, outputLimit: 4096)),
                                   [anthropicFinal("Hello.")])
         XCTAssertEqual(small.bodies.first?["max_tokens"] as? Int, 4096)
+    }
+
+    /// A catalog entry with an output limit but no context length (no spec):
+    /// its limit wins over the raised cap. A snapshot without a limit, as
+    /// saved before, keeps the cap.
+    func testCatalogOutputLimitWinsWithoutContextLength() async throws {
+        func options(_ entry: CatalogModel) throws -> AgentRunOptions {
+            let suite = UUID().uuidString
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
+            addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
+            let snapshot = CatalogSnapshot(models: [entry], fetchedAt: Date(), lastRefreshFailed: false, limited: false)
+            try JSONEncoder().encode([ProviderAccount.anthropic.storageID: snapshot]).write(to: file)
+            let routing = AIRoutingStore(defaults: defaults)
+            routing.setRoute(FeatureRoute(account: .anthropic, model: entry.id), for: .agent)
+            return AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
+                                      catalogs: ModelCatalogStore(fileURL: file)).options(for: .native)
+        }
+        let partial = try options(CatalogModel(id: "claude-sonnet-5-5", maxOutputTokens: 8192))
+        XCTAssertNil(partial.openCodeModelSpec)
+        XCTAssertEqual(partial.outputTokenLimit, 8192)
+        let sent = try await run("hi", partial, [anthropicFinal("Hello.")])
+        XCTAssertEqual(sent.bodies.first?["max_tokens"] as? Int, 8192)
+        let old = try JSONDecoder().decode(CatalogModel.self, from: Data(#"{"id":"claude-sonnet-5-5","contextLength":200000}"#.utf8))
+        let oldOptions = try options(old)
+        XCTAssertNil(oldOptions.outputTokenLimit)
+        XCTAssertEqual(oldOptions.openCodeModelSpec?.outputLimit, 16_384)
+        let oldSent = try await run("hi", oldOptions, [anthropicFinal("Hello.")])
+        XCTAssertEqual(oldSent.bodies.first?["max_tokens"] as? Int, 16_384)
+    }
+
+    /// OpenRouter's HTTP-200 error envelope: the single failed event keeps
+    /// the typed envelope and the response's token counts.
+    func testOpenRouterHTTP200ErrorKeepsUsageOnTheFailedEvent() async throws {
+        let (_, _, http) = try fixture()
+        StubURLProtocol.handler = { _ in self.serve(["error": ["message": "PRIVATE", "metadata": ["error_type": "invalid_request"]],
+                                                     "usage": ["prompt_tokens": 123, "completion_tokens": 45, "cost": 0.001]]) }
+        var diagnostics: [NativeAgentDiagnostics.Event] = []
+        var model = NativeAgentModel(options: .init(model: "vendor/model"), key: "key", system: "system", history: [], prompt: "q",
+                                     http: http, usageSink: { _ in }, diagnosticsSink: { diagnostics.append($0) })
+        do { _ = try await model.next(tools: []); XCTFail("Expected error") } catch {}
+        XCTAssertEqual(diagnostics.map(\.stage), [.request, .failed])
+        XCTAssertEqual(diagnostics.last?.error?.envelope, .root200)
+        XCTAssertEqual(diagnostics.last?.usage, .init(input: 123, output: 45))
+        XCTAssertFalse(diagnostics.compactMap(\.json).joined().contains("PRIVATE"))
     }
 
     /// An answer cut at the limit says so instead of a generic failure, on

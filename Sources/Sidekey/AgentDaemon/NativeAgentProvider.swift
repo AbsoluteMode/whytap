@@ -174,10 +174,12 @@ final class NativeAgentProvider: CLIProvider {
             let completion: NativeAgentFinalAnswer?
             if calls.isEmpty {
                 // Direct Anthropic runs with tool_choice auto, and at low effort
-                // a short answer often comes as plain text: that text is the
-                // answer, checked like finish_answer's, without cards.
+                // a short answer often comes as plain text. A finished reply
+                // (end_turn, text blocks only) is the answer, checked like
+                // finish_answer's with no sources or actions of its own; links,
+                // paths and commands in it become cards as in every answer.
                 // WHY: .project-docs/decisions/2026-11-23-agent-low-effort.md
-                guard options.openCodeProvider == .anthropic, !model.pendingSearch,
+                guard options.openCodeProvider == .anthropic, model.plainTextReply,
                       let plain = try? NativeAgentFinalAnswer(arguments: ["status": "answered", "answer": text,
                                                                          "sources": [], "actions": []],
                                                               openAICitations: false)

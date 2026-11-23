@@ -53,15 +53,25 @@ enum OnboardingAccessKind: CaseIterable {
         }
     }
 
-    /// The pane under Privacy & Security.
+    /// macOS 27.3 lists apps that control the Mac under System & App
+    /// Protection Override, where the Accessibility link now lands, and an
+    /// app's request no longer adds its row: the person adds it with +.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static var protectionOverride = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
+
+    /// The pane under Privacy & Security, named as this Mac shows it.
     var pane: String {
         switch self {
-        case .keyboard: return "Accessibility"
+        case .keyboard: return Self.protectionOverride ? "System & App Protection Override" : "Accessibility"
         case .microphone: return "Microphone"
         case .inputMonitoring: return "Input Monitoring"
         case .screenRecording: return "Screen Recording"
         }
     }
+
+    /// Whether the pane has no Whytap row until the person adds one.
+    var addsWithPlus: Bool { self == .keyboard && Self.protectionOverride }
 
     var grantedLine: String {
         switch self {
@@ -74,7 +84,7 @@ enum OnboardingAccessKind: CaseIterable {
 
     var notOnLine: String {
         switch self {
-        case .keyboard: return "Whytap isn’t on in Accessibility yet."
+        case .keyboard: return "Whytap isn’t on in \(pane) yet."
         case .microphone: return "Microphone access is still off."
         case .inputMonitoring: return "Input Monitoring isn’t on yet."
         case .screenRecording: return "Screen Recording isn’t on yet."
@@ -623,7 +633,8 @@ struct OnboardingAccessStage: View {
             line(kind.purpose, color: OnboardingTheme.muted)
         case .waiting:
             VStack(spacing: 5) {
-                (Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
+                (Text(kind.addsWithPlus ? "Click + under the list, add " : "Turn on ")
+                    + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
                     + Text(", then come back here."))
                     .font(OnboardingTheme.sans(13.5))
                     .foregroundColor(OnboardingTheme.muted)

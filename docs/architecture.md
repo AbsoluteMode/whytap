@@ -1394,7 +1394,10 @@ display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
 (OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
 Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
-no spinner); only the
+no spinner). On macOS 27.3 and later the Accessibility link lands on System &
+App Protection Override, which lists no Whytap until the person adds it, so
+Keyboard control names that pane and says "Click + under the list, add Whytap,
+then come back here." (OnboardingAccessKind.protectionOverride); only the
 system's own check (polling and a return to the app) makes it granted, then
 the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again

@@ -828,7 +828,22 @@ final class OnboardingPreviewTests: XCTestCase {
             XCTAssertEqual(kind.isOptional, kind.step.isOptional)
             XCTAssertFalse(kind.notOnLine.isEmpty)
         }
+        let override = OnboardingAccessKind.protectionOverride
+        defer { OnboardingAccessKind.protectionOverride = override }
+        OnboardingAccessKind.protectionOverride = false
         XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "Accessibility")
+        XCTAssertFalse(OnboardingAccessKind.keyboard.addsWithPlus)
+        XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine, "Whytap isn’t on in Accessibility yet.")
+        // macOS 27.3: the Accessibility link lands on System & App Protection
+        // Override, which lists no Whytap until the person adds it with +.
+        OnboardingAccessKind.protectionOverride = true
+        XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "System & App Protection Override")
+        XCTAssertTrue(OnboardingAccessKind.keyboard.addsWithPlus)
+        XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine,
+                       "Whytap isn’t on in System & App Protection Override yet.")
+        // The other panes keep their names and their switches.
+        XCTAssertEqual(OnboardingAccessKind.microphone.pane, "Microphone")
+        XCTAssertFalse(OnboardingAccessKind.screenRecording.addsWithPlus)
         XCTAssertNil(OnboardingAccessKind(step: .language))
         XCTAssertTrue(OnboardingJourneyView.isWireframe(.screenRecording))
         // The ⌘ is closed strokes: four sides and four 270-degree loops whose

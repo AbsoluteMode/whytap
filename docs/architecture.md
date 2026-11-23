@@ -1497,9 +1497,13 @@ fake). macOS is asked only from Connect (requestFullAccessToEvents); opening
 Hover and refreshing only read the authorization status. Anything but Full Access
 (denied, restricted, revoked, "Add Events Only") is appleAccessOff; Settings and
 the Connect page say where to allow access, with Open Privacy Settings (Privacy &
-Security -> Calendars). A refused Connect saves nothing (allow, then Connect
-again, no second prompt); a saved connection keeps itself, clears Apple events
-and its row reads Access off. checkAppleAccess() reads only the status for a
+Security -> Calendars). A refused Allow access saves nothing (allow in System
+Settings, then the same "Allow access to calendars" button, no second prompt); a
+saved connection keeps itself and Disconnect, clears Apple events. Settings calls
+prepareMacCalendars() (status, then the calendar list and today's events for a
+saved, readable connection) on appear, on app activation and after Allow.
+macCalendarGroups groups by EKSource.sourceIdentifier. Only apple: entries count
+toward the hidden-calendar limit; inactive direct-connection entries make room. checkAppleAccess() reads only the status for a
 saved or refused Apple connection when Calendar or Settings opens and when the
 app becomes active, so neither shows a stale answer.
 Since 2026-11-23 Calendar on this Mac is the only way to connect: Hover's

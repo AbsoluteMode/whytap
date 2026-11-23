@@ -94,16 +94,33 @@ maintainer).
   fetched every few minutes); direct accounts were polled every minute.
 - Shared or secondary Google calendars appear only if Google syncs them to the Mac.
 
+## Builder review (queue #465)
+
+The first review found five gaps, all fixed in the same PR: Settings now reads
+the calendar list itself (`prepareMacCalendars()` on appear, on app activation
+and after Allow, status only for an unconnected Mac); accounts are grouped by
+EventKit's source identifier, and repeated names get their service; a saved
+connection with access off keeps **Disconnect** next to **Open Privacy
+Settings**; inactive hidden-calendar entries of direct connections make room
+instead of using up the limit for calendars of this Mac (the saved set stays
+within the backup and sync bound); and the recovery text names the button both
+surfaces show, **Allow access to calendars**.
+
 ## What was tested
 
 `CalendarMacOnlyTests`: states from not asked through loading, no calendars and
-ready to refused; a refused Allow asking for Connect again and returning to the
+ready to refused; a refused Allow asking for Allow access again and returning to the
 one button once allowed; one tap from the Calendars page connecting and showing
 the day; grouping by account with the service and sorted calendars; unticking
 calendars, an invitation in two calendars staying while either is ticked,
 Whytap's own events never hidden, the choice surviving a restart; Meet, Teams and
 Zoom links found in description text; a direct Outlook account still refreshing
-and never hidden; the expired-sign-in message. `CalendarReleaseTests` still
+and never hidden; the expired-sign-in message; and, after the builder review,
+Settings loading the list on relaunch, after Allow and after recovery (never for
+an unconnected Mac), same-named accounts kept apart with and without a source
+identifier, the card's buttons per state, Disconnect of a revoked connection,
+inactive direct entries making room while the limit holds for this Mac, and the
+recovery text naming the visible button. `CalendarReleaseTests` still
 cover the access transitions. `CalendarConnectRenderTests` writes the Hover
 Calendars page and the Settings card in all four states (light and dark).
 EventKit with the maintainer's real Google and Exchange accounts can only be

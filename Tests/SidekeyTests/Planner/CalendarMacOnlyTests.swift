@@ -61,9 +61,10 @@ final class CalendarMacOnlyTests: XCTestCase {
         XCTAssertFalse(flow.working)
     }
 
-    private func feed(_ id: String, account: String, name: String, service: CalendarProvider? = nil) -> CalendarFeed {
+    private func feed(_ id: String, account: String, name: String, service: CalendarProvider? = nil,
+                      sourceID: String? = nil) -> CalendarFeed {
         CalendarFeed(id: "apple:\(id)", accountID: nil, remoteID: id, title: "\(name) · \(account)", provider: .apple,
-                     displayService: service, sourceTitle: account, calendarTitle: name)
+                     displayService: service, sourceTitle: account, calendarTitle: name, sourceID: sourceID)
     }
 
     private func event(_ title: String, feed: String, hour: Int, notes: String = "", uid: String? = nil) -> CalendarFeedEvent {
@@ -214,5 +215,136 @@ final class CalendarMacOnlyTests: XCTestCase {
         let message = CalendarConnectionError.signInRequired.errorDescription ?? ""
         XCTAssertTrue(message.contains("Internet Accounts"))
         XCTAssertFalse(message.contains("Connect account"), "the old Connect account path is not offered any more")
+    }
+
+    // MARK: - Builder review of queue #465
+
+    /// 1. Settings reads the list itself: relaunch, Allow in Settings, recovery in System Settings.
+    func testSettingsReadsAlreadyEnabledCalendarsWithoutOpeningHover() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("work", account: "Exchange", name: "Work", service: .microsoft)]
+        let connections = connections(mac)
+        let settings = SettingsCalendarIntegrationsView(connections: connections)
+        settings.recheckAppleAccess()
+        XCTAssertEqual(connections.macAccess, .ready, "opening Settings on a fresh process populates calendars")
+        XCTAssertEqual(connections.macCalendarGroups.first?.feeds.first?.id, "apple:work")
+        XCTAssertEqual(mac.prompts, 0)
+    }
+
+    func testAllowInSettingsLoadsTheListWithoutHover() async throws {
+        let mac = FakeMac()
+        mac.feeds = [feed("home", account: "iCloud", name: "Home")]
+        let connections = connections(mac)
+        let flow = CalendarConnectionFlow(connections: connections)
+        XCTAssertTrue(flow.startRegistered(provider: .apple, info: nil) { connections.prepareMacCalendars() })
+        try await finish(flow)
+        XCTAssertEqual(mac.prompts, 1)
+        XCTAssertEqual(connections.macAccess, .ready)
+    }
+
+    func testRecoveryInSystemSettingsReloadsTheListFromSettings() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .denied
+        mac.feeds = [feed("home", account: "iCloud", name: "Home")]
+        let connections = connections(mac)
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .refused)
+        XCTAssertTrue(connections.feeds.isEmpty, "nothing is read while access is off")
+        mac.status = .fullAccess
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .ready)
+        XCTAssertEqual(connections.macCalendarGroups.map(\.title), ["iCloud"])
+    }
+
+    func testSettingsNeverReadsAnUnconnectedMac() {
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("home", account: "iCloud", name: "Home")]
+        let connections = connections(mac)
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .notAsked)
+        XCTAssertTrue(connections.feeds.isEmpty)
+    }
+
+    /// 2. An account is its EventKit source, not its title.
+    func testAccountsWithTheSameTitleStaySeparate() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("office", account: "Work", name: "Calendar", service: .microsoft, sourceID: "src-exchange"),
+                     feed("cloud", account: "Work", name: "Calendar", sourceID: "src-icloud"),
+                     feed("cloud2", account: "Work", name: "Birthdays", sourceID: "src-icloud-2")]
+        let connections = connections(mac)
+        connections.refreshAppleIfEnabled(interval: DateInterval(start: day, duration: 86_400))
+        let groups = connections.macCalendarGroups
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(Set(groups.map(\.id)).count, 3)
+        XCTAssertEqual(Set(groups.map(\.title)).count, 3, "repeated names are told apart: \(groups.map(\.title))")
+        XCTAssertTrue(groups.contains { $0.title == "Work · Exchange" && $0.service == .microsoft })
+        XCTAssertEqual(groups.first { $0.id == "src-exchange" }?.feeds.map(\.id), ["apple:office"])
+    }
+
+    func testAccountsWithTheSameTitleAndNoSourceIDSplitByService() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("office", account: "Work", name: "Calendar", service: .microsoft),
+                     feed("local", account: "Work", name: "Calendar", service: .apple)]
+        let connections = connections(mac)
+        connections.refreshAppleIfEnabled(interval: DateInterval(start: day, duration: 86_400))
+        XCTAssertEqual(connections.macCalendarGroups.count, 2)
+    }
+
+    /// 3. A saved connection with access off keeps Disconnect next to Open Privacy Settings.
+    func testSettingsKeepsDisconnectWhileAccessIsOff() {
+        typealias View = SettingsCalendarIntegrationsView
+        XCTAssertEqual(View.macActions(access: .refused, connected: true, working: false), [.disconnect, .openPrivacySettings])
+        XCTAssertEqual(View.macActions(access: .refused, connected: false, working: false), [.openPrivacySettings])
+        XCTAssertEqual(View.macActions(access: .notAsked, connected: false, working: false), [.allowAccess])
+        XCTAssertEqual(View.macActions(access: .ready, connected: true, working: false), [.disconnect])
+        XCTAssertEqual(View.macActions(access: .noCalendars, connected: true, working: false), [.disconnect])
+        XCTAssertEqual(View.macActions(access: .notAsked, connected: false, working: true), [.cancel])
+    }
+
+    func testDisconnectingARevokedConnectionClearsIt() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .denied
+        let connections = connections(mac)
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .refused)
+        connections.disableApple()
+        XCTAssertEqual(connections.macAccess, .notAsked)
+        XCTAssertFalse(defaults.bool(forKey: CalendarAccountSettings.appleEnabledKey))
+    }
+
+    /// 4. Inactive entries of direct connections never use up the ticks of this Mac.
+    func testOldDirectVisibilityPreferencesDoNotBlockLocalCalendarTicks() {
+        let legacyAccount = UUID().uuidString
+        defaults.set((0..<CalendarAccountSettings.maximumHiddenFeeds).map { "\(legacyAccount):calendar-\($0)" },
+                     forKey: CalendarAccountSettings.hiddenFeedsKey)
+        let connections = connections(FakeMac())
+        connections.setVisible(false, feedID: "apple:work")
+        XCTAssertFalse(connections.isShown(feedID: "apple:work"))
+        XCTAssertNil(connections.errors["visibility"])
+        let saved = defaults.stringArray(forKey: CalendarAccountSettings.hiddenFeedsKey) ?? []
+        XCTAssertLessThanOrEqual(saved.count, CalendarAccountSettings.maximumHiddenFeeds, "backup and sync keep their bound")
+        XCTAssertTrue(saved.contains("apple:work"))
+        XCTAssertEqual(saved.filter { $0.hasPrefix(legacyAccount) }.count, CalendarAccountSettings.maximumHiddenFeeds - 1,
+                       "only as many inactive entries as needed make room")
+    }
+
+    func testTheLimitStillHoldsForCalendarsOfThisMac() {
+        defaults.set((0..<CalendarAccountSettings.maximumHiddenFeeds).map { "apple:cal-\($0)" },
+                     forKey: CalendarAccountSettings.hiddenFeedsKey)
+        let connections = connections(FakeMac())
+        connections.setVisible(false, feedID: "apple:one-more")
+        XCTAssertTrue(connections.isShown(feedID: "apple:one-more"))
+        XCTAssertNotNil(connections.errors["visibility"])
+    }
+
+    /// 5. The recovery text names the button each surface shows.
+    func testRecoveryTextNamesTheButtonOnBothSurfaces() {
+        let message = CalendarConnectionError.appleConnectRefusedMessage
+        XCTAssertTrue(message.contains(CalendarConnectionError.allowAccessTitle))
+        XCTAssertFalse(message.contains("Connect"), "no button called Connect asks macOS any more")
+        XCTAssertEqual(CalendarConnectionError.allowAccessTitle, "Allow access to calendars")
     }
 }

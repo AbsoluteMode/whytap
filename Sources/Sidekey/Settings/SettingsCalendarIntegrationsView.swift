@@ -91,18 +91,26 @@ struct SettingsCalendarIntegrationsView: View {
                     Text(macStatus).font(.system(size: 11)).foregroundStyle(MacSettingsTheme.text2)
                 }
                 Spacer(minLength: 8)
-                if flow.working {
-                    IntegrationAction(title: "Cancel") { flow.cancel() }
-                } else if connections.macAccess == .refused {
-                    IntegrationAction(title: "Open Privacy Settings", primary: true) { PermissionsHelper.openCalendarsSettings() }
-                        .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
-                } else if connections.appleEnabled {
-                    IntegrationAction(title: "Disconnect", enabled: !busy) { confirmingAppleDisconnect = true }
-                } else {
-                    IntegrationAction(title: "Allow access", primary: true, enabled: !busy) {
-                        flow.startRegistered(provider: .apple, info: configurationInfo)
+                HStack(spacing: 8) {
+                    ForEach(Self.macActions(access: connections.macAccess, connected: connections.appleEnabled,
+                                            working: flow.working), id: \.self) { action in
+                        switch action {
+                        case .cancel:
+                            IntegrationAction(title: "Cancel") { flow.cancel() }
+                        case .disconnect:
+                            IntegrationAction(title: "Disconnect", enabled: !busy) { confirmingAppleDisconnect = true }
+                        case .openPrivacySettings:
+                            IntegrationAction(title: "Open Privacy Settings", primary: true) { PermissionsHelper.openCalendarsSettings() }
+                                .accessibilityHint("Opens System Settings → Privacy & Security → Calendars")
+                        case .allowAccess:
+                            IntegrationAction(title: CalendarConnectionError.allowAccessTitle, primary: true, enabled: !busy) {
+                                flow.startRegistered(provider: .apple, info: configurationInfo) {
+                                    connections.prepareMacCalendars()
+                                }
+                            }
+                            .accessibilityHint("macOS asks once for access to the calendars of this Mac")
+                        }
                     }
-                    .accessibilityHint("macOS asks once for access to the calendars of this Mac")
                 }
             }
             switch connections.macAccess {
@@ -161,6 +169,18 @@ struct SettingsCalendarIntegrationsView: View {
         }
     }
 
+    enum MacAction: Hashable { case cancel, disconnect, openPrivacySettings, allowAccess }
+
+    /// The card's buttons: a saved connection keeps Disconnect while access is off.
+    static func macActions(access: MacCalendarAccess, connected: Bool, working: Bool) -> [MacAction] {
+        if working { return [.cancel] }
+        switch access {
+        case .refused: return connected ? [.disconnect, .openPrivacySettings] : [.openPrivacySettings]
+        case .notAsked: return [.allowAccess]
+        case .loading, .noCalendars, .ready: return connected ? [.disconnect] : [.allowAccess]
+        }
+    }
+
     private func disconnect(_ account: ConnectedCalendarAccount) {
         removing = nil
         guard connections.beginConnecting(provider: account.provider) else {
@@ -181,8 +201,10 @@ struct SettingsCalendarIntegrationsView: View {
 }
 
 extension SettingsCalendarIntegrationsView {
+    /// Live status and, for a connection that may read, the calendar list itself:
+    /// Settings does not wait for Calendar in Hover to read them.
     func recheckAppleAccess() {
-        connections.checkAppleAccess()
+        connections.prepareMacCalendars()
         flow.clearAppleRefusalIfAllowed()
     }
 }

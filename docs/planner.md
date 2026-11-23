@@ -160,15 +160,19 @@ conference fields (a link only in Google's `conferenceData` or Graph's
 per-account permission (macOS grants all calendars at once), and update timing,
 which macOS decides.
 macOS requires full event permission even for reading; Whytap only reads.
-macOS asks only when you press Connect, never when Whytap starts or Calendar
-opens. It asks once. After **Don't Allow** nothing is connected: Settings and the
-Connect page say to turn on Whytap in **System Settings → Privacy & Security →
-Calendars** (Full Access), with an **Open Privacy Settings** button; then press
-Connect again, which needs no second prompt. If access of a connected Apple
-Calendar is later turned off or limited to "Add Events Only", its events leave
-the day, its row reads **Access off** and opens System Settings, and the
-connection is kept: allowing access brings the events back. Calendar and Settings
-check the current permission when they open and when you return to Whytap.
+macOS asks only when you press **Allow access to calendars** (the same words in
+Hover and Settings), never when Whytap starts or Calendar opens. It asks once.
+After **Don't Allow** nothing is connected: Settings and the Calendars page say
+to turn on Whytap in **System Settings → Privacy & Security → Calendars** (Full
+Access), with an **Open Privacy Settings** button; then choose **Allow access to
+calendars** again, which needs no second prompt. If access of a connected
+Calendar on this Mac is later turned off or limited to "Add Events Only", its
+events leave the day, Settings shows **Open Privacy Settings** next to
+**Disconnect**, and the connection is kept: allowing access brings the events
+back. Calendar and Settings check the current permission when they open and when
+you return to Whytap; Settings then reads the calendar list itself, without
+opening Calendar. Accounts are told apart by macOS's account identifier, so two
+accounts with the same name stay separate (the name gets its service).
 This connection does not require a Whytap backend or a new Apple OAuth client.
 An account connected directly by an earlier build and also added to macOS shows
 each event once when the providers return the same iCalendar UID; copies with

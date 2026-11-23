@@ -30,7 +30,8 @@ struct AppleCalendarAccess {
                         title: calendar.title + " · " + calendar.source.title, provider: .apple,
                         displayService: calendar.source.map {
                             CalendarDisplayService.classify(sourceType: $0.sourceType, sourceTitle: $0.title)
-                        }, sourceTitle: calendar.source?.title, calendarTitle: calendar.title)
+                        }, sourceTitle: calendar.source?.title, calendarTitle: calendar.title,
+                        sourceID: calendar.source?.sourceIdentifier)
                 }
                 // EventKit reads every calendar when the list is empty; no calendars means no events.
                 guard !calendars.isEmpty else { return (feeds, []) }
@@ -66,7 +67,9 @@ enum MacCalendarAccess: Equatable {
 
 /// One account of Internet Accounts (iCloud, an address, Exchange) and its calendars.
 struct MacCalendarGroup: Identifiable, Equatable {
-    var id: String { title }
+    /// EventKit's source identifier (titles can repeat).
+    let id: String
+    /// The account's name, with its service added when another account has the same name.
     let title: String
     let service: CalendarProvider?
     let feeds: [CalendarFeed]
@@ -118,17 +121,53 @@ final class CalendarConnections: ObservableObject {
     }
 
     /// Calendars of this Mac by account, accounts and calendars in alphabetical order.
+    /// An account is its EventKit source, not its title: two accounts can both be
+    /// called "Work". Repeated titles get their service, then a number.
     var macCalendarGroups: [MacCalendarGroup] {
         let mac = feeds.filter { $0.provider == .apple }
-        let titles = mac.reduce(into: [String]()) { list, feed in
-            let title = feed.sourceTitle ?? "On My Mac"
-            if !list.contains(title) { list.append(title) }
+        func key(_ feed: CalendarFeed) -> String {
+            feed.sourceID ?? "\(feed.sourceTitle ?? "On My Mac")|\(feed.displayService?.rawValue ?? "")"
         }
-        return titles.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { title in
-            let group = mac.filter { ($0.sourceTitle ?? "On My Mac") == title }
+        let keys = mac.reduce(into: [String]()) { list, feed in
+            if !list.contains(key(feed)) { list.append(key(feed)) }
+        }
+        let groups = keys.map { id -> (id: String, title: String, service: CalendarProvider?, feeds: [CalendarFeed]) in
+            let group = mac.filter { key($0) == id }
                 .sorted { ($0.calendarTitle ?? $0.title).localizedStandardCompare($1.calendarTitle ?? $1.title) == .orderedAscending }
-            return MacCalendarGroup(title: title, service: group.first?.displayService, feeds: group)
+            return (id, group.first?.sourceTitle ?? "On My Mac", group.first?.displayService, group)
+        }.sorted {
+            let order = $0.title.localizedStandardCompare($1.title)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
         }
+        var used: [String: Int] = [:]
+        return groups.map { group in
+            var title = group.title
+            if groups.filter({ $0.title == group.title }).count > 1 {
+                title += " · " + Self.serviceName(group.service)
+                used[title, default: 0] += 1
+                if used[title]! > 1 { title += " \(used[title]!)" }
+            }
+            return MacCalendarGroup(id: group.id, title: title, service: group.service, feeds: group.feeds)
+        }
+    }
+
+    private static func serviceName(_ service: CalendarProvider?) -> String {
+        switch service {
+        case .google: return "Google"
+        case .microsoft: return "Exchange"
+        case .zoom: return "Zoom"
+        case .apple, nil: return "iCloud or this Mac"
+        }
+    }
+
+    /// Settings opened, Allow access finished or Whytap came back from System
+    /// Settings: reads the live status and, when a saved connection may read, the
+    /// calendar list and today's events (no prompt; nothing for an unconnected Mac).
+    func prepareMacCalendars(now: Date = Date()) {
+        checkAppleAccess()
+        guard CalendarAvailability.isOpen, appleEnabled, !appleAccessOff,
+              let day = Calendar.current.dateInterval(of: .day, for: now) else { return }
+        refreshAppleIfEnabled(interval: day)
     }
 
     /// Whether a calendar's events are shown. Only Calendar on this Mac can be
@@ -207,11 +246,18 @@ final class CalendarConnections: ObservableObject {
     }
 
     func setVisible(_ visible: Bool, feedID: String) {
+        guard feedID.utf8.count <= 1024, !feedID.contains("\0") else { return }
+        // Entries of direct connections are inactive since 2026-11-23 (only calendars
+        // of this Mac have ticks); they make room before the limit refuses a tick.
+        if !visible, feedID.hasPrefix("apple:"), !hiddenFeeds.contains(feedID),
+           hiddenFeeds.count >= CalendarAccountSettings.maximumHiddenFeeds {
+            let overflow = hiddenFeeds.count - CalendarAccountSettings.maximumHiddenFeeds + 1
+            for legacy in hiddenFeeds.filter({ !$0.hasPrefix("apple:") }).sorted().prefix(overflow) { hiddenFeeds.remove(legacy) }
+        }
         guard visible || hiddenFeeds.contains(feedID) || hiddenFeeds.count < CalendarAccountSettings.maximumHiddenFeeds else {
             errors["visibility"] = "Too many hidden calendars. Show a calendar or disconnect an unused account first."
             return
         }
-        guard feedID.utf8.count <= 1024, !feedID.contains("\0") else { return }
         if visible { hiddenFeeds.remove(feedID) } else { hiddenFeeds.insert(feedID) }
         errors.removeValue(forKey: "visibility")
         saveHiddenFeeds()

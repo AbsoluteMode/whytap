@@ -461,13 +461,13 @@ struct CalendarHoverView: View {
             CalendarHoverButton { allowAccess() } label: {
                 HStack(spacing: 8) {
                     CalendarSourceLogoView(source: .provider(.apple), size: 22)
-                    Text("Allow access to calendars").font(.system(size: 12, weight: .semibold))
+                    Text(CalendarConnectionError.allowAccessTitle).font(.system(size: 12, weight: .semibold))
                     Spacer(minLength: 2)
                     if connectionFlow.working { ProgressView().controlSize(.small) }
                 }.padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(connections.isConnecting)
-            .accessibilityLabel("Allow access to calendars")
+            .accessibilityLabel(CalendarConnectionError.allowAccessTitle)
             .accessibilityHint("macOS asks once for access to the calendars of this Mac")
             if let appleError { notice(appleError) }
         case .refused:

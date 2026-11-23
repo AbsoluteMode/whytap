@@ -629,6 +629,22 @@ window, Back and a progress bar.
   provider still gets the language's ISO 639-1 code. Sending the variant to
   Deepgram is left out of this change.
 
+- No alert sound for keys nothing takes (the owner, 2026-11-23, build 1732:
+  system beeps "for no reason"). Most steps have no text field, so Space, a
+  letter, Escape or an unbound ⌘ shortcut there, or on Try Drop before its
+  field is focused, travelled up the responder chain and AppKit answered with
+  the alert sound. The onboarding window and its controller (the end of the
+  chain) drop a key press nobody took, silently; the Try Drop field takes
+  Escape quietly instead of asking for word completions it does not have.
+  Text fields, buttons and Return still get their keys, and Drop's own Escape
+  is read by its event tap first.
+- Re-opening the onboarding on a Mac where Whytap is set up starts at the
+  first step not done yet (Try Drop when speech, the language model, the
+  language and every permission are in place): steps done before the window
+  opened are left out by design. Every step from the first is seen in the
+  standalone preview (`scripts/onboarding-preview.sh`), which never touches
+  the Mac's settings.
+
 ## Rejected
 
 - Keeping Continue on every step: the maintainer asked for screens that move
@@ -819,4 +835,5 @@ Not verified: the real window with real permissions, real provider key
 checks, the motion itself (offscreen renders are still frames) and the
 maintainer's approval of the visual.
 
-2026-11-22 · branch `feature/onboarding-v2`
+2026-11-22 · branch `feature/onboarding-v2`; 2026-11-23 · branch
+`feature/onboarding-v2-launch-fixes` (no alert sound for unhandled keys)

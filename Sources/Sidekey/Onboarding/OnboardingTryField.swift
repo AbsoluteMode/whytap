@@ -97,6 +97,23 @@ final class OnboardingTryTextView: NSTextView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Escape in a text view asks for word completions and beeps when there
+    /// are none; this field has nothing to complete, so Escape is taken
+    /// quietly. Drop's own Escape (cancel a take) is read before the field.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(NSResponder.cancelOperation(_:)) || selector == #selector(NSTextView.complete(_:)) {
+            quietEscapes += 1
+            return
+        }
+        super.doCommand(by: selector)
+    }
+
+    override func complete(_ sender: Any?) { quietEscapes += 1 }
+
+    /// Escapes taken quietly (for tests).
+    private(set) var quietEscapes = 0
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }

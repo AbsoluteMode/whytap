@@ -485,6 +485,12 @@ def run(args):
                 raise ValueError("Use one of --retry-install, --install-first, --hold")
             retry = {"retry_install": "meeting", "install_first": "first",
                      "hold": "hold"}.get(flags[0] if flags else "", "")
+            if (args.status == "pending_install" and item["status"] == "pending_install"
+                    and item["retry"] in BOUNDARY and retry not in BOUNDARY):
+                # The boundary is sticky until the install is resolved: a later
+                # deferral never lets other runtime work pass it. Automatic stays
+                # first; anything else waits for a person.
+                retry = "first" if retry == "meeting" else "hold"
             stamp = now()
             # A ticket requeued after a block goes to the end; one returned from
             # in_progress without a block keeps its place (its queued_at).

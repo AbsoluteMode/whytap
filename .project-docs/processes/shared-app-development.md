@@ -543,7 +543,13 @@ Under the lock:
    is marked `--install-first`; merged but not installable now, it is
    recorded `--hold` (a person must act) or `--install-first` (only the gate
    is busy). `pending_install -> pending_install` records a prepared
-   candidate or changes the flag without leaving the group. The install
+   candidate or changes the flag without leaving the group. The boundary is
+   sticky in the helper: once a waiting install is `--install-first` or
+   `--hold`, a later `--retry-install` keeps it `first` and a deferral
+   without a flag makes it `hold`, so no install-step deferral lets other
+   runtime work pass. A `--hold` on any ticket of a group stops the watcher's
+   automatic install of the whole group until it is set `--install-first`
+   again. The install
    session packages one candidate from current main, which contains every PR
    of the group; after the verified install every ticket of the group is
    `done` with that running build and its own acceptance steps, and the

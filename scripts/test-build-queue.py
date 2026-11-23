@@ -573,8 +573,9 @@ class QueueTests(unittest.TestCase):
         ticket = self.merged_waiting(1)
         retry = lambda: sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3").execute(
             "SELECT retry FROM tickets WHERE id=?", (ticket,)).fetchone()[0]
-        for flags, expected in ((["--retry-install"], "meeting"), (["--install-first"], "first"),
-                                (["--hold"], "hold"), ([], "")):
+        for flags, expected in (([], ""), (["--retry-install"], "meeting"),
+                                (["--install-first"], "first"), (["--hold"], "hold"),
+                                ([], "hold")):  # the boundary stays until resolved
             self.call("set", "--ticket", str(ticket), "--status", "pending_install", *flags,
                       "--note", "candidate build 1740 at /private/candidate.app")
             self.assertEqual(retry(), expected, flags)
@@ -622,6 +623,24 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(self.call("claim")["ticket"]["id"], queued)  # legacy holds nothing
             self.update(queued, "done")
 
+
+    def test_a_deferral_never_lifts_the_install_boundary(self):
+        ticket = self.merged_waiting(1, flag="--install-first", note="isolated, gate busy")
+        retry = lambda: sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3").execute(
+            "SELECT retry FROM tickets WHERE id=?", (ticket,)).fetchone()[0]
+        steps = ((["--retry-install"], "first"),  # install step, gate busy
+                 ([], "hold"),                    # install step, a person must act
+                 (["--retry-install"], "first"),  # the person acted
+                 (["--hold"], "hold"), (["--install-first"], "first"))
+        for flags, expected in steps:
+            self.call("set", "--ticket", str(ticket), "--status", "pending_install", *flags,
+                      "--note", "deferred")
+            self.assertEqual(retry(), expected, flags)
+            self.assertTrue(self.call("status")["install_boundary"])
+        queued = self.enqueue(2)["ticket"]["id"]
+        self.assertEqual(self.call("claim")["held_for_install"], [queued])
+        self.update(ticket, "done")
+        self.assertFalse(self.call("status")["install_boundary"])
 
 if __name__ == "__main__":
     unittest.main()

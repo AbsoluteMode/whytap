@@ -53,7 +53,10 @@ untested prefix in main) but recommended grouping only the install.
   not installable now, it is `--hold` or `--install-first`.
 - `pending_install -> pending_install` records a prepared candidate or changes
   the flag without leaving the group, so an interrupted install session finds
-  the same group and candidate.
+  the same group and candidate. The boundary is sticky: a later
+  `--retry-install` keeps an install `first`, a deferral without a flag makes
+  it `hold`. A `hold` on any member stops automatic installs of the whole
+  group, because one candidate installs all of it.
 
 ## Rationale
 

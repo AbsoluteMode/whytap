@@ -165,15 +165,19 @@ holds it, leave the tickets queued and end your turn.
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. Otherwise record
-   `set --status pending_install --retry-install --note <candidate evidence>`,
+   `set --status pending_install --retry-install --note <candidate evidence>`
+   (for a group or an isolated PR, use `--install-first`; the helper keeps an
+   existing `--install-first` or `--hold` anyway, a deferral never lifts it),
    release the lock and go on: the watcher rechecks the gate by itself and
    starts a session when it is clear. Quit normally, verify exit, keep one
    signed rollback bundle, replace the bundle without exposing a partial copy,
    launch that exact path, verify the running identity and one smoke check,
    update `build/CURRENT_BUILD.md`. If a normal quit is declined, or macOS
    asks for a permission you cannot grant, stop there, keep the working app
-   and leave the ticket `pending_install` (without `--retry-install` when a
-   person must act) with the reason.
+   and leave the ticket `pending_install` (with `--hold` when a person must
+   act; before `activate`, without `--retry-install`) with the reason. A
+   `--hold` on any ticket of a group stops automatic installs of the whole
+   group until a person has acted and it is set `--install-first` again.
 8. `set` the result with evidence and message the author: event ID, what is
    actually running, acceptance steps, what is pending.
 

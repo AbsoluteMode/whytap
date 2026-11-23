@@ -156,9 +156,12 @@ def open_work(root):
     automatic = [ticket for ticket, retry in waiting_installs if retry in ("meeting", "first")]
     full = len(automatic) >= GROUP_LIMIT
     boundary = full or any(retry in ("first", "hold") for _t, retry in waiting_installs)
+    # One candidate installs the whole group: a person holding any of it holds all.
+    held = any(retry == "hold" for _t, retry in waiting_installs)
     for ticket, status, updated, queued, retry, waiting, changes_app in rows:
         if status == "pending_install":
-            status = "retry_install" if retry in ("meeting", "first") else "waiting_install"
+            status = ("retry_install" if retry in ("meeting", "first") and not held
+                      else "waiting_install")
             if status == "retry_install" and (full or retry == "first"):
                 work["install_first"].append(ticket)
         if status == "queued" and waiting:

@@ -770,6 +770,25 @@ class WatcherTests(unittest.TestCase):
         self.watcher("run")
         self.assertEqual(self.statuses(), {first: "done", isolated: "done"})
 
+    def test_a_hold_on_one_member_stops_the_automatic_install_of_the_group(self):
+        first, held = self.merged_waiting(1), self.merged_waiting(2)
+        self.queue("set", "--ticket", str(first), "--status", "pending_install", "--install-first",
+                   "--note", "group, gate busy")
+        # The session persisted a hold on one member, then stopped.
+        self.queue("set", "--ticket", str(held), "--status", "pending_install", "--hold",
+                   "--note", "a person must approve the permission prompt")
+        runtime = self.enqueue(3)
+        self.watcher("run")  # the gate is clear
+        self.assertEqual(self.sessions(), [])
+        status = json.loads(self.watcher("status").stdout)
+        self.assertEqual((status["open"]["retry_install"], status["open"]["waiting_install"],
+                          status["open"]["held_for_install"]), ([], [first, held], [runtime]))
+        self.queue("set", "--ticket", str(held), "--status", "pending_install", "--install-first",
+                   "--note", "the person acted")
+        self.state_reset_install_attempt()
+        self.assertIn("builder session (retry_install)", self.watcher("run").stdout)
+        self.assertEqual(set(self.statuses().values()), {"done"})
+
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400
         for output in ('{"load": %s, "cpus": 8}' % huge, '{"load": 1, "cpus": %s}' % huge,

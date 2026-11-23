@@ -127,6 +127,7 @@ final class ToolboxTileInteractionTests: XCTestCase {
         window.orderFrontRegardless()
         defer { window.close() }
         host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))  // first render installs the gesture
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             window.sendEvent(NSEvent.mouseEvent(
                 with: type, location: NSPoint(x: 50, y: 82), modifierFlags: [],
@@ -134,6 +135,10 @@ final class ToolboxTileInteractionTests: XCTestCase {
                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         }
+        // SwiftUI delivers the tap on a later run-loop turn, later still on a loaded Mac.
+        let deadline = Date().addingTimeInterval(10)
+        while taps == 0, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertEqual(taps, 1)
         XCTAssertFalse(window.isKeyWindow)
         XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) }, "never on a display")

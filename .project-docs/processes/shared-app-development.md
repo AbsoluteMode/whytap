@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md]
 ---
 
 # Parallel development, one working Whytap
@@ -382,6 +382,16 @@ queue survives downtime.
    running the suite. If it stays not clear, do not run it: return the ticket
    with a note that the environment, not the PR, stopped it. Failures in a
    suite that ran while the check was not clear are not findings against the PR.
+   A failed test whose file and code under test the candidate does not change
+   is rerun alone (`swift test --filter <Class>/<test>`), not with a second
+   full suite. If it passes, it is not a finding: the builder continues,
+   appends the test, ticket and date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git
+   common directory and names it as a follow-up in the ticket note when it is
+   already listed within the last seven days; if it fails again, it is a
+   finding. A test skipped with "Protected data is unavailable" ran while the
+   screen was locked; it runs again once the environment is clear, before the
+   merge, and a failure there is a finding (see the
+   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)).
    Block a PR once with everything. Before setting `blocked`, finish the whole
    inspection: every probe and check across all paths the PR touches. Write
    **all** problems found into the ticket note as one numbered list. When a

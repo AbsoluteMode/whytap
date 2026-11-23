@@ -510,6 +510,9 @@ Translation tools:
   ignored and kept for a rollback build. The owner chose this on 2026-11-22
   (three users, all aware), an exception to keeping saved audio routes. WHY:
   .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+  Subtitles capture the system mix at 24 kHz, low-passed before resampling
+  (SystemAudioAntiAliasFilter; Meeting Notes keep 16 kHz), WHY:
+  .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md.
   OpenAIRealtimeTranslateAdapter streams the capture (24 kHz, 200 ms frames)
   to one session that returns the translation and, with gpt-realtime-whisper
   input transcription, the heard original. SubtitleSpeechPairer cuts the

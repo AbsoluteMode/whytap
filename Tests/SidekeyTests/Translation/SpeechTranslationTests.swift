@@ -300,20 +300,23 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
         await session.close()
     }
 
-    func testAudioIsUpsampledToTwoHundredMillisecondFramesAndCloseFlushes() async throws {
+    /// The capture is already 24 kHz: its bytes go out unchanged, in 200 ms
+    /// frames, the rest flushed at close.
+    func testTwentyFourKilohertzAudioGoesOutUnchangedInTwoHundredMillisecondFrames() async throws {
         let transport = StubWebSocketTransport()
         transport.deliverText(#"{"type":"session.updated"}"#)
         let session = try await open(transport)
-        // 9,600 bytes = 300 ms at 16 kHz -> 14,400 bytes at 24 kHz: one 200 ms frame, the rest waits.
-        await session.sendAudio(Data(count: 9_600))
+        // 14,400 bytes = 300 ms at 24 kHz: one 200 ms frame, the rest waits.
+        let pcm = Data((0..<14_400).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+        await session.sendAudio(pcm)
         var appends = transport.sent.compactMap(json).filter { $0["type"] as? String == "session.input_audio_buffer.append" }
         XCTAssertEqual(appends.count, 1)
-        XCTAssertEqual(Data(base64Encoded: appends[0]["audio"] as? String ?? "")?.count, 9_600)
+        XCTAssertEqual(Data(base64Encoded: appends[0]["audio"] as? String ?? ""), pcm.prefix(9_600))
         await session.endInput()
         let sent = transport.sent.compactMap(json)
         appends = sent.filter { $0["type"] as? String == "session.input_audio_buffer.append" }
         XCTAssertEqual(appends.count, 2, "the rest is flushed before close")
-        XCTAssertEqual(Data(base64Encoded: appends[1]["audio"] as? String ?? "")?.count, 4_800)
+        XCTAssertEqual(Data(base64Encoded: appends[1]["audio"] as? String ?? ""), pcm.suffix(4_800))
         XCTAssertEqual(sent.last?["type"] as? String, "session.close")
         XCTAssertEqual(session.acceptedAudioSeconds(), 0.3, accuracy: 0.001)
         transport.deliverText(#"{"type":"session.input_transcript.delta","delta":" Hello","elapsed_ms":200}"#)

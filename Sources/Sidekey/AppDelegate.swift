@@ -602,8 +602,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
-        // An accepted onboarding restart (macOS 27.3 grant): reopen after this quit.
-        AppRelauncher.startHelperIfRestarting()
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()

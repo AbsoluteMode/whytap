@@ -645,8 +645,10 @@ struct OnboardingAccessStage: View {
     private var state: OnboardingAccessState { shownState ?? model.accessState(kind.step) }
     private var setup: PermissionsSettingsViewModel.KeyboardSetup { shownSetup ?? model.keyboardSetup }
     private var guided: Bool { kind.addsByHand && state != .granted }
-    /// Screen & system audio, screen on: the step waits for the audio ask or Continue.
-    private var audioHeld: Bool { kind == .screenRecording && state == .granted && model.systemAudioPending }
+    /// Screen & system audio: the audio ask sits under the step's line in
+    /// every state, independent of the screen grant (two consents in macOS).
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    private var showsAudioRow: Bool { kind == .screenRecording && model.offersSystemAudio }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -662,9 +664,9 @@ struct OnboardingAccessStage: View {
                 .frame(height: guided ? 70 : 138)
             if guided {
                 guide.padding(.horizontal, 36)
-            } else if audioHeld {
-                VStack(spacing: 10) {
-                    line(kind.grantedLine, color: OnboardingWireframeInk.greenColor)
+            } else if showsAudioRow {
+                VStack(spacing: 8) {
+                    copy
                     systemAudioRow
                 }
                 .frame(height: 64, alignment: .top)
@@ -674,12 +676,13 @@ struct OnboardingAccessStage: View {
                     .frame(height: 46, alignment: .top)
                     .padding(.horizontal, 36)
             }
-            OnboardingAccessPill(kind: kind, state: state, guided: guided, continues: audioHeld) {
+            OnboardingAccessPill(kind: kind, state: state, guided: guided) {
                 switch state {
                 case .rest, .notOn: model.requestAccess(kind.step)
                 case .waiting: model.recheckPermissions()
                 case .restarting: model.restartWhytap()
-                case .granted: if audioHeld { model.next() }
+                // The window's Next is the one way on, before and after the audio ask.
+                case .granted: break
                 }
             }
             .padding(.top, 4)
@@ -706,9 +709,10 @@ struct OnboardingAccessStage: View {
             // Screen Recording has no partial grant to read: the first line leads.
             let focus = kind == .keyboard ? OnboardingAccessKind.guideFocus(setup) : 0
             VStack(alignment: .center, spacing: 8) {
-                Text(kind.guidePurpose)
+                // Restart Whytap pressed while an activity runs: why it waits.
+                Text(model.restartNote ?? kind.guidePurpose)
                     .font(OnboardingTheme.sans(13))
-                    .foregroundColor(OnboardingTheme.muted)
+                    .foregroundColor(model.restartNote == nil ? OnboardingTheme.muted : OnboardingWireframeInk.amberColor)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { index, text in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -726,7 +730,7 @@ struct OnboardingAccessStage: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
-                if kind == .screenRecording, model.systemAudioPending || model.systemAudioAsked { systemAudioRow }
+                if showsAudioRow { systemAudioRow }
             }
             .frame(height: 104, alignment: .top)
         }
@@ -813,7 +817,6 @@ struct OnboardingAccessStage: View {
                 // A grant only a new process sees: the person can restart now.
                 OnboardingWireLink(title: "Restart Whytap", arrow: "arrow.clockwise", action: model.restartWhytap)
             }
-            // Held for the audio ask, Continue is the way on (without asking).
             if kind.isOptional, state != .restarting, state != .granted {
                 OnboardingWireLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
             }
@@ -828,8 +831,6 @@ struct OnboardingAccessPill: View {
     let state: OnboardingAccessState
     /// 27.3: the step's action is opening System Settings.
     var guided = false
-    /// Granted, but the step waits for its optional system audio ask.
-    var continues = false
     let action: () -> Void
 
     var body: some View {
@@ -841,8 +842,6 @@ struct OnboardingAccessPill: View {
             OnboardingWirePill("Allow", isDefault: true, action: action).accessibilityLabel("Allow \(kind.pane)")
         case .waiting:
             OnboardingWirePill("Waiting…", tone: .active, disc: .none, action: action)
-        case .granted where continues:
-            OnboardingWirePill("Continue", isDefault: true, action: action)
         case .granted:
             OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
         case .notOn:

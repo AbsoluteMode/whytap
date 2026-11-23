@@ -612,7 +612,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
 
     // Builder review #503: screen granted first (before the step, or after
     // the restart) keeps Screen & system audio for its system audio ask, with
-    // Continue; asked once, it stays asked across a relaunch.
+    // the window's Next; asked once, it stays asked across a relaunch.
     func testScreenOnFirstKeepsTheStepForSystemAudioUntilAsked() async throws {
         let suite = "journey-audio-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -634,7 +634,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let again = try makeModel(env, asksSystemAudio: true, resumeDefaults: defaults)
         XCTAssertFalse(again.steps.contains(.screenRecording), "asked once: the relaunch skips the step")
         model.next()
-        XCTAssertNotEqual(model.step, .screenRecording, "Continue leaves")
+        XCTAssertNotEqual(model.step, .screenRecording, "Next leaves")
     }
 
     func testPendingScreenRequestOpensNoPaneAfterSkipOrClose() async throws {
@@ -1563,3 +1563,153 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("llm-server-then-anthropic")
     }
 }
+
+// Builder review #504.
+extension OnboardingJourneyModelTests {
+    // A restart blocked by an activity is tried once: the next passive poll
+    // (every second while the step is open) does not re-arm it when the
+    // recording ends; Restart Whytap is the retry, and a fresh Open System
+    // Settings allows one more automatic try.
+    func testABlockedAutomaticRestartIsNotRetriedByThePoll() async throws {
+        let missingKeyboard = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .authorized,
+                                                         postEventGranted: false, listenEventGranted: false)
+        let reason = "Ready. Finish the meeting recording, then choose Restart."
+        for step: OnboardingStep in [.keyboard, .screenRecording] {
+            let env = try makeEnv(accessibility: step == .screenRecording, microphone: .authorized)
+            if step == .keyboard { env.snapshot.value = missingKeyboard }
+            var busy = true
+            var attempts = 0
+            let model = try makeModel(env, settingsOnly: true,
+                                      launch: .init(snapshot: env.snapshot.value, screenRecording: false),
+                                      relaunch: { attempts += 1; return busy ? reason : nil }, asksSystemAudio: true)
+            defer { model.stop(); env.beat.end() }
+            for _ in 0..<20 where model.step != step { model.next() }
+            XCTAssertEqual(model.step, step)
+            model.requestAccess(step)
+            if step == .keyboard {
+                env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .authorized)
+            } else {
+                env.screen.value = true
+            }
+            model.permissions.refresh(restartRecoveryPolling: false)
+            try await eventually { env.beat.count > 0 }
+            env.beat.end()
+            try await eventually { model.restartNote != nil }
+            XCTAssertEqual(model.restartNote, reason, "\(step)")
+            XCTAssertEqual(attempts, 1)
+            busy = false
+            for _ in 0..<3 { model.permissions.refresh(restartRecoveryPolling: false) }
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertFalse(model.restartPending, "\(step) re-armed without a press")
+            XCTAssertEqual(attempts, 1, "\(step) restarted when the recording ended, without a press")
+            XCTAssertEqual(model.accessState(step), .restarting)
+            model.restartWhytap()
+            XCTAssertEqual(attempts, 2, "the button is the retry")
+            XCTAssertNil(model.restartNote)
+        }
+    }
+
+    // Restart Whytap pressed in the guide's Waiting while a recording runs:
+    // the reason is on the step (the guide shows it in place of its purpose).
+    func testRestartPressedWhileWaitingKeepsItsReason() throws {
+        let none = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .authorized,
+                                              postEventGranted: false, listenEventGranted: false)
+        let env = try makeEnv(accessibility: false, microphone: .authorized)
+        env.snapshot.value = none
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: none, screenRecording: false),
+                                  relaunch: { "Ready. Finish the meeting recording, then choose Restart." })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.restartWhytap()
+        XCTAssertEqual(model.restartNote, "Ready. Finish the meeting recording, then choose Restart.")
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.back()
+        XCTAssertNil(model.restartNote, "leaving the step clears it")
+    }
+
+    // Request-first macOS: system audio is its own consent, offered on the
+    // step before (and without) the screen grant; asked first, a later screen
+    // grant moves on as any access step does.
+    func testRequestFirstMacOSOffersSystemAudioWithoutTheScreen() async throws {
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        var asked = 0
+        let model = try makeModel(env, systemAudioProbe: { asked += 1 }, asksSystemAudio: true)
+        for _ in 0..<20 where model.step != .screenRecording { model.next() }
+        XCTAssertEqual(model.step, .screenRecording)
+        XCTAssertEqual(model.accessState(.screenRecording), .rest)
+        XCTAssertTrue(model.offersSystemAudio)
+        model.askSystemAudio()
+        try await eventually { asked == 1 }
+        XCTAssertEqual(model.accessState(.screenRecording), .rest, "the audio ask grants no screen")
+        XCTAssertTrue(model.offersSystemAudio, "the row stays, as its asked status")
+        env.screen.value = true
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.accessState(.screenRecording), .granted)
+        try await eventually { env.beat.count > 0 }
+    }
+
+    // Helper failure keeps Whytap open with a reason; a cancelled quit stops
+    // the helper so a later Quit never reopens Whytap.
+    func testTheRelaunchHelperFailsSafely() {
+        var terminated = 0, stopped = 0
+        struct NoHelper: Error {}
+        XCTAssertEqual(AppRelauncher.relaunch(appState: AppState(), startHelper: { _, _ in throw NoHelper() },
+                                              terminate: { terminated += 1 }), AppRelauncher.helperFailed)
+        XCTAssertEqual(terminated, 0, "no quit without a helper to reopen")
+        var acceptedDuringQuit = false
+        XCTAssertNil(AppRelauncher.relaunch(appState: AppState(), startHelper: { pid, path in
+            XCTAssertEqual(pid, ProcessInfo.processInfo.processIdentifier)
+            XCTAssertEqual(path, Bundle.main.bundlePath)
+            return { stopped += 1 }
+        }, terminate: { terminated += 1; acceptedDuringQuit = AppRelauncher.restartAccepted }))
+        XCTAssertEqual(terminated, 1)
+        XCTAssertTrue(acceptedDuringQuit)
+        XCTAssertEqual(stopped, 1, "the quit returned (cancelled): the helper is stopped")
+        XCTAssertFalse(AppRelauncher.restartAccepted)
+    }
+
+    /// Offscreen: request-first Screen & system audio in each state and the
+    /// whole window before and after the audio ask (one way on: Next).
+    func testRenderSystemAudioOnEveryScreenState() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
+        }
+        _ = NSApplication.shared
+        let previous = PermissionsHelper.usesProtectionOverridePane
+        PermissionsHelper.usesProtectionOverridePane = false
+        defer { PermissionsHelper.usesProtectionOverridePane = previous }
+        OnboardingAccessMotion.settlesAtOnce = true
+        defer { OnboardingAccessMotion.settlesAtOnce = false }
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func write(_ view: NSView, _ name: String) async throws {
+            view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(120))
+            view.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("504-\(name).png"))
+        }
+        let env = try makeEnv(accessibility: true, microphone: .authorized)
+        let model = try makeModel(env, asksSystemAudio: true)
+        for (name, state) in [("rest", OnboardingAccessState.rest), ("waiting", .waiting), ("not-on", .notOn), ("granted", .granted)] {
+            let host = NSHostingView(rootView: OnboardingAccessStage(kind: .screenRecording, model: model, shownState: state)
+                .frame(width: 520, height: 320).background(OnboardingTheme.bg).preferredColorScheme(.dark))
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            try await write(host, "audio-\(name)")
+        }
+        env.screen.value = true
+        let held = try makeModel(env, asksSystemAudio: true)
+        for _ in 0..<20 where held.step != .screenRecording { held.next() }
+        XCTAssertEqual(held.accessState(.screenRecording), .granted)
+        for asked in [false, true] {
+            if asked { held.askSystemAudio() }
+            let host = NSHostingView(rootView: OnboardingJourneyView(model: held))
+            host.frame = NSRect(origin: .zero, size: OnboardingJourneyView.size)
+            try await write(host, "window-audio-asked-\(asked)")
+        }
+    }
+}
+

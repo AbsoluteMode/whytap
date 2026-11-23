@@ -8,8 +8,10 @@ import AppKit
 /// The same activity rules as an update restart apply: nothing quits during
 /// a meeting recording, dictation, a screenshot and the rest
 /// (UpdateController.restartDeferralReason). The helper that reopens the app
-/// starts only in `applicationWillTerminate` of an accepted restart quit, so
-/// a cancelled restart followed by an ordinary Quit never reopens Whytap.
+/// starts before the quit; if it cannot start, Whytap stays open and says so
+/// (the person quits and opens it by hand). A quit that returns was
+/// cancelled: the helper is stopped, so a later ordinary Quit never reopens
+/// Whytap.
 // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
 @MainActor
 enum AppRelauncher {
@@ -26,27 +28,41 @@ enum AppRelauncher {
         ["-c", script, "whytap-relaunch", String(pid), bundlePath]
     }
 
-    /// A restart quit is under way: `applicationWillTerminate` starts the helper.
+    /// Shown when the reopen helper cannot start: nothing quits.
+    static let helperFailed = "Whytap couldn’t restart itself. Quit Whytap and open it again."
+
+    /// A restart quit is under way (between the helper's start and the quit).
     private(set) static var restartAccepted = false
 
-    /// Restarts now, or returns why not (the activity to finish first).
+    /// Starts the reopen helper; returns how to stop it if the quit is cancelled.
+    typealias HelperStarter = (_ pid: Int32, _ bundlePath: String) throws -> () -> Void
+
+    /// Restarts now, or returns why not (the activity to finish first, or a
+    /// helper that could not start).
     @discardableResult
-    static func relaunch(appState: AppState? = .shared) -> String? {
+    static func relaunch(appState: AppState? = .shared,
+                         startHelper: HelperStarter = AppRelauncher.startHelper,
+                         terminate: () -> Void = { NSApp.terminate(nil) }) -> String? {
         if let reason = UpdateController.restartDeferralReason(appState) { return reason }
+        let stopHelper: () -> Void
+        do {
+            stopHelper = try startHelper(ProcessInfo.processInfo.processIdentifier, Bundle.main.bundlePath)
+        } catch {
+            return helperFailed
+        }
         restartAccepted = true
-        NSApp.terminate(nil)
-        // Reached only when the quit was cancelled.
+        terminate()
+        // Reached only when the quit was cancelled: no reopen after a later Quit.
         restartAccepted = false
+        stopHelper()
         return nil
     }
 
-    /// From `applicationWillTerminate`: the quit is final; reopen after it.
-    static func startHelperIfRestarting() {
-        guard restartAccepted else { return }
+    static func startHelper(pid: Int32, bundlePath: String) throws -> () -> Void {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = arguments(pid: ProcessInfo.processInfo.processIdentifier,
-                                      bundlePath: Bundle.main.bundlePath)
-        try? process.run()
+        process.arguments = arguments(pid: pid, bundlePath: bundlePath)
+        try process.run()
+        return { if process.isRunning { process.terminate() } }
     }
 }

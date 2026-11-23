@@ -245,6 +245,9 @@ final class OnboardingJourneyModel: ObservableObject {
     private var screenAsking = false
     /// The pending restart after a 27.3 grant; leaving the step cancels it.
     private var restartTask: Task<Void, Never>?
+    /// Steps whose one automatic restart has been tried since their last
+    /// Open System Settings: a blocked try waits for the Restart button.
+    private var autoRestartTried: Set<OnboardingStep> = []
     private let systemAudioProbe: () async -> Void
     /// "Ask for system audio" was pressed (kept across a restart).
     @Published private(set) var systemAudioAsked = false
@@ -259,6 +262,9 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// System audio is still to be asked for on the Screen & system audio step.
     var systemAudioPending: Bool { asksSystemAudio && !systemAudioAsked }
+    /// The step shows the system audio ask (or that it was asked), whatever
+    /// the screen's own state: the two are separate consents in macOS.
+    var offersSystemAudio: Bool { systemAudioPending || systemAudioAsked }
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -509,6 +515,7 @@ final class OnboardingJourneyModel: ObservableObject {
         restartTask?.cancel()
         restartTask = nil
         restartPending = false
+        restartNote = nil
         sourceMove?.cancel()
         self.direction = direction
         if direction == .forward { leftSteps.insert(step) }
@@ -1180,6 +1187,8 @@ final class OnboardingJourneyModel: ObservableObject {
     /// Allow (or Allow again): the step waits for System Settings.
     private func asking(_ step: OnboardingStep) {
         requested.insert(step)
+        // A fresh Open System Settings may restart once more by itself.
+        autoRestartTried.remove(step)
         if case .failed = latest(step) { outcomes[step] = .idle }
     }
 
@@ -1309,7 +1318,10 @@ final class OnboardingJourneyModel: ObservableObject {
         // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
         // Only after this step's own Open System Settings in this window:
         // a grant that is merely found here waits for the Restart button.
-        if requested.contains(step), (step == .keyboard && keyboardRestart) || (step == .screenRecording && screenRestart) {
+        // One try per press: a try blocked by a recording is not repeated by
+        // this poll when the recording ends; the Restart button is the retry.
+        if requested.contains(step), !autoRestartTried.contains(step),
+           (step == .keyboard && keyboardRestart) || (step == .screenRecording && screenRestart) {
             scheduleRestart()
         }
         let now: [(OnboardingStep, Bool, Bool, String)] = [
@@ -1347,6 +1359,7 @@ final class OnboardingJourneyModel: ObservableObject {
     private func scheduleRestart() {
         guard restartTask == nil, !isPreview else { return }
         let shown = step
+        autoRestartTried.insert(shown)
         restartPending = true
         restartTask = Task { @MainActor [weak self] in
             await self?.pause(Self.restartBeat)

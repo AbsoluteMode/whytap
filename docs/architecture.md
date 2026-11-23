@@ -1413,9 +1413,13 @@ line. Grants present at launch are recorded (`recordLaunchGrants`); one that
 appears later needs a new process, so the step shows `restarting`; after this
 step's own Open System Settings `AppRelauncher` reopens Whytap on the same step,
 under the update restart's activity rules (UpdateController.restartDeferralReason),
-with its helper armed only in `applicationWillTerminate` of that quit (Settings
-and Drop's repair window offer Restart Whytap). Screen & system audio stays for
-its system audio ask even with the screen on. "Ask for system audio" runs one second of the
+once per press: a try blocked by an activity waits for Restart Whytap, with its
+reason on the step (also in the guide's Waiting). The reopen helper starts just
+before the quit; if it cannot start nothing quits and the step says so, and a
+cancelled quit stops it (Settings and Drop's repair window offer Restart
+Whytap). Screen & system audio offers its system audio ask in every state,
+independent of the screen grant, and with the screen on it stays for the ask,
+the window's Next the one way on. "Ask for system audio" runs one second of the
 Meetings process tap (SystemAudioPermissionProbe) so macOS asks now. Saved keys
 are named from Keychain attributes only (`TokenStore.exists`). The screen step names both settings and confirms only
 the screen preflight. Audio-only

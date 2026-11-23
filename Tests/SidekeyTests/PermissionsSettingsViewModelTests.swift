@@ -215,7 +215,11 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         XCTAssertNil(UpdateController.restartDeferralReason(state))
         state.updateMeetingRecordingState(audioLevel: 0, duration: 1, paused: false)
         XCTAssertEqual(UpdateController.restartDeferralReason(state), "Ready. Finish the meeting recording, then choose Restart.")
-        XCTAssertEqual(AppRelauncher.relaunch(appState: state), "Ready. Finish the meeting recording, then choose Restart.")
+        var started = 0
+        XCTAssertEqual(AppRelauncher.relaunch(appState: state, startHelper: { _, _ in started += 1; return {} },
+                                              terminate: { XCTFail("quit during a recording") }),
+                       "Ready. Finish the meeting recording, then choose Restart.")
+        XCTAssertEqual(started, 0)
         XCTAssertFalse(AppRelauncher.restartAccepted, "nothing quits and no reopen helper is armed")
     }
 

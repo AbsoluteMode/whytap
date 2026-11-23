@@ -196,6 +196,7 @@ final class TodoCommandTests: XCTestCase {
             ["id": UUID().uuidString, "title": "Open", "completed": false, "createdAt": 11.0]]]
         try JSONSerialization.data(withJSONObject: archive).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         guard protection(url) == .completeUnlessOpen else { throw XCTSkip("This volume has no data protection classes") }
+        try skipWhileProtectedDataIsUnavailable(url)
 
         XCTAssertEqual(tasks(run(["list"], client: closedApp).1).count, 1)
         XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication, "Reading migrates the old class")
@@ -203,6 +204,16 @@ final class TodoCommandTests: XCTestCase {
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path)
         XCTAssertEqual(run(["add", "From agent"], client: closedApp).1?.data.object?["added"], .int(1))
         XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication, "A helper save keeps the readable class")
+    }
+
+    /// A file in the stricter class opens only while the screen is unlocked, and the
+    /// migration starts with such a read. On a locked Mac the test cannot run: the
+    /// build queue reruns every test skipped with this message before it installs.
+    // WHY: .project-docs/decisions/2026-11-23-builder-queue-flaky-tests.md
+    private func skipWhileProtectedDataIsUnavailable(_ url: URL) throws {
+        if (try? Data(contentsOf: url)) == nil {
+            throw XCTSkip("Protected data is unavailable: the screen is locked")
+        }
     }
 
     private func protection(_ url: URL) -> FileProtectionType? {

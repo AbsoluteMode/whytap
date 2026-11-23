@@ -112,7 +112,16 @@ holds it, leave the tickets queued and end your turn.
    again (up to 15 minutes) instead of running the suite; if it stays not
    clear, return the ticket with a note that the environment, not the PR,
    stopped it. Do not treat failures from a suite run under such load as PR
-   findings. Commands that run
+   findings. When a test fails whose file and code under test the candidate
+   does not change, rerun only the failed tests
+   (`swift test --filter <Class>/<test>`), not the whole suite. If they pass,
+   it is not a finding: go on with the ticket, append the test, ticket and
+   date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git common directory, and name it
+   as a follow-up in the ticket note when the file already lists it within
+   the last seven days. If a rerun fails again, it is a finding as before. A
+   test skipped with "Protected data is unavailable" ran while the screen was
+   locked: run it again once `environment` is clear, before merging; a
+   failure there is a finding. Commands that run
    longer than a few minutes go to the background with output in a file.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.

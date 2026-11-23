@@ -56,7 +56,9 @@ final class SpeechTranslationModelTests: XCTestCase {
         return model
     }
 
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 3) async throws {
+    /// Returns as soon as the condition holds. The deadline only matters on a loaded
+    /// Mac (the build queue saw load 317 on 14 cores), so it is generous.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
     }
@@ -70,7 +72,9 @@ final class SpeechTranslationModelTests: XCTestCase {
         audio.pair.continuation.yield([0.1, 0.2, -0.1])
         try await wait(session.sentBytes > 0)
         session.yieldRecorded()
-        try await wait(model.lines.count >= 7)
+        // The recording's last sentence arrives after the seventh pair is closed.
+        try await wait(model.lines.count >= 7 && !model.live.isEmpty && !model.liveTranslation.isEmpty)
+        XCTAssertEqual(model.lines.count, 7)
         XCTAssertFalse(model.liveTranslation.isEmpty || model.live.isEmpty, "the last sentence is still live")
         model.stop()
         try await wait(model.phase == .idle)
@@ -218,7 +222,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(!model.lines.isEmpty)
         model.stop()
         XCTAssertEqual(model.phase, .finishing)
-        try await wait(model.phase == .failed, seconds: 12)
+        try await wait(model.phase == .failed)
         XCTAssertEqual(model.issue?.message, "The speech provider did not finish in time. The completed subtitles are still here.")
         XCTAssertFalse(model.lines.isEmpty)
     }
@@ -279,7 +283,9 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
         return try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
     }
 
-    private func open(_ transport: StubWebSocketTransport, deadline: Duration = .seconds(2)) async throws
+    /// The start deadline is long unless a test is about it: a handshake answered at
+    /// once must not lose to the timer on a loaded Mac.
+    private func open(_ transport: StubWebSocketTransport, deadline: Duration = .seconds(30)) async throws
         -> SpeechTranslationSession {
         var adapter = OpenAIRealtimeTranslateAdapter(transport: { transport })
         adapter.startDeadline = deadline

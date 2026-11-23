@@ -9,7 +9,8 @@ import XCTest
 // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
 @MainActor
 final class SubtitleSteadyOverlayTests: XCTestCase {
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 3) async throws {
+    /// Returns as soon as the condition holds; the deadline only matters on a loaded Mac.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
     }

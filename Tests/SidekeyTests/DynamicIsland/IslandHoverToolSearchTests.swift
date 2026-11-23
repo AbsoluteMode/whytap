@@ -153,6 +153,12 @@ final class IslandHoverToolSearchTests: XCTestCase {
             RunLoop.current.run(until: Date(timeIntervalSinceNow: duration))
             host.layoutSubtreeIfNeeded()
         }
+        /// SwiftUI applies a state change on a later run-loop turn, later still on a
+        /// loaded Mac: run the loop until the layout shows it, not for a fixed time.
+        func settleUntil(_ condition: () -> Bool) {
+            let deadline = Date(timeIntervalSinceNow: 10)
+            repeat { settle(0.05) } while !condition() && Date() < deadline
+        }
         func searchFields(in view: NSView) -> [IslandHoverSearchNativeField] {
             if let field = view as? IslandHoverSearchNativeField { return [field] }
             return view.subviews.flatMap { searchFields(in: $0) }
@@ -197,10 +203,11 @@ final class IslandHoverToolSearchTests: XCTestCase {
         let initialDrawing = try validateField()
         state.showsSearch = false
         window.setContentSize(CGSize(width: panelWidth, height: monitorHeight))
-        settle(0.20)
+        settleUntil({ searchFields(in: host).isEmpty })
         XCTAssertTrue(searchFields(in: host).isEmpty)
         state.showsSearch = true
         window.setContentSize(CGSize(width: panelWidth, height: 243))
+        settleUntil({ searchFields(in: host).count == 1 })
         settle(0.20)
         XCTAssertEqual(try validateField(), initialDrawing, "Native loupe/text/cancel drawing must survive removal and remount")
         XCTAssertTrue(state.focusChanges.isEmpty, "Returning to Tools must not acquire keyboard focus")

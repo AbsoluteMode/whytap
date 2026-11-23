@@ -194,9 +194,20 @@ final class PlannerExternalChangesTests: XCTestCase {
 
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path)
         XCTAssertEqual(protection(url), .completeUnlessOpen, "As an earlier build left it")
+        try skipWhileProtectedDataIsUnavailable(url)
         let relaunched = PlannerStore(url: url)
         XCTAssertEqual(relaunched.archive.tasks.map(\.title), ["Mine"])
         XCTAssertEqual(protection(url), .completeUntilFirstUserAuthentication)
+    }
+
+    /// A file in the stricter class opens only while the screen is unlocked, and the
+    /// migration starts with such a read. On a locked Mac the test cannot run: the
+    /// build queue reruns every test skipped with this message before it installs.
+    // WHY: .project-docs/decisions/2026-11-23-builder-queue-flaky-tests.md
+    private func skipWhileProtectedDataIsUnavailable(_ url: URL) throws {
+        if (try? Data(contentsOf: url)) == nil {
+            throw XCTSkip("Protected data is unavailable: the screen is locked")
+        }
     }
 
     private func protection(_ url: URL) -> FileProtectionType? {

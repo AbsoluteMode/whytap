@@ -70,8 +70,9 @@ final class MeetingContinuationRefreshTests: XCTestCase {
         return (controller, view, model)
     }
 
+    /// Returns as soon as the condition holds; the deadline only matters on a loaded Mac.
     private func waitUntil(_ condition: @escaping () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(3)
+        let deadline = Date().addingTimeInterval(30)
         while !condition() && Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
         XCTAssertTrue(condition())
     }

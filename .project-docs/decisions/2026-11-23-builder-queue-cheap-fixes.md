@@ -53,8 +53,10 @@ by the environment (ticket 461 under load 317) had no way back except through
 
 All three are decided by data the queue already has or a single unauthenticated
 Git read, so they need no model and no new state. The new column has a default
-and older helpers ignore it; the new transition only widens what the builder
-may do. Keeping the place of a returned ticket is fair because nothing was
+and older helpers ignore it (checked: an older helper enqueues and claims on
+the migrated database, and would claim a ticket regardless of its
+dependencies, so the features start with `activate`); the new transition only
+widens what the builder may do. Keeping the place of a returned ticket is fair because nothing was
 wrong with it, while the backoff prevents a loop of sessions that return the
 same ticket.
 

@@ -317,7 +317,11 @@ three concrete checks. When the PR must not merge before another PR, add
 builder session, until the latest ticket of that PR is `done` or
 `pending_install` (merged through the queue). `status` shows it as
 `waiting_for`. A PR that does not go through the queue is not a structured
-dependency. A self-dependency or a direct cycle is refused. Without `--source`/`--session` the helper takes the
+dependency. A self-dependency or a direct cycle is refused. `--depends-on`,
+the head check and the return without a block below work once `activate` has
+installed the helper from that change; an older installed helper refuses the
+flag (then state the dependency in `--dependencies` only) and ignores recorded
+dependencies. Without `--source`/`--session` the helper takes the
 author's address from the environment: Codex's `CODEX_THREAD_ID`, otherwise
 Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID, stored in lower case; a
 display name such as `one-mcp` is refused because Harness Link cannot reach

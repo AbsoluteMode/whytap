@@ -2195,6 +2195,17 @@ FLAVOR=prod EXODIA_NOTARIZE=1 ./scripts/user-release.sh --build-only
 FLAVOR=prod ./scripts/user-release.sh --upload-only
 ```
 
+Test runs play no sound. `SystemSoundGuard`
+(`Tests/SidekeyTests/Support/SystemSoundGuard.swift`, installed at bundle load
+by the `SidekeyTestBootstrap` target) turns the AppKit alert off for the test
+process and ends the run with a report naming each test that asked for a
+sound. A test whose key reaches the end of a window's responder chain, or that
+plays a sound file, fails: the app would beep for the user in the same place,
+so fix the app or wrap an intended case in `SystemSoundGuard.expectingSound { }`.
+A key sent through `NSApp.sendEvent` without a key window is only reported (a
+test process has no key window). WHY:
+`.project-docs/decisions/2026-11-23-silent-test-runs.md`.
+
 Whytap stays open source and uses ready-made community builds for normal installs
 and updates. The default DMG/Sparkle pipeline builds and signs locally with the
 Developer ID certificate of the team committed in `Resources/developer-id-team.txt`

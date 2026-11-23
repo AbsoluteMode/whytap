@@ -10,8 +10,8 @@ enum CaseKnownClient: String, CaseIterable, Equatable {
     case builtInOpenCode
 
     /// The current Connect catalog. Preserve legacy identities and registrations.
-    // WHY: .project-docs/decisions/2026-10-21-case-connect-claude-code.md
-    static let connectableClients: [CaseKnownClient] = [.builtInOpenCode, .claudeCode, .cursor]
+    // WHY: .project-docs/decisions/2026-11-23-case-connect-codex.md
+    static let connectableClients: [CaseKnownClient] = [.builtInOpenCode, .claudeCode, .codex, .cursor]
 
     var displayName: String {
         switch self {
@@ -108,7 +108,7 @@ final class CaseClientSetup: CaseClientConfiguring {
     }
 
     /// Which of `clients` are on this Mac, whatever the Connect catalog
-    /// offers. The onboarding asks about Claude Code and Codex.
+    /// offers. The onboarding asks about Claude Code and Codex only.
     func installed(among clients: [CaseKnownClient]) async -> [CaseKnownClient] {
         let connectors = connectors
         return await Task.detached {

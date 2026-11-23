@@ -117,6 +117,10 @@ final class LiveSubtitleModel: ObservableObject {
     /// message is shown, at the user's request.
     // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
     static let maxSessionDuration: Duration = .seconds(60 * 60)
+    /// Subtitles capture the system mix at the provider's 24 kHz, low-passed
+    /// before resampling, instead of the 16 kHz Meeting Notes use.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md
+    nonisolated static let captureSampleRate: Double = 24_000
     private let maxSessionDuration: Duration
     private var sessionLimit: Task<Void, Never>?
     private var source: TerminalSystemAudioSourceStreaming?
@@ -133,7 +137,9 @@ final class LiveSubtitleModel: ObservableObject {
         flushInterval: Duration = .milliseconds(80),
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
-        makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = { CoreAudioSystemAudioSource() },
+        makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
+            CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
+        },
         // Subtitles run only on Audio translate (OpenAI gpt-realtime-translate)
         // with the OpenAI key from API keys; without it Start names the fix.
         // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md

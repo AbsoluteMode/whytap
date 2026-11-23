@@ -22,7 +22,13 @@ final class MonitorStore: ObservableObject {
 
     let root: URL
     private let collector: (MonitorServer) async throws -> MonitorServerMetrics
-    private var configuration: MonitorServerConfiguration?
+    /// The servers being polled. A poll belongs to the configuration it
+    /// started with: once that is removed, emptied, unreadable or replaced,
+    /// the poll in flight is cancelled before it can reach SSH.
+    /// WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
+    private var configuration: MonitorServerConfiguration? {
+        didSet { if configuration != oldValue { refreshTask?.cancel() } }
+    }
     private var task: Task<Void, Never>?
     private var lastServerRefresh: Date?
     private var refreshRequested = false
@@ -71,9 +77,11 @@ final class MonitorStore: ObservableObject {
                 let due = self.lastServerRefresh.map { Date().timeIntervalSince($0) >= self.refreshSeconds } ?? true
                 if due || self.refreshRequested {
                     self.refreshRequested = false
-                    await self.refreshServers(generation: runGeneration)
+                    let finished = await self.refreshServers(generation: runGeneration)
                     guard !Task.isCancelled, self.generation == runGeneration else { break }
-                    self.lastServerRefresh = Date()
+                    // A poll cancelled for a replaced configuration leaves the
+                    // new one due at once instead of a whole interval later.
+                    if finished { self.lastServerRefresh = Date() }
                 }
                 do { try await Task.sleep(nanoseconds: 2_000_000_000) }
                 catch { break }
@@ -237,15 +245,18 @@ final class MonitorStore: ObservableObject {
         return wasListed
     }
 
-    func refreshServers(generation refreshGeneration: UInt64? = nil) async {
-        guard let configuration else { return }
+    /// Returns false when the poll was cancelled before it finished.
+    @discardableResult
+    func refreshServers(generation refreshGeneration: UInt64? = nil) async -> Bool {
+        guard let configuration else { return true }
         readings = readings.map { reading in
             var pending = reading
             pending.refreshing = true
             return pending
         }
         // Its own task, so reloadFiles can cancel it the moment Server status
-        // is deleted (here or on another surface) or the list turns unreadable.
+        // is deleted (here or on another surface), the list turns unreadable
+        // or the configuration it started with is no longer the current one.
         let poll = Task<Void, Never> { @MainActor [weak self] in
             guard let self else { return }
             await self.collect(configuration, generation: refreshGeneration)
@@ -260,6 +271,7 @@ final class MonitorStore: ObservableObject {
                 return idle
             }
         }
+        return !poll.isCancelled
     }
 
     private func collect(_ configuration: MonitorServerConfiguration, generation refreshGeneration: UInt64?) async {

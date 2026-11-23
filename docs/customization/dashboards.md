@@ -142,7 +142,8 @@ Server status (CPU, memory and GPU readings of your servers) is optional and
 is not a default dashboard. Whytap never creates its configuration. The board
 is listed in Monitor only while local `Monitor/servers.json` names at least
 one server and the board was not deleted; a missing file or an empty `servers`
-list means no row, no screen and no connection. A `servers.json` that cannot
+list means no row, no screen and no connection: a check already under way
+for servers that were removed or replaced is cancelled. A `servers.json` that cannot
 be read keeps the row, with a notice to validate the file. The file uses
 existing SSH aliases or credential-store references. See
 `Sources/Sidekey/Monitor/MonitorServer.swift` for that contract.

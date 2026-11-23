@@ -45,6 +45,15 @@ simply hardcoded. The maintainer took it for a test dashboard.
 - A `servers.json` that is there but invalid keeps the row with the existing
   "could not be loaded" notice: that is a setup attempt, and hiding it would
   hide the mistake.
+- A poll belongs to the configuration it started with. When a reload finds
+  that configuration removed, emptied, unreadable or replaced by other
+  servers, the store cancels the poll in flight, so one still preparing its
+  connection (a credential lookup can take seconds) never reaches SSH. An
+  unchanged file keeps its poll. A cancelled poll does not count as a
+  refresh, so replaced servers are polled on the next loop turn, not an
+  interval later. Each Monitor surface has its own store and rereads the
+  folder every 2 s while shown, so another surface drops its poll on its
+  next reload.
 - Deleting with the × and `restore-dashboard server-status` work as before.
   While the deleted list is unreadable, a set-up Server status stays listed
   and paused; without servers it is still not listed.
@@ -73,6 +82,12 @@ configuration is the explicit sign that they want the board.
   board stays unlisted after relaunch with servers set up; an unreadable
   deleted list pauses a set-up board and invents none without servers; both
   surfaces use `serverStatusListed`; the agent instructions.
+- The builder's review (queue ticket 463) found a poll paused before SSH
+  still connecting after its `servers.json` was removed, emptied, made
+  invalid or replaced. Its probe is now a test for all four changes (no
+  connection, UI state kept), with controls: rereading an unchanged file
+  keeps the poll, and a running store polls the replacement servers within
+  one loop turn.
 - Not tested: the live island picker and the empty text over it.
 
 ## Rejected

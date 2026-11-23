@@ -428,6 +428,113 @@ final class MonitorDashboardDeletionTests: XCTestCase {
         XCTAssertTrue(store.readings.isEmpty)
     }
 
+    /// Builder's reproducer (queue ticket 463): a hidden or unconfigured
+    /// board makes no connection, so a poll still preparing its connection
+    /// must not connect once its configuration is removed, emptied, made
+    /// unreadable or replaced by other servers.
+    func testPollPreparingItsConnectionStopsWhenItsConfigurationGoesAway() async throws {
+        let file = root.appendingPathComponent("servers.json")
+        let changes: [(name: String, listed: Bool, rows: [String], change: () throws -> Void)] = [
+            ("remove", false, [], { try FileManager.default.removeItem(at: file) }),
+            ("empty", false, [], { try Data(#"{"servers":[]}"#.utf8).write(to: file) }),
+            ("invalid", true, ["sferyx"], { try Data("{ not json".utf8).write(to: file) }),
+            ("replace", true, ["other"], {
+                try Data(#"{"servers":[{"id":"other","name":"Other","group":"Team","sshTarget":"other"}]}"#.utf8)
+                    .write(to: file)
+            }),
+        ]
+        for step in changes {
+            _ = try writeServers()
+            let began = XCTestExpectation(description: "\(step.name): poll reached authentication before SSH")
+            let release = AsyncStream<Void>.makeStream()
+            let contacted = SSHCalls()
+            let store = MonitorStore(root: root) { server in
+                if server.id == "sferyx" {
+                    began.fulfill()
+                    for await _ in release.stream { break }
+                }
+                try Task.checkCancellation()
+                await MainActor.run { contacted.servers.append(server.id) }
+                throw CancellationError()
+            }
+            store.reloadFiles()
+            let poll = Task { await store.refreshServers() }
+            await fulfillment(of: [began], timeout: 2)
+
+            try step.change()
+            store.reloadFiles()
+            release.continuation.yield(())
+            release.continuation.finish()
+            let finished = await poll.value
+
+            XCTAssertFalse(finished, "\(step.name): the obsolete poll is reported as cancelled")
+            XCTAssertEqual(contacted.servers, [], "\(step.name): the obsolete poll must not connect")
+            XCTAssertEqual(store.serverStatusListed, step.listed, step.name)
+            XCTAssertEqual(store.readings.map(\.server.id), step.rows, step.name)
+            XCTAssertFalse(store.readings.contains { $0.refreshing }, step.name)
+            XCTAssertEqual(store.serverError != nil, step.name == "invalid", step.name)
+
+            // The servers that replaced the old ones are polled normally.
+            await store.refreshServers()
+            XCTAssertEqual(contacted.servers, step.name == "replace" ? ["other"] : [], step.name)
+        }
+    }
+
+    /// An unchanged servers.json reread by the 2 s loop keeps its poll.
+    func testRereadingTheSameConfigurationKeepsThePollInFlight() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "poll reached authentication before SSH")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = SSHCalls()
+        let store = MonitorStore(root: root) { server in
+            began.fulfill()
+            for await _ in release.stream { break }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.servers.append(server.id) }
+            throw CancellationError()
+        }
+        store.reloadFiles()
+        let poll = Task { await store.refreshServers() }
+        await fulfillment(of: [began], timeout: 2)
+        store.reloadFiles()
+        store.reloadFiles()
+        release.continuation.yield(())
+        release.continuation.finish()
+        let finished = await poll.value
+        XCTAssertTrue(finished)
+        XCTAssertEqual(contacted.servers, ["sferyx"])
+    }
+
+    /// The running loop polls replaced servers at once, not an interval later.
+    func testRunningStorePollsReplacedServersWithoutWaitingAnInterval() async throws {
+        _ = try writeServers()
+        let began = XCTestExpectation(description: "first poll preparing")
+        let other = XCTestExpectation(description: "replacement server polled")
+        let release = AsyncStream<Void>.makeStream()
+        let contacted = SSHCalls()
+        let store = MonitorStore(root: root) { server in
+            if server.id == "sferyx" {
+                began.fulfill()
+                for await _ in release.stream { break }
+            }
+            try Task.checkCancellation()
+            await MainActor.run { contacted.servers.append(server.id) }
+            if server.id == "other" { other.fulfill() }
+            throw CancellationError()
+        }
+        store.start()
+        defer { store.stop() }
+        await fulfillment(of: [began], timeout: 2)
+        try Data(#"{"servers":[{"id":"other","name":"Other","group":"Team","sshTarget":"other"}]}"#.utf8)
+            .write(to: root.appendingPathComponent("servers.json"))
+        store.reloadFiles()
+        release.continuation.yield(())
+        release.continuation.finish()
+        // Well under refreshSeconds (15 s): the next 2 s loop turn polls it.
+        await fulfillment(of: [other], timeout: 6)
+        XCTAssertEqual(contacted.servers, ["other"])
+    }
+
     /// Builder's reproducer (queue ticket 317): island and Toolbox have their
     /// own stores; Delete on one stops the other's poll before SSH as well.
     func testDeletionOnOneSurfaceStopsAnotherSurfacePreparingItsConnection() async throws {

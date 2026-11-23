@@ -18,7 +18,7 @@ enum DeepgramRealtimeURL {
             URLQueryItem(name: "punctuate", value: "true"),
         ]
         items.append(URLQueryItem(name: "language", value: language))
-        // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        // WHY: .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
         for term in VocabularyBudget.terms(terms, for: .deepgram) { items.append(URLQueryItem(name: "keyterm", value: term)) }
         comps.queryItems = items
         return comps.url!

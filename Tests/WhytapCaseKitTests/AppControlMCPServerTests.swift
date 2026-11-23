@@ -123,6 +123,22 @@ final class AppControlMCPServerTests: XCTestCase {
         XCTAssertEqual(sent, [AppControlRequest("hotkey_set", arguments: arguments.object!)])
     }
 
+    // MARK: Dictation lists
+
+    func test_dictation_list_tools_state_the_yes_and_the_filler_exception() throws {
+        let tools = AppControlMCPServer.tools.compactMap(\.object)
+        let names = tools.compactMap { $0["name"]?.string }
+        XCTAssertTrue(names.contains("whytap_vocab_add") && names.contains("whytap_filler_add"))
+        XCTAssertFalse(names.contains("whytap_replace_add"), "Replace left the app with Drop learning")
+        for name in ["whytap_vocab_add", "whytap_filler_add"] {
+            let description = try XCTUnwrap(tools.first { $0["name"] == .string(name) }?["description"]?.string)
+            XCTAssertTrue(description.contains("Needs the user's one-time Yes for this harness"), name)
+            XCTAssertFalse(description.contains("sentByCurrentDrop"), name)
+        }
+        let filler = tools.first { $0["name"] == .string("whytap_filler_add") }?["description"]?.string ?? ""
+        XCTAssertTrue(filler.contains("A Fast take that would be left empty is pasted unfiltered instead"))
+    }
+
     // MARK: Meetings and the access prompt
 
     func test_meeting_tools_are_listed_and_sent_to_the_app_with_their_arguments() throws {

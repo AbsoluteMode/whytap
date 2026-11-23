@@ -391,10 +391,11 @@ protocol HarnessAccessPresenting: AnyObject {
 @MainActor
 final class HarnessAccessGate {
     static let requestOperation = "request_access"
-    /// Every operation that needs the user's Yes for the calling harness.
-    static let gatedOperations: Set<String> = [
-        "meetings_search", "meeting_get", "meeting_transcript", "meeting_open",
-    ]
+    /// Every operation that needs the user's Yes for the calling harness:
+    /// the user's meetings, and writes to the dictation lists (Vocab, Filler),
+    /// a speech profile the user builds by hand.
+    // WHY: .project-docs/decisions/2026-11-23-agent-drop-lists.md
+    static let gatedOperations: Set<String> = AppControlMeetings.operations.union(AppControlDropLists.operations)
 
     private let resolver: HarnessCallerResolving
     private let store: HarnessAccessStore

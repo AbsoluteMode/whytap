@@ -59,25 +59,6 @@ is a verifiable claim rather than a slogan.
   address; these are not sent with the request or logged.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
-- Learning from your edits after Drop (on unless you turn it off in Settings
-  → Other → Drop → Learn from my edits) watches the field a take was pasted
-  into, through Accessibility, until you send or clear it, leave it, start
-  another take or 2 minutes pass, and only while it is still the same
-  focused field. While it watches, it notices Return and Enter by key code
-  only, to read the field once more; no keys are recorded. For Electron and
-  web apps (Claude, Slack) it asks only that app to expose its text fields
-  for that time and turns this off afterwards. Password fields,
-  secure input, terminals, password managers, Whytap's own fields and fields
-  that do not expose their text are never read. Besides the text it asks
-  only where the caret is, to find the pasted words. The words of a correction stay
-  in memory until you accept a suggestion; on disk there are only salted
-  hashes and day counts, outside backups, settings sync and logs, plus counts
-  of why takes taught nothing, as fixed reason names with no words; they are
-  deleted when you turn learning off. Nothing is sent anywhere and no model
-  is asked. A hidden developer calibration mode,
-  never on unless set by hand with `defaults write`, writes a local journal
-  of the edited words, the app and why each take taught nothing (readable
-  only by you) and deletes it after 14 days.
 - Logs go to the unified system log (`os_log`, subsystem
   `com.rootwise.sidekey`). They never contain transcripts, prompts, replies
   or keys; `Tests/SidekeyTests/LLM/LocalPathLoggingInvariantTests.swift`
@@ -166,8 +147,7 @@ Data-use policies depend on the selected provider and its account settings.
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
   editable text field before recording, the focused field's role and
-  document address for Smart formatting (never the window's text), the one
-  read of the field after a take when learning from edits is on and, only
+  document address for Smart formatting (never the window's text) and, only
   when Brightness keys is switched on in Settings → Toolbox → Display, the
   Mac's brightness keys.
 - Microphone: dictation and meetings.

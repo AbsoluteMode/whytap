@@ -135,17 +135,27 @@ holds it, leave the tickets queued and end your turn.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.
 6. Tooling or documentation only: `done` with that explicit statement, no app
-   refresh. Runtime change, grouped install: when another runtime ticket can
-   be claimed now (`queued`, empty `waiting_for`), fewer than four merged
-   runtime tickets wait for an install, and neither this PR nor any of them
-   touches stored-data formats or migrations, permissions (TCC), Keychain,
-   signing or entitlements, or the updater, do not package: `set --status
+   refresh. Runtime change, grouped install (with the helper `activate` installs;
+   before that, install each runtime PR as before): `status` marks each
+   ticket's `runtime`. Count the merged runtime tickets waiting for an
+   automatic install, including the one just merged. When that count is below
+   four, another runtime ticket can be claimed now, and neither this PR nor any
+   of them touches stored-data formats or migrations, permissions (TCC),
+   Keychain, signing or entitlements, or the updater: `set --status
    pending_install --retry-install --note "merged at <main SHA>; install
    grouped"`, list it under **Merged, not installed** in
-   `build/CURRENT_BUILD.md`, message the author and take the next ticket. A
-   PR of those kinds installs alone; install a waiting group before merging
-   it. After a verified install, set every ticket of the group `done` with
-   the running build and its own acceptance steps and empty that section.
+   `build/CURRENT_BUILD.md`, message the author and take the next ticket. At
+   four, mark every ticket of the group `--install-first`: `claim` then holds
+   runtime work until the install. A PR of those kinds installs alone: if you
+   claim one while a group waits, mark the group `--install-first` and return
+   the PR with `set --status queued` (it keeps its place). A merged PR that
+   cannot be installed now is recorded `--hold` when a person must act, or
+   `--install-first` when only the gate is busy; both hold other runtime work.
+   `set --status pending_install` again records a prepared candidate or a
+   change of flag without leaving the group. One candidate from current main
+   installs the whole group; after the verified install set each ticket
+   `done` with the running build and its own acceptance steps, and empty that
+   section.
    Otherwise build the signed production candidate per
    `docs/build-and-release.md` (local build-only, no notarization, no upload),
    verify strict signature, Developer ID team from

@@ -27,7 +27,9 @@ TRANSITIONS = {
     # in_progress -> queued returns a ticket without blaming the PR (the environment
     # stopped it, an undeclared dependency is not merged yet); it keeps its place.
     "in_progress": {"pending_install", "done", "blocked", "queued"},
-    "pending_install": {"done", "blocked", "superseded"},
+    # pending_install -> pending_install records a prepared candidate, a person who
+    # must act, or an install that must come first, without leaving the group.
+    "pending_install": {"done", "blocked", "superseded", "pending_install"},
     "blocked": {"queued", "cancelled", "superseded"},
 }
 
@@ -47,6 +49,35 @@ def common_dir():
 # WHY: .project-docs/decisions/2026-11-23-builder-queue-cheap-fixes.md
 PULL_REMOTE_ENV = "WHYTAP_BUILD_QUEUE_PULL_REMOTE"
 MERGED = ("done", "pending_install")  # pending_install: merged, the install waits
+# WHY: .project-docs/decisions/2026-11-23-builder-queue-group-install.md
+GROUP_LIMIT = 4  # merged runtime PRs that one install may carry
+# retry: '' a person decides (legacy), 'meeting' automatic and grouped, 'first'
+# automatic and before any other runtime work, 'hold' a person must act and other
+# runtime work waits. 'first' and 'hold' are the install boundary.
+BOUNDARY = ("first", "hold")
+# Paths that never reach the app bundle; anything else makes a PR a runtime change.
+NOT_RUNTIME = re.compile(r"(docs/|\.project-docs/|Tests/|\.github/|scripts/build-queue|"
+                         r"scripts/test-|[^/]+\.md$)")
+
+
+def changes_runtime(head):
+    """Whether this commit changes anything that reaches the app, against its merge base
+    with origin/main: both sides of renames, deletions included. Unknown counts as
+    runtime."""
+    try:
+        base = git("merge-base", "origin/main", head)
+        paths = git("diff", "--name-only", "--no-renames", base, head).splitlines()
+    except (subprocess.CalledProcessError, OSError):
+        return True
+    return any(not NOT_RUNTIME.match(path) for path in paths if path)
+
+
+def install_boundary(db):
+    """True while merged runtime work must be installed before more runtime work is
+    merged: an install marked first or held for a person, or a full group."""
+    waiting = db.execute("SELECT retry FROM tickets WHERE status='pending_install'").fetchall()
+    return (any(t["retry"] in BOUNDARY for t in waiting)
+            or sum(1 for t in waiting if t["retry"] in ("meeting", "first")) >= GROUP_LIMIT)
 
 
 def remote_heads():
@@ -244,6 +275,10 @@ def database():
             # 1 = written without a builder (a model-free return): listed by
             # `events --pending` for any deliverable author, not only Codex.
             db.execute("ALTER TABLE events ADD COLUMN deliver INTEGER NOT NULL DEFAULT 0")
+        if "runtime" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
+            # 1 = the PR changes what reaches the app (counted at submission); older
+            # tickets count as runtime.
+            db.execute("ALTER TABLE tickets ADD COLUMN runtime INTEGER NOT NULL DEFAULT 1")
         yield db
         db.commit()
     finally:
@@ -376,10 +411,11 @@ def run(args):
             stamp = now()
             cursor = db.execute(
                 "INSERT INTO tickets(pr,head,title,source,session,host,checks,acceptance,"
-                "dependencies,depends_on,queued_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "dependencies,depends_on,runtime,queued_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
                  args.checks, json.dumps(args.acceptance), args.dependencies,
-                 json.dumps(args.depends_on), stamp, stamp))
+                 json.dumps(args.depends_on), int(args.runtime), stamp, stamp))
             event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
                   "checks at submission: " + args.documentation_checks)
             return {"created": True, "builder": config(db),
@@ -394,7 +430,8 @@ def run(args):
                 query += " WHERE id=?"
                 params = (args.ticket,)
             query += " ORDER BY queued_at, id"
-            return {"builder": config(db), "tickets": [ticket_json(db, t[0])
+            return {"builder": config(db), "install_boundary": install_boundary(db),
+                    "tickets": [ticket_json(db, t[0])
                     for t in db.execute(query, params).fetchall()]}
 
         if args.command == "claim":
@@ -403,12 +440,16 @@ def run(args):
             if active:
                 return {"claimed": False, "active": ticket_json(db, active[0])}
             # FIFO among tickets that can be built now: one waiting for a dependency
+            # or, while merged runtime work must be installed first, a runtime ticket
             # keeps its place; one whose PR head moved goes back to its author.
-            returned, waiting = [], []
+            returned, waiting, held = [], [], []
+            boundary = install_boundary(db)
             for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
                                    "ORDER BY queued_at, id").fetchall():
                 if unmet_dependencies(db, item):
                     waiting.append(item["id"])
+                elif boundary and item["runtime"]:
+                    held.append(item["id"])
                 elif block_moved_head(db, item, args.remote_heads):
                     returned.append(item["id"])
                 else:
@@ -417,9 +458,10 @@ def run(args):
                     event(db, item["id"], "in_progress",
                           "Builder has started; follow this build and its acceptance checks")
                     return {"claimed": True, "ticket": ticket_json(db, item["id"]),
-                            "returned_moved_heads": returned, "waiting_for_dependencies": waiting}
+                            "returned_moved_heads": returned, "waiting_for_dependencies": waiting,
+                            "held_for_install": held}
             return {"claimed": False, "active": None, "returned_moved_heads": returned,
-                    "waiting_for_dependencies": waiting}
+                    "waiting_for_dependencies": waiting, "held_for_install": held}
 
         if args.command == "check-heads":
             require_builder(db, args.actor)
@@ -435,8 +477,14 @@ def run(args):
             item = row(db, args.ticket)
             if args.status not in TRANSITIONS.get(item["status"], set()):
                 raise ValueError("Invalid transition: " + item["status"] + " -> " + args.status)
-            if args.retry_install and args.status != "pending_install":
-                raise ValueError("--retry-install applies only to pending_install")
+            flags = [f for f in ("retry_install", "install_first", "hold") if getattr(args, f)]
+            if flags and args.status != "pending_install":
+                raise ValueError("--retry-install, --install-first and --hold apply only to "
+                                 "pending_install")
+            if len(flags) > 1:
+                raise ValueError("Use one of --retry-install, --install-first, --hold")
+            retry = {"retry_install": "meeting", "install_first": "first",
+                     "hold": "hold"}.get(flags[0] if flags else "", "")
             stamp = now()
             # A ticket requeued after a block goes to the end; one returned from
             # in_progress without a block keeps its place (its queued_at).
@@ -444,8 +492,7 @@ def run(args):
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
             db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
                        "queued_at=CASE WHEN ? THEN ? ELSE queued_at END WHERE id=?",
-                       (args.status, args.note, stamp, "meeting" if args.retry_install else "",
-                        requeued, stamp, args.ticket))
+                       (args.status, args.note, stamp, retry, requeued, stamp, args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 
@@ -500,8 +547,14 @@ def main():
     update.add_argument("--status", choices=STATES, required=True)
     update.add_argument("--note", required=True)
     update.add_argument("--retry-install", action="store_true",
-                        help="pending_install only: the checked candidate waits for the "
-                             "meeting gate; the watcher retries the install by itself")
+                        help="pending_install only: the install waits for the meeting gate "
+                             "(or for its group); the watcher retries it by itself")
+    update.add_argument("--install-first", action="store_true",
+                        help="pending_install only: like --retry-install, but installed before "
+                             "any other runtime work is claimed (full group, isolated PR next)")
+    update.add_argument("--hold", action="store_true",
+                        help="pending_install only: a person must act; no other runtime work "
+                             "is claimed until this install is resolved")
     events = commands.add_parser("events")
     events.add_argument("--ticket", type=int)
     events.add_argument("--pending", action="store_true")
@@ -525,6 +578,7 @@ def main():
                 # accepted PR/head stays idempotent and is not checked again.
                 args.documentation_checks = (None if known
                                              else documentation_preflight(args.head))
+                args.runtime = changes_runtime(args.head)
             # Outside the queue transaction too: one network read, before any lock.
             args.remote_heads = (remote_heads() if args.command in ("claim", "check-heads")
                                  else None)

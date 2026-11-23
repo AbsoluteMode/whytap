@@ -521,21 +521,34 @@ Under the lock:
    Fetch and verify the merged source/tree before packaging. Do not force-push
    shared main or bypass existing review/release gates.
 4. Group the install, never the review or the tests: each PR is still checked,
-   tested and merged alone. After merging a runtime PR, when another runtime
-   ticket can be claimed now (`queued` with no `waiting_for`), fewer than four
-   merged runtime tickets wait for an install, and neither this PR nor any of
-   them changes stored-data formats or migrations, permissions (TCC), Keychain
-   items, signing or entitlements, or the updater, do not package yet: record
-   `set --status pending_install --retry-install` with "merged at <main SHA>;
-   install grouped", list the PR under **Merged, not installed** in
-   build/CURRENT_BUILD.md, tell its author, and take the next ticket. The
-   watcher takes queued work before a waiting install, so the group installs
-   once the queue has no claimable ticket left, through the usual meeting gate.
-   A PR of the kinds above is installed alone: install a waiting group before
-   merging it. The install session packages one candidate from current main,
-   which contains every PR of the group; after the verified install every
-   ticket of the group is `done` with that running build and its own
-   acceptance steps, and the section is emptied (see the
+   tested and merged alone. The helper marks each ticket `runtime` at
+   submission (any changed path outside documentation, tests, `.github/` and
+   the queue's own scripts). After merging a runtime PR, count the merged
+   runtime tickets waiting for an automatic install, including this one. While
+   that count is below four, another runtime ticket can be claimed now, and
+   neither this PR nor any of them changes stored-data formats or migrations,
+   permissions (TCC), Keychain items, signing or entitlements, or the updater,
+   do not package yet: record `set --status pending_install --retry-install`
+   with "merged at <main SHA>; install grouped", list the PR under **Merged,
+   not installed** in build/CURRENT_BUILD.md, tell its author, and take the
+   next ticket. The watcher takes queued work before such an install, so the
+   group installs once no runtime ticket can be claimed, through the usual
+   meeting gate. The install boundary holds in both directions, also while
+   the gate is busy or a person must act: four waiting installs, or one
+   marked `--install-first` or `--hold`, make `claim` and the watcher skip
+   runtime tickets (they keep their place) and put the install first; work
+   that does not change the app still runs. At four the builder marks the
+   group `--install-first`. A PR of the kinds above installs alone: claimed
+   while a group waits, it goes back with `set --status queued` and the group
+   is marked `--install-first`; merged but not installable now, it is
+   recorded `--hold` (a person must act) or `--install-first` (only the gate
+   is busy). `pending_install -> pending_install` records a prepared
+   candidate or changes the flag without leaving the group. The install
+   session packages one candidate from current main, which contains every PR
+   of the group; after the verified install every ticket of the group is
+   `done` with that running build and its own acceptance steps, and the
+   section is emptied. This starts with the helper and watcher that `activate`
+   installs; until then each runtime PR installs as before (see the
    [group install decision](../decisions/2026-11-23-builder-queue-group-install.md)).
    Otherwise, and for that install,
    prepare a signed production candidate from clean,

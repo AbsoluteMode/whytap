@@ -563,5 +563,65 @@ class QueueTests(unittest.TestCase):
         metrics = self.metrics("2000-01-01", "2999-01-01")
         self.assertEqual(metrics["deferred_installs"], {"grouped": 1, "meeting or microphone": 1})
 
+    def merged_waiting(self, pr, flag="--retry-install", note="merged; install grouped"):
+        ticket = self.enqueue(pr)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(ticket), "--status", "pending_install", flag, "--note", note)
+        return ticket
+
+    def test_a_waiting_install_records_a_candidate_or_a_person_without_leaving_the_group(self):
+        ticket = self.merged_waiting(1)
+        retry = lambda: sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3").execute(
+            "SELECT retry FROM tickets WHERE id=?", (ticket,)).fetchone()[0]
+        for flags, expected in ((["--retry-install"], "meeting"), (["--install-first"], "first"),
+                                (["--hold"], "hold"), ([], "")):
+            self.call("set", "--ticket", str(ticket), "--status", "pending_install", *flags,
+                      "--note", "candidate build 1740 at /private/candidate.app")
+            self.assertEqual(retry(), expected, flags)
+        self.assertEqual(self.ticket(ticket)["note"], "candidate build 1740 at /private/candidate.app")
+        self.assertIn("one of", self.call("set", "--ticket", str(ticket), "--status",
+                                          "pending_install", "--hold", "--install-first",
+                                          "--note", "x", ok=False)["error"])
+
+    def test_runtime_is_counted_from_the_paths_at_submission(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        docs = self.commit({"docs/guide.md": "words", "README.md": "more words",
+                            "Tests/AppTests/T.swift": "test"})
+        self.assertEqual(self.enqueue(1, head=docs)["ticket"]["runtime"], 0)
+        self.git("checkout", "-q", "-b", "app", self.head)
+        app = self.commit({"Sources/App/Feature.swift": "code"})
+        self.assertEqual(self.enqueue(2, head=app)["ticket"]["runtime"], 1)
+
+    def test_a_full_group_holds_runtime_work_but_not_documentation(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        group = [self.merged_waiting(pr) for pr in (1, 2, 3)]
+        runtime = self.enqueue(5, head=self.commit({"Sources/App/A.swift": "a"}))["ticket"]["id"]
+        self.assertEqual(self.call("claim")["ticket"]["id"], runtime)  # 3 + this one = 4
+        self.call("set", "--ticket", str(runtime), "--status", "pending_install", "--retry-install",
+                  "--note", "merged; install grouped")
+        fifth = self.enqueue(6, head=self.commit({"Sources/App/B.swift": "b"}))["ticket"]["id"]
+        self.git("checkout", "-q", "-b", "docs", self.head)
+        docs = self.enqueue(7, head=self.commit({"docs/c.md": "c"}))["ticket"]["id"]
+        claimed = self.call("claim")
+        self.assertEqual((claimed["ticket"]["id"], claimed["held_for_install"]), (docs, [fifth]))
+        self.update(docs, "done")
+        for ticket in group + [runtime]:
+            self.update(ticket, "done")  # one install closed the group
+        self.assertEqual(self.call("claim")["ticket"]["id"], fifth)
+
+    def test_an_install_first_or_held_for_a_person_comes_before_runtime_work(self):
+        legacy = self.merged_waiting(1)
+        self.call("set", "--ticket", str(legacy), "--status", "pending_install", "--note", "old")
+        for pr, flag in ((2, "--install-first"), (4, "--hold")):
+            waiting = self.merged_waiting(pr, flag=flag, note="merged")
+            queued = self.enqueue(pr + 1)["ticket"]["id"]  # no origin/main: counts as runtime
+            claimed = self.call("claim")
+            self.assertEqual((claimed["claimed"], claimed["held_for_install"]), (False, [queued]),
+                             flag)
+            self.update(waiting, "done")
+            self.assertEqual(self.call("claim")["ticket"]["id"], queued)  # legacy holds nothing
+            self.update(queued, "done")
+
+
 if __name__ == "__main__":
     unittest.main()

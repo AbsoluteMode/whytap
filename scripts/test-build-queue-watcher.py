@@ -42,7 +42,7 @@ with open(control / "sessions.log", "a") as output:
 if (control / "noop").exists():
     sys.exit(0)
 for ticket in queue("status")["tickets"]:
-    if ticket["status"] == "pending_install" and ticket["retry"] == "meeting":
+    if ticket["status"] == "pending_install" and ticket["retry"] in ("meeting", "first"):
         queue("set", "--ticket", str(ticket["id"]), "--status", "done", "--note", "installed")
 while True:
     claim = queue("claim")
@@ -700,6 +700,75 @@ class WatcherTests(unittest.TestCase):
         result = self.watcher("run")
         self.assertIn("builder session (queued)", result.stdout)  # no gate asked first
         self.assertEqual(self.statuses()[merged], "done")  # the fake installs the group too
+
+    def merged_waiting(self, pr, flag="--retry-install"):
+        ticket = self.enqueue(pr)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "pending_install", flag,
+                   "--note", "merged; install grouped")
+        return ticket
+
+    def test_four_plus_one_installs_the_group_before_the_fifth_even_while_the_gate_is_busy(self):
+        group = [self.merged_waiting(pr) for pr in (1, 2, 3, 4)]
+        fifth = self.enqueue(5)  # no origin/main in this fixture: counts as runtime
+        (self.control / "meeting").touch()
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        status = json.loads(self.watcher("status").stdout)
+        self.assertEqual((status["open"]["install_first"], status["open"]["held_for_install"]),
+                         (group, [fifth]))
+        (self.control / "meeting").unlink()
+        self.state_reset_install_attempt()
+        result = self.watcher("run")
+        self.assertIn("builder session (retry_install)", result.stdout)
+        self.assertEqual(self.lines("handled.log"), [str(fifth)])  # after the group's install
+        self.assertEqual(set(self.statuses().values()), {"done"})
+
+    def state_reset_install_attempt(self):
+        state = self.state()
+        state["last_install_attempt"] = 0
+        (self.root / "whytap-build-queue-watcher-state.json").write_text(json.dumps(state))
+
+    def test_an_install_held_for_a_person_holds_runtime_work_but_not_documentation(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        held = self.merged_waiting(1, flag="--hold")
+        runtime = self.queue("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                             "--head", self.make_commit("Sources/App/A.swift"), "--title", "App",
+                             "--checks", "x", "--acceptance", "x", "--source", "claude",
+                             "--session", WORKER)["ticket"]
+        self.assertEqual(runtime["runtime"], 1)
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.git("checkout", "-q", "-B", "docs", self.head)
+        docs = self.queue("enqueue", "--pr", "https://github.com/example/app/pull/3",
+                          "--head", self.make_commit("docs/guide.md"), "--title", "Docs",
+                          "--checks", "x", "--acceptance", "x", "--source", "claude",
+                          "--session", WORKER)["ticket"]
+        self.assertEqual(docs["runtime"], 0)
+        self.watcher("run")
+        self.assertEqual(self.lines("handled.log"), [str(docs["id"])])
+        self.assertEqual(self.statuses(), {held: "pending_install", runtime["id"]: "queued",
+                                           docs["id"]: "done"})
+
+    def make_commit(self, path):
+        target = self.repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(path)
+        self.git("add", "-A")
+        self.git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", path)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def test_an_isolated_pr_waits_for_an_install_marked_first(self):
+        first = self.merged_waiting(1, flag="--install-first")
+        isolated = self.enqueue(2)
+        (self.control / "meeting").touch()
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertIn("deferred install", self.state()["last_reason"])
+        (self.control / "meeting").unlink()
+        self.state_reset_install_attempt()
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {first: "done", isolated: "done"})
 
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400

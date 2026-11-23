@@ -1012,125 +1012,21 @@ Input language offer:
   language code, the count and the offered codes are stored. WHY:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
-Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
-  user switched it off: a missing key reads as on, an explicit false is kept;
-  Settings -> Other -> Drop -> Learn from my edits; WHY:
-  .project-docs/decisions/2026-11-22-drop-learning-default-on.md):
-  AutoPasteEngine.paste hands over the field at the paste boundary (after
-  focus restore, right before Cmd+V): the system-wide focused element of the
-  frontmost target app, metadata only, never Whytap's own editors.
-  DropLearningCoordinator then watches that field until it empties (sent),
-  focus leaves it, it goes away, another take starts or 120 s pass: AX
-  value/destroyed/focus notifications plus a bounded read every 0.5 s, and a
-  listen-only Return/Enter key-code monitor (only during the watch, keeps
-  nothing, never delays Return) that triggers a read. Both deadlines (5 s
-  to see the paste, 120 s in all) are monotonic clock times checked before
-  every read, whatever triggered it. The last text that still aligns with
-  the take counts, minus the corrections it already held when the field
-  first showed the paste (a draft is not an edit). A read reports text,
-  focus left (verified: other app, other element, process gone; the last
-  text counts) or unreadable (a failed or empty focus lookup, or still
-  focused but no length, over the bound, a failed transfer or the gate
-  now refuses it; nothing counts). Another
-  message (no alignment) or a paste not seen within 5 s counts nothing.
-  Electron and Chromium apps get AXManualAccessibility (else
-  AXEnhancedUserInterface) set on the target app only, at take start, only
-  when its focused element is not already a readable field and the
-  attribute reads as false (an unreadable attribute is never written). The
-  approval (same process by bundle ID and launch date, frontmost, the same
-  focused element or a confirmed absence, gate and secure input) is taken
-  again after the blocking flag read and must match, each pass confirming
-  focus after its metadata query; right before the write the flag must
-  still read false, focus, process and front app are confirmed again and a
-  fresh IsSecureEventInputEnabled sample, taken after the last blocking AX
-  call, must be false; a failed focus lookup exposes nothing. It is undone when the watch ends, the next take goes
-  elsewhere, 660 s pass without a paste, learning and calibration are
-  switched off (UserDefaults change) or Whytap quits; only for the same
-  process (checked again after the flag read), while the flag reads true
-  or still reads false after a write never seen applied (Electron applies
-  it about 2 s later, so the pending enable is cancelled) (WHY:
-  .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
-  happens only if that app is still frontmost, the same element still has
-  keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure
-  event input, terminals and password managers by bundle ID, own process,
-  unknown app, non-text role, any AX error but a missing attribute). The
-  field must report its length (at most 20,000 UTF-16 units) and only that
-  range is requested (AXStringForRange); no length means no read. Focus
-  and the gate are confirmed again after the length query and after the
-  transfer (focus is checked before and after the gate's metadata calls);
-  if another app takes focus during the capture, the paste engine posts no
-  Cmd+V and restores the clipboard. With learning and calibration off no
-  capture callback is passed and the paste path is unchanged.
-  Switching learning or calibration off stops the watch. It
-  compares with what reached the field (a rich paste's plainText), aligns
-  the take inside the field word by word (DropEditDiff: the paste counts
-  once it is seen verbatim, which records the field words around it; two
-  identical copies are told apart by the caret (AXSelectedTextRange, right
-  after the new copy), else the take is `ambiguous` and teaches nothing; later
-  reads compare only the region between them and a changed surrounding is
-  not compared, so a draft around the paste never becomes an edit; >50%
-  of the kept words changed = rewrite; words cut from either edge of the
-  take, such as a made-up tail, are their own hunks and are not counted;
-  WHY: .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md) and
-  DropLearningClassifier turns edits into candidates without a model: a
-  sound-alike term (transliterated spelling, or the consonant skeleton with
-  voiced and voiceless pairs as one sound; one changed part of a
-  hyphenated word is the term) -> Vocab (only if the wrong word is in the provider's raw
-  text); On this Mac / batch / Retry / recorder fallback, a full route list,
-  a term already in Vocab or a Smart-only error -> Replace (never for
-  dictionary words or grammar endings); full list without Replace -> Vocab
-  full with the route's limit (Y opens Vocab); undone replacement / Vocab
-  term written where not said -> remove; deleted spoken word -> Filler;
-  DropLearningStats counts why each take did or did not teach anything as
-  fixed reason names only (sidekey.dropLearning.stats.v1, local, not backed
-  up, deleted when learning and calibration are off; `suggested` only when
-  the drops really showed, else `suggestion.notShown`; a delivery with no
-  learnable paste is `delivery.<reason>`; a capture refusal such as
-  `axError` belongs to its own take);
-  retyped cut filler -> Stop cutting. Translated takes teach nothing. The
-  same correction in two takes within 14 days becomes one suggestion; N is
-  forever, an expired one starts over; never while the island is not idle;
-  a new take cancels the pending read. DropLearningLedger stores only
-  HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
-  stay in memory until Y, which saves through VocabularyCache /
-  FillerTermsStore / DropReplacementStore (editors reload on their change
-  notification). Hidden calibration (sidekey.dropLearning.calibration,
-  `defaults write` only): the developer journal, Application
-  Support/<bundle id>/drop-learning/calibration.jsonl (0600), one entry
-  per Drop with app, capture refusal or end reason, whether the field was
-  readable and whether the paste aligned, refusal reasons, candidates with
-  counts, the edited words and whether a drop was shown; a watch that saw
-  calibration off is never journaled.
-  With learning on it runs beside real learning; with learning off it is
-  a dry run with a separate ledger and dry-run Y (WHY:
-  .project-docs/decisions/2026-11-22-drop-learning-cut-tail.md); 0700 folder / 0600 single-name file without following
-  links, ends itself after 14 days (checked at launch, hourly and before
-  every read) and deletes its data. Fired fillers come from the same masked Filler pass.
-  Replace is its own DropOutputPolicy step after Smart and before Filler
-  (DropReplaceFilter: one pass, longest first, letter lookaround
-  boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
-  Vocabulary backup section). Vocab is one list of up to 1,000 terms x 50
-  chars; VocabularyBudget trims it per request in list order: Deepgram ~450
-  est. tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
+Vocab budget: Vocab is one list of up to 1,000 terms x 50 chars;
+  VocabularyBudget trims it per request in list order: Deepgram ~450 est.
+  tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
   Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
-  terms within 8 KB encoded. WHY:
-  .project-docs/decisions/2026-11-22-drop-edit-learning.md
-  A suggestion is asked by DropLearningDropsController: DropLearningDropsModel
-  (chain of four drops: list icon, action with +/- in a thin circle, Y, N;
-  budding 0.1 s apart, open at 0.7 s, reverse retract 0.6 s, 10 s open time
-  with no visible timer, hover pauses, one suggestion at a time) drawn by
-  DropLearningDropsView in DropLearningDropsPanel, a non-activating panel
-  right of the island just below its level, following the system
-  appearance. macOS 26 glassEffect in a GlassEffectContainer (blend spacing
-  5 pt < 7 pt gap: bridges only while a drop leaves its parent); thin
-  material on 14/15; opaque with Reduce Transparency; Reduce Motion fades.
-  Y/N are plain glass with a 0.75 pt green/red contour and soft glow only,
-  letters at rest, check/cross under the pointer. Answers: click, or
-  Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
-  the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
-  conflict check and listed in Help. An active Drop or Agent phase, an open
-  Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
-  .project-docs/decisions/2026-11-22-drop-learning-drops.md
+  terms within 8 KB encoded. VocabularyCache posts a change notification and
+  an open Vocab editor reloads. WHY:
+  .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
+
+Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
+  accepts sidekey.drop.replacements.v1 so older archives restore (restored,
+  never read), and at launch and hourly the hidden calibration journal
+  (drop-learning/calibration.jsonl) and its keys are deleted once calibration
+  is off or 14 days old; nothing is read or collected. FillerTermsStore posts
+  a change notification and every Filler editor reloads. WHY:
+  .project-docs/decisions/2026-11-23-drop-learning-shelved.md
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
@@ -1399,9 +1295,8 @@ a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
 show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Learn from my edits, Meeting Notes, Google search, Agent,
-Screenshot protection, Auto-hide island); rows that are plain options have
-none. WHY:
+automatically, Meeting Notes, Google search, Agent, Screenshot protection,
+Auto-hide island); rows that are plain options have none. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

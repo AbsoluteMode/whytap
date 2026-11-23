@@ -11,8 +11,8 @@ struct FillerTermsStore {
     enum Rejection: Equatable { case empty, tooLong, duplicate, tooMany }
     enum AddResult: Equatable { case added, rejected(Rejection) }
 
-    /// Posted after every write so an open editor shows a term added or
-    /// removed by a learning suggestion's Y.
+    /// Posted after every write so every open editor (island, Toolbox) shows
+    /// a term added or removed in another one.
     static let didChangeNotification = Notification.Name("sidekey.filler.didChange")
 
     private let defaults: UserDefaults

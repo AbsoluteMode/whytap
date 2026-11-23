@@ -610,4 +610,31 @@ final class ArtifactBackupCoverageTests: XCTestCase {
             XCTAssertEqual(error as? ArtifactBackupError, .unsafeContent)
         }
     }
+
+    /// Drop learning is shelved, but a settings archive written while it was
+    /// on still carries its Replace rules. The whole restore must not fail on
+    /// that one key: it is restored as an inert value next to manual Vocab.
+    /// WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+    func testAnOlderArchiveWithShelvedReplaceRulesStillRestores() async throws {
+        let target = try profile()
+        let key = ArtifactBackupTestKeys.make()
+        let url = archive(in: target)
+        let values: [String: ConfigBackupValue] = [
+            "sidekey.preferences.vocabularyTerms": .strings(["Whytap", "Claude"]),
+            ShelvedDropLearningData.replacementsKey: .strings(["{\"heard\":\"вайтап\",\"wanted\":\"Whytap\"}"]),
+        ]
+        let payload = ArtifactSettingsPayload(values: values)
+        XCTAssertNoThrow(try payload.validate())
+        _ = try ArtifactBackupTestArchive.make(at: url, key: key, entries: [
+            (path: "settings/preferences.json", section: .settings,
+             data: try JSONEncoder.artifactBackup.encode(payload))
+        ])
+        let environment = target.environment()
+        try await ArtifactBackupEngine(environment: environment)
+            .stageRestore(from: url, key: key, sections: [.settings])
+        _ = try ArtifactBackupEngine.applyPendingRestore(environment: environment)
+        XCTAssertEqual(target.defaults.stringArray(forKey: "sidekey.preferences.vocabularyTerms"), ["Whytap", "Claude"])
+        XCTAssertNotNil(target.defaults.object(forKey: ShelvedDropLearningData.replacementsKey))
+    }
+
 }

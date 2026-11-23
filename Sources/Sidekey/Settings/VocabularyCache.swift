@@ -30,14 +30,14 @@ final class VocabularyCache {
     /// The saved list is no longer capped by the strictest provider: each
     /// request takes the part its route accepts, in list order
     /// (`VocabularyBudget`). These caps only bound the stored list.
-    // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+    // WHY: .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
     static let maxTermCount = 1_000
     /// ElevenLabs recorded keyterms allow 50 characters; realtime routes skip
     /// longer terms per request.
     static let maxTermLength = 50
 
     /// Posted after every write so an open editor reloads a list changed
-    /// elsewhere (a learning suggestion's Y, settings sync).
+    /// elsewhere (another editor, settings sync).
     static let didChangeNotification = Notification.Name("sidekey.vocabulary.didChange")
 
     private let defaults: UserDefaults

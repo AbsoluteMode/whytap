@@ -1430,7 +1430,10 @@ microphone never asked asks it and records nothing
 (DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
 onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
-and relaunch. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
+and relaunch; it starts at the first step not yet done (a set-up Mac goes
+straight to Try Drop), and every step is seen in the preview. A key press
+nothing in the window takes is dropped without the alert sound
+(OnboardingJourneyWindow), and the Try Drop field takes Escape quietly. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
 .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->

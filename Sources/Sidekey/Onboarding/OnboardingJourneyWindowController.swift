@@ -16,7 +16,7 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
         self.model = model
         self.onClosed = onClosed
         let size = OnboardingJourneyView.size
-        let window = NSWindow(
+        let window = OnboardingJourneyWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
@@ -73,6 +73,13 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
         }
     }
 
+    /// The window passes key presses it does not take up to its controller,
+    /// the end of the responder chain, where AppKit would beep.
+    override func noResponder(for eventSelector: Selector) {
+        if let window = window as? OnboardingJourneyWindow, window.silences(eventSelector) { return }
+        super.noResponder(for: eventSelector)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard !didClose else { return }
         didClose = true
@@ -80,5 +87,28 @@ final class OnboardingJourneyWindowController: NSWindowController, NSWindowDeleg
         keyMonitor = nil
         model.stop()
         onClosed()
+    }
+}
+
+/// The onboarding's window. A key press nothing in it takes (Space, a letter,
+/// Escape or an unbound ⌘ shortcut on a step without a text field, or while
+/// the Try Drop field is not yet focused) ends here, and `NSWindow` answers
+/// it with the system alert sound. Most onboarding steps have no text field,
+/// so those sounds came with no visible cause; they are dropped silently.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+final class OnboardingJourneyWindow: NSWindow {
+    /// Key presses dropped here instead of beeping (for tests).
+    private(set) var silencedKeyPresses = 0
+
+    override func noResponder(for eventSelector: Selector) {
+        if silences(eventSelector) { return }
+        super.noResponder(for: eventSelector)
+    }
+
+    /// `true` for a key press, counted; the caller then stays silent.
+    func silences(_ eventSelector: Selector) -> Bool {
+        guard eventSelector == #selector(NSResponder.keyDown(with:)) else { return false }
+        silencedKeyPresses += 1
+        return true
     }
 }

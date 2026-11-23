@@ -219,6 +219,88 @@ final class OnboardingJourneyModelTests: XCTestCase {
     /// The owner, 2026-11-22: no separate screen. In the app too, "Use your
     /// own server →" turns the step's key field into the server's fields;
     /// Settings does not open and the step stays.
+    /// A key press nothing in the window takes is dropped without the system
+    /// alert sound (the owner heard beeps with no visible cause, 2026-11-23);
+    /// one the step does take still reaches it.
+    func testUnhandledKeysInTheOnboardingWindowDoNotBeep() throws {
+        _ = NSApplication.shared
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window as? OnboardingJourneyWindow)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        window.makeFirstResponder(nil)
+        func press(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) throws {
+            let event = try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+            // What AppKit does with a key press: the first responder gets it.
+            (window.firstResponder ?? window).keyDown(with: event)
+        }
+        try press(" ", keyCode: 49)
+        try press("a", keyCode: 0)
+        try press("\u{1b}", keyCode: 53)
+        XCTAssertEqual(window.silencedKeyPresses, 3)
+        // The page itself holding the keyboard: the same.
+        let page = try XCTUnwrap(window.contentView)
+        if window.makeFirstResponder(page) {
+            try press(" ", keyCode: 49)
+            XCTAssertEqual(window.silencedKeyPresses, 4)
+        }
+
+        // A text field in the window still gets its typing.
+        let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        try XCTUnwrap(window.contentView).addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        try press("a", keyCode: 0)
+        XCTAssertEqual(field.string, "a")
+        let silenced = window.silencedKeyPresses
+        try press("b", keyCode: 11)
+        XCTAssertEqual(field.string, "ab")
+        XCTAssertEqual(window.silencedKeyPresses, silenced)
+    }
+
+    /// Escape in the Try Drop field has nothing to cancel and is taken
+    /// quietly; Option-Escape stays the text view's completion command.
+    func testEscapeInTheTryDropFieldIsQuietAndOptionEscapeStillCompletes() throws {
+        _ = NSApplication.shared
+        final class Field: OnboardingTryTextView {
+            var completions = 0
+            override func complete(_ sender: Any?) { completions += 1 }
+        }
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window as? OnboardingJourneyWindow)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        let field = Field(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        try XCTUnwrap(window.contentView).addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        field.string = "hel"
+        field.setSelectedRange(NSRange(location: 3, length: 0))
+        func escape(_ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        }
+        // The real key events, through the key bindings.
+        field.interpretKeyEvents([try escape([])])
+        XCTAssertEqual(field.quietEscapes, 1)
+        XCTAssertEqual(field.completions, 0)
+        field.interpretKeyEvents([try escape(.option)])
+        XCTAssertEqual(field.quietEscapes, 1)
+        XCTAssertEqual(field.completions, 1)
+        XCTAssertEqual(field.string, "hel")
+        XCTAssertEqual(window.silencedKeyPresses, 0)
+        // Other commands still edit.
+        field.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+        XCTAssertEqual(field.string, "he")
+    }
+
     func testTheServerLinkChangesTheStepInPlace() throws {
         let model = try makeModel(makeEnv())
         var settings: [SettingsWindowTab] = []

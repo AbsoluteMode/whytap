@@ -37,6 +37,8 @@ final class NativeAgentAppControlTests: XCTestCase {
         let http: NativeAgentHTTP
         let layout: HoverLayoutStore
         let vocabulary: VocabularyCache
+        let fillers: FillerTermsStore
+        let replacements: DropReplacementStore
         let hotkeys: HotkeyPreferences
         let defaults: UserDefaults
     }
@@ -69,6 +71,8 @@ final class NativeAgentAppControlTests: XCTestCase {
         let layout = HoverLayoutStore(defaults: defaults)
         let hotkeys = HotkeyPreferences(defaults: defaults)
         let vocabulary = VocabularyCache(defaults: defaults)
+        let fillers = FillerTermsStore(defaults: defaults)
+        let replacements = DropReplacementStore(defaults: defaults)
         // Drop dictates with Soniox, which sends Vocab with every take.
         routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
         routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropSmart)
@@ -78,7 +82,8 @@ final class NativeAgentAppControlTests: XCTestCase {
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-1"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
             activity: { .object(["drop": .string("idle")]) }, planner: { planner },
             googleCalendarReview: { false }, agentWorkspace: { directory.path },
-            layout: { layout }, hotkeys: { hotkeys }, vocabulary: { vocabulary })
+            layout: { layout }, hotkeys: { hotkeys }, vocabulary: { vocabulary },
+            fillers: { fillers }, replacements: { replacements })
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -89,7 +94,8 @@ final class NativeAgentAppControlTests: XCTestCase {
         }
         return Env(routing: routing, probe: probe, planner: planner, controller: controller, keys: keys,
                    directory: directory, http: NativeAgentHTTP(session: session),
-                   layout: layout, vocabulary: vocabulary, hotkeys: hotkeys, defaults: defaults)
+                   layout: layout, vocabulary: vocabulary, fillers: fillers, replacements: replacements,
+                   hotkeys: hotkeys, defaults: defaults)
     }
 
     // MARK: Model stub
@@ -735,11 +741,102 @@ final class NativeAgentAppControlTests: XCTestCase {
         // A full list refuses a new term; one already there is still just reported.
         e.vocabulary.setTerms((1...VocabularyCache.maxTermCount).map { "term\($0)" })
         let full = await e.controller.handle(AppControlRequest("vocab_add", arguments: ["terms": .array([.string("Soniox")])]))
-        XCTAssertEqual(full.data.object?["code"], .string("vocab_full"))
+        XCTAssertEqual(full.data.object?["code"], .string("list_full"))
         XCTAssertEqual(e.vocabulary.terms.count, VocabularyCache.maxTermCount)
         let existing = await e.controller.handle(AppControlRequest("vocab_add", arguments: ["terms": .array([.string("TERM1")])]))
         XCTAssertTrue(existing.ok)
         XCTAssertEqual(existing.data.object?["terms"]?.array?.first?.object?["result"], .string("existing"))
+    }
+
+    // MARK: Filler and Replace
+
+    /// "не только в vocab но и везде": Filler entries go through the Filler
+    /// editor's store; an open editor reloads and the next take drops them.
+    func testAddFillerWordSavesItAndTheNextTakeDropsIt() async throws {
+        let e = try env()
+        let editor = IslandFillerViewModel(store: e.fillers)
+        let result = try await turn(e, "убери слово «ну» из моих диктовок", [
+            app("whytap_filler_add", ["terms": ["ну"]], id: "f"),
+            final("Добавил «ну» в Filler.")
+        ])
+        XCTAssertEqual(result.finalText, "Filler + ну\n\nДобавил «ну» в Filler.")
+        XCTAssertTrue(result.labels.contains("Filler + ну"), "\(result.labels)")
+        XCTAssertEqual(FillerTermsStore(defaults: e.defaults).terms(), ["ну"])
+        XCTAssertEqual(editor.terms, ["ну"], "an open Filler editor reloads it")
+        XCTAssertFalse(DropFillerFilter.apply("ну давай созвонимся", removing: e.fillers.terms()).contains("ну "))
+        let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.contains("is whytap_filler_add") && system.contains("is whytap_replace_add"))
+    }
+
+    func testFillerDuplicatesAndLimitsAddNothing() async {
+        let e = try! env()
+        e.fillers.add("Типа")
+        let existing = await e.controller.handle(AppControlRequest("filler_add", arguments: ["terms": .array([.string("типа")])]))
+        XCTAssertEqual(existing.data.object?["terms"]?.array?.first, .object(["term": .string("Типа"), "result": .string("existing")]))
+        XCTAssertNil(NativeAgentAppControl.changeLine("filler_add", existing.data))
+        let long = String(repeating: "a", count: FillerTermsStore.maxTermLength + 1)
+        for (terms, code) in [([String](["ну", long]), "invalid_term"), (["две\nстроки"], "invalid_term"), ([" "], "invalid_term")] {
+            let response = await e.controller.handle(AppControlRequest("filler_add", arguments: ["terms": .array(terms.map(AppControlValue.string))]))
+            XCTAssertEqual(response.data.object?["code"], .string(code), "\(terms)")
+        }
+        XCTAssertEqual(e.fillers.terms(), ["Типа"])
+        for index in 1..<FillerTermsStore.maxTermCount { e.fillers.add("filler\(index)") }
+        let full = await e.controller.handle(AppControlRequest("filler_add", arguments: ["terms": .array([.string("ещё")])]))
+        XCTAssertEqual(full.data.object?["code"], .string("list_full"))
+        XCTAssertEqual(e.fillers.terms().count, FillerTermsStore.maxTermCount)
+    }
+
+    /// A Replace rule: what dictation writes and what Drop pastes instead.
+    func testAddReplaceRuleAppliesToTheNextTake() async throws {
+        let e = try env()
+        let result = try await turn(e, "всегда пиши гитхаб как GitHub", [
+            app("whytap_replace_add", ["rules": [["heard": "гитхаб", "wanted": "GitHub"]]], id: "r"),
+            final("Готово.")
+        ])
+        XCTAssertEqual(result.finalText, "Replace + гитхаб → GitHub\n\nГотово.")
+        XCTAssertEqual(DropReplacementStore(defaults: e.defaults).replacements(), [DropReplacement(heard: "гитхаб", wanted: "GitHub")])
+        XCTAssertEqual(DropReplaceFilter.apply("открой гитхаб", rules: e.replacements.replacements()).text, "открой GitHub")
+    }
+
+    /// A rule for that word already exists: the same one is "existing", a
+    /// different one is kept and reported as "different"; nothing changes.
+    func testExistingReplaceRuleIsKept() async throws {
+        let e = try env()
+        e.replacements.add(DropReplacement(heard: "Гитхаб", wanted: "GitHub"))
+        let same = await e.controller.handle(AppControlRequest("replace_add", arguments: ["rules": .array([
+            .object(["heard": .string("гитхаб"), "wanted": .string("GitHub")])])]))
+        XCTAssertEqual(same.data.object?["rules"]?.array?.first?.object?["result"], .string("existing"))
+        let result = try await turn(e, "пиши гитхаб как github.com", [
+            app("whytap_replace_add", ["rules": [["heard": "гитхаб", "wanted": "github.com"]]], id: "r"),
+            final("Для «гитхаб» уже есть правило → GitHub, оставил его.")
+        ])
+        XCTAssertEqual(e.replacements.replacements(), [DropReplacement(heard: "Гитхаб", wanted: "GitHub")])
+        XCTAssertTrue(result.toolResults()[0].contains(#""heard":"Гитхаб","result":"different","wanted":"GitHub""#), result.toolResults()[0])
+        XCTAssertEqual(result.finalText, "Для «гитхаб» уже есть правило → GitHub, оставил его.")
+    }
+
+    func testInvalidReplaceRulesAddNothing() async {
+        let e = try! env()
+        let cases: [([String: Any], String)] = [
+            (["rules": [["heard": "GitHub", "wanted": "GitHub"]]], "invalid_term"),
+            (["rules": [["heard": " ", "wanted": "x"]]], "invalid_term"),
+            (["rules": [["heard": "раз два три четыре пять шесть", "wanted": "x"]]], "invalid_term"),
+            (["rules": [["heard": "ok", "wanted": String(repeating: "w", count: DropReplacementStore.maxWantedLength + 1)]]], "invalid_term"),
+            (["rules": [["heard": "a\nb", "wanted": "c"]]], "invalid_term"),
+            (["rules": [["heard": "гит", "wanted": "Git"], ["heard": "x", "wanted": "x"]]], "invalid_term"),
+            (["rules": [["heard": "гит"]]], "invalid_arguments"),
+            (["rules": [["heard": "гит", "wanted": "Git", "regex": true]]], "invalid_arguments"),
+            (["rules": ["гит → Git"]], "invalid_arguments"),
+            (["terms": ["гит"]], "invalid_arguments"),
+        ]
+        for (arguments, expected) in cases {
+            let result = await NativeAgentAppControl.execute(dispatch("whytap_replace_add", arguments)) { request in
+                await e.controller.handle(request)
+            }
+            XCTAssertTrue(result.text.contains(#""code":"\#(expected)""#), "\(arguments): \(result.text)")
+            XCTAssertNil(result.change)
+        }
+        XCTAssertEqual(e.replacements.replacements(), [])
     }
 
     // MARK: Catalog contract

@@ -79,7 +79,7 @@ tools:
 | `write_file`: create or replace a file | yes | removed and refused |
 | `run_command`: run a shell command | yes | removed and refused |
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |
-| `whytap`: change Whytap's own settings, island tools and hotkeys, add Vocab words, To-do (next version after 2.2.26) | yes | yes |
+| `whytap`: change Whytap's own settings, island tools and hotkeys, add Vocab, Filler and Replace entries, To-do (next version after 2.2.26) | yes | yes |
 
 Paths can be absolute or start with `~`; relative paths are inside the
 agent's folder. Nothing confines the agent to that folder: it acts with your

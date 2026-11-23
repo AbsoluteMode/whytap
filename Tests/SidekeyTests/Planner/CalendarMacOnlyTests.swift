@@ -347,4 +347,66 @@ final class CalendarMacOnlyTests: XCTestCase {
         XCTAssertFalse(message.contains("Connect"), "no button called Connect asks macOS any more")
         XCTAssertEqual(CalendarConnectionError.allowAccessTitle, "Allow access to calendars")
     }
+
+    // MARK: - Builder review of queue #471
+
+    /// Settings reads the calendar list only; the day open in Hover keeps its events.
+    func testSettingsKeepsTheDayOpenInHover() async {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("work", account: "iCloud", name: "Work", sourceID: "src")]
+        let tomorrow = day.addingTimeInterval(86_400)
+        mac.events = [CalendarFeedEvent(id: "apple:tomorrow", feedID: "apple:work",
+            event: PlannerEvent(title: "Tomorrow's review", start: tomorrow.addingTimeInterval(10 * 3600),
+                                end: tomorrow.addingTimeInterval(11 * 3600)), sourceURL: nil)]
+        var listed = 0, readIntervals: [DateInterval] = []
+        let access = AppleCalendarAccess(status: { mac.status }, request: { true },
+            read: { interval in readIntervals.append(interval); return (mac.feeds, mac.events) },
+            list: { listed += 1; return mac.feeds })
+        let connections = CalendarConnections(defaults: defaults, oauth: CalendarOAuthClient(storage: PlannerMemoryCredentials()),
+                                              apple: access)
+        let model = model(connections)
+        model.begin()
+        model.moveDay(1)
+        await connections.refresh(interval: model.interval)
+        XCTAssertEqual(model.events.map(\.event.title), ["Tomorrow's review"])
+        let reads = readIntervals.count
+
+        // Settings opens (and Whytap becomes active again) while Hover shows tomorrow.
+        mac.events = []   // today, as an event read for today would return
+        connections.prepareMacCalendars()
+        connections.prepareMacCalendars()
+        XCTAssertEqual(listed, 2)
+        XCTAssertEqual(readIntervals.count, reads, "Settings reads no events")
+        XCTAssertEqual(model.events.map(\.event.title), ["Tomorrow's review"], "the selected day keeps its events")
+        XCTAssertEqual(connections.macAccess, .ready)
+    }
+
+    func testARemovedCalendarTakesItsEventsWithIt() async {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        mac.feeds = [feed("work", account: "iCloud", name: "Work"), feed("old", account: "iCloud", name: "Old")]
+        mac.events = [event("Kept", feed: "apple:work", hour: 9), event("Gone", feed: "apple:old", hour: 10)]
+        let connections = connections(mac)
+        let model = model(connections)
+        model.begin()
+        await connections.refresh(interval: model.interval)
+        XCTAssertEqual(model.events.map(\.event.title), ["Kept", "Gone"])
+        mac.feeds = [feed("work", account: "iCloud", name: "Work")]
+        connections.prepareMacCalendars()
+        XCTAssertEqual(model.events.map(\.event.title), ["Kept"])
+        XCTAssertEqual(connections.macCalendarGroups.flatMap(\.feeds).map(\.id), ["apple:work"])
+    }
+
+    func testSettingsListBeforeAnyEventReadIsReady() {
+        defaults.set(true, forKey: CalendarAccountSettings.appleEnabledKey)
+        let mac = FakeMac(); mac.status = .fullAccess
+        let connections = connections(mac)
+        XCTAssertEqual(connections.macAccess, .loading)
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .noCalendars, "an empty Mac is reported, not left loading")
+        mac.feeds = [feed("home", account: "iCloud", name: "Home")]
+        connections.prepareMacCalendars()
+        XCTAssertEqual(connections.macAccess, .ready)
+    }
 }

@@ -106,6 +106,12 @@ instead of using up the limit for calendars of this Mac (the saved set stays
 within the backup and sync bound); and the recovery text names the button both
 surfaces show, **Allow access to calendars**.
 
+The second review (queue #471) found that this list load read today's events
+and replaced the events of another day already open in Hover. Settings now asks
+EventKit for the calendars alone (`AppleCalendarAccess.list`); events are read
+only by the day's refresh, and only the events of a calendar that left the Mac
+are dropped.
+
 ## What was tested
 
 `CalendarMacOnlyTests`: states from not asked through loading, no calendars and
@@ -120,7 +126,10 @@ Settings loading the list on relaunch, after Allow and after recovery (never for
 an unconnected Mac), same-named accounts kept apart with and without a source
 identifier, the card's buttons per state, Disconnect of a revoked connection,
 inactive direct entries making room while the limit holds for this Mac, and the
-recovery text naming the visible button. `CalendarReleaseTests` still
+recovery text naming the visible button; after the second review, a day other
+than today open in Hover keeping its events while Settings loads the list twice
+without an event read, a removed calendar taking its events with it, and an
+empty Mac reported as no calendars instead of loading. `CalendarReleaseTests` still
 cover the access transitions. `CalendarConnectRenderTests` writes the Hover
 Calendars page and the Settings card in all four states (light and dark).
 EventKit with the maintainer's real Google and Exchange accounts can only be

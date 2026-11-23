@@ -1582,8 +1582,10 @@ the Connect page say where to allow access, with Open Privacy Settings (Privacy 
 Security -> Calendars). A refused Allow access saves nothing (allow in System
 Settings, then the same "Allow access to calendars" button, no second prompt); a
 saved connection keeps itself and Disconnect, clears Apple events. Settings calls
-prepareMacCalendars() (status, then the calendar list and today's events for a
-saved, readable connection) on appear, on app activation and after Allow.
+prepareMacCalendars() (status, then only the calendar list of a saved, readable
+connection: no event read, so the day open in Hover keeps its events; events of
+a calendar that left the Mac are dropped) on appear, on app activation and after
+Allow.
 macCalendarGroups groups by EKSource.sourceIdentifier. Only apple: entries count
 toward the hidden-calendar limit; inactive direct-connection entries make room. checkAppleAccess() reads only the status for a
 saved or refused Apple connection when Calendar or Settings opens and when the

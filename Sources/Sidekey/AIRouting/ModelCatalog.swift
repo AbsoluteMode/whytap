@@ -41,6 +41,10 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// Anthropic's `capabilities.server_tools.web_search.supported`; `nil`
     /// when the catalog does not say. Decides the Agent's built-in search.
     var supportsWebSearch: Bool?
+    /// Anthropic's `capabilities.effort.low.supported` (`false` when
+    /// `effort.supported` is false); `nil` when the catalog does not say.
+    /// Decides whether the Agent sends `effort: low`.
+    var supportsLowEffort: Bool?
     var expiresAt: Date?
     /// Deepgram: the date of the model's newest version (`version` is
     /// `YYYY-MM-DD.N`). Pickers hide a model not updated for a year.
@@ -62,6 +66,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
         supportsWebSearch: Bool? = nil,
+        supportsLowEffort: Bool? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
         catalogDate: Date? = nil,
@@ -76,6 +81,7 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
         self.supportsWebSearch = supportsWebSearch
+        self.supportsLowEffort = supportsLowEffort
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
         self.catalogDate = catalogDate
@@ -440,6 +446,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             let maxTokens: Int?
             let thinking: Bool?
             let webSearch: Bool?
+            let lowEffort: Bool?
             let createdAt: String?
 
             enum CodingKeys: String, CodingKey {
@@ -459,10 +466,21 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                         webSearch = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Support.self, forKey: .webSearch)
                     }
                 }
+                struct Effort: Decodable {
+                    let supported: Bool?
+                    let low: Support?
+                    init(from decoder: Decoder) throws {
+                        let container = try decoder.container(keyedBy: CodingKeys.self)
+                        supported = try? container.decodeIfPresent(Bool.self, forKey: .supported)
+                        low = try? container.decodeIfPresent(Support.self, forKey: .low)
+                    }
+                    enum CodingKeys: String, CodingKey { case supported, low }
+                }
                 let thinking: Support?
                 let serverTools: ServerTools?
+                let effort: Effort?
                 enum CodingKeys: String, CodingKey {
-                    case thinking
+                    case thinking, effort
                     case serverTools = "server_tools"
                 }
                 // Each capability decodes on its own: an odd value in one
@@ -471,6 +489,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                     let container = try decoder.container(keyedBy: CodingKeys.self)
                     thinking = try? container.decodeIfPresent(Support.self, forKey: .thinking)
                     serverTools = try? container.decodeIfPresent(ServerTools.self, forKey: .serverTools)
+                    effort = try? container.decodeIfPresent(Effort.self, forKey: .effort)
                 }
             }
 
@@ -484,6 +503,8 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 let capabilities = try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
                 thinking = capabilities?.thinking?.supported
                 webSearch = capabilities?.serverTools?.webSearch?.supported
+                let effort = capabilities?.effort
+                lowEffort = effort?.supported == false ? false : effort?.low?.supported
             }
         }
         let data: [Model]
@@ -509,6 +530,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 supportsTools: true,
                 supportsReasoning: model.thinking,
                 supportsWebSearch: model.webSearch,
+                supportsLowEffort: model.lowEffort,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
             )
         }

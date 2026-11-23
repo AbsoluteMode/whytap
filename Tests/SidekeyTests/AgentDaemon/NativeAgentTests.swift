@@ -409,8 +409,10 @@ final class NativeAgentTests: XCTestCase {
         }
     }
 
+    /// OpenRouter keeps the structured-only contract; direct Anthropic now
+    /// accepts a plain-text reply (NativeAgentLowEffortTests).
     func testClaudeAutoChoiceStillRejectsUnstructuredFinalWithoutPaidRepair() async throws {
-        for route: OpenCodeModelProvider in [.anthropic, .openRouter] {
+        for route: OpenCodeModelProvider in [.openRouter] {
             let (directory, keys, http) = try fixture()
             try keys.save("key", account: route == .anthropic ? ProviderAccount.anthropicKeychainAccount : OpenRouterLLMKeyStore.account)
             StubURLProtocol.handler = { _ in self.serve(route == .anthropic

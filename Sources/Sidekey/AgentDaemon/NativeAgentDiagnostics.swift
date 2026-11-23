@@ -202,6 +202,34 @@ enum NativeAgentDiagnostics {
             missingResults = callIDs.subtracting(resultIDs).count
         }
     }
+    /// The level the request asked for; `nil` when none was sent.
+    enum Effort: String, Codable { case low }
+    /// Token counts the provider reported for one response; a count it did
+    /// not report stays `nil`. Counts only, never content.
+    struct Usage: Codable, Equatable {
+        var input: Int?, output: Int?, thinking: Int?, cacheRead: Int?, cacheWrite: Int?
+
+        init(input: Int? = nil, output: Int? = nil, thinking: Int? = nil, cacheRead: Int? = nil, cacheWrite: Int? = nil) {
+            self.input = input; self.output = output; self.thinking = thinking
+            self.cacheRead = cacheRead; self.cacheWrite = cacheWrite
+        }
+
+        /// Anthropic (`input_tokens`, `output_tokens_details.thinking_tokens`,
+        /// `cache_read_input_tokens`), OpenAI Responses (`output_tokens_details.
+        /// reasoning_tokens`, `input_tokens_details.cached_tokens`) and
+        /// OpenRouter (`prompt_tokens`, `completion_tokens_details`).
+        init?(_ usage: [String: Any]?) {
+            guard let usage else { return nil }
+            func count(_ value: Any?) -> Int? { AIUsageNumber.nonnegative(value).map { Int(min($0, 100_000_000)) } }
+            let outputDetails = (usage["output_tokens_details"] ?? usage["completion_tokens_details"]) as? [String: Any]
+            let inputDetails = (usage["input_tokens_details"] ?? usage["prompt_tokens_details"]) as? [String: Any]
+            self.init(input: count(usage["input_tokens"] ?? usage["prompt_tokens"]),
+                      output: count(usage["output_tokens"] ?? usage["completion_tokens"]),
+                      thinking: count(outputDetails?["thinking_tokens"] ?? outputDetails?["reasoning_tokens"]),
+                      cacheRead: count(usage["cache_read_input_tokens"] ?? inputDetails?["cached_tokens"]),
+                      cacheWrite: count(usage["cache_creation_input_tokens"]))
+        }
+    }
     struct Event: Encodable {
         let version = 1
         let turn: UUID
@@ -219,6 +247,8 @@ enum NativeAgentDiagnostics {
         let error: ErrorShape?
         let failure: Failure?
         let finish: Finish?
+        var effort: Effort? = nil
+        var usage: Usage? = nil
 
         var json: String? {
             guard let data = try? JSONEncoder().encode(self) else { return nil }
@@ -232,11 +262,12 @@ enum NativeAgentDiagnostics {
         let pinned: Bool
         let toolsCount: Int
         let outputLimit: Int
+        var effort: Effort? = nil
         let sink: (Event) -> Void
         private let started = ContinuousClock.now
 
         func emit(_ stage: Stage, status: Int? = nil, bytes: Int? = nil, shape: Shape? = nil,
-                  error: ErrorShape? = nil, failure: Failure? = nil, finish: Finish? = nil) {
+                  error: ErrorShape? = nil, failure: Failure? = nil, finish: Finish? = nil, usage: Usage? = nil) {
             let elapsed = started.duration(to: .now).components
             let service: Provider
             switch provider { case .openRouter: service = .openRouter; case .openAI: service = .openAI; case .anthropic: service = .anthropic }
@@ -244,7 +275,7 @@ enum NativeAgentDiagnostics {
                 scope: .agent,
                 pinned: pinned, toolsCount: toolsCount, outputLimit: outputLimit, stage: stage,
                 status: status, bytes: bytes, elapsedMS: Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000),
-                shape: shape, error: error, failure: failure, finish: finish))
+                shape: shape, error: error, failure: failure, finish: finish, effort: effort, usage: usage))
         }
     }
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "native-agent")

@@ -128,6 +128,44 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         XCTAssertEqual(pairer.showLive().source, "")
     }
 
+    /// The space between two phrases arrives with the earlier audio delta: the
+    /// word boundary is already heard there, so the earlier row never takes
+    /// the later phrase's first word (the build queue's ticket #467 probe).
+    func testASpaceAtTheEndOfAnEarlyDeltaEndsItsWords() async throws {
+        for (early, later) in [("early source words ", "later source words"),
+                               ("early source words", " later source words")] {
+            var pairer = SubtitleSpeechPairer()
+            pairer.addSource(early, elapsedMs: 400)
+            pairer.addTranslation("early translation", elapsedMs: 400, now: 0)
+            pairer.addSource(later, elapsedMs: 4_000)
+            XCTAssertEqual(pairer.showLive().source, "early source words", "live, \(early.debugDescription)")
+            XCTAssertEqual(pairer.take(now: 2), [.init(source: "early source words", translation: "early translation")],
+                           early.debugDescription)
+            pairer.addTranslation(" later translation", elapsedMs: 4_000, now: 3)
+            XCTAssertEqual(pairer.take(now: 5), [.init(source: "later source words", translation: "later translation")],
+                           early.debugDescription)
+        }
+        // A word split across two deltas still settles whole.
+        var pairer = SubtitleSpeechPairer()
+        pairer.addSource("early sou", elapsedMs: 400)
+        pairer.addTranslation("early translation", elapsedMs: 400, now: 0)
+        pairer.addSource("rce words", elapsedMs: 4_000)
+        XCTAssertEqual(pairer.showLive().source, "early source")
+        XCTAssertEqual(pairer.take(now: 2).map(\.source), ["early source"])
+
+        let shots = try await snapshots([
+            (.source, " Welcome to ", 400),
+            (.translation, "Добро пожаловать.", 1_000),
+            (.source, "the lecture. Today we", 4_000),
+            (.translation, " На лекцию.", 4_300),
+            (.source, " talk", 4_600),
+            (.translation, " Сегодня", 4_700),
+            (.translation, " мы", 4_800)
+        ], minimum: 4)
+        assertSteady(shots)
+        XCTAssertEqual(try XCTUnwrap(shots.last).map(\.source), ["Welcome to", "the lecture.", "Today we talk"])
+    }
+
     /// The translation splits one sentence of the original in two: each part
     /// keeps the words heard by its own translation, none is left empty.
     func testASentenceTranslatedInTwoPartsKeepsAnOriginalForEach() async throws {

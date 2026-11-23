@@ -109,6 +109,11 @@ a box that still changed size. Added:
   (and at most to its first sentence end). The timing cut takes at least
   those words, so the floor never takes another pair's words. The original
   now appears in step with its translation instead of ahead of it.
+- **A space already heard ends the words.** The third check (ticket #467)
+  found the whole-word rule extending past a separating space that arrived
+  with the earlier audio delta: the first row took the next phrase's first
+  word. A word is now finished from later audio only when the last heard
+  character is inside it, wherever the model puts the space.
 - **A shown clause mark survives a broken session.** Dropping an unfinished
   word after a failure never goes below what the row showed.
 - **Newest lines of a long column.** A column is at most
@@ -155,6 +160,8 @@ event and checks:
 - an original far ahead of its translation (the build queue's 400 / 4,000 ms
   fixture) and a sentence the translation splits in two settle each
   translation with its own original, none empty, and keep every shown word;
+  a space at the end of an early delta keeps the next phrase's first word
+  out of the earlier row;
   a long translation closed at a clause keeps the words it showed; a broken
   session keeps a shown clause mark (these fail on the earlier heads);
 - a long column stays within its cap with the translation at the row's top;

@@ -74,9 +74,19 @@ struct SubtitleSpeechPairer {
     /// shown translation word, whole words only: the timing cut of this pair
     /// takes at least these.
     private var translatedCount: Int {
-        guard let reached = translation.prefix(wholeWordCount).map(\.elapsed).max(),
-              let last = source.lastIndex(where: { $0.elapsed <= reached }) else { return 0 }
+        guard let reached = translation.prefix(wholeWordCount).map(\.elapsed).max() else { return 0 }
+        return heardCount(by: reached)
+    }
+
+    /// Characters of the original heard by audio position `elapsed`, whole
+    /// words only. A word heard in part is finished from the next delta; a
+    /// separating space already heard ends the words there, so the next
+    /// phrase's first word is never taken (the space may arrive with either
+    /// delta).
+    private func heardCount(by elapsed: Int) -> Int {
+        guard let last = source.lastIndex(where: { $0.elapsed <= elapsed }) else { return 0 }
         var count = last + 1
+        guard !source[last].character.isWhitespace else { return count }
         while count < source.count, !source[count].character.isWhitespace { count += 1 }
         return count
     }
@@ -214,13 +224,7 @@ struct SubtitleSpeechPairer {
         // No sentence end of the original yet: a pause (its period comes
         // with the next word) or a sentence the model split. Take the words
         // heard up to the translation's position.
-        if let last = source.lastIndex(where: { $0.elapsed <= elapsed }) {
-            var count = last + 1
-            // Whole words only.
-            while count < source.count, !source[count].character.isWhitespace { count += 1 }
-            return count
-        }
-        return 0
+        return heardCount(by: elapsed)
     }
 
     private static let leading: Set<Character> = [".", "!", "?", "…", ",", ";", ":"]

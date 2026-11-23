@@ -144,6 +144,19 @@ which nothing told the person to make.
   `sidekey.onboarding.step.v1`. The relaunch opens there, or at the next step
   still on the way.
 
+# Back to the onboarding with ⌘Tab (REV 74)
+
+- Whytap runs as `.accessory` (no Dock icon), so ⌘Tab never listed it. A
+  person on a permission step who went to System Settings could not come back
+  with ⌘Tab.
+- While the onboarding window is open the app is `.regular`: it is listed in
+  ⌘Tab and has a Dock icon. A Dock click brings the window forward. Closing
+  the onboarding sets `.accessory` again.
+- The policy does not change hotkeys or the island:
+  - the Carbon hotkeys and the event taps do not depend on it;
+  - the island panels keep their own levels.
+- Not checked on a Mac: ⌘Tab while System Settings is in front.
+
 # Rejected
 
 - Asking for `com.apple.developer.assistive-technology`: Apple limits it to

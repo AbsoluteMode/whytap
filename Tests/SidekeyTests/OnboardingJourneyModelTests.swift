@@ -225,6 +225,27 @@ final class OnboardingJourneyModelTests: XCTestCase {
     /// The owner, 2026-11-22: no separate screen. In the app too, "Use your
     /// own server →" turns the step's key field into the server's fields;
     /// Settings does not open and the step stays.
+    /// ⌘Tab could not reach the onboarding (the owner, 2026-11-23): Whytap
+    /// has no Dock icon. Closing the onboarding hands the app back to
+    /// `.accessory` once, and the controller's own closing still finishes.
+    func testClosingTheOnboardingLeavesTheAppSwitcher() throws {
+        _ = NSApplication.shared
+        let env = try makeEnv()
+        let model = try makeModel(env, isPreview: true)
+        var calls: [Bool] = []
+        var closed = 0
+        let controller = OnboardingJourneyWindowController(model: model, inAppSwitcher: { calls.append($0) },
+                                                           onClosed: { closed += 1 })
+        let window = try XCTUnwrap(controller.window)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        XCTAssertEqual(calls, [], "nothing changes before the window is shown")
+        window.contentViewController = nil
+        window.close()
+        window.close()
+        XCTAssertEqual(calls, [false])
+        XCTAssertEqual(closed, 1)
+    }
+
     /// A key press nothing in the window takes is dropped without the system
     /// alert sound (the owner heard beeps with no visible cause, 2026-11-23);
     /// one the step does take still reaches it.

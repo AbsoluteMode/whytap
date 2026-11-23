@@ -550,7 +550,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
-        let controller = OnboardingJourneyWindowController(model: model) { [weak self] in
+        let controller = OnboardingJourneyWindowController(model: model, inAppSwitcher: { shown in
+            NSApp.setActivationPolicy(shown ? .regular : .accessory)
+        }) { [weak self] in
             // A quit (System Settings' Quit & Reopen after a privacy switch)
             // is not the end of the onboarding: the relaunch continues it.
             // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
@@ -576,6 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showRuntimeSurfaceAfterReopen()
+        visibleOnboarding?.bringForward()
         return true
     }
 

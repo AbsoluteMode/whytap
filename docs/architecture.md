@@ -1409,7 +1409,11 @@ no dialog, so the pane opens once it returned
 (PermissionsHelper.screenRecordingShowsNoDialog). The step on screen is kept in
 `sidekey.onboarding.step.v1`, and a quit (System Settings' Quit & Reopen after a
 privacy switch) does not finish the onboarding (AppDelegate.isTerminating): the
-relaunch continues at that step, or the next one still on the way. Only the
+relaunch continues at that step, or the next one still on the way. Whytap is an
+`.accessory` app (no Dock icon), so ⌘Tab did not list it; while the onboarding is
+open it is `.regular` (in ⌘Tab and the Dock, a Dock click brings the window
+forward) and closing the onboarding hands back `.accessory`
+(OnboardingJourneyWindowController.inAppSwitcher). Only the
 system's own check (polling and a return to the app) makes it granted, then
 the figure plays its click and the step moves on after 1.05 s. A return to the
 app with the switch still off shows one calm line and Allow again

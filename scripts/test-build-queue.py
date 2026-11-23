@@ -30,6 +30,8 @@ class QueueTests(unittest.TestCase):
         self.git("-c", "user.name=Queue Test", "-c", "user.email=queue@example.invalid",
                  "commit", "--allow-empty", "-qm", "fixture")
         self.head = self.git("rev-parse", "HEAD").strip()
+        self.pulls = Path(self.temp.name) / "pulls.git"  # GitHub's refs/pull/<n>/head
+        subprocess.run(["git", "init", "-q", "--bare", str(self.pulls)], check=True)
         self.call("configure", "--builder-thread", "builder")
 
     def git(self, *args):
@@ -38,7 +40,8 @@ class QueueTests(unittest.TestCase):
     def call(self, *args, actor="builder", cwd=None, ok=True, env=None):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
-                                env={**HERMETIC_ENV, **(env or {})})
+                                env={**HERMETIC_ENV, "WHYTAP_BUILD_QUEUE_PULL_REMOTE": str(self.pulls),
+                                     **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -442,6 +445,78 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(early["environment_wait_minutes"], {})
         later = self.metrics("2026-01-01T00:30:00+00:00", "2026-01-01T02:00:00+00:00")
         self.assertEqual(later["environment_wait_minutes"], {"meeting gate": 7})
+
+    def ticket(self, ticket_id):
+        return self.call("status", "--ticket", str(ticket_id))["tickets"][0]
+
+    def test_a_ticket_returned_without_a_block_keeps_its_place(self):
+        first = self.enqueue(1)["ticket"]["id"]
+        second = self.enqueue(2)["ticket"]["id"]
+        queued_at = self.ticket(first)["queued_at"]
+        self.call("claim")
+        self.update(first, "queued")
+        self.assertEqual((self.ticket(first)["position"], self.ticket(first)["queued_at"]),
+                         (1, queued_at))
+        self.assertEqual(self.call("claim")["ticket"]["id"], first)
+        self.update(first, "blocked")
+        self.update(first, "queued")  # after a block: to the end, as before
+        self.assertEqual(self.ticket(first)["position"], 2)
+        self.assertEqual(self.call("claim")["ticket"]["id"], second)
+
+    def test_a_ticket_waits_for_its_dependency_in_place(self):
+        dependency = "https://github.com/example/app/pull/3"
+        waiting = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                            "--head", self.head, "--title", "Needs 3", "--checks", "x",
+                            "--acceptance", "x", "--session", "worker",
+                            "--depends-on", dependency)["ticket"]
+        self.assertEqual((waiting["depends_on"], waiting["waiting_for"]), ([dependency], [dependency]))
+        other = self.enqueue(4)["ticket"]["id"]
+        claimed = self.call("claim")
+        self.assertEqual((claimed["ticket"]["id"], claimed["waiting_for_dependencies"]),
+                         (other, [waiting["id"]]))
+        self.update(other, "done")
+        three = self.enqueue(3)["ticket"]["id"]
+        self.assertEqual(self.call("claim")["ticket"]["id"], three)
+        self.assertEqual(self.ticket(waiting["id"])["position"], 1)
+        self.update(three, "pending_install")  # merged; the install waits
+        self.assertEqual(self.ticket(waiting["id"])["waiting_for"], [])
+        self.assertEqual(self.call("claim")["ticket"]["id"], waiting["id"])
+
+    def test_dependencies_on_itself_or_in_a_cycle_are_refused(self):
+        own = "https://github.com/example/app/pull/1"
+        self.assertIn("itself", self.call(
+            "enqueue", "--pr", own, "--head", self.head, "--title", "x", "--checks", "x",
+            "--acceptance", "x", "--session", "worker", "--depends-on", own, ok=False)["error"])
+        self.call("enqueue", "--pr", "https://github.com/example/app/pull/2", "--head", self.head,
+                  "--title", "x", "--checks", "x", "--acceptance", "x", "--session", "worker",
+                  "--depends-on", own)
+        self.assertIn("already depends", self.call(
+            "enqueue", "--pr", own, "--head", self.head, "--title", "x", "--checks", "x",
+            "--acceptance", "x", "--session", "worker", "--depends-on",
+            "https://github.com/example/app/pull/2", ok=False)["error"])
+
+    def test_claim_returns_a_ticket_whose_pr_head_moved(self):
+        stale = self.enqueue(1)["ticket"]["id"]
+        fresh = self.enqueue(2)["ticket"]["id"]
+        moved = self.commit({"pushed.txt": "after submission"})
+        self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/1/head",
+                 f"{self.head}:refs/pull/2/head")
+        claimed = self.call("claim")
+        self.assertEqual((claimed["ticket"]["id"], claimed["returned_moved_heads"]), (fresh, [stale]))
+        returned = self.ticket(stale)
+        self.assertEqual(returned["status"], "blocked")
+        self.assertIn("--head " + moved, returned["note"])
+        self.assertEqual(self.call("events", "--ticket", str(stale))[-1]["status"], "blocked")
+
+    def test_check_heads_needs_the_builder_and_an_unknown_remote_blocks_nothing(self):
+        ticket = self.enqueue(1)["ticket"]["id"]
+        self.git("push", "-q", str(self.pulls), f"{self.commit({'a': 'b'})}:refs/pull/1/head")
+        self.call("check-heads", actor="worker", ok=False)
+        offline = {"WHYTAP_BUILD_QUEUE_PULL_REMOTE": str(Path(self.temp.name) / "missing.git")}
+        self.assertEqual(self.call("check-heads", env=offline),
+                         {"checked": False, "returned_moved_heads": []})
+        self.assertEqual(self.call("claim", env=offline)["ticket"]["id"], ticket)
+
 
 if __name__ == "__main__":
     unittest.main()

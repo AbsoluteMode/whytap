@@ -69,10 +69,15 @@ holds it, leave the tickets queued and end your turn.
 
 ## Each ticket
 
-1. `claim`, then message the author that work started.
+1. `claim`, then message the author that work started. `claim` already
+   returned queued tickets whose PR head moved (`returned_moved_heads`) and
+   skipped tickets waiting for a `--depends-on` PR; deliver their events too.
 2. Check the live PR: exact queued head and base, review evidence, checks,
    dependencies, overlaps. A moved head is `blocked` with a request to
-   resubmit the reviewed head.
+   resubmit the reviewed head. To give a ticket back without blaming the PR
+   (environment, an undeclared dependency not merged yet), use
+   `set --status queued --note <reason>`: it keeps its place. Never do that
+   after pushing to its branch.
 3. Merge conflicts with `main` are yours to resolve. In the integration
    worktree, merge current `origin/main` into the PR branch (or the reverse
    order the process prescribes), read both sides' intent from their PRs and
@@ -110,8 +115,8 @@ holds it, leave the tickets queued and end your turn.
    `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`.
    While it reports a locked screen or a load above its limit, wait and check
    again (up to 15 minutes) instead of running the suite; if it stays not
-   clear, return the ticket with a note that the environment, not the PR,
-   stopped it. Do not treat failures from a suite run under such load as PR
+   clear, return the ticket with `set --status queued` and a note that the
+   environment, not the PR, stopped it. Do not treat failures from a suite run under such load as PR
    findings. When a test fails whose file and code under test the candidate
    does not change, rerun only the failed tests
    (`swift test --filter <Class>/<test>`), not the whole suite. If they pass,

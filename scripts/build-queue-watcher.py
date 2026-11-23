@@ -106,20 +106,30 @@ def worktree_path(config):
 
 
 def open_work(root):
-    """Read-only view of what could need a builder. Never modifies the queue."""
+    """Read-only view of what could need a builder. Never modifies the queue. A queued
+    ticket waiting for a `--depends-on` PR that is not merged yet needs none."""
     path = root / QUEUE
-    work = {"queued": [], "in_progress": [], "retry_install": [], "waiting_install": []}
+    work = {"queued": [], "in_progress": [], "retry_install": [], "waiting_install": [],
+            "waiting_dependency": []}
     if not path.is_file():
         return {**work, "fingerprint": ""}
     def read():
         db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
         try:
-            retry = "retry" if "retry" in {c[1] for c in db.execute(
-                "PRAGMA table_info(tickets)")} else "''"
-            return db.execute(
-                "SELECT id, status, updated_at, " + retry + " FROM tickets WHERE status IN "
-                "('queued', 'in_progress', 'pending_install') ORDER BY queued_at, id"
-            ).fetchall()
+            columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+            retry = "retry" if "retry" in columns else "''"
+            depends = "depends_on" if "depends_on" in columns else "'[]'"
+            # The latest ticket of each PR: a dependency is met once it is merged.
+            merged = {pr for pr, status in db.execute(
+                "SELECT pr, status FROM tickets WHERE id IN (SELECT MAX(id) FROM tickets "
+                "GROUP BY pr)") if status in ("done", "pending_install")}
+            rows = db.execute(
+                "SELECT id, status, updated_at, " + retry + ", " + depends + " FROM tickets "
+                "WHERE status IN ('queued', 'in_progress', 'pending_install') "
+                "ORDER BY queued_at, id").fetchall()
+            return [(ticket, status, updated, retry_value,
+                     any(pr not in merged for pr in json.loads(needs or "[]")))
+                    for ticket, status, updated, retry_value, needs in rows]
         finally:
             db.close()
 
@@ -135,11 +145,17 @@ def open_work(root):
             db.close()
         rows = read()
     seen = []
-    for ticket, status, updated, retry in rows:
+    for ticket, status, updated, retry, waiting in rows:
         if status == "pending_install":
             status = "retry_install" if retry == "meeting" else "waiting_install"
+        if status == "queued" and waiting:
+            status = "waiting_dependency"  # no session until its dependency is merged
         work[status].append(ticket)
-        if status != "waiting_install":
+        if status == "queued":
+            # A ticket returned to the queue without a block keeps its row: the same
+            # queued work again is no progress, whatever its update time.
+            seen.append([ticket, status])
+        elif status not in ("waiting_install", "waiting_dependency"):
             seen.append([ticket, status, updated])
     work["fingerprint"] = hashlib.sha256(json.dumps(seen).encode()).hexdigest() if seen else ""
     return work
@@ -788,6 +804,10 @@ def watch(root):
         work = open_work(root)
         before = json.dumps(state, sort_keys=True)
         start, reason = decide(work, state, config, time.time(), meeting_gate_clear, environment)
+        if start and reason == "queued" and returned_moved_heads(root):
+            work = open_work(root)  # a returned ticket needs no builder
+            start, reason = decide(work, state, config, time.time(), meeting_gate_clear,
+                                   environment)
         if not start:
             watchdog(root, config, {"reason": reason, "no_progress": state.get("no_progress", 0)})
             last = str(state.get("last_reason", ""))
@@ -829,6 +849,22 @@ def summary(root):
             "open": {k: v for k, v in work.items() if k != "fingerprint"},
             "engine": config["engine"], "worktree": str(worktree_path(config)),
             "state": state, "logs": str(root / LOGS)}
+
+
+def returned_moved_heads(root):
+    """Model-free: before a session starts for queued work, the helper returns tickets
+    whose PR head moved after submission to their authors. Failures only log."""
+    # WHY: .project-docs/decisions/2026-11-23-builder-queue-cheap-fixes.md
+    try:
+        result = helper(root, ACTOR, "check-heads", check=False) or {}
+    except (OSError, ValueError) as error:
+        log(f"head check failed: {error}")
+        return []
+    returned = result.get("returned_moved_heads", [])
+    if returned:
+        log("returned to their authors, PR head moved: "
+            + ", ".join(f"#{ticket}" for ticket in returned))
+    return returned
 
 
 def helper(root, actor, *arguments, check=True):

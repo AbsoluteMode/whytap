@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import CryptoKit
 import Security
 
@@ -25,6 +26,16 @@ protocol TokenStore {
     func save(_ token: String) throws
     func read() throws -> String?
     func delete() throws
+    /// Whether a non-empty secret is stored, without reading it where the
+    /// store can tell (the Keychain): never shows an authentication prompt.
+    func exists() -> Bool
+}
+
+extension TokenStore {
+    func exists() -> Bool {
+        guard let stored = try? read() else { return false }
+        return !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 /// Legacy file-backed credential storage retained for migration and isolated tests
@@ -231,6 +242,26 @@ struct KeychainStore: TokenStore {
         default:
             throw KeychainError.unhandledError(status)
         }
+        #endif
+    }
+
+    /// Whether an item is stored, from its attributes only: the secret is
+    /// not read and Keychain authentication UI is not allowed, so naming a
+    /// saved key (the onboarding's saved keys line) never prompts. A locked
+    /// item counts as present; using it is the person's next, explicit step.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    func exists() -> Bool {
+        #if DEBUG && SIDEKEY_FILE_TOKEN_STORE
+        return fileStore.exists()
+        #else
+        var query = baseQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
         #endif
     }
 

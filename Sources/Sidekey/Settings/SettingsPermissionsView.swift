@@ -13,11 +13,11 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "keyboard.fill",
                             title: "Keyboard control",
-                            subtitle: viewModel.keyboardUnavailable ? PermissionsSettingsViewModel.unavailableLine : nil,
-                            granted: viewModel.snapshot.accessibilityGranted,
+                            subtitle: viewModel.settingsOnly && !viewModel.keyboardReady
+                                ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil,
+                            granted: viewModel.keyboardReady && !viewModel.keyboardNeedsRestart,
                             requested: viewModel.keyboardOpensSettings,
-                            checking: viewModel.refusals.checking.contains(.keyboard),
-                            unavailable: viewModel.keyboardUnavailable,
+                            needsRestart: viewModel.keyboardNeedsRestart,
                             action: viewModel.requestAccessibility
                         )
                         MacRowSeparator()
@@ -31,12 +31,13 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "rectangle.dashed.badge.record",
                             title: "Screen Recording",
-                            subtitle: viewModel.screenUnavailable ? PermissionsSettingsViewModel.unavailableLine
+                            subtitle: viewModel.settingsOnly && !viewModel.screenRecordingGranted
+                                ? PermissionsSettingsViewModel.screenSettingsGuide
                                 : "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
-                            granted: viewModel.screenRecordingGranted,
-                            requested: viewModel.screenRecordingRequested,
+                            granted: viewModel.screenRecordingGranted && !viewModel.screenNeedsRestart,
+                            requested: viewModel.screenRecordingRequested || viewModel.settingsOnly,
                             isRequesting: viewModel.isRequestingScreenRecording,
-                            unavailable: viewModel.screenUnavailable,
+                            needsRestart: viewModel.screenNeedsRestart,
                             action: { Task { await viewModel.requestScreenRecording() } }
                         )
                     }
@@ -62,8 +63,7 @@ struct SettingsPermissionsView: View {
         granted: Bool,
         requested: Bool = false,
         isRequesting: Bool = false,
-        checking: Bool = false,
-        unavailable: Bool = false,
+        needsRestart: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         MacRow(
@@ -82,16 +82,13 @@ struct SettingsPermissionsView: View {
                             .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(MacSettingsTheme.green)
                             .accessibilityLabel("\(title): Allowed")
-                    } else if unavailable {
-                        // 27.3 beta refused the request without a dialog: no
-                        // button that would lead to the pane's "+".
+                    } else if needsRestart {
+                        // 27.3: the grant made in System Settings works after a restart.
                         // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-                        Text("Not available yet")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(MacSettingsTheme.text2)
+                        MacButton(title: "Restart Whytap", style: .default, action: viewModel.restartWhytap)
                             .fixedSize()
-                            .accessibilityLabel("\(title): not available on this macOS beta yet")
-                    } else if isRequesting || checking {
+                            .accessibilityLabel("Restart Whytap to turn on \(title)")
+                    } else if isRequesting {
                         ProgressView()
                             .controlSize(.small)
                             .accessibilityLabel("Waiting for \(title) permission")

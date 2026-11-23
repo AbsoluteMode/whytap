@@ -66,6 +66,11 @@ struct ProviderKeyStore {
         return key.isEmpty ? .absent : .key(key)
     }
 
+    /// Whether a key is stored, without reading it or prompting.
+    func hasKey(account: String) -> Bool {
+        makeStore(account).exists()
+    }
+
     /// The key from `lookup`, or `nil` for either of the other answers. For
     /// callers that cannot act differently on an unreadable Keychain; the route
     /// resolver tells the two apart with `lookup`.

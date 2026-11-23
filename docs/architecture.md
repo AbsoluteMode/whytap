@@ -1389,19 +1389,20 @@ display with viewfinder corners; OnboardingAccessFigures, drawn per display
 frame), one line and an Allow capsule. Allow asks macOS and the step waits
 (OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
 Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
-no spinner). On 27.3 beta 2 the Accessibility link opens System & App
-Protection Override, where a new app gets in only with "+", which Whytap never
-sends a person to. After a keyboard or screen request, PermissionRequestRefusals
-watches 2.5 s for a new window of macOS's permission agents
-(universalAccessAuthWarn, UserNotificationCenter, SecurityAgent, System
-Settings); none and still no access is a refusal, checked only where the old
-pane is gone (27.3+), remembered per macOS build
-(`sidekey.permissions.refusedRequests.v1`) and cleared by any later grant. A
-refused step shows OnboardingAccessState.unavailable (an honest line about the
-beta and Continue, no pane, no Waiting), Try Drop shows `needsAccess` with
-Continue enabled, and Settings → Permissions and Drop's repair window show
-"Not available yet" instead of a button. On 27.3 the keyboard button never
-opens the Override pane. The screen step names both settings and confirms only
+no spinner). On 27.3 (`PermissionsHelper.usesProtectionOverridePane`) requests
+show no dialog, so keyboard control and Screen & system audio show a numbered
+guide instead (OnboardingAccessKind.guide): + under System & App Protection
+Override, Override System Protections (not Choose Apps), five OKs, the red
+Allow and the password, then + under Input Monitoring; for the screen, + under
+Screen & System Audio Recording. Keyboard control counts there only with
+Accessibility, posting and listening (`PermissionsHelper.keyboardReady`); a
+process that starts with Accessibility but no posting gets the Choose Apps
+line. Grants present at launch are recorded (`recordLaunchGrants`); one that
+appears later needs a new process, so the step shows `restarting` and
+`AppRelauncher` reopens Whytap on the same step (Settings and Drop's repair
+window offer Restart Whytap). "Ask for system audio" runs one second of the
+Meetings process tap (SystemAudioPermissionProbe) so macOS asks now. Saved keys
+are named from Keychain attributes only (`TokenStore.exists`). The screen step names both settings and confirms only
 the screen preflight. Audio-only
 consent is requested by the first recording from the Core Audio tap's aggregate
 device. Key steps offer the sole saved provider up front and list saved accounts

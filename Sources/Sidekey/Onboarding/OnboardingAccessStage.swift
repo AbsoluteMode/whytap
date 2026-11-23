@@ -83,7 +83,7 @@ enum OnboardingAccessKind: CaseIterable {
 
     var notOnLine: String {
         switch self {
-        case .keyboard: return asksWithoutPane ? "Keyboard control isn’t on yet." : "Whytap isn’t on in \(pane) yet."
+        case .keyboard: return addsByHand ? "Keyboard control isn’t on yet." : "Whytap isn’t on in \(pane) yet."
         case .microphone: return "Microphone access is still off."
         case .inputMonitoring: return "Input Monitoring isn’t on yet."
         case .screenRecording: return "\(pane) isn’t on yet."
@@ -92,14 +92,49 @@ enum OnboardingAccessKind: CaseIterable {
 
     var isOptional: Bool { self == .screenRecording }
 
-    /// Keyboard control on 27.3: its pane lists Whytap only after "+", so the
-    /// step never points there.
+    /// 27.3: keyboard control and Screen Recording are given in System
+    /// Settings with +; the step shows the clicks in the system's own words.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    var asksWithoutPane: Bool { self == .keyboard && Self.protectionOverride }
+    var addsByHand: Bool { (self == .keyboard || self == .screenRecording) && Self.protectionOverride }
 
-    /// A request this macOS beta refused without a dialog (27.3 beta 2).
-    static let unavailableTitle = "This macOS beta doesn’t let new apps ask yet."
-    static let unavailableDetail = "Apple’s temporary limit. Whytap asks again after an update."
+    /// The guide's lines, in order and with the names macOS shows. Keyboard
+    /// control needs the full Override (Choose Apps leaves Drop unable to
+    /// paste) and Input Monitoring for its shortcut.
+    func guide(_ setup: PermissionsSettingsViewModel.KeyboardSetup) -> [String] {
+        switch self {
+        case .keyboard:
+            return [
+                "Click + and choose Whytap.",
+                setup == .chooseAppsOnly
+                    ? "Whytap has Choose Apps: pick Override System Protections."
+                    : "Pick Override System Protections, not Choose Apps.",
+                "Press OK five times, the red Allow, then your password.",
+                "Under Input Monitoring, click + and choose Whytap.",
+            ]
+        case .screenRecording:
+            return [
+                "Click + under Screen & System Audio Recording.",
+                "Choose Whytap. It restarts by itself to turn it on.",
+            ]
+        default: return []
+        }
+    }
+
+    /// The guide line the person is on (27.3 keyboard control).
+    static func guideFocus(_ setup: PermissionsSettingsViewModel.KeyboardSetup) -> Int {
+        switch setup {
+        case .addWhytap: return 0
+        case .chooseAppsOnly: return 1
+        case .inputMonitoring: return 3
+        case .restart, .ready: return 4
+        }
+    }
+
+    /// One short purpose line above the guide.
+    var guidePurpose: String {
+        self == .keyboard ? "Drop needs it to hear its shortcut and type for you."
+            : "Shot uses the screen; Meetings and Subtitles, system audio."
+    }
 
 }
 
@@ -502,7 +537,7 @@ struct OnboardingAccessFigure: View {
         case .waiting: strength = 0.86
         case .granted: tint = OnboardingWireframeInk.green; strength = 0.90
         case .notOn: tint = OnboardingWireframeInk.amber; strength = 0.80
-        case .unavailable: strength = 0.42
+        case .restarting: tint = OnboardingWireframeInk.green; strength = 0.70
         }
         // While it waits, a light runs up the figure.
         let waveY: Double? = state == .waiting && !still
@@ -596,15 +631,19 @@ struct OnboardingAccessFigure: View {
 // MARK: - The step
 
 /// One access step: the title, its figure, one line of copy, the Allow
-/// capsule and, under it, the quiet links.
+/// capsule and, under it, the quiet links. On 27.3 keyboard control and
+/// Screen & system audio show the clicks in System Settings instead.
 struct OnboardingAccessStage: View {
     let kind: OnboardingAccessKind
     @ObservedObject var model: OnboardingJourneyModel
     /// Offscreen renders show a state without asking the system.
     var shownState: OnboardingAccessState?
+    var shownSetup: PermissionsSettingsViewModel.KeyboardSetup?
     @State private var motion = OnboardingAccessMotion()
 
     private var state: OnboardingAccessState { shownState ?? model.accessState(kind.step) }
+    private var setup: PermissionsSettingsViewModel.KeyboardSetup { shownSetup ?? model.keyboardSetup }
+    private var guided: Bool { kind.addsByHand && state != .granted }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -613,16 +652,23 @@ struct OnboardingAccessStage: View {
                 .foregroundColor(OnboardingTheme.ink)
                 .padding(.top, 6)
                 .accessibilityAddTraits(.isHeader)
+            // With the guide the figure is drawn whole at half size.
             OnboardingAccessFigure(kind: kind, state: state, motion: motion)
                 .frame(height: 138)
-            copy
-                .frame(height: 46, alignment: .top)
-                .padding(.horizontal, 36)
-            OnboardingAccessPill(kind: kind, state: state) {
+                .scaleEffect(guided ? 0.5 : 1)
+                .frame(height: guided ? 70 : 138)
+            if guided {
+                guide.padding(.horizontal, 36)
+            } else {
+                copy
+                    .frame(height: 46, alignment: .top)
+                    .padding(.horizontal, 36)
+            }
+            OnboardingAccessPill(kind: kind, state: state, guided: guided) {
                 switch state {
                 case .rest, .notOn: model.requestAccess(kind.step)
                 case .waiting: model.recheckPermissions()
-                case .unavailable: model.next()
+                case .restarting: model.restartWhytap()
                 case .granted: break
                 }
             }
@@ -638,14 +684,47 @@ struct OnboardingAccessStage: View {
         }
     }
 
+    /// 27.3: what to click in System Settings, numbered, the current line in
+    /// ink. After the grant: one line, and Whytap restarts.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    @ViewBuilder private var guide: some View {
+        if state == .restarting {
+            line("On. Whytap restarts to use it and comes back here.", color: OnboardingWireframeInk.greenColor)
+                .frame(height: 104, alignment: .center)
+        } else {
+            let lines = kind.guide(setup)
+            // Screen Recording has no partial grant to read: the first line leads.
+            let focus = kind == .keyboard ? OnboardingAccessKind.guideFocus(setup) : 0
+            VStack(alignment: .center, spacing: 8) {
+                Text(kind.guidePurpose)
+                    .font(OnboardingTheme.sans(13))
+                    .foregroundColor(OnboardingTheme.muted)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, text in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(index + 1)")
+                                .font(OnboardingTheme.mono(11, weight: .medium))
+                                .foregroundColor(index < focus ? OnboardingWireframeInk.greenColor : OnboardingTheme.faint)
+                                .frame(width: 12, alignment: .trailing)
+                            Text(text)
+                                .font(OnboardingTheme.sans(13, weight: index == focus ? .semibold : .regular))
+                                .foregroundColor(index == focus
+                                    ? (setup == .chooseAppsOnly && kind == .keyboard ? OnboardingWireframeInk.amberColor : OnboardingTheme.ink)
+                                    : OnboardingTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            .frame(height: 104, alignment: .top)
+        }
+    }
+
     @ViewBuilder private var copy: some View {
         switch state {
         case .rest:
             line(kind.purpose, color: OnboardingTheme.muted)
-        case .waiting where kind.asksWithoutPane:
-            // 27.3: the request is answered in macOS's own dialog or not at
-            // all; the pane would only offer "+".
-            line("Waiting for macOS’s answer.", color: OnboardingTheme.muted)
         case .waiting:
             VStack(spacing: 5) {
                 (Text("Turn on ") + Text("Whytap").fontWeight(.semibold).foregroundColor(OnboardingTheme.ink)
@@ -667,20 +746,8 @@ struct OnboardingAccessStage: View {
             line(kind.grantedLine, color: OnboardingWireframeInk.greenColor)
         case .notOn:
             line(kind.notOnLine, color: OnboardingWireframeInk.amberColor)
-        case .unavailable:
-            // macOS 27.3 beta refused the request without a dialog: say so
-            // plainly; no pane, no "+".
-            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-            VStack(spacing: 5) {
-                Text(OnboardingAccessKind.unavailableTitle)
-                    .font(OnboardingTheme.sans(13.5, weight: .semibold))
-                    .foregroundColor(OnboardingTheme.ink)
-                Text(OnboardingAccessKind.unavailableDetail)
-                    .font(OnboardingTheme.sans(13.5))
-                    .foregroundColor(OnboardingTheme.muted)
-            }
-            .multilineTextAlignment(.center)
-            .accessibilityElement(children: .combine)
+        case .restarting:
+            line("On. Whytap restarts to use it and comes back here.", color: OnboardingWireframeInk.greenColor)
         }
     }
 
@@ -695,13 +762,31 @@ struct OnboardingAccessStage: View {
 
     @ViewBuilder private var links: some View {
         HStack(spacing: 14) {
-            if state == .waiting, !kind.asksWithoutPane {
+            if state == .waiting, !guided {
                 OnboardingWireLink(title: "Open System Settings", arrow: "arrow.up.right") {
                     motion.nudge()
                     model.openSystemSettings(for: kind.step)
                 }
             }
-            if kind.isOptional, state != .granted, state != .unavailable {
+            if guided, state == .waiting {
+                if kind == .keyboard {
+                    OnboardingWireLink(title: "Input Monitoring", arrow: "arrow.up.right", action: model.openInputMonitoring)
+                }
+                // A grant only a new process sees: the person can restart now.
+                OnboardingWireLink(title: "Restart Whytap", arrow: "arrow.clockwise", action: model.restartWhytap)
+            }
+            // Screen & system audio: macOS asks for system audio at the first
+            // recording; this asks now, from the same step.
+            if kind == .screenRecording, PermissionsHelper.screenPaneNamesSystemAudio, state != .restarting {
+                if model.systemAudioAsked {
+                    Text("System audio asked")
+                        .font(OnboardingTheme.sans(12.5))
+                        .foregroundColor(OnboardingTheme.faint)
+                } else {
+                    OnboardingWireLink(title: "Ask for system audio", arrow: "speaker.wave.2", action: model.askSystemAudio)
+                }
+            }
+            if kind.isOptional, state != .granted, state != .restarting {
                 OnboardingWireLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
             }
         }
@@ -713,10 +798,15 @@ struct OnboardingAccessStage: View {
 struct OnboardingAccessPill: View {
     let kind: OnboardingAccessKind
     let state: OnboardingAccessState
+    /// 27.3: the step's action is opening System Settings.
+    var guided = false
     let action: () -> Void
 
     var body: some View {
         switch state {
+        case .rest where guided:
+            OnboardingWirePill("Open System Settings", isDefault: true, action: action)
+                .accessibilityLabel("Open \(kind.pane) in System Settings")
         case .rest:
             OnboardingWirePill("Allow", isDefault: true, action: action).accessibilityLabel("Allow \(kind.pane)")
         case .waiting:
@@ -725,9 +815,9 @@ struct OnboardingAccessPill: View {
             OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
         case .notOn:
             OnboardingWirePill("Allow again", tone: .warn, isDefault: true, action: action)
-        case .unavailable:
-            OnboardingWirePill("Continue", isDefault: true, action: action)
-                .accessibilityHint("This macOS beta can't give Whytap this access yet")
+        case .restarting:
+            OnboardingWirePill("Restarting…", tone: .done, disc: .none, action: action)
+                .accessibilityHint("Whytap restarts to turn this on")
         }
     }
 }

@@ -348,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `static func main()` call alone was racing AppKit's Dock paint on
     /// some macOS versions (Tahoe 26 included).
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before anything is granted in this process: 27.3 grants made later need a restart.
+        PermissionsHelper.recordLaunchGrants()
         let accepted = NSApp.setActivationPolicy(.accessory)
         os_log(
             "lifecycle_activation_policy stage=will_finish accepted=%{public}@ policy=%d",

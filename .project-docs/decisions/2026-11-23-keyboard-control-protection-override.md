@@ -2,7 +2,7 @@
 id: keyboard-control-protection-override-2026-11-23
 type: decision
 title: First-launch permissions and saved keys on macOS 27.3 beta 2
-summary: Where macOS 27.3 beta refuses a new app's keyboard control or Screen Recording request without a dialog, Whytap says so plainly and lets the person continue; it never opens a pane whose only way in is the Add (+) button. Drop is not reworked for the beta.
+summary: On macOS 27.3 keyboard control and Screen Recording are given in System Settings with +. The onboarding opens the right pane, lists the clicks in the system's words, checks posting and listening besides Accessibility, and restarts Whytap on the same step after the grant. Saved keys are named without reading secrets.
 status: confirmed
 tags: [onboarding, permissions, accessibility, macos-27, keys]
 canonical_for: [keyboard-control-pane-name, onboarding-saved-keys-line]
@@ -33,7 +33,13 @@ sources:
     reference: Sources/Sidekey/Onboarding/OnboardingWireframe.swift
     confirmed_at: 2026-11-23
   - type: repository
-    reference: Sources/Sidekey/Permissions/PermissionRequestRefusals.swift
+    reference: Sources/Sidekey/AppRelauncher.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Permissions/SystemAudioPermissionProbe.swift
+    confirmed_at: 2026-11-23
+  - type: repository
+    reference: Sources/Sidekey/Auth/KeychainStore.swift
     confirmed_at: 2026-11-23
   - type: repository
     reference: Sources/Sidekey/Onboarding/OnboardingFinaleStages.swift
@@ -45,7 +51,13 @@ sources:
     reference: Sources/Sidekey/Settings/SettingsPermissionsView.swift
     confirmed_at: 2026-11-23
   - type: user-confirmed
-    reference: On 2026-11-23 (onboarding specification 38 revision 76) the owner chose not to rework Drop for the beta, and asked that the refused steps say so in plain words and offer one Continue button, detected by the refused request rather than by a version number where possible.
+    reference: On 2026-11-23 (onboarding specification 38 revisions 77 and 78) the owner granted Whytap himself on 26C5047e through System & App Protection Override with + and Override System Protections, Input Monitoring with +, and a restart, then dictated with Drop. He dropped the no-+ requirement and asked for the step to lead through that path, for Screen Recording the same, and for screen and system audio in one step.
+    confirmed_at: 2026-11-23
+  - type: url
+    reference: https://github.com/Beingpax/VoiceInk/issues/1089
+    confirmed_at: 2026-11-23
+  - type: url
+    reference: https://github.com/CapSoftware/Cap/pull/4424
     confirmed_at: 2026-11-23
   - type: url
     reference: https://support.apple.com/en-us/149699
@@ -58,25 +70,18 @@ related: [2026-11-19-permission-request-before-settings.md, 2026-11-22-onboardin
 
 # Decision
 
-The owner requires that a new user never presses Add (+) in a privacy pane. On macOS 27.3 beta 2 a new app cannot get keyboard control or Screen Recording any other way, and Apple says known apps are not affected and entitlement details will follow. The owner chose (revision 76) not to rework Drop for a beta. So:
+On macOS 27.3 beta 2 no app can ask for keyboard control or Screen Recording: the requests show no dialog and add no row. The way in is adding the app with + in System Settings, then a restart. The owner went through it himself (revision 77) and asked the onboarding to lead every new user through it. No other app found a way without +; Cap (#4424) rebuilt its steps the same way.
 
-- Where macOS shows its own dialog (every macOS before 27.3, and 27.3 if Apple lifts the limit), the steps behave as before.
-- Where the request is refused without a dialog, the keyboard step and the Screen & system audio step say "This macOS beta doesn't let new apps ask yet. Apple's temporary limit. Whytap asks again after an update." with one Continue button. They never open System & App Protection Override or the screen pane, and never sit on Waiting.
-- Try Drop then says in its field that Drop needs keyboard control which this beta doesn't give new apps yet, and Continue is enabled. Settings → Permissions and Drop's repair window show "Not available yet" with the same line instead of a button that would lead to "+".
+- `PermissionsHelper.usesProtectionOverridePane` (27.3 and later, by version, as Cap does) switches the keyboard and Screen & system audio steps to a guide. Older macOS keeps its request-first steps unchanged.
+- **Keyboard control.** Open System Settings opens System & App Protection Override (where the Accessibility link lands). The step lists: click + and choose Whytap; pick Override System Protections, not Choose Apps; press OK five times, the red Allow, then the password; under Input Monitoring click + and choose Whytap. Links: Input Monitoring and Restart Whytap.
+- **Ready means what Drop uses.** On 27.3 keyboard control counts only with Accessibility, posting (`CGPreflightPostEventAccess`) and listening (`CGPreflightListenEventAccess`). Choose Apps gives Accessibility without posting and Drop silently can't paste (VoiceInk #1089). A process that starts with that state shows the Choose Apps line in amber.
+- **Restart.** The grants this process started with are recorded at launch. A grant that appears later works only in a new process, so on its own step the onboarding shows "Restarting…" and relaunches Whytap (`AppRelauncher`: a shell waits for this PID to end, then opens the bundle; nothing opens if the quit was cancelled). The step is kept across the quit, and the relaunch finds the grant at launch and moves on. Leaving the step first cancels the restart. Settings → Permissions and Drop's repair window offer Restart Whytap for such a grant.
+- **Screen & system audio, one step.** On 27.3: + under Screen & System Audio Recording, choose Whytap, restart. System audio (System Audio Recording Only, used by Meetings and Subtitles) has no status API and macOS asks for it at the first recording. "Ask for system audio" on the same step runs one second of the same process tap with its audio dropped, so macOS asks now. Whether 27.3 still shows that question to a new app is not verified.
+- **Saved keys** are named from Keychain attributes only (`TokenStore.exists`, no secret read, authentication UI not allowed). The key is read only when the person uses it.
 
-## How a refusal is detected
+Rejected: a no-dialog refusal detector with an honest dead end (revision 76: the owner wants a working path; the builder also found the detector misreads a dialog shown before the first sample, a failed window list and a repeated request); Choose Apps (scoped to listed apps, Drop types into any app); hiding Accessibility as Cap does (Drop needs it); restarting without being asked outside the onboarding (Settings shows a button instead).
 
-By what happened, not by the version number alone (`PermissionRequestRefusals`):
-
-1. The request is sent (the AX prompt call, or the ScreenCaptureKit request).
-2. For 2.5 seconds Whytap watches for a new on-screen window of the agents that show permission dialogs (universalAccessAuthWarn, UserNotificationCenter, SecurityAgent) or of System Settings. Only window owners and numbers are read, which needs no Screen Recording.
-3. No new window and still no access means refused. Access during the wait, or any dialog, means not refused.
-
-The check runs only where the old Accessibility pane is gone (27.3 and later). On older macOS a request that shows no second dialog is normal (macOS asks once), and would otherwise be taken for a refusal. A refusal is stored with the macOS build (`sidekey.permissions.refusedRequests.v1`), so a relaunch or a Quit & Reopen shows it at once without asking again, and an OS update asks again. A later grant, however it came, clears it. On 27.3 the keyboard button never opens the Override pane, even after a dialog: it asks macOS again.
-
-Rejected: a pure version check (would stay wrong when Apple lifts the limit within 27.3); reading the TCC database or the unified log (needs privileges an app doesn't have); the CGPreflight results (they only say access is off, not whether macOS asked); opening the pane with instructions for "+" (the owner's hard rule).
-
-Not verified live: the detector against the real dialogs on this build and on an older macOS, and the activation guard below. Unit tests cover the refused, dialog, grant-during-wait, per-build memory and older-macOS cases with injected checks.
+Not verified live: the guide against a fresh install on 27.3, the automatic restart and resume, the Choose Apps diagnosis after a restart, and the system audio question on 27.3.
 
 ## Keyboard control
 

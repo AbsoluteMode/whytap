@@ -13,9 +13,7 @@ struct PermissionRepairView: View {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 0) {
                     MacGroupTitle(title: "Enable Drop")
-                    Text(viewModel.keyboardUnavailable
-                         ? "Drop needs keyboard control, which this macOS beta doesn’t give new apps yet. Whytap asks again after a macOS update; until then this window can be closed."
-                         : "Allow the items below, then press your Drop shortcut again. This window closes when Drop is ready.")
+                    Text("Allow the items below, then press your Drop shortcut again. This window closes when Drop is ready.")
                         .font(.system(size: 12))
                         .foregroundStyle(MacSettingsTheme.text2)
                         .padding(.horizontal, 6)
@@ -26,8 +24,8 @@ struct PermissionRepairView: View {
                     MacCard {
                         MacRow(
                             title: "Keyboard control",
-                            subtitle: viewModel.keyboardUnavailable ? PermissionsSettingsViewModel.unavailableLine
-                                : "Required for Drop and the Agent. Allow Whytap under Accessibility or Device Control and Data Access in System Settings.",
+                            subtitle: viewModel.settingsOnly ? PermissionsSettingsViewModel.keyboardSettingsGuide
+                                : "Required for Drop and the Agent. macOS asks first; after that, turn on Whytap under Accessibility in System Settings.",
                             leading: {
                                 Image(systemName: "keyboard.fill")
                                     .font(.system(size: 14, weight: .medium))
@@ -36,16 +34,20 @@ struct PermissionRepairView: View {
                             },
                             trailing: {
                                 HStack(spacing: 10) {
+                                    let ready = viewModel.keyboardReady && !viewModel.keyboardNeedsRestart
                                     MacPill(
-                                        text: viewModel.snapshot.accessibilityGranted ? "Allowed"
-                                            : viewModel.keyboardUnavailable ? "Not available yet" : "Required",
-                                        tone: viewModel.snapshot.accessibilityGranted ? .green
-                                            : viewModel.keyboardUnavailable ? .neutral : .orange,
+                                        text: ready ? "Allowed" : "Required",
+                                        tone: ready ? .green : .orange,
                                         showsDot: true
                                     )
+                                    // 27.3: a grant made in System Settings works after a restart.
                                     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-                                    if !viewModel.snapshot.accessibilityGranted, !viewModel.keyboardUnavailable {
-                                        MacButton(title: "Open Settings", style: .default, action: viewModel.requestAccessibility)
+                                    if viewModel.keyboardNeedsRestart {
+                                        MacButton(title: "Restart Whytap", style: .default, action: viewModel.restartWhytap)
+                                    } else if !ready {
+                                        // The first press asks macOS; later ones (and every press on 27.3) open System Settings.
+                                        MacButton(title: viewModel.keyboardOpensSettings ? "Open Settings" : "Allow",
+                                                  style: .default, action: viewModel.requestAccessibility)
                                     }
                                 }
                             }

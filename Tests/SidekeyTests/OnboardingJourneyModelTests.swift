@@ -152,8 +152,11 @@ final class OnboardingJourneyModelTests: XCTestCase {
                            realCatalogs: Bool = false, probe: ModelProbing? = nil,
                            heldForTeardown: Bool = true,
                            openScreenSettings: @escaping () -> Void = {},
-                           refusals: PermissionRequestRefusals? = nil,
-                           keyboardRequest: @escaping () -> Void = {},
+                           settingsOnly: Bool = false,
+                           launch: PermissionsHelper.LaunchGrants? = nil,
+                           openKeyboardSettings: @escaping () -> Void = {},
+                           relaunch: @escaping () -> Void = {},
+                           systemAudioProbe: @escaping () async -> Void = {},
                            screenRequest: @escaping () async -> Void = {},
                            resumeDefaults: UserDefaults? = nil,
                            skipLanguage: Bool = true) throws -> OnboardingJourneyModel {
@@ -182,10 +185,10 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
             snapshotProvider: { snapshot.value }, screenRecordingAccessProvider: { screen.value },
-            screenRecordingRequester: {}, accessibilityRequester: keyboardRequest, openAccessibilitySettings: {},
-            usesProtectionOverridePane: { refusals != nil },
+            screenRecordingRequester: {}, accessibilityRequester: {}, openAccessibilitySettings: openKeyboardSettings,
+            usesProtectionOverridePane: { settingsOnly },
             openScreenRecordingSettings: {},
-            refusals: refusals ?? PermissionRequestRefusals(applies: { false }, defaults: nil),
+            launchGrants: launch, relaunch: relaunch,
             runtimeRefresh: { _, _ in })
         let beat = env.beat
         let configuration = URLSessionConfiguration.ephemeral
@@ -204,7 +207,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
             tavily: tavily,
             isPreview: isPreview,
             offersOpenAISpeech: offersOpenAISpeech,
-            resumeDefaults: resumeDefaults)
+            resumeDefaults: resumeDefaults,
+            systemAudioProbe: systemAudioProbe)
         if skipLanguage, model.step == .language { model.skip() }
         if heldForTeardown { addTeardownBlock { model.stop() } }
         return model
@@ -466,60 +470,100 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .deepgram)
     }
 
-    // macOS 27.3 beta refuses a new app's Screen Recording request without
-    // a dialog: the step says so, offers Continue and never opens the pane
-    // (its "+" list). With a dialog, or on older macOS, nothing changes:
-    // the first press is macOS's, Allow again opens the pane.
-    func testAScreenRequestRefusedWithoutADialogSaysSoAndOpensNoPane() async throws {
-        for dialog in [false, true] {
+    // macOS 27.3 (REV 77/78): keyboard control is given in System & App
+    // Protection Override with +. The step opens that pane, counts it as on
+    // only with posting and listening too (Accessibility alone is Choose
+    // Apps), and a grant made after launch restarts Whytap on the same step.
+    func testOnMacOS27_3KeyboardControlOpensTheOverridePaneAndRestartsAfterTheGrant() async throws {
+        let env = try makeEnv(accessibility: false, microphone: .notDetermined)
+        var opened = 0, restarts = 0
+        let none = PermissionsHelper.Snapshot(accessibilityGranted: false, microphoneStatus: .notDetermined,
+                                              postEventGranted: false, listenEventGranted: false)
+        env.snapshot.value = none
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: none, screenRecording: false),
+                                  openKeyboardSettings: { opened += 1 }, relaunch: { restarts += 1 })
+        for _ in 0..<20 where model.step != .keyboard { model.next() }
+        XCTAssertEqual(model.step, .keyboard)
+        XCTAssertEqual(model.keyboardSetup, .addWhytap)
+        model.requestAccess(.keyboard)
+        XCTAssertEqual(opened, 1, "the press opens System & App Protection Override")
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        model.recheckPermissions()
+        XCTAssertEqual(model.accessState(.keyboard), .waiting, "no Not on yet: the grant may show after a restart")
+        // Override on, Input Monitoring still missing.
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined,
+                                   postEventGranted: true, listenEventGranted: false)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.keyboardSetup, .inputMonitoring)
+        XCTAssertEqual(model.accessState(.keyboard), .waiting)
+        // Everything on: restart, and stay on this step for the relaunch.
+        env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        model.permissions.refresh(restartRecoveryPolling: false)
+        XCTAssertEqual(model.accessState(.keyboard), .restarting)
+        try await eventually { env.beat.count > 0 }
+        env.beat.end()
+        try await eventually { restarts == 1 }
+        XCTAssertEqual(model.step, .keyboard, "the step is kept for the reopened app")
+    }
+
+    // After the restart the grant is in the launch grants: the step is done.
+    // Accessibility without posting at launch is Choose Apps: the guide says so.
+    func testOnMacOS27_3TheRelaunchFindsKeyboardControlOnOrNamesChooseApps() throws {
+        let env = try makeEnv(accessibility: true, microphone: .notDetermined)
+        let on = PermissionsHelper.Snapshot(accessibilityGranted: true, microphoneStatus: .notDetermined)
+        env.snapshot.value = on
+        let ready = try makeModel(env, settingsOnly: true, launch: .init(snapshot: on, screenRecording: false))
+        XCTAssertFalse(ready.steps.contains(.keyboard), "keyboard control is on: no step")
+        let chooseApps = PermissionsHelper.Snapshot(accessibilityGranted: true, microphoneStatus: .notDetermined,
+                                                    postEventGranted: false, listenEventGranted: true)
+        env.snapshot.value = chooseApps
+        let model = try makeModel(env, settingsOnly: true, launch: .init(snapshot: chooseApps, screenRecording: false))
+        XCTAssertTrue(model.steps.contains(.keyboard), "Accessibility alone doesn't let Drop paste")
+        XCTAssertEqual(model.keyboardSetup, .chooseAppsOnly)
+    }
+
+    // Screen & system audio on 27.3: the press opens the pane (the request
+    // shows nothing), a grant after launch restarts Whytap; leaving the
+    // step first cancels the restart. "Ask for system audio" asks once.
+    func testOnMacOS27_3TheScreenStepOpensThePaneRestartsAndAsksForSystemAudio() async throws {
+        for leave in [false, true] {
             let env = try makeEnv(accessibility: true, microphone: .authorized)
-            var opened = 0
-            let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in dialog }, defaults: nil)
-            let model = try makeModel(env, openScreenSettings: { opened += 1 }, refusals: refusals)
+            var opened = 0, restarts = 0, asked = 0, requests = 0
+            let model = try makeModel(env, openScreenSettings: { opened += 1 }, settingsOnly: true,
+                                      launch: .init(snapshot: env.snapshot.value, screenRecording: false),
+                                      relaunch: { restarts += 1 }, systemAudioProbe: { asked += 1 },
+                                      screenRequest: { requests += 1 })
             for _ in 0..<20 where model.step != .screenRecording { model.next() }
             XCTAssertEqual(model.step, .screenRecording)
             model.requestAccess(.screenRecording)
-            XCTAssertEqual(model.accessState(.screenRecording), .waiting)
-            try await Task.sleep(for: .milliseconds(250))
-            if dialog {
-                XCTAssertEqual(model.accessState(.screenRecording), .waiting)
-                model.requestAccess(.screenRecording)
-                XCTAssertEqual(opened, 1, "after macOS's own dialog Allow again opens the pane")
-            } else {
-                XCTAssertEqual(model.accessState(.screenRecording), .unavailable)
-                model.requestAccess(.screenRecording)
-                model.recheckPermissions()
-                XCTAssertEqual(model.accessState(.screenRecording), .unavailable, "no Not on yet over the refusal")
-                XCTAssertEqual(opened, 0, "a refused request never opens the pane")
-                model.next()
-                XCTAssertNotEqual(model.step, .screenRecording, "Continue goes on")
-            }
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertEqual(opened, 1)
+            XCTAssertEqual(requests, 0, "no request that shows nothing")
+            model.askSystemAudio()
+            model.askSystemAudio()
+            try await eventually { asked == 1 }
+            XCTAssertTrue(model.systemAudioAsked)
+            env.screen.value = true
+            model.permissions.refresh(restartRecoveryPolling: false)
+            XCTAssertEqual(model.accessState(.screenRecording), .restarting)
+            try await eventually { env.beat.count > 0 }
+            if leave { model.back() }
+            env.beat.end()
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(restarts, leave ? 0 : 1, "leave=\(leave)")
         }
     }
 
-    // The same for keyboard control: the step never hangs on Waiting and
-    // never reaches System & App Protection Override; Try Drop then says
-    // what Drop needs and lets the person continue.
-    func testAKeyboardRequestRefusedWithoutADialogSaysSoAndTryDropNeedsAccess() async throws {
+    // Older macOS: a grant is live, nothing restarts.
+    func testBefore27_3AGrantNeedsNoRestart() throws {
         let env = try makeEnv(accessibility: false, microphone: .notDetermined)
-        var asked = 0
-        let refusals = PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in false }, defaults: nil)
-        let model = try makeModel(env, refusals: refusals, keyboardRequest: { asked += 1 })
+        var restarts = 0
+        let model = try makeModel(env, relaunch: { restarts += 1 })
         for _ in 0..<20 where model.step != .keyboard { model.next() }
-        XCTAssertEqual(model.step, .keyboard)
-        model.requestAccess(.keyboard)
-        XCTAssertEqual(asked, 1)
-        try await eventually { model.accessState(.keyboard) == .unavailable }
-        XCTAssertTrue(model.dropUnavailable)
-        model.requestAccess(.keyboard)
-        XCTAssertEqual(asked, 1, "a refused request is not repeated")
-        model.next()
-        XCTAssertEqual(model.step, .microphone)
-        // A grant later (an update, or the person's own way) moves on as usual.
         env.snapshot.value = .init(accessibilityGranted: true, microphoneStatus: .notDetermined)
         model.permissions.refresh(restartRecoveryPolling: false)
-        XCTAssertFalse(model.dropUnavailable)
-        XCTAssertTrue(refusals.refused.isEmpty)
+        XCTAssertEqual(model.accessState(.keyboard), .granted)
+        XCTAssertEqual(restarts, 0)
     }
 
     func testPendingScreenRequestOpensNoPaneAfterSkipOrClose() async throws {
@@ -529,7 +573,6 @@ final class OnboardingJourneyModelTests: XCTestCase {
             let request = Beat()
             var returned = false
             let model = try makeModel(env, openScreenSettings: { opened += 1 },
-                                      refusals: PermissionRequestRefusals(applies: { true }, promptAppeared: { _ in true }, defaults: nil),
                                       screenRequest: {
                 await request.wait()
                 returned = true
@@ -597,6 +640,45 @@ final class OnboardingJourneyModelTests: XCTestCase {
         XCTAssertEqual(model.speechProvider, .elevenLabs)
         await model.useSavedKey(on: .speech)
         XCTAssertEqual(env.routing.route(for: .dropFast)?.account, .elevenLabs)
+    }
+
+    /// A store that counts secret reads; `exists` answers without one, as the
+    /// Keychain's attribute query does.
+    private final class CountingStore: TokenStore {
+        let inner: InMemoryTokenStore
+        let reads: Box<Int>
+        init(_ inner: InMemoryTokenStore, reads: Box<Int>) { self.inner = inner; self.reads = reads }
+        func save(_ token: String) throws { try inner.save(token) }
+        func read() throws -> String? { reads.value += 1; return try inner.read() }
+        func delete() throws { try inner.delete() }
+        func exists() -> Bool { ((try? inner.read()) ?? nil).map { !$0.isEmpty } ?? false }
+    }
+
+    // Builder review #502 item 3: naming saved keys before a choice reads no
+    // secret (a Keychain read can prompt); only using the chosen one does.
+    func testNamingSavedKeysReadsNoSecretUntilOneIsUsed() async throws {
+        let base = try makeEnv()
+        let reads = Box(0)
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: { CountingStore(InMemoryTokenStore(account: $0, box: box), reads: reads) })
+        let env = Env(defaults: base.defaults, routing: base.routing, keys: keys, modelPresent: base.modelPresent,
+                      snapshot: base.snapshot, screen: base.screen)
+        for provider in [AIProviderKind.soniox, .elevenLabs] {
+            let account = try XCTUnwrap(APIAndModelsViewModel.builtInAccount(for: provider)?.keychainAccount(in: env.routing))
+            try keys.save("key-\(provider)", account: account)
+        }
+        let model = try makeModel(env)
+        reads.value = 0
+        XCTAssertEqual(model.savedKeyProviders(.speech), [.soniox, .elevenLabs])
+        model.pickSavedKey(.elevenLabs, on: .speech)
+        XCTAssertEqual(reads.value, 0, "naming and picking read no secret")
+        await model.useSavedKey(on: .speech)
+        XCTAssertGreaterThan(reads.value, 0, "Return uses the chosen key")
+    }
+
+    // The Keychain's own presence check: an absent item is absent, with no read.
+    func testKeychainPresenceCheckForAMissingItem() {
+        XCTAssertFalse(KeychainStore(service: "whytap.tests.absent", account: UUID().uuidString).exists())
     }
 
     func testLanguageChosenFirstMustWorkWithTheSpeechProvider() async throws {
@@ -1267,8 +1349,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         for kind in OnboardingAccessKind.allCases {
             var states: [(String, OnboardingAccessState)] = [("rest", .rest), ("waiting", .waiting), ("granted", .granted),
                                                                ("not-on", .notOn)]
-            // REV 76: macOS 27.3 beta refused the request without a dialog.
-            if kind == .keyboard || kind == .screenRecording { states.append(("unavailable", .unavailable)) }
+            // REV 78: macOS 27.3, given in System Settings and restarting after it.
+            if kind == .keyboard || kind == .screenRecording { states.append(("restarting", .restarting)) }
             for (name, state) in states {
                 let stage = OnboardingAccessStage(kind: kind, model: model, shownState: state)
                     .frame(width: 520, height: 320)
@@ -1288,6 +1370,25 @@ final class OnboardingJourneyModelTests: XCTestCase {
             }
         }
 
+        // REV 78: the 27.3 keyboard guide at Choose Apps only and at Input Monitoring.
+        for (name, setup) in [("choose-apps", PermissionsSettingsViewModel.KeyboardSetup.chooseAppsOnly),
+                              ("input-monitoring", .inputMonitoring)] {
+            let stage = OnboardingAccessStage(kind: .keyboard, model: model, shownState: .waiting, shownSetup: setup)
+                .frame(width: 520, height: 320)
+                .background(OnboardingTheme.bg)
+                .preferredColorScheme(.dark)
+            let host = NSHostingView(rootView: stage)
+            host.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(80))
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            index += 1
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent(String(format: "%02d-access-keyboard-guide-%@.png", index, name)))
+        }
+
         // The last five steps (REV 58), the springs landed.
         OnboardingFinaleMotion.settlesAtOnce = true
         defer { OnboardingFinaleMotion.settlesAtOnce = false }
@@ -1301,8 +1402,6 @@ final class OnboardingJourneyModelTests: XCTestCase {
                                                         shownText: "Moving our sync to Thursday at 3. I’ll send the new invite tonight."))),
             ("try-failed", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
                                                           shownState: .failed(OnboardingJourneyModel.noSpeech)))),
-            ("try-needs-access", AnyView(OnboardingTryDropStage(model: model, shortcut: drop, gesture: gesture,
-                                                                shownState: .needsAccess))),
             ("toolbox-idle", AnyView(OnboardingToolboxStage(model: model))),
             ("toolbox-open", AnyView(OnboardingToolboxStage(model: model, shownTool: HoverTool.caseVault))),
             ("finish", AnyView(OnboardingFinishStage(model: model, still: true))),

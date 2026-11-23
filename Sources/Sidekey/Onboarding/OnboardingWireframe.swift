@@ -1642,7 +1642,8 @@ struct OnboardingKeyStage: View {
                 .buttonStyle(.plain)
                 .foregroundColor(isCurrent || hovered ? OnboardingTheme.ink : OnboardingTheme.muted)
                 .fontWeight(isCurrent ? .semibold : .regular)
-                .underline(hovered && !isCurrent)
+                // The chosen name reacts to the pointer too: it stays a button (Return uses it).
+                .underline(hovered)
                 .contentShape(Rectangle())
                 .onHover { inside in
                     if inside { hoveredSaved = provider.kind } else if hoveredSaved == provider.kind { hoveredSaved = nil }

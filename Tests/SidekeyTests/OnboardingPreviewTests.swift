@@ -835,13 +835,14 @@ final class OnboardingPreviewTests: XCTestCase {
         PermissionsHelper.usesProtectionOverridePane = false
         XCTAssertEqual(OnboardingAccessKind.keyboard.pane, "Accessibility")
         XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine, "Whytap isn’t on in Accessibility yet.")
-        XCTAssertFalse(OnboardingAccessKind.keyboard.asksWithoutPane)
+        XCTAssertFalse(OnboardingAccessKind.keyboard.addsByHand)
         // macOS 27.3: the Accessibility link lands on System & App Protection
         // Override, which lists no Whytap until the person adds it with +, so
         // the step never names or opens it.
         PermissionsHelper.usesProtectionOverridePane = true
-        XCTAssertTrue(OnboardingAccessKind.keyboard.asksWithoutPane)
-        XCTAssertFalse(OnboardingAccessKind.screenRecording.asksWithoutPane)
+        XCTAssertTrue(OnboardingAccessKind.keyboard.addsByHand)
+        XCTAssertTrue(OnboardingAccessKind.screenRecording.addsByHand)
+        XCTAssertFalse(OnboardingAccessKind.microphone.addsByHand)
         XCTAssertEqual(OnboardingAccessKind.keyboard.notOnLine, "Keyboard control isn’t on yet.")
         // The other panes keep their names and their switches.
         XCTAssertEqual(OnboardingAccessKind.microphone.pane, "Microphone")

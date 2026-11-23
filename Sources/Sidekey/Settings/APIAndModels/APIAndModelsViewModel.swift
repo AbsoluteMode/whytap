@@ -660,6 +660,14 @@ final class APIAndModelsViewModel: ObservableObject {
         access(account) != nil
     }
 
+    /// Whether the account has a saved key, without reading the secret or
+    /// allowing a Keychain prompt: for naming saved keys before a choice.
+    func hasSavedKey(_ account: ProviderAccount) -> Bool {
+        if account == .thisMac { return onDevice.isReady() }
+        guard let keychainAccount = account.keychainAccount(in: routing) else { return false }
+        return keys.hasKey(account: keychainAccount)
+    }
+
     /// A verified model is assigned at once; a new one only after its probe
     /// passes. Otherwise the previous route stays and the row says why. A model
     /// whose earlier probe failed is probed again: picking it is the user

@@ -8,6 +8,20 @@ enum PermissionsHelper {
     struct Snapshot: Equatable {
         let accessibilityGranted: Bool
         let microphoneStatus: AVAuthorizationStatus
+        /// Posting events (Drop's paste) and listening to them (its shortcut):
+        /// on macOS 27.3 these come apart from Accessibility. "Choose Apps"
+        /// gives Accessibility without posting; Input Monitoring gives listening.
+        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+        let postEventGranted: Bool
+        let listenEventGranted: Bool
+
+        init(accessibilityGranted: Bool, microphoneStatus: AVAuthorizationStatus,
+             postEventGranted: Bool = true, listenEventGranted: Bool = true) {
+            self.accessibilityGranted = accessibilityGranted
+            self.microphoneStatus = microphoneStatus
+            self.postEventGranted = postEventGranted
+            self.listenEventGranted = listenEventGranted
+        }
 
         var microphoneGranted: Bool {
             microphoneStatus == .authorized
@@ -21,8 +35,34 @@ enum PermissionsHelper {
     static func snapshot() -> Snapshot {
         Snapshot(
             accessibilityGranted: accessibilityGranted(prompt: false),
-            microphoneStatus: microphoneStatus()
+            microphoneStatus: microphoneStatus(),
+            postEventGranted: CGPreflightPostEventAccess(),
+            listenEventGranted: CGPreflightListenEventAccess()
         )
+    }
+
+    /// Keyboard control as Drop needs it. Where grants are made in System
+    /// Settings only (27.3), Accessibility alone is not enough: posting
+    /// needs Override System Protections and listening Input Monitoring.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static func keyboardReady(_ snapshot: Snapshot, settingsOnly: Bool) -> Bool {
+        guard settingsOnly else { return snapshot.accessibilityGranted }
+        return snapshot.accessibilityGranted && snapshot.postEventGranted && snapshot.listenEventGranted
+    }
+
+    /// The grants this process started with. A grant made later in System
+    /// Settings only takes effect in a new process on 27.3, so it needs a
+    /// restart. Recorded once, at launch.
+    struct LaunchGrants: Equatable {
+        let snapshot: Snapshot
+        let screenRecording: Bool
+    }
+
+    private(set) static var launchGrants: LaunchGrants?
+
+    static func recordLaunchGrants() {
+        guard launchGrants == nil else { return }
+        launchGrants = LaunchGrants(snapshot: snapshot(), screenRecording: screenRecordingGranted())
     }
 
     static func allRequiredPermissionsGranted() -> Bool {
@@ -50,7 +90,12 @@ enum PermissionsHelper {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// The Accessibility settings link on 27.3 opens the protection override pane.
+    /// macOS 27.3 and later: keyboard control and Screen Recording are given
+    /// in System Settings only. Requests show no dialog and add no row; the
+    /// person adds Whytap with + (keyboard control under System & App
+    /// Protection Override, where the Accessibility link lands), and the
+    /// grant takes effect after a restart. Checked by version, as Cap does:
+    /// a refused request and an older macOS that asks only once look alike.
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     static var usesProtectionOverridePane = ProcessInfo.processInfo.isOperatingSystemAtLeast(
         OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))

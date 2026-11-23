@@ -55,14 +55,10 @@ enum OnboardingTryState: Equatable {
     case recording
     case done
     case failed(String)
-    /// Drop can't run here yet: this macOS beta refused keyboard control
-    /// without a dialog. The field says so and Continue goes on.
-    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-    case needsAccess
 
     var tone: OnboardingWireTone {
         switch self {
-        case .waiting, .needsAccess: return .rest
+        case .waiting: return .rest
         case .recording: return .active
         case .done: return .done
         case .failed: return .warn
@@ -100,7 +96,6 @@ struct OnboardingTryDropStage: View {
         if let shownState { return shownState }
         switch model.outcome(.tryDrop) {
         case .done: return .done
-        case _ where model.dropUnavailable: return .needsAccess
         case .failed(let reason): return voice.recording ? .recording : .failed(reason)
         default: return voice.recording ? .recording : .waiting
         }
@@ -121,12 +116,11 @@ struct OnboardingTryDropStage: View {
             // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
             HStack(spacing: 14) {
                 let done = state == .done
-                let open = done || state == .needsAccess
                 OnboardingWirePill("Continue", tone: done ? .done : .rest, disc: done ? .check : .arrow,
-                                   isDefault: open, interactive: open, action: model.next)
-                    .opacity(open ? 1 : 0.4)
-                    .accessibilityHint(open ? "" : "Available after your first take")
-                if !open {
+                                   isDefault: done, interactive: done, action: model.next)
+                    .opacity(done ? 1 : 0.4)
+                    .accessibilityHint(done ? "" : "Available after your first take")
+                if !done {
                     OnboardingWireLink(title: "Skip", arrow: "arrow.right", action: model.next)
                 }
             }
@@ -169,7 +163,7 @@ struct OnboardingTryDropStage: View {
                     in: &context, center: CGPoint(x: size.width / 2, y: 57 + bob), radius: 26,
                     angles: (ax: -0.50 + sway.x, ay: -0.52 + sway.y, az: 0.03), worldZ: motion.stage.value,
                     press: max(-0.12, min(1.25, motion.press.value)), fade: motion.fade, tint: state.tone.tint,
-                    strength: state == .waiting || state == .needsAccess ? 0.62 : state == .recording ? 0.94 : 0.9, clock: motion.clock)
+                    strength: state == .waiting ? 0.62 : state == .recording ? 0.94 : 0.9, clock: motion.clock)
             }
         }
         .allowsHitTesting(false)
@@ -179,7 +173,6 @@ struct OnboardingTryDropStage: View {
     private var status: (String, Color) {
         switch state {
         case .waiting, .failed: return ("", OnboardingTheme.faint)
-        case .needsAccess: return ("NEEDS ACCESS", OnboardingWireframeInk.amberColor)
         case .recording: return ("LISTENING", OnboardingTheme.muted)
         case .done:
             return (model.tryDropSeconds.map { String(format: "%.1f S", $0) } ?? "", OnboardingWireframeInk.greenColor)
@@ -218,15 +211,12 @@ struct OnboardingTryDropStage: View {
 
     /// The field's empty text: where the words go, not which key to hold.
     static let placeholder = "Your text will appear here"
-    /// Try Drop on a Mac whose macOS beta refused keyboard control.
-    static let needsAccessText = "Drop needs keyboard control. This macOS beta doesn’t give it to new apps yet."
 
     /// What the empty field says: the placeholder, or a take that brought
     /// nothing here ("No speech heard - try again."), inside the field
     /// instead of a line under it.
     static func emptyText(_ state: OnboardingTryState) -> (text: String, failed: Bool) {
         if case .failed(let reason) = state { return (reason, true) }
-        if state == .needsAccess { return (needsAccessText, true) }
         return (placeholder, false)
     }
 }

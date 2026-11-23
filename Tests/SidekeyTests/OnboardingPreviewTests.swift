@@ -29,6 +29,16 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertTrue(condition(), "Condition never became true", file: file, line: line)
     }
 
+    // Builder review #503: the preview's system audio ask is simulated like
+    // every permission there; no Core Audio tap starts.
+    func testThePreviewAsksForSystemAudioWithoutHardware() async throws {
+        let session = makeSession()
+        defer { session.clear() }
+        XCTAssertFalse(session.askedSystemAudio)
+        session.model.askSystemAudio()
+        try await eventually { session.askedSystemAudio }
+    }
+
     func testThePreviewWalksEveryStepWithoutTheSystem() async throws {
         let suite = "OnboardingPreviewTests-\(UUID().uuidString)"
         let session = makeSession(suiteName: suite, skipLanguage: false)

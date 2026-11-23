@@ -83,6 +83,9 @@ final class OnboardingPreviewSession {
     static let suiteName = "ai.whytap.onboarding-preview"
 
     let model: OnboardingJourneyModel
+    private let simulated: System
+    /// The preview's "Ask for system audio" went to its simulation, not Core Audio.
+    var askedSystemAudio: Bool { simulated.askedSystemAudio }
     private let defaults: UserDefaults
     private let suiteName: String
     private let directory: URL
@@ -108,6 +111,9 @@ final class OnboardingPreviewSession {
 
         /// The first ask of an access step comes back with the switch still
         /// off, so the calm Not on yet line shows; the next ask grants.
+        /// "Ask for system audio" was pressed; the preview asks no hardware.
+        var askedSystemAudio = false
+
         @MainActor func ask(_ step: String, _ change: @escaping (System) -> Void) {
             guard asked.insert(step).inserted else { return grant(change) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
@@ -155,6 +161,7 @@ final class OnboardingPreviewSession {
             inputLanguage: { nil }, onDevice: readiness)
 
         let system = System()
+        simulated = system
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
             snapshotProvider: { system.snapshot }, screenRecordingAccessProvider: { system.screen },
@@ -198,7 +205,9 @@ final class OnboardingPreviewSession {
             dropStandIn: OnboardingPreviewDrop(),
             isPreview: true,
             // OpenAI speech is shown here already; the app waits for its model.
-            offersOpenAISpeech: true)
+            offersOpenAISpeech: true,
+            // Simulated like every other permission here: no Core Audio tap.
+            systemAudioProbe: { await MainActor.run { system.askedSystemAudio = true } })
         let model = self.model
         system.returned = { [weak model] in model?.recheckPermissions() }
     }

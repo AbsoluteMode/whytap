@@ -24,7 +24,8 @@ struct PermissionRepairView: View {
                     MacCard {
                         MacRow(
                             title: "Keyboard control",
-                            subtitle: viewModel.settingsOnly ? PermissionsSettingsViewModel.keyboardSettingsGuide
+                            subtitle: viewModel.keyboardNeedsRestart && viewModel.restartBlocked != nil ? viewModel.restartBlocked!
+                                : viewModel.settingsOnly ? PermissionsSettingsViewModel.keyboardSettingsGuide
                                 : "Required for Drop and the Agent. macOS asks first; after that, turn on Whytap under Accessibility in System Settings.",
                             leading: {
                                 Image(systemName: "keyboard.fill")
@@ -43,7 +44,7 @@ struct PermissionRepairView: View {
                                     // 27.3: a grant made in System Settings works after a restart.
                                     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
                                     if viewModel.keyboardNeedsRestart {
-                                        MacButton(title: "Restart Whytap", style: .default, action: viewModel.restartWhytap)
+                                        MacButton(title: "Restart Whytap", style: .default) { viewModel.restartWhytap() }
                                     } else if !ready {
                                         // The first press asks macOS; later ones (and every press on 27.3) open System Settings.
                                         MacButton(title: viewModel.keyboardOpensSettings ? "Open Settings" : "Allow",

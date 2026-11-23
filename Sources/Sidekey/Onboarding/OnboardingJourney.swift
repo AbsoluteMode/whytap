@@ -118,6 +118,9 @@ struct OnboardingStart: Equatable {
     var keyboardGranted = false
     var microphoneGranted = false
     var screenRecordingGranted = false
+    /// macOS 15+: system audio wasn't asked for yet (Meetings, Subtitles).
+    /// Screen & system audio is one step, so it stays even with the screen on.
+    var systemAudioPending = false
     /// This Mac can run speech locally (Apple Silicon).
     var onDeviceSupported = true
 
@@ -173,7 +176,7 @@ enum OnboardingJourney {
         case .inputMonitoring:
             return progress.needsInputMonitoring
         case .screenRecording:
-            return !start.screenRecordingGranted
+            return !start.screenRecordingGranted || start.systemAudioPending
         case .tryDrop:
             return start.speechReady || progress.speechExpected
         case .toolbox, .thanks:

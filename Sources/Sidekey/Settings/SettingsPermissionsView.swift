@@ -13,7 +13,8 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "keyboard.fill",
                             title: "Keyboard control",
-                            subtitle: viewModel.settingsOnly && !viewModel.keyboardReady
+                            subtitle: viewModel.keyboardNeedsRestart ? viewModel.restartBlocked
+                                : viewModel.settingsOnly && !viewModel.keyboardReady
                                 ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil,
                             granted: viewModel.keyboardReady && !viewModel.keyboardNeedsRestart,
                             requested: viewModel.keyboardOpensSettings,
@@ -31,7 +32,8 @@ struct SettingsPermissionsView: View {
                         permissionRow(
                             icon: "rectangle.dashed.badge.record",
                             title: "Screen Recording",
-                            subtitle: viewModel.settingsOnly && !viewModel.screenRecordingGranted
+                            subtitle: viewModel.screenNeedsRestart && viewModel.restartBlocked != nil ? viewModel.restartBlocked
+                                : viewModel.settingsOnly && !viewModel.screenRecordingGranted
                                 ? PermissionsSettingsViewModel.screenSettingsGuide
                                 : "For screenshots. If macOS asks to reopen Whytap, finish your current work first.",
                             granted: viewModel.screenRecordingGranted && !viewModel.screenNeedsRestart,
@@ -85,7 +87,7 @@ struct SettingsPermissionsView: View {
                     } else if needsRestart {
                         // 27.3: the grant made in System Settings works after a restart.
                         // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-                        MacButton(title: "Restart Whytap", style: .default, action: viewModel.restartWhytap)
+                        MacButton(title: "Restart Whytap", style: .default) { viewModel.restartWhytap() }
                             .fixedSize()
                             .accessibilityLabel("Restart Whytap to turn on \(title)")
                     } else if isRequesting {

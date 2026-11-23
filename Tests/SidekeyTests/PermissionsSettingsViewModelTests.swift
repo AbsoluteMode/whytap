@@ -134,7 +134,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         XCTAssertTrue(model.keyboardOpensSettings)
         model.requestAccessibility()
         model.requestAccessibility()
-        XCTAssertEqual(events, ["request", "settings", "request", "settings"])
+        XCTAssertEqual(events, ["settings", "settings"], "the pane only: no system request rides along")
         // Choose Apps gives Accessibility without posting: still not ready.
         snapshot = .init(accessibilityGranted: true, microphoneStatus: .authorized,
                          postEventGranted: false, listenEventGranted: true)
@@ -170,7 +170,7 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         let launch = PermissionsHelper.LaunchGrants(snapshot: snapshot, screenRecording: false)
         let model = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
             snapshotProvider: { snapshot }, screenRecordingAccessProvider: { screen },
-            usesProtectionOverridePane: { true }, launchGrants: launch, relaunch: { restarts += 1 },
+            usesProtectionOverridePane: { true }, launchGrants: launch, relaunch: { restarts += 1; return nil },
             runtimeRefresh: { _, _ in })
         XCTAssertFalse(model.keyboardNeedsRestart)
         snapshot = .init(accessibilityGranted: true, microphoneStatus: .authorized)
@@ -178,8 +178,9 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         model.refresh()
         XCTAssertTrue(model.keyboardNeedsRestart)
         XCTAssertTrue(model.screenNeedsRestart)
-        model.restartWhytap()
+        XCTAssertTrue(model.restartWhytap())
         XCTAssertEqual(restarts, 1)
+        XCTAssertNil(model.restartBlocked)
         let atLaunch = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false,
             snapshotProvider: { snapshot }, screenRecordingAccessProvider: { screen },
             usesProtectionOverridePane: { true },
@@ -206,6 +207,16 @@ final class PermissionsSettingsViewModelTests: XCTestCase {
         await model.requestScreenRecording()
         await model.requestScreenRecording()
         XCTAssertEqual(events, ["settings", "settings"])
+    }
+
+    // The update restart's activity rules block the onboarding restart too.
+    func testARestartWaitsForAMeetingRecording() {
+        let state = AppState()
+        XCTAssertNil(UpdateController.restartDeferralReason(state))
+        state.updateMeetingRecordingState(audioLevel: 0, duration: 1, paused: false)
+        XCTAssertEqual(UpdateController.restartDeferralReason(state), "Ready. Finish the meeting recording, then choose Restart.")
+        XCTAssertEqual(AppRelauncher.relaunch(appState: state), "Ready. Finish the meeting recording, then choose Restart.")
+        XCTAssertFalse(AppRelauncher.restartAccepted, "nothing quits and no reopen helper is armed")
     }
 
     // The relaunch passes the PID and the bundle path as arguments, never in

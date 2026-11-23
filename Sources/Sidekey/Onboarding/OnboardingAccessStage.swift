@@ -106,7 +106,7 @@ enum OnboardingAccessKind: CaseIterable {
             return [
                 "Click + and choose Whytap.",
                 setup == .chooseAppsOnly
-                    ? "Whytap has Choose Apps: pick Override System Protections."
+                    ? "Typing isn’t on yet: pick Override System Protections."
                     : "Pick Override System Protections, not Choose Apps.",
                 "Press OK five times, the red Allow, then your password.",
                 "Under Input Monitoring, click + and choose Whytap.",
@@ -130,9 +130,10 @@ enum OnboardingAccessKind: CaseIterable {
         }
     }
 
-    /// One short purpose line above the guide.
+    /// One short purpose line above the guide. Keyboard control names its
+    /// scope before System Settings opens: the grant covers every app.
     var guidePurpose: String {
-        self == .keyboard ? "Drop needs it to hear its shortcut and type for you."
+        self == .keyboard ? "Drop types in any app, so this covers your whole Mac."
             : "Shot uses the screen; Meetings and Subtitles, system audio."
     }
 
@@ -644,6 +645,8 @@ struct OnboardingAccessStage: View {
     private var state: OnboardingAccessState { shownState ?? model.accessState(kind.step) }
     private var setup: PermissionsSettingsViewModel.KeyboardSetup { shownSetup ?? model.keyboardSetup }
     private var guided: Bool { kind.addsByHand && state != .granted }
+    /// Screen & system audio, screen on: the step waits for the audio ask or Continue.
+    private var audioHeld: Bool { kind == .screenRecording && state == .granted && model.systemAudioPending }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -659,17 +662,24 @@ struct OnboardingAccessStage: View {
                 .frame(height: guided ? 70 : 138)
             if guided {
                 guide.padding(.horizontal, 36)
+            } else if audioHeld {
+                VStack(spacing: 10) {
+                    line(kind.grantedLine, color: OnboardingWireframeInk.greenColor)
+                    systemAudioRow
+                }
+                .frame(height: 64, alignment: .top)
+                .padding(.horizontal, 36)
             } else {
                 copy
                     .frame(height: 46, alignment: .top)
                     .padding(.horizontal, 36)
             }
-            OnboardingAccessPill(kind: kind, state: state, guided: guided) {
+            OnboardingAccessPill(kind: kind, state: state, guided: guided, continues: audioHeld) {
                 switch state {
                 case .rest, .notOn: model.requestAccess(kind.step)
                 case .waiting: model.recheckPermissions()
                 case .restarting: model.restartWhytap()
-                case .granted: break
+                case .granted: if audioHeld { model.next() }
                 }
             }
             .padding(.top, 4)
@@ -689,7 +699,7 @@ struct OnboardingAccessStage: View {
     // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
     @ViewBuilder private var guide: some View {
         if state == .restarting {
-            line("On. Whytap restarts to use it and comes back here.", color: OnboardingWireframeInk.greenColor)
+            line(restartLine, color: model.restartNote == nil ? OnboardingWireframeInk.greenColor : OnboardingWireframeInk.amberColor)
                 .frame(height: 104, alignment: .center)
         } else {
             let lines = kind.guide(setup)
@@ -716,8 +726,31 @@ struct OnboardingAccessStage: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
+                if kind == .screenRecording, model.systemAudioPending || model.systemAudioAsked { systemAudioRow }
             }
             .frame(height: 104, alignment: .top)
+        }
+    }
+
+    /// After the grant: restarting by itself, waiting for an activity, or
+    /// (a grant found here, not made from this step) the button.
+    private var restartLine: String {
+        if let note = model.restartNote { return note }
+        return model.restartPending ? "On. Whytap restarts to use it and comes back here."
+            : "On. Restart Whytap to use it; you’ll come back here."
+    }
+
+    /// Screen & system audio: macOS asks for system audio at the first
+    /// recording; this asks now, from the same step. Optional: Continue or
+    /// Skip leave without it.
+    @ViewBuilder private var systemAudioRow: some View {
+        if model.systemAudioAsked {
+            Text("System audio asked. macOS shows its question once.")
+                .font(OnboardingTheme.sans(12.5))
+                .foregroundColor(OnboardingTheme.faint)
+        } else {
+            OnboardingWireLink(title: "Ask for system audio (Meetings, Subtitles)", arrow: "speaker.wave.2",
+                               action: model.askSystemAudio)
         }
     }
 
@@ -747,7 +780,7 @@ struct OnboardingAccessStage: View {
         case .notOn:
             line(kind.notOnLine, color: OnboardingWireframeInk.amberColor)
         case .restarting:
-            line("On. Whytap restarts to use it and comes back here.", color: OnboardingWireframeInk.greenColor)
+            line(restartLine, color: OnboardingWireframeInk.greenColor)
         }
     }
 
@@ -769,24 +802,19 @@ struct OnboardingAccessStage: View {
                 }
             }
             if guided, state == .waiting {
+                // Back without the grant: the pane opens again from here.
+                OnboardingWireLink(title: "System Settings", arrow: "arrow.up.right") {
+                    motion.nudge()
+                    model.openSystemSettings(for: kind.step)
+                }
                 if kind == .keyboard {
                     OnboardingWireLink(title: "Input Monitoring", arrow: "arrow.up.right", action: model.openInputMonitoring)
                 }
                 // A grant only a new process sees: the person can restart now.
                 OnboardingWireLink(title: "Restart Whytap", arrow: "arrow.clockwise", action: model.restartWhytap)
             }
-            // Screen & system audio: macOS asks for system audio at the first
-            // recording; this asks now, from the same step.
-            if kind == .screenRecording, PermissionsHelper.screenPaneNamesSystemAudio, state != .restarting {
-                if model.systemAudioAsked {
-                    Text("System audio asked")
-                        .font(OnboardingTheme.sans(12.5))
-                        .foregroundColor(OnboardingTheme.faint)
-                } else {
-                    OnboardingWireLink(title: "Ask for system audio", arrow: "speaker.wave.2", action: model.askSystemAudio)
-                }
-            }
-            if kind.isOptional, state != .granted, state != .restarting {
+            // Held for the audio ask, Continue is the way on (without asking).
+            if kind.isOptional, state != .restarting, state != .granted {
                 OnboardingWireLink(title: "Skip for now", arrow: "arrow.right", action: model.next)
             }
         }
@@ -800,6 +828,8 @@ struct OnboardingAccessPill: View {
     let state: OnboardingAccessState
     /// 27.3: the step's action is opening System Settings.
     var guided = false
+    /// Granted, but the step waits for its optional system audio ask.
+    var continues = false
     let action: () -> Void
 
     var body: some View {
@@ -811,13 +841,15 @@ struct OnboardingAccessPill: View {
             OnboardingWirePill("Allow", isDefault: true, action: action).accessibilityLabel("Allow \(kind.pane)")
         case .waiting:
             OnboardingWirePill("Waiting…", tone: .active, disc: .none, action: action)
+        case .granted where continues:
+            OnboardingWirePill("Continue", isDefault: true, action: action)
         case .granted:
             OnboardingWirePill("Allowed", tone: .done, disc: .check, action: {})
         case .notOn:
             OnboardingWirePill("Allow again", tone: .warn, isDefault: true, action: action)
         case .restarting:
-            OnboardingWirePill("Restarting…", tone: .done, disc: .none, action: action)
-                .accessibilityHint("Whytap restarts to turn this on")
+            OnboardingWirePill("Restart Whytap", tone: .done, isDefault: true, action: action)
+                .accessibilityHint("Quits and reopens Whytap to turn this on; you come back to this step")
         }
     }
 }

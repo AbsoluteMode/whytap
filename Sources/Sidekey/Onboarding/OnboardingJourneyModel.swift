@@ -246,8 +246,19 @@ final class OnboardingJourneyModel: ObservableObject {
     /// The pending restart after a 27.3 grant; leaving the step cancels it.
     private var restartTask: Task<Void, Never>?
     private let systemAudioProbe: () async -> Void
-    /// The step's "Ask for system audio" was pressed in this window.
+    /// "Ask for system audio" was pressed (kept across a restart).
     @Published private(set) var systemAudioAsked = false
+    /// This Mac's Screen & system audio step also asks for system audio.
+    private let asksSystemAudio: Bool
+    static let systemAudioAskedKey = "sidekey.onboarding.systemAudioAsked.v1"
+    /// The automatic restart after a 27.3 grant is counting down.
+    @Published private(set) var restartPending = false
+    /// Why a restart waits (a meeting recording, dictation…), from the
+    /// update restart's own rules.
+    @Published private(set) var restartNote: String?
+
+    /// System audio is still to be asked for on the Screen & system audio step.
+    var systemAudioPending: Bool { asksSystemAudio && !systemAudioAsked }
     /// The pause after a success, which the person can hold (Dwell Latch).
     let dwell: OnboardingDwellController
     /// Step 1's own beat: the chosen figure's click motion plays, then the
@@ -316,9 +327,12 @@ final class OnboardingJourneyModel: ObservableObject {
         isPreview: Bool = false,
         offersOpenAISpeech: Bool? = nil,
         resumeDefaults: UserDefaults? = nil,
-        systemAudioProbe: (() async -> Void)? = nil
+        systemAudioProbe: (() async -> Void)? = nil,
+        asksSystemAudio: Bool = PermissionsHelper.screenPaneNamesSystemAudio
     ) {
         self.systemAudioProbe = systemAudioProbe ?? { await SystemAudioPermissionProbe.ask() }
+        self.asksSystemAudio = asksSystemAudio
+        _systemAudioAsked = Published(initialValue: resumeDefaults?.bool(forKey: Self.systemAudioAskedKey) ?? false)
         self.resumeDefaults = resumeDefaults
         let openAI = offersOpenAISpeech ?? Self.offersOpenAISpeech
         speechProviders = OnboardingDropSpeech.keyProviders + (openAI ? [.openAI] : [])
@@ -358,6 +372,7 @@ final class OnboardingJourneyModel: ObservableObject {
         start.keyboardGranted = PermissionsHelper.keyboardReady(snapshot, settingsOnly: permissions.settingsOnly)
         start.microphoneGranted = snapshot.microphoneGranted
         start.screenRecordingGranted = permissions.screenRecordingGranted
+        start.systemAudioPending = asksSystemAudio && !(resumeDefaults?.bool(forKey: Self.systemAudioAskedKey) ?? false)
         start.onDeviceSupported = supportsOnDevice
         self.start = start
         var progress = OnboardingProgress()
@@ -483,6 +498,7 @@ final class OnboardingJourneyModel: ObservableObject {
         stopPolling()
         restartTask?.cancel()
         restartTask = nil
+        restartPending = false
         dwell.cancel()
         sourceMove?.cancel()
         tryCheck?.cancel()
@@ -492,6 +508,7 @@ final class OnboardingJourneyModel: ObservableObject {
         dwell.cancel()
         restartTask?.cancel()
         restartTask = nil
+        restartPending = false
         sourceMove?.cancel()
         self.direction = direction
         if direction == .forward { leftSteps.insert(step) }
@@ -519,7 +536,7 @@ final class OnboardingJourneyModel: ObservableObject {
             startPolling()
             if direction == .forward, case .done(let text) = latest(step) {
                 // macOS can grant this access while the preceding step is still visible.
-                succeed(step, text)
+                succeed(step, text, holds: step == .screenRecording && systemAudioPending)
             }
         default:
             stopPolling()
@@ -1202,7 +1219,11 @@ final class OnboardingJourneyModel: ObservableObject {
 
     /// The step's "Restart Whytap" (27.3): for a grant that is on but whose
     /// check only a new process sees.
-    func restartWhytap() { permissions.restartWhytap() }
+    func restartWhytap() {
+        restartTask?.cancel()
+        restartTask = nil
+        restartNote = permissions.restartWhytap() ? nil : permissions.restartBlocked
+    }
 
     func openInputMonitoring() {
         if let requests { return requests.openSettings(.inputMonitoring) }
@@ -1216,6 +1237,7 @@ final class OnboardingJourneyModel: ObservableObject {
     func askSystemAudio() {
         guard !systemAudioAsked else { return }
         systemAudioAsked = true
+        resumeDefaults?.set(true, forKey: Self.systemAudioAskedKey)
         let probe = systemAudioProbe
         Task { await probe() }
     }
@@ -1224,9 +1246,9 @@ final class OnboardingJourneyModel: ObservableObject {
     func openSystemSettings(for step: OnboardingStep) {
         if let requests { return requests.openSettings(step) }
         switch step {
-        case .keyboard: PermissionsHelper.openAccessibilitySettings()
+        case .keyboard: permissions.openKeyboardSettings()
         case .microphone: PermissionsHelper.openMicrophoneSettings()
-        case .inputMonitoring: PermissionsHelper.openInputMonitoringSettings()
+        case .inputMonitoring: permissions.openInputMonitoring()
         case .screenRecording: openScreenRecordingSettings()
         default: break
         }
@@ -1285,7 +1307,9 @@ final class OnboardingJourneyModel: ObservableObject {
         // 27.3: a grant made in System Settings works in a new process. On its
         // own step Whytap restarts and comes back here (the step is kept).
         // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
-        if (step == .keyboard && keyboardRestart) || (step == .screenRecording && screenRestart) {
+        // Only after this step's own Open System Settings in this window:
+        // a grant that is merely found here waits for the Restart button.
+        if requested.contains(step), (step == .keyboard && keyboardRestart) || (step == .screenRecording && screenRestart) {
             scheduleRestart()
         }
         let now: [(OnboardingStep, Bool, Bool, String)] = [
@@ -1298,7 +1322,8 @@ final class OnboardingJourneyModel: ObservableObject {
         for (permission, isGranted, isRevoked, text) in now {
             if isGranted, !granted.contains(permission) {
                 granted.insert(permission)
-                succeed(permission, text)
+                // Screen & system audio holds while system audio is still to ask.
+                succeed(permission, text, holds: permission == .screenRecording && systemAudioPending)
             } else if isRevoked, granted.contains(permission) {
                 revoked(permission)
             }
@@ -1322,12 +1347,16 @@ final class OnboardingJourneyModel: ObservableObject {
     private func scheduleRestart() {
         guard restartTask == nil, !isPreview else { return }
         let shown = step
+        restartPending = true
         restartTask = Task { @MainActor [weak self] in
             await self?.pause(Self.restartBeat)
-            guard let self, !Task.isCancelled, self.step == shown, self.needsRestart(shown) else {
-                self?.restartTask = nil
+            guard let self else { return }
+            self.restartPending = false
+            guard !Task.isCancelled, self.step == shown, self.needsRestart(shown) else {
+                self.restartTask = nil
                 return
             }
+            // The activity rules are checked now, at the moment of the quit.
             self.restartWhytap()
         }
     }

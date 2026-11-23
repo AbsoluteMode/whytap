@@ -29,7 +29,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
     private let openInputMonitoringPane: () -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
-    private let relaunchApp: @MainActor () -> Void
+    private let relaunchApp: @MainActor () -> String?
     /// When `false`, `completeIfReady` is a no-op even when every
     /// required permission is granted. Used by the Settings path so
     /// the view stays on screen showing the All Set state instead of
@@ -48,7 +48,7 @@ final class PermissionsSettingsViewModel: ObservableObject {
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         launchGrants: PermissionsHelper.LaunchGrants? = nil,
         openInputMonitoringSettings: @escaping () -> Void = PermissionsHelper.openInputMonitoringSettings,
-        relaunch: @escaping @MainActor () -> Void = { AppRelauncher.relaunch() },
+        relaunch: @escaping @MainActor () -> String? = { AppRelauncher.relaunch() },
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
                 userInfo: ["retry": retry, "resumePolling": resumePolling])
@@ -113,8 +113,8 @@ final class PermissionsSettingsViewModel: ObservableObject {
     enum KeyboardSetup: Equatable {
         /// Nothing usable yet: add Whytap with + under Override.
         case addWhytap
-        /// Started with Accessibility but no posting: "Choose Apps" was
-        /// picked instead of Override System Protections (VoiceInk #1089).
+        /// Started with Accessibility but no posting. That is what Choose Apps
+        /// gives (VoiceInk #1089), but the check can't tell what was picked.
         case chooseAppsOnly
         /// Override is on; Input Monitoring is still missing.
         case inputMonitoring
@@ -136,13 +136,25 @@ final class PermissionsSettingsViewModel: ObservableObject {
     }
 
     /// One line for Settings and Drop's repair window: what to do on 27.3.
-    static let keyboardSettingsGuide = "In System & App Protection Override click +, choose Whytap, pick Override System Protections and confirm. Then add Whytap under Input Monitoring and restart Whytap."
+    static let keyboardSettingsGuide = "Drop needs control across all apps to type where you are. In System & App Protection Override click +, choose Whytap, pick Override System Protections and confirm. Then add Whytap under Input Monitoring and restart Whytap."
     static let screenSettingsGuide = "Click + under Screen & System Audio Recording and choose Whytap, then restart Whytap."
 
-    /// Quits and reopens Whytap so a 27.3 grant takes effect.
-    func restartWhytap() { relaunchApp() }
+    /// Why the last restart waited (a meeting recording, dictation…), shown
+    /// beside the Restart button; nil once it may go.
+    @Published private(set) var restartBlocked: String?
+
+    /// Quits and reopens Whytap so a 27.3 grant takes effect, unless an
+    /// activity must finish first: then `restartBlocked` says which.
+    @discardableResult
+    func restartWhytap() -> Bool {
+        restartBlocked = relaunchApp()
+        return restartBlocked == nil
+    }
 
     func openInputMonitoring() { openInputMonitoringPane() }
+
+    /// Keyboard control's pane (System & App Protection Override on 27.3).
+    func openKeyboardSettings() { openAccessibilitySettings() }
 
     var allRequiredGranted: Bool {
         snapshot.allRequiredGranted && dropHotkeyStatus == .ready
@@ -211,12 +223,11 @@ final class PermissionsSettingsViewModel: ObservableObject {
         if PermissionsHelper.keyboardReady(snapshotProvider(), settingsOnly: settingsOnly) {
             // Nothing to ask.
         } else if settingsOnly {
-            // 27.3: no dialog, no row. The request stays (a later build may ask
-            // again) and the press opens System & App Protection Override,
-            // where the step's guide says what to click.
+            // 27.3: no dialog, no row. The press only opens System & App
+            // Protection Override, where the step's guide says what to click;
+            // no system request rides along with it.
             // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
             accessibilityRequested = true
-            if !snapshotProvider().accessibilityGranted { accessibilityRequester() }
             openAccessibilitySettings()
         } else if accessibilityRequested {
             openAccessibilitySettings()

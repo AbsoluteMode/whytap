@@ -1398,9 +1398,12 @@ Screen & System Audio Recording. Keyboard control counts there only with
 Accessibility, posting and listening (`PermissionsHelper.keyboardReady`); a
 process that starts with Accessibility but no posting gets the Choose Apps
 line. Grants present at launch are recorded (`recordLaunchGrants`); one that
-appears later needs a new process, so the step shows `restarting` and
-`AppRelauncher` reopens Whytap on the same step (Settings and Drop's repair
-window offer Restart Whytap). "Ask for system audio" runs one second of the
+appears later needs a new process, so the step shows `restarting`; after this
+step's own Open System Settings `AppRelauncher` reopens Whytap on the same step,
+under the update restart's activity rules (UpdateController.restartDeferralReason),
+with its helper armed only in `applicationWillTerminate` of that quit (Settings
+and Drop's repair window offer Restart Whytap). Screen & system audio stays for
+its system audio ask even with the screen on. "Ask for system audio" runs one second of the
 Meetings process tap (SystemAudioPermissionProbe) so macOS asks now. Saved keys
 are named from Keychain attributes only (`TokenStore.exists`). The screen step names both settings and confirms only
 the screen preflight. Audio-only

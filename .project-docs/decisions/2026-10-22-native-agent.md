@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md, 2026-11-23-agent-low-effort.md]
 ---
 
 # Decision
@@ -97,7 +97,9 @@ models use auto with strict tool schemas: current Claude Opus 5.5, Sonnet 5.5,
 Fable 5.1 and Mythos 5.1 reject forced any/tool choice with HTTP 400, irrespective
 of thinking settings. This compatibility policy applies to the whole Anthropic
 route family rather than attempting a model downgrade or retry. Plain free-text
-completion under auto is still rejected by Whytap without a paid repair.
+completion under auto is rejected by Whytap without a paid repair on OpenRouter;
+from 2026-11-23 a direct Anthropic plain-text reply is the answer, checked like
+finish_answer's (see the [low effort decision](2026-11-23-agent-low-effort.md)).
 OpenRouter retains the exact model and endpoint pin and requires parameter support. A terminal call mixed with any other call fails before that
 batch executes. Completion does not require another model request or a terminal
 tool-result round trip. The model layer retains automatic tool choice as its default; the Agent

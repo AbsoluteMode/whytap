@@ -126,8 +126,10 @@ struct NativeAgentHTTP {
         return tools.firstIndex { ["web_search", "web_search_20250305", "openrouter:web_search"].contains($0["type"] as? String ?? "") }
     }
 
-    static func request(url: URL, key: String, body: [String: Any]? = nil) throws -> URLRequest {
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+    /// `timeout`: the longest wait for the next bytes. A non-streamed model
+    /// answer sends none until it is complete.
+    static func request(url: URL, key: String, body: [String: Any]? = nil, timeout: TimeInterval = 60) throws -> URLRequest {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpMethod = "POST"

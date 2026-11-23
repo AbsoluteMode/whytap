@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md]
 ---
 
 # Parallel development, one working Whytap
@@ -223,7 +223,9 @@ directory.
 
 launchd runs `build-queue-watcher.py run` every minute and whenever the queue
 file changes. It reads the queue read-only and involves no model while nothing
-is open. Open work is a `queued` ticket, an `in_progress` ticket without a
+is open; its one write is the helper's `check-heads` (as the builder) right
+before a session for queued work, which returns tickets whose PR head moved.
+Open work is a `queued` ticket that waits for no `--depends-on` PR, an `in_progress` ticket without a
 live session, or a `pending_install` ticket recorded with `--retry-install`
 once the meeting gate is clear. Then it starts exactly one builder session
 (Codex by default, Claude Code or another harness by configuration) in the
@@ -309,7 +311,17 @@ python3 "$queue_git_dir/exodia-build-queue.py" enqueue \
 ```
 
 Use actual values, not literal placeholders. Repeat `--acceptance` for up to
-three concrete checks. Without `--source`/`--session` the helper takes the
+three concrete checks. When the PR must not merge before another PR, add
+`--depends-on <that PR's URL>` (repeatable) besides describing it in
+`--dependencies`: the ticket keeps its place but is not claimed, and starts no
+builder session, until the latest ticket of that PR is `done` or
+`pending_install` (merged through the queue). `status` shows it as
+`waiting_for`. A PR that does not go through the queue is not a structured
+dependency. A self-dependency or a direct cycle is refused. `--depends-on`,
+the head check and the return without a block below work once `activate` has
+installed the helper from that change; an older installed helper refuses the
+flag (then state the dependency in `--dependencies` only) and ignores recorded
+dependencies. Without `--source`/`--session` the helper takes the
 author's address from the environment: Codex's `CODEX_THREAD_ID`, otherwise
 Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID, stored in lower case; a
 display name such as `one-mcp` is refused because Harness Link cannot reach
@@ -358,7 +370,18 @@ queue survives downtime.
    The on-demand builder records the watcher's process ID
    (`WHYTAP_BUILDER_LEASE_PID`) as the lock owner.
 3. Run `claim`. Only the configured builder may claim; a SQLite transaction
-   selects the oldest queued ticket and permits one `in_progress` ticket.
+   selects the oldest queued ticket that waits for no dependency and permits
+   one `in_progress` ticket. Before that, the helper reads every PR's current
+   head with `git ls-remote` (no model, no credentials): a queued ticket whose
+   PR head moved after submission is `blocked` with the new SHA and a request
+   to enqueue it, and the next ticket is claimed. Only tickets queued before
+   that read started are judged, and a pull ref that still shows an ancestor
+   of the submitted commit is GitHub lagging, not a move. The watcher runs the
+   same `check-heads` before it starts a session for queued work, so a moved
+   head costs no session. An unreachable remote checks nothing. Such a return
+   has no builder to announce it: `events --pending` lists it for Codex and
+   Claude Code authors alike until the next builder delivers and acknowledges
+   it.
    Send its start event to the originating chat immediately: include ticket,
    PR/title/head and ask that agent to follow the build and check its acceptance
    steps when notified. The worker may inspect, diagnose and report problems;
@@ -367,7 +390,14 @@ queue survives downtime.
    and source. Follow all integration/signature/version/activity/rollback gates
    below. Queue membership is a request, never proof that gates passed. A moved
    head needs new review; block the ticket and ask its worker to resubmit the
-   reviewed result. Resolve routine merge conflicts with main in the clean
+   reviewed result. To give a claimed ticket back without blaming the PR (the
+   environment stopped it, an undeclared dependency is not merged yet), use
+   `set --status queued --note <reason>`: from `in_progress` it keeps its place,
+   while a requeue after `blocked` goes to the end as before. The watcher
+   counts such a return as a session without progress, so its backoff applies;
+   a retry after a block gets a new place and resets the backoff. Do not
+   return a ticket whose branch you already pushed to; finish or block it.
+   Resolve routine merge conflicts with main in the clean
    integration worktree yourself: keep the contracts of both features, re-run
    the tests of both, push the resolution to the PR branch as a normal commit
    and record the new head and what was resolved in the ticket note. Mechanical
@@ -380,7 +410,8 @@ queue survives downtime.
    from the integration worktree (main's copy, also before reactivation);
    while it is not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
    running the suite. If it stays not clear, do not run it: return the ticket
-   with a note that the environment, not the PR, stopped it. Failures in a
+   with `set --status queued` and a note that the environment, not the PR,
+   stopped it. Failures in a
    suite that ran while the check was not clear are not findings against the PR.
    A failed test whose file and code under test the candidate does not change
    is rerun alone (`swift test --filter <Class>/<test>`), not with a second

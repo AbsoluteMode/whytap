@@ -24,7 +24,9 @@ STATES = ("queued", "in_progress", "pending_install", "done", "blocked",
           "cancelled", "superseded")
 TRANSITIONS = {
     "queued": {"cancelled"},
-    "in_progress": {"pending_install", "done", "blocked"},
+    # in_progress -> queued returns a ticket without blaming the PR (the environment
+    # stopped it, an undeclared dependency is not merged yet); it keeps its place.
+    "in_progress": {"pending_install", "done", "blocked", "queued"},
     "pending_install": {"done", "blocked", "superseded"},
     "blocked": {"queued", "cancelled", "superseded"},
 }
@@ -40,6 +42,74 @@ def git(*args):
 
 def common_dir():
     return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
+
+
+# WHY: .project-docs/decisions/2026-11-23-builder-queue-cheap-fixes.md
+PULL_REMOTE_ENV = "WHYTAP_BUILD_QUEUE_PULL_REMOTE"
+MERGED = ("done", "pending_install")  # pending_install: merged, the install waits
+
+
+def remote_heads():
+    """Current head of every open PR from GitHub's pull refs, without a model and
+    without credentials (`git ls-remote`), with the time the read started. None when
+    unknown: offline, no such remote, a timeout. Unknown never blocks anything."""
+    started = now()
+    remote = os.environ.get(PULL_REMOTE_ENV) or "origin"
+    try:
+        output = subprocess.run(
+            ["git", "ls-remote", remote, "refs/pull/*/head"], capture_output=True, text=True,
+            timeout=30, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if output.returncode != 0:
+        return None
+    heads = {}
+    for line in output.stdout.splitlines():
+        match = re.fullmatch(r"([0-9a-f]{40})\trefs/pull/([1-9]\d*)/head", line.strip())
+        if match:
+            heads[int(match.group(2))] = match.group(1)
+    return {"started": started, "heads": heads}
+
+
+def pr_number(url):
+    return int(url.rsplit("/", 1)[-1])
+
+
+def unmet_dependencies(db, ticket):
+    """Dependency PRs of this ticket that are not merged through the queue yet: the
+    latest ticket of each must be done or pending_install."""
+    waiting = []
+    for pr in json.loads(ticket["depends_on"] or "[]"):
+        latest = db.execute("SELECT status FROM tickets WHERE pr=? ORDER BY id DESC LIMIT 1",
+                            (pr,)).fetchone()
+        if not latest or latest["status"] not in MERGED:
+            waiting.append(pr)
+    return waiting
+
+
+def block_moved_head(db, ticket, snapshot):
+    """A queued ticket whose PR head moved after submission goes back to its author
+    before any builder reviews the old commit. True when it was returned. Only a
+    ticket queued before the remote read started is judged: one submitted (or
+    requeued) while the read was in flight may be newer than the snapshot."""
+    if not snapshot or ticket["queued_at"] >= snapshot["started"]:
+        return False
+    current = snapshot["heads"].get(pr_number(ticket["pr"]))
+    if not current or current == ticket["head"]:
+        return False
+    # GitHub moves refs/pull/<n>/head a little after a push: a ref that still shows
+    # an ancestor of the submitted commit is lagging, not moved.
+    if subprocess.run(["git", "merge-base", "--is-ancestor", current, ticket["head"]],
+                      capture_output=True).returncode == 0:
+        return False
+    note = (f"The PR head moved after submission: this ticket is {ticket['head']}, the PR "
+            f"is now {current}. Review that commit and enqueue it with --head {current}.")
+    db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
+               (note, now(), ticket["id"]))
+    # No builder wrote this: the next builder delivers it from `events --pending`,
+    # whatever the author's harness (Harness Link reaches codex and claude).
+    event(db, ticket["id"], "blocked", note, deliver=ticket["source"] in ("codex", "claude"))
+    return True
 
 
 DOCUMENTATION_SCRIPTS_ENV = "WHYTAP_PROJECT_DOCUMENTATION_SCRIPTS"
@@ -167,6 +237,13 @@ def database():
             # '' = wait for a person or a handoff; 'meeting' = the watcher retries the
             # deferred local install whenever the meeting gate is clear.
             db.execute("ALTER TABLE tickets ADD COLUMN retry TEXT NOT NULL DEFAULT ''")
+        if "depends_on" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
+            # JSON list of PR URLs that must be merged through the queue first.
+            db.execute("ALTER TABLE tickets ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'")
+        if "deliver" not in {c[1] for c in db.execute("PRAGMA table_info(events)")}:
+            # 1 = written without a builder (a model-free return): listed by
+            # `events --pending` for any deliverable author, not only Codex.
+            db.execute("ALTER TABLE events ADD COLUMN deliver INTEGER NOT NULL DEFAULT 0")
         yield db
         db.commit()
     finally:
@@ -183,9 +260,9 @@ def require_builder(db, actor):
         raise ValueError("Only the configured builder chat may claim or update work")
 
 
-def event(db, ticket, status, note=""):
-    db.execute("INSERT INTO events(ticket, status, note, created_at) VALUES (?, ?, ?, ?)",
-               (ticket, status, note, now()))
+def event(db, ticket, status, note="", deliver=False):
+    db.execute("INSERT INTO events(ticket, status, note, created_at, deliver) "
+               "VALUES (?, ?, ?, ?, ?)", (ticket, status, note, now(), int(deliver)))
 
 
 def row(db, ticket):
@@ -198,7 +275,9 @@ def row(db, ticket):
 def ticket_json(db, ticket):
     result = dict(row(db, ticket))
     result["acceptance"] = json.loads(result["acceptance"])
+    result["depends_on"] = json.loads(result.get("depends_on") or "[]")
     if result["status"] == "queued":
+        result["waiting_for"] = unmet_dependencies(db, row(db, ticket))
         result["position"] = db.execute(
             "SELECT COUNT(*) FROM tickets WHERE status='queued' AND "
             "(queued_at < ? OR (queued_at = ? AND id <= ?))",
@@ -245,6 +324,9 @@ def submitted(db, args):
     args.pr = canonical_pr(args.pr)
     validate_head(args.head)
     author_address(args)
+    args.depends_on = sorted({canonical_pr(url) for url in args.depends_on or []})
+    if args.pr in args.depends_on:
+        raise ValueError("A PR cannot depend on itself")
     if not args.session:
         raise ValueError("Set --session (detected from CODEX_THREAD_ID or "
                          "CLAUDE_CODE_SESSION_ID when present)")
@@ -282,15 +364,22 @@ def run(args):
             for t in old:
                 if (t["source"], t["session"], t["host"]) != (args.source, args.session, args.host):
                     raise ValueError("A previous request for this PR belongs to another session")
+            for dependency in args.depends_on:
+                for t in db.execute("SELECT depends_on FROM tickets WHERE pr=? AND status IN "
+                                    "('queued', 'blocked', 'in_progress')", (dependency,)):
+                    if args.pr in json.loads(t["depends_on"]):
+                        raise ValueError(dependency + " already depends on this PR")
+            for t in old:
                 db.execute("UPDATE tickets SET status='superseded', updated_at=? WHERE id=?",
                            (now(), t["id"]))
                 event(db, t["id"], "superseded", "Replaced by a newly reviewed commit")
             stamp = now()
             cursor = db.execute(
                 "INSERT INTO tickets(pr,head,title,source,session,host,checks,acceptance,"
-                "dependencies,queued_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "dependencies,depends_on,queued_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
-                 args.checks, json.dumps(args.acceptance), args.dependencies, stamp, stamp))
+                 args.checks, json.dumps(args.acceptance), args.dependencies,
+                 json.dumps(args.depends_on), stamp, stamp))
             event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
                   "checks at submission: " + args.documentation_checks)
             return {"created": True, "builder": config(db),
@@ -313,14 +402,33 @@ def run(args):
             active = db.execute("SELECT id FROM tickets WHERE status='in_progress'").fetchone()
             if active:
                 return {"claimed": False, "active": ticket_json(db, active[0])}
-            item = db.execute("SELECT id FROM tickets WHERE status='queued' "
-                              "ORDER BY queued_at, id LIMIT 1").fetchone()
-            if not item:
-                return {"claimed": False, "active": None}
-            db.execute("UPDATE tickets SET status='in_progress', owner=?, updated_at=? WHERE id=?",
-                       (args.actor, now(), item[0]))
-            event(db, item[0], "in_progress", "Builder has started; follow this build and its acceptance checks")
-            return {"claimed": True, "ticket": ticket_json(db, item[0])}
+            # FIFO among tickets that can be built now: one waiting for a dependency
+            # keeps its place; one whose PR head moved goes back to its author.
+            returned, waiting = [], []
+            for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
+                                   "ORDER BY queued_at, id").fetchall():
+                if unmet_dependencies(db, item):
+                    waiting.append(item["id"])
+                elif block_moved_head(db, item, args.remote_heads):
+                    returned.append(item["id"])
+                else:
+                    db.execute("UPDATE tickets SET status='in_progress', owner=?, updated_at=? "
+                               "WHERE id=?", (args.actor, now(), item["id"]))
+                    event(db, item["id"], "in_progress",
+                          "Builder has started; follow this build and its acceptance checks")
+                    return {"claimed": True, "ticket": ticket_json(db, item["id"]),
+                            "returned_moved_heads": returned, "waiting_for_dependencies": waiting}
+            return {"claimed": False, "active": None, "returned_moved_heads": returned,
+                    "waiting_for_dependencies": waiting}
+
+        if args.command == "check-heads":
+            require_builder(db, args.actor)
+            if not args.remote_heads:
+                return {"checked": False, "returned_moved_heads": []}
+            returned = [t["id"] for t in db.execute(
+                "SELECT * FROM tickets WHERE status='queued' ORDER BY queued_at, id").fetchall()
+                if block_moved_head(db, t, args.remote_heads)]
+            return {"checked": True, "returned_moved_heads": returned}
 
         if args.command == "set":
             require_builder(db, args.actor)
@@ -330,11 +438,14 @@ def run(args):
             if args.retry_install and args.status != "pending_install":
                 raise ValueError("--retry-install applies only to pending_install")
             stamp = now()
+            # A ticket requeued after a block goes to the end; one returned from
+            # in_progress without a block keeps its place (its queued_at).
+            requeued = args.status == "queued" and item["status"] != "in_progress"
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
             db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
-                       "queued_at=CASE WHEN ?='queued' THEN ? ELSE queued_at END WHERE id=?",
+                       "queued_at=CASE WHEN ? THEN ? ELSE queued_at END WHERE id=?",
                        (args.status, args.note, stamp, "meeting" if args.retry_install else "",
-                        args.status, stamp, args.ticket))
+                        requeued, stamp, args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 
@@ -343,7 +454,7 @@ def run(args):
                      "JOIN tickets t ON t.id=e.ticket WHERE 1=1")
             params = []
             if args.pending:
-                query += " AND e.acknowledged_at IS NULL AND t.source='codex'"
+                query += (" AND e.acknowledged_at IS NULL AND (t.source='codex' OR e.deliver=1)")
             if args.ticket:
                 query += " AND e.ticket=?"
                 params.append(args.ticket)
@@ -372,6 +483,9 @@ def main():
         enqueue.add_argument("--" + flag, required=True)
     enqueue.add_argument("--acceptance", action="append", required=True)
     enqueue.add_argument("--dependencies", default="none")
+    enqueue.add_argument("--depends-on", action="append", metavar="PR_URL",
+                         help="a PR that must be merged through this queue first; the "
+                              "ticket keeps its place and is not claimed until then")
     enqueue.add_argument("--source", choices=("codex", "claude", "other"),
                          help="default: detected from CODEX_THREAD_ID / CLAUDE_CODE_SESSION_ID")
     enqueue.add_argument("--session", default="",
@@ -380,6 +494,7 @@ def main():
     status = commands.add_parser("status")
     status.add_argument("--ticket", type=int)
     commands.add_parser("claim")
+    commands.add_parser("check-heads", help="Return queued tickets whose PR head moved")
     update = commands.add_parser("set")
     update.add_argument("--ticket", type=int, required=True)
     update.add_argument("--status", choices=STATES, required=True)
@@ -410,6 +525,9 @@ def main():
                 # accepted PR/head stays idempotent and is not checked again.
                 args.documentation_checks = (None if known
                                              else documentation_preflight(args.head))
+            # Outside the queue transaction too: one network read, before any lock.
+            args.remote_heads = (remote_heads() if args.command in ("claim", "check-heads")
+                                 else None)
             result = run(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, sqlite3.Error, subprocess.CalledProcessError, OSError) as error:

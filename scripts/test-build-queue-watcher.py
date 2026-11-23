@@ -66,6 +66,9 @@ while True:
         (control / "hold").rename(control / "holding")
         while (control / "holding").exists():
             time.sleep(0.02)
+    if (control / "requeue").exists():
+        queue("set", "--ticket", str(ticket["id"]), "--status", "queued", "--note", "environment")
+        break
     defer = (control / "defer").exists()
     queue("set", "--ticket", str(ticket["id"]), "--status",
           "pending_install" if defer else "done", "--note", "fake result",
@@ -126,6 +129,9 @@ class WatcherTests(unittest.TestCase):
                     "WHYTAP_WATCHER_LAUNCH_AGENTS": str(base / "LaunchAgents")}
         self.env.pop("CODEX_THREAD_ID", None)
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
+        self.pulls = base / "pulls.git"  # GitHub's refs/pull/<n>/head, locally
+        subprocess.run(["git", "init", "-q", "--bare", str(self.pulls)], check=True)
+        self.env["WHYTAP_BUILD_QUEUE_PULL_REMOTE"] = str(self.pulls)
         self.configure_watcher()
         self.queue("configure", "--builder-thread", self.builder)
 
@@ -164,11 +170,19 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
-    def enqueue(self, pr):
+    def enqueue(self, pr, *extra):
         return self.queue("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
                           "--head", self.head, "--title", "Fixture", "--checks", "Fixture",
                           "--acceptance", "Fixture", "--source", "claude",
-                          "--session", WORKER)["ticket"]["id"]
+                          "--session", WORKER, *extra)["ticket"]["id"]
+
+    def move_pr_head(self, pr):
+        """The author pushed after submitting: the PR's head is a newer commit."""
+        self.git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit",
+                 "--allow-empty", "-qm", f"push to {pr}")
+        moved = self.git("rev-parse", "HEAD").strip()
+        self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/{pr}/head")
+        return moved
 
     def watcher(self, *args, ok=True):
         result = subprocess.run([sys.executable, str(WATCHER), "--git-dir", str(self.root),
@@ -624,6 +638,57 @@ class WatcherTests(unittest.TestCase):
         conditions = [a["condition"] for a in self.alerts()]
         self.assertIn(f"undelivered:{after}", conditions)
         self.assertNotIn(f"undelivered:{before}", conditions)
+
+    def test_a_moved_pr_head_goes_back_to_its_author_without_a_session(self):
+        ticket = self.enqueue(1)
+        moved = self.move_pr_head(1)
+        result = self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertEqual(self.statuses(), {ticket: "blocked"})
+        self.assertIn(moved, self.queue("status", "--ticket", str(ticket))["tickets"][0]["note"])
+        self.assertIn(f"PR head moved: #{ticket}", result.stdout)
+
+    def test_a_moved_head_does_not_hold_up_the_next_ticket(self):
+        first = self.enqueue(1)
+        self.git("push", "-q", str(self.pulls), f"{self.head}:refs/pull/2/head")
+        second = self.enqueue(2)
+        self.move_pr_head(1)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {first: "blocked", second: "done"})
+
+    def test_a_ticket_waiting_for_its_dependency_starts_no_session(self):
+        waiting = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        result = self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertEqual(json.loads(self.watcher("status").stdout)["open"]["waiting_dependency"],
+                         [waiting])
+        dependency = self.enqueue(1)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {dependency: "done", waiting: "done"})
+        self.assertEqual(self.lines("handled.log"), [str(dependency), str(waiting)])
+        self.assertNotIn("starting", result.stdout)
+
+    def test_a_returned_ticket_keeps_its_place_and_counts_as_no_progress(self):
+        (self.control / "requeue").touch()
+        first, second = self.enqueue(1), self.enqueue(2)
+        self.watcher("run")
+        self.assertEqual(self.statuses(), {first: "queued", second: "queued"})
+        self.assertEqual(self.queue("status", "--ticket", str(first))["tickets"][0]["position"], 1)
+        self.assertEqual(self.state()["no_progress"], 1)
+        self.assertIn("backoff", json.loads(self.watcher("status").stdout)["reason"])
+
+    def test_an_explicit_retry_after_a_block_resets_the_backoff(self):
+        (self.control / "requeue").touch()
+        ticket = self.enqueue(1)
+        self.watcher("run")
+        self.assertIn("backoff", json.loads(self.watcher("status").stdout)["reason"])
+        (self.control / "requeue").unlink()
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "blocked", "--note", "needs a fix")
+        self.queue("set", "--ticket", str(ticket), "--status", "queued", "--note", "retry")
+        self.watcher("run")
+        self.assertEqual(len(self.sessions()), 2)
+        self.assertEqual(self.statuses(), {ticket: "done"})
 
     def test_oversized_numbers_in_the_probe_are_unknown(self):
         huge = "1" + "0" * 400

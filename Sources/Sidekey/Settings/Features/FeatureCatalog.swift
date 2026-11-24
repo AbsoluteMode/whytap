@@ -332,8 +332,7 @@ enum FeatureCatalog {
             return FeatureInfo(
                 feature: feature, name: "Drop", kind: "Dictation",
                 line: "Dictation. Use its shortcut in any text field and speak: your words are typed there.",
-                // The Drop clip is not made yet; the screen shows no placeholder.
-                video: nil, hotkeys: [.dropVoice], activation: .alwaysOn, place: .screen)
+                video: .dropFast, hotkeys: [.dropVoice], activation: .alwaysOn, place: .screen)
         case .agent:
             return FeatureInfo(
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",
@@ -355,13 +354,13 @@ enum FeatureCatalog {
             return FeatureInfo(
                 feature: feature, name: "Translate & Subtitles", kind: "Island tools",
                 line: "Translate text in a small window, or show live translated subtitles for a call or video.",
-                video: nil, hotkeys: [.tool(.translate), .tool(.subtitles)],
+                video: .translate, hotkeys: [.tool(.translate), .tool(.subtitles)],
                 activation: .islandTools([.translate, .subtitles]), place: .tool(.translate))
         case .screenshots:
             return FeatureInfo(
                 feature: feature, name: "Screenshots", kind: "Island tool Shot",
                 line: "Capture an area, annotate it, blur text and numbers.",
-                video: nil, hotkeys: [.tool(.screenshot)],
+                video: .screenshot, hotkeys: [.tool(.screenshot)],
                 activation: .islandTools([.screenshot]), place: .tool(.screenshot))
         }
     }

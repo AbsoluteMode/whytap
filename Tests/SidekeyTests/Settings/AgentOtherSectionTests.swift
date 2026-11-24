@@ -49,15 +49,27 @@ final class AgentOtherSectionTests: XCTestCase {
         XCTAssertFalse(source.contains("http"), "feature videos must never be fetched")
     }
 
-    /// Every bundled clip has its ▶ on a Settings row.
+    /// Every bundled clip is shown somewhere: a ▶ on a Settings row, or the
+    /// clip of a feature in the catalog (its feature screen shows it).
     func test_every_feature_video_has_a_button() throws {
         let root = try projectRoot().appendingPathComponent("Sources/Sidekey/Settings")
         let sources = try ["SettingsOtherView.swift", "AgentOtherSection.swift"]
             .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
             .joined()
-        for video in FeatureVideo.allCases {
+        let catalogued = Set(FeatureCatalog.all.compactMap(\.video))
+        for video in FeatureVideo.allCases where !catalogued.contains(video) {
             XCTAssertTrue(sources.contains("FeatureVideoButton(video: .\(video)"), "\(video) has no ▶ button")
         }
+    }
+
+    /// The feature screens' clips: Drop, Translate & Subtitles and Screenshots
+    /// have theirs, each a bundled file.
+    // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+    func test_feature_screens_have_their_clips() throws {
+        XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
+        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
+        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
+        XCTAssertTrue(FeatureVideo.allCases.contains(.subtitles))
     }
 
     func test_other_row_clips_name_the_users_own_shortcuts() {

@@ -231,6 +231,13 @@ if [ -d "${FEATURE_VIDEOS_DIR}" ]; then
     cp -R "${FEATURE_VIDEOS_DIR}" "${APP_BUNDLE}/Contents/Resources/FeatureVideos"
 fi
 
+# What's New list (WhatsNewCatalog, Bundle.main/WhatsNew.json): what changed
+# for the person in each release. Bundled, never fetched.
+WHATS_NEW_FILE="${PROJECT_DIR}/Resources/WhatsNew.json"
+if [ -f "${WHATS_NEW_FILE}" ]; then
+    cp "${WHATS_NEW_FILE}" "${APP_BUNDLE}/Contents/Resources/WhatsNew.json"
+fi
+
 # Custom fonts (Instrument Serif Regular + Italic). Registered at launch
 # via Info.plist's ATSApplicationFontsPath = "Fonts", consumed by the
 # editorial display typography.

@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/PostProcessor.swift
     confirmed_at: 2026-11-20
-related: [2026-10-21-smart-editor-prompt.md, 2026-10-22-smart-editor-pass.md, 2026-11-24-smart-destination-line.md]
+related: [2026-10-21-smart-editor-prompt.md, 2026-10-22-smart-editor-pass.md, 2026-11-24-smart-markdown-off.md]
 ---
 
 # Smart: ready text

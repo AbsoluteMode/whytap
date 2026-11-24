@@ -147,11 +147,12 @@ struct PostProcessor {
     /// is unknown, a single-line field or one of Whytap's own editors.
     static let plainTextRule = "Только обычный текст, абзацы и простые списки. Не добавляй заголовков, жирного, обратных кавычек, таблиц, блоков кода или внешних кавычек; уже имеющиеся буквальные фрагменты не меняй ради оформления."
 
+    /// Not reached while `SmartFormattingProfile.isMarkdownEnabled` is off.
     /// With a destination, one line about the app the text is meant for takes
     /// the place of the plain-text rule; the rest of the prompt is the same.
     /// Appended after the prompt, a line like it changed nothing in live
     /// answers: the rule it contradicted won.
-    /// WHY: .project-docs/decisions/2026-11-24-smart-destination-line.md
+    /// WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
     static func systemPrompt(for formatting: SmartFormattingProfile) -> String {
         guard let line = formatting.instructions else { return systemPrompt }
         return systemPrompt.replacingOccurrences(

@@ -54,14 +54,9 @@ is a verifiable claim rather than a slogan.
 - Smart sends the cleanup model you chose the transcript of your dictation,
   the name of the app you dictate into, Whytap's own instructions and your
   language settings. It does not read or send the text of that app's window.
-  Its instructions name that app once more (for Slack or Telegram open in a
-  browser: "Slack" or "Telegram"), so the model can use the app's Markdown
-  when it knows the app shows it. To leave single-line fields plain
-  and to recognize Slack or Telegram in a browser it reads, on the Mac, only
-  the focused field's Accessibility role and the document's address; these
-  are not sent with the request or logged.
-  Rich clipboard conversion for Slack and Telegram runs on the Mac, using
-  the same clipboard suppression and restore as ordinary dictation.
+  Smart writes plain text in every app; while its Markdown formatting is
+  switched off it does not read the focused field's role or the document's
+  address either, and nothing is converted on the clipboard.
 - Logs go to the unified system log (`os_log`, subsystem
   `com.rootwise.sidekey`). They never contain transcripts, prompts, replies
   or keys; `Tests/SidekeyTests/LLM/LocalPathLoggingInvariantTests.swift`
@@ -149,8 +144,7 @@ Data-use policies depend on the selected provider and its account settings.
 ## Permissions
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
-  editable text field before recording, the focused field's role and
-  document address for Smart formatting (never the window's text) and, only
+  editable text field before recording and, only
   when Brightness keys is switched on in Settings → Toolbox → Display, the
   Mac's brightness keys.
 - Microphone: dictation and meetings.

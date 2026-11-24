@@ -85,6 +85,32 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         }
     }
 
+    /// Scenario: Smart into Slack, Telegram, Claude or Terminal while Markdown
+    /// is off. The request is the base prompt with its plain-text rule, the
+    /// app's name and the transcript; a clean dictation still passes.
+    /// WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
+    func testSmartRequestForAnyAppIsThePlainPromptWhileMarkdownIsOff() async throws {
+        let env = makeEnv()
+        try env.keys.save("or-key", account: OpenRouterLLMKeyStore.account)
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/auto"), for: .dropSmartCleanup)
+        for (id, app) in [("com.tinyspeck.slackmacgap", "Slack"), ("ru.keepcoder.Telegram", "Telegram"),
+                          ("com.anthropic.claudefordesktop", "Claude"), ("com.apple.Terminal", "Terminal")] {
+            let profile = SmartFormattingProfile.resolve(bundleID: id, appName: app, documentURL: nil, focusedRole: "AXTextArea")
+            let client = FakeOpenRouterClient(completion: "Проверь timeout_ms в config.yaml.")
+            let output = try await env.processor(client).processOutput(
+                "ну проверь timeout_ms в config.yaml", targetApp: app, language: "ru", transcriptionMode: "smart", formatting: profile
+            )
+            XCTAssertEqual(client.lastMessages[0].content, PostProcessor.systemPrompt)
+            XCTAssertFalse(client.lastMessages[0].content.contains("предназначается для приложения"))
+            XCTAssertTrue(client.lastMessages[1].content.hasPrefix("Active app: \(app)\n\n"))
+            XCTAssertEqual(output.deliveryProfile(profile), .plain)
+            let ready = FakeOpenRouterClient(completion: PostProcessor.passMarker)
+            let passed = try await env.processor(ready).processOutput("Давай созвонимся завтра.", targetApp: app, formatting: profile)
+            XCTAssertEqual(passed.text, "Давай созвонимся завтра.")
+            XCTAssertFalse(passed.usedEditor)
+        }
+    }
+
     func test_openrouter_route_without_key_throws_missing_key() async throws {
         let env = makeEnv()
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/auto"), for: .dropSmartCleanup)

@@ -4,12 +4,57 @@ import XCTest
 
 final class SmartFormattingProfileTests: XCTestCase {
     private func resolve(_ id: String?, _ url: String? = nil, role: String? = "AXTextArea", name: String? = nil) -> SmartFormattingProfile {
-        .resolve(bundleID: id, appName: name, documentURL: url.flatMap(URL.init(string:)), focusedRole: role)
+        // The mechanism behind the switch: these tests keep it working for
+        // the day Markdown is turned back on.
+        .resolve(bundleID: id, appName: name, documentURL: url.flatMap(URL.init(string:)), focusedRole: role, markdownEnabled: true)
+    }
+
+    /// Scenario (maintainer, 2026-11-24): Markdown is removed from Smart for
+    /// now. Whatever the app or field, the take is plain: no destination
+    /// line, no rich paste, no markup protection.
+    /// WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
+    func testSmartIsPlainEverywhereWhileMarkdownIsOff() {
+        XCTAssertFalse(SmartFormattingProfile.isMarkdownEnabled)
+        let targets: [(String?, String?, String?, String?)] = [
+            ("com.tinyspeck.slackmacgap", "Slack", nil, "AXTextArea"),
+            ("ru.keepcoder.Telegram", "Telegram", nil, "AXTextArea"),
+            ("com.google.Chrome", "Google Chrome", "https://app.slack.com/client/T/C", "AXTextArea"),
+            ("com.apple.Safari", "Safari", "https://web.telegram.org/a/", "AXTextArea"),
+            ("com.anthropic.claudefordesktop", "Claude", nil, "AXTextArea"),
+            ("md.obsidian", "Obsidian", "file:///tmp/README.md", "AXTextArea"),
+            ("com.apple.Terminal", "Terminal", nil, "AXTextArea"),
+            ("com.google.Chrome", "Google Chrome", "https://github.com/a/b/issues/1", "AXTextArea"),
+            ("com.apple.Safari", "Safari", nil, "AXTextField"),
+            ("com.example.nameless", nil, nil, nil),
+            (nil, "Whytap", nil, nil),
+        ]
+        for (id, name, url, role) in targets {
+            let profile = SmartFormattingProfile.resolve(
+                bundleID: id, appName: name, documentURL: url.flatMap(URL.init(string:)), focusedRole: role
+            )
+            XCTAssertEqual(profile, .plain, "\(name ?? "nameless")")
+            XCTAssertFalse(profile.usesRichPaste)
+            XCTAssertFalse(profile.allowsMarkdown)
+            XCTAssertEqual(PostProcessor.systemPrompt(for: profile), PostProcessor.systemPrompt)
+        }
+        XCTAssertTrue(PostProcessor.systemPrompt.contains(PostProcessor.plainTextRule))
+        XCTAssertTrue(PostProcessor.systemPrompt.contains(PostProcessor.passMarker))
+    }
+
+    /// While the switch is off the take does not wait for Accessibility: the
+    /// role and document address are not read at all.
+    func testNoAccessibilityReadForSmartWhileMarkdownIsOff() throws {
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Sidekey/AppDelegate.swift"), encoding: .utf8)
+        let reads = source.components(separatedBy: "SmartFormattingMetadataReader.snapshot(").count - 1
+        XCTAssertEqual(reads, 1)
+        XCTAssertTrue(source.contains("SmartFormattingProfile.isMarkdownEnabled\n                    ? await SmartFormattingMetadataReader.snapshot(forPID: targetPID) : nil"))
     }
 
     /// Scenario: the user dictates in Smart into any app. The model is told
     /// that app's name; no list in code decides which apps "have Markdown".
-    /// WHY: .project-docs/decisions/2026-11-24-smart-destination-line.md
+    /// WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
     func testAnyAppIsNamedToTheModelWithoutAListOfKnownApps() {
         for (id, name) in [("md.obsidian", "Obsidian"), ("com.anthropic.claudefordesktop", "Claude"),
                            ("notion.id", "Notion"), ("com.linear", "Linear"), ("com.apple.Notes", "Notes"),

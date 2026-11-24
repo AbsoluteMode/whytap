@@ -3238,9 +3238,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let postProcessor else { throw OpenRouterLLMError.notConfigured }
                 // Local formatting metadata only; no window text reaches the model.
                 // WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
-                // The model is told the app's name and decides about Markdown itself.
-                // WHY: .project-docs/decisions/2026-11-24-smart-destination-line.md
-                let snapshot = await SmartFormattingMetadataReader.snapshot(forPID: targetPID)
+                // Markdown is off in Smart for now: nothing is read and every
+                // take is plain.
+                // WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
+                let snapshot = SmartFormattingProfile.isMarkdownEnabled
+                    ? await SmartFormattingMetadataReader.snapshot(forPID: targetPID) : nil
                 try Task.checkCancellation()
                 formatting = SmartFormattingProfile.resolve(
                     bundleID: targetBundleID, appName: targetApp,

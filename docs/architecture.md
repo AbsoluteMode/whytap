@@ -168,24 +168,16 @@ Voice flow (Drop / dictation):
        name, the language and mode hints and the transcript; no text of the
        target window is read or sent, with no setting to add it. WHY:
        .project-docs/decisions/2026-11-22-smart-no-window-context.md
-       One line in the system prompt names the app the text is meant for and
-       lets the model use that app's Markdown if it knows the app shows it;
-       there is no list of apps with their own rules. The line replaces the
-       prompt's plain-text rule (PostProcessor.systemPrompt(for:)). A
-       single-line field, a take into Whytap's own editor and an app without
-       a name get no line and stay plain. SmartFormattingMetadataReader reads
-       the focused element's AX role and document URL on this Mac (1.5s
-       deadline); they are never sent, and an unread role leaves the app
-       named. WHY:
-       .project-docs/decisions/2026-11-24-smart-destination-line.md
-       Slack/Telegram (bundle ID, or app.slack.com / web.telegram.org in a
-       browser) are the only apps named in SmartFormattingProfile: their
-       paste uses local RTF + semantic HTML + plain clipboard fallback, and
-       their line names Slack/Telegram (also in a browser) and describes
-       that converter. Code/URLs survive filler
-       stripping and every flavor is restored after paste. Fast and the
-       editor's pass verdict stay plain. WHY:
-       .project-docs/decisions/2026-10-21-smart-destination-formatting.md
+       Smart writes plain text (paragraphs, simple lists) in every app:
+       Markdown is switched off for now by
+       SmartFormattingProfile.isMarkdownEnabled. While it is off every take
+       resolves to the plain profile, the system prompt is the base prompt,
+       nothing is converted on paste (Slack and Telegram included) and
+       SmartFormattingMetadataReader is not called. Behind the switch stay a
+       one-line "this text is for app X" instruction
+       (PostProcessor.systemPrompt(for:)) and the Slack/Telegram rich paste
+       (local RTF + semantic HTML + plain fallback); tests keep both working.
+       WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
        Smart uses the lowest supported OpenRouter reasoning effort (or off
        when optional), discovered from the cached model catalog, and asks
        OpenRouter to sort providers of the selected model by throughput. Meeting

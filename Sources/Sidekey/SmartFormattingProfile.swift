@@ -3,17 +3,28 @@ import Foundation
 /// Where a Smart take goes, as far as formatting is concerned: the name the
 /// editor model is told, and whether Whytap converts the result on paste.
 ///
+/// Switched off for now by `isMarkdownEnabled`: Smart writes plain text
+/// everywhere. The description below is what the switch turns back on.
+///
 /// There is no per-app list of Markdown rules. The model gets the destination's
 /// name in one line and decides itself whether that app shows Markdown and
 /// which. The only apps named in code are the ones the paste mechanics need:
 /// Slack and Telegram, where Whytap turns Markdown into rich clipboard text.
 /// Never infer a destination from transcript text, window titles or screen prose.
-// WHY: .project-docs/decisions/2026-11-24-smart-destination-line.md
+// WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
 struct SmartFormattingProfile: Sendable, Equatable {
     /// Name given to the model. `nil`: no destination line, plain text only.
     let destination: String?
     /// Whytap converts the editor's Markdown to RTF + HTML for this paste.
     let usesRichPaste: Bool
+
+    /// The one switch. Off since 2026-11-24: the maintainer removed Markdown
+    /// from Smart for now, after the live model put backticks into apps that
+    /// show no Markdown (a terminal among them). While it is off every take
+    /// is `plain`: no destination line, no rich paste, no Accessibility read.
+    /// Everything below stays in place so that it can be turned back on here.
+    // WHY: .project-docs/decisions/2026-11-24-smart-markdown-off.md
+    static let isMarkdownEnabled = false
 
     static let plain = Self(destination: nil, usesRichPaste: false)
     static let slack = Self(destination: "Slack", usesRichPaste: true)
@@ -40,7 +51,11 @@ struct SmartFormattingProfile: Sendable, Equatable {
         return "Это сообщение предназначается для приложения «\(destination)». Если ты знаешь, что это приложение показывает Markdown, используй особенности его Markdown для структурирования текста: имена файлов, параметров и команд оформляй как `код`, сохраняя символы внутри точно, остальное оформление применяй по смыслу, а не ради украшения. Если приложение Markdown не показывает или ты его не знаешь, не используй никакой разметки, кроме простых списков."
     }
 
-    static func resolve(bundleID: String?, appName: String?, documentURL: URL?, focusedRole: String?) -> Self {
+    static func resolve(
+        bundleID: String?, appName: String?, documentURL: URL?, focusedRole: String?,
+        markdownEnabled: Bool = SmartFormattingProfile.isMarkdownEnabled
+    ) -> Self {
+        guard markdownEnabled else { return .plain }
         // Single-line fields include search, issue titles, addresses and names:
         // no markup there, whatever the app.
         // A role that could not be read (slow Accessibility) does not hide the

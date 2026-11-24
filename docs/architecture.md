@@ -1889,8 +1889,13 @@ Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 editors' own stores and rules; open editors reload from the stores'
 notifications and every take reads the lists. One invalid entry adds nothing
 (line breaks and control characters are refused, joiners like U+200C pass);
-an existing entry is reported in its saved form, never rewritten. No read or
-removal, no per-route promise (each route sends what its model supports).
+an existing entry is reported in its saved form, never rewritten.
+whytap_vocab_remove and whytap_filler_remove take 1–20 named entries out
+through the stores' remove (any letter case, trimmed): removed with the saved
+spelling, missing when not there (no error, no line), no way to clear a list;
+lines "Vocab − Whytap"; they alone carry destructiveHint. WHY:
+.project-docs/decisions/2026-11-24-agent-drop-list-removal.md No read, no
+per-route promise (each route sends what its model supports).
 External harnesses need HarnessAccessGate's Yes (gatedOperations), with
 HarnessConsent rechecked right before the write; the built-in Agent adds what
 the current request names. App-owned change lines are escaped as Markdown

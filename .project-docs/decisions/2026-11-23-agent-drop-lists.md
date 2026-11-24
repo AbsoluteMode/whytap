@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AppControl/HarnessAccessTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md, 2026-11-24-agent-step-drops.md]
+related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md, 2026-11-24-agent-step-drops.md, 2026-11-24-agent-drop-list-removal.md]
 ---
 
 # The Agent adds words to Vocab and Filler
@@ -79,7 +79,8 @@ already has its own operations.
   change lines as Markdown literals (`NativeAgentAppControl.markdownLiteral`):
   `Vocab + __init__` renders with its underscores, and so do model IDs such as
   `scribe_v3_live` in other change lines. Step labels stay plain text.
-- **Not added:** reading the lists and removing entries. They need a
+- **Not added:** reading the lists and removing entries (removal came on
+  2026-11-24, see [removal](2026-11-24-agent-drop-list-removal.md)). They need a
   separate request.
 
 ## Why

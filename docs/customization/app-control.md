@@ -83,8 +83,8 @@ no arbitrary UserDefaults operation.
 
 These are Drop's hand-filled lists, the ones the island's Vocab and Filler
 editors fill. Each operation adds through that list's own store and checks,
-so an open editor shows the entry and the next dictation reads it. Neither
-reads a list back or removes an entry; remove entries in the island. An
+so an open editor shows the entry and the next dictation reads it. Nothing
+reads a list back. An
 entry already there is reported and left as it is, so a retry is safe. One
 invalid entry (empty, too long, a line break or control character) adds
 nothing (`invalid_term`); joiners such as the Persian zero-width non-joiner
@@ -103,6 +103,15 @@ shows `Vocab + whytap` above its answer, with the spelling exactly as saved.
 holds 100): words Drop removes from dictation, Fast and Smart (`um`, `ну`).
 When removing them would leave a Fast take empty, Drop pastes the take
 unfiltered. The Agent shows `Filler + ну`.
+
+`whytap_vocab_remove` and `whytap_filler_remove` take `terms` (1–20) and
+remove exactly those entries, matched in any letter case and without
+surrounding spaces. A removed entry comes back as `removed` with the
+spelling it had; a term that is not in the list is `missing`, which changes
+nothing and is not an error. One invalid entry removes nothing, and there is
+no way to clear a whole list. `whytap_filler_remove` makes Drop keep a word
+again; to cut a word from dictation use `whytap_filler_add`. The Agent shows
+`Vocab − Whytap`. Coding tools need the same one-time Yes.
 
 There is no Replace list: it came with Drop learning, which was shelved on
 2026-11-23.

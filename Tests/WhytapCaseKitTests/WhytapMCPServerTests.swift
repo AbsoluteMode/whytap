@@ -80,7 +80,8 @@ final class WhytapMCPServerTests: XCTestCase {
         for tool in tools {
             let name = try XCTUnwrap(tool.object?["name"]?.string)
             let hints = try XCTUnwrap(tool.object?["annotations"]?.object, "\(name) has annotations")
-            XCTAssertEqual(hints["destructiveHint"], .bool(false), name)
+            // Only taking a named word out of Vocab or Filler deletes anything.
+            XCTAssertEqual(hints["destructiveHint"], .bool(["whytap_vocab_remove", "whytap_filler_remove"].contains(name)), name)
             if hints["readOnlyHint"] == .bool(true) { readOnly.append(name) }
         }
         for name in ["case_list_projects", "case_list_keys"] {
@@ -90,7 +91,8 @@ final class WhytapMCPServerTests: XCTestCase {
         }
         XCTAssertFalse(readOnly.contains { ["whytap_set_model", "whytap_set_provider", "whytap_set_setting",
                                              "whytap_todo_add", "whytap_todo_update", "whytap_meeting_open",
-                                             "whytap_toolbox_set", "whytap_hotkey_set", "whytap_vocab_add", "whytap_filler_add"].contains($0) })
+                                             "whytap_toolbox_set", "whytap_hotkey_set", "whytap_vocab_add", "whytap_filler_add",
+                                             "whytap_vocab_remove", "whytap_filler_remove"].contains($0) })
     }
 
     func test_initialize_names_one_server_and_carries_both_guides() throws {

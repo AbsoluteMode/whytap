@@ -32,7 +32,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-22-native-agent-app-control.md, 2026-11-23-agent-drop-lists.md, 2026-11-23-drop-learning-shelved.md, 2026-10-22-native-agent.md]
+related: [2026-11-22-native-agent-app-control.md, 2026-11-23-agent-drop-lists.md, 2026-11-23-drop-learning-shelved.md, 2026-10-22-native-agent.md, 2026-11-24-agent-drop-list-removal.md]
 ---
 
 # Agent step drops
@@ -112,7 +112,8 @@ while liking the drop itself.
   older ones are not shown late (they are in History).
 - **No keys, no clicks, no undo.** The user asked for the change, so there is
   nothing to confirm and Control-Y / Control-N are not registered. Undo is a
-  new request to the Agent; Vocab and Filler removal is not an operation yet.
+  new request to the Agent (a word is taken out again with
+  [removal](2026-11-24-agent-drop-list-removal.md)).
 - **VoiceOver.** The panel never has focus; the shown lines are posted as
   one announcement.
 - **Unchanged:** answers with text, cards, sources or an error; the step

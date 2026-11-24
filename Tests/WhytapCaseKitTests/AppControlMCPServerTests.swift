@@ -130,7 +130,17 @@ final class AppControlMCPServerTests: XCTestCase {
         let names = tools.compactMap { $0["name"]?.string }
         XCTAssertTrue(names.contains("whytap_vocab_add") && names.contains("whytap_filler_add"))
         XCTAssertFalse(names.contains("whytap_replace_add"), "Replace left the app with Drop learning")
-        for name in ["whytap_vocab_add", "whytap_filler_add"] {
+        for name in ["whytap_vocab_remove", "whytap_filler_remove"] {
+            let tool = try XCTUnwrap(tools.first { $0["name"] == .string(name) })
+            XCTAssertEqual(tool["annotations"]?.object?["destructiveHint"], .bool(true), name)
+            XCTAssertEqual(tool["annotations"]?.object?["readOnlyHint"], .bool(false), name)
+            XCTAssertTrue(tool["description"]?.string?.contains("reported as missing") == true, name)
+        }
+        XCTAssertEqual(tools.filter { $0["annotations"]?.object?["destructiveHint"] == .bool(true) }.compactMap { $0["name"]?.string }.sorted(),
+                       ["whytap_filler_remove", "whytap_vocab_remove"], "nothing else deletes")
+        XCTAssertTrue(tools.first { $0["name"] == .string("whytap_filler_remove") }?["description"]?.string?
+            .contains("that is whytap_filler_add") == true, "which of the two a word to cut needs")
+        for name in ["whytap_vocab_add", "whytap_filler_add", "whytap_vocab_remove", "whytap_filler_remove"] {
             let description = try XCTUnwrap(tools.first { $0["name"] == .string(name) }?["description"]?.string)
             XCTAssertTrue(description.contains("Needs the user's one-time Yes for this harness"), name)
             XCTAssertFalse(description.contains("sentByCurrentDrop"), name)

@@ -75,6 +75,10 @@ enum NativeAgentAppControl {
     giving a copy card: "add whytap to vocab" is whytap_vocab_add, "remove 'ну' from my dictation"
     is whytap_filler_add; add to Vocab or Filler only what the current request names. An entry
     reported as existing is already there in its saved form: say so; nothing was added.
+    "remove whytap from vocab" is whytap_vocab_remove. whytap_filler_remove is only for taking a word
+    out of the Filler list so Drop keeps it in the text again ("stop cutting 'ну'", "remove 'ну' from
+    Filler"); a word the user wants gone from their speech is whytap_filler_add. Remove only what the
+    current request names. An entry reported as missing was not in the list: say so; nothing was removed.
     Whytap's own tools come first. When the request is something a Whytap tool may do (a screenshot,
     capturing or annotating an area, translating text, live subtitles, recording a meeting, tasks),
     read whytap_toolbox_get and choose by the titles and descriptions it lists; never name a tool it
@@ -275,6 +279,12 @@ enum NativeAgentAppControl {
             guard !added.isEmpty else { return nil }
             let list = operation == "vocab_add" ? "Vocab" : "Filler"
             return "\(list) + " + (added.count <= 3 ? added.joined(separator: ", ") : "\(added.count) terms")
+        case "vocab_remove", "filler_remove":
+            let removed = (object["terms"]?.array ?? []).compactMap(\.object)
+                .filter { $0["result"] == .string("removed") }.compactMap { $0["term"]?.string }
+            guard !removed.isEmpty else { return nil }
+            let list = operation == "vocab_remove" ? "Vocab" : "Filler"
+            return "\(list) − " + (removed.count <= 3 ? removed.joined(separator: ", ") : "\(removed.count) terms")
         case "todo_update":
             guard let task = object["task"]?.object, let title = task["title"]?.string else { return nil }
             return "To-do: \(title)" + (task["completed"] == .bool(true) ? " ✓" : "")
@@ -323,8 +333,8 @@ enum NativeAgentAppControl {
         case "toolbox_get": return "Reading Whytap tools"
         case "toolbox_set": return "Changing Whytap tools"
         case "hotkey_set": return "Changing a hotkey"
-        case "vocab_add": return "Updating Vocab"
-        case "filler_add": return "Updating Filler"
+        case "vocab_add", "vocab_remove": return "Updating Vocab"
+        case "filler_add", "filler_remove": return "Updating Filler"
         case "todo_list": return "Reading To-do"
         case "todo_add", "todo_update": return "Updating To-do"
         case "meetings_search": return "Searching meetings"

@@ -1114,6 +1114,157 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertNotNil(question.text)
     }
 
+    // MARK: Removing words
+    // WHY: .project-docs/decisions/2026-11-24-agent-drop-list-removal.md
+
+    private func remove(_ e: Env, _ operation: String, _ terms: [AppControlValue]) async -> AppControlResponse {
+        await e.controller.handle(AppControlRequest(operation, arguments: ["terms": .array(terms)]))
+    }
+
+    /// "убери whytap из vocab": the word is there, so it is removed, an open
+    /// editor reloads, the next take no longer sends it and one drop says so.
+    func testRemoveAWordFromVocabTakesItOutAndShowsOneStep() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Whytap", "Soniox"])
+        let editor = IslandVocabularyViewModel(vocabulary: e.vocabulary)
+        _ = await editor.loadIfNeeded()
+        let result = try await turn(e, "убери whytap из vocab", [
+            app("whytap_vocab_remove", ["terms": ["whytap"]], id: "r"),
+            done()
+        ])
+        XCTAssertEqual(VocabularyCache(defaults: e.defaults).terms, ["Soniox"])
+        XCTAssertEqual(editor.terms, ["Soniox"], "an open island editor reloads it")
+        XCTAssertEqual(VocabularyBudget.terms(e.vocabulary.terms, for: .soniox), ["Soniox"], "the next take does not send it")
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "vocab_remove", line: "Vocab − Whytap")],
+                       "the drop shows the spelling that was saved")
+        XCTAssertEqual(steps(result)?.first?.symbol, "book.closed")
+        XCTAssertEqual(steps(result)?.first?.parts.sign, " − ")
+        XCTAssertNil(result.finalText)
+        XCTAssertTrue(result.labels.contains("Updating Vocab") && result.labels.contains("Vocab − Whytap"), "\(result.labels)")
+        let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.contains("\"remove whytap from vocab\" is whytap_vocab_remove"))
+        XCTAssertTrue(system.contains("a word the user wants gone from their speech is whytap_filler_add"))
+    }
+
+    /// The word is not in the list: nothing changes, no drop, the Agent says so.
+    func testRemovingAWordThatIsNotThereAnswersInTextWithoutADrop() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Soniox"])
+        let result = try await turn(e, "убери whytap из vocab", [
+            app("whytap_vocab_remove", ["terms": ["whytap"]], id: "r"),
+            done(),
+            final("Слова whytap нет в Vocab.")
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["Soniox"])
+        XCTAssertNil(steps(result))
+        XCTAssertEqual(result.finalText, "Слова whytap нет в Vocab.")
+        XCTAssertTrue(result.toolResults().first?.contains(#""result":"missing""#) == true, "\(result.toolResults())")
+        XCTAssertTrue(result.toolResults().last?.contains("the app confirmed no change") == true)
+        XCTAssertFalse(result.labels.contains { $0.hasPrefix("Vocab − ") })
+    }
+
+    /// Another letter case, spaces around it, a phrase: matched as the editors match.
+    func testRemovalMatchesAnyLetterCaseAndIgnoresSurroundingSpaces() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["WhyTap", "Claude Code", "Ёлка"])
+        let response = await remove(e, "vocab_remove", [.string("  whytap \n"), .string("CLAUDE CODE"), .string("ёлка")])
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.data.object?["terms"], .array([
+            .object(["term": .string("WhyTap"), "result": .string("removed")]),
+            .object(["term": .string("Claude Code"), "result": .string("removed")]),
+            .object(["term": .string("Ёлка"), "result": .string("removed")])]))
+        XCTAssertEqual(e.vocabulary.terms, [])
+        XCTAssertEqual(NativeAgentAppControl.changeLine("vocab_remove", response.data), "Vocab − WhyTap, Claude Code, Ёлка")
+        // The same word twice in one request is one row.
+        e.vocabulary.setTerms(["Whytap"])
+        let twice = await remove(e, "vocab_remove", [.string("whytap"), .string("WHYTAP")])
+        XCTAssertEqual(twice.data.object?["terms"]?.array?.count, 1)
+        XCTAssertEqual(NativeAgentAppControl.changeLine("vocab_remove", twice.data), "Vocab − Whytap")
+    }
+
+    /// Two words in one command: one line, one drop; a word that was not
+    /// there is left out of it.
+    func testTwoWordsRemovedByOneCommandAreOneStep() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Whytap", "Soniox", "Exodia"])
+        let result = try await turn(e, "убери из vocab whytap и exodia", [
+            app("whytap_vocab_remove", ["terms": ["whytap", "exodia"]], id: "r"),
+            done()
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["Soniox"])
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "vocab_remove", line: "Vocab − Whytap, Exodia")])
+        // One there, one not: the removed one is shown, the Agent reports the other in text.
+        e.vocabulary.setTerms(["Whytap"])
+        let mixed = await remove(e, "vocab_remove", [.string("whytap"), .string("ghost")])
+        XCTAssertEqual(NativeAgentAppControl.changeLine("vocab_remove", mixed.data), "Vocab − Whytap")
+        XCTAssertEqual(mixed.data.object?["terms"]?.array?.last, .object(["term": .string("ghost"), "result": .string("missing")]))
+        // More than three: a count.
+        e.vocabulary.setTerms(["a", "b", "c", "d"])
+        let many = await remove(e, "vocab_remove", ["a", "b", "c", "d"].map(AppControlValue.string))
+        XCTAssertEqual(NativeAgentAppControl.changeLine("vocab_remove", many.data), "Vocab − 4 terms")
+    }
+
+    /// "Add X and remove Y" in one request: two steps, in the order made.
+    func testAddAndRemoveInOneRequestAreTwoStepsInOrder() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Exodia"])
+        let result = try await turn(e, "добавь whytap в vocab и убери оттуда exodia", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "a"),
+            app("whytap_vocab_remove", ["terms": ["exodia"]], id: "r"),
+            done()
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["whytap"])
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "vocab_add", line: "Vocab + whytap"),
+                                       AgentAppStep(operation: "vocab_remove", line: "Vocab − Exodia")])
+        XCTAssertNil(result.finalText)
+    }
+
+    /// Filler: the word comes out of the list and the next take keeps it.
+    func testRemoveAFillerWordAndTheNextTakeKeepsIt() async throws {
+        let e = try env()
+        e.fillers.add("Ну"); e.fillers.add("типа")
+        let editor = IslandFillerViewModel(store: e.fillers)
+        XCTAssertFalse(DropFillerFilter.apply("ну давай созвонимся", removing: e.fillers.terms()).contains("ну "))
+        let result = try await turn(e, "перестань вырезать «ну» из диктовок", [
+            app("whytap_filler_remove", ["terms": ["ну"]], id: "r"),
+            done()
+        ])
+        XCTAssertEqual(FillerTermsStore(defaults: e.defaults).terms(), ["типа"])
+        XCTAssertEqual(editor.terms, ["типа"], "an open Filler editor reloads it")
+        XCTAssertTrue(DropFillerFilter.apply("ну давай созвонимся", removing: e.fillers.terms()).contains("ну "))
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "filler_remove", line: "Filler − Ну")])
+        XCTAssertEqual(steps(result)?.first?.symbol, "scissors")
+        let missing = await remove(e, "filler_remove", [.string("ээ")])
+        XCTAssertTrue(missing.ok)
+        XCTAssertNil(NativeAgentAppControl.changeLine("filler_remove", missing.data))
+        XCTAssertEqual(e.fillers.terms(), ["типа"])
+    }
+
+    /// A broken request removes nothing, and counts as a failed change.
+    func testInvalidRemovalsRemoveNothing() async throws {
+        let e = try env()
+        e.vocabulary.setTerms(["Whytap", "Soniox"])
+        for terms: [AppControlValue] in [[.string("whytap"), .string(" ")], [.string("whytap"), .string("две\nстроки")],
+                                          [.string("whytap"), .int(1)], [],
+                                          (0..<21).map { .string("w\($0)") }] {
+            let response = await remove(e, "vocab_remove", terms)
+            XCTAssertFalse(response.ok, "\(terms)")
+            XCTAssertTrue(["invalid_term", "invalid_arguments"].contains(response.data.object?["code"]?.string ?? ""), "\(terms)")
+        }
+        let extra = await e.controller.handle(AppControlRequest("vocab_remove", arguments: ["terms": .array([.string("whytap")]), "all": .bool(true)]))
+        XCTAssertEqual(extra.data.object?["code"], .string("invalid_arguments"), "no way to clear the list")
+        XCTAssertEqual(e.vocabulary.terms, ["Whytap", "Soniox"])
+        // In a turn, such a failure cannot end as done.
+        let result = try await turn(e, "убери whytap из vocab", [
+            app("whytap_vocab_remove", ["terms": ["whytap", " "]], id: "r"),
+            done(),
+            final("Не получилось: пустое слово в запросе.")
+        ])
+        XCTAssertNil(steps(result))
+        XCTAssertTrue(result.toolResults().last?.contains("a Whytap change failed") == true)
+        XCTAssertEqual(e.vocabulary.terms, ["Whytap", "Soniox"])
+    }
+
     // MARK: Catalog contract
 
     func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {

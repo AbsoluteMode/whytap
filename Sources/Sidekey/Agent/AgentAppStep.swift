@@ -13,8 +13,8 @@ struct AgentAppStep: Equatable, Sendable {
     /// The mark in the step's drop: which part of Whytap changed.
     var symbol: String {
         switch operation {
-        case "vocab_add": return "book.closed"
-        case "filler_add": return "scissors"
+        case "vocab_add", "vocab_remove": return "book.closed"
+        case "filler_add", "filler_remove": return "scissors"
         case "todo_add", "todo_update": return "checklist"
         case "toolbox_set": return "square.grid.2x2"
         case "hotkey_set": return "keyboard"

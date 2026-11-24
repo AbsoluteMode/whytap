@@ -88,7 +88,7 @@ tools:
 | `write_file`: create or replace a file | yes | removed and refused |
 | `run_command`: run a shell command | yes | removed and refused |
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |
-| `whytap`: change Whytap's own settings, island tools and hotkeys, add Vocab and Filler words, To-do (next version after 2.2.26) | yes | yes |
+| `whytap`: change Whytap's own settings, island tools and hotkeys, add and remove Vocab and Filler words, To-do (next version after 2.2.26; removing words after 2.2.27) | yes | yes |
 
 When your request only changes Whytap ("add whytap to vocab", "switch Drop
 to Smart") and the Agent has nothing else to tell you, it writes no answer:

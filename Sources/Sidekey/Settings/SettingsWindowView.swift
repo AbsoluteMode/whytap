@@ -129,7 +129,8 @@ struct SettingsWindowView: View {
                 .padding(.horizontal, SettingsSidebarStyle.horizontalPadding)
 
             VStack(alignment: .leading, spacing: 4) {
-                SettingsProjectFooter(identity: .current, updateController: AppState.shared.updateController)
+                SettingsProjectFooter(identity: .current, updateController: AppState.shared.updateController,
+                                      whatsNew: .shared)
                 quitRow
             }
                 .padding(.horizontal, SettingsSidebarStyle.horizontalPadding)

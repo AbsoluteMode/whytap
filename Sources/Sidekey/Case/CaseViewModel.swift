@@ -163,6 +163,10 @@ final class CaseViewModel: ObservableObject {
     private var indexedProjects: [CaseProject] = []
     private var indexedRows: [UUID: CaseDisplayRow] = [:]
     @Published private(set) var inputMode: CaseInputMode = .name
+    /// The key the last `submitValue` saved. It is listed first in its project,
+    /// right under + Key, until Case locks; then it takes its place by name.
+    // WHY: docs/DESIGN.md — Case add-key position.
+    private(set) var lastAddedSecretID: UUID?
     /// Suspend explicit menu dismissal while a system authentication is active.
     @Published private(set) var isSystemInteractionActive = false
     /// Whether the first "arm" step of the two-step reset confirm has been
@@ -355,6 +359,7 @@ final class CaseViewModel: ObservableObject {
         }
         inputMode = .name
         query = ""
+        lastAddedSecretID = secretID
         refreshRows()
         scheduleIdleLock()
     }
@@ -926,7 +931,10 @@ final class CaseViewModel: ObservableObject {
         }
         allSections = ordered.map { project in
             let keys = (grouped[project.id] ?? []).sorted {
-                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                if ($0.id == lastAddedSecretID) != ($1.id == lastAddedSecretID) {
+                    return $0.id == lastAddedSecretID
+                }
+                return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             }
             return CaseProjectSection(id: project.id, name: project.name, description: project.description,
                                       keyCount: keys.count, secrets: keys)
@@ -980,6 +988,7 @@ final class CaseViewModel: ObservableObject {
         indexedSecrets = []
         indexedProjects = []
         indexedRows = [:]
+        lastAddedSecretID = nil
     }
 
     private func scheduleIdleLock() {

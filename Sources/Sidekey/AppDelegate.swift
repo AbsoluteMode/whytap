@@ -2981,7 +2981,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // AgentRealtimeVoiceSessioning`, called on `@MainActor`). The flow
             // store maps the drop phase → wing face on its own (it observes
             // `AppState.phase`), so wiring the transcript is all that's left.
-            session.onTranscriptUpdate = { [weak self] text in
+            session.onTranscriptUpdate = { [weak self, usesOnDeviceWindow = onDevice != nil] text in
                 // Count inbound tokens (count only — never the text) so the
                 // trace can tell "the STT provider transcribed something" from "WS opened
                 // but nothing arrived". First token also stamps `.firstToken`.
@@ -2994,7 +2994,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         text, now: ProcessInfo.processInfo.systemUptime
                     )
                 }
-                if onDevice == nil { self?.dropLiveFeed.partial(text, take: liveTake) }
+                if !usesOnDeviceWindow { self?.dropLiveFeed.partial(text, take: liveTake) }
                 // An allowed app showing the words in its own field keeps
                 // them out of the wing; otherwise the wing gets them as before.
                 // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md

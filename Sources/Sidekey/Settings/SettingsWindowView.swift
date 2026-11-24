@@ -218,24 +218,6 @@ struct SettingsWindowView: View {
         .accessibilityLabel(AppBuildIdentity.current.quitActionTitle)
     }
 
-    /// The Agent group in Other; a `whytap://settings/agentMode` link or the
-    /// Agent setup prompt highlights it for a second.
-    private var agentSection: AgentOtherSection {
-        let highlighted: Bool = {
-            if case .tab(.agentMode) = selection.highlightedTarget { return true }
-            return false
-        }()
-        return AgentOtherSection(
-            viewModel: agentModeViewModel,
-            settings: AgentSettingsStore.shared,
-            store: AgentProviderStore.shared,
-            agentEnabled: agentEnabled,
-            onAgentToggle: onAgentToggle,
-            openAPIAndModels: { selection.focus($0) },
-            highlighted: highlighted
-        )
-    }
-
     @ViewBuilder
     private var detailPane: some View {
         switch selection.selectedTab {
@@ -265,14 +247,8 @@ struct SettingsWindowView: View {
         case .other:
             SettingsOtherView(
                 displayPicker: displayPickerViewModel,
-                volumeDuckConfig: otherVolumeDuckConfig,
-                meetingsEnabled: otherMeetingsEnabled,
-                googleEnabled: otherGoogleEnabled,
-                onMeetingsToggle: otherOnMeetingsToggle,
-                onGoogleToggle: otherOnGoogleToggle,
                 privacyPreferences: privacyPreferences,
-                screenshotProtectionChanged: screenshotProtectionChanged,
-                agentSection: agentSection
+                screenshotProtectionChanged: screenshotProtectionChanged
             )
         case .agentMode:
             // Never selected: `select` resolves it to Other.

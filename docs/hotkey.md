@@ -150,7 +150,7 @@ stored separately and can be changed in Settings independently of the key.
 | `.hold` | Hold | Press starts recording; release sends (grace-tail then commit). |
 | `.tap`  | Toggle | First press starts recording; second press sends. |
 
-With **Stop Drop automatically** on (Settings -> Other -> Drop), a Toggle
+With **Stop Drop automatically** on (Settings -> Features -> Drop), a Toggle
 Drop shortcut needs one press: recording ends when the speaker has finished,
 and a second press still stops it at once. Hold shortcuts are unchanged. See
 `.project-docs/decisions/2026-11-11-drop-auto-stop.md`.

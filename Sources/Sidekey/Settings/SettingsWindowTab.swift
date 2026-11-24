@@ -61,8 +61,11 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
             return "Integrations"
         case .backup:
             return "Backup"
+        // The raw id stays `other` for links (and the landing's catalog
+        // parser, which wants `case` and `return` together); what is left is
+        // general.
         case .other:
-            return "Other"
+            return "General"
         }
     }
 
@@ -109,7 +112,7 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
         case .backup:
             return "externaldrive.badge.timemachine"
         case .other:
-            return "ellipsis.circle"
+            return "gearshape"
         }
     }
 

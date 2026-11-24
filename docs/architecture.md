@@ -309,7 +309,7 @@ Live text in the recording wing (Drop and agent voice):
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
-Drop auto-stop (opt-in, Settings -> Other -> Drop, off by default):
+Drop auto-stop (opt-in, Settings -> Features -> Drop, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
@@ -1086,7 +1086,7 @@ Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
-  (Settings -> Other -> "Show island on") -> screen with a real notch ->
+  (Settings -> General -> "Show island on") -> screen with a real notch ->
   primary display -> first. NSScreen.main is NEVER used (it is the key
   window's screen and moves with every click). All overlay panels position
   through currentDescriptor()/currentVisibleFrame() and follow
@@ -1117,7 +1117,7 @@ Island idle-hide:
   agent flow, drop, update pill, music, hover, held modifiers, programmatic
   expansion, "Updated" indicator). Wake = cursor in the pill rect + 24px, any
   of our hotkeys, or a blocker rising. Toggle "Auto-hide island" in
-  Settings -> Other. WHY:
+  Settings -> General. WHY:
   docs/decisions/2026-07-09-island-idle-hide-settings-toggle.md
 
 Update flow (download-on-action):
@@ -1360,14 +1360,19 @@ centers the menu and enable switch, moving Notification type into the adjacent
 question-mark tooltip/popover. Bindings and saved selections are unchanged.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
-Settings -> Other rows explain themselves with a short subtitle that names no
+Settings rows explain themselves with a short subtitle that names no
 remappable key, plus, where an accepted clip exists, a ▶ FeatureVideoButton:
 a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
-show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Meeting Notes, Google search, Agent, Screenshot protection,
-Auto-hide island); rows that are plain options have none. WHY:
+show default or example keys. Today: Stop Drop automatically on the Drop
+screen, Screenshot protection and Auto-hide island in General; the Agent,
+Meeting Notes and Google search clips play on their feature screens
+(FeatureVideoStrip); rows that are plain options have none. Settings ->
+General (raw id still other, whytap://settings/other) keeps only the island
+(auto-hide, display) and screenshot protection; Other's Drop, Meeting Notes,
+Google search and Agent rows moved to their feature screens, and
+AgentOtherSection is only the shared switch logic and words. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings is being rebuilt around features, in steps. FeatureCatalog
@@ -1396,7 +1401,7 @@ SettingsFeaturesView lists the catalog with each status, read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
 PermissionsSettingsViewModel the older tabs show. A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
-present place: the Other tab, or its Toolbox pane. The older tabs stay in the
+present place. Every feature has its own screen now. The older tabs stay in the
 sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
@@ -1413,7 +1418,7 @@ Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
 Mode, Language you speak, Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
-island editors. The same switches remain in Other and in the island. Every
+island editors. The same switches remain in the island. Every
 feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
 (snapshot, view models, environment, the setup actions and the per-check
 notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs

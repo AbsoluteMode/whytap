@@ -1418,9 +1418,9 @@ feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
 (snapshot, view models, environment, the setup actions and the per-check
 notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
 setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
-one a "Video coming" row says what it will show), FeatureShortcutsGroup (one
-recorder per shortcut), FeatureNeedsGroup, the feature's own settings and
-FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
+one a "Video coming" row says what it will show), FeatureShortcutsGroup
+(one recording session shared by the shortcut rows), FeatureNeedsGroup, the
+feature's own settings and FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
 its screen; Drop keeps DropFeatureView around the same parts. The Agent,
 Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
 the switch (FeatureSwitchModel) writes the same flag as Other and the island
@@ -1873,6 +1873,28 @@ except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
+
+Live dictation clients: whytap_drop_live (DropLiveFeed) is a separate
+allowlist, DropLiveFeed.allowedClients (Whycode, UVBKCN5PPV /
+com.rootwise.whycode), resolved like a harness (direct parent, Apple-vouched)
+but with HarnessScope.liveDictation: it reaches liveDictationOperations only
+and gets unsupported_client for every gated tool, and a coding harness gets
+unsupported_client for drop_live. Same one Yes and store; the card asks "Let
+Whycode show your dictation?" and its VoiceOver detail and Settings row name
+that scope only. The gate answers it itself with the client's pid: phase,
+takeId, level, energy (VoiceOrbView.voiceEnergy, the orb before
+AudioEnergyFollower, recording only) and the take's words only while the
+phase can still deliver and the take's target pid (captured at
+startDropTurnTelemetry) is the caller. Partials carry the take id of their
+session; endTake() runs from endDropTurn (before the trace guard) and on
+every idle/deliveryFailed phase (endTakes(on:)). On-device partials report
+through onTranscriptWindow whether their ~14 s window has shifted; only
+shifted windows are stitched onto the words already sent (DropLiveFeed.stitch,
+words or characters). showsLiveText keeps an opt-in for
+1.5 s; while it holds for the take's target, onTranscriptUpdate skips the
+wing. Not listed in tools/list, unknown to AppControlController (the built-in
+Agent cannot reach it), never logged. WHY:
+.project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 with a sole finish_answer call containing status, answer, insert_text, sources

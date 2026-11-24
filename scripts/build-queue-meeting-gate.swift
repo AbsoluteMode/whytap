@@ -11,31 +11,51 @@ struct Gate: Codable, Equatable {
     let status: String
     let reason: String
 }
+// WHY: .project-docs/decisions/2026-11-24-meeting-gate-whytap-activity.md
+// An install interrupts only Whytap. Whytap's own capture (meeting, Notes, dictation,
+// Subtitles) runs in its process, so its input flag is the authoritative "Whytap is
+// recording" signal. Real call apps still defer: Whytap may be about to record them.
+let whytapApps = ["com.rootwise.sidekey"]  // .beta and helpers match by prefix
+let callApps = ["us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2",
+    "com.tinyspeck.slackmacgap", "com.apple.facetime", "com.apple.avconferenced",
+    "ru.keepcoder.telegram", "org.telegram.desktop", "net.whatsapp.whatsapp",
+    "com.cisco.webexmeetingsapp", "ru.yandex.telemost"]
+let browsers = ["com.google.chrome", "com.apple.safari", "com.apple.webkit",
+    "com.brave.browser", "com.microsoft.edgemac", "company.thebrowser.browser",
+    "company.thebrowser.dia", "org.mozilla.firefox"]
+// Audio that is neither a meeting Whytap records nor Whytap itself: the owner's
+// always-on Discord voice chat (2026-11-24) and macOS speech services, which follow
+// any open microphone.
+let ignoredApps = ["com.hnc.discord", "com.hnc.discordcanary", "com.hnc.discordptb",
+    "com.apple.corespeech"]
+func matches(_ bid: String, _ list: [String]) -> Bool {
+    list.contains { bid == $0 || bid.hasPrefix($0 + ".") }
+}
+func isBrowser(_ bid: String) -> Bool {
+    matches(bid, browsers) ||
+        (bid.hasPrefix("company.thebrowser.") && bid.contains(".browser.helper"))
+}
 func classify(_ rows: [AudioActivity], complete: Bool) -> Gate {
-    // Any microphone user may be an unrecognized call or a manual Notes take.
-    if rows.contains(where: { $0.input }) {
+    let active = rows.filter { $0.input || $0.output }
+    let ids = active.map { $0.bundle?.lowercased() ?? "" }
+    // Whytap capturing anything (a meeting, Notes, dictation) is what an install breaks.
+    if zip(active, ids).contains(where: { $0.input && matches($1, whytapApps) }) {
+        return Gate(status: "busy", reason: "whytap_capturing_audio")
+    }
+    for (row, bid) in zip(active, ids) where row.input {
+        if matches(bid, ignoredApps) { continue }
+        if matches(bid, callApps) { return Gate(status: "busy", reason: "call_app_microphone_in_use") }
+        if isBrowser(bid) { return Gate(status: "busy", reason: "browser_microphone_in_use") }
+        // An unidentified or unrecognized microphone user may be a call in an app this
+        // list does not know.
         return Gate(status: "busy", reason: "microphone_in_use")
     }
     guard complete else { return Gate(status: "unknown", reason: "incomplete_audio_snapshot") }
-    let callApps = ["us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2",
-        "com.tinyspeck.slackmacgap", "com.apple.facetime", "com.hnc.discord",
-        "ru.keepcoder.telegram", "org.telegram.desktop", "net.whatsapp.whatsapp",
-        "com.cisco.webexmeetingsapp", "ru.yandex.telemost"]
-    let browsers = ["com.google.chrome", "com.apple.safari", "com.apple.webkit",
-        "com.brave.browser", "com.microsoft.edgemac", "company.thebrowser.browser",
-        "company.thebrowser.dia", "org.mozilla.firefox"]
-    func matches(_ bid: String, _ prefix: String) -> Bool {
-        bid == prefix || bid.hasPrefix(prefix + ".")
-    }
-    for row in rows where row.output {
-        guard let bid = row.bundle?.lowercased(), !bid.isEmpty else {
-            return Gate(status: "unknown", reason: "unidentified_audio_output")
-        }
-        if callApps.contains(where: { matches(bid, $0) }) {
-            return Gate(status: "busy", reason: "call_app_output_active")
-        }
-        if browsers.contains(where: { matches(bid, $0) }) ||
-            (bid.hasPrefix("company.thebrowser.") && bid.contains(".browser.helper")) {
+    for (row, bid) in zip(active, ids) where row.output {
+        if bid.isEmpty { return Gate(status: "unknown", reason: "unidentified_audio_output") }
+        if matches(bid, ignoredApps) { continue }
+        if matches(bid, callApps) { return Gate(status: "busy", reason: "call_app_output_active") }
+        if isBrowser(bid) {
             return Gate(status: "unknown", reason: "browser_audio_may_be_a_muted_call")
         }
     }
@@ -82,25 +102,55 @@ func snapshot() -> Gate {
             complete = false; continue
         }
         rows.append(AudioActivity(input: input != 0, output: output != 0,
-            bundle: output == 0 ? nil : bundle(object)))
+            bundle: input == 0 && output == 0 ? nil : bundle(object)))
     }
     return classify(rows, complete: complete)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
-    func expect(_ rows: [AudioActivity], _ complete: Bool, _ status: String) {
-        precondition(classify(rows, complete: complete).status == status)
+    var cases = 0
+    func expect(_ rows: [AudioActivity], _ complete: Bool, _ status: String, _ reason: String? = nil) {
+        let gate = classify(rows, complete: complete)
+        precondition(gate.status == status && (reason == nil || gate.reason == reason),
+            "\(rows) -> \(gate)")
+        cases += 1
     }
+    func row(_ input: Bool, _ output: Bool, _ bundle: String?) -> AudioActivity {
+        AudioActivity(input: input, output: output, bundle: bundle)
+    }
+    let discord = row(true, true, "com.hnc.Discord.helper.Renderer")
+    let coreSpeech = row(true, false, "com.apple.CoreSpeech")
     expect([], true, "clear")
     expect([], false, "unknown")
-    expect([AudioActivity(input: true, output: false, bundle: nil)], false, "busy")
-    expect([AudioActivity(input: true, output: false, bundle: "com.rootwise.sidekey")], true, "busy")
-    expect([AudioActivity(input: false, output: true, bundle: "com.microsoft.teams2.modulehost")], true, "busy")
-    expect([AudioActivity(input: false, output: true, bundle: "company.thebrowser.browser.helper")], true, "unknown")
-    expect([AudioActivity(input: false, output: true, bundle: "com.apple.WebKit.GPU")], true, "unknown")
-    expect([AudioActivity(input: false, output: true, bundle: nil)], true, "unknown")
-    expect([AudioActivity(input: false, output: true, bundle: "com.apple.Music")], true, "clear")
-    expect([AudioActivity(input: false, output: false, bundle: "us.zoom.xos")], true, "clear")
-    print("{\"self_test\":\"passed\",\"cases\":10}")
+    expect([row(true, false, nil)], false, "busy", "microphone_in_use")
+    expect([row(true, false, "com.rootwise.sidekey")], true, "busy", "whytap_capturing_audio")
+    expect([row(true, false, "com.rootwise.sidekey.beta")], true, "busy", "whytap_capturing_audio")
+    expect([row(false, true, "com.microsoft.teams2.modulehost")], true, "busy")
+    expect([row(false, true, "company.thebrowser.browser.helper")], true, "unknown")
+    expect([row(false, true, "com.apple.WebKit.GPU")], true, "unknown")
+    expect([row(false, true, nil)], true, "unknown")
+    expect([row(false, true, "com.apple.Music")], true, "clear")
+    expect([row(false, false, "us.zoom.xos")], true, "clear")
+    // The owner's Discord voice chat with macOS speech services: nothing Whytap records.
+    expect([discord], true, "clear")
+    expect([discord, coreSpeech], true, "clear")
+    expect([coreSpeech], true, "clear")
+    expect([row(false, true, "com.hnc.Discord")], true, "clear")
+    // Whytap recording while Discord holds the microphone still defers.
+    expect([discord, coreSpeech, row(true, true, "com.rootwise.sidekey")], true, "busy",
+        "whytap_capturing_audio")
+    // Real calls still defer, with or without Discord alongside.
+    expect([row(true, true, "us.zoom.xos")], true, "busy", "call_app_microphone_in_use")
+    expect([discord, row(false, true, "us.zoom.xos")], true, "busy", "call_app_output_active")
+    expect([row(true, false, "com.apple.FaceTime")], true, "busy", "call_app_microphone_in_use")
+    expect([row(true, false, "ru.yandex.telemost")], true, "busy")
+    expect([row(true, false, "com.microsoft.teams2")], true, "busy")
+    expect([row(true, false, "com.google.Chrome.helper")], true, "busy", "browser_microphone_in_use")
+    // An unknown microphone user may be a call app this list does not know.
+    expect([row(true, false, "com.example.unknowncaller")], true, "busy", "microphone_in_use")
+    expect([discord, row(true, false, nil)], true, "busy", "microphone_in_use")
+    // Ignoring Discord never hides an incomplete snapshot.
+    expect([discord], false, "unknown")
+    print("{\"self_test\":\"passed\",\"cases\":\(cases)}")
 } else if CommandLine.arguments.count == 1 {
     var samples: [Gate] = []
     for index in 0..<3 {

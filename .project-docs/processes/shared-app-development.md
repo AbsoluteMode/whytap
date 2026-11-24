@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md]
 ---
 
 # Parallel development, one working Whytap
@@ -595,11 +595,15 @@ Under the lock:
    Check for meetings immediately before a normal quit using
    `python3 scripts/build-queue-meeting-gate.py` from checked main. Only exit 0
    with a fresh `status: clear` permits the next step; never reuse a cached
-   result or replace an error/timeout with an empty activity list. An ongoing
-   or suspected meeting, microphone use (including manual Notes capture),
-   browser audio that could be a muted call, or an unknown result means
+   result or replace an error/timeout with an empty activity list. Whytap's
+   own audio capture (a meeting, manual Notes, dictation, Subtitles), a call
+   app's microphone or output, a browser microphone, an unknown microphone
+   user, browser audio that could be a muted call, or an unknown result means
    **pending**: record `pending_install --retry-install`, release the lock and
-   let the watcher retry silently.
+   let the watcher retry silently. Discord voice chat and macOS CoreSpeech do
+   not defer. `reason: owner_override` is clear: the owner allowed this
+   waiting install (see the probe section); record it in the install evidence.
+   The builder never runs `allow-install` itself.
    Do not ask for a saved/idle confirmation on each build. On 2026-10-20 the
    user gave standing permission to interrupt other work outside meetings,
    including dictation, agent work, editors and backup. The conservative probe
@@ -615,22 +619,39 @@ Under the lock:
 
 ### Meeting probe and its limits
 
-The builder-only script reads CoreAudio process input/output flags three times
-one second apart. It never records audio, reads browser URLs or calendar data,
-opens UI, or requests permissions. Any input stream defers, including an
-unrecognized calling app or Whytap itself. Output from known call apps defers;
-browser/WebKit output is uncertain because a muted call and media share this
-signal. Merely leaving Zoom or a browser open is not a meeting signal.
-Property/list failures, stale results and the 20-second timeout defer.
+The builder-only script reads CoreAudio process input/output flags and the
+bundle IDs of active processes three times one second apart. It never records
+audio, reads browser URLs or calendar data, opens UI, or requests permissions.
+An install interrupts only Whytap, so Whytap's own input (every capture path
+runs in its process, system audio through an in-process tap) always defers.
+Input from a known call app, a browser, an unidentified or an unknown process
+defers. Discord (the owner's always-on voice chat, which Whytap does not
+record) and `com.apple.CoreSpeech` are ignored for input and output. Output
+from known call apps defers; browser/WebKit output is uncertain because a
+muted call and media share this signal. Merely leaving Zoom or a browser open
+is not a meeting signal. Property/list failures, stale results and the
+20-second timeout defer.
+
+Only on the owner's own words in chat, the orchestrator or the owner runs
+`python3 scripts/build-queue.py allow-install --ticket <id> --by <owner>
+--said "<their words>" [--minutes 30]` (at most 120; `--revoke` ends it) for
+a `pending_install` ticket. The helper refuses the builder and records on the
+ticket who allowed it, when and until when. While that ticket waits and the
+window is open, the gate answers `clear / owner_override` for anything except
+Whytap's own capture or an unreadable snapshot; the watcher's next recheck
+(at most five minutes) starts the install.
 
 This is an activity check, not a guarantee that every possible meeting can be
-detected: a call with both input and output fully closed is invisible, and a
-listening-only call in an unrecognized native app may be missed. Browser media
+detected: a call with both input and output fully closed is invisible, a
+listening-only call in an unrecognized native app may be missed, and a work
+call in Discord does not defer (an install then relaunches only Whytap). Browser media
 can delay an update. Preserve these limits in the local handoff evidence rather
 than claiming an authoritative in-process meeting status. A future reliable
 runtime signal may strengthen this gate; it must not invent an idle result.
 The decision and standing authorization are recorded in
-[meeting-aware builder refresh](../decisions/2026-10-20-meeting-aware-builder-refresh.md).
+[meeting-aware builder refresh](../decisions/2026-10-20-meeting-aware-builder-refresh.md);
+Whytap's own activity and the owner's override in
+[meeting gate and Whytap activity](../decisions/2026-11-24-meeting-gate-whytap-activity.md).
 
 ## Local build backup retention
 

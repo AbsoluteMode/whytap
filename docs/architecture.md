@@ -1152,7 +1152,7 @@ Update flow (download-on-action):
   with nothing remembered sees the running version only, and the highest
   launched version is what is remembered (a rollback repeats nothing). It
   comes forward
-  without taking the keyboard and never returns by itself; the version in
+  with the keyboard at the Settings level (above Settings) and never returns by itself; the version in
   the Settings footer reopens the list. The release script refuses a prod
   version without its entry (`scripts/whats-new.py check`). WHY:
   .project-docs/decisions/2026-11-24-whats-new-window.md

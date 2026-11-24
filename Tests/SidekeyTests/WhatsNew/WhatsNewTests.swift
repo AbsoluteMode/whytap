@@ -53,12 +53,11 @@ final class WhatsNewTests: XCTestCase {
 
     // MARK: - Scenarios
 
-    func testAnUpdateWithChangesShowsThemOnceWithoutTakingTheKeyboard() throws {
+    func testAnUpdateWithChangesShowsThemOnce() throws {
         XCTAssertNil(launch("2.2.27"), "2.2.27 has nothing for the person")
         let shown = try XCTUnwrap(launch("2.2.28"))
         XCTAssertEqual(shown.releases.map(\.version), ["2.2.28"])
         XCTAssertEqual(shown.releases.first?.items.map(\.title), ["Calendar is open", "Models in two picks"])
-        XCTAssertFalse(shown.activates, "after an update the window does not take the keyboard")
         XCTAssertNil(launch("2.2.28"), "the next launch of the same version shows nothing")
         XCTAssertNil(launch("2.2.28"))
     }
@@ -131,7 +130,7 @@ final class WhatsNewTests: XCTestCase {
     /// through AppKit's key dispatch, closes it and asks for no alert sound.
     func testEscapeClosesTheWindowWithoutASound() throws {
         var closed = false
-        let request = WhatsNewPresenter.Request(releases: catalog.releases, since: nil, activates: true)
+        let request = WhatsNewPresenter.Request(releases: catalog.releases, since: nil)
         let controller = WhatsNewWindowController(request: request, onLink: { _ in }, onClosed: { closed = true })
         let window = try XCTUnwrap(controller.window)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -172,7 +171,7 @@ final class WhatsNewTests: XCTestCase {
     func testRowsWithOneTitleAreAllDrawn() {
         func height(_ titles: [String]) -> CGFloat {
             let request = WhatsNewPresenter.Request(releases: [WhatsNewRelease(version: "3.0", items: titles.map(item))],
-                                                    since: nil, activates: false)
+                                                    since: nil)
             return WhatsNewWindowController.naturalHeight(of: request)
         }
         XCTAssertEqual(height(["One", "One", "One"]), height(["One", "Two", "Three"]), accuracy: 0.5)
@@ -198,15 +197,70 @@ final class WhatsNewTests: XCTestCase {
         XCTAssertTrue(presenter.history.isEmpty)
     }
 
-    func testSettingsOpensTheListWithEarlierReleasesAndTakesTheKeyboard() throws {
+    func testSettingsOpensTheListWithEarlierReleases() throws {
         let presenter = WhatsNewPresenter(catalog: catalog, currentVersion: "2.2.28")
         var shown: WhatsNewPresenter.Request?
         presenter.display = { shown = $0 }
         presenter.presentHistory()
         let request = try XCTUnwrap(shown)
         XCTAssertEqual(request.releases.map(\.version), ["2.2.28", "2.2.26"])
-        XCTAssertTrue(request.activates)
         XCTAssertNil(defaults.string(forKey: WhatsNewLaunch.seenVersionKey), "looking at the list remembers nothing")
+    }
+
+    /// REV 1 (Maxim, build 1746): the window must show right after the
+    /// update. A person updating through Sparkle from 2.2.26 to 2.2.27
+    /// launches 2.2.27 with 2.2.26 remembered: the shipped 2.2.27 list
+    /// opens by itself, in front and with the keyboard.
+    func testASparkleUpdateFrom2226To2227ShowsTheShippedListAtLaunch() throws {
+        let data = try Data(contentsOf: Self.resources.appendingPathComponent("WhatsNew.json"))
+        let bundled = try XCTUnwrap(WhatsNewCatalog.decode(data))
+        defaults.set("2.2.26", forKey: WhatsNewLaunch.seenVersionKey)
+        let presenter = WhatsNewPresenter(catalog: bundled, currentVersion: "2.2.27")
+        var shownWindows: [WhatsNewWindowController] = []
+        presenter.bringForward = { shownWindows.append($0) }
+        presenter.presentAfterLaunch(isFirstLaunch: false, defaults: defaults)
+        let window = try XCTUnwrap(shownWindows.first?.window, "the window opens at launch, nothing to click")
+        XCTAssertEqual(shownWindows.count, 1)
+        XCTAssertTrue(presenter.controller === shownWindows.first)
+        XCTAssertFalse(window.isVisible, "the test shows nothing")
+        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<WhatsNewView>)
+        XCTAssertEqual(host.rootView.releases.map(\.version), ["2.2.27"])
+        XCTAssertEqual(host.rootView.releases.first?.items.count, 5)
+        XCTAssertEqual(host.rootView.since, "2.2.26")
+        XCTAssertEqual(defaults.string(forKey: WhatsNewLaunch.seenVersionKey), "2.2.27")
+        presenter.bringForward = { _ in XCTFail("the next launch of 2.2.27 opens nothing") }
+        presenter.presentAfterLaunch(isFirstLaunch: false, defaults: defaults)
+        shownWindows.first?.close()
+    }
+
+    /// REV 1 (Maxim, build 1746): opened from Settings the window lay under
+    /// it, because Settings sits at the island's overlay level. What's New
+    /// takes that level, so ordered front after Settings it is on top, and
+    /// it shows on the Space the person is in.
+    func testTheWindowSitsAtTheSettingsLevelAndTakesTheKeyboard() throws {
+        let controller = WhatsNewWindowController(request: .init(releases: catalog.releases, since: nil),
+                                                  onLink: { _ in }, onClosed: {})
+        defer { controller.close() }
+        let window = try XCTUnwrap(controller.window)
+        let settings = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: true)
+        settings.isReleasedWhenClosed = false
+        SidekeyWindowChrome.configureHoverOverlayPolicy(settings)
+        XCTAssertGreaterThanOrEqual(window.level.rawValue, settings.level.rawValue, "not under Settings")
+        XCTAssertGreaterThan(window.level.rawValue, NSWindow.Level.normal.rawValue, "not under other apps' windows")
+        XCTAssertTrue(window.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(window.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(window.canBecomeKey)
+        let root = Self.resources.deletingLastPathComponent()
+        let settingsSource = try String(contentsOf: root.appendingPathComponent(
+            "Sources/Sidekey/Settings/SettingsWindowController.swift"), encoding: .utf8)
+        XCTAssertTrue(settingsSource.contains("SidekeyWindowChrome.configureHoverOverlayPolicy(window)"),
+                      "Settings still uses the level this test compares with")
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "Sources/Sidekey/WhatsNew/WhatsNewWindowController.swift"), encoding: .utf8)
+        let show = try XCTUnwrap(source.range(of: "func show()").map { String(source[$0.lowerBound...].prefix(600)) })
+        XCTAssertTrue(show.contains("NSApp.activate(ignoringOtherApps: true)"), "both paths take the keyboard")
+        XCTAssertTrue(show.contains("makeKeyAndOrderFront"))
+        XCTAssertFalse(show.contains("orderFrontRegardless"), "no front-without-focus path is left")
     }
 
     func testVersionsCompareByTheirNumbers() {
@@ -306,12 +360,12 @@ final class WhatsNewTests: XCTestCase {
         let data = try Data(contentsOf: Self.resources.appendingPathComponent("WhatsNew.json"))
         let bundled = try XCTUnwrap(WhatsNewCatalog.decode(data))
         for release in bundled.releases where !release.items.isEmpty {
-            let request = WhatsNewPresenter.Request(releases: [release], since: nil, activates: false)
+            let request = WhatsNewPresenter.Request(releases: [release], since: nil)
             XCTAssertLessThanOrEqual(WhatsNewWindowController.naturalHeight(of: request), WhatsNewView.maxHeight,
                                      "\(release.version) shows whole, without scrolling")
         }
         let many = (1...6).map { release("3.0.\($0)", "One", "Two", "Three", "Four", "Five") }
-        let long = WhatsNewPresenter.Request(releases: many, since: "3.0.0", activates: false)
+        let long = WhatsNewPresenter.Request(releases: many, since: "3.0.0")
         XCTAssertGreaterThan(WhatsNewWindowController.naturalHeight(of: long), WhatsNewView.maxHeight)
         var closed = false
         let controller = WhatsNewWindowController(request: long, onLink: { _ in }, onClosed: { closed = true })
@@ -387,10 +441,10 @@ final class WhatsNewTests: XCTestCase {
         var plain = current.items
         plain[0].video = nil
         let cases: [(String, WhatsNewPresenter.Request)] = [
-            ("2.2.27", .init(releases: [current], since: nil, activates: false)),
+            ("2.2.27", .init(releases: [current], since: nil)),
             ("2.2.27-no-clip", .init(releases: [WhatsNewRelease(version: current.version, items: plain)],
-                                     since: nil, activates: false)),
-            ("skipped-2.2.25-to-2.2.28", .init(releases: skipped, since: "2.2.25", activates: false)),
+                                     since: nil)),
+            ("skipped-2.2.25-to-2.2.28", .init(releases: skipped, since: "2.2.25")),
         ]
         for (name, request) in cases {
             let natural = WhatsNewWindowController.naturalHeight(of: request)

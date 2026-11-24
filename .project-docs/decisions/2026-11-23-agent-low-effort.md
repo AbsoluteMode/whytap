@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentLowEffortTests.swift
     confirmed_at: 2026-11-23
-related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md]
+related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md, 2026-11-24-smart-minimal-reasoning.md]
 ---
 
 # The built-in Agent asks for low effort

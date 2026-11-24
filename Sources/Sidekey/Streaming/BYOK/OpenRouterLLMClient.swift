@@ -129,10 +129,15 @@ extension OpenRouterLLMClienting {
 }
 
 struct OpenRouterLLMClient: OpenRouterLLMClienting {
-    enum Profile { case standard, dictation }
-    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "cleanup-llm")
-    private let profile: Profile
+    /// `dictation` is the OpenRouter latency profile (Smart and translation);
+    /// `smart` is Drop Smart cleanup, which also asks direct Anthropic and
+    /// OpenAI models for the least reasoning (`SmartDirectReasoning`).
+    enum Profile { case standard, dictation, smart }
+    static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "cleanup-llm")
+    let profile: Profile
     private let reasoningCatalog: OpenRouterReasoningCatalog
+    let reasoningRefusals: SmartReasoningRefusals
+    private var isDictation: Bool { profile != .standard }
     let baseURL: URL
     let session: URLSession
     let usageSink: (AIUsageEvent) -> Void
@@ -142,12 +147,14 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         session: URLSession = .shared,
         profile: Profile = .standard,
         reasoningCatalog: OpenRouterReasoningCatalog = OpenRouterReasoningCatalog(),
+        reasoningRefusals: SmartReasoningRefusals = .shared,
         usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record
     ) {
         self.baseURL = baseURL
         self.session = session
         self.profile = profile
         self.reasoningCatalog = reasoningCatalog
+        self.reasoningRefusals = reasoningRefusals
         self.usageSink = usageSink
     }
 
@@ -222,7 +229,7 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         let discoveryStarted = ProcessInfo.processInfo.systemUptime
         let reasoning: OpenRouterReasoningSetting?
-        if profile == .dictation, endpoint.sendsOpenRouterHeaders {
+        if isDictation, endpoint.sendsOpenRouterHeaders {
             reasoning = await reasoningCatalog.setting(model: trimmedModel, baseURL: endpoint.baseURL, session: session)
         } else {
             reasoning = nil
@@ -230,32 +237,60 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         try Task.checkCancellation()
         let discoveryMs = Int((ProcessInfo.processInfo.systemUptime - discoveryStarted) * 1000)
         let provider = providerPreferences(for: endpoint)
+        // WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
+        var directEffort: String? = nil
+        if profile == .smart, endpoint.textAPI == .openAI, !reasoningRefusals.contains(.openAI, model: trimmedModel) {
+            directEffort = SmartDirectReasoning.openAIEffort(model: trimmedModel)
+        }
         struct ChatRequest: Encodable {
             let model: String
             let messages: [OpenRouterChatMessage]
             let temperature: Double?
             let stream: Bool
             let reasoning: OpenRouterReasoningSetting?
+            let reasoning_effort: String?
             let provider: ProviderPreferences?
         }
-        request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: trimmedModel, messages: messages,
-                        temperature: endpoint.textAPI == .openAI ? nil : 0.1,
-                        stream: false, reasoning: reasoning, provider: provider)
-        )
+        func body(effort: String?) throws -> Data {
+            try JSONEncoder().encode(
+                ChatRequest(model: trimmedModel, messages: messages,
+                            temperature: endpoint.textAPI == .openAI ? nil : 0.1,
+                            stream: false, reasoning: reasoning, reasoning_effort: effort, provider: provider)
+            )
+        }
+        func send() async throws -> (Data, URLResponse) {
+            do {
+                return try await session.data(for: request)
+            } catch {
+                if let context = AIUsageTaskScope.context {
+                    usageSink(AIUsageEvent(context: context, currency: .usd, amount: nil, basis: .unavailable))
+                }
+                throw error
+            }
+        }
+        request.httpBody = try body(effort: directEffort)
 
         let requestStarted = ProcessInfo.processInfo.systemUptime
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            if let context = AIUsageTaskScope.context {
-                usageSink(AIUsageEvent(context: context, currency: .usd, amount: nil, basis: .unavailable))
-            }
-            throw error
+        var (data, response) = try await send()
+        var refusedEffort = false
+        if directEffort != nil, (response as? HTTPURLResponse)?.statusCode == 400 {
+            // The model refused the request with the field: it goes once more
+            // exactly as before this policy, and the model gets no field again.
+            reasoningRefusals.record(.openAI, model: trimmedModel)
+            refusedEffort = true
+            try Task.checkCancellation()
+            request.httpBody = try body(effort: nil)
+            (data, response) = try await send()
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
+        let logsModel = endpoint.sendsOpenRouterHeaders || endpoint.textAPI == .openAI
+        let effortLabel = reasoning?.diagnosticLabel ?? (refusedEffort ? nil : directEffort) ?? "default"
+        if isDictation, let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+            os_log("cleanup failed model=%{public}@ effort=%{public}@ status=%{public}d llm_ms=%{public}d effort_refused=%{public}d",
+                   log: Self.log, type: .default,
+                   logsModel ? Self.safeDiagnosticID(trimmedModel) : "custom", effortLabel, status, requestMs,
+                   refusedEffort ? 1 : 0)
+        }
         try validate(response: response, body: data)
         if let context = AIUsageTaskScope.context {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -284,16 +319,18 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         do {
             let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
-            if profile == .dictation {
+            if isDictation {
                 // No prompt, reply, reasoning text, key, URL, or provider error body.
-                // Only catalog identifiers (OpenRouter) and numeric diagnostics.
-                let modelID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(trimmedModel) : "custom"
+                // Only catalog identifiers (OpenRouter, OpenAI) and numeric
+                // diagnostics, at the default level so the system log keeps them.
+                let modelID = logsModel ? Self.safeDiagnosticID(trimmedModel) : "custom"
                 let requestID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(decoded.id) : "unavailable"
-                os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d",
-                       log: Self.log, type: .info,
-                       modelID, requestID, reasoning?.diagnosticLabel ?? "default",
+                os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d effort_refused=%{public}d",
+                       log: Self.log, type: .default,
+                       modelID, requestID, effortLabel,
                        discoveryMs, requestMs, decoded.usage?.completion_tokens ?? -1,
-                       decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1)
+                       decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1,
+                       refusedEffort ? 1 : 0)
             }
             guard let content = decoded.choices.first?.message.content,
                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -332,10 +369,10 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             return ProviderPreferences(order: [pinned], allow_fallbacks: false)
         }
         // WHY: docs/decisions/2026-09-07-smart-latency.md
-        return profile == .dictation ? ProviderPreferences(sort: "throughput") : nil
+        return isDictation ? ProviderPreferences(sort: "throughput") : nil
     }
 
-    private static func safeDiagnosticID(_ value: String?) -> String {
+    static func safeDiagnosticID(_ value: String?) -> String {
         guard let value, !value.isEmpty, value.count <= 150,
               value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_/.:~").contains($0) })
         else { return "unavailable" }

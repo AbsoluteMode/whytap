@@ -18,6 +18,7 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
     /// Files on the provider paths that touch user/model content.
     private static let guardedFiles = [
         "Sources/Sidekey/Streaming/BYOK/OpenRouterLLMClient.swift",
+        "Sources/Sidekey/Streaming/BYOK/AnthropicLLMClient.swift",
         "Sources/Sidekey/Meetings/MeetingBYOKProcessor.swift",
         "Sources/Sidekey/Streaming/BYOK/DirectProviderStreamingSession.swift",
         "Sources/Sidekey/Streaming/BYOK/ProviderBatchTranscriber.swift",

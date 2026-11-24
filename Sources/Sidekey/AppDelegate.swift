@@ -2657,7 +2657,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         trace.mark(.done)
         os_log(
             "drop turn %{public}@ completed last_phase=%{public}@ finishing_ms=%{public}d resolving_ms=%{public}d release_to_done_ms=%{public}d",
-            log: Self.log, type: .info, trace.turnId, trace.lastPhase.label,
+            log: Self.log, type: .default, trace.turnId, trace.lastPhase.label,
             trace.durationMs(from: .stopRequested, to: .resolving) ?? -1,
             trace.durationMs(from: .resolving, to: .done) ?? -1,
             trace.durationMs(from: .stopRequested, to: .done) ?? -1
@@ -3258,7 +3258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !Task.isCancelled, generation == streamingSetupGeneration else { return false }
             os_log(
                 "drop processing ok turn_id=%{public}@ mode=%{public}@ chars=%{public}d latency_ms=%{public}d ax_ms=%{public}d cleanup_ms=%{public}d",
-                log: Self.log, type: .info, turnID, mode.rawValue, final.count,
+                log: Self.log, type: .default, turnID, mode.rawValue, final.count,
                 Int((ProcessInfo.processInfo.systemUptime - processStartedAt) * 1000), contextMs,
                 mode == .smart ? Int((ProcessInfo.processInfo.systemUptime - cleanupStartedAt) * 1000) : 0
             )

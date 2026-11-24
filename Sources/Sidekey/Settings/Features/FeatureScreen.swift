@@ -373,7 +373,9 @@ struct FeatureSwitchCard: View {
     static func subtitle(_ info: FeatureInfo, isOn: Bool) -> String {
         switch info.activation {
         case .alwaysOn: return "There is nothing to switch: it waits for its shortcut."
-        case .islandTools: return "Show or hide them in Toolbox; their shortcuts work either way."
+        case .islandTools(let tools):
+            return tools.count > 1 ? "Show or hide them in Toolbox; their shortcuts work either way."
+                : "Show or hide it in Toolbox; its shortcut works either way."
         case .userSwitch: return isOn ? "Turn it off if you don’t use it." : "Turn it on to use it."
         }
     }

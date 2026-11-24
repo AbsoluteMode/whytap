@@ -12,6 +12,8 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case googleSearch
     case translateSubtitles
     case screenshots
+    case todo
+    case caseVault = "case"
 
     var id: String { rawValue }
 }
@@ -60,6 +62,8 @@ enum FeatureHotkey: Hashable {
         case .tool(.translate): return "Open Translate"
         case .tool(.subtitles): return "Start Subtitles"
         case .tool(.screenshot): return "Capture an area"
+        case .tool(.tasks): return "Open To-do"
+        case .tool(.caseVault): return "Open Case"
         case .tool(let tool): return HoverToolRegistry.info(for: tool).title
         }
     }
@@ -384,13 +388,47 @@ enum FeatureCatalog {
                 feature: feature, name: "Translate & Subtitles", kind: "Island tools",
                 line: "Translate text in a small window, or show live translated subtitles for a call or video.",
                 video: nil, hotkeys: [.tool(.translate), .tool(.subtitles)],
-                activation: .islandTools([.translate, .subtitles]), place: .tool(.translate))
+                activation: .islandTools([.translate, .subtitles]), place: .screen,
+                about: "Two tools in the island. Translate turns text you type or paste into another language "
+                    + "with your text model. Subtitles listens to your Mac’s sound and shows a live translation on screen.",
+                clipCaption: "Translate: paste a phrase, get the translation, copy it. Subtitles: a video plays, translated lines appear.")
         case .screenshots:
             return FeatureInfo(
                 feature: feature, name: "Screenshots", kind: "Island tool Shot",
                 line: "Capture an area, annotate it, blur text and numbers.",
                 video: nil, hotkeys: [.tool(.screenshot)],
-                activation: .islandTools([.screenshot]), place: .tool(.screenshot))
+                activation: .islandTools([.screenshot]), place: .screen,
+                about: "Pick an area of the screen, draw arrows and text on it, blur anything private, "
+                    + "then copy or save it. In the island it is called Shot.",
+                clipCaption: "Shot, drag over an area, add an arrow, blur a number, copy.")
+        case .todo:
+            return FeatureInfo(
+                feature: feature, name: "To-do", kind: "Island tool",
+                line: "Quick tasks in the island. The Agent and your coding tools can add to it.",
+                video: nil, hotkeys: [.tool(.tasks)],
+                activation: .islandTools([.tasks]), place: .screen,
+                about: "A short task list in the island. Type a task and press Return; click one to finish it. "
+                    + "The Agent, and coding tools connected to Whytap, can add tasks for you. The list stays on this Mac.",
+                clipCaption: "To-do in the island, a task typed in, then ticked off.",
+                examples: [
+                    "Ask the Agent: “Add ‘renew the passport’ to my To-do”",
+                    "Ask Claude Code or Codex: “Turn my last call into tasks”",
+                ],
+                examplesTitle: "Ways to add tasks")
+        case .caseVault:
+            return FeatureInfo(
+                feature: feature, name: "Case", kind: "Secrets for coding agents",
+                line: "Keeps API keys on this Mac. Coding agents use them by name and never see the values.",
+                video: nil, hotkeys: [.tool(.caseVault)],
+                activation: .islandTools([.caseVault]), place: .screen,
+                about: "A local vault for the API keys your coding agents need. They see key names only; "
+                    + "a command started through Case gets the values, and the island can ask you before each one.",
+                clipCaption: "A coding agent asks for a key, the island asks you, the command runs.",
+                examples: [
+                    "Ask Claude Code: “Deploy with my API key from Case”",
+                    "Ask Codex: “Which keys are in Case for this project?”",
+                ],
+                examplesTitle: "Things to ask your coding agent")
         }
     }
 
@@ -487,6 +525,9 @@ enum FeatureCatalog {
                 FeatureRequirement(kind: .permission(.screenRecording), title: FeaturePermission.screenRecording.title,
                                    detail: "To capture the area you pick."),
             ]
+        // Both work as soon as they are opened: nothing to set up.
+        case .todo, .caseVault:
+            return []
         }
     }
 
@@ -603,7 +644,7 @@ enum FeatureCatalog {
 
     static func isOn(_ feature: AppFeature, snapshot: FeatureSetupSnapshot) -> Bool {
         switch feature {
-        case .drop, .translateSubtitles, .screenshots: return true
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault: return true
         case .agent: return snapshot.agentOn
         case .meetings: return snapshot.meetingsOn
         case .googleSearch: return snapshot.googleOn

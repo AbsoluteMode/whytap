@@ -1,5 +1,8 @@
 # Translation and system-audio subtitles
 
+**Settings → Features → Translate & Subtitles** shows both tools on one screen:
+their shortcuts, what each needs, and buttons that open them.
+
 Open **Translate** or **Subtitles** from the island's tool search. Add either
 button in **Settings → Toolbox** if you want it pinned. Each tool can have its
 own shortcut in **Settings → Hotkeys**; no existing shortcut or layout changes.

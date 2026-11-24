@@ -37,8 +37,8 @@ final class FeatureCatalogTests: XCTestCase {
         let snapshot = freshInstall()
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word),
-                       ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up"])
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "0 ready · 1 needs setup")
+                       ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up", "Ready", "Ready"])
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "2 ready · 1 needs setup")
     }
 
     func testShortcutWaitingForKeyboardControlIsNotCountedTwice() {
@@ -458,22 +458,26 @@ final class FeatureCatalogTests: XCTestCase {
     func testCatalogListsEveryFeatureOnceInOrder() {
         XCTAssertEqual(FeatureCatalog.all.map(\.feature), AppFeature.allCases)
         XCTAssertEqual(FeatureCatalog.all.map(\.name),
-                       ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots"])
+                       ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots",
+                        "To-do", "Case"])
     }
 
     func testClipsAreTheOnesThatExist() {
-        XCTAssertNil(FeatureCatalog.info(for: .drop).video, "No Drop clip yet: the screen shows no placeholder")
+        XCTAssertNil(FeatureCatalog.info(for: .drop).video, "No Drop clip yet: the screen keeps its place")
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)
     }
 
-    func testFeaturesWithoutAScreenPointAtTheirPresentPlace() {
-        XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).place, .tool(.translate))
-        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).place, .tool(.screenshot))
+    func testEveryFeatureHasItsOwnScreen() {
+        for info in FeatureCatalog.all { XCTAssertEqual(info.place, .screen, "\(info.feature)") }
+    }
+
+    func testToDoAndCaseNeedNothingAndAreReadyFromTheStart() {
+        for feature in [AppFeature.todo, .caseVault] {
+            XCTAssertTrue(FeatureCatalog.requirements(for: feature, snapshot: FeatureSetupSnapshot()).isEmpty)
+            XCTAssertEqual(FeatureCatalog.status(for: feature, snapshot: FeatureSetupSnapshot()), .ready(note: nil))
+        }
+        XCTAssertEqual(AppFeature.caseVault.rawValue, "case")
     }
 }

@@ -123,6 +123,11 @@ accepted the second version.
   link (`whytap://settings/agentMode`, the setup prompt) opens the Agent
   screen. The Agent's examples are only things its tools do today (files,
   a command, the screen, web search, To-do, Whytap's own settings).
+- Every catalog feature now has a screen. To-do and Case join the catalog as
+  island tools (they need nothing, so they read Ready on a fresh Mac and the
+  list's summary counts them). Translate and Subtitles keep one shared screen,
+  as in the mockup: they share requirements, a window and a Toolbox pane.
+  Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
 
 ## Why
 

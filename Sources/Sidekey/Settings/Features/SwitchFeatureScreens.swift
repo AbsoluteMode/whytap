@@ -39,7 +39,7 @@ struct SwitchFeatureScreen<Settings: View>: View {
         case .googleSearch: return SettingsOtherView.googleSearchVideoShortcuts(configuration)
         case .meetings:
             return [FeatureVideoShortcut(label: "Record", contents: configuration.meetingRecordShortcut.contents)]
-        case .drop, .translateSubtitles, .screenshots: return []
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault: return []
         }
     }
 }
@@ -84,7 +84,7 @@ final class FeatureSwitchModel: ObservableObject {
         case .googleSearch:
             isOn = on
             environment.setGoogle(on)
-        case .drop, .translateSubtitles, .screenshots:
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault:
             break
         }
         return nil

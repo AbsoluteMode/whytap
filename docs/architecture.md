@@ -1430,7 +1430,13 @@ it is on, otherwise the card says why. The Agent screen adds Allow file edits
 and commands and things to ask; Meeting Notes adds the note-ready notification
 and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
 setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
-Features). WHY:
+Features). Translate & Subtitles, Screenshots, To-do (AppFeature.todo) and
+Case (AppFeature.caseVault, raw value "case") are island tools with their own
+screens too: no switch (the card points to Toolbox), their tool shortcuts, what
+they need, and a "Use it" group (IslandToolActions) that opens the tool:
+Translate and Subtitles in their Toolbox panes, Shot's capture
+(FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
+Case need nothing and read Ready. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

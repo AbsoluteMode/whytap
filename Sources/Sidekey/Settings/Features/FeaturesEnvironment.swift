@@ -30,6 +30,8 @@ struct FeaturesEnvironment {
     /// "Allow file edits and commands".
     var agentSettings: AgentSettingsStore
     var meetingNotifications: MeetingReadyNotifications
+    /// Starts Shot's capture, as its island tool does.
+    var openScreenshot: () -> Void
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
@@ -46,6 +48,7 @@ struct FeaturesEnvironment {
          setGoogle: @escaping (Bool) -> Void = { _ in },
          agentSettings: AgentSettingsStore? = nil,
          meetingNotifications: MeetingReadyNotifications? = nil,
+         openScreenshot: @escaping () -> Void = {},
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil) {
@@ -67,6 +70,7 @@ struct FeaturesEnvironment {
         self.setGoogle = setGoogle
         self.agentSettings = agentSettings ?? .shared
         self.meetingNotifications = meetingNotifications ?? .shared
+        self.openScreenshot = openScreenshot
     }
 }
 

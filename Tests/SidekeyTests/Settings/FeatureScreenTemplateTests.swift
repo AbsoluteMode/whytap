@@ -53,6 +53,48 @@ final class FeatureScreenTemplateTests: XCTestCase {
         XCTAssertNil(FeatureVideoStrip.url(for: FeatureCatalog.info(for: .drop)), "Drop's clip is not made yet")
     }
 
+    func testStartingAnotherShortcutReleasesTheFirstRecorder() async throws {
+        let fixture = try await FeaturesFixture(.usual)
+        defer { fixture.cleanUp() }
+        let recording = HotkeyRecordingSession<FeatureHotkey>()
+        let text = FeatureShortcutEditor(hotkey: .agentText, preferences: fixture.hotkeys, recording: recording)
+        let voice = FeatureShortcutEditor(hotkey: .agentVoice, preferences: fixture.hotkeys, recording: recording)
+        defer { recording.stop() }
+
+        text.startRecording(monitorsEvents: false)
+        voice.startRecording(monitorsEvents: false)
+        XCTAssertFalse(text.isRecording)
+        XCTAssertTrue(voice.isRecording)
+        text.cancel()
+        XCTAssertEqual(recording.target, .agentVoice)
+        XCTAssertTrue(AppState.shared.hotkeyRecordingActive)
+        voice.cancel()
+        XCTAssertFalse(AppState.shared.hotkeyRecordingActive)
+    }
+
+    func testBundledVideoRowRendersEnabledAndDisabled() throws {
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources")
+        let bundle = try XCTUnwrap(Bundle(url: resources))
+        let info = FeatureCatalog.info(for: .googleSearch)
+        XCTAssertNotNil(FeatureVideoStrip.url(for: info, in: bundle))
+
+        for dark in [false, true] {
+            let appearance = dark ? "dark" : "light"
+            let strip = FeatureVideoStrip(info: info, bundle: bundle)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            let size = NSSize(width: 680, height: 80)
+            let directory = FeaturesFixture.renderDirectory
+            let enabled = try FeaturesFixture.render(strip, size: size, dark: dark,
+                                                      to: directory?.appendingPathComponent("video-ready-\(appearance).png"))
+            let disabled = try FeaturesFixture.render(strip.disabled(true), size: size, dark: dark,
+                                                       to: directory?.appendingPathComponent("video-disabled-\(appearance).png"))
+            XCTAssertNotEqual(try XCTUnwrap(enabled.tiffRepresentation), try XCTUnwrap(disabled.tiffRepresentation))
+        }
+    }
+
     func testDropScreenUsesTheTemplateAndKeepsItsPlaceForTheClip() async throws {
         let fixture = try await FeaturesFixture(.usual)
         defer { fixture.cleanUp() }

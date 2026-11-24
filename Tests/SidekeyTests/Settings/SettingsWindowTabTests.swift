@@ -3,30 +3,34 @@ import XCTest
 
 @MainActor
 final class SettingsWindowTabTests: XCTestCase {
-    func test_api_and_models_is_the_first_and_default_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.first, .apiAndModels)
-        XCTAssertEqual(SettingsWindowTab.defaultAvailable, .apiAndModels)
-        XCTAssertEqual(SettingsWindowSelection().selectedTab, .apiAndModels)
+    func test_features_is_the_first_and_default_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.first, .features)
+        XCTAssertEqual(SettingsWindowTab.defaultAvailable, .features)
+        XCTAssertEqual(SettingsWindowSelection().selectedTab, .features)
     }
 
-    func test_hotkeys_is_the_second_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst().first, .hotkeys)
+    func test_api_and_models_follows_features() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst().first, .apiAndModels)
     }
 
-    func test_permissions_is_the_third_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(2).first, .permissions)
+    func test_hotkeys_is_the_third_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(2).first, .hotkeys)
     }
 
-    func test_notes_is_the_fourth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(3).first, .notes)
+    func test_permissions_is_the_fourth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(3).first, .permissions)
     }
 
-    func test_agent_mode_is_the_fifth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(4).first, .agentMode)
+    func test_notes_is_the_fifth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(4).first, .notes)
     }
 
-    func test_toolbox_is_the_sixth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(5).first, .toolbox)
+    func test_agent_mode_is_the_sixth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(5).first, .agentMode)
+    }
+
+    func test_toolbox_is_the_seventh_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(6).first, .toolbox)
     }
 
     func test_every_tab_but_agents_is_in_the_sidebar() {

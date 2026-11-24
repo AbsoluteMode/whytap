@@ -333,7 +333,8 @@ enum FeatureCatalog {
                 feature: feature, name: "Drop", kind: "Dictation",
                 line: "Dictation. Use its shortcut in any text field and speak: your words are typed there.",
                 // The Drop clip is not made yet; the screen shows no placeholder.
-                video: nil, hotkeys: [.dropVoice], activation: .alwaysOn, place: .screen)
+                // Until Drop has its own screen its switches are in Other.
+                video: nil, hotkeys: [.dropVoice], activation: .alwaysOn, place: .tab(.other))
         case .agent:
             return FeatureInfo(
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",

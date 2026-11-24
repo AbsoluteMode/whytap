@@ -34,7 +34,10 @@ their screens showed no clip.
   ids like the existing ones: `drop-fast.mp4` (`.dropFast`, "Drop"),
   `screenshot.mp4` (`.screenshot`, "Shot") and `translate.mp4` (`.translate`).
 - `FeatureCatalog` points Drop, Screenshots and Translate & Subtitles at them;
-  the feature screen template draws `FeatureInfo.video`.
+  the feature screen template draws `FeatureInfo.video`. Drop can play its
+  clip now. Shot and Translate can play theirs after their feature screens
+  ship. Other screens keep the existing quiet “Video coming” row when a
+  bundled clip is unavailable.
 - A Subtitles clip (kit scene `subtitles`) is made too. A feature has one clip
   and the shared screen has no Subtitles block yet, so it is not bundled: a
   bundled clip with no place to play would only add weight. It joins as
@@ -65,7 +68,6 @@ their screens showed no clip.
 
 ## Rejected
 
-- A placeholder where a clip is missing: the screens show none until one exists.
 - Translate into German for an English-only screen: not the app's default, and
   the default is what a new user sees.
 

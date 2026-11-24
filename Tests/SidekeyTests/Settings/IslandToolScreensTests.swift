@@ -22,6 +22,18 @@ final class IslandToolScreensTests: XCTestCase {
         XCTAssertEqual(FeatureHotkey.tool(.caseVault).label, "Open Case")
     }
 
+    /// Translate & Subtitles shows one clip per tool. The Subtitles clip has
+    /// its place before the clip exists: the strip says what it will show.
+    func testTranslateAndSubtitlesHaveAPlaceForEachClip() {
+        let clips = FeatureCatalog.info(for: .translateSubtitles).clips
+        XCTAssertEqual(clips.map(\.name), ["Translate", "Subtitles"])
+        XCTAssertTrue(clips.allSatisfy { !$0.caption.isEmpty })
+        for feature in AppFeature.allCases where feature != .translateSubtitles {
+            XCTAssertEqual(FeatureCatalog.info(for: feature).clips.count, 1, "\(feature)")
+            XCTAssertEqual(FeatureCatalog.info(for: feature).clips[0].name, FeatureCatalog.info(for: feature).name)
+        }
+    }
+
     func testScreensOpenTheirToolsWithoutAWindowOnScreen() async throws {
         let fixture = try await FeaturesFixture(.usual)
         defer { fixture.cleanUp() }

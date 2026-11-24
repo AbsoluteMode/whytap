@@ -128,6 +128,10 @@ accepted the second version.
   list's summary counts them). Translate and Subtitles keep one shared screen,
   as in the mockup: they share requirements, a window and a Toolbox pane.
   Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
+- A screen can hold more than one clip (`FeatureInfo.moreClips`, one strip
+  each). Translate & Subtitles shows a Translate clip and a Subtitles clip;
+  the Subtitles slot waits for `FeatureVideo.subtitles`
+  (Resources/FeatureVideos/subtitles.mp4) and says "Video coming" until then.
 
 ## Why
 

@@ -172,4 +172,28 @@ final class SettingsFeaturesTests: XCTestCase {
         let document = try XCTUnwrap(sidebar.documentView)
         XCTAssertLessThanOrEqual(document.frame.height, sidebar.contentView.bounds.height + 1)
     }
+
+    /// "Choose a model" needs a model that would work: not the selected one,
+    /// not one the feature can't use, not under a refused key.
+    func testAnAlternativeModelMustBeUsableUnderAWorkingKey() {
+        func option(_ model: String, selected: Bool = false, state: PickerOptionState = .verified) -> PickerOption {
+            PickerOption(model: model, state: state, isSelected: selected, hint: nil)
+        }
+        let onlyCurrent = PickerSection(account: .openRouter, title: "OpenRouter",
+                                        options: [option("a", selected: true)], refreshFailed: false)
+        XCTAssertFalse(FeatureSetupSnapshot.hasAlternative(in: [onlyCurrent]))
+        let refused = PickerSection(account: .openRouter, title: "OpenRouter",
+                                    options: [option("a", selected: true), option("b")], refreshFailed: false,
+                                    keyProblem: "Key refused")
+        XCTAssertFalse(FeatureSetupSnapshot.hasAlternative(in: [refused]), "same refused key cannot fix it")
+        let unusable = PickerSection(account: .openRouter, title: "OpenRouter",
+                                     options: [option("b", state: .notSupported(reason: "No audio"))], refreshFailed: false)
+        XCTAssertFalse(FeatureSetupSnapshot.hasAlternative(in: [unusable]))
+        let other = PickerSection(account: .openRouter, title: "OpenRouter",
+                                  options: [option("b", state: .new)], refreshFailed: false)
+        XCTAssertTrue(FeatureSetupSnapshot.hasAlternative(in: [refused, other]))
+        let server = PickerSection(account: .server(UUID()), title: "My server", options: [], refreshFailed: false,
+                                   acceptsModelName: true)
+        XCTAssertTrue(FeatureSetupSnapshot.hasAlternative(in: [server]))
+    }
 }

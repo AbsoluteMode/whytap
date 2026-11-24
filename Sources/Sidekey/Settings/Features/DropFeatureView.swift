@@ -48,7 +48,7 @@ struct DropFeatureView: View {
                 header
                 if case .needsSetup(let missing) = status, let first = missing.first {
                     FeatureNeedsBox(
-                        consequence: FeatureCatalog.consequence(of: first, for: .drop),
+                        consequence: FeatureCatalog.consequence(of: first, for: .drop, snapshot: snapshot),
                         more: missing.count - 1,
                         action: first.action,
                         download: downloadFraction,
@@ -214,11 +214,15 @@ struct DropFeatureView: View {
             return models.rows.first { $0.feature == feature }?.message
         case .permission(.keyboard):
             if permissions.keyboardNeedsRestart { return permissions.restartBlocked }
+            // Override is on: only the last step is left to say.
+            if snapshot.keyboardSetup == .inputMonitoring {
+                return "Override is on. Add Whytap under Input Monitoring, then restart Whytap."
+            }
             return permissions.settingsOnly && !permissions.keyboardReady
                 ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil
         case .dropShortcut:
             guard case .unmet = check.state else { return nil }
-            return FeatureCatalog.consequence(of: check, for: .drop)
+            return FeatureCatalog.consequence(of: check, for: .drop, snapshot: snapshot)
         case .permission, .subtitlesKey:
             return nil
         }
@@ -241,7 +245,7 @@ struct DropFeatureView: View {
             models.useOnDeviceModel(for: feature)
         case .chooseModel(let feature):
             selection.focus(feature)
-        case .addKey, .addOpenAIKey:
+        case .addKey, .fixKey, .addOpenAIKey:
             selection.select(.apiAndModels)
         case .allow(.keyboard):
             permissions.requestAccessibility()
@@ -440,7 +444,7 @@ struct FeatureRequirementRow<Menu: View>: View {
     /// No keyed provider can serve it: there is no list to choose from yet.
     private var needsKey: Bool {
         switch check.action {
-        case .addKey, .addOpenAIKey: return true
+        case .addKey, .fixKey, .addOpenAIKey: return true
         default: return false
         }
     }

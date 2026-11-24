@@ -151,7 +151,7 @@ final class DropFeatureTests: XCTestCase {
         let snapshot = try await fixture(.freshInstall).snapshot
         let missing = FeatureCatalog.status(for: .drop, snapshot: snapshot).missing
         XCTAssertEqual(
-            FeatureNeedsBox.text(consequence: FeatureCatalog.consequence(of: missing[0], for: .drop), more: missing.count - 1),
+            FeatureNeedsBox.text(consequence: FeatureCatalog.consequence(of: missing[0], for: .drop, snapshot: snapshot), more: missing.count - 1),
             "Drop can’t type what you say until it has a speech-to-text model. 2 more below.")
         XCTAssertEqual(FeatureNeedsBox.buttonTitle(.downloadOnDeviceModel(.dropFast), modelSize: "about 470 MB"),
                        "Download the free model · 470 MB")
@@ -173,6 +173,7 @@ final class DropFeatureTests: XCTestCase {
         XCTAssertEqual(Row.rowTitle(.allow(.keyboard)), "Allow")
         XCTAssertEqual(Row.rowTitle(.restartWhytap), "Restart Whytap")
         XCTAssertEqual(Row.rowTitle(.downloadOnDeviceModel(.dropFast)), "Download free model")
+        XCTAssertEqual(Row.rowTitle(.fixKey(.dropFast)), "Fix the key", "a refused key with nothing else to pick")
         XCTAssertEqual(Row.doneWord(.permission(.microphone)), "Allowed")
         XCTAssertEqual(Row.doneWord(.dropShortcut), "Heard")
         XCTAssertEqual(Row.downloadText(0), "Starting the download…")

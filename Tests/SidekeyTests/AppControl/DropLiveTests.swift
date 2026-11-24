@@ -80,10 +80,12 @@ final class DropLiveTests: XCTestCase {
     private func field(_ response: AppControlResponse, _ key: String) -> AppControlValue? { response.data.object?[key] }
 
     /// Starts a take into `target` and lets the provider send words.
-    private func dictate(into target: pid_t?, _ words: String...) {
-        feed.beginTake(target: target)
+    @discardableResult
+    private func dictate(into target: pid_t?, _ words: String...) -> String {
+        let take = feed.beginTake(target: target)
         phase = "recording"
-        for text in words { feed.partial(text) }
+        for text in words { feed.partial(text, take: take) }
+        return take
     }
 
     // MARK: Who may read the live take
@@ -213,6 +215,86 @@ final class DropLiveTests: XCTestCase {
         }
         let none = await live(nil)
         XCTAssertTrue(none.ok, "showsLiveText is optional")
+    }
+
+    // MARK: Takes end, fail and overlap
+
+    func test_a_failed_or_parked_take_shows_no_words() async {
+        dictate(into: whycodePID, "half a sentence")
+        phase = "deliveryFailed"
+        let failed = await live()
+        XCTAssertEqual(field(failed, "toCaller"), .bool(false))
+        XCTAssertEqual(field(failed, "text"), .string(""))
+        XCTAssertEqual(field(failed, "energy")?.double ?? -1, 0, accuracy: 0.0005)
+    }
+
+    func test_the_end_of_a_take_drops_its_words_and_late_partials() async {
+        let take = dictate(into: whycodePID, "first words")
+        feed.endTake()
+        feed.partial("arrived after the end", take: take)
+        let ended = await live()
+        XCTAssertEqual(field(ended, "text"), .string(""))
+        XCTAssertEqual(field(ended, "toCaller"), .bool(false))
+        XCTAssertFalse(feed.suppressesWing)
+    }
+
+    func test_a_partial_from_a_cancelled_take_never_reaches_the_next_one() async {
+        let old = dictate(into: whycodePID, "old take")
+        dictate(into: whycodePID, "new take")
+        // The cancelled session's on-device decode returns late.
+        feed.partial("old take finished decoding", take: old)
+        let response = await live()
+        XCTAssertEqual(field(response, "text"), .string("new take"))
+    }
+
+    func test_a_long_on_device_take_keeps_its_start() async {
+        let take = feed.beginTake(target: whycodePID)
+        feed.markWindowed(take: take)
+        phase = "recording"
+        // Trailing ~14 s windows: each starts later in the take.
+        feed.partial("one two three four five six", take: take)
+        feed.partial("three four five six seven eight", take: take)
+        feed.partial("Five, six seven eight nine ten", take: take)
+        let response = await live()
+        XCTAssertEqual(field(response, "text"), .string("one two three four Five, six seven eight nine ten"))
+    }
+
+    func test_a_cloud_take_is_cumulative_and_not_stitched() async {
+        dictate(into: whycodePID, "one two three", "one two three four", "one too three four five")
+        let response = await live()
+        XCTAssertEqual(field(response, "text"), .string("one too three four five"), "the provider's revision wins")
+    }
+
+    func test_stitching_windows() {
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "", window: " hello "), "hello")
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "a b c d", window: "   "), "a b c d")
+        // The tail was revised by the re-decode.
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "we met on monday to plan the reelase", window: "on monday to plan the release today"),
+                       "we met on monday to plan the release today")
+        // A phrase said twice: the later, longer run is where the window starts.
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "go to the store then go to the bank", window: "go to the bank and home"),
+                       "go to the store then go to the bank and home")
+        // Nothing in common: the start of the take is kept.
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "alpha beta gamma", window: "delta epsilon zeta"), "alpha beta gamma delta epsilon zeta")
+    }
+
+    // MARK: What the user is asked and shown
+
+    func test_whycode_is_asked_about_its_dictation_not_about_meetings() {
+        let whycode = HarnessCallerResolver(inspector: processes).client(peerPID: whycodeHelper)!
+        XCTAssertEqual(CaseApprovalView.harnessTitle(whycode), "Let Whycode show your dictation?")
+        let detail = CaseApprovalView.harnessDetail(for: whycode)
+        XCTAssertTrue(detail.contains("While you dictate into Whycode"))
+        XCTAssertTrue(detail.contains("no meetings"))
+        XCTAssertFalse(detail.contains("read your meetings"))
+        let claude = HarnessCallerResolver(inspector: processes).client(peerPID: claudeHelper)!
+        XCTAssertEqual(CaseApprovalView.harnessDetail(for: claude), CaseApprovalView.harnessDetail)
+
+        let allowed = HarnessAccessSettingsSection.subtitle(.allow, identity: whycode.identity)
+        XCTAssertTrue(allowed.contains("while you dictate into Whycode"))
+        XCTAssertFalse(allowed.contains("Reads your meetings"))
+        XCTAssertFalse(HarnessAccessSettingsSection.subtitle(.deny, identity: whycode.identity).contains("Not allowed to use Whytap"))
+        XCTAssertTrue(HarnessAccessSettingsSection.subtitle(.allow, identity: claude.identity).contains("Reads your meetings"))
     }
 
     // MARK: The island's wing

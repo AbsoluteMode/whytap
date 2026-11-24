@@ -1846,11 +1846,15 @@ allowlist, DropLiveFeed.allowedClients (Whycode, UVBKCN5PPV /
 com.rootwise.whycode), resolved like a harness (direct parent, Apple-vouched)
 but with HarnessScope.liveDictation: it reaches liveDictationOperations only
 and gets unsupported_client for every gated tool, and a coding harness gets
-unsupported_client for drop_live. Same one Yes and store. The gate answers it
-itself with the client's pid: phase, takeId, level, energy
-(VoiceOrbView.voiceEnergy, the orb before AudioEnergyFollower) and the
-cumulative partial only while the take's target pid (captured at
-startDropTurnTelemetry) is the caller. showsLiveText keeps an opt-in for
+unsupported_client for drop_live. Same one Yes and store; the card asks "Let
+Whycode show your dictation?" and its VoiceOver detail and Settings row name
+that scope only. The gate answers it itself with the client's pid: phase,
+takeId, level, energy (VoiceOrbView.voiceEnergy, the orb before
+AudioEnergyFollower, recording only) and the take's words only while the
+phase can still deliver and the take's target pid (captured at
+startDropTurnTelemetry) is the caller. Partials carry the take id of their
+session; endDropTurn calls endTake(). On-device takes (a ~14 s moving window)
+are stitched onto the words already sent (DropLiveFeed.stitch). showsLiveText keeps an opt-in for
 1.5 s; while it holds for the take's target, onTranscriptUpdate skips the
 wing. Not listed in tools/list, unknown to AppControlController (the built-in
 Agent cannot reach it), never logged. WHY:

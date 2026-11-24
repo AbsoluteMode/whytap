@@ -97,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The live take for allowed dictation clients (`drop_live`).
     // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
     private let dropLiveFeed = DropLiveFeed()
+    /// The running take's id in `dropLiveFeed`; its session's partials carry it.
+    private var dropLiveTake = ""
     /// True between the synchronous `phase = .transcribing` at the top of
     /// `startStreamingSession()` and the moment the session is assigned (or
     /// setup fails). Distinguishes the streaming-setup window from the
@@ -2655,7 +2657,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropFailureSettingsShown = false
         lastDropPartial = ""
         // `rememberDropTarget()` ran just before: the take's own target.
-        dropLiveFeed.beginTake(target: autoPasteEngine.currentDropTarget().pid)
+        dropLiveTake = dropLiveFeed.beginTake(target: autoPasteEngine.currentDropTarget().pid)
         let trace = DropTurnTrace()
         dropTurnTrace = trace
         dropActivity.begin(reason: "drop voice turn")
@@ -2690,6 +2692,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// that prevents a double terminal emit.
     private func endDropTurn() -> DropTurnTrace? {
         guard let trace = dropTurnTrace else { return nil }
+        // Pasted, failed, cancelled or parked for retry: no client sees its words.
+        dropLiveFeed.endTake()
         dropTurnWatchdog?.cancel()
         dropTurnWatchdog = nil
         dropMaxHoldTimer?.cancel()
@@ -2961,6 +2965,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.streamingSession = session
+            // This session's partials belong to this take only: a late one
+            // from a cancelled session can never reach a later take.
+            let liveTake = dropLiveTake
+            if session is OnDeviceTranscriptionSession { dropLiveFeed.markWindowed(take: liveTake) }
             // Surface live STT partials in the island recording wing as words
             // land — the same `onTranscriptUpdate` sink the agent voice flow
             // uses (inherited via `StreamingSessionRunning:
@@ -2980,7 +2988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         text, now: ProcessInfo.processInfo.systemUptime
                     )
                 }
-                self?.dropLiveFeed.partial(text)
+                self?.dropLiveFeed.partial(text, take: liveTake)
                 // An allowed app showing the words in its own field keeps
                 // them out of the wing; otherwise the wing gets them as before.
                 // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md

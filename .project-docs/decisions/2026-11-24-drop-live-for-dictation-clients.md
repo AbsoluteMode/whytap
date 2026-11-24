@@ -45,23 +45,38 @@ external process could read it.
   `HarnessScope.liveDictation`. The gate refuses such a client every gated
   tool (meetings, Vocab, Filler) with `unsupported_client`, and refuses a
   coding harness `drop_live` the same way. Case never sees it.
-- **The same Yes.** The first call, or `request_access` right after the
-  server connects, shows "Give Whycode access to Whytap?" through the harness
-  prompt and store; No is remembered, and the switch in Settings ->
-  Integrations -> Coding tools turns it off. The gate rechecks the answer
-  before the reply leaves.
-- **Words only for their destination.** The take's target pid is captured at
-  `startDropTurnTelemetry`, right after `rememberDropTarget()`. `text` is
-  sent only while a take runs and that pid is the caller's own process; for a
-  take into any other app (or a Whytap editor, which has no pid) the caller
-  sees the phase and the level, never words. An idle phase sends no text and
-  zero energy. The task allowed the partial for any take; this is narrower
+- **The same Yes, its own words.** The first call, or `request_access` right
+  after the server connects, shows the harness card and store, but the card
+  asks "Let Whycode show your dictation?" and VoiceOver reads what that
+  covers (only takes into Whycode; no other apps' dictation, meetings,
+  settings or Case keys). The Settings -> Integrations -> Coding tools row
+  says the same. No is remembered, the switch turns it off, and the gate
+  rechecks the answer before the reply leaves.
+- **Words only for their destination and their take.** The take's target
+  pid is captured at `startDropTurnTelemetry`, right after
+  `rememberDropTarget()`. `text` is sent only while the take can still deliver
+  (recording through inserting/finishing) and that pid is the caller's own
+  process; for a take into any other app (or a Whytap editor, which has no
+  pid) the caller sees the phase and the level, never words. A session's
+  partials carry its take id, so a late on-device decode from a cancelled
+  session cannot reach a later take, and `endDropTurn` (paste, failure,
+  cancel, parked retry) calls `endTake()`, which drops the words and the
+  target. Energy is 0 outside `recording`. The task allowed the partial for any take; this is narrower
   and costs Whycode nothing, because it only needs its own takes.
 - **The wing.** `showsLiveText: true` keeps an opt-in for 1.5 s. While it holds
   and the running take goes into that same process, `onTranscriptUpdate`
   skips `dropTranscriptUpdated`; the orb, phase and paste are untouched. When
   the app stops asking (composer blurred, app quit or hung) the next partial
   reaches the wing again, with the whole cumulative text.
+- **Long on-device takes.** `OnDeviceTranscriptionSession` re-decodes only
+  its trailing ~14 s for the island ticker, so its partial is a moving
+  window. For those takes the feed keeps the words already sent and joins
+  each window where it overlaps them (longest run of words compared without
+  case or punctuation, latest on a tie; no overlap appends), so the field
+  keeps the start of the take. Cloud partials are already the whole take and
+  are passed through. The client shows a preview either way; the paste is
+  final. Showing only the trailing window was rejected: the field would lose
+  the start of a long take while the person is still speaking.
 - **Energy.** `VoiceOrbView.voiceEnergy` is the orb's adaptive gate and
   normalisation, moved out of `displayEnergy` unchanged; the island orb and
   `drop_live` use the same function, and the client applies the follower's
@@ -76,7 +91,8 @@ external process could read it.
 
 ## What was checked
 
-`DropLiveTests` (17): an ad-hoc build, another certificate with Whycode's
+`DropLiveTests` (24, after the builder's first review added failed, ended,
+late-partial, long on-device and wording cases): an ad-hoc build, another certificate with Whycode's
 identifier and a script in Whycode's terminal are refused without a prompt;
 Whycode's Yes opens no gated tool; Claude Code with a Yes is refused
 `drop_live`; No is kept and cannot quiet the wing; payload for a take into

@@ -191,10 +191,11 @@ today Whycode (Team ID `UVBKCN5PPV`, identifier `com.rootwise.whycode`), and
 never a coding harness. The app is recognised like a harness: the helper's
 direct parent, by Apple-vouched Team ID and signing identifier, so an ad-hoc
 signed build, another certificate or a script in that app's terminal gets
-`unsupported_client`. Whytap then asks once in the island ("Give Whycode
-access to Whytap?"), as for meetings; the answer is listed in Settings ->
-Integrations -> Coding tools. That Yes opens this tool only: meetings, Vocab
-and Filler writes and Case stay closed to it.
+`unsupported_client`. Whytap then asks once in the island ("Let Whycode show
+your dictation?"; VoiceOver reads what that means), with the same Yes/No card
+as for meetings; the answer is listed in Settings -> Integrations -> Coding
+tools with what it allows. That Yes opens this tool only: meetings, Vocab and
+Filler writes and Case stay closed to it.
 
 Arguments: `{ "showsLiveText": bool }` (optional). The reply:
 
@@ -202,10 +203,16 @@ Arguments: `{ "showsLiveText": bool }` (optional). The reply:
 | --- | --- |
 | `takeId` | Changes with every new take; `""` before the first one |
 | `phase` | The same values as `activity.drop` in `whytap_get_state` (`idle`, `recording`, `transcribing`, `verifying`, `inserting`, …) |
-| `toCaller` | True while a take is running and goes into the calling app's process (the app frontmost at hotkey-down) |
-| `text` | The cumulative partial while `toCaller`, otherwise `""`; a take into any other app never sends words |
+| `toCaller` | True while the take can still deliver (`recording`, `transcribing`, `verifying`, `inserting`, `finishing`) and goes into the calling app's process (the app frontmost at hotkey-down) |
+| `text` | The words so far while `toCaller`, otherwise `""`; a take into any other app never sends words, and a take that ended, failed (`deliveryFailed`) or was cancelled sends none |
 | `level` | Newest raw microphone sample, 0…1 |
-| `energy` | 0…1: the island orb's noise-floor gate and scaling, before its smoothing (0 while idle) |
+| `energy` | 0…1 while `recording`: the island orb's noise-floor gate and scaling, before its smoothing; 0 otherwise |
+
+`text` is the whole take so far. Cloud speech providers send that directly.
+On-device transcription re-decodes only the last ~14 s, so for a longer take
+Whytap keeps the words already sent and joins each new window onto them where
+they overlap (a re-decoded boundary word may change). It is a preview; the
+pasted final text is what counts.
 
 A call with `showsLiveText: true` keeps an opt-in for 1.5 s; `false` ends it.
 While the opt-in holds and the take goes into that app, Whytap writes no

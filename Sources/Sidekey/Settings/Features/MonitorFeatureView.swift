@@ -7,16 +7,14 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 @MainActor
 struct MonitorFeatureView: View {
-    let snapshot: FeatureSetupSnapshot
     @ObservedObject var selection: SettingsWindowSelection
     @ObservedObject private var store: MonitorStore
     @StateObject private var shortcut: FeatureShortcutEditor
     private let environment: FeaturesEnvironment
     private let now: () -> Date
 
-    init(snapshot: FeatureSetupSnapshot, selection: SettingsWindowSelection, environment: FeaturesEnvironment,
+    init(selection: SettingsWindowSelection, environment: FeaturesEnvironment,
          now: @escaping () -> Date = Date.init) {
-        self.snapshot = snapshot
         self.selection = selection
         self.environment = environment
         self.store = environment.monitor
@@ -35,31 +33,33 @@ struct MonitorFeatureView: View {
     private var isEmpty: Bool { store.dashboards.isEmpty && !store.serverStatusListed }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                IslandFeatureHeader(info: FeatureCatalog.info(for: .monitor), about: Self.about) {
-                    selection.shownFeature = nil
-                }
-                shortcutGroup
-                if isEmpty {
-                    promptCard
-                    dashboards
-                } else {
-                    dashboards
-                    promptCard
-                }
-                Text("To delete a dashboard, open Monitor in the island and click × on its row. "
-                     + "Whytap never stops or deletes a collector: turn it off yourself if it should stop running.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
+        let info = FeatureCatalog.info(for: .monitor)
+        FeatureScreenScaffold {
+            FeatureScreenHeader(info: info, about: Self.about) {
+                selection.shownFeature = nil
             }
-            .frame(maxWidth: SettingsFeaturesView.contentWidth, alignment: .topLeading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-            .frame(maxWidth: .infinity, alignment: .top)
+            FeatureVideoStrip(info: info)
+            shortcutGroup
+            if isEmpty {
+                promptCard
+                dashboards
+            } else {
+                dashboards
+                promptCard
+            }
+            Text("To delete a dashboard, open Monitor in the island and click × on its row. "
+                 + "Whytap never stops or deletes a collector: turn it off yourself if it should stop running.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .onAppear { store.reloadFiles() }
+        .task {
+            while !Task.isCancelled {
+                store.reloadFiles()
+                do { try await Task.sleep(for: .seconds(5)) }
+                catch { break }
+            }
+        }
         .onDisappear { shortcut.cancel() }
     }
 

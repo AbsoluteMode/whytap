@@ -6,14 +6,12 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 @MainActor
 struct NotifyFeatureView: View {
-    let snapshot: FeatureSetupSnapshot
     @ObservedObject var selection: SettingsWindowSelection
     @ObservedObject private var supervisor: NotifyScriptSupervisor
     @StateObject private var shortcut: FeatureShortcutEditor
     private let environment: FeaturesEnvironment
 
-    init(snapshot: FeatureSetupSnapshot, selection: SettingsWindowSelection, environment: FeaturesEnvironment) {
-        self.snapshot = snapshot
+    init(selection: SettingsWindowSelection, environment: FeaturesEnvironment) {
         self.selection = selection
         self.environment = environment
         self.supervisor = environment.notifySupervisor
@@ -29,30 +27,26 @@ struct NotifyFeatureView: View {
         + "It writes a small local script, and the source appears under Connected sources with its own switch and sound."
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                IslandFeatureHeader(info: FeatureCatalog.info(for: .notify), about: Self.about) {
-                    selection.shownFeature = nil
-                }
-                shortcutGroup
-                // Nothing connected yet: the way to connect comes first.
-                if supervisor.sources.isEmpty {
-                    promptCard
-                    sources
-                } else {
-                    sources
-                    promptCard
-                }
-                Text("Click the speaker to choose a sound and hear it; crossed out means silent. Cards appear while "
-                     + "Whytap is open. Turning a source off keeps its setup and history.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
+        let info = FeatureCatalog.info(for: .notify)
+        FeatureScreenScaffold {
+            FeatureScreenHeader(info: info, about: Self.about) {
+                selection.shownFeature = nil
             }
-            .frame(maxWidth: SettingsFeaturesView.contentWidth, alignment: .topLeading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-            .frame(maxWidth: .infinity, alignment: .top)
+            FeatureVideoStrip(info: info)
+            shortcutGroup
+            // Nothing connected yet: the way to connect comes first.
+            if supervisor.sources.isEmpty {
+                promptCard
+                sources
+            } else {
+                sources
+                promptCard
+            }
+            Text("Click the speaker to choose a sound and hear it; crossed out means silent. Cards appear while "
+                 + "Whytap is open. Turning a source off keeps its setup and history.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .onDisappear { shortcut.cancel() }
     }

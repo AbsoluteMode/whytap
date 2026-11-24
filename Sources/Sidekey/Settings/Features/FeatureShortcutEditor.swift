@@ -54,11 +54,13 @@ final class FeatureShortcutEditor: ObservableObject {
     @Published private(set) var problem: String?
     @Published private(set) var isRecording = false
     @Published private(set) var recordedContents: [KeycapContent] = []
-    private let recording = HotkeyRecordingSession<FeatureHotkey>()
+    private let recording: HotkeyRecordingSession<FeatureHotkey>
 
-    init(hotkey: FeatureHotkey, preferences: HotkeyPreferences) {
+    init(hotkey: FeatureHotkey, preferences: HotkeyPreferences,
+         recording: HotkeyRecordingSession<FeatureHotkey>? = nil) {
         self.hotkey = hotkey
         self.preferences = preferences
+        self.recording = recording ?? HotkeyRecordingSession()
     }
 
     var configuration: HotkeyConfiguration { preferences.configuration }
@@ -73,6 +75,7 @@ final class FeatureShortcutEditor: ObservableObject {
     }
 
     func startRecording(monitorsEvents: Bool = true) {
+        guard !recording.isRecording(hotkey) else { return }
         conflicts = []
         problem = nil
         isRecording = true
@@ -86,11 +89,11 @@ final class FeatureShortcutEditor: ObservableObject {
     func record(_ shortcut: HotkeyShortcut) {
         var candidate = configuration
         guard hotkey.assign(shortcut, in: &candidate) else { return }
-        if save(candidate) { recording.stop() }
+        if save(candidate), recording.isRecording(hotkey) { recording.stop() }
     }
 
     func cancel() {
-        recording.stop()
+        if recording.isRecording(hotkey) { recording.stop() }
         isRecording = false
         conflicts = []
     }

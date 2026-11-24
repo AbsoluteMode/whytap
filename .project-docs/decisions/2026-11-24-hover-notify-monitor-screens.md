@@ -49,7 +49,8 @@ had to know that and tell the agent where Whytap's files are.
     tool is still held. A row that slides under the pointer after a move is
     not a new target, so the tool does not flip back. A tool that is off,
     dropped on a row, joins the island there; dropped on Settings it joins
-    the end; a tool dropped on More tools leaves the island.
+    the end; a tool dropped on More tools leaves the island. Tool drags
+    use an internal type, so dropping ordinary text cannot move a tool.
   - Each row has a switch: off takes the tool out of the island, on puts it
     back at the end, before Settings. Move Up, Move Down and Move to Top are
     in the row's context menu and VoiceOver actions.
@@ -63,6 +64,8 @@ had to know that and tell the agent where Whytap's files are.
 - **Notify** and **Monitor** are "Not set up" (quiet, counted nowhere) until
   the person's agent connected a source or a dashboard, then Ready. The
   built-in Meeting notes source belongs to Meeting Notes and is not counted.
+- The three screens share the feature header, scrolling layout and quiet
+  clip slot used by Drop.
 - Their screens: what it does; the tool's shortcut and an Open button for its
   island panel; the sources (the Notifications tab's list, now one shared
   view) or the dashboards with how fresh each is; and a "Let your coding
@@ -76,8 +79,10 @@ had to know that and tell the agent where Whytap's files are.
   `history.json`; for Monitor, the snapshot fields, widget kinds, limits,
   atomic writes, the optional `servers.json`. It forbids sending messages,
   LaunchAgents for Notify, changing servers and putting secrets in files.
-- Settings reads Monitor's files with a store that is never started, so it
-  never connects to servers. Copying goes through
+- Settings rereads Monitor's files every five seconds while the Monitor
+  screen is open. The store is never started, so Settings never connects
+  to servers. An unreadable server configuration is shown for repair and
+  does not count toward Ready. Copying goes through
   `FeaturesEnvironment.copyText`; tests pass a box, never the pasteboard.
 - The Toolbox and Notifications tabs stay until the sidebar is reduced.
 

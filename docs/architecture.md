@@ -1413,7 +1413,15 @@ Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
 Mode, Language you speak, Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
-island editors. The same switches remain in Other and in the island. WHY:
+island editors. The same switches remain in Other and in the island. Every
+feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
+(snapshot, view models, environment, the setup actions and the per-check
+notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
+setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
+one a "Video coming" row says what it will show), FeatureShortcutsGroup (one
+recording session shared by its rows), FeatureNeedsGroup, the feature's own
+settings and FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
+its screen; Drop keeps DropFeatureView around the same parts. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Hover, Notify and Monitor are features with their own screens too. Hover
@@ -1421,7 +1429,8 @@ Hover, Notify and Monitor are features with their own screens too. Hover
 Settings pinned last, then the tools that are off. A row is held and dragged
 (HoverToolDragModel: over another row the tool takes its place live; a row
 sliding under the pointer is not a new target; an off tool dropped on a row
-joins there; dropped on More tools it leaves); its switch removes it or puts
+joins there; dropped on More tools it leaves). Only the internal tool drag
+type can update the list. A tool's switch removes it or puts
 it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
 actions. The island observes the same store, so it changes at once. The
 chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a

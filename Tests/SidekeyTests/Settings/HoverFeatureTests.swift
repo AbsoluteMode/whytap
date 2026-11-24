@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import XCTest
 @testable import Sidekey
 
@@ -21,6 +22,13 @@ final class HoverFeatureTests: XCTestCase {
     }
 
     // MARK: - Opening
+
+    func testOnlyAnInternalToolProviderOffersTheReorderType() {
+        let type = HoverToolDropDelegate.contentType.identifier
+        XCTAssertTrue(HoverToolDropDelegate.provider(for: .monitor).hasItemConformingToTypeIdentifier(type))
+        XCTAssertFalse(NSItemProvider(object: "external text" as NSString).hasItemConformingToTypeIdentifier(type))
+        XCTAssertFalse(HoverToolDropDelegate.contentType.conforms(to: .text))
+    }
 
     func testHoverRowOpensItsOwnScreenAndIsReadyOnAFreshMac() async throws {
         let fixture = try await fixture(.freshInstall)

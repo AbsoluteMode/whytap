@@ -121,7 +121,7 @@ extension FeatureSetupSnapshot {
             googleOn: environment.googleOn(),
             notifySources: environment.notifySupervisor.sources.count,
             monitorDashboards: environment.monitor.dashboards.count
-                + (environment.monitor.serverStatusListed ? 1 : 0)
+                + (environment.monitor.serverStatusListed && environment.monitor.serverError == nil ? 1 : 0)
         )
     }
 

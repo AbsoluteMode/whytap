@@ -173,6 +173,11 @@ final class NotifyMonitorFeatureTests: XCTestCase {
         let rows = MonitorFeatureView.rows(dashboards: [], serverStatusListed: true, serverError: nil, now: Date())
         XCTAssertEqual(rows.map(\.title), ["Server status"])
         XCTAssertTrue(fixture.monitor.readings.allSatisfy { $0.metrics == nil }, "Reading files connects to nothing")
+        try Data("invalid JSON".utf8).write(to: fixture.monitor.root.appendingPathComponent("servers.json"))
+        fixture.monitor.reloadFiles()
+        XCTAssertTrue(fixture.monitor.serverStatusListed, "Show the setup problem on the screen")
+        XCTAssertNotNil(fixture.monitor.serverError)
+        XCTAssertEqual(FeatureCatalog.status(for: .monitor, snapshot: fixture.snapshot).word, "Not set up")
     }
 
     // MARK: - Looks
@@ -204,7 +209,7 @@ final class NotifyMonitorFeatureTests: XCTestCase {
         try Data(snapshot.utf8).write(to: dashboards.appendingPathComponent("queue.json"))
         fixture.monitor.reloadFiles()
         try FeaturesFixture.render(
-            MonitorFeatureView(snapshot: fixture.snapshot, selection: selection, environment: fixture.environment)
+            MonitorFeatureView(selection: selection, environment: fixture.environment)
                 .background(MacSettingsTheme.bgContent),
             size: NSSize(width: 760, height: 900), dark: false,
             to: FeaturesFixture.renderDirectory?.appendingPathComponent("monitor-connected-light.png"))

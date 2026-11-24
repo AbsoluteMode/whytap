@@ -13,6 +13,7 @@ struct HoverFeatureView: View {
     @ObservedObject private var store: HoverLayoutStore
     @ObservedObject private var hotkeys: HotkeyPreferences
     @StateObject private var drag: HoverToolDragModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let environment: FeaturesEnvironment
 
     init(selection: SettingsWindowSelection, environment: FeaturesEnvironment) {
@@ -29,48 +30,48 @@ struct HoverFeatureView: View {
 
     var body: some View {
         let layout = HoverToolLayout(slots: store.slots)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                IslandFeatureHeader(info: FeatureCatalog.info(for: .hover), about: Self.about) {
-                    selection.shownFeature = nil
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    MacGroupTitle(title: "In the island", trailing: HoverToolLayout.countText(layout.inIsland.count))
-                    MacCard {
-                        ForEach(Array(layout.inIsland.enumerated()), id: \.element) { index, tool in
-                            if index > 0 { MacRowSeparator() }
-                            row(tool, isOn: true, layout: layout)
-                                .onDrop(of: [.text], delegate: HoverToolDropDelegate(target: .tool(tool), model: drag))
-                        }
-                        if !layout.inIsland.isEmpty { MacRowSeparator() }
-                        HoverPinnedSettingsRow()
-                            .onDrop(of: [.text], delegate: HoverToolDropDelegate(target: .end, model: drag))
+        let info = FeatureCatalog.info(for: .hover)
+        FeatureScreenScaffold {
+            FeatureScreenHeader(info: info, about: Self.about) {
+                selection.shownFeature = nil
+            }
+            FeatureVideoStrip(info: info)
+            VStack(alignment: .leading, spacing: 0) {
+                MacGroupTitle(title: "In the island", trailing: HoverToolLayout.countText(layout.inIsland.count))
+                MacCard {
+                    ForEach(Array(layout.inIsland.enumerated()), id: \.element) { index, tool in
+                        if index > 0 { MacRowSeparator() }
+                        row(tool, isOn: true, layout: layout)
+                            .onDrop(of: [HoverToolDropDelegate.contentType],
+                                    delegate: HoverToolDropDelegate(target: .tool(tool), model: drag,
+                                                                   reduceMotion: reduceMotion))
                     }
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    MacGroupTitle(title: "More tools", trailing: layout.offIsland.isEmpty ? nil : "Off")
-                    MacCard {
-                        if layout.offIsland.isEmpty {
-                            Text("Every tool is in the island.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(MacSettingsTheme.text2)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 14)
-                        } else {
-                            ForEach(Array(layout.offIsland.enumerated()), id: \.element) { index, tool in
-                                if index > 0 { MacRowSeparator() }
-                                row(tool, isOn: false, layout: layout)
-                            }
-                        }
-                    }
-                    // Dropping a tool here takes it out of the island.
-                    .onDrop(of: [.text], delegate: HoverToolDropDelegate(target: .off, model: drag))
+                    if !layout.inIsland.isEmpty { MacRowSeparator() }
+                    HoverPinnedSettingsRow()
+                        .onDrop(of: [HoverToolDropDelegate.contentType],
+                                delegate: HoverToolDropDelegate(target: .end, model: drag, reduceMotion: reduceMotion))
                 }
             }
-            .frame(maxWidth: SettingsFeaturesView.contentWidth, alignment: .topLeading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-            .frame(maxWidth: .infinity, alignment: .top)
+            VStack(alignment: .leading, spacing: 0) {
+                MacGroupTitle(title: "More tools", trailing: layout.offIsland.isEmpty ? nil : "Off")
+                MacCard {
+                    if layout.offIsland.isEmpty {
+                        Text("Every tool is in the island.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(MacSettingsTheme.text2)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 14)
+                    } else {
+                        ForEach(Array(layout.offIsland.enumerated()), id: \.element) { index, tool in
+                            if index > 0 { MacRowSeparator() }
+                            row(tool, isOn: false, layout: layout)
+                        }
+                    }
+                }
+                // Dropping a tool here takes it out of the island.
+                .onDrop(of: [HoverToolDropDelegate.contentType],
+                        delegate: HoverToolDropDelegate(target: .off, model: drag, reduceMotion: reduceMotion))
+            }
         }
         .onDisappear { drag.end() }
     }
@@ -83,8 +84,8 @@ struct HoverFeatureView: View {
             hotkeys: hotkeys,
             canMoveUp: layout.canMoveUp(tool),
             canMoveDown: layout.canMoveDown(tool),
-            setOn: { on in withAnimation(.easeInOut(duration: 0.18)) { layout.set(tool, on: on, in: store) } },
-            move: { step in withAnimation(.easeInOut(duration: 0.18)) { layout.move(tool, by: step, in: store) } },
+            setOn: { on in withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { layout.set(tool, on: on, in: store) } },
+            move: { step in withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { layout.move(tool, by: step, in: store) } },
             beginDrag: { drag.begin(tool) },
             destination: destination(for: tool)
         )
@@ -216,15 +217,30 @@ final class HoverToolDragModel: ObservableObject {
 }
 
 struct HoverToolDropDelegate: DropDelegate {
+    /// A cancelled drag can leave a remembered tool. Use a process-local
+    /// representation so an unrelated text drop does not consume it.
+    static let contentType = UTType(exportedAs: "com.rootwise.sidekey.hover-tool")
     let target: HoverToolDragModel.Target
     let model: HoverToolDragModel
+    let reduceMotion: Bool
+
+    static func provider(for tool: HoverTool) -> NSItemProvider {
+        let provider = NSItemProvider()
+        let data = Data(tool.rawValue.utf8)
+        provider.registerDataRepresentation(forTypeIdentifier: contentType.identifier, visibility: .ownProcess) { completion in
+            completion(data, nil)
+            return nil
+        }
+        return provider
+    }
 
     @MainActor func validateDrop(info: DropInfo) -> Bool {
-        model.dragging != nil && info.hasItemsConforming(to: [.text])
+        model.dragging != nil && info.hasItemsConforming(to: [Self.contentType])
     }
 
     @MainActor func dropEntered(info: DropInfo) {
-        withAnimation(.easeInOut(duration: 0.16)) { model.enter(target) }
+        guard validateDrop(info: info) else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) { model.enter(target) }
     }
 
     @MainActor func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -232,7 +248,8 @@ struct HoverToolDropDelegate: DropDelegate {
     }
 
     @MainActor func performDrop(info: DropInfo) -> Bool {
-        withAnimation(.easeInOut(duration: 0.18)) { model.drop(on: target) }
+        guard validateDrop(info: info) else { return false }
+        return withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { model.drop(on: target) }
     }
 }
 
@@ -258,6 +275,7 @@ struct HoverToolRow: View {
     let destination: Destination?
     @State private var expanded = false
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var chevronFocused: Bool
 
     private var info: HoverToolInfo { HoverToolRegistry.info(for: tool) }
@@ -274,7 +292,7 @@ struct HoverToolRow: View {
                 if !shortcut.isEmpty {
                     FeatureShortcutKeys(contents: shortcut)
                 }
-                Button { withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() } } label: {
+                Button { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) { expanded.toggle() } } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(MacSettingsTheme.text2)
@@ -305,14 +323,21 @@ struct HoverToolRow: View {
                 .padding(.bottom, 12)
             }
         }
-        .background(hovering && isOn ? MacSettingsTheme.hover.opacity(0.35) : Color.clear)
+        .background(hovering ? MacSettingsTheme.hover.opacity(0.35) : Color.clear)
         .onHover { hovering = $0 }
         .contextMenu { menu }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(info.title)
         .accessibilityValue(isOn ? "In the island" : "Off")
-        .accessibilityAction(named: "Move up") { if canMoveUp { move(-1) } }
-        .accessibilityAction(named: "Move down") { if canMoveDown { move(1) } }
+        .accessibilityActions {
+            if canMoveUp {
+                Button("Move up") { move(-1) }
+                Button("Move to top") { move(.min) }
+            }
+            if canMoveDown {
+                Button("Move down") { move(1) }
+            }
+        }
     }
 
     /// The part a person holds to drag: handle, mark and words.
@@ -350,7 +375,7 @@ struct HoverToolRow: View {
         .contentShape(Rectangle())
         .onDrag {
             beginDrag()
-            return NSItemProvider(object: tool.rawValue as NSString)
+            return HoverToolDropDelegate.provider(for: tool)
         } preview: {
             HStack(spacing: 8) {
                 Image(systemName: info.sfSymbol).font(.system(size: 12.5))

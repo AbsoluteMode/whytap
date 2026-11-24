@@ -19,10 +19,11 @@ final class SettingsFeaturesTests: XCTestCase {
     func testFreshInstallListsDropAsTheOnlyThingToSetUp() async throws {
         let snapshot = try await fixture(.freshInstall).snapshot
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
-        XCTAssertEqual(statuses.map(\.word), ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up"])
+        XCTAssertEqual(statuses.map(\.word), ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
+                        "Ready", "Not set up", "Not set up"])
         XCTAssertEqual(statuses[0].reason, "No speech-to-text model +2")
         XCTAssertEqual(statuses[0].missing.first?.action, .downloadOnDeviceModel(.dropFast))
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "0 ready · 1 needs setup")
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "1 ready · 1 needs setup")
     }
 
     func testIntelMacWithoutKeysIsAskedForAKey() async throws {

@@ -21,7 +21,13 @@ no attention indicator. The dot survives temporary card expiry and app restarts,
 and clears when Notify history is opened. **Clear All** clears history and current
 notifications immediately, without confirmation or disconnecting sources.
 
-**Settings → Notifications** lists every connected source, its logo and current
+**Settings → Features → Notify** has a Copy prompt card (Claude Code, Codex,
+Cursor, Antigravity): the prompt carries this Mac's paths and the contract
+below, so the person pastes it into their coding agent and says what they want
+to hear about (`Settings/Features/CodingAgentPrompt.swift`). Update the prompt
+when this contract changes.
+
+**Settings → Notifications** and the Notify screen list every connected source, its logo and current
 status and an on/off switch. Turning it off stops its script
 and notifications immediately, while keeping its configuration and event history;
 the switch remains off after restarting Whytap. Agent-added sources appear

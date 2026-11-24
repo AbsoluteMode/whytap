@@ -59,9 +59,12 @@ external process could read it.
   process; for a take into any other app (or a Whytap editor, which has no
   pid) the caller sees the phase and the level, never words. A session's
   partials carry its take id, so a late on-device decode from a cancelled
-  session cannot reach a later take, and `endDropTurn` (paste, failure,
-  cancel, parked retry) calls `endTake()`, which drops the words and the
-  target. Energy is 0 outside `recording`. The task allowed the partial for any take; this is narrower
+  session cannot reach a later take. `endTake()` drops the words and the
+  target: `endDropTurn` calls it before looking at the diagnostic trace, and
+  the feed also ends the take itself whenever the Drop phase becomes `idle`
+  or `deliveryFailed` (`endTakes(on:)`), so a take whose trace the 640 s
+  watchdog already dropped cannot hand old words to a Retry. Energy is 0
+  outside `recording`. The task allowed the partial for any take; this is narrower
   and costs Whycode nothing, because it only needs its own takes.
 - **The wing.** `showsLiveText: true` keeps an opt-in for 1.5 s. While it holds
   and the running take goes into that same process, `onTranscriptUpdate`
@@ -69,12 +72,17 @@ external process could read it.
   the app stops asking (composer blurred, app quit or hung) the next partial
   reaches the wing again, with the whole cumulative text.
 - **Long on-device takes.** `OnDeviceTranscriptionSession` re-decodes only
-  its trailing ~14 s for the island ticker, so its partial is a moving
-  window. For those takes the feed keeps the words already sent and joins
-  each window where it overlaps them (longest run of words compared without
-  case or punctuation, latest on a tie; no overlap appends), so the field
-  keeps the start of the take. Cloud partials are already the whole take and
-  are passed through. The client shows a preview either way; the paste is
+  its trailing ~14 s for the island ticker. It now also reports, per partial
+  (`onTranscriptWindow`), whether that window still starts at the beginning
+  of the take. Such a frame, like every cloud partial, is the whole take and
+  replaces the text (growth, a revised first word, any script). Only a
+  shifted window is joined onto the words already sent where it overlaps
+  them: longest run compared without case or punctuation, latest on a tie,
+  by words, or by characters when the window has hardly any spaces
+  (Japanese, Chinese, Thai); no overlap appends, so the field keeps the start
+  of the take. Guessing a shift from the text alone was tried first and
+  rejected by review: it duplicated short growing takes, revised leading
+  words and unspaced text. The client shows a preview either way; the paste is
   final. Showing only the trailing window was rejected: the field would lose
   the start of a long take while the person is still speaking.
 - **Energy.** `VoiceOrbView.voiceEnergy` is the orb's adaptive gate and
@@ -91,8 +99,9 @@ external process could read it.
 
 ## What was checked
 
-`DropLiveTests` (24, after the builder's first review added failed, ended,
-late-partial, long on-device and wording cases): an ad-hoc build, another certificate with Whycode's
+`DropLiveTests` (27; the builder's reviews added failed, ended, late-partial,
+watchdog-then-Retry, short, revised, unspaced and long on-device, and
+wording cases) and an on-device session test of the shifted flag: an ad-hoc build, another certificate with Whycode's
 identifier and a script in Whycode's terminal are refused without a prompt;
 Whycode's Yes opens no gated tool; Claude Code with a Yes is refused
 `drop_live`; No is kept and cannot quiet the wing; payload for a take into

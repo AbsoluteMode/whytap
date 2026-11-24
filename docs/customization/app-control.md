@@ -209,9 +209,11 @@ Arguments: `{ "showsLiveText": bool }` (optional). The reply:
 | `energy` | 0…1 while `recording`: the island orb's noise-floor gate and scaling, before its smoothing; 0 otherwise |
 
 `text` is the whole take so far. Cloud speech providers send that directly.
-On-device transcription re-decodes only the last ~14 s, so for a longer take
-Whytap keeps the words already sent and joins each new window onto them where
-they overlap (a re-decoded boundary word may change). It is a preview; the
+On-device transcription re-decodes only the last ~14 s; once a take is longer
+than that, Whytap keeps the words already sent and joins each new window onto
+them where they overlap (by words, or by characters in languages written
+without spaces; a re-decoded boundary word may change). Shorter takes are
+passed through as decoded. It is a preview; the
 pasted final text is what counts.
 
 A call with `showsLiveText: true` keeps an opt-in for 1.5 s; `false` ends it.

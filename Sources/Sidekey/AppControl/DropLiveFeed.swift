@@ -1,3 +1,4 @@
+import Combine
 import Darwin
 import Foundation
 import WhytapCaseKit
@@ -18,10 +19,12 @@ import WhytapCaseKit
 ///   `endTake()` drops the words and the target when the take ends, fails or
 ///   is parked for a retry.
 /// - Long on-device takes: that session re-decodes only its trailing ~14 s,
-///   so its partial is a moving window. For such a take (`markWindowed`) the
-///   feed keeps the words already shown and joins each window onto them where
-///   the two overlap (`stitch`), so the client's field does not lose its
-///   start. It is a preview: Drop's paste of the final text replaces it.
+///   and says so per partial (`shifted`). A partial whose window still starts
+///   at the beginning of the take replaces the text, like a cloud partial; a
+///   shifted one is joined onto the words already shown where the two overlap
+///   (`stitch`, by words, or by characters for text without spaces), so the
+///   client's field does not lose its start. It is a preview: Drop's paste of
+///   the final text replaces it.
 /// - Wing: a call with `showsLiveText: true` keeps an opt-in for
 ///   `optInDuration`. While it holds and the take goes into that client, the
 ///   island's recording wing gets no partials (the orb and phase stay). When
@@ -56,8 +59,8 @@ final class DropLiveFeed {
     private(set) var takeID = ""
     private var target: pid_t?
     private var text = ""
-    private var windowed = false
     private var optIn: (pid: pid_t, until: TimeInterval)?
+    private var phaseWatch: AnyCancellable?
 
     init(uptime: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          phase: @escaping @MainActor () -> String = { String(describing: AppState.shared.phase) },
@@ -80,15 +83,16 @@ final class DropLiveFeed {
         takeID = UUID().uuidString
         self.target = target
         text = ""
-        windowed = false
         return takeID
     }
 
-    /// The take's speech source sends a moving window rather than the whole
-    /// take so far (on-device transcription).
-    func markWindowed(take: String) {
-        guard take == takeID, target != nil else { return }
-        windowed = true
+    /// Ends the take whenever Drop goes idle or parks a take for Retry,
+    /// whichever path got it there (the diagnostic watchdog drops the trace
+    /// that `endDropTurn` would otherwise use).
+    func endTakes(on phases: AnyPublisher<String, Never>) {
+        phaseWatch = phases
+            .filter { $0 == "idle" || $0 == "deliveryFailed" }
+            .sink { [weak self] _ in self?.endTake() }
     }
 
     /// The take ended (pasted, failed, cancelled, parked for retry): its
@@ -96,15 +100,15 @@ final class DropLiveFeed {
     func endTake() {
         target = nil
         text = ""
-        windowed = false
     }
 
-    /// The provider's partial for `take`. One from another (older) take, or
-    /// after the take ended, is dropped. A transient blank one keeps the last
-    /// words, as the wing does.
-    func partial(_ text: String, take: String) {
+    /// The provider's partial for `take`: the whole take so far, or with
+    /// `shifted` a window that no longer starts at its beginning. One from
+    /// another (older) take, or after the take ended, is dropped. A transient
+    /// blank one keeps the last words, as the wing does.
+    func partial(_ text: String, take: String, shifted: Bool = false) {
         guard take == takeID, target != nil, text.contains(where: { !$0.isWhitespace }) else { return }
-        self.text = windowed ? Self.stitch(shown: self.text, window: text) : text
+        self.text = shifted ? Self.stitch(shown: self.text, window: text) : text
     }
 
     /// True while an allowed client asked to show the text itself and the
@@ -144,9 +148,10 @@ final class DropLiveFeed {
 
     // MARK: Moving windows
 
-    /// The shortest run of words that has to match before a window is joined
-    /// onto the words already shown.
-    static let minimumOverlap = 3
+    /// The shortest run that has to match before a window is joined onto
+    /// what is shown: words, or characters for text written without spaces.
+    static let minimumWordOverlap = 3
+    static let minimumCharacterOverlap = 6
 
     /// Joins a trailing window onto the words already shown. The window's
     /// start is looked for in `shown`, compared without case or punctuation
@@ -157,7 +162,11 @@ final class DropLiveFeed {
     /// matches nothing is added after what is shown, so the start of the take
     /// is never lost.
     static func stitch(shown: String, window: String) -> String {
-        let old = words(shown), new = words(window)
+        // About 14 s of speech is many words where words are spaced; a window
+        // with hardly any spaces (Japanese, Chinese, Thai) is compared by character.
+        let byCharacters = units(window, byCharacters: false).count < 4
+        let old = units(shown, byCharacters: byCharacters), new = units(window, byCharacters: byCharacters)
+        let minimumOverlap = byCharacters ? minimumCharacterOverlap : minimumWordOverlap
         let trimmed = window.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !old.isEmpty else { return trimmed }
         guard !new.isEmpty else { return shown }
@@ -174,8 +183,20 @@ final class DropLiveFeed {
         return String(shown[..<old[best.start].range.lowerBound]) + trimmed
     }
 
-    private static func words(_ text: String) -> [(key: String, range: Range<String.Index>)] {
+    /// Words (or single characters) with their place in `text`, keyed
+    /// without case or punctuation; units that are only punctuation are left out.
+    private static func units(_ text: String, byCharacters: Bool) -> [(key: String, range: Range<String.Index>)] {
         var result: [(key: String, range: Range<String.Index>)] = []
+        if byCharacters {
+            var index = text.startIndex
+            while index < text.endIndex {
+                let next = text.index(after: index)
+                let key = String(text[index]).lowercased().filter { $0.isLetter || $0.isNumber }
+                if !key.isEmpty { result.append((key, index..<next)) }
+                index = next
+            }
+            return result
+        }
         var index = text.startIndex
         while index < text.endIndex {
             guard !text[index].isWhitespace else {
@@ -184,7 +205,8 @@ final class DropLiveFeed {
             }
             let start = index
             while index < text.endIndex, !text[index].isWhitespace { index = text.index(after: index) }
-            result.append((text[start..<index].lowercased().filter { $0.isLetter || $0.isNumber }, start..<index))
+            let key = text[start..<index].lowercased().filter { $0.isLetter || $0.isNumber }
+            if !key.isEmpty { result.append((key, start..<index)) }
         }
         return result
     }

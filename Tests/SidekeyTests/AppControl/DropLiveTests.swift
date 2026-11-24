@@ -1,3 +1,4 @@
+import Combine
 import Darwin
 import WhytapCaseKit
 import XCTest
@@ -249,14 +250,52 @@ final class DropLiveTests: XCTestCase {
 
     func test_a_long_on_device_take_keeps_its_start() async {
         let take = feed.beginTake(target: whycodePID)
-        feed.markWindowed(take: take)
         phase = "recording"
-        // Trailing ~14 s windows: each starts later in the take.
+        // Under 14 s every window is the whole take; then it starts sliding.
+        feed.partial("one two three four", take: take)
         feed.partial("one two three four five six", take: take)
-        feed.partial("three four five six seven eight", take: take)
-        feed.partial("Five, six seven eight nine ten", take: take)
+        feed.partial("three four five six seven eight", take: take, shifted: true)
+        feed.partial("Five, six seven eight nine ten", take: take, shifted: true)
         let response = await live()
         XCTAssertEqual(field(response, "text"), .string("one two three four Five, six seven eight nine ten"))
+    }
+
+    func test_a_short_on_device_take_is_shown_as_decoded() async {
+        let take = feed.beginTake(target: whycodePID)
+        phase = "recording"
+        // Growing, then the leading word revised: whole-take frames replace.
+        for frame in ["hello", "hello world", "Hallo world again"] { feed.partial(frame, take: take) }
+        let spaced = await live()
+        XCTAssertEqual(field(spaced, "text"), .string("Hallo world again"))
+        // A language written without spaces.
+        let japanese = feed.beginTake(target: whycodePID)
+        for frame in ["こんにちは", "こんにちは世界", "今日は世界です"] { feed.partial(frame, take: japanese) }
+        let unspaced = await live()
+        XCTAssertEqual(field(unspaced, "text"), .string("今日は世界です"))
+    }
+
+    func test_a_long_take_without_spaces_keeps_its_start() async {
+        let take = feed.beginTake(target: whycodePID)
+        phase = "recording"
+        feed.partial("きょうはかいぎでしんきのけいかくをはなしました", take: take)
+        feed.partial("しんきのけいかくをはなしましたあしたまでに", take: take, shifted: true)
+        let response = await live()
+        XCTAssertEqual(field(response, "text"), .string("きょうはかいぎでしんきのけいかくをはなしましたあしたまでに"))
+    }
+
+    func test_after_the_watchdog_a_retry_shows_no_old_words() async {
+        // The diagnostic watchdog dropped the trace, so no endDropTurn ends
+        // the take; the take then parks for Retry and comes back to finishing.
+        let phases = PassthroughSubject<String, Never>()
+        feed.endTakes(on: phases.eraseToAnyPublisher())
+        dictate(into: whycodePID, "words before the stall")
+        phase = "deliveryFailed"
+        phases.send("deliveryFailed")
+        phase = "finishing"
+        phases.send("finishing")
+        let retry = await live()
+        XCTAssertEqual(field(retry, "text"), .string(""))
+        XCTAssertEqual(field(retry, "toCaller"), .bool(false))
     }
 
     func test_a_cloud_take_is_cumulative_and_not_stitched() async {
@@ -276,6 +315,9 @@ final class DropLiveTests: XCTestCase {
                        "go to the store then go to the bank and home")
         // Nothing in common: the start of the take is kept.
         XCTAssertEqual(DropLiveFeed.stitch(shown: "alpha beta gamma", window: "delta epsilon zeta"), "alpha beta gamma delta epsilon zeta")
+        // Punctuation-only tokens do not count as words.
+        XCTAssertEqual(DropLiveFeed.stitch(shown: "so — we start now and then", window: "we start now and then stop"),
+                       "so — we start now and then stop")
     }
 
     // MARK: What the user is asked and shown

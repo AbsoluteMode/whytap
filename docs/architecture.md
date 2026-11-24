@@ -1869,8 +1869,11 @@ takeId, level, energy (VoiceOrbView.voiceEnergy, the orb before
 AudioEnergyFollower, recording only) and the take's words only while the
 phase can still deliver and the take's target pid (captured at
 startDropTurnTelemetry) is the caller. Partials carry the take id of their
-session; endDropTurn calls endTake(). On-device takes (a ~14 s moving window)
-are stitched onto the words already sent (DropLiveFeed.stitch). showsLiveText keeps an opt-in for
+session; endTake() runs from endDropTurn (before the trace guard) and on
+every idle/deliveryFailed phase (endTakes(on:)). On-device partials report
+through onTranscriptWindow whether their ~14 s window has shifted; only
+shifted windows are stitched onto the words already sent (DropLiveFeed.stitch,
+words or characters). showsLiveText keeps an opt-in for
 1.5 s; while it holds for the take's target, onTranscriptUpdate skips the
 wing. Not listed in tools/list, unknown to AppControlController (the built-in
 Agent cannot reach it), never logged. WHY:

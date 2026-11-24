@@ -72,7 +72,7 @@ final class WhytapLinkTests: XCTestCase {
         XCTAssertEqual(destination("whytap://tool/screenshot"), .toolboxTool(.screenshot))
         XCTAssertEqual(destination("whytap://tool/dropMode"), .toolboxTool(.dropMode))
         XCTAssertEqual(destination("whytap://tool/quit"), .settings(.quitRow))
-        XCTAssertEqual(destination("whytap://tool/settings"), .settings(.tab(.apiAndModels)))
+        XCTAssertEqual(destination("whytap://tool/settings"), .settings(.tab(.features)))
         XCTAssertEqual(destination("whytap://tool/tasks"), .hoverPanel(.tasks))
         XCTAssertEqual(destination("whytap://tool/calendar"), .hoverPanel(.calendar))
         XCTAssertEqual(destination("whytap://tool/translate"), .translation(.text))

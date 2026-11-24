@@ -21,6 +21,9 @@ struct SettingsWindowView: View {
     let privacyPreferences: PrivacyPreferences
     /// Applies the screenshot-protection toggle to the live island panel.
     let screenshotProtectionChanged: (Bool) -> Void
+    /// What the Features screens read besides the view models; tests and
+    /// previews replace it to show a Mac in another state.
+    let featuresEnvironment: FeaturesEnvironment?
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
@@ -44,7 +47,8 @@ struct SettingsWindowView: View {
         otherOnMeetingsToggle: @escaping (Bool) -> Void = { _ in },
         otherOnGoogleToggle: @escaping (Bool) -> Void = { _ in },
         privacyPreferences: PrivacyPreferences? = nil,
-        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in }
+        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
+        featuresEnvironment: FeaturesEnvironment? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
@@ -60,6 +64,18 @@ struct SettingsWindowView: View {
         self.otherOnGoogleToggle = otherOnGoogleToggle
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
+        self.featuresEnvironment = featuresEnvironment
+    }
+
+    /// The live environment: this window's own switches and Drop mode.
+    private var liveFeaturesEnvironment: FeaturesEnvironment {
+        FeaturesEnvironment(
+            dropMode: toolboxDeps.currentDropMode,
+            agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),
+                                              activeProvider: AgentProviderStore.shared.activeProvider) },
+            meetingsOn: otherMeetingsEnabled,
+            googleOn: otherGoogleEnabled
+        )
     }
 
     var body: some View {
@@ -208,6 +224,13 @@ struct SettingsWindowView: View {
     @ViewBuilder
     private var detailPane: some View {
         switch selection.selectedTab {
+        case .features:
+            SettingsFeaturesView(
+                selection: selection,
+                models: apiAndModelsViewModel,
+                permissions: permissionsViewModel,
+                environment: featuresEnvironment ?? liveFeaturesEnvironment
+            )
         case .apiAndModels:
             APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature)
         case .hotkeys:
@@ -337,6 +360,8 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
+    /// The feature whose own screen Features shows; nil is the list.
+    @Published var shownFeature: AppFeature?
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?
@@ -344,7 +369,7 @@ final class SettingsWindowSelection: ObservableObject {
     private var previousNonNotesTab: SettingsWindowTab
     private var highlightTask: Task<Void, Never>?
 
-    init(selectedTab: SettingsWindowTab = .apiAndModels) {
+    init(selectedTab: SettingsWindowTab = .features) {
         let resolvedTab = selectedTab.resolved
         let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         self.selectedTab = availableTab
@@ -361,7 +386,24 @@ final class SettingsWindowSelection: ObservableObject {
         } else {
             previousNonNotesTab = availableTab
         }
+        // The sidebar's Features row is "Features home": back to the list.
+        if availableTab == .features { shownFeature = nil }
         selectedTab = availableTab
+    }
+
+    /// Opens a feature from the Features list: its own screen when it has one,
+    /// otherwise the place its settings are shown today.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    func open(_ feature: AppFeature) {
+        switch FeatureCatalog.info(for: feature).place {
+        case .screen:
+            select(.features)
+            shownFeature = feature
+        case .tab(let tab):
+            setHighlight(.tab(tab))
+        case .tool(let tool):
+            focus(tool)
+        }
     }
 
     /// Opens API & Models on one feature's row.

@@ -1390,7 +1390,14 @@ one tool works, Not set up when neither does. On macOS 27.3 the Input
 Monitoring stage of keyboard control (KeyboardSetup.inputMonitoring) is one
 step, on Keyboard control's row, not counted again for the shortcut. A
 sentence about an optional part names only what it stops. No catalog text
-names a key. WHY:
+names a key. Settings opens on the
+Features tab (SettingsWindowTab.features, whytap://settings/features):
+SettingsFeaturesView lists the catalog with each status, read through
+FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
+PermissionsSettingsViewModel the older tabs show. A row opens the feature's
+own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
+present place: the Other tab, or its Toolbox pane. The older tabs stay in the
+sidebar with their identifiers. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

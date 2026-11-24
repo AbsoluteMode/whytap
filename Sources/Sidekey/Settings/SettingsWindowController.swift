@@ -243,6 +243,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func loadIfNeeded(tab: SettingsWindowTab) async {
         switch tab {
+        case .features:
+            // The Features views refresh their own models and permissions.
+            break
         case .apiAndModels:
             await apiAndModelsViewModel.onAppear()
         case .hotkeys:

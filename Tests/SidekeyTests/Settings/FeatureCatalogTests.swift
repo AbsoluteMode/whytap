@@ -469,7 +469,7 @@ final class FeatureCatalogTests: XCTestCase {
     }
 
     func testFeaturesWithoutAScreenPointAtTheirPresentPlace() {
-        XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .screen)
+        XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .tab(.other))
         XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .tab(.agentMode))
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .tab(.other))
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .tab(.other))

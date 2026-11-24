@@ -1,5 +1,29 @@
 # Interface decisions
 
+## What's New window — 2026-11-24
+
+Opens once after an update and from the version in Settings. 440 pt wide, as
+tall as its list up to 740 pt, then the middle scrolls. Settings tokens,
+following the system appearance; a transparent title bar with the close
+button only. A mono caption ("WHAT'S NEW", or "WHAT'S NEW SINCE 2.2.25"
+after a jump over releases), then the onboarding's serif at 34 pt: "Whytap"
+and the version in italic. One card per release (14 pt radius, hairline
+border); with several releases each card has its version above it in mono.
+A row is a 28 pt accent-tinted tile with an SF Symbol, a 13 pt semibold
+title, a 12 pt secondary body and, when the item has one, a quiet accent
+action ("Open Models ›") that opens that Settings tab. The first row of the
+newest release carries its clip at 368 × 207 pt above the text: the still
+frame at once, the silent loop over it, the still frame alone under Reduce
+Motion. One primary button on the right, Got it (Return); Escape and the
+close button do the same.
+
+Why: a person who just updated wants to know in a few seconds what is
+different. Five short rows are read at a glance, one clip shows the main
+change at work, and one button ends it. The look is Settings', because the
+window belongs to the app's ordinary surfaces, with the serif headline as
+the one thing shared with the first launch. See
+`.project-docs/decisions/2026-11-24-whats-new-window.md`.
+
 ## Island beside the system Dynamic Island — 2026-11-22
 
 - On a touch MacBook Pro macOS draws its own Dynamic Island around the camera
@@ -99,7 +123,8 @@ change the tool's settings below.
   reason ("Agent: no tool support · kept …"), and "Checking…" while the single
   probe runs.
 - "Advanced · a model per feature" (chevron, collapsed by default) holds the
-  former per-feature groups unchanged. It starts expanded for Mixed, a link
+  former per-feature groups. Since 2026-11-24 the Agent is one card like Drop
+  Smart and Meetings: Speech (the Agent voice route), then Text. It starts expanded for Mixed, a link
   to one feature, and "Show" for features without a model.
 - Re-picking with custom features asks in a native dialog: Keep custom models
   (default), Replace them too, Cancel; the message names those features.
@@ -131,10 +156,16 @@ See the [provider web search decision](../.project-docs/decisions/2026-11-22-age
   nothing copied).
 - With marks, a plain click on any row copies all marked rows in mark order
   and clears the marks; Enter pastes them where there is a target.
-- The footer teaches the gesture in one line ("⌘-click for several") and,
-  once rows are marked, states the outcome: "Click to copy N   Enter to paste
-  N to <app>   Esc to clear" (no Enter part without a target; Toolbox says
-  "⌘-click to unmark"). Without marks plain click and Enter keep their meaning.
+- The footer is separate plain-text blocks with a thin vertical hairline
+  between them, no icons or keycaps: "Click to copy | ⌘-click for several |
+  Enter to paste to <app>"; with marks "Click to copy N | Enter to paste N to
+  <app> | Esc to clear" (no Enter block without a target; Toolbox ends with
+  "⌘-click to unmark"). The row steps from 9.5 pt down to 8 pt to fit; only
+  then the app name, never a hint, shortens with "…" (2026-11-23: the
+  one-line footer read as one sentence; a keycap/icon version shipped in
+  build 1724 and the maintainer asked to remove the icons;
+  [decision](../.project-docs/decisions/2026-11-22-history-hint-keycaps.md)).
+  Without marks plain click and Enter keep their meaning.
 - Marked rows stay marked while switching Agent, Drop and Clipboard, so text
   and files from different tabs can go out together in mark order.
 
@@ -1209,7 +1240,7 @@ rights. No alternative composition or decorative screen is needed.
 | --- | --- |
 | Search | Finds project and key names/descriptions, including empty projects and General. A project match shows all its keys; a key match shows just matching keys under its project. The project with the best match (own or a key's) comes first; equal ones keep project order. A query word that starts a word of a project name lets the rest of the query match that project's keys. + Key stays available in project results. Return cannot create a key; name/value fields open separately after + Key. Empty results say Nothing found. |
 | Connected icons | Open the selected registration directly. Connect stays visible beside the horizontally scrolling strip, including when empty. Codex/OpenAI uses blue, Claude/Anthropic orange, Cursor a white halo. Hover/focus change color and glow without changing geometry; keyboard focus has an outline. Reduce Motion removes the short opacity/color transition. |
-| Client picker | Discovers installed OpenCode, Claude Code and Cursor only after Connect (no Codex). Shows bundled brand marks, loading, no installed clients or already-connected states. Selecting a client opens a draft; nothing is registered until Connect on the rights screen. The arbitrary program picker is removed. |
+| Client picker | Discovers Whytap Agent and installed Claude Code, Codex and Cursor only after Connect. Shows bundled brand marks (Whytap Agent: the Agent orb in colour, since 2026-11-23), loading, no installed clients or already-connected states. Selecting a client opens a draft; nothing is registered until Connect on the rights screen. The arbitrary program picker is removed. |
 | Rights | Default Accept asks before use; Bypass allows use without prompts. All projects includes future projects (explained in native help); Selected shows searchable checkboxes and denies unchecked projects at the broker. Filtering preserves the full draft selection. Existing per-project overrides remain visible/editable. An empty saved scope closes access; a new connection needs at least one project or All. |
 | Save | One transaction stores mode and scope; registration, widening access and enabling Bypass require Touch ID. Pending authentication disables edits and Back. Failure preserves the draft and explains recovery; connector errors remain visible after registration, with Retry setup reusing the same registration and rights. |
 | Back / disconnect | Back discards unsaved rights. Disconnect revokes access before editing client config. Existing island outside-click and Escape dismissal still apply. |
@@ -1236,6 +1267,26 @@ key-only matches remain filtered. Search results expose + Key so the found
 project can be used without clearing the query manually. Adding explicitly
 expands that project before leaving search; existing cached metadata and
 lazy rendering remain.
+
+### Case add-key position — 2026-11-24
+
+The maintainer added a key to a project with more than a hundred keys and had
+to scroll the whole list to reach + Key, which had stood after the last key
+since the first Case version for no recorded reason. He asked to move it up.
+
+- + Key in <project> is the first row of an expanded project, directly under
+  the project name and above its keys, in the island and in Settings (one
+  panel). The name and value fields stay in the fixed bar above the list, so
+  they are in view wherever the list is scrolled.
+- Keys are listed by name, so a saved key could land far below. The key just
+  saved is therefore listed first in its project, right under + Key, until Case
+  locks; after that it takes its place by name. Only the panel's order changes:
+  stored data, search ranking and what the broker lists are untouched.
+- A key dragged onto + Key moves into that project, like a drop on the project
+  name or on one of its keys, so the row is not a dead spot between them.
+- Rejected: scrolling the list to the saved key. `ScrollViewProxy.scrollTo`
+  does nothing in the offscreen fixture windows, so it could not be checked
+  without launching an app, which feature sessions do not do.
 
 ### Case search ranking — 2026-10-21
 
@@ -1377,7 +1428,7 @@ only Connect commits the draft after authentication. The user chose this flow.
   explanation belongs to the commit action; normal mode/scope navigation does
   not request authentication. Errors and retry remain visible above the editor.
 - Loading and both empty states are contained surfaces. With no installation,
-  explain to install OpenCode, Claude Code or Cursor and reopen Connect; with saved supported
+  explain to install Claude Code, Codex or Cursor and reopen Connect; with saved supported
   registrations, point to their icons for editing rights. No client config,
   secret, route or vault migration changes are part of this polish.
 

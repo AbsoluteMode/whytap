@@ -41,7 +41,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/OpenAITranslateRecordedSession.swift
     confirmed_at: 2026-11-21
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-10-20-translation-tools.md, 2026-10-19-api-and-models.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md, 2026-11-23-subtitle-realtime-audio.md]
 ---
 
 # Subtitles on OpenAI live speech translation
@@ -70,8 +70,9 @@ their own OpenAI quota, with Whytap's pairs and look kept.
   `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate`
   with the OpenAI key from API & Models, sets the target language and input
   transcription (`gpt-realtime-whisper`), and waits for `session.updated`
-  before any audio, so a refused key or language fails at Start. The 16 kHz
-  capture is upsampled to 24 kHz and sent in 200 ms frames. Stop flushes the
+  before any audio, so a refused key or language fails at Start. The capture
+  is sent at 24 kHz in 200 ms frames (until 2026-11-23 a 16 kHz capture was
+  upsampled per callback; see `2026-11-23-subtitle-realtime-audio.md`). Stop flushes the
   rest, sends `session.close` and waits for `session.closed` (the existing
   10 s stop watchdog bounds it). Only `session.closed` is a complete ending:
   a failed `session.close` send, or a socket lost before `session.closed`,
@@ -87,7 +88,9 @@ their own OpenAI quota, with Whytap's pairs and look kept.
   a 1.2 s pause, or at a clause past 160 characters. Each cut takes the
   original's next sentence if that sentence ended (by `elapsed_ms`) no later
   than the translation; sentences that ended 5 s or more earlier join it (the
-  model merged them). Without a finished original sentence (a pause, whose
+  model merged them). Since 2026-11-23 a later sentence heard by the cut
+  joins too when the translation's length and delay fit it better
+  (2026-11-23-subtitle-pairs-close-speed.md). Without a finished original sentence (a pause, whose
   period arrives with the next word, or a sentence the model split) it takes
   the words heard up to the translation's position, whole words only. A
   period arriving after its pair closed is added to that pair.

@@ -1,0 +1,138 @@
+import AppKit
+import SwiftUI
+
+/// Hosts the onboarding window and participates in the app switcher while visible.
+/// Closing it explicitly finishes onboarding. Quitting the app preserves the step.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+@MainActor
+final class OnboardingJourneyWindowController: NSWindowController, NSWindowDelegate {
+    let model: OnboardingJourneyModel
+    private let onClosed: () -> Void
+    private var didClose = false
+    private var keyMonitor: Any?
+
+    /// Whytap lives without a Dock icon (`.accessory`), so ⌘Tab never lists
+    /// it. While the onboarding is open the app is `.regular`: in ⌘Tab and the
+    /// Dock, so a person who went to System Settings can come back; closing
+    /// it hands back `.accessory`. Hotkeys and the island do not depend on it.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    private let inAppSwitcher: (Bool) -> Void
+
+    init(model: OnboardingJourneyModel, inAppSwitcher: @escaping (Bool) -> Void = { _ in },
+         onClosed: @escaping () -> Void) {
+        self.model = model
+        self.inAppSwitcher = inAppSwitcher
+        self.onClosed = onClosed
+        let size = OnboardingJourneyView.size
+        let window = OnboardingJourneyWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to Whytap"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
+        window.level = .normal
+        window.collectionBehavior = [.managed, .fullScreenNone]
+        // The onboarding is dark in every appearance, like the island.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.047, green: 0.047, blue: 0.063, alpha: 1)
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        let hosting = NSHostingController(rootView: OnboardingJourneyView(model: model))
+        // The page fills the whole window, title bar included.
+        hosting.sizingOptions = []
+        window.contentViewController = hosting
+        window.setContentSize(size)
+        super.init(window: window)
+        window.delegate = self
+        model.onFinish = { [weak self] in self?.close() }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("OnboardingJourneyWindowController only supports programmatic init.")
+    }
+
+    var isVisible: Bool { window?.isVisible == true }
+
+    /// ⌘Tab or a Dock click brought Whytap back: the onboarding comes forward.
+    func bringForward() {
+        guard let window, window.isVisible else { return }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// On activation (⌘Tab, the Dock): the onboarding comes up unless the
+    /// person activated Whytap through another of its windows (Settings
+    /// opened from a step), which stays in front.
+    func bringForwardOnActivation(keyWindow: NSWindow?) {
+        guard keyWindow == nil || keyWindow === window || keyWindow is NSPanel else { return }
+        bringForward()
+    }
+
+    func show() {
+        guard let window else { return }
+        inAppSwitcher(true)
+        SidekeyWindowChrome.centerOnMainScreen(window)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        installBackKey()
+    }
+
+    /// ← and ⌘[ go back a step while this window has the keyboard and no
+    /// text field does (`OnboardingBackKey`).
+    private func installBackKey() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.window, event.window === window,
+                  OnboardingBackKey.isBack(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                                           editingText: OnboardingBackKey.isEditingText(window.firstResponder)),
+                  self.model.canGoBack else { return event }
+            self.model.back()
+            return nil
+        }
+    }
+
+    /// The window passes key presses it does not take up to its controller,
+    /// the end of the responder chain, where AppKit would beep.
+    override func noResponder(for eventSelector: Selector) {
+        if let window = window as? OnboardingJourneyWindow, window.silences(eventSelector) { return }
+        super.noResponder(for: eventSelector)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard !didClose else { return }
+        didClose = true
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        model.stop()
+        inAppSwitcher(false)
+        onClosed()
+    }
+}
+
+/// The onboarding's window. A key press nothing in it takes (Space, a letter,
+/// Escape or an unbound ⌘ shortcut on a step without a text field, or while
+/// the Try Drop field is not yet focused) ends here, and `NSWindow` answers
+/// it with the system alert sound. Most onboarding steps have no text field,
+/// so those sounds came with no visible cause; they are dropped silently.
+// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+final class OnboardingJourneyWindow: NSWindow {
+    /// Key presses dropped here instead of beeping (for tests).
+    private(set) var silencedKeyPresses = 0
+
+    override func noResponder(for eventSelector: Selector) {
+        if silences(eventSelector) { return }
+        super.noResponder(for: eventSelector)
+    }
+
+    /// `true` for a key press, counted; the caller then stays silent.
+    func silences(_ eventSelector: Selector) -> Bool {
+        guard eventSelector == #selector(NSResponder.keyDown(with:)) else { return false }
+        silencedKeyPresses += 1
+        return true
+    }
+}

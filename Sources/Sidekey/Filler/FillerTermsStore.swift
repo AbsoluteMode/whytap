@@ -11,8 +11,8 @@ struct FillerTermsStore {
     enum Rejection: Equatable { case empty, tooLong, duplicate, tooMany }
     enum AddResult: Equatable { case added, rejected(Rejection) }
 
-    /// Posted after every write so an open editor shows a term added or
-    /// removed by a learning suggestion's Y.
+    /// Posted after every write so every open editor (island, Toolbox) shows
+    /// a term added or removed in another one.
     static let didChangeNotification = Notification.Name("sidekey.filler.didChange")
 
     private let defaults: UserDefaults
@@ -27,16 +27,25 @@ struct FillerTermsStore {
         defaults.stringArray(forKey: key) ?? []
     }
 
-    @discardableResult
-    func add(_ raw: String) -> AddResult {
+    /// The editor's rules for one term against `current`. Pure: callers that
+    /// check a batch before adding (application controls) use it too.
+    static func validate(_ raw: String, against current: [String]) -> AddResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .rejected(.empty) }
-        guard trimmed.count <= Self.maxTermLength else { return .rejected(.tooLong) }
-        var current = terms()
+        guard trimmed.count <= maxTermLength else { return .rejected(.tooLong) }
         guard !current.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
             return .rejected(.duplicate)
         }
-        guard current.count < Self.maxTermCount else { return .rejected(.tooMany) }
+        guard current.count < maxTermCount else { return .rejected(.tooMany) }
+        return .added
+    }
+
+    @discardableResult
+    func add(_ raw: String) -> AddResult {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var current = terms()
+        let result = Self.validate(trimmed, against: current)
+        guard result == .added else { return result }
         current.append(trimmed)
         defaults.set(current, forKey: key)
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)

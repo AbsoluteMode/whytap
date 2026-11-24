@@ -168,17 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// leaves captured audio stranded in memory.
     private var pendingRetryPCM: Data?
     private var pendingProcessingRetry: DropProcessingRetry?
-    /// Learning from the user's edits after a take (opt-in; calibration is a
-    /// hidden developer mode). WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-    private lazy var dropLearning = DropLearningCoordinator.live { [weak self] in
-        self?.show(.hoverPanel(.vocabularyEditor))
-    }
-    /// The liquid-glass drops right of the island that ask about a learned
-    /// correction. WHY: .project-docs/decisions/2026-11-22-drop-learning-drops.md
-    private var dropLearningDrops: (controller: DropLearningDropsController, panel: DropLearningDropsPanel)?
-    /// How this take's speech request carried Vocab. Batch recovery, Retry
-    /// and the recorder fallback send none.
-    private var dropLearningVocabTransport: VocabularyTransport = .none
     private var pendingRetryTarget: (app: String?, pid: pid_t?)?
     /// True while a manual Retry's batch recovery is in flight. Gates
     /// `retryPendingDelivery` (via `shouldBeginRetry`) so a second press can't
@@ -264,13 +253,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardWatcher: ClipboardWatcher?
     private var assetsDirectory: URL?
     private var permissionRepairWindowController: PermissionRepairWindowController?
-    private var onboardingWindowController: OnboardingWindowController?
+    private var onboardingWindowController: OnboardingJourneyWindowController?
     private var didCompleteReadyStartup = false
     private var runtimeAccessibilityGranted = false
     private var runtimePermissionsObserver: NSObjectProtocol?
     private var openHotkeySettingsObserver: NSObjectProtocol?
     private var permissionCaptureEndObserver: AnyCancellable?
     private var permissionRecoveryTimer: Timer?
+    /// Hourly end of the shelved Drop learning calibration journal.
+    private var shelvedDropLearningTimer: Timer?
     private var permissionRecoverySession: UUID?
     private var permissionRecoveryBudget = DropHotkeyRecoveryPollBudget()
     private var dropRegistrationFailure: DropHotkeyStatus?
@@ -357,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `static func main()` call alone was racing AppKit's Dock paint on
     /// some macOS versions (Tahoe 26 included).
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before anything is granted in this process: 27.3 grants made later need a restart.
+        PermissionsHelper.recordLaunchGrants()
         let accepted = NSApp.setActivationPolicy(.accessory)
         os_log(
             "lifecycle_activation_policy stage=will_finish accepted=%{public}@ policy=%d",
@@ -377,10 +370,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Runs after this method returns, once the island and its actions exist.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Creating it runs calibration expiry and opt-out cleanup now and
-            // hourly. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-            _ = self.dropLearning
-            self.dropLearningDrops = DropLearningDropsController.live(coordinator: self.dropLearning)
             self.acceptsLinkRequests = true
             if let request = self.pendingLinkRequest {
                 self.pendingLinkRequest = nil
@@ -400,6 +389,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.ensureSettingsWindowController().selectNoteMeeting(id: id)
         }
         NotifyScriptSupervisor.shared.start()
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+        ShelvedDropLearningData().expireCalibration()
+        shelvedDropLearningTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { _ in
+            ShelvedDropLearningData().expireCalibration()
+        }
         Task { await AgentSettingsStore.shared.refreshCodexCatalog() }
         // Final-rubber-stamp diagnostic + last-resort retry. If we reach
         // `applicationDidFinishLaunching` with a non-`.accessory` policy
@@ -544,9 +538,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The first launch on a Mac opens the onboarding instead of Settings ->
         // Permissions; a Mac that ran Whytap before never sees it.
         // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
-        if OnboardingLaunch.consume(in: .standard) {
+        let opensOnboarding = OnboardingLaunch.consume(in: .standard)
+        if opensOnboarding {
             presentOnboarding()
         }
+        // After an update: what changed for the person, once per version.
+        // WHY: .project-docs/decisions/2026-11-24-whats-new-window.md
+        WhatsNewPresenter.shared.openSettings = { [weak self] tab in
+            self?.openSettingsWindow(tab: tab)
+        }
+        WhatsNewPresenter.shared.presentAfterLaunch(isFirstLaunch: opensOnboarding, defaults: .standard)
     }
 
     private func presentOnboarding() {
@@ -554,12 +555,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             existing.show()
             return
         }
-        let model = OnboardingModel()
+        let model = OnboardingJourneyModel(resumeDefaults: .standard)
         model.openSettings = { [weak self] tab, feature in
             self?.openSettingsWindow(tab: tab, feature: feature)
         }
-        let controller = OnboardingWindowController(model: model) { [weak self] in
-            OnboardingLaunch.finish(in: .standard)
+        let controller = OnboardingJourneyWindowController(model: model, inAppSwitcher: { shown in
+            NSApp.setActivationPolicy(shown ? .regular : .accessory)
+        }) { [weak self] in
+            // A quit (System Settings' Quit & Reopen after a privacy switch)
+            // is not the end of the onboarding: the relaunch continues it.
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            if self?.isTerminating != true { OnboardingLaunch.finish(in: .standard) }
             NowPlayingAutomationConsent.promptsDeferred = false
             // Released after AppKit finishes closing the window.
             DispatchQueue.main.async { self?.onboardingWindowController = nil }
@@ -571,16 +577,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The onboarding on screen, if any: Drop's setup problems are shown in it
     /// instead of opening a second window over it.
-    private var visibleOnboarding: OnboardingWindowController? {
+    private var visibleOnboarding: OnboardingJourneyWindowController? {
         onboardingWindowController.flatMap { $0.isVisible ? $0 : nil }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        visibleOnboarding?.bringForwardOnActivation(keyWindow: NSApp.keyWindow)
         refreshRuntimePermissions()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showRuntimeSurfaceAfterReopen()
+        visibleOnboarding?.bringForward()
         return true
     }
 
@@ -591,7 +599,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerIslandHotkeyActivity()
     }
 
+    /// Set once the app agreed to quit, before AppKit takes its windows down.
+    private(set) var isTerminating = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        isTerminating = true
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()
@@ -624,7 +641,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caseBrokerServer = nil
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
-        dropLearningDrops?.controller.model.dismissForBusyIsland()
         meetingsEventConsumer?.cancel()
         meetingsEventConsumer = nil
     }
@@ -996,7 +1012,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.orderOut(nil)
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
-        dropLearningDrops?.controller.model.dismissForBusyIsland()
 
         Task { @MainActor in
             await BackgroundLuminanceObserver.shared.stop()
@@ -1326,10 +1341,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsWindowController() -> SettingsWindowController {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                screenshotProtectionChanged: { [weak self] enabled in
+                screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
-                    self?.dropLearningDrops?.panel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -1350,38 +1364,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliverDropTranscript(
-        _ text: String,
-        formatting: SmartFormattingProfile = .plain,
-        beforeCommandV: (() -> Void)? = nil
-    ) async -> Bool {
+    private func deliverDropTranscript(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
         guard !text.isEmpty else { return false }
 
-        return await autoPasteEngine.paste(text, formatting: formatting, beforeCommandV: beforeCommandV)
+        return await autoPasteEngine.paste(text, formatting: formatting)
     }
 
     private func finishDropDelivery(
         text: String,
         rawTranscript: String,
         targetApp: String?,
-        formatting: SmartFormattingProfile = .plain,
-        learning: DropLearningTake? = nil,
-        targetPID: pid_t? = nil
+        formatting: SmartFormattingProfile = .plain
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
-        // Whytap's own editors are never read. The focused field is captured
-        // at the paste boundary, right before Cmd+V (metadata only), and read
-        // once later only if it is still the focused field of the frontmost
-        // app. WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
-        var learningField: DropEditFieldHandle?
-        let wantsField = learning != nil && !autoPasteEngine.hasLocalDropTarget && dropLearning.capturesFields
-        let pasted = await deliverDropTranscript(cleaned, formatting: formatting, beforeCommandV: wantsField ? { [weak self] in
-            learningField = self?.dropLearning.prepareDelivery(targetPID: targetPID)
-        } : nil)
-        if pasted, !autoPasteEngine.hasLocalDropTarget, let learning {
-            dropLearning.delivered(learning, handle: learningField)
-        }
+        let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
@@ -2645,11 +2642,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here and every later read of the take's mode uses `DropTake`.
         let mode = UserPreferencesCache.shared.currentMode
         DropTake.shared.begin(mode: mode, route: AIRoutingStore.shared.route(for: .drop(mode)))
-        // The target was remembered at hotkey-down. An Electron or web field
-        // gets its app's tree turned on now, so it can be captured at the
-        // paste. WHY: .project-docs/decisions/2026-11-22-drop-edit-observation.md
-        dropLearning.takeStarted(targetPID: autoPasteEngine.currentDropTarget().pid)
-        dropLearningVocabTransport = DropTake.shared.route.map { VocabularyTransport.realtime(for: $0.account) } ?? .none
         // Decided here for every take: one that follows an auto-stop take
         // never inherits its mode.
         endDropAutoStop()
@@ -2672,7 +2664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         trace.mark(.done)
         os_log(
             "drop turn %{public}@ completed last_phase=%{public}@ finishing_ms=%{public}d resolving_ms=%{public}d release_to_done_ms=%{public}d",
-            log: Self.log, type: .info, trace.turnId, trace.lastPhase.label,
+            log: Self.log, type: .default, trace.turnId, trace.lastPhase.label,
             trace.durationMs(from: .stopRequested, to: .resolving) ?? -1,
             trace.durationMs(from: .resolving, to: .done) ?? -1,
             trace.durationMs(from: .stopRequested, to: .done) ?? -1
@@ -2817,7 +2809,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let startedAt = Date()
             do {
                 let prefs = PrivacyPreferences.shared
-                self.dropLearningVocabTransport = .none
                 let raw = try await dropBatchTranscriber.transcribe(
                     audio: wav,
                     language: prefs.selectedLanguage?.code
@@ -2911,7 +2902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // row, where its key and model are one click away.
                 if case StreamingSessionSetupError.byokMisconfigured(let routeError) = error {
                     if let onboarding = visibleOnboarding {
-                        // The try page says Drop is not set up yet (or still
+                        // The try step says Drop is not set up yet (or still
                         // downloading) instead of Settings opening over it.
                         onboarding.model.noteDropSetupFailure(routeError.feature)
                     } else {
@@ -3247,9 +3238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetBundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
         if mode == .smart { AppState.shared.phase = .verifying }
         do {
-            let prepared = try await policy.prepareDetailed(
+            let final = try await policy.prepare(
                 rawText: rawText, fillerTerms: FillerTermsStore().terms(),
-                replacements: DropReplacementStore().replacements(),
                 preservingMarkdown: { formatting != .plain }
             ) { [self] in
                 guard let postProcessor else { throw OpenRouterLLMError.notConfigured }
@@ -3273,26 +3263,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return output.text
             }
             guard !Task.isCancelled, generation == streamingSetupGeneration else { return false }
-            let final = prepared.text
             os_log(
                 "drop processing ok turn_id=%{public}@ mode=%{public}@ chars=%{public}d latency_ms=%{public}d ax_ms=%{public}d cleanup_ms=%{public}d",
-                log: Self.log, type: .info, turnID, mode.rawValue, final.count,
+                log: Self.log, type: .default, turnID, mode.rawValue, final.count,
                 Int((ProcessInfo.processInfo.systemUptime - processStartedAt) * 1000), contextMs,
                 mode == .smart ? Int((ProcessInfo.processInfo.systemUptime - cleanupStartedAt) * 1000) : 0
             )
-            // What reaches the field: a rich paste's plain text in Slack and
-            // Telegram. The learning step compares the field with this.
-            let learning = DropLearningTake(
-                pasted: deliveryFormatting.usesRichPaste ? (SmartRichTextPaste.make(final)?.plainText ?? final) : final,
-                raw: rawText, mode: mode,
-                translated: outputLanguageCodeForDrop(mode: mode) != nil,
-                firedReplacements: prepared.firedReplacements, firedFillers: prepared.firedFillers,
-                vocabTransport: dropLearningVocabTransport
-            )
-            await finishDropDelivery(
-                text: final, rawTranscript: rawText, targetApp: targetApp, formatting: deliveryFormatting,
-                learning: learning, targetPID: targetPID
-            )
+            await finishDropDelivery(text: final, rawTranscript: rawText, targetApp: targetApp, formatting: deliveryFormatting)
             return true
         } catch {
             guard !Task.isCancelled, generation == streamingSetupGeneration else { return false }
@@ -3435,7 +3412,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prefs = PrivacyPreferences.shared
         let transcriber = dropBatchTranscriber
         let hasBatchTranscriber = await transcriber.isAvailable()
-        dropLearningVocabTransport = .none
         await Self.runBatchRecovery(
             pcm: pcm,
             hasBatchTranscriber: hasBatchTranscriber,
@@ -3467,9 +3443,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             capturedPCM: capturedPCM, lastPartial: partial,
             startedAt: startedAt,
             hasBatchTranscriber: hasBatchTranscriber,
-            transcribe: { [weak self] pcm in
-                await MainActor.run { self?.dropLearningVocabTransport = .none }
-                return try await transcriber.transcribe(
+            transcribe: { pcm in
+                try await transcriber.transcribe(
                     audio: pcm,
                     language: prefs.selectedLanguage?.code)
             },

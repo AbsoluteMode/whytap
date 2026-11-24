@@ -9,9 +9,18 @@ struct TranslationView: View {
     var embedded = false
     /// Closes the floating window; the embedded Toolbox pane has no close control.
     var close: () -> Void = {}
+    /// The floating overlay's window-level click dispatch for × and the
+    /// session button; the Toolbox pane has its own, which nothing dispatches.
+    @ObservedObject var hitTargets = SubtitleOverlayHitTargets()
+    @State private var closeHovered = false
     @FocusState private var inputFocused: Bool
     @State private var inputHovered = false
-    @State private var overlayHovered = false
+    /// The running overlay's controls: shown on hover and kept for
+    /// `controlsLinger` after the pointer leaves, so a press that briefly
+    /// loses hover (the panel turning key, a tooltip) still lands on Stop or ×.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    @State private var controlsShown = false
+    @State private var hideControls: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isText: Bool { presentation.mode == .text }
@@ -20,7 +29,8 @@ struct TranslationView: View {
         Group {
             if isText { textContent } else { subtitleContent }
         }
-        .frame(minWidth: embedded ? 0 : (isText ? 320 : 420), maxWidth: .infinity,
+        // Subtitles fit the panel's own minimum (360 pt); no wider floor here.
+        .frame(minWidth: embedded || !isText ? 0 : 320, maxWidth: .infinity,
                minHeight: embedded ? 0 : (isText ? 80 : 120), maxHeight: .infinity)
         .background { if !embedded && isText { Rectangle().fill(.regularMaterial) } }
         .onAppear { if isText && embedded { inputFocused = true } }
@@ -45,13 +55,13 @@ struct TranslationView: View {
         MacPopup(items: [.init(value: "auto", label: "Auto-detect")] + languageItems,
                  selection: $subtitles.sourceCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Speech")
-            .disabled(subtitles.phase.isActive)
+            .disabled(subtitles.phase.isRunning)
     }
 
     private var targetPicker: some View {
         MacPopup(items: languageItems, selection: $subtitles.targetCode, maxWidth: embedded ? 130 : 150, appearance: .adaptive)
             .accessibilityLabel("Translate to")
-            .disabled(subtitles.phase.isActive)
+            .disabled(subtitles.phase.isRunning)
     }
 
     private var languageItems: [MacPopup<String>.Item] {
@@ -155,7 +165,7 @@ struct TranslationView: View {
     // WHY: .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
     @ViewBuilder private var subtitleContent: some View {
         let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live,
-                                        liveTranslation: subtitles.liveTranslation)
+                                        liveTranslation: subtitles.liveTranslation, liveID: subtitles.liveID)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
@@ -173,53 +183,124 @@ struct TranslationView: View {
         } else {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                // The box hugs its widest pair (up to the panel's inner width)
-                // and stays centred, so no empty strip runs beside the text.
+                // While a session runs, or pairs are on screen, the box has
+                // one fixed size, so its controls never move and no text
+                // reflows. Idle without pairs, it hugs its controls.
+                // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+                // The caption takes the panel's width up to the usual box
+                // width, so a narrower panel narrows it instead of cutting it.
+                let shape = Self.overlayCaption(phase: subtitles.phase, hasRows: !rows.isEmpty,
+                                                hasIssue: subtitles.issue != nil)
                 HuggingColumnLayout(spacing: 10, maxWidth: Self.overlayContentWidth) {
-                    if showsOverlayControls { subtitleControls }
-                    if subtitles.issue != nil || !rows.isEmpty
-                        || SubtitleCaption.status(hasRows: false, phase: subtitles.phase, issue: nil) != nil {
-                        caption(rows)
+                    if !subtitles.phase.isRunning { subtitleControls }
+                    if case .fixed(let height) = shape {
+                        // As tall as the panel leaves, up to `height`.
+                        caption(rows, height: height)
+                            .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
+                                   minHeight: 0, idealHeight: height, maxHeight: height, alignment: .bottomLeading)
+                            // Inside the caption, so the box does not grow
+                            // and shrink while no audio arrives.
+                            .overlay(alignment: .bottomTrailing) { if waitingWithoutAudio { audioPermissionsButton } }
+                            .layoutPriority(-1)
+                    } else if shape == .hugging {
+                        caption(rows, height: Self.stoppedCaptionHeight)
+                            .frame(idealWidth: Self.overlayContentWidth, maxWidth: Self.overlayContentWidth,
+                                   alignment: .leading)
                     }
                     if let feature = subtitles.issue?.feature {
                         Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
                     }
-                    if waitingWithoutAudio { audioPermissionsButton }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                // The video under the box is blurred, then darkened enough for
+                // white text on any picture.
+                .background {
+                    ZStack {
+                        IslandVisualEffectBackground(material: .hudWindow)
+                        Color.black.opacity(Self.overlayTint)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                // While running, the controls cover the top of the caption on
+                // hover instead of pushing it: Stop and × stay in one place.
+                .overlay(alignment: .top) {
+                    if subtitles.phase.isRunning && controlsShown {
+                        subtitleControls
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Color.black.opacity(0.88),
+                                        in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
+                            .transition(.opacity)
+                    }
+                }
                 .shadow(radius: 5)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
-                .onHover { overlayHovered = $0 }
+                .onHover(perform: overlayHover)
                 .contextMenu { subtitleMenu }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsOverlayControls)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controlsShown)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: subtitles.phase)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(10)
         }
     }
 
+    /// How long the running overlay keeps its controls after hover ends.
+    static let controlsLinger: Duration = .seconds(1)
+
+    private func overlayHover(_ hovering: Bool) {
+        hideControls?.cancel()
+        guard !hovering else { controlsShown = true; return }
+        hideControls = Task { @MainActor in
+            try? await Task.sleep(for: Self.controlsLinger)
+            guard !Task.isCancelled else { return }
+            controlsShown = false
+        }
+    }
+
+    /// Darkening over the blurred background (the box was a flat 60 % black
+    /// before the blur).
+    static let overlayTint = 0.45
+
+    /// The running caption: five lines of the 18 pt translation, as many as
+    /// the original overlay showed.
+    static let captionHeight: CGFloat = 146
+    /// After Stop the controls return above the caption inside the same panel.
+    static let stoppedCaptionHeight: CGFloat = 108
+    /// The original's share of the width: Russian runs about a fifth longer
+    /// than English and is the line being read.
+    static let sourceFraction: CGFloat = 0.38
+
     /// The overlay panel is 760 pt wide: 10 pt outside and 16 pt inside the box.
     static let overlayContentWidth: CGFloat = 760 - 2 * 10 - 2 * 16
 
-    /// While subtitles run, the overlay shows only the caption; the controls
-    /// return on hover and whenever capture is not running.
-    private var showsOverlayControls: Bool { !subtitles.phase.isActive || overlayHovered }
+    enum OverlayCaption: Equatable { case hidden, hugging, fixed(CGFloat) }
+
+    /// The overlay caption's shape. While capture runs (Connecting and
+    /// listening) it keeps one size whatever it shows (a status, no audio
+    /// yet), so the box and its hover controls never move. Stop shows the
+    /// stopped box at once: the pairs keep a shorter fixed caption under the
+    /// controls while the last translation settles; a problem hugs its
+    /// message; empty, the box is just its controls.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    static func overlayCaption(phase: SubtitlePhase, hasRows: Bool, hasIssue: Bool) -> OverlayCaption {
+        if hasIssue { return .hugging }
+        if phase.isRunning { return .fixed(captionHeight) }
+        return hasRows ? .fixed(stoppedCaptionHeight) : .hidden
+    }
 
     private var waitingWithoutAudio: Bool {
         subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
     }
 
-    /// Pairs when there are phrases, otherwise one status line. The box keeps
-    /// the overlay panel's height: pairs are bottom-anchored and only whole
-    /// pairs show, so the newest pair never moves and the oldest leaves at the
-    /// top in one piece; a new pair fades and slides in from the bottom. The
-    /// controls row, shown on hover, takes its height from the pairs.
-    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row]) -> some View {
+    /// Pairs when there are phrases, otherwise one status line. In the
+    /// overlay the caption has a fixed size: pairs are bottom-anchored with a
+    /// fixed column split, the live pair settles in place, and older lines
+    /// leave at the top as new ones push them up. Toolbox keeps whole pairs.
+    @ViewBuilder private func caption(_ rows: [SubtitleCaption.Row], height: CGFloat = 0) -> some View {
         if let status = SubtitleCaption.status(hasRows: !rows.isEmpty, phase: subtitles.phase, issue: subtitles.issue) {
-            captionText(status)
+            captionText(status, compact: subtitles.issue != nil)
         } else if embedded {
             NewestRowsLayout(spacing: 6, maxHeight: 150) {
                 ForEach(rows) { row in
@@ -233,22 +314,29 @@ struct TranslationView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Subtitles")
         } else {
-            // Russian runs about a fifth longer than English and is the line
-            // being read: the grid gives the original only what it needs.
-            PairGridLayout(rowSpacing: 8, columnSpacing: 18, maxWidth: Self.overlayContentWidth,
-                           maxHeight: showsOverlayControls ? 108 : 146, inset: Self.bandInset) {
+            // Bottom-anchored, clipped at the top with a short fade: new text
+            // pushes older lines up smoothly, a line at a time.
+            let layout = SteadyPairsLayout(rowSpacing: 8, columnSpacing: 18, sourceFraction: Self.sourceFraction,
+                                           size: CGSize(width: Self.overlayContentWidth, height: height),
+                                           inset: Self.bandInset)
+            layout {
                 ForEach(rows) { row in
                     Group {
                         RoundedRectangle(cornerRadius: 7)
                             .fill(.white.opacity(row.ordinal.isMultiple(of: 2) ? Self.bandOpacity : 0))
-                        sourceText(row)
-                        translationText(row)
+                        sourceText(row).modifier(NewestLinesColumn())
+                        translationText(row).modifier(NewestLinesColumn())
                     }
-                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                    .transition(.opacity)
                 }
             }
             .clipped()
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows)
+            .mask {
+                LinearGradient(stops: [.init(color: .clear, location: 0),
+                                       .init(color: .black, location: SteadyPairsLayout.topFade)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: rows)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Subtitles")
         }
@@ -311,16 +399,17 @@ struct TranslationView: View {
         }
     }
 
-    private func captionText(_ value: String) -> some View {
+    /// `compact`: a problem's message, smaller, so it and its fix fit the panel.
+    private func captionText(_ value: String, compact: Bool = false) -> some View {
         // At most five lines; the box height hugs shorter text (its width spans
         // the panel, as in the original) and older words leave
         // at the top, so the newest line never moves.
         Text(value)
-            .font(.system(size: embedded ? 15 : 20, weight: .medium, design: .rounded))
+            .font(.system(size: embedded || compact ? 15 : 20, weight: .medium, design: .rounded))
             .foregroundStyle(.white)
             .multilineTextAlignment(.leading)
             .lineSpacing(3)
-            .lineLimit(5)
+            .lineLimit(compact ? 3 : 5)
             .truncationMode(.head)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -360,21 +449,34 @@ struct TranslationView: View {
         }
     }
 
-    @ViewBuilder private var sessionButton: some View {
-        switch subtitles.phase {
-        case .finishing:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Button("Cancel") { subtitles.cancel() }
-            }
-        case .connecting:
-            Button("Cancel") { subtitles.stop() }
-        case .listening:
-            Button("Stop", systemImage: "stop.fill") { subtitles.stop() }
+    /// The session button's click goes through the window (`hitTargets`)
+    /// bound to the action drawn now (Start, Cancel or Stop, with its
+    /// session), never to the phase at mouse-up: the model runs it only while
+    /// it is still the action shown. A press whose action changes is dropped.
+    private var sessionButton: some View {
+        let action = subtitles.sessionAction
+        let model = subtitles
+        return sessionButtonBody(action)
+            // The window takes the click, so the button shows the press itself.
+            .opacity(hitTargets.pressed == .session ? 0.6 : 1)
+            .background(SubtitleOverlayHitReporter(
+                control: .session, targets: hitTargets,
+                action: String(describing: action),
+                activate: { model.perform(action) }))
+    }
+
+    @ViewBuilder private func sessionButtonBody(_ action: SubtitleSessionAction) -> some View {
+        switch action {
+        case .cancel:
+            Button("Cancel") { subtitles.perform(action) }
+        case .stop:
+            Button("Stop", systemImage: "stop.fill") { subtitles.perform(action) }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Stop subtitles")
-        case .idle, .failed:
-            Button("Start", systemImage: "play.fill") { subtitles.start() }
+        case .start:
+            // After Stop the session shows as stopped at once; the last
+            // translation still settles in the background.
+            Button("Start", systemImage: "play.fill") { subtitles.perform(action) }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("Start subtitles")
         }
@@ -382,12 +484,18 @@ struct TranslationView: View {
 
     private var closeButton: some View {
         Button(action: close) {
+            // A 28 pt target, Stop's height. No tooltip: its window could
+            // take hover from the running overlay's controls mid-press.
             Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 22).contentShape(Rectangle())
+                .frame(width: 28, height: 28)
+                // Hover and press show the whole 28 pt target.
+                .background(Circle().fill(.white.opacity(hitTargets.pressed == .close ? 0.22 : closeHovered ? 0.12 : 0)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .help("Close")
+        .foregroundStyle(closeHovered ? .primary : .secondary)
+        .onHover { closeHovered = $0 }
+        .background(SubtitleOverlayHitReporter(control: .close, targets: hitTargets, action: "close", activate: close))
         .accessibilityLabel("Close subtitles")
     }
 

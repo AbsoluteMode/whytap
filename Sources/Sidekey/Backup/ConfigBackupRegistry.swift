@@ -35,7 +35,7 @@ enum ConfigBackupRegistry {
         add(.models, .string, ["sidekey.models.transcriptionLevel", "sidekey.models.byokProvider",
             "sidekey.models.selfHostedBaseURL", "sidekey.models.selfHostedModel", "sidekey.models.llmLevel",
             "sidekey.models.openRouterModel", "sidekey.models.customLLMBaseURL", "sidekey.models.customLLMModel",
-            "sidekey.preferences.transcriptionMode", "sidekey.preferences.selectedLanguage", "sidekey.preferences.targetLanguage", "com.sidekey.meetings.preferredLanguage"])
+            "sidekey.preferences.transcriptionMode", "sidekey.preferences.selectedLanguage", "sidekey.preferences.selectedLanguageVariant", "sidekey.preferences.targetLanguage", "com.sidekey.meetings.preferredLanguage"])
         add(.models, .string, ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "sidekey.models.byokModel." + $0 })
         add(.models, .string, ["sidekey.translation.textTarget", "sidekey.translation.subtitleTarget", "sidekey.translation.source"])
         add(.models, .bool, ["sidekey.translation.original"])
@@ -52,7 +52,11 @@ enum ConfigBackupRegistry {
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
             "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
-        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms", DropReplacementStore.key])
+        // The shelved Drop learning's Replace rules stay readable so older
+        // archives and settings history restore; nothing applies them.
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
+        add(.vocabulary, .strings, ["sidekey.preferences.vocabularyTerms", "sidekey.replace.terms",
+            ShelvedDropLearningData.replacementsKey])
         add(.toolbox, .strings, ["sidekey.b2b.hover.layout"])
         add(.other, .bool, ["sidekey.privacy.screenshotProtectionEnabled", "sidekey.preferences.hideHelpers",
             "sidekey.preferences.hideIslandHoverWidgets", "sidekey.preferences.agentEnabled", "sidekey.preferences.meetingsEnabled",

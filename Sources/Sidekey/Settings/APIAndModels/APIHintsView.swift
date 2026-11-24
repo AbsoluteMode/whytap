@@ -187,7 +187,7 @@ struct APIHintsView: View {
         Hint(
             category: .models,
             provider: "ChatGPT Pro",
-            assetName: "openai",
+            assetName: "model-openai",
             allowance: "$100–500",
             cadence: "API credit each month",
             access: .paidPlan,

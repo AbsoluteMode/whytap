@@ -18,8 +18,11 @@ that height and scrolls vertically when more dashboards are available.
 
 Keep the Monitor heading visible and precisely centered. Equal 88-point slots
 for Back and Refresh center the heading independently of button content. Choose
-**Server status** or a custom dashboard; **Back** returns to the picker, then
-**Tools** returns to the capsules. The picker shows dashboard choices rather
+a dashboard; **Back** returns to the picker, then
+**Tools** returns to the capsules. Monitor starts with no dashboards: the
+picker then says "No dashboards yet" and to ask a coding agent to add one.
+**Server status** is listed only after servers are set up (see
+[Server status](#server-status)). The picker shows dashboard choices rather
 than agent setup instructions or local paths; setup belongs in this guide.
 Refresh uses the existing store. The panel starts polling when shown
 and stops it on disappearance, reusing `MonitorStore` and the existing collectors.
@@ -69,8 +72,8 @@ appear unavailable, rather than zero. No collector should present cached numbers
 as a current successful connection.
 
 Dashboard files are bounded to 2 MB and 128 widgets. IDs must be unique within
-their scope. Charts support up to 512 finite points. The built-in `server-status`
-ID is reserved: use a different ID for a custom snapshot. Native validation is
+their scope. Charts support up to 512 finite points. The `server-status`
+ID is reserved for Server status: use a different ID for a custom snapshot. Native validation is
 defined by `Sources/Sidekey/Monitor/MonitorDashboard.swift`.
 
 See [the disconnected example](examples/dashboard.json). It intentionally has no
@@ -124,8 +127,8 @@ be read, Server status pauses with a notice instead of connecting.
 
 To bring a deleted dashboard back, run
 `python3 scripts/customize.py restore-dashboard <id> --flavor prod` (for example
-`server-status`). It only takes the ID off the list: Server status reconnects to
-its servers, and a custom dashboard appears when its collector next writes the
+`server-status`). It only takes the ID off the list: Server status is listed
+again while `servers.json` names a server and reconnects to those servers, and a custom dashboard appears when its collector next writes the
 snapshot. `install-dashboard` also takes the ID off the list. The
 snapshot and the list change together: if either cannot be written (or the list
 is unreadable), both stay as they were. Whytap's Delete and the installer run
@@ -133,9 +136,20 @@ only while holding an exclusive `flock` on `Monitor/removed-dashboards.lock`.
 WHY:
 [decision](../../.project-docs/decisions/2026-11-21-monitor-dashboard-delete.md)
 
-The built-in Server status collector uses separate local `Monitor/servers.json`
-configuration with existing SSH aliases or credential-store references. See
-`Sources/Sidekey/Monitor/MonitorServer.swift` for that contract. Custom collectors
+## Server status
+
+Server status (CPU, memory and GPU readings of your servers) is optional and
+is not a default dashboard. Whytap never creates its configuration. The board
+is listed in Monitor only while local `Monitor/servers.json` names at least
+one server and the board was not deleted; a missing file or an empty `servers`
+list means no row, no screen and no connection: a check already under way
+for servers that were removed or replaced is cancelled. A `servers.json` that cannot
+be read keeps the row, with a notice to validate the file. The file uses
+existing SSH aliases or credential-store references. See
+`Sources/Sidekey/Monitor/MonitorServer.swift` for that contract.
+WHY:
+[decision](../../.project-docs/decisions/2026-11-23-monitor-server-status-optional.md)
+ Custom collectors
 run separately and write passive snapshots; they are not commands embedded in
 dashboard JSON. Use `discover --json` for the current source entry points.
 

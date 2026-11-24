@@ -422,7 +422,7 @@ struct IslandCaseClientPicker: View {
                     CaseAccessSection(title: hasConnectedClients ? "Agents already connected" : "No agents found") {
                         Text(hasConnectedClients
                              ? "Click an agent’s logo in Case to change its access."
-                             : "Install OpenCode, Claude Code or Cursor, then open Connect again.")
+                             : "Install Claude Code, Codex or Cursor, then open Connect again.")
                             .font(.system(size: 11))
                             .fixedSize(horizontal: false, vertical: true)
                     }

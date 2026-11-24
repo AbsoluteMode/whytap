@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/WhytapCaseKitTests/TodoCommandTests.swift
     confirmed_at: 2026-11-04
-related: [2026-11-03-todo-helper.md, 2026-11-03-todo-tree.md, 2026-10-19-planner.md]
+related: [2026-11-03-todo-helper.md, 2026-11-03-todo-tree.md, 2026-10-19-planner.md, 2026-11-23-builder-queue-flaky-tests.md]
 ---
 
 # To-do on a locked screen

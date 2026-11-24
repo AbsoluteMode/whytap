@@ -112,6 +112,7 @@ final class ToolboxTileInteractionTests: XCTestCase {
     /// A click still selects. No `.draggable` here, so no drag session can
     /// start; the window is ordered far outside every display at zero opacity
     /// (SwiftUI only routes events to an ordered window) and is never key.
+    /// WHY: .project-docs/decisions/2026-11-24-windowless-test-runs.md
     func test_click_selects() throws {
         var taps = 0
         let tile = ToolboxTileView(title: "Notify", sfSymbol: "bell", isSelected: false, isLocked: false,
@@ -122,11 +123,10 @@ final class ToolboxTileInteractionTests: XCTestCase {
         let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.alphaValue = 0
-        window.setFrameOrigin(NSPoint(x: -30_000, y: -30_000))
-        window.orderFrontRegardless()
+        XCTAssertTrue(OnScreenWindowGuard.orderInBeyondEveryDisplay(window))
         defer { window.close() }
         host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))  // first render installs the gesture
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             window.sendEvent(NSEvent.mouseEvent(
                 with: type, location: NSPoint(x: 50, y: 82), modifierFlags: [],
@@ -134,6 +134,10 @@ final class ToolboxTileInteractionTests: XCTestCase {
                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         }
+        // SwiftUI delivers the tap on a later run-loop turn, later still on a loaded Mac.
+        let deadline = Date().addingTimeInterval(10)
+        while taps == 0, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertEqual(taps, 1)
         XCTAssertFalse(window.isKeyWindow)
         XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) }, "never on a display")

@@ -99,6 +99,7 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
                     ("cursor", [.cursor], false, false),
                     ("opencode", [.builtInOpenCode], false, false),
                     ("claude-code", [.claudeCode], false, false),
+                    ("codex", [.codex], false, false),
                     ("empty", [], false, false),
                     ("connected", [], false, true),
                     ("loading", [], true, false),
@@ -226,13 +227,22 @@ final class IslandCaseAccessPanelLayoutTests: XCTestCase {
             root.deleteLastPathComponent()
         }
         ProviderBrandIconAsset.setResourceDirectoryForTesting(root.appendingPathComponent("Resources/UsefulLinkIcons"))
+        OrbActionIcon.setResourceDirectoryForTesting(root.appendingPathComponent("Resources"))
         defer {
             ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
             ProviderBrandIconAsset.clearCacheForTesting()
+            OrbActionIcon.setResourceDirectoryForTesting(nil)
         }
-        // Every Connect row draws a bundled brand mark, never the generic fallback.
-        let assets = CaseKnownClient.connectableClients.compactMap { IslandCaseConnectedApps.brandAsset(for: $0.identity) }
-        XCTAssertEqual(assets, ["opencode", "claude-code", "cursor"])
+        // Whytap Agent wears the island's Agent orb in colour, not the OpenCode mark.
+        XCTAssertTrue(IslandCaseConnectedApps.usesAgentOrb(CaseKnownClient.builtInOpenCode.identity))
+        XCTAssertNil(IslandCaseConnectedApps.brandAsset(for: CaseKnownClient.builtInOpenCode.identity))
+        let orb = try XCTUnwrap(OrbActionIcon.agent.image())
+        XCTAssertFalse(orb.isTemplate, "The orb keeps its violet palette")
+        // Every other Connect row draws a bundled brand mark, never the generic fallback.
+        let outside = CaseKnownClient.connectableClients.filter { !IslandCaseConnectedApps.usesAgentOrb($0.identity) }
+        XCTAssertEqual(outside, [.claudeCode, .codex, .cursor])
+        let assets = outside.compactMap { IslandCaseConnectedApps.brandAsset(for: $0.identity) }
+        XCTAssertEqual(assets, ["claude-code", "codex", "cursor"])
         for asset in assets {
             let image = try XCTUnwrap(ProviderBrandIconAsset.image(named: asset, pointSize: 22))
             XCTAssertEqual(image.size, NSSize(width: 22, height: 22))

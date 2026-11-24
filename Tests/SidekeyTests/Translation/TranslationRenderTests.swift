@@ -177,6 +177,9 @@ final class SubtitlePairRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         // The last sentence still being heard and translated.
+        let early = try await session(until: 9_000, pairs: 1)
+        try renderOverlay(early, name: "subtitles-openai-early.png")
+        await early.model.cancel().value
         let live = try await session(until: 31_600, pairs: 5)
         try renderOverlay(live, name: "subtitles-openai-live.png")
         try renderToolbox(live, name: "toolbox-subtitles-openai.png")
@@ -193,9 +196,51 @@ final class SubtitlePairRenderTests: XCTestCase {
         await noKey.start()?.value
         try renderOverlay(Session(model: noKey), name: "subtitles-no-key.png")
         try renderToolbox(Session(model: noKey), name: "toolbox-subtitles-no-key.png")
+
+        // Listening before any audio: the permissions link sits inside the
+        // caption, so the box keeps its size when audio starts.
+        let silent = try await session(until: 0, pairs: 0)
+        try renderOverlay(silent, name: "subtitles-silent-start.png")
+        // Stop before the first words: the box keeps its size while finishing.
+        let speech = FakeSpeechTranslation()
+        speech.closesOnEndInput = false
+        let stopping = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in speech })
+        stopping.start()
+        for _ in 0..<200 where stopping.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
+        stopping.stop()
+        try renderOverlay(Session(model: stopping), name: "subtitles-early-stop.png")
+        await stopping.cancel().value
+        // An original far longer than the caption, with a short translation.
+        let long = try await session(until: 0, pairs: 0)
+        long.speech?.pair.continuation.yield(.source(String(repeating: " and the speaker just kept on going", count: 16),
+                                                     elapsedMs: 3_000))
+        long.speech?.pair.continuation.yield(.translation("И докладчик всё продолжал", elapsedMs: 900))
+        for _ in 0..<200 where long.model.liveTranslation.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        try renderOverlay(long, name: "subtitles-long-original.png")
+        try renderOverlay(silent, name: "subtitles-silent-start-480.png", width: 480)
+        await long.model.cancel().value
+        await silent.model.cancel().value
+        let narrow = try await session(until: 31_600, pairs: 5)
+        try renderOverlay(narrow, name: "subtitles-openai-live-480.png", width: 480)
+        await narrow.model.cancel().value
+        try renderOverlay(Session(model: noKey), name: "subtitles-no-key-480.png", width: 480)
+        // The panel's own minimum width.
+        let smallest = try await session(until: 31_600, pairs: 5)
+        try renderOverlay(smallest, name: "subtitles-openai-live-360.png", width: 360)
+        await smallest.model.cancel().value
+        let stopped = try await session(until: .max, pairs: 8)
+        stopped.model.stop()
+        for _ in 0..<400 where stopped.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
+        try renderOverlay(stopped, name: "subtitles-pairs-stopped-360.png", width: 360)
+        await stopped.model.cancel().value
+
+        try renderOverlay(Session(model: noKey), name: "subtitles-no-key-360.png", width: 360)
     }
 
-    private struct Session { let model: LiveSubtitleModel }
+    private struct Session {
+        let model: LiveSubtitleModel
+        var speech: FakeSpeechTranslation?
+    }
 
     private func session(until millis: Int, pairs: Int) async throws -> Session {
         let speech = FakeSpeechTranslation()
@@ -207,7 +252,7 @@ final class SubtitlePairRenderTests: XCTestCase {
         for _ in 0..<200 where model.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
         speech.yieldRecorded(until: millis)
         for _ in 0..<200 where model.lines.count < pairs { try await Task.sleep(for: .milliseconds(5)) }
-        return Session(model: model)
+        return Session(model: model, speech: speech)
     }
 
     private func view(_ session: Session, embedded: Bool) -> TranslationView {
@@ -218,7 +263,7 @@ final class SubtitlePairRenderTests: XCTestCase {
     }
 
     /// The overlay panel is 760 x 190 pt; it floats over whatever plays.
-    private func renderOverlay(_ session: Session, name: String) throws {
+    private func renderOverlay(_ session: Session, name: String, width: CGFloat = 760, height: CGFloat = 190) throws {
         let frame = ZStack {
             LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.20), Color(red: 0.20, green: 0.16, blue: 0.22)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -228,12 +273,22 @@ final class SubtitlePairRenderTests: XCTestCase {
                 .offset(x: 260, y: 20)
             VStack {
                 Spacer()
-                view(session, embedded: false).frame(width: 760, height: 190)
+                view(session, embedded: false).frame(width: width, height: height)
+                    // The panel edge, so anything drawn past it shows.
+                    .border(Color.red.opacity(0.5))
             }
         }
         .frame(width: 860, height: 300)
         .environment(\.colorScheme, .dark)
-        try write(frame, to: directoryURL().appendingPathComponent(name))
+        // An AppKit host draws the box's blur view (ImageRenderer cannot);
+        // offscreen it has no window content to blur, so only its tint shows.
+        let host = NSHostingView(rootView: frame)
+        host.frame = NSRect(x: 0, y: 0, width: 860, height: 300)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            .write(to: directoryURL().appendingPathComponent(name))
     }
 
     private func renderToolbox(_ session: Session, name: String) throws {

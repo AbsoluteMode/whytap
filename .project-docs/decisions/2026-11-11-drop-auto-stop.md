@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DropAutoStop/DropAutoStopTests.swift
     confirmed_at: 2026-11-11
-related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-13-drop-auto-stop-voice-guard.md, 2026-11-22-drop-learning-default-on.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-strict-drop-modes.md, 2026-11-12-drop-auto-stop-local-rule-only.md, 2026-11-13-drop-auto-stop-voice-guard.md]
 ---
 
 # Drop auto-stop

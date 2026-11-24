@@ -1,3 +1,4 @@
+import Accelerate
 import CoreAudio
 import Foundation
 import os.log
@@ -34,7 +35,10 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
     /// Carries the interpolation phase across IOProc callbacks. Touched only
     /// from `handleInput`, which runs on the serial `ioQueue`; a new tap
     /// generation starts from a fresh phase.
-    private var resampler = SystemAudioStreamingResampler(targetSampleRate: 16_000)
+    private var resampler: SystemAudioStreamingResampler
+    /// Low-pass before a downsampling resampler (Subtitles); nil keeps the
+    /// plain resampler Meeting Notes always used.
+    private var antiAliasFilter: SystemAudioAntiAliasFilter?
     private var resamplerGeneration: UUID?
     private var callbackRateMonitor = SystemAudioCallbackRateMonitor()
     private var callbackRateMismatchWindows = 0
@@ -56,12 +60,20 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
         await self?.restartAfterDefaultOutputChange()
     }
 
+    /// `targetSampleRate` is the rate of the mono buffers it yields (16 kHz
+    /// for Meeting Notes). `antiAlias` low-passes the capture before it is
+    /// resampled down, so sound above the new Nyquist rate does not fold into
+    /// the speech band; Subtitles capture at 24 kHz with it.
     init(
         ioQueue: DispatchQueue = DispatchQueue(label: "com.sidekey.meetings.coreaudio.tap", qos: .userInitiated),
-        buffers: SystemAudioBufferBroadcast = SystemAudioBufferBroadcast()
+        buffers: SystemAudioBufferBroadcast = SystemAudioBufferBroadcast(),
+        targetSampleRate: Double = 16_000,
+        antiAlias: Bool = false
     ) {
         self.ioQueue = ioQueue
         self.buffers = buffers
+        resampler = SystemAudioStreamingResampler(targetSampleRate: targetSampleRate)
+        antiAliasFilter = antiAlias ? SystemAudioAntiAliasFilter(targetSampleRate: targetSampleRate) : nil
     }
 
     enum CaptureEnded: Error { case terminal }
@@ -541,9 +553,11 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
 
         if resamplerGeneration != generation {
             resampler.reset()
+            antiAliasFilter?.reset()
             resamplerGeneration = generation
         }
-        let outputSamples = resampler.process(inputSamples, sourceSampleRate: sourceSampleRate)
+        let filtered = antiAliasFilter?.process(inputSamples, sourceSampleRate: sourceSampleRate) ?? inputSamples
+        let outputSamples = resampler.process(filtered, sourceSampleRate: sourceSampleRate)
         guard !outputSamples.isEmpty else { return }
 
         buffers.yield(outputSamples)
@@ -922,6 +936,66 @@ struct SystemAudioStreamingResampler {
         nextPosition -= Double(samples.count)
         previousSample = samples[lastIndex]
         return out
+    }
+}
+
+/// Low-pass for capture resampled down to `targetSampleRate`. The linear
+/// resampler alone folds everything above the new Nyquist rate into the
+/// speech band: captured at 16 kHz, a 12 kHz tone came back at 4 kHz at
+/// -1 dB. A windowed-sinc FIR (Blackman, cutoff at 0.42 of the target rate)
+/// keeps its history across IOProc callbacks; a rate change starts it again.
+/// Upsampling or pass-through capture is returned unchanged.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md
+struct SystemAudioAntiAliasFilter {
+    let targetSampleRate: Double
+    private var sourceSampleRate: Double?
+    private var taps: [Float] = []
+    private var history: [Float] = []
+
+    init(targetSampleRate: Double) {
+        self.targetSampleRate = targetSampleRate
+    }
+
+    mutating func reset() {
+        sourceSampleRate = nil
+        taps = []
+        history = []
+    }
+
+    mutating func process(_ samples: [Float], sourceSampleRate rate: Double) -> [Float] {
+        guard !samples.isEmpty else { return [] }
+        guard rate > targetSampleRate + 0.5 else {
+            if sourceSampleRate != nil { reset() }
+            return samples
+        }
+        if sourceSampleRate != rate {
+            sourceSampleRate = rate
+            taps = Self.taps(cutoff: 0.42 * targetSampleRate / rate, ratio: rate / targetSampleRate)
+            history = [Float](repeating: 0, count: taps.count - 1)
+        }
+        let input = history + samples
+        var output = [Float](repeating: 0, count: samples.count)
+        // The taps are symmetric, so vDSP's correlation is the convolution.
+        vDSP_conv(input, 1, taps, 1, &output, 1, vDSP_Length(samples.count), vDSP_Length(taps.count))
+        history = Array(input.suffix(taps.count - 1))
+        return output
+    }
+
+    /// Unity-gain windowed-sinc low-pass; `cutoff` is a fraction of the
+    /// source rate. About 16 taps per output sample on each side: 65 taps
+    /// from 48 to 24 kHz, a 0.67 ms delay.
+    static func taps(cutoff: Double, ratio: Double) -> [Float] {
+        let half = max(8, Int((16 * ratio).rounded()))
+        let count = 2 * half + 1
+        let raw = (0..<count).map { index -> Double in
+            let offset = Double(index - half)
+            let sinc = offset == 0 ? 2 * cutoff : sin(2 * .pi * cutoff * offset) / (.pi * offset)
+            let phase = Double(index) / Double(count - 1)
+            let window = 0.42 - 0.5 * cos(2 * .pi * phase) + 0.08 * cos(4 * .pi * phase)
+            return sinc * window
+        }
+        let sum = raw.reduce(0, +)
+        return raw.map { Float($0 / sum) }
     }
 }
 

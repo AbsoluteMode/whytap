@@ -1,15 +1,18 @@
 # Whytap Planner
 
 Open **Search all tools → To-do** for a compact list inside hover.
-**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button. The published 2.2.26 build shows Calendar as **Soon**.
+**Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button (**Calendars** once connected). The published 2.2.26 build shows Calendar as **Soon**.
+Calendar shows the calendars of this Mac: allow access once, and every account
+in **System Settings → Internet Accounts** (iCloud, Google, Outlook/Exchange and
+others) appears, with a tick per calendar.
 Events are blocks from start to end, all one colour, each with the small logo
 of its service (Google, Outlook, Calendar on this Mac, Zoom or Whytap), the time
 range and the calendar name. A Google or Outlook account synced through Calendar
 on this Mac shows the Google or Outlook logo. Taller blocks also show the
 description and attendees as they fit; hovering a block that cuts anything shows
 a bubble beside Hover with every detail (time, calendar, location, meeting link,
-description, attendees). Every connected calendar is shown. Clicking one joins its meeting link, or opens it in its
-own calendar (Google or Outlook on the web, Calendar on this Mac).
+description, attendees). Every ticked calendar is shown. Clicking one joins its meeting link, or opens it in its
+own calendar (Calendar on this Mac; Google or Outlook on the web for an account connected directly by an earlier build).
 The tools can also be added from Settings → Toolbox; adding this
 feature does not change existing saved tool layouts or positional shortcuts.
 
@@ -107,17 +110,21 @@ Planner support preserve connections already configured on the target Mac.
 
 ## Unified calendar
 
-Not available yet (shown as Soon); this is how it will work. Calendar opens on **today** inside Hover. The header’s **Connect** opens provider
-selection and the same connection flow used by Settings → Integrations. It does
-not create a Whytap account. Previous/next day and Today stay in the panel;
+Calendar opens on **today** inside Hover. The header’s **Connect** (or
+**Calendars** once connected) opens the Calendars page, the same choice as
+Settings → Integrations → Calendars. It does not create a Whytap account. Previous/next day and Today stay in the panel;
 opening Calendar again always returns to today. Hover an event whose block cuts
 something for its full details; clicking it joins the meeting or opens the
 original. A meeting/original link opens only when explicitly clicked.
 Attendees come from Calendar on this Mac and Microsoft, stay in memory and are
 never saved; direct Google connections do not read them.
 
-**Calendars** chooses which local/connected feeds are shown. Account removal is
-in Settings → Integrations. Event times use the Mac’s current time zone. Matching
+**The Calendars page** has four states: not connected (one **Allow access to
+calendars** button), access off (what to turn on in System Settings and **Open
+Privacy Settings**), no calendars on this Mac (add an account in Internet
+Accounts), and the calendars grouped by account with a tick each. Unticked
+calendars leave the day; the choice is saved. Whytap's own events have no tick.
+**Open Internet Accounts** is on the page and in Settings. Event times use the Mac’s current time zone. Matching
 external iCalendar UIDs with identical occurrence bounds collapse into one agenda
 item; unrelated events are never merged by title. Events spanning midnight and
 all-day events appear on each applicable day with an exclusive end boundary.
@@ -125,8 +132,9 @@ all-day events appear on each applicable day with an exclusive end boundary.
 Events are read-only in Hover. Whytap fetches the selected day on opening, day
 changes, account changes and every minute while visible; there is no Refresh
 button. Native calendar-change notifications update EventKit feeds at once.
-Google, Outlook and Zoom cannot push changes to an app without a server, so
-they are polled. Errors retain the last loaded data and are listed on Connect. Closing Hover stops
+How fast Google or Outlook events reach this Mac is up to macOS (iCloud and
+Exchange push changes; Google over CalDAV is fetched every few minutes). Accounts
+connected directly by an earlier build are polled every minute. Errors retain the last loaded data and are listed on Connect. Closing Hover stops
 polling; there is no background sync or persistent external-event cache.
 
 The explicitly opened panel survives pointer exit; Escape/outside click closes
@@ -139,35 +147,55 @@ Explicit Cancel/Back cancels the operation.
 A visible Calendar defers restore and update restart; ordinary backups still run.
 Disconnect removes local credentials/events, keeping the original provider data.
 
-**Apple Calendar:** Connect account → Apple Calendar requests the macOS calendar
-permission. It shows the calendars available through EventKit, including iCloud.
+**Calendar on this Mac** (the only way to connect since 2026-11-23):
+**Allow access to calendars** requests the macOS calendar permission. It shows
+the calendars available through EventKit: iCloud, On My Mac, and every account
+added in System Settings → Internet Accounts (Google, Outlook/Exchange, other
+CalDAV). A Google or Exchange account shows its own logo. Meeting links come from
+the event's URL, location and description (Google adds the Meet link there, Teams
+invitations carry it in the body). What this does not give compared with the
+former direct connections: Zoom Calendar Service calendars, structured
+conference fields (a link only in Google's `conferenceData` or Graph's
+`onlineMeeting` and not in the text is not found), opening an event on the web,
+per-account permission (macOS grants all calendars at once), and update timing,
+which macOS decides.
 macOS requires full event permission even for reading; Whytap only reads.
-macOS asks only when you press Connect, never when Whytap starts or Calendar
-opens. It asks once. After **Don't Allow** nothing is connected: Settings and the
-Connect page say to turn on Whytap in **System Settings → Privacy & Security →
-Calendars** (Full Access), with an **Open Privacy Settings** button; then press
-Connect again, which needs no second prompt. If access of a connected Apple
-Calendar is later turned off or limited to "Add Events Only", its events leave
-the day, its row reads **Access off** and opens System Settings, and the
-connection is kept: allowing access brings the events back. Calendar and Settings
-check the current permission when they open and when you return to Whytap.
+macOS asks only when you press **Allow access to calendars** (the same words in
+Hover and Settings), never when Whytap starts or Calendar opens. It asks once.
+After **Don't Allow** nothing is connected: Settings and the Calendars page say
+to turn on Whytap in **System Settings → Privacy & Security → Calendars** (Full
+Access), with an **Open Privacy Settings** button; then choose **Allow access to
+calendars** again, which needs no second prompt. If access of a connected
+Calendar on this Mac is later turned off or limited to "Add Events Only", its
+events leave the day, Settings shows **Open Privacy Settings** next to
+**Disconnect**, and the connection is kept: allowing access brings the events
+back. Calendar and Settings check the current permission when they open and when
+you return to Whytap; Settings then reads the calendar list itself, without
+opening Calendar. Accounts are told apart by macOS's account identifier, so two
+accounts with the same name stay separate (the name gets its service).
 This connection does not require a Whytap backend or a new Apple OAuth client.
-When the same Google/Exchange account is also available through macOS, use the
-feed checkboxes to select the desired source. UID-based collapse cannot identify
-copies for which the providers return unrelated identifiers.
+An account connected directly by an earlier build and also added to macOS shows
+each event once when the providers return the same iCalendar UID; copies with
+unrelated identifiers cannot be matched.
 
-**Google:** connects directly to Google Calendar API using a Desktop OAuth
+**Direct connections (earlier builds, no longer offered).** Google, Outlook and
+Zoom sign-in stays in the code but has no button: Google requires OAuth
+verification and Microsoft shows an unverified publisher. Accounts already
+connected keep working, are listed in Settings → Integrations under **Connected
+directly** with Disconnect, and an expired sign-in points to Internet Accounts.
+
+**Google:** connected directly to Google Calendar API using a Desktop OAuth
 client, `https://www.googleapis.com/auth/calendar.calendarlist.readonly` and
 `https://www.googleapis.com/auth/calendar.events.readonly`. These only allow
 listing subscribed calendars and reading events; calendar settings and sharing
 permissions are not requested.
 
-**Outlook and Teams:** connects directly to Microsoft Graph calendars using
+**Outlook and Teams:** connected directly to Microsoft Graph calendars using
 delegated `Calendars.Read` and `offline_access`. Teams meeting links come from
 the Outlook event's `onlineMeeting.joinUrl`; this is not a separate Teams chat or
 meeting-bot integration. Organizational policies can require administrator consent.
 
-**Zoom:** connects directly to **Zoom Calendar Service**, using
+**Zoom:** connected directly to **Zoom Calendar Service**, using
 `calendar:read:list_calendar_lists` and `calendar:read:list_events`. This requires
 that service and API permissions on the account. It is not a replacement for the
 Zoom Meetings API: a Zoom client merely displaying a linked Google or Microsoft
@@ -176,14 +204,11 @@ any supported source remain joinable.
 
 ## OAuth app registration
 
-Settings → **Integrations** lists **Google Calendar**, **Outlook Calendar**,
-**Apple Calendar** and **Zoom Calendar** with separate permission descriptions,
-account controls and direct provider authorization. Google and Zoom show
-their pending review/publication state and do not start new shared-client sign-in
-before public approval. Existing accounts can still be disconnected. Hover has
-no calendar selection (removed on 2026-11-21); Connect starts the provider browser
-or macOS prompt directly, without an intermediate form or account-name field. Repeated accounts receive
-distinct provider-based names automatically.
+Not used by the interface since 2026-11-23: Settings → **Integrations** shows
+**Calendars on this Mac** and, only when such accounts exist, **Connected
+directly**. The registration below is kept for those accounts and for a
+possible return of direct sign-in. Repeated accounts received distinct
+provider-based names automatically.
 
 Use **Whytap** as the application name and public consent-screen brand.
 

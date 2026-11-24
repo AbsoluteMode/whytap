@@ -17,13 +17,10 @@ final class CalendarIntegrationRenderTests: XCTestCase {
         let suite = "test.calendar-integration-render." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let pending: (CalendarProvider) -> CalendarConnectionReadiness = { provider in
-            .shared(provider, configuration: provider == .apple || provider == .zoom ? nil : .init(clientID: "fixture"), googleReview: false)
-        }
         let connections = CalendarConnections(defaults: defaults)
         for dark in [false, true] {
             for width in [500.0, 739.0, 1059.0] {
-                try render(SettingsCalendarIntegrationsView(connections: connections, readiness: pending).padding(24),
+                try render(SettingsCalendarIntegrationsView(connections: connections).padding(24),
                     size: NSSize(width: width, height: 800), dark: dark,
                     to: destination.appendingPathComponent("pending-\(Int(width))-\(dark).png"))
             }
@@ -43,11 +40,11 @@ final class CalendarIntegrationRenderTests: XCTestCase {
         }
         XCTAssertTrue(connections.beginConnecting(provider: .microsoft))
         defer { connections.endConnecting() }
-        try render(SettingsCalendarIntegrationsView(connections: connections, readiness: pending).padding(24),
+        try render(SettingsCalendarIntegrationsView(connections: connections).padding(24),
             size: NSSize(width: 500, height: 900), dark: false, to: destination.appendingPathComponent("busy-long-account.png"))
         defaults.set(Data("invalid synthetic metadata".utf8), forKey: CalendarAccountSettings.accountsKey)
         let damaged = CalendarConnections(defaults: defaults)
-        try render(SettingsCalendarIntegrationsView(connections: damaged, readiness: pending).padding(24),
+        try render(SettingsCalendarIntegrationsView(connections: damaged).padding(24),
             size: NSSize(width: 500, height: 1000), dark: true, to: destination.appendingPathComponent("preserved-error.png"))
         connections.endConnecting()
         let info: [String: Any] = ["WhytapCalendarOAuthClients": ["google": ["clientID": "fixture"], "microsoft": ["clientID": "fixture"]]]
@@ -62,14 +59,14 @@ final class CalendarIntegrationRenderTests: XCTestCase {
                 defer { authorization.continuation.finish(); flow.cancel() }
                 XCTAssertTrue(flow.startRegistered(provider: .microsoft, info: info))
                 XCTAssertTrue(flow.working)
-                try render(SettingsCalendarIntegrationsView(connections: connections, readiness: pending,
+                try render(SettingsCalendarIntegrationsView(connections: connections,
                     configurationInfo: info, flow: flow).padding(24), size: NSSize(width: width, height: 1000), dark: dark,
                     to: destination.appendingPathComponent("direct-connecting-\(Int(width))-\(dark).png"))
                 flow.cancel()
                 for _ in 0..<100 where flow.working { try await Task.sleep(for: .milliseconds(5)) }
                 XCTAssertFalse(flow.working)
                 XCTAssertFalse(flow.startRegistered(provider: .google, info: info))
-                try render(SettingsCalendarIntegrationsView(connections: connections, readiness: pending,
+                try render(SettingsCalendarIntegrationsView(connections: connections,
                     configurationInfo: info, flow: flow).padding(24), size: NSSize(width: width, height: 1000), dark: dark,
                     to: destination.appendingPathComponent("direct-error-\(Int(width))-\(dark).png"))
             }

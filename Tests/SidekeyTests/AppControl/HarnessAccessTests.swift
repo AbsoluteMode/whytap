@@ -181,7 +181,47 @@ final class HarnessAccessTests: XCTestCase {
     }
 
     func test_every_meeting_tool_is_gated() {
-        XCTAssertEqual(HarnessAccessGate.gatedOperations, AppControlMeetings.operations)
+        XCTAssertTrue(AppControlMeetings.operations.isSubset(of: HarnessAccessGate.gatedOperations))
+    }
+
+    // MARK: Dictation lists (Vocab, Filler)
+
+    func test_dictation_list_writes_are_gated_like_meetings() async {
+        XCTAssertEqual(HarnessAccessGate.gatedOperations,
+                       AppControlMeetings.operations.union(["vocab_add", "filler_add"]))
+        prompt.answer = .deny
+        for operation in ["vocab_add", "filler_add"] {
+            let answer = await read(operation)
+            XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"), operation)
+        }
+        // A script in the harness's shell never reaches them.
+        processes.add(600, parent: 500)
+        processes.add(901, parent: 600)
+        let script = await read("vocab_add", from: 901)
+        XCTAssertEqual(script?.data.object?["code"], .string("unsupported_client"))
+    }
+
+    /// Coding tools turned off while the request waits: nothing is written.
+    func test_access_turned_off_mid_request_writes_no_dictation_entry() async {
+        let suite = "harness-drop-lists-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let vocabulary = VocabularyCache(defaults: defaults), fillers = FillerTermsStore(defaults: defaults)
+        let lists = AppControlDropLists(vocabulary: { vocabulary }, fillers: { fillers })
+        let allowed = await read("vocab_add")
+        XCTAssertNil(allowed, "the user said Yes")
+        for operation in ["vocab_add", "filler_add"] {
+            let request = AppControlRequest(operation, arguments: ["terms": .array([.string("Whytap")])])
+            let response = await gate.handle(request, peerPID: helper) { request in
+                // The user turns Claude Code off in Settings while it waits.
+                _ = self.store.record(.deny, for: self.claude, at: Date())
+                return lists.handle(request.operation, request.arguments)
+            }
+            XCTAssertEqual(response.data.object?["code"], .string("access_denied"), operation)
+            _ = self.store.record(.allow, for: self.claude, at: Date())
+        }
+        XCTAssertEqual(vocabulary.terms, [])
+        XCTAssertEqual(fillers.terms(), [])
     }
 
     func test_a_script_in_the_harness_shell_gets_nothing_even_after_yes() async {

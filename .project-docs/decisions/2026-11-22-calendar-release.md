@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarReleaseTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-calendar-soon.md]
+related: [2026-11-21-calendar-soon.md, 2026-11-23-calendar-macos-only.md]
 ---
 
 # Calendar is released

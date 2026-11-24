@@ -88,6 +88,7 @@ final class OnboardingTests: XCTestCase {
             onComplete: {}, autoComplete: true,
             snapshotProvider: { .init(accessibilityGranted: accessibility, microphoneStatus: microphone) },
             accessibilityRequester: {}, openAccessibilitySettings: {},
+            usesProtectionOverridePane: { false },
             runtimeRefresh: { _, _ in })
     }
 
@@ -1135,7 +1136,8 @@ final class OnboardingTests: XCTestCase {
                 snapshotProvider: { .init(accessibilityGranted: granted.value,
                                           microphoneStatus: granted.value ? .authorized : .notDetermined) },
                 screenRecordingAccessProvider: { false },
-                accessibilityRequester: {}, openAccessibilitySettings: {}, runtimeRefresh: { _, _ in })
+                accessibilityRequester: {}, openAccessibilitySettings: {},
+                usesProtectionOverridePane: { false }, runtimeRefresh: { _, _ in })
             let tools = OnboardingCodingTools(detect: { [] }, connect: { _ in CaseClientSetupReport() })
             tools.show([.claudeCode, .codex], state: stop == .featuresConnected ? .connected : .idle)
             let model = OnboardingModel(speech: env.speech, permissions: permissions, onDevice: controller,

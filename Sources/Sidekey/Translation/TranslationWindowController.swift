@@ -29,7 +29,9 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
     let text: TextTranslationModel
     let subtitles: LiveSubtitleModel
-    private let presentation = Presentation()
+    let presentation = Presentation()
+    /// × and the session button, clicked through the panel's `sendEvent`.
+    let hitTargets = SubtitleOverlayHitTargets()
     private var embeddingID: UUID?
     var isEmbedded: Bool { embeddingID != nil }
     private let panel: TranslationPanel
@@ -86,14 +88,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         }
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: TranslationView(
+        panel.contentView = FirstClickHostingView(rootView: TranslationView(
             text: text, subtitles: subtitles, presentation: presentation,
             openSettings: { [weak self] feature in
                 self?.dismiss()
                 openSettings(feature)
             },
-            close: { [weak self] in self?.dismiss() }
+            close: { [weak self] in self?.dismiss() },
+            hitTargets: hitTargets
         ))
+        panel.hitTargets = hitTargets
         adoptTextWidth(restoredFrame: panel.frame)
         configureChrome(for: .text)
         let publish = { [weak self] in
@@ -147,12 +151,18 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
     static let subtitleSize = NSSize(width: 760, height: 190)
+    static let minimumWidth: CGFloat = 360
 
     /// Internal so tests can check the layout without putting the panel on screen.
     func resize(for mode: Mode) {
+        hitTargets.cancelPress()
         let isText = mode == .text
         configureChrome(for: mode)
-        panel.minSize = NSSize(width: 360, height: isText ? 120 : 140)
+        // Subtitles: never shorter than the overlay's own height, so the
+        // controls, a problem with its fix and the caption all fit at the
+        // narrowest width (the caption shrinks to what the controls leave).
+        // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+        panel.minSize = NSSize(width: Self.minimumWidth, height: isText ? 120 : Self.subtitleSize.height)
         let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
         if laidOutMode == .text { rememberTextWidth(frame.width) }
@@ -235,6 +245,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 
     func dismiss() {
+        hitTargets.cancelPress()
         presentation.isTextPresented = false
         removeOutsideClickMonitors()
         panel.orderOut(nil)
@@ -295,7 +306,24 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 }
 
+/// The subtitle overlay never takes keyboard focus, so it is not the key
+/// window when the user reaches for Stop or ×. Without this, AppKit spends
+/// that first click making the panel key and the button never sees it.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 private final class TranslationPanel: NSPanel {
+    var hitTargets: SubtitleOverlayHitTargets?
     override var canBecomeKey: Bool { true }
+
+    // The overlay's buttons take their click here, where it always arrives,
+    // not through the first-mouse bridge that can drop it.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    override func sendEvent(_ event: NSEvent) {
+        if let hitTargets, hitTargets.handle(event, in: self) { return }
+        super.sendEvent(event)
+    }
     override func cancelOperation(_ sender: Any?) { close() }
 }

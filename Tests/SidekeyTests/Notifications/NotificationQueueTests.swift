@@ -62,8 +62,13 @@ final class NotificationQueueTests: XCTestCase {
         XCTAssertEqual(hub.current?.id, "first")
         hub.setHovered(false)
         XCTAssertGreaterThan(hub.deadline?.timeIntervalSinceNow ?? 0, 1.8)
-        try await Task.sleep(nanoseconds: 2_150_000_000)
+        // The expiry timer can fire late on a loaded Mac: wait for the turn, not a fixed time.
+        let resumed = Date()
+        while hub.current?.id != "second", Date().timeIntervalSince(resumed) < 30 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
         XCTAssertEqual(hub.current?.id, "second")
+        XCTAssertGreaterThan(Date().timeIntervalSince(resumed), 1.5, "the first card kept its remaining time")
         hub.setSuspended(true)
         XCTAssertEqual(hub.history.count, 2)
     }

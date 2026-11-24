@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One phrase of speech and its translation, shown as a pair. The source is
 /// fixed when the phrase is committed; only its own translation fills it in.
@@ -13,8 +14,8 @@ struct SubtitleLine: Identifiable, Equatable {
     /// Position in the session, kept when older pairs leave, so alternating
     /// bands never move from one pair to another.
     var ordinal = 0
-    init(source: String, translation: String? = nil, failed: Bool = false, ordinal: Int = 0) {
-        id = UUID(); self.source = source; self.translation = translation; self.failed = failed; self.ordinal = ordinal
+    init(id: UUID = UUID(), source: String, translation: String? = nil, failed: Bool = false, ordinal: Int = 0) {
+        self.id = id; self.source = source; self.translation = translation; self.failed = failed; self.ordinal = ordinal
     }
     var isSettled: Bool { translation != nil || failed }
 }
@@ -22,6 +23,19 @@ struct SubtitleLine: Identifiable, Equatable {
 enum SubtitlePhase: Equatable {
     case idle, connecting, listening, finishing, failed
     var isActive: Bool { self == .connecting || self == .listening || self == .finishing }
+    /// Capture is on. After Stop (`finishing`) the overlay already shows the
+    /// session as stopped while the last translation arrives in the background.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    var isRunning: Bool { self == .connecting || self == .listening }
+}
+
+/// The session button's action as drawn. Cancel and Stop carry the session
+/// they were drawn for.
+// WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+enum SubtitleSessionAction: Hashable {
+    case start
+    case cancel(UUID)
+    case stop(UUID)
 }
 
 /// A bounded handoff prevents a slow socket from retaining unlimited system audio.
@@ -61,6 +75,8 @@ final class SubtitleAudioRelay: @unchecked Sendable {
 // WHY: .project-docs/decisions/2026-10-20-translation-tools.md
 @MainActor
 final class LiveSubtitleModel: ObservableObject {
+    /// Delay measurements only: never text, keys or audio.
+    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "subtitles")
     @Published var targetCode = "ru"
     @Published var sourceCode = "auto"
     @Published var showsOriginal = true
@@ -70,6 +86,11 @@ final class LiveSubtitleModel: ObservableObject {
     @Published private(set) var live = ""
     /// Its translation so far, in whole words: the live pair's right column.
     @Published private(set) var liveTranslation = ""
+    /// The identity the live pair shows under and the next committed pair
+    /// keeps, so a pair settles in place instead of leaving and coming back
+    /// as a new row.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
+    @Published private(set) var liveID = UUID()
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
     var onActivityChange: (() -> Void)?
@@ -96,16 +117,29 @@ final class LiveSubtitleModel: ObservableObject {
     /// message is shown, at the user's request.
     // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
     static let maxSessionDuration: Duration = .seconds(60 * 60)
+    /// Subtitles capture the system mix at the provider's 24 kHz, low-passed
+    /// before resampling, instead of the 16 kHz Meeting Notes use.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md
+    nonisolated static let captureSampleRate: Double = 24_000
     private let maxSessionDuration: Duration
     private var sessionLimit: Task<Void, Never>?
     private var source: TerminalSystemAudioSourceStreaming?
     private var relay: SubtitleAudioRelay?
+    /// A Start waiting for the previous session's cleanup (`start` during
+    /// `finishing`).
+    private var pendingStart: Task<Void, Never>?
+    /// Events received from the session and how many the caption reflects:
+    /// tests wait on these instead of on time.
+    private var receivedEvents = 0
+    private(set) var publishedEvents = 0
 
     init(
-        flushInterval: Duration = .milliseconds(100),
+        flushInterval: Duration = .milliseconds(80),
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
-        makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = { CoreAudioSystemAudioSource() },
+        makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
+            CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
+        },
         // Subtitles run only on Audio translate (OpenAI gpt-realtime-translate)
         // with the OpenAI key from API keys; without it Start names the fix.
         // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
@@ -126,13 +160,29 @@ final class LiveSubtitleModel: ObservableObject {
     }
 
     @discardableResult func start() -> Task<Void, Never>? {
-        guard !phase.isActive else { return nil }
+        guard !phase.isRunning else { return nil }
+        if phase == .finishing {
+            // Start after Stop while the last translation still arrives: drop
+            // that tail and its capture, then start fresh. The restart is
+            // tracked: closing, sleep or any cancel before it begins drops it.
+            let cleanup = cancel()
+            let restart = Task { [weak self] in
+                await cleanup.value
+                guard !Task.isCancelled, let self, self.phase == .idle || self.phase == .failed else { return }
+                self.pendingStart = nil
+                await self.start()?.value
+            }
+            pendingStart = restart
+            return restart
+        }
+        pendingStart?.cancel(); pendingStart = nil
         cleanupTask = nil
         generation = UUID()
         let token = generation
         let language = sourceCode == "auto" ? nil : sourceCode
         lines = []; live = ""; liveTranslation = ""; issue = nil
-        pairer = SubtitleSpeechPairer(); nextOrdinal = 0
+        pairer = SubtitleSpeechPairer(); nextOrdinal = 0; liveID = UUID()
+        receivedEvents = 0; publishedEvents = 0
         hasAudio = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
@@ -161,6 +211,28 @@ final class LiveSubtitleModel: ObservableObject {
         return task
     }
 
+    /// What the session button shows now, bound to this session: Start while
+    /// nothing runs, Cancel while connecting, Stop while listening.
+    var sessionAction: SubtitleSessionAction {
+        switch phase {
+        case .connecting: .cancel(generation)
+        case .listening: .stop(generation)
+        case .idle, .failed, .finishing: .start
+        }
+    }
+
+    /// Runs `action` only while it is still the action the button shows: a
+    /// click that began on Start, Cancel or Stop never runs another one, or
+    /// acts on another session.
+    func perform(_ action: SubtitleSessionAction) {
+        guard action == sessionAction else { return }
+        switch action {
+        case .start: start()
+        case .cancel: cancel()
+        case .stop: stop()
+        }
+    }
+
     func stop() {
         guard phase == .listening else { cancel(); return }
         sessionLimit?.cancel(); sessionLimit = nil
@@ -181,6 +253,8 @@ final class LiveSubtitleModel: ObservableObject {
     /// Closing/sleep cancels immediately, including pending paid requests.
     /// Keep a finishing state until old capture has actually been released.
     @discardableResult func cancel() -> Task<Void, Never> {
+        // A Start queued behind a finishing session never runs after a cancel.
+        pendingStart?.cancel(); pendingStart = nil
         if let cleanupTask { return cleanupTask }
         generation = UUID()
         let token = generation
@@ -252,17 +326,25 @@ final class LiveSubtitleModel: ObservableObject {
             guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening else { return }
             self.stop()
         }
-        audioTask = Task { [weak self] in
+        // Audio goes out off the main actor: a busy caption never holds it
+        // back (the relay's 128 buffers would fill and stop the session).
+        // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+        nonisolated(unsafe) let session = translator
+        audioTask = Task.detached { [weak self] in
+            var heard = false
             do {
                 for try await pcm in relay.stream {
                     guard !Task.isCancelled else { return }
-                    if pcm.contains(where: { $0 != 0 }), self?.hasAudio == false { self?.hasAudio = true }
-                    await translator.sendAudio(pcm)
+                    if !heard, pcm.contains(where: { $0 != 0 }) {
+                        heard = true
+                        await MainActor.run { if self?.hasAudio == false { self?.hasAudio = true } }
+                    }
+                    await session.sendAudio(pcm)
                 }
                 guard !Task.isCancelled else { return }
-                await translator.endInput()
+                await session.endInput()
             } catch {
-                self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
+                await self?.fail(.init(message: "Audio is arriving faster than it can be sent. Check your connection and start again."), token: token)
             }
         }
         timer = Task { [weak self] in
@@ -277,11 +359,18 @@ final class LiveSubtitleModel: ObservableObject {
             guard generation == token, !Task.isCancelled else { return }
             switch event {
             case .source(let text, let elapsed):
+                receivedEvents += 1
                 pairer.addSource(text, elapsedMs: elapsed)
-                flushPairs(token: token)
+                publishSoon(token: token)
             case .translation(let text, let elapsed):
+                receivedEvents += 1
                 pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
-                flushPairs(token: token)
+                publishSoon(token: token)
+                // Numbers only: with the adapter's arrival log, whether a delay
+                // that grows builds up at the provider or before the caption.
+                let sent = Int(translator.acceptedAudioSeconds() * 1_000)
+                os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
+                       elapsed ?? -1, sent, sent - (elapsed ?? 0))
             case .closed:
                 closedCleanly = true
             case .failed(let failure):
@@ -309,18 +398,33 @@ final class LiveSubtitleModel: ObservableObject {
         setPhase(.idle)
     }
 
+    /// Deltas often arrive several at once: the caption is published at once
+    /// when the last publish is `publishInterval` old, otherwise by the flush
+    /// timer, so a burst redraws (and restarts its motion) once.
+    // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    static let publishInterval: TimeInterval = 0.08
+    private var lastPublish: TimeInterval = 0
+
+    private func publishSoon(token: UUID) {
+        if ProcessInfo.processInfo.systemUptime - lastPublish >= Self.publishInterval { flushPairs(token: token) }
+    }
+
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
+        lastPublish = ProcessInfo.processInfo.systemUptime
+        publishedEvents = receivedEvents
         let carry = pairer.takeCarry()
         if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
         for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
             let translated = !pair.translation.isEmpty
-            lines.append(SubtitleLine(source: pair.source, translation: translated ? pair.translation : nil,
+            lines.append(SubtitleLine(id: liveID, source: pair.source, translation: translated ? pair.translation : nil,
                                       failed: !translated, ordinal: nextOrdinal))
             nextOrdinal += 1
+            liveID = UUID()
             if lines.count > 40 { lines.removeFirst() }
         }
-        if live != pairer.liveSource { live = pairer.liveSource }
-        if liveTranslation != pairer.liveTranslation { liveTranslation = pairer.liveTranslation }
+        let row = pairer.showLive(now: ProcessInfo.processInfo.systemUptime)
+        if live != row.source { live = row.source }
+        if liveTranslation != row.translation { liveTranslation = row.translation }
     }
 }

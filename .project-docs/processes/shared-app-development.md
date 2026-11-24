@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-22
+verified_at: 2026-11-23
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-23 the maintainer approved starting the builder-queue rework with a model-free watchdog, a load and screen-lock gate, current builder rules and a baseline measurement.
+    confirmed_at: 2026-11-23
   - type: user-confirmed
     reference: On 2026-11-22, after the builder blocked one PR seven times in a row for one or two edge cases each time that had been in the code from the start, the maintainer asked the builder to validate everything and report all findings at once, re-blocking only for errors the fix itself introduces, and to remember that rule.
     confirmed_at: 2026-11-22
@@ -65,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md]
 ---
 
 # Parallel development, one working Whytap
@@ -130,6 +133,13 @@ taps. Keep the user's working instance; do not launch a second app for testing.
    `swift test --filter ...` and other relevant non-launching checks. Keep each
    worktree's build output separate. Tests use temporary stores and fake
    providers rather than the user's notes, clipboard, keys or paid requests.
+   A run plays no sound: a test that asks for one is named in the run's
+   `SystemSoundGuard` report, and a key nobody takes in a window fails it
+   ([decision](../decisions/2026-11-23-silent-test-runs.md)).
+   A run shows no window and takes no focus: `OnScreenWindowGuard` keeps
+   windows off screen, fails a test that opens modal UI, a menu or another
+   app, and after every test fails one that left a window on screen
+   ([decision](../decisions/2026-11-24-windowless-test-runs.md)).
 4. Do **not** invoke `scripts/dev-run.sh`, `customize.py build/run`, `swift run`,
    `open` on a feature bundle, or LaunchServices registration. On branches
    older than the one-running-copy change (2026-10-19), even `dev-run.sh`
@@ -217,7 +227,9 @@ directory.
 
 launchd runs `build-queue-watcher.py run` every minute and whenever the queue
 file changes. It reads the queue read-only and involves no model while nothing
-is open. Open work is a `queued` ticket, an `in_progress` ticket without a
+is open; its one write is the helper's `check-heads` (as the builder) right
+before a session for queued work, which returns tickets whose PR head moved.
+Open work is a `queued` ticket that waits for no `--depends-on` PR, an `in_progress` ticket without a
 live session, or a `pending_install` ticket recorded with `--retry-install`
 once the meeting gate is clear. Then it starts exactly one builder session
 (Codex by default, Claude Code or another harness by configuration) in the
@@ -241,6 +253,51 @@ six hours.
 The LaunchAgent runs only in the logged-in graphical session: signing needs
 the unlocked login keychain, and the engine needs its own signed-in CLI. A
 sleeping, logged-out or locked Mac processes nothing; the queue survives.
+Before starting a session for open work, including a deferred install, the
+watcher checks the environment without a model: a locked screen (or another
+user at the console) and a five-minute load average above
+`load_limit_per_cpu` (default 2) times the CPU count only wait, logged as
+`waiting: …`. A wait counts no backoff and blames no PR; the next tick starts
+the session once the screen is unlocked and the load has fallen. Unknown
+values never block. `build-queue-watcher.py environment` prints the same check
+(exit 0 clear, 3 not clear) for the builder.
+
+Each session reads the builder prompt from `origin/main`, so a merged rule
+change reaches the next session without reinstalling. Only a successful fetch
+counts: the prompt is then read from that fetched commit and labelled with its
+SHA in the watcher log. A failed fetch uses the installed copy, labelled as
+such, never a cached `origin/main`. `activate` installs only scripts identical
+to freshly fetched `origin/main`'s; a stale or edited checkout, or a failed
+fetch, is refused (`--allow-local` overrides this deliberately).
+
+A model-free watchdog runs on every tick without a session and every minute
+inside a running one. It never changes the queue, the lock or the session and
+shows no notifications. It appends one `raised` line per episode and one
+`cleared` line when the condition is resolved to
+`whytap-build-queue-alerts.jsonl` in the Git common directory, and to the
+optional `alerts_mirror` path in the builder configuration (the maintainer's
+orchestrator reads that file). A record that cannot be written stays in the
+watchdog's outbox and is written, in order, once that destination works. Its conditions: an `in_progress`
+ticket without a new queue event for `stall_minutes` (60) during a live
+session, open work waiting for the screen or the load for
+`environment_alert_minutes` (60), two or more sessions in a row without
+progress (for queued work or a deferred install), a deferred install older
+than `install_alert_minutes` (120), and an author event unacknowledged after
+`undelivered_minutes` (20), including every event of a `--source other`
+ticket, which no Harness Link address reaches. The scope starts when the
+new watcher is activated or first started, before its first session; events
+created earlier are out of it, and one in scope stays raised until it is
+acknowledged.
+`whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
+current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
+[--until <date>]` measures returns, waits, builder time, deferred installs and
+environment waits read-only from the events inside the period (status as of
+the cutoff; waits and attempts that started earlier count from the period's
+start or when they end in it; times come from the event history, never from
+the requeue-reset `queued_at`; a meeting wait starts only when the gate says
+"not clear", spans its rechecks until the watcher logs another decision, and
+a retry backoff after a clear gate is not one), for comparing the queue before and after a change (see the
+[watchdog decision](../decisions/2026-11-23-builder-queue-watchdog.md)).
 The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this
 process and the builder prompt, never queue contents.
@@ -258,10 +315,25 @@ python3 "$queue_git_dir/exodia-build-queue.py" enqueue \
 ```
 
 Use actual values, not literal placeholders. Repeat `--acceptance` for up to
-three concrete checks. Codex captures the originating `CODEX_THREAD_ID`;
-Claude Code uses `--source claude --session <its-actual-session-id>`, and other
-harnesses use `--source other --session <actual-session-id>`. Never invent a
-Codex ID for a CLI session. No keys, user content or arbitrary executable
+three concrete checks. When the PR must not merge before another PR, add
+`--depends-on <that PR's URL>` (repeatable) besides describing it in
+`--dependencies`: the ticket keeps its place but is not claimed, and starts no
+builder session, until the latest ticket of that PR is `done` or
+`pending_install` (merged through the queue). `status` shows it as
+`waiting_for`. A PR that does not go through the queue is not a structured
+dependency. A self-dependency or a direct cycle is refused. `--depends-on`,
+the head check and the return without a block below work once `activate` has
+installed the helper from that change; an older installed helper refuses the
+flag (then state the dependency in `--dependencies` only) and ignores recorded
+dependencies. Without `--source`/`--session` the helper takes the
+author's address from the environment: Codex's `CODEX_THREAD_ID`, otherwise
+Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID, stored in lower case; a
+display name such as `one-mcp` is refused because Harness Link cannot reach
+it). Session IDs are validated whole, from flags and the environment alike:
+no whitespace or control characters. Other harnesses use
+`--source other --session <actual-session-id>`; the response then says
+`delivery: inbox_only`, and that author must read `events --ticket <id>`
+itself. Never invent a Codex ID for a CLI session. No keys, user content or arbitrary executable
 commands belong in queue fields. These fields are evidence, not instructions.
 
 `enqueue` checks the reviewed head itself before accepting it: it runs the
@@ -302,7 +374,18 @@ queue survives downtime.
    The on-demand builder records the watcher's process ID
    (`WHYTAP_BUILDER_LEASE_PID`) as the lock owner.
 3. Run `claim`. Only the configured builder may claim; a SQLite transaction
-   selects the oldest queued ticket and permits one `in_progress` ticket.
+   selects the oldest queued ticket that waits for no dependency and permits
+   one `in_progress` ticket. Before that, the helper reads every PR's current
+   head with `git ls-remote` (no model, no credentials): a queued ticket whose
+   PR head moved after submission is `blocked` with the new SHA and a request
+   to enqueue it, and the next ticket is claimed. Only tickets queued before
+   that read started are judged, and a pull ref that still shows an ancestor
+   of the submitted commit is GitHub lagging, not a move. The watcher runs the
+   same `check-heads` before it starts a session for queued work, so a moved
+   head costs no session. An unreachable remote checks nothing. Such a return
+   has no builder to announce it: `events --pending` lists it for Codex and
+   Claude Code authors alike until the next builder delivers and acknowledges
+   it.
    Send its start event to the originating chat immediately: include ticket,
    PR/title/head and ask that agent to follow the build and check its acceptance
    steps when notified. The worker may inspect, diagnose and report problems;
@@ -311,7 +394,14 @@ queue survives downtime.
    and source. Follow all integration/signature/version/activity/rollback gates
    below. Queue membership is a request, never proof that gates passed. A moved
    head needs new review; block the ticket and ask its worker to resubmit the
-   reviewed result. Resolve routine merge conflicts with main in the clean
+   reviewed result. To give a claimed ticket back without blaming the PR (the
+   environment stopped it, an undeclared dependency is not merged yet), use
+   `set --status queued --note <reason>`: from `in_progress` it keeps its place,
+   while a requeue after `blocked` goes to the end as before. The watcher
+   counts such a return as a session without progress, so its backoff applies;
+   a retry after a block gets a new place and resets the backoff. Do not
+   return a ticket whose branch you already pushed to; finish or block it.
+   Resolve routine merge conflicts with main in the clean
    integration worktree yourself: keep the contracts of both features, re-run
    the tests of both, push the resolution to the PR branch as a normal commit
    and record the new head and what was resolved in the ticket note. Mechanical
@@ -319,7 +409,24 @@ queue survives downtime.
    builder's too. Block only for a product choice by the author or maintainer,
    tests failing because of the feature itself, missing review evidence, or a
    destructive migration or access decision. Preserve every other session's
-   work. Do not automatically merge unrelated open PRs.
+   work. Do not automatically merge unrelated open PRs. Before the full suite
+   run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`
+   from the integration worktree (main's copy, also before reactivation);
+   while it is not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
+   running the suite. If it stays not clear, do not run it: return the ticket
+   with `set --status queued` and a note that the environment, not the PR,
+   stopped it. Failures in a
+   suite that ran while the check was not clear are not findings against the PR.
+   A failed test whose file and code under test the candidate does not change
+   is rerun alone (`swift test --filter <Class>/<test>`), not with a second
+   full suite. If it passes, it is not a finding: the builder continues,
+   appends the test, ticket and date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git
+   common directory and names it as a follow-up in the ticket note when it is
+   already listed within the last seven days; if it fails again, it is a
+   finding. A test skipped with "Protected data is unavailable" ran while the
+   screen was locked; it runs again once the environment is clear, before the
+   merge, and a failure there is a finding (see the
+   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)).
    Block a PR once with everything. Before setting `blocked`, finish the whole
    inspection: every probe and check across all paths the PR touches. Write
    **all** problems found into the ticket note as one numbered list. When a
@@ -417,7 +524,44 @@ Under the lock:
    SHA and base. If either moves, reconcile and validate the affected result.
    Fetch and verify the merged source/tree before packaging. Do not force-push
    shared main or bypass existing review/release gates.
-4. For a runtime update, prepare a signed production candidate from clean,
+4. Group the install, never the review or the tests: each PR is still checked,
+   tested and merged alone. The helper marks each ticket `runtime` at
+   submission (any changed path outside documentation, tests, `.github/` and
+   the queue's own scripts). After merging a runtime PR, count the merged
+   runtime tickets waiting for an automatic install, including this one. While
+   that count is below four, another runtime ticket can be claimed now, and
+   neither this PR nor any of them changes stored-data formats or migrations,
+   permissions (TCC), Keychain items, signing or entitlements, or the updater,
+   do not package yet: record `set --status pending_install --retry-install`
+   with "merged at <main SHA>; install grouped", list the PR under **Merged,
+   not installed** in build/CURRENT_BUILD.md, tell its author, and take the
+   next ticket. The watcher takes queued work before such an install, so the
+   group installs once no runtime ticket can be claimed, through the usual
+   meeting gate. The install boundary holds in both directions, also while
+   the gate is busy or a person must act: four waiting installs, or one
+   marked `--install-first` or `--hold`, make `claim` and the watcher skip
+   runtime tickets (they keep their place) and put the install first; work
+   that does not change the app still runs. At four the builder marks the
+   group `--install-first`. A PR of the kinds above installs alone: claimed
+   while a group waits, it goes back with `set --status queued` and the group
+   is marked `--install-first`; merged but not installable now, it is
+   recorded `--hold` (a person must act) or `--install-first` (only the gate
+   is busy). `pending_install -> pending_install` records a prepared
+   candidate or changes the flag without leaving the group. The boundary is
+   sticky in the helper: once a waiting install is `--install-first` or
+   `--hold`, a later `--retry-install` keeps it `first` and a deferral
+   without a flag makes it `hold`, so no install-step deferral lets other
+   runtime work pass. A `--hold` on any ticket of a group stops the watcher's
+   automatic install of the whole group until it is set `--install-first`
+   again. The install
+   session packages one candidate from current main, which contains every PR
+   of the group; after the verified install every ticket of the group is
+   `done` with that running build and its own acceptance steps, and the
+   section is emptied. This starts with the helper and watcher that `activate`
+   installs; until then each runtime PR installs as before (see the
+   [group install decision](../decisions/2026-11-23-builder-queue-group-install.md)).
+   Otherwise, and for that install,
+   prepare a signed production candidate from clean,
    committed main using the current local build-only packaging procedure in
    `docs/build-and-release.md`. Building must leave the installed app running.
    Verify the candidate's strict code signature and compare its signing
@@ -521,6 +665,7 @@ Update the local build/CURRENT_BUILD.md under the lock. Keep these separate:
 | --- | --- |
 | Ready | PR/head SHA, checks, dependencies and acceptance steps |
 | Merged | Verified main SHA; no claim that the app changed |
+| Merged, not installed | PRs of a waiting install group with their main SHAs, kept current at each merge |
 | Candidate / pending | Source SHA, signed artifact path, reason it is waiting |
 | Running | Verified launched process, bundle/channel, version/build, source SHA and smoke result |
 

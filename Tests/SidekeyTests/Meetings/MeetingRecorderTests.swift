@@ -938,7 +938,7 @@ final class MeetingRecorderTests: XCTestCase {
         mic.feed([Float](repeating: 0.8, count: 1_024))
         sys.feed([Float](repeating: 0, count: 4_096))
 
-        await fulfillment(of: [expectation], timeout: 0.7)
+        await fulfillment(of: [expectation], timeout: 10)  // returns once four levels arrived
         collector.cancel()
 
         _ = await recorder.stop(reason: .user)

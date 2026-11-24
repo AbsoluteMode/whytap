@@ -751,13 +751,15 @@ final class ProviderBatchTranscriberTests: XCTestCase {
     func test_soniox_jobThatNeverFinishes_timesOut_andDeletesTheAudio() async {
         let deleted = deletions(2)
         let jobDeletes = serveSoniox(jobStatuses: ["processing"], busyDeletes: 2, deleted: deleted)
-        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
+        // The deletion retries run until `jobTimeout`: 50 ms left room for only one
+        // attempt on a loaded Mac, so the window is long enough for three.
+        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(500))
         let pcm = pcm
 
         let outcome = await watchdog { try await soniox.transcribe(audio: pcm, language: nil) }
 
         XCTAssertEqual(outcome?.failure as? ProviderBatchTranscriptionError, .timedOut, "got \(String(describing: outcome))")
-        await fulfillment(of: [deleted], timeout: 2)
+        await fulfillment(of: [deleted], timeout: 10)
         XCTAssertEqual(jobDeletes.value, 3)
     }
 
@@ -766,13 +768,21 @@ final class ProviderBatchTranscriberTests: XCTestCase {
     func test_soniox_deletionOfAJobThatNeverStops_isGivenUp() async throws {
         let deleted = deletions(1)
         let jobDeletes = serveSoniox(jobStatuses: ["processing"], busyDeletes: .max, deleted: deleted)
-        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(50))
+        let soniox = transcriber(.soniox(apiKey: "sx-key", model: "stt-async-v6"), pollInterval: .milliseconds(5), jobTimeout: .milliseconds(500))
         let pcm = pcm
 
         let outcome = await watchdog { try await soniox.transcribe(audio: pcm, language: nil) }
-        await fulfillment(of: [deleted], timeout: 2)
-        try await Task.sleep(for: .milliseconds(500))
-        let attempts = jobDeletes.value
+        await fulfillment(of: [deleted], timeout: 10)
+        // Wait for the retries to end on their own: no new attempt for twice the
+        // retry window, however slow the Mac is.
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(30)
+        var attempts = jobDeletes.value
+        while clock.now < deadline {
+            try await Task.sleep(for: .seconds(1))
+            if jobDeletes.value == attempts, attempts > 1 { break }
+            attempts = jobDeletes.value
+        }
         try await Task.sleep(for: .milliseconds(200))
 
         XCTAssertEqual(outcome?.failure as? ProviderBatchTranscriptionError, .timedOut, "got \(String(describing: outcome))")
@@ -882,7 +892,7 @@ final class ProviderBatchTranscriberTests: XCTestCase {
             do { outcome.set(.success(try await body())) } catch { outcome.set(.failure(error)) }
             finished.fulfill()
         }
-        await fulfillment(of: [finished], timeout: 5)
+        await fulfillment(of: [finished], timeout: 30)  // returns as soon as it finishes
         return outcome.value
     }
 

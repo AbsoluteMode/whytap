@@ -8,6 +8,20 @@ enum PermissionsHelper {
     struct Snapshot: Equatable {
         let accessibilityGranted: Bool
         let microphoneStatus: AVAuthorizationStatus
+        /// Posting events (Drop's paste) and listening to them (its shortcut):
+        /// on macOS 27.3 these come apart from Accessibility. "Choose Apps"
+        /// gives Accessibility without posting; Input Monitoring gives listening.
+        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+        let postEventGranted: Bool
+        let listenEventGranted: Bool
+
+        init(accessibilityGranted: Bool, microphoneStatus: AVAuthorizationStatus,
+             postEventGranted: Bool = true, listenEventGranted: Bool = true) {
+            self.accessibilityGranted = accessibilityGranted
+            self.microphoneStatus = microphoneStatus
+            self.postEventGranted = postEventGranted
+            self.listenEventGranted = listenEventGranted
+        }
 
         var microphoneGranted: Bool {
             microphoneStatus == .authorized
@@ -21,8 +35,34 @@ enum PermissionsHelper {
     static func snapshot() -> Snapshot {
         Snapshot(
             accessibilityGranted: accessibilityGranted(prompt: false),
-            microphoneStatus: microphoneStatus()
+            microphoneStatus: microphoneStatus(),
+            postEventGranted: CGPreflightPostEventAccess(),
+            listenEventGranted: CGPreflightListenEventAccess()
         )
+    }
+
+    /// Keyboard control as Drop needs it. Where grants are made in System
+    /// Settings only (27.3), Accessibility alone is not enough: posting
+    /// needs Override System Protections and listening Input Monitoring.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static func keyboardReady(_ snapshot: Snapshot, settingsOnly: Bool) -> Bool {
+        guard settingsOnly else { return snapshot.accessibilityGranted }
+        return snapshot.accessibilityGranted && snapshot.postEventGranted && snapshot.listenEventGranted
+    }
+
+    /// The grants this process started with. A grant made later in System
+    /// Settings only takes effect in a new process on 27.3, so it needs a
+    /// restart. Recorded once, at launch.
+    struct LaunchGrants: Equatable {
+        let snapshot: Snapshot
+        let screenRecording: Bool
+    }
+
+    private(set) static var launchGrants: LaunchGrants?
+
+    static func recordLaunchGrants() {
+        guard launchGrants == nil else { return }
+        launchGrants = LaunchGrants(snapshot: snapshot(), screenRecording: screenRecordingGranted())
     }
 
     static func allRequiredPermissionsGranted() -> Bool {
@@ -49,6 +89,20 @@ enum PermissionsHelper {
         let options: CFDictionary = [key: true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }
+
+    /// macOS 27.3 and later: keyboard control and Screen Recording are given
+    /// in System Settings only. Requests show no dialog and add no row; the
+    /// person adds Whytap with + (keyboard control under System & App
+    /// Protection Override, where the Accessibility link lands), and the
+    /// grant takes effect after a restart. Checked by version, as Cap does:
+    /// a refused request and an older macOS that asks only once look alike.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static var usesProtectionOverridePane = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 3, patchVersion: 0))
+
+    /// macOS 15 and later put screen capture and audio-only consent in the same pane.
+    static var screenPaneNamesSystemAudio = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
 
     /// Asks macOS to register Whytap and show its own Accessibility dialog.
     /// Never opens System Settings in the same action: that dialog has its
@@ -159,6 +213,15 @@ enum PermissionsHelper {
         NSWorkspace.shared.open(url)
     }
 
+    /// Opens System Settings → Internet Accounts, where Google, Outlook/Exchange
+    /// and other calendar accounts are added for Calendar on this Mac.
+    static func openInternetAccountsSettings() {
+        for raw in ["x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension",
+                    "x-apple.systempreferences:com.apple.preferences.internetaccounts"] {
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) { return }
+        }
+    }
+
     static func openInputMonitoringSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else { return }
         NSWorkspace.shared.open(url)
@@ -168,9 +231,8 @@ enum PermissionsHelper {
     /// known to be USABLE for opening a CoreAudio process tap.
     ///
     /// macOS exposes **no API** to read this bucket's status, and surfaces
-    /// its prompt exactly once — the first time the process creates a
-    /// process tap (`AudioHardwareCreateProcessTap`). So there is nothing to
-    /// preflight: creating the tap IS the request-if-undetermined, and a
+    /// its prompt exactly once — when the process first starts recording from
+    /// an aggregate device containing a tap. There is no public status preflight. A
     /// previously-denied grant is indistinguishable at runtime from silence
     /// (the tap starts without error and yields zero buffers forever). The
     /// contract therefore always returns `true` — "go ahead and create the

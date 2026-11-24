@@ -17,7 +17,8 @@ final class IslandFillerViewModel: ObservableObject {
     init(store: FillerTermsStore = FillerTermsStore()) {
         self.store = store
         self.terms = store.terms()
-        // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        // The island and Toolbox each hold an editor: a change in one shows in the other.
+        // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
         changeObserver = NotificationCenter.default.addObserver(
             forName: FillerTermsStore.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in

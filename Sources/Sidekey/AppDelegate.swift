@@ -94,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// salvage rung when both the live terminal and batch recovery are unavailable
     /// (offline). Reset at turn start. Length only is ever logged (privacy #3).
     private var lastDropPartial: String = ""
+    /// The live take for allowed dictation clients (`drop_live`).
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+    private let dropLiveFeed = DropLiveFeed()
     /// True between the synchronous `phase = .transcribing` at the top of
     /// `startStreamingSession()` and the moment the session is assigned (or
     /// setup fails). Distinguishes the streaming-setup window from the
@@ -2651,6 +2654,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropBatchFailed = false
         dropFailureSettingsShown = false
         lastDropPartial = ""
+        // `rememberDropTarget()` ran just before: the take's own target.
+        dropLiveFeed.beginTake(target: autoPasteEngine.currentDropTarget().pid)
         let trace = DropTurnTrace()
         dropTurnTrace = trace
         dropActivity.begin(reason: "drop voice turn")
@@ -2975,6 +2980,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         text, now: ProcessInfo.processInfo.systemUptime
                     )
                 }
+                self?.dropLiveFeed.partial(text)
+                // An allowed app showing the words in its own field keeps
+                // them out of the wing; otherwise the wing gets them as before.
+                // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+                guard self?.dropLiveFeed.suppressesWing != true else { return }
                 IslandPanel.shared.agentFlow.dropTranscriptUpdated(text)
             }
             // Close the setup window now that the session exists. From here a
@@ -4012,7 +4022,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         harnessAccessStore = harnessStore
         HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(
-            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
+            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals,
+            dropLive: dropLiveFeed)
         let broker = CaseBroker(
             service: CaseVaultService.shared,
             resolver: CaseSystemCallerResolver(

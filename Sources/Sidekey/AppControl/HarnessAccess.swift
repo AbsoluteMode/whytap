@@ -11,9 +11,25 @@ struct HarnessIdentity: Hashable, Codable, Sendable {
     let signingIdentifier: String
 }
 
+/// What a recognised client may reach after the user's Yes.
+enum HarnessScope: Equatable, Sendable {
+    /// A coding harness (`CaseCallerResolver.knownAIApps`): every gated tool.
+    case harness
+    /// An app listed in `DropLiveFeed.allowedClients`: `drop_live` only.
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+    case liveDictation
+}
+
 struct HarnessClient: Equatable, Sendable {
     let identity: HarnessIdentity
     let name: String
+    let scope: HarnessScope
+
+    init(identity: HarnessIdentity, name: String, scope: HarnessScope = .harness) {
+        self.identity = identity
+        self.name = name
+        self.scope = scope
+    }
 }
 
 enum HarnessDecision: String, Codable, Sendable {
@@ -33,6 +49,8 @@ struct HarnessGrant: Codable, Equatable, Identifiable, Sendable {
 
 protocol HarnessCallerResolving {
     func client(peerPID: pid_t) -> HarnessClient?
+    /// The recognised client's own process (the helper's parent), or nil.
+    func clientProcess(peerPID: pid_t) -> pid_t?
 }
 
 /// Only the helper's direct parent counts. A script running in the harness's
@@ -42,16 +60,29 @@ struct HarnessCallerResolver: HarnessCallerResolving {
     let inspector: CaseProcessInspecting
 
     func client(peerPID: pid_t) -> HarnessClient? {
+        resolve(peerPID: peerPID)?.client
+    }
+
+    func clientProcess(peerPID: pid_t) -> pid_t? {
+        resolve(peerPID: peerPID)?.pid
+    }
+
+    private func resolve(peerPID: pid_t) -> (client: HarnessClient, pid: pid_t)? {
         guard peerPID > 1, let peer = inspector.info(pid: peerPID), peer.parentPID > 1,
               let parent = inspector.info(pid: peer.parentPID),
               // teamID is present only when an Apple certificate chain vouches for it.
-              let team = parent.teamID, let identifier = parent.signingIdentifier,
-              let known = CaseCallerResolver.knownAIApps.first(where: {
-                  $0.teamID == team && $0.identifier == identifier
-              })
+              let team = parent.teamID, let identifier = parent.signingIdentifier
         else { return nil }
-        return HarnessClient(
-            identity: HarnessIdentity(teamID: team, signingIdentifier: identifier), name: known.name)
+        let identity = HarnessIdentity(teamID: team, signingIdentifier: identifier)
+        if let known = CaseCallerResolver.knownAIApps.first(where: { $0.teamID == team && $0.identifier == identifier }) {
+            return (HarnessClient(identity: identity, name: known.name, scope: .harness), peer.parentPID)
+        }
+        // A separate list: these apps read the live Drop take and nothing else.
+        // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+        if let allowed = DropLiveFeed.allowedClients.first(where: { $0.teamID == team && $0.identifier == identifier }) {
+            return (HarnessClient(identity: identity, name: allowed.name, scope: .liveDictation), peer.parentPID)
+        }
+        return nil
     }
 }
 
@@ -396,11 +427,24 @@ final class HarnessAccessGate {
     /// a speech profile the user builds by hand.
     // WHY: .project-docs/decisions/2026-11-23-agent-drop-lists.md
     static let gatedOperations: Set<String> = AppControlMeetings.operations.union(AppControlDropLists.operations)
+    /// Operations for apps in `DropLiveFeed.allowedClients` only, after the
+    /// same Yes. A coding harness gets `unsupported_client` here, and such an
+    /// app gets it for every `gatedOperations` tool.
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+    static let liveDictationOperations: Set<String> = [DropLiveFeed.operation]
+
+    private static func scope(of operation: String) -> HarnessScope? {
+        if gatedOperations.contains(operation) { return .harness }
+        if liveDictationOperations.contains(operation) { return .liveDictation }
+        return nil
+    }
 
     private let resolver: HarnessCallerResolving
     private let store: HarnessAccessStore
     private weak var presenter: HarnessAccessPresenting?
     private let now: () -> Date
+    /// Answers `drop_live`; nil where the build has no live Drop.
+    private let dropLive: DropLiveFeed?
     private var prompting: Set<HarnessIdentity> = []
     private var waiters: [HarnessIdentity: [UUID: CheckedContinuation<HarnessAccessOutcome?, Never>]] = [:]
     /// A prompt the user left unanswered is not shown again just because the
@@ -408,11 +452,13 @@ final class HarnessAccessGate {
     private var askedUnprompted: Set<HarnessIdentity> = []
 
     init(resolver: HarnessCallerResolving, store: HarnessAccessStore,
-         presenter: HarnessAccessPresenting?, now: @escaping () -> Date = Date.init) {
+         presenter: HarnessAccessPresenting?, now: @escaping () -> Date = Date.init,
+         dropLive: DropLiveFeed? = nil) {
         self.resolver = resolver
         self.store = store
         self.presenter = presenter
         self.now = now
+        self.dropLive = dropLive
     }
 
     /// Answers a request: refused here, or performed and then released only
@@ -420,11 +466,20 @@ final class HarnessAccessGate {
     func handle(_ request: AppControlRequest, peerPID: pid_t,
                 perform: (AppControlRequest) async -> AppControlResponse) async -> AppControlResponse {
         if let refusal = await intercept(request, peerPID: peerPID) { return refusal }
-        guard Self.gatedOperations.contains(request.operation) else { return await perform(request) }
-        let response = await HarnessConsent.$stillAllowed.withValue({ [weak self] in
-            guard let self, let client = self.resolver.client(peerPID: peerPID) else { return false }
-            return self.store.decision(for: client.identity) == .allow
-        }) { await perform(request) }
+        guard let scope = Self.scope(of: request.operation) else { return await perform(request) }
+        let response: AppControlResponse
+        if scope == .liveDictation {
+            // Not the application controls: the answer depends on who asks.
+            guard let dropLive, let process = resolver.clientProcess(peerPID: peerPID) else {
+                return dropLive == nil ? .failure("unavailable", "Live dictation is unavailable in this build.") : Self.unsupported
+            }
+            response = dropLive.handle(request.arguments, clientPID: process)
+        } else {
+            response = await HarnessConsent.$stillAllowed.withValue({ [weak self] in
+                guard let self, let client = self.resolver.client(peerPID: peerPID) else { return false }
+                return self.store.decision(for: client.identity) == .allow
+            }) { await perform(request) }
+        }
         // Access turned off, or the client gone, while the content was read.
         guard !Task.isCancelled else { return Self.cancelled }
         guard let client = resolver.client(peerPID: peerPID) else { return Self.unsupported }
@@ -449,8 +504,13 @@ final class HarnessAccessGate {
                 return Self.status(client, "pending")
             }
         }
-        guard Self.gatedOperations.contains(request.operation) else { return nil }
-        guard let client = resolver.client(peerPID: peerPID) else { return Self.unsupported }
+        guard let scope = Self.scope(of: request.operation) else { return nil }
+        guard let client = resolver.client(peerPID: peerPID) else {
+            return scope == .liveDictation ? Self.unsupportedLive : Self.unsupported
+        }
+        guard client.scope == scope else {
+            return scope == .liveDictation ? Self.unsupportedLive : Self.unsupported
+        }
         switch store.decision(for: client.identity) {
         case .allow:
             return nil
@@ -535,4 +595,7 @@ final class HarnessAccessGate {
 
     private static let unsupported = AppControlResponse.failure("unsupported_client",
         "These Whytap tools work only from the Whytap MCP server that Claude Code or Codex started itself. A script or a shell command cannot use them.")
+
+    private static let unsupportedLive = AppControlResponse.failure("unsupported_client",
+        "Live dictation is only for apps Whytap lists for it, signed with their Developer ID, that started the Whytap MCP server themselves.")
 }

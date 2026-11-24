@@ -31,6 +31,28 @@ final class AppControlMCPServerTests: XCTestCase {
         }
     }
 
+    /// Whycode calls whytap_drop_live by name; coding harnesses never see it listed.
+    func test_drop_live_is_callable_but_not_listed() throws {
+        var seen: [AppControlRequest] = []
+        let server = AppControlMCPServer { request in
+            seen.append(request)
+            return .success(.object(["phase": .string("recording"), "level": .double(0.25)]))
+        }
+        let listing = try XCTUnwrap(server.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#))
+        XCTAssertFalse(listing.contains("drop_live"))
+        let reply = try XCTUnwrap(server.handle(line: #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whytap_drop_live","arguments":{"showsLiveText":true}}}"#))
+        XCTAssertEqual(seen, [AppControlRequest("drop_live", arguments: ["showsLiveText": .bool(true)])])
+        let json = try JSONDecoder().decode(AppControlValue.self, from: Data(reply.utf8))
+        XCTAssertEqual(json.object?["result"]?.object?["structuredContent"]?.object?["data"]?.object?["level"], .double(0.25))
+    }
+
+    func test_fractional_numbers_round_trip_and_whole_numbers_stay_integers() throws {
+        let value: AppControlValue = .object(["energy": .double(0.125), "count": .int(3)])
+        let decoded = try JSONDecoder().decode(AppControlValue.self, from: JSONEncoder().encode(value))
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.object?["energy"]?.double, 0.125)
+    }
+
     private final class Client: CaseBrokerCalling {
         var requests: [CaseBrokerRequest] = []
         func send(_ request: CaseBrokerRequest) throws -> CaseBrokerResponse {

@@ -17,6 +17,7 @@ that the installed application or a host's plugin connection has been updated.
 | Codex | yes | yes | after a one-time Yes in Whytap | no: Case → Connect does not offer Codex, so Case refuses it (access denied) |
 | Cursor | yes | yes | no (`unsupported_client`): only Claude Code and Codex are recognized | after **Case → Connect → Cursor** |
 | Whytap Agent (built in) | through its own `whytap` tool (next version after 2.2.26) | same | same, without the question (you are at the Mac) | after **Case → Connect → Whytap Agent** |
+| Whycode (Developer ID build) | yes | yes | no (`unsupported_client`); after a one-time Yes only the live Drop take, see [Live dictation](#live-dictation-in-an-apps-own-field) | no |
 | A script, terminal or other program | yes, through the CLI or MCP | yes | no (`unsupported_client`) | no |
 
 - Settings and model tools need Whytap running; To-do works while Whytap is
@@ -180,6 +181,42 @@ key. Accounts use the exact ID returned
 by `list_models`: built-in provider IDs or an already configured server ID.
 The application-control server cannot add a provider, change an endpoint URL
 or read a key.
+
+## Live dictation in an app's own field
+
+`whytap_drop_live` lets an app with its own text field show a Drop take as it
+is spoken and draw its own orb, instead of the island's right wing showing the
+words. It is not in `tools/list`: it answers only the apps on its own list,
+today Whycode (Team ID `UVBKCN5PPV`, identifier `com.rootwise.whycode`), and
+never a coding harness. The app is recognised like a harness: the helper's
+direct parent, by Apple-vouched Team ID and signing identifier, so an ad-hoc
+signed build, another certificate or a script in that app's terminal gets
+`unsupported_client`. Whytap then asks once in the island ("Give Whycode
+access to Whytap?"), as for meetings; the answer is listed in Settings ->
+Integrations -> Coding tools. That Yes opens this tool only: meetings, Vocab
+and Filler writes and Case stay closed to it.
+
+Arguments: `{ "showsLiveText": bool }` (optional). The reply:
+
+| Field | Meaning |
+| --- | --- |
+| `takeId` | Changes with every new take; `""` before the first one |
+| `phase` | The same values as `activity.drop` in `whytap_get_state` (`idle`, `recording`, `transcribing`, `verifying`, `inserting`, …) |
+| `toCaller` | True while a take is running and goes into the calling app's process (the app frontmost at hotkey-down) |
+| `text` | The cumulative partial while `toCaller`, otherwise `""`; a take into any other app never sends words |
+| `level` | Newest raw microphone sample, 0…1 |
+| `energy` | 0…1: the island orb's noise-floor gate and scaling, before its smoothing (0 while idle) |
+
+A call with `showsLiveText: true` keeps an opt-in for 1.5 s; `false` ends it.
+While the opt-in holds and the take goes into that app, Whytap writes no
+partials into the island's wing (the orb and phase stay). When the app stops
+asking, quits or loses the take, the next partial reaches the wing as before.
+The final text is still pasted by Drop (in Smart it can differ from the
+partials); the app replaces its preview with it. Poll it about 10 times a
+second during a take. Whytap 2.2.27 and older answer the call with
+`Unknown tool` (MCP error -32602): treat that, `unsupported_client`,
+`access_denied` and `approval_timed_out` as "no live text" and keep the
+earlier behaviour. Nothing from this tool is logged.
 
 ## Case projects and keys
 

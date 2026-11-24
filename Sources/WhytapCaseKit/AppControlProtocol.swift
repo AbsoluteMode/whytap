@@ -3,12 +3,15 @@ import Foundation
 /// JSON at the application-control boundary. No raw preferences or credentials.
 public enum AppControlValue: Codable, Equatable {
     case string(String), bool(Bool), int(Int), object([String: AppControlValue]), array([AppControlValue]), null
+    /// A fractional number (live levels of `drop_live`). Whole numbers decode as `int`.
+    case double(Double)
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
         else if let v = try? c.decode(Bool.self) { self = .bool(v) }
         else if let v = try? c.decode(Int.self) { self = .int(v) }
+        else if let v = try? c.decode(Double.self) { self = .double(v) }
         else if let v = try? c.decode(String.self) { self = .string(v) }
         else if let v = try? c.decode([String: Self].self) { self = .object(v) }
         else { self = .array(try c.decode([Self].self)) }
@@ -20,6 +23,7 @@ public enum AppControlValue: Codable, Equatable {
         case .string(let v): try c.encode(v)
         case .bool(let v): try c.encode(v)
         case .int(let v): try c.encode(v)
+        case .double(let v): try c.encode(v)
         case .object(let v): try c.encode(v)
         case .array(let v): try c.encode(v)
         case .null: try c.encodeNil()
@@ -29,6 +33,7 @@ public enum AppControlValue: Codable, Equatable {
     public var string: String? { if case .string(let v) = self { return v }; return nil }
     public var object: [String: Self]? { if case .object(let v) = self { return v }; return nil }
     public var int: Int? { if case .int(let v) = self { return v }; return nil }
+    public var double: Double? { if case .double(let v) = self { return v }; return nil }
     public var bool: Bool? { if case .bool(let v) = self { return v }; return nil }
     public var array: [Self]? { if case .array(let v) = self { return v }; return nil }
 }

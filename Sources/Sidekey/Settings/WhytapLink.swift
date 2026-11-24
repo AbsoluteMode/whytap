@@ -111,7 +111,7 @@ enum WhytapLink {
         case .notes: return .settings(.tab(.notes))
         // Highlights the Quit row; quitting needs the user's click.
         case .quit: return .settings(.quitRow)
-        case .settings: return .settings(.tab(.apiAndModels))
+        case .settings: return .settings(.tab(.features))
         case .tasks: return .hoverPanel(.tasks)
         // Closed Calendar ("Soon"): the link shows its Toolbox pane instead.
         case .calendar: return tool.isComingSoon ? .toolboxTool(.calendar) : .hoverPanel(.calendar)
@@ -126,7 +126,7 @@ enum WhytapLink {
 
     static func destination(for tab: SettingsWindowTab) -> WhytapLinkDestination {
         switch tab {
-        case .apiAndModels, .hotkeys, .permissions, .notes, .agentMode, .toolbox,
+        case .features, .apiAndModels, .hotkeys, .permissions, .notes, .agentMode, .toolbox,
              .notifications, .integrations, .backup, .other:
             return .settings(.tab(tab))
         }

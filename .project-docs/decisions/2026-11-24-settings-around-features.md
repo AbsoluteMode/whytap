@@ -17,6 +17,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/FeatureCatalogTests.swift
     confirmed_at: 2026-11-24
+  - type: repository
+    reference: Sources/Sidekey/Settings/Features/SettingsFeaturesView.swift
+    confirmed_at: 2026-11-24
+  - type: repository
+    reference: Tests/SidekeyTests/Settings/SettingsFeaturesTests.swift
+    confirmed_at: 2026-11-24
 related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md]
 ---
 
@@ -65,6 +71,14 @@ accepted the second version.
 - No catalog text names a key (`testNoCatalogTextNamesAKey`), following the
   2026-11-20 rule. Drop's lead paragraph follows the gesture: Hold or press.
 
+- Settings opens on Features, the first sidebar row
+  (`SettingsWindowTab.features`, `whytap://settings/features`). The older
+  tabs keep their identifiers and their place under it. A row of the list
+  opens the feature's own screen or, until it has one, the place its settings
+  are shown today (`FeaturePlace`): the Other tab with the Agent group marked,
+  or the tool's Toolbox pane. The island's Settings tile opens Features too.
+- The list shows no reason under Off and Not set up; VoiceOver still reads it.
+
 ## Why
 
 - A newcomer thinks in features, not in providers, routes and permissions.
@@ -108,6 +122,12 @@ Smart mode; a set model whose key stopped working; features that are off;
 Meeting Notes and the Agent turned on without models; island tools; a rebound
 key and a stale Toggle stored for Space; the summary line; no text naming a
 key.
+
+`SettingsFeaturesTests`: the list on a fresh install, an Intel Mac and a usual
+Mac read from the live view models; the tab order and identifiers; the
+`whytap://settings/features` link; where each row leads; the sidebar fitting
+the smallest window; offscreen pictures of the start screen in both themes at
+960 x 560 and 1280 x 760.
 
 ## Rejected
 

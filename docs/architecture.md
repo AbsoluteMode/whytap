@@ -1370,7 +1370,14 @@ step missing, with the first reason and the count of the rest) and Not set up
 (an island tool without a switch; quiet). System audio is never shown as
 allowed or missing: macOS cannot be asked in advance. A missing speech model
 offers the model on this Mac first, where the Mac (Apple Silicon) and the
-feature can use it. No catalog text names a key. WHY:
+feature can use it. No catalog text names a key. Settings opens on the
+Features tab (SettingsWindowTab.features, whytap://settings/features):
+SettingsFeaturesView lists the catalog with each status, read through
+FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
+PermissionsSettingsViewModel the older tabs show. A row opens the feature's
+own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
+present place: the Other tab, or its Toolbox pane. The older tabs stay in the
+sidebar with their identifiers. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

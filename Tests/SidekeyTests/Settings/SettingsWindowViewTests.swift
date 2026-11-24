@@ -7,8 +7,8 @@ import XCTest
 @MainActor
 final class SettingsWindowViewTests: XCTestCase {
 
-    func test_selection_defaults_to_api_and_models_tab() {
-        XCTAssertEqual(SettingsWindowSelection().selectedTab, .apiAndModels)
+    func test_selection_defaults_to_features_tab() {
+        XCTAssertEqual(SettingsWindowSelection().selectedTab, .features)
     }
 
     func test_focus_selects_the_tab_and_remembers_the_feature() {
@@ -38,7 +38,7 @@ final class SettingsWindowViewTests: XCTestCase {
 
         selection.leaveNotes()
 
-        XCTAssertEqual(selection.selectedTab, .apiAndModels)
+        XCTAssertEqual(selection.selectedTab, .features)
     }
 
     func test_selection_remembers_last_non_notes_tab() {

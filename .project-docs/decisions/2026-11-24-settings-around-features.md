@@ -62,6 +62,17 @@ accepted the second version.
   and the feature can use it, the action of a missing speech model is the
   download (or "Use the model on this Mac" once it is there). On an Intel Mac
   the action is a model of a keyed provider, or a key.
+- "Choose a model" is offered only when the picker holds a model that would
+  work (`modelAlternatives`: a listed model other than the selected one, or a
+  typed name, under a key that is not refused). A refused key with nothing
+  else to pick gets "Fix the key"; a removed or unsupported model with
+  nothing else gets the free model or "Add a key".
+- A sentence about a missing part names only what stops: Fast's model while
+  Smart is on stops Fast, the Agent's and search's voice parts stop talking,
+  not typing. "Switch to Fast" is offered only when Fast's model works.
+- Translate and Subtitles start on their own, so the shared row says which
+  one works: Ready "Translate only", Ready "Subtitles only", Ready for both,
+  Not set up for neither. System audio never decides it.
 - No catalog text names a key (`testNoCatalogTextNamesAKey`), following the
   2026-11-20 rule. Drop's lead paragraph follows the gesture: Hold or press.
 
@@ -91,7 +102,10 @@ The app's behaviour wins, with "simple for a newcomer" as the tie-breaker.
   works without it and it is asked only when the event tap is refused; on
   27.3 it is part of Keyboard control. The row "Your shortcut is heard"
   covers both, and a shortcut that merely waits for Keyboard control or the
-  Microphone is not counted a second time.
+  Microphone is not counted a second time. On 27.3, once Override is on and
+  Input Monitoring is the one step left (`KeyboardSetup.inputMonitoring`),
+  Keyboard control's row asks for Input Monitoring and the shortcut row waits
+  for it: one step, one action, as in Permissions.
 - "On this Mac" needs Apple Silicon: an Intel Mac is never offered the
   download.
 - Translate & Subtitles and Screenshots have no switch and no Off.
@@ -105,6 +119,12 @@ the first action is the free model); a downloaded model not yet chosen; a
 running and a failed download; Intel; permissions missing, a grant that needs
 a restart, Input Monitoring, a shortcut in use, a stale Accessibility entry;
 Smart mode; a set model whose key stopped working; features that are off;
+and, after the build-queue review of this PR (ticket 519): Smart ready with
+Fast missing or broken, the text model missing with Fast working and not,
+the Agent's and search's voice parts, Translate and Subtitles each alone,
+both and neither, the 27.3 Input Monitoring stage beside Override, restart
+and the older-macOS fallback, and refused, removed and unsupported routes
+with and without another model to pick;
 Meeting Notes and the Agent turned on without models; island tools; a rebound
 key and a stale Toggle stored for Space; the summary line; no text naming a
 key.

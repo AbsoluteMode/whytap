@@ -1370,7 +1370,14 @@ step missing, with the first reason and the count of the rest) and Not set up
 (an island tool without a switch; quiet). System audio is never shown as
 allowed or missing: macOS cannot be asked in advance. A missing speech model
 offers the model on this Mac first, where the Mac (Apple Silicon) and the
-feature can use it. No catalog text names a key. WHY:
+feature can use it; "Choose a model" only when another model would work
+(modelAlternatives), otherwise "Fix the key" for a refused key or "Add a key".
+Translate & Subtitles is Ready with "Translate only" or "Subtitles only" when
+one tool works, Not set up when neither does. On macOS 27.3 the Input
+Monitoring stage of keyboard control (KeyboardSetup.inputMonitoring) is one
+step, on Keyboard control's row, not counted again for the shortcut. A
+sentence about an optional part names only what it stops. No catalog text
+names a key. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

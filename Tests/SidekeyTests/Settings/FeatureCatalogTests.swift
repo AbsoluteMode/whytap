@@ -29,7 +29,7 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(missing.map(\.requirement.id), ["model.dropFast", "permission.keyboard", "permission.microphone"])
         XCTAssertEqual(missing.first?.action, .downloadOnDeviceModel(.dropFast))
         XCTAssertEqual(status.reason, "No speech-to-text model +2")
-        XCTAssertEqual(FeatureCatalog.consequence(of: missing[0], for: .drop),
+        XCTAssertEqual(FeatureCatalog.consequence(of: missing[0], for: .drop, snapshot: freshInstall()),
                        "Drop can’t type what you say until it has a speech-to-text model.")
     }
 
@@ -89,7 +89,7 @@ final class FeatureCatalogTests: XCTestCase {
         var snapshot = freshInstall()
         snapshot.onDevice = .unsupported
         XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .addKey(.dropFast))
-        snapshot.selectableModels = [.dropFast]
+        snapshot.modelAlternatives = [.dropFast]
         XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .chooseModel(.dropFast))
     }
 
@@ -110,7 +110,7 @@ final class FeatureCatalogTests: XCTestCase {
         snapshot.keyboardNeedsRestart = true
         let status = FeatureCatalog.status(for: .drop, snapshot: snapshot)
         XCTAssertEqual(actions(status), [.restartWhytap])
-        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[0], for: .drop),
+        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[0], for: .drop, snapshot: snapshot),
                        "Keyboard control is allowed. Restart Whytap to make it work.")
     }
 
@@ -153,8 +153,9 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertTrue(checks[2].requirement.optional, "Fast's model is not needed while Smart is on")
         let status = FeatureCatalog.status(for: .drop, snapshot: snapshot)
         XCTAssertEqual(status.missing.map(\.requirement.id), ["model.dropSmart", "model.dropSmartCleanup"])
-        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[1], for: .drop),
-                       "Smart mode can’t tidy your text until it has a text model. Switch to Fast to dictate now.")
+        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[1], for: .drop, snapshot: snapshot),
+                       "Smart mode can’t tidy your text until it has a text model. "
+                       + "Fast mode has a working model: switch to it to dictate without tidying.")
     }
 
     func testBrokenKeyOnASetModelIsNotReady() {
@@ -162,8 +163,8 @@ final class FeatureCatalogTests: XCTestCase {
         snapshot.models[.dropFast] = .keyProblem
         let status = FeatureCatalog.status(for: .drop, snapshot: snapshot)
         XCTAssertEqual(status.reason, "Its provider key isn't working")
-        XCTAssertEqual(actions(status), [.chooseModel(.dropFast)])
-        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[0], for: .drop),
+        XCTAssertEqual(actions(status), [.fixKey(.dropFast)], "no other model would work: fix the key")
+        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[0], for: .drop, snapshot: snapshot),
                        "Drop can’t type what you say: its provider key isn't working.")
     }
 
@@ -227,9 +228,9 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.status(for: .screenshots, snapshot: snapshot).reason, "Allow Screen Recording")
         snapshot.screenRecordingGranted = true
         XCTAssertEqual(FeatureCatalog.status(for: .screenshots, snapshot: snapshot), .ready(note: nil))
-        // Translate works without the Subtitles key; that part is optional.
+        // Translate works without the Subtitles key, and the row says so.
         snapshot.models[.translation] = .ok
-        XCTAssertEqual(FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot), .ready(note: nil))
+        XCTAssertEqual(FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot), .ready(note: "Translate only"))
     }
 
     func testSummaryCountsOnlyReadyAndNeedsSetup() {
@@ -238,6 +239,158 @@ final class FeatureCatalogTests: XCTestCase {
         let check = FeatureCatalog.checks(for: .drop, snapshot: freshInstall())[0]
         XCTAssertEqual(FeatureCatalog.summary([.needsSetup([check]), .needsSetup([check]), .off]),
                        "0 ready · 2 need setup")
+    }
+
+    // MARK: - Optional parts name only what they serve (queue review 519, 1)
+
+    private func smartReady() -> FeatureSetupSnapshot {
+        var snapshot = readyDrop()
+        snapshot.dropMode = .smart
+        snapshot.models = [.dropSmart: .ok, .dropSmartCleanup: .ok]
+        return snapshot
+    }
+
+    func testSmartReadyWithoutFastSaysOnlyFastIsMissing() {
+        let snapshot = smartReady()
+        XCTAssertEqual(FeatureCatalog.status(for: .drop, snapshot: snapshot), .ready(note: nil))
+        let fast = FeatureCatalog.checks(for: .drop, snapshot: snapshot).first { $0.requirement.kind == .model(.dropFast) }!
+        let text = FeatureCatalog.consequence(of: fast, for: .drop, snapshot: snapshot)
+        XCTAssertEqual(text, "Fast mode can’t type what you say until it has its own speech-to-text model. Smart doesn’t use it.")
+        XCTAssertFalse(text.hasPrefix("Drop can’t"), "Smart dictates; Drop as a whole is not blocked")
+    }
+
+    func testSmartBrokenFastRouteNamesFastNotDrop() {
+        var snapshot = smartReady()
+        snapshot.models[.dropFast] = .keyProblem
+        let fast = FeatureCatalog.checks(for: .drop, snapshot: snapshot).first { $0.requirement.kind == .model(.dropFast) }!
+        XCTAssertEqual(FeatureCatalog.consequence(of: fast, for: .drop, snapshot: snapshot),
+                       "Fast mode can’t type what you say: its provider key isn't working.")
+    }
+
+    func testNoTextModelOffersFastOnlyWhenFastWorks() {
+        var snapshot = smartReady()
+        snapshot.models[.dropSmartCleanup] = nil
+        var cleanup = FeatureCatalog.status(for: .drop, snapshot: snapshot).missing[0]
+        XCTAssertEqual(FeatureCatalog.consequence(of: cleanup, for: .drop, snapshot: snapshot),
+                       "Smart mode can’t tidy your text until it has a text model.",
+                       "Fast has no model either: switching would not help")
+
+        snapshot.models[.dropFast] = .ok
+        cleanup = FeatureCatalog.status(for: .drop, snapshot: snapshot).missing[0]
+        XCTAssertTrue(FeatureCatalog.consequence(of: cleanup, for: .drop, snapshot: snapshot)
+            .hasSuffix("Fast mode has a working model: switch to it to dictate without tidying."))
+    }
+
+    func testVoiceRowsOfTypedFeaturesKeepTheTypedPathWorking() {
+        var snapshot = readyDrop()
+        snapshot.microphoneGranted = false
+        snapshot.agentOn = true
+        snapshot.googleOn = true
+        snapshot.models[.agent] = .ok
+        let agent = FeatureCatalog.checks(for: .agent, snapshot: snapshot)
+        let google = FeatureCatalog.checks(for: .googleSearch, snapshot: snapshot)
+        func say(_ checks: [FeatureCheck], _ kind: FeatureRequirement.Kind, _ feature: AppFeature) -> String {
+            FeatureCatalog.consequence(of: checks.first { $0.requirement.kind == kind }!, for: feature, snapshot: snapshot)
+        }
+        XCTAssertEqual(say(agent, .model(.agentVoice), .agent),
+                       "Talking to the Agent needs a speech-to-text model. Typing to it works without one.")
+        XCTAssertEqual(say(agent, .permission(.microphone), .agent),
+                       "Talking to the Agent needs the Microphone. Typing to it works without it.")
+        XCTAssertEqual(say(google, .model(.voiceSearch), .googleSearch),
+                       "Searching by voice needs a speech-to-text model. Typed searches work without one.")
+        XCTAssertEqual(say(google, .permission(.microphone), .googleSearch),
+                       "Searching by voice needs the Microphone. Typed searches work without it.")
+        XCTAssertEqual(FeatureCatalog.status(for: .agent, snapshot: snapshot), .ready(note: nil))
+        XCTAssertEqual(FeatureCatalog.status(for: .googleSearch, snapshot: snapshot), .ready(note: "typing only"))
+    }
+
+    // MARK: - Translate and Subtitles are two tools (queue review 519, 2)
+
+    func testTranslateAndSubtitlesSayWhichToolWorks() {
+        var snapshot = FeatureSetupSnapshot()
+        var status = FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot)
+        XCTAssertEqual(status.word, "Not set up")
+        XCTAssertEqual(status.missing.map(\.requirement.id), ["model.translation", "subtitlesKey"],
+                       "System audio is asked later and never counted")
+
+        snapshot.models[.translation] = .ok
+        XCTAssertEqual(FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot), .ready(note: "Translate only"))
+
+        snapshot.models[.translation] = nil
+        snapshot.subtitlesKeyPresent = true
+        status = FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot)
+        XCTAssertEqual(status, .ready(note: "Subtitles only"), "Subtitles start on the OpenAI key alone")
+
+        snapshot.models[.translation] = .ok
+        XCTAssertEqual(FeatureCatalog.status(for: .translateSubtitles, snapshot: snapshot), .ready(note: nil))
+        let audio = FeatureCatalog.checks(for: .translateSubtitles, snapshot: snapshot).last
+        XCTAssertEqual(audio?.state, .askedLater(note: "macOS asks at the first recording"))
+    }
+
+    // MARK: - macOS 27.3 Input Monitoring once (queue review 519, 3)
+
+    func testInputMonitoringStepOn27_3IsCountedOnce() {
+        var snapshot = readyDrop()
+        snapshot.keyboardReady = false
+        snapshot.keyboardSetup = .inputMonitoring
+        snapshot.dropShortcut = .inputMonitoringRequired
+        let status = FeatureCatalog.status(for: .drop, snapshot: snapshot)
+        XCTAssertEqual(status.reason, "Allow Input Monitoring")
+        XCTAssertEqual(actions(status), [.openInputMonitoring], "no generic Override step on top")
+        let shortcut = FeatureCatalog.checks(for: .drop, snapshot: snapshot).first { $0.requirement.kind == .dropShortcut }
+        XCTAssertEqual(shortcut?.state, .waiting(reason: "Waits for Input Monitoring"))
+        XCTAssertEqual(FeatureCatalog.consequence(of: status.missing[0], for: .drop, snapshot: snapshot),
+                       "Drop can’t hear its shortcut until you allow Input Monitoring.")
+    }
+
+    func testOtherKeyboardStagesStayDistinct() {
+        // 27.3, Override still missing: Keyboard control's own step.
+        var snapshot = readyDrop()
+        snapshot.keyboardReady = false
+        snapshot.keyboardSetup = .addWhytap
+        snapshot.dropShortcut = .accessibilityRequired
+        XCTAssertEqual(actions(FeatureCatalog.status(for: .drop, snapshot: snapshot)), [.allow(.keyboard)])
+
+        // 27.3, all granted after launch: a restart.
+        snapshot = readyDrop()
+        snapshot.keyboardSetup = .restart
+        snapshot.keyboardNeedsRestart = true
+        XCTAssertEqual(actions(FeatureCatalog.status(for: .drop, snapshot: snapshot)), [.restartWhytap])
+
+        // Older macOS: keyboard control is fine, the tap fell back to Input Monitoring.
+        snapshot = readyDrop()
+        snapshot.keyboardSetup = nil
+        snapshot.dropShortcut = .inputMonitoringRequired
+        let status = FeatureCatalog.status(for: .drop, snapshot: snapshot)
+        XCTAssertEqual(status.missing.map(\.requirement.id), ["dropShortcut"])
+        XCTAssertEqual(actions(status), [.openInputMonitoring])
+    }
+
+    // MARK: - "Choose a model" only with a real choice (queue review 519, 4)
+
+    func testIntelWithTheOnlySpeechKeyRefusedIsSentToTheKey() {
+        var snapshot = readyDrop()
+        snapshot.onDevice = .unsupported
+        snapshot.models[.dropFast] = .keyProblem
+        snapshot.selectableModels = [.dropFast]   // the refused key's section is still listed
+        XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .fixKey(.dropFast))
+        snapshot.modelAlternatives = [.dropFast]  // another key offers a model
+        XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .chooseModel(.dropFast))
+    }
+
+    func testRemovedOrUnsupportedModelWithNoAlternativeAsksForAKeyOrTheFreeModel() {
+        for broken in [ModelRowStatus.removedByProvider, .notSupported(reason: "Can’t transcribe audio")] {
+            var snapshot = readyDrop()
+            snapshot.onDevice = .unsupported
+            snapshot.models[.dropFast] = broken
+            snapshot.selectableModels = [.dropFast]
+            XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .addKey(.dropFast), "\(broken)")
+            snapshot.modelAlternatives = [.dropFast]
+            XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action, .chooseModel(.dropFast), "\(broken)")
+            snapshot.onDevice = .available(.notDownloaded)
+            XCTAssertEqual(FeatureCatalog.checks(for: .drop, snapshot: snapshot)[0].action,
+                           .downloadOnDeviceModel(.dropFast), "free way first, \(broken)")
+        }
     }
 
     // MARK: - Hotkeys
@@ -283,7 +436,7 @@ final class FeatureCatalogTests: XCTestCase {
             for snapshot in [FeatureSetupSnapshot(), everything] {
                 for check in FeatureCatalog.checks(for: info.feature, snapshot: snapshot) {
                     texts += [check.requirement.title, check.requirement.detail, check.reason ?? "",
-                              check.action?.title ?? "", FeatureCatalog.consequence(of: check, for: info.feature)]
+                              check.action?.title ?? "", FeatureCatalog.consequence(of: check, for: info.feature, snapshot: snapshot)]
                 }
             }
         }

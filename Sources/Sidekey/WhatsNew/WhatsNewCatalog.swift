@@ -104,17 +104,23 @@ struct WhatsNewVersion: Comparable, Equatable {
 ///   something for the person, newest first; none of them has: nothing.
 /// - A Mac that ran Whytap before this window existed (nothing remembered):
 ///   the running version's list only.
-/// - An older version than remembered (a rollback): nothing.
+/// - An older version than remembered (a rollback, a developer build):
+///   nothing, and the remembered version stays, so the return to the newer
+///   one shows nothing again.
 ///
-/// The running version is remembered as soon as the decision is made, so
-/// the window never comes back by itself until the next update.
+/// The highest launched version is remembered as soon as the decision is
+/// made, so the window never comes back by itself until the next update.
 enum WhatsNewLaunch {
     static let seenVersionKey = "sidekey.whatsNew.seenVersion.v1"
 
     static func consume(currentVersion: String, isFirstLaunch: Bool, catalog: WhatsNewCatalog,
                         defaults: UserDefaults) -> [WhatsNewRelease] {
         let seen = defaults.string(forKey: seenVersionKey)
-        defaults.set(currentVersion, forKey: seenVersionKey)
+        // The highest version ever launched: an older build in between
+        // (a rollback, a developer build) never brings a seen list back.
+        if seen.map({ WhatsNewVersion($0) < WhatsNewVersion(currentVersion) }) ?? true {
+            defaults.set(currentVersion, forKey: seenVersionKey)
+        }
         guard !isFirstLaunch else { return [] }
         guard let seen else {
             return catalog.releases(after: nil, through: currentVersion)

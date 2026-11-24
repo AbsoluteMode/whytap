@@ -50,7 +50,9 @@ first outside tester updated and did not learn what changed.
 - **The release cannot start without it.** `scripts/user-release.sh` runs
   `scripts/whats-new.py check <version>` for the prod flavor, also on
   `--dry-run`, and stops when the version has no entry or the text breaks the
-  limits. The entry lands through an ordinary pull request before the
+  limits. It also checks every field's type, because the app drops the whole
+  list when one field cannot be decoded, and refuses two entries the app
+  would read as one version ("2.3" and "2.3.0") and two items with one title. The entry lands through an ordinary pull request before the
   VERSION change, because the VERSION pull request changes that file only.
 - **When the window opens.** `WhatsNewLaunch` remembers the last launched
   display version. A newer version opens the window once with every release
@@ -58,9 +60,12 @@ first outside tester updated and did not learn what changed.
   are several; releases without items are left out, and if none has items no
   window opens. A new Mac (the onboarding opens) only remembers the version.
   A Mac that ran Whytap before this window existed has nothing remembered:
-  it sees the running version's list only. A rollback shows nothing. The
-  version is remembered when the decision is made, not when the window is
-  closed, so the window never returns by itself.
+  it sees the running version's list only. An older build after a newer one
+  (a rollback, a developer build) shows nothing and leaves the remembered
+  version alone: the highest launched version is kept, so the return to the
+  newer build shows nothing again. The version is remembered when the
+  decision is made, not when the window is closed, so the window never
+  returns by itself.
 - **How it opens.** After an update the window comes forward without taking
   the keyboard from the app the person is in (`orderFrontRegardless`, no
   activation): an update can also apply on quit and the next launch may be a
@@ -123,5 +128,17 @@ coming forward after a real Sparkle relaunch.
   return on every launch while buried.
 - A clip on every row: only some features have one, and several playing at
   once is noise.
+
+## Builder review (ticket 517)
+
+The first head was returned with four findings, fixed together: the window
+opened from Settings while the automatic one was still open lost its
+controller to the old window's late close callback (the callback now clears
+only its own window); an older build in between reset the remembered version
+and the list came back (the highest version is kept); the release check let
+through optional fields of the wrong type that make the app drop the whole
+list (all types are checked); Escape never reached the close action in a
+window without a text field (the window takes the key itself). Each has a
+test named after the finding in `WhatsNewTests` or `test_whats_new.py`.
 
 2026-11-24 · ORCH-TASK 98

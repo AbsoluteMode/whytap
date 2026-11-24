@@ -131,7 +131,8 @@ python3 scripts/whats-new.py check 2.2.28
 ```
 
 `user-release.sh` runs this check for the prod flavor, also with `--dry-run`,
-and stops without the entry. The GitHub release body (`RELEASE_NOTES_FILE`)
+and stops without the entry, or when a field has a type the app cannot read
+(the app drops the whole list then). The GitHub release body (`RELEASE_NOTES_FILE`)
 stays the complete list; the window is a selection of it. To see the window
 before the release, draw it offscreen:
 `WHYTAP_WHATSNEW_RENDER_DIR=<folder> swift test --filter WhatsNewTests`. WHY:

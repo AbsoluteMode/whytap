@@ -96,10 +96,86 @@ final class WhatsNewTests: XCTestCase {
         XCTAssertNil(launch("2.2.27"), "nothing remembered and nothing for this version")
     }
 
-    func testARollbackShowsNothing() {
+    /// Builder review, ticket 517: after 2.2.28 was shown, an older build
+    /// in between must not bring its list, or 2.2.28's, back.
+    func testARollbackShowsNothingAndTheReturnDoesNotRepeatTheList() {
+        XCTAssertNil(launch("2.2.25"))
         XCTAssertNotNil(launch("2.2.28"))
         XCTAssertNil(launch("2.2.26"), "an older build after a newer one")
+        XCTAssertEqual(defaults.string(forKey: WhatsNewLaunch.seenVersionKey), "2.2.28", "the highest launched version stays")
+        XCTAssertNil(launch("2.2.28"), "back on the version already shown")
         XCTAssertNil(launch("0.0.0-dev"), "a developer build")
+        XCTAssertNil(launch("2.2.28"), "and back again: none of the seen releases return")
+        XCTAssertEqual(launch("2.2.29")?.releases.map(\.version), ["2.2.29"], "the next update shows its own list only")
+    }
+
+    /// Builder review, ticket 517: the window that opened by itself is
+    /// still open when the person clicks the version in Settings. The old
+    /// window's late close callback must not drop the new window.
+    func testTheWindowFromSettingsReplacesTheAutomaticOneAndStays() throws {
+        let presenter = WhatsNewPresenter(catalog: catalog, currentVersion: "2.2.28")
+        presenter.bringForward = { _ in }
+        presenter.presentAfterLaunch(isFirstLaunch: false, defaults: defaults)
+        let automatic = try XCTUnwrap(presenter.controller)
+        presenter.presentHistory()
+        let fromSettings = try XCTUnwrap(presenter.controller)
+        XCTAssertFalse(automatic === fromSettings)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertTrue(presenter.controller === fromSettings, "the replacement is still the presenter's window")
+        fromSettings.close()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertNil(presenter.controller, "closing the window on screen releases it")
+    }
+
+    /// Builder review, ticket 517: Escape reaches the real hosting window
+    /// through AppKit's key dispatch, closes it and asks for no alert sound.
+    func testEscapeClosesTheWindowWithoutASound() throws {
+        var closed = false
+        let request = WhatsNewPresenter.Request(releases: catalog.releases, since: nil, activates: true)
+        let controller = WhatsNewWindowController(request: request, onLink: { _ in }, onClosed: { closed = true })
+        let window = try XCTUnwrap(controller.window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        func key(_ code: UInt16, _ characters: String) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, characters: characters,
+                                           charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+        }
+        let escape = try key(WhatsNewWindow.escapeKeyCode, "\u{1b}")
+        let sounds = SystemSoundGuard.expectingSound { window.sendEvent(escape) }.sounds
+        XCTAssertTrue(sounds.isEmpty, "Escape is taken, no alert sound")
+        XCTAssertTrue(closed, "Escape closed the window")
+
+        closed = false
+        let again = WhatsNewWindowController(request: request, onLink: { _ in }, onClosed: { closed = true })
+        XCTAssertTrue(try XCTUnwrap(again.window).tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: nil))
+        XCTAssertTrue(closed, "the cancel action closes it too")
+    }
+
+    /// Builder review, ticket 517: one field of the wrong type makes the
+    /// app drop the whole list, which is why the release check refuses it.
+    func testOneWrongTypeDropsTheWholeList() {
+        let good = #"{"releases":[{"version":"2.2.28","date":"2026-12-01","items":[{"title":"One","body":"Two.","symbol":null}]}]}"#
+        XCTAssertEqual(WhatsNewCatalog.decode(Data(good.utf8))?.releases.first?.items.count, 1, "null is an absent field")
+        for broken in [#""date":7"#, #""items":[{"title":"One","body":"Two.","symbol":7}]"#,
+                       #""items":[{"title":"One","body":"Two.","video":["agent"]}]"#,
+                       #""items":[{"title":"One","body":"Two.","link":"apiAndModels"}]"#,
+                       #""items":[{"title":"One","body":"Two.","link":{"title":"Open","settings":3}}]"#] {
+            let text = broken.hasPrefix("\"date") ? #"{"releases":[{"version":"2.2.28","items":[],\#(broken)}]}"#
+                : #"{"releases":[{"version":"2.2.28",\#(broken)}]}"#
+            XCTAssertNil(WhatsNewCatalog.decode(Data(text.utf8)), broken)
+        }
+    }
+
+    /// Two rows with one title, or one release listed twice, still draw
+    /// every row: rows are told apart by their place.
+    func testRowsWithOneTitleAreAllDrawn() {
+        func height(_ titles: [String]) -> CGFloat {
+            let request = WhatsNewPresenter.Request(releases: [WhatsNewRelease(version: "3.0", items: titles.map(item))],
+                                                    since: nil, activates: false)
+            return WhatsNewWindowController.naturalHeight(of: request)
+        }
+        XCTAssertEqual(height(["One", "One", "One"]), height(["One", "Two", "Three"]), accuracy: 0.5)
     }
 
     func testABuildWithoutNotesOrWithDamagedNotesShowsNothing() throws {

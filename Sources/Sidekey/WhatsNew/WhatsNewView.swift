@@ -70,7 +70,7 @@ struct WhatsNewView: View {
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(releases.enumerated()), id: \.element.id) { index, release in
+            ForEach(Array(releases.enumerated()), id: \.offset) { index, release in
                 VStack(alignment: .leading, spacing: 8) {
                     if releases.count > 1 {
                         Text(release.version)
@@ -97,7 +97,7 @@ private struct WhatsNewReleaseCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(release.items.enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(release.items.enumerated()), id: \.offset) { index, item in
                 if index > 0 {
                     Rectangle().fill(MacSettingsTheme.rowSeparator).frame(height: 0.5)
                         .padding(.leading, 52)

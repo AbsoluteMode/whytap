@@ -1149,7 +1149,9 @@ Update flow (download-on-action):
   a newer version opens one window (WhatsNewPresenter, WhatsNewLaunch) with
   the releases since the remembered version, newest first; a version with
   `"items": []` opens nothing, a new Mac gets the onboarding instead, a Mac
-  with nothing remembered sees the running version only. It comes forward
+  with nothing remembered sees the running version only, and the highest
+  launched version is what is remembered (a rollback repeats nothing). It
+  comes forward
   without taking the keyboard and never returns by itself; the version in
   the Settings footer reopens the list. The release script refuses a prod
   version without its entry (`scripts/whats-new.py check`). WHY:

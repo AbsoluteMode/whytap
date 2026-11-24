@@ -21,7 +21,10 @@ final class WhatsNewPresenter {
     var openSettings: (SettingsWindowTab) -> Void = { _ in }
     /// Shows the window; tests replace it and no window opens.
     var display: (Request) -> Void = { _ in }
-    private var controller: WhatsNewWindowController?
+    /// Puts the built window on screen; tests replace it and nothing shows.
+    var bringForward: (WhatsNewWindowController) -> Void = { $0.show() }
+    /// The presenter's window, while one is open.
+    private(set) var controller: WhatsNewWindowController?
 
     init(catalog: WhatsNewCatalog = .bundled(), currentVersion: String = AppBuildIdentity.current.version) {
         self.catalog = catalog
@@ -52,26 +55,32 @@ final class WhatsNewPresenter {
         controller?.close()
         let controller = WhatsNewWindowController(request: request, onLink: { [weak self] tab in
             self?.openSettings(tab)
-        }, onClosed: { [weak self] in
-            // Released after AppKit finishes closing the window.
-            DispatchQueue.main.async { self?.controller = nil }
-        })
+        }, onClosed: {})
+        controller.onClosed = { [weak self, weak controller] in
+            // Released after AppKit finishes closing the window, and only
+            // while this window is still the presenter's: a newer window
+            // that replaced it stays.
+            DispatchQueue.main.async {
+                guard let self, let controller, self.controller === controller else { return }
+                self.controller = nil
+            }
+        }
         self.controller = controller
-        controller.show()
+        bringForward(controller)
     }
 }
 
 @MainActor
 final class WhatsNewWindowController: NSWindowController, NSWindowDelegate {
     private let request: WhatsNewPresenter.Request
-    private let onClosed: () -> Void
+    var onClosed: () -> Void
 
     init(request: WhatsNewPresenter.Request, onLink: @escaping (SettingsWindowTab) -> Void,
          onClosed: @escaping () -> Void) {
         self.request = request
         self.onClosed = onClosed
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: WhatsNewView.width, height: 400)),
-                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = WhatsNewWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: WhatsNewView.width, height: 400)),
+                                    styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "What’s New in Whytap"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -128,4 +137,17 @@ final class WhatsNewWindowController: NSWindowController, NSWindowDelegate {
     override func cancelOperation(_ sender: Any?) { close() }
 
     func windowWillClose(_ notification: Notification) { onClosed() }
+}
+
+/// Escape closes the window. The page has no text field, so nothing in it
+/// turns the key into `cancelOperation`; unhandled, it would end at the
+/// window and beep.
+final class WhatsNewWindow: NSWindow {
+    static let escapeKeyCode: UInt16 = 53
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == Self.escapeKeyCode { close() } else { super.keyDown(with: event) }
+    }
+
+    override func cancelOperation(_ sender: Any?) { close() }
 }

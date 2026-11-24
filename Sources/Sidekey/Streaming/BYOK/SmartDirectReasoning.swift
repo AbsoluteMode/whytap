@@ -84,6 +84,38 @@ enum SmartDirectReasoning {
     }
 }
 
+/// The model name a stored timing line may carry. Model names are saved text:
+/// a user can type any name, and a fine-tuned or self-hosted one can hold an
+/// organization or a private label. Only a name of a public catalog is
+/// written; anything else is the fixed word `other`.
+enum CleanupDiagnosticModel {
+    static let other = "other"
+
+    /// Direct Anthropic: the published families, an alias or a dated ID.
+    static func anthropic(_ model: String) -> String {
+        let pattern = #"^claude-(fable|mythos|opus|sonnet|haiku)-(preview|[0-9]{1,2}(-[0-9]{1,2})?)(-(latest|[0-9]{8}))?$"#
+        return matches(model, pattern) ? model : other
+    }
+
+    /// Direct OpenAI: the published GPT and o-series names, an alias or a
+    /// dated snapshot. A fine-tuned `ft:` ID never matches.
+    static func openAI(_ model: String) -> String {
+        let gpt = #"gpt-[0-9]{1,2}(\.[0-9]{1,2})?[a-z]?(-(mini|nano|pro|turbo|chat-latest|luna|sol|terra|astra))?"#
+        let oSeries = #"o[0-9](-(mini|pro|preview))?"#
+        let pattern = "^(\(gpt)|\(oSeries))(-[0-9]{4}-[0-9]{2}-[0-9]{2})?$"
+        return matches(model, pattern) ? model : other
+    }
+
+    /// OpenRouter: an ID its own catalog listed at the last read.
+    static func openRouter(_ model: String, listed: Bool) -> String {
+        listed && matches(model, #"^[a-z0-9][a-z0-9._-]{0,60}/[a-z0-9][a-z0-9._:-]{0,80}$"#) ? model : other
+    }
+
+    private static func matches(_ model: String, _ pattern: String) -> Bool {
+        model.count <= 150 && model.range(of: pattern, options: .regularExpression) != nil
+    }
+}
+
 /// Models whose provider refused a Smart reasoning field and then accepted
 /// the same request without it, while this app runs: they get no field again
 /// until relaunch, so one refusal costs one extra

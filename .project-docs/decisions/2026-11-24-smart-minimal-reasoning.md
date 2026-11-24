@@ -96,8 +96,10 @@ below), and that time is spent on every dictation.
 - **A refused field never costs the dictation.** When a request that carried
   one of these fields comes back with HTTP 400 (422 on Anthropic too), the
   same request goes once more without the fields, exactly as before this
-  decision. When that repeat succeeds, the model gets no field again until
-  the app is relaunched (`SmartReasoningRefusals`, memory only). A second
+  decision. When that repeat returns a valid answer (a decoded, non-empty
+  reply, not merely HTTP 200: a proxy can answer 200 with its own page), the
+  model gets no field again until the app is relaunched
+  (`SmartReasoningRefusals`, memory only). A second
   refusal is the error it was before (a rejected input, or a refused model
   with its badge) and changes nothing for the next dictation. A key
   error, a rate limit, an outage and a connection failure are not repeated.
@@ -107,8 +109,12 @@ below), and that time is spent on every dictation.
   direct Anthropic path now writes the same line (model ID, requested
   setting, HTTP status, milliseconds, output and thinking tokens, whether the
   field was refused), and a failed request writes its status and
-  milliseconds. Model IDs are logged for OpenRouter, OpenAI and Anthropic
-  only; a user's own server and a fine-tuned OpenAI model stay `custom`. No text, key, URL or error body.
+  milliseconds. A model name is saved text that a user can type, so it is
+  logged only when it is a public catalog name (`CleanupDiagnosticModel`): a
+  published Anthropic or OpenAI model name, or an ID that OpenRouter's catalog
+  listed at its last read. Any other name, a fine-tuned OpenAI model included,
+  is logged as `other`, and a user's own server as `custom`. No text, key, URL
+  or error body.
   Read them with the system tool by its full path (in zsh a bare `log` is
   a shell builtin and prints nothing useful):
 
@@ -140,7 +146,11 @@ verdict still inserts the dictation unchanged and a thinking block is not
 pasted); the per-model table for Anthropic with dated IDs; an older Claude
 (request identical to before); OpenAI models at `none`, `minimal` and `low`
 and models that get no field; a refused field on each provider (cleaned text,
-second dictation sent without the field, no refusal badge); a rejected input,
+second dictation sent without the field, no refusal badge); a repeat answered
+with a proxy page or an empty reply under HTTP 200 (the dictation fails, the
+model is not marked); the stored lines read back from the unified log of the
+test process (a private alias, a fine-tuned ID and a name on a user's own
+server never appear, on success and on failure, on all three providers); a rejected input,
 a refused model, HTTP 401, 429, 500 and 529 and a timeout; OpenRouter
 unchanged (catalog effort, throughput sorting, none of the direct fields); a
 user's own server named like an OpenAI model; translation and meeting profiles
@@ -213,4 +223,6 @@ stayed in the text.
   paid request twice when only the answer was lost. Left to the maintainer
   as a separate decision.
 
-2026-11-24, branch `claude/smart-minimal-reasoning`; an independent review's finding (a request refused both ways must not mark the model) folded in the same day.
+2026-11-24, branch `claude/smart-minimal-reasoning`; an independent review's finding (a request refused both ways must not mark the model) folded in the same day, and so were the two findings of the builder's review of ticket 508
+(an invalid HTTP 200 answer to the repeat must not mark the model; unverified
+model names must not reach the stored log).

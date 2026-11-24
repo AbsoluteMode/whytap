@@ -1,3 +1,4 @@
+import OSLog
 import XCTest
 @testable import Sidekey
 
@@ -245,6 +246,42 @@ final class SmartMinimalReasoningTests: XCTestCase {
         XCTAssertNil(bodies[2]["output_config"])
     }
 
+    /// A proxy between the Mac and the provider answers the repeat with its
+    /// own HTTP 200 page (or an empty reply): the dictation fails, and that
+    /// proves nothing about the field. The next dictation still asks for
+    /// minimal reasoning.
+    func testAnInvalidAnswerToTheRepeatDoesNotMarkTheModel() async throws {
+        let cases: [(ProviderAccount, String, OpenAICompatibleLLMEndpoint.TextAPI, String, String)] = [
+            (.anthropic, "claude-sonnet-5-5", .anthropic, "thinking", Self.anthropicReply),
+            (.openAI, "gpt-5.5", .openAI, "reasoning_effort", Self.openAIReply),
+        ]
+        let invalid = ["<html><body>502 Bad Gateway</body></html>",
+                       #"{"content":[],"stop_reason":"end_turn","choices":[{"message":{"content":""}}]}"#]
+        for (account, model, api, field, goodReply) in cases {
+            for page in invalid {
+                bodies = []
+                try route(account, model)
+                provider { body, _ in body[field] == nil ? (200, page) : (400, #"{"error":{"message":"refused"}}"#) }
+                let processor = smart()
+                do {
+                    _ = try await dictate(processor)
+                    XCTFail("Expected the invalid answer to fail the dictation")
+                } catch let error as OpenRouterLLMError {
+                    XCTAssertFalse(error.isModelRefusal, "\(model): \(error)")
+                }
+                XCTAssertEqual(bodies.count, 2, model)
+                XCTAssertFalse(refusals.contains(api, model: model), "\(model): \(page.prefix(12))")
+
+                bodies = []
+                provider { _, _ in (200, goodReply) }
+                let output = try await dictate(processor)
+                XCTAssertEqual(output.text, Self.cleaned)
+                XCTAssertEqual(bodies.count, 1)
+                XCTAssertNotNil(bodies[0][field], "\(model) is still asked for minimal reasoning")
+            }
+        }
+    }
+
     // MARK: Provider failures
 
     /// A request the provider rejects for another reason (too long an input)
@@ -324,6 +361,84 @@ final class SmartMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(bodies.count, 2)
         XCTAssertEqual(checks.refusedModel(for: .dropSmartCleanup), "gpt-5.5")
         XCTAssertFalse(refusals.contains(.openAI, model: "gpt-5.5"), "The field was not the reason")
+    }
+
+    // MARK: Stored timing lines
+
+    func testOnlyPublicCatalogNamesBecomeALoggedModel() {
+        for model in ["claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101",
+                      "claude-sonnet-5-20260601", "claude-mythos-preview", "claude-fable-5-2"] {
+            XCTAssertEqual(CleanupDiagnosticModel.anthropic(model), model)
+        }
+        for model in ["gpt-5.5", "gpt-4o-mini", "gpt-5.4-mini-2026-03-17", "gpt-6.2-sol", "gpt-5-chat-latest", "o3", "o4-mini"] {
+            XCTAssertEqual(CleanupDiagnosticModel.openAI(model), model)
+        }
+        for name in ["acme-private-claude", "claude-sonnet-5-5 for Ivan", "claude-acme-5", "my-claude-sonnet-5-5",
+                     "ft:gpt-5.1:acme-corp:ivan-notes:abc123", "gpt-acme", "gpt-5.5-acme-internal", "", "o3-acme"] {
+            XCTAssertEqual(CleanupDiagnosticModel.anthropic(name), "other", name)
+            XCTAssertEqual(CleanupDiagnosticModel.openAI(name), "other", name)
+        }
+        XCTAssertEqual(CleanupDiagnosticModel.openRouter("google/gemini-3.8-flash", listed: true), "google/gemini-3.8-flash")
+        XCTAssertEqual(CleanupDiagnosticModel.openRouter("acme/private-alias", listed: false), "other")
+        XCTAssertEqual(CleanupDiagnosticModel.openRouter("Ivan's model", listed: true), "other")
+    }
+
+    /// The lines the system log now keeps, read back from the real unified
+    /// log of this process. A saved model name the catalogs do not know (a
+    /// private alias, a fine-tuned model, a name on a user's own server)
+    /// never appears in them, on a successful and on a failed request, on
+    /// direct Anthropic, direct OpenAI and OpenRouter; a catalog name does.
+    func testStoredTimingLinesCarryNoUnverifiedModelName() async throws {
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let started = Date().addingTimeInterval(-1)
+        let secret = "acme-secret-\(UUID().uuidString.prefix(8).lowercased())"
+        let server = routing.addServer(name: "Local", baseURL: "http://127.0.0.1:11434/v1")
+        let routes: [(ProviderAccount, String)] = [
+            (.anthropic, secret), (.openAI, secret), (.openAI, "ft:gpt-5.1:\(secret):notes:abc"),
+            (.openRouter, "\(secret)/model"), (.server(server.id), secret),
+            (.anthropic, "claude-sonnet-5-5"), (.openAI, "gpt-5.5"), (.openRouter, "google/gemini-3.8-flash"),
+        ]
+        for (account, model) in routes {
+            for status in [200, 500] {
+                try route(account, model)
+                provider { [unowned self] body, _ in
+                    if urls.last?.hasSuffix("/models") == true {
+                        return (200, #"{"data":[{"id":"google/gemini-3.8-flash"}]}"#)
+                    }
+                    if status != 200 { return (status, #"{"error":{"message":"unavailable"}}"#) }
+                    return (200, body["max_tokens"] == nil ? Self.openAIReply : Self.anthropicReply)
+                }
+                let client = OpenRouterLLMClient(session: session, profile: .smart, reasoningRefusals: refusals, usageSink: { _ in })
+                let processor = PostProcessor(
+                    llmRoute: DirectLLMRouteResolver(feature: .dropSmartCleanup, routing: routing, keys: keys),
+                    openRouterClient: client, checks: checks)
+                _ = try? await dictate(processor)
+            }
+        }
+
+        // The log store can lag the write by a moment.
+        var lines: [String] = []
+        for _ in 0..<40 {
+            let entries = try store.getEntries(
+                at: store.position(date: started),
+                matching: NSPredicate(format: "subsystem == %@ AND category == %@", "com.rootwise.sidekey", "cleanup-llm"))
+            lines = entries.compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
+            if lines.filter({ $0.hasPrefix("cleanup") }).count >= routes.count * 2 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertGreaterThanOrEqual(lines.count, routes.count * 2, "Every request, successful or failed, leaves a line")
+        XCTAssertFalse(lines.contains { $0.contains(secret) }, "An unverified model name reached the log")
+        for known in ["claude-sonnet-5-5", "gpt-5.5", "google/gemini-3.8-flash"] {
+            // Earlier tests of this process may have logged the same name.
+            XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=\(known) ") }.count, 2,
+                                        "\(known): a successful and a failed line")
+            XCTAssertTrue(lines.contains { $0.hasPrefix("cleanup failed") && $0.contains("model=\(known) ") }
+                          || known.hasPrefix("claude"), "\(known): the failed request is logged")
+        }
+        XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=other ") }.count, 8)
+        XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=custom ") }.count, 2, "A user's own server stays custom")
+        XCTAssertTrue(lines.contains { $0.contains("provider=anthropic") && $0.contains("status=500") },
+                      "A failed Anthropic request is logged with its status")
     }
 
     // MARK: Routes that must not change

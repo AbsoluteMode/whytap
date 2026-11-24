@@ -274,27 +274,33 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         var (data, response) = try await send()
         var refusedEffort = false
         if directEffort != nil, (response as? HTTPURLResponse)?.statusCode == 400 {
-            // The request goes once more exactly as before this policy. Only
-            // when that works was the field the reason, and the model gets no
-            // field again; a request refused both ways (too long an input, a
-            // model that is gone) says nothing about the field.
+            // The request goes once more exactly as before this policy. The
+            // model is marked below, only once that repeat returns an answer;
+            // a request refused both ways (too long an input, a model that is
+            // gone) says nothing about the field.
             refusedEffort = true
             try Task.checkCancellation()
             request.httpBody = try body(effort: nil)
             (data, response) = try await send()
-            if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
-                reasoningRefusals.record(.openAI, model: trimmedModel)
-            }
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
-        // A fine-tuned ID carries the organization and a name the user chose.
-        let logsModel = endpoint.sendsOpenRouterHeaders
-            || (endpoint.textAPI == .openAI && !trimmedModel.lowercased().hasPrefix("ft:"))
+        // Only a public catalog name is logged; a user's own server, a
+        // fine-tuned model and any other saved name are fixed words.
+        let diagnosticModel: String
+        if !isDictation {
+            diagnosticModel = "custom"
+        } else if endpoint.sendsOpenRouterHeaders {
+            diagnosticModel = CleanupDiagnosticModel.openRouter(trimmedModel, listed: await reasoningCatalog.lists(trimmedModel))
+        } else if endpoint.textAPI == .openAI {
+            diagnosticModel = CleanupDiagnosticModel.openAI(trimmedModel)
+        } else {
+            diagnosticModel = "custom"
+        }
         let effortLabel = reasoning?.diagnosticLabel ?? (refusedEffort ? nil : directEffort) ?? "default"
         if isDictation, let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
             os_log("cleanup failed model=%{public}@ effort=%{public}@ status=%{public}d llm_ms=%{public}d effort_refused=%{public}d",
                    log: Self.log, type: .default,
-                   logsModel ? Self.safeDiagnosticID(trimmedModel) : "custom", effortLabel, status, requestMs,
+                   diagnosticModel, effortLabel, status, requestMs,
                    refusedEffort ? 1 : 0)
         }
         try validate(response: response, body: data)
@@ -327,9 +333,9 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
             if isDictation {
                 // No prompt, reply, reasoning text, key, URL, or provider error body.
-                // Only catalog identifiers (OpenRouter, OpenAI) and numeric
+                // Only verified catalog identifiers (OpenRouter, OpenAI) and numeric
                 // diagnostics, at the default level so the system log keeps them.
-                let modelID = logsModel ? Self.safeDiagnosticID(trimmedModel) : "custom"
+                let modelID = diagnosticModel
                 let requestID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(decoded.id) : "unavailable"
                 os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d effort_refused=%{public}d",
                        log: Self.log, type: .default,
@@ -343,6 +349,10 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             else {
                 throw OpenRouterLLMError.emptyContent
             }
+            // The repeat without the field produced a real answer: the field
+            // was the reason, and this model gets none again. A status alone
+            // does not prove it (a proxy can answer 200 with its own page).
+            if refusedEffort { reasoningRefusals.record(.openAI, model: trimmedModel) }
             return content
         } catch let error as OpenRouterLLMError {
             throw error
@@ -378,7 +388,7 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         return isDictation ? ProviderPreferences(sort: "throughput") : nil
     }
 
-    static func safeDiagnosticID(_ value: String?) -> String {
+    private static func safeDiagnosticID(_ value: String?) -> String {
         guard let value, !value.isEmpty, value.count <= 150,
               value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_/.:~").contains($0) })
         else { return "unavailable" }

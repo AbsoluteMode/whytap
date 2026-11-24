@@ -48,17 +48,14 @@ extension OpenRouterLLMClient {
         try Task.checkCancellation()
         var refused = false
         if reasoning != nil, let status = (response as? HTTPURLResponse)?.statusCode, status == 400 || status == 422 {
-            // The request goes once more exactly as before this policy. Only
-            // when that works were the fields the reason, and the model gets
-            // none again; an input refused both ways says nothing about them.
+            // The request goes once more exactly as before this policy. The
+            // model is marked below, only once that repeat returns an answer;
+            // an input refused both ways says nothing about the fields.
             refused = true
             reasoning = nil
             request.httpBody = try body(nil)
             (data, response) = try await session.data(for: request)
             try Task.checkCancellation()
-            if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
-                reasoningRefusals.record(.anthropic, model: model)
-            }
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
         guard let http = response as? HTTPURLResponse else {
@@ -66,12 +63,13 @@ extension OpenRouterLLMClient {
         }
         let usage = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["usage"] as? [String: Any]
         if profile != .standard {
-            // Catalog model ID and numbers only, at the default level so the
-            // system log keeps them; no prompt, reply, key or error body.
+            // A verified catalog model name and numbers only, at the default
+            // level so the system log keeps them; no prompt, reply, key or
+            // error body.
             let details = usage?["output_tokens_details"] as? [String: Any]
             os_log("cleanup model=%{public}@ provider=anthropic effort=%{public}@ status=%{public}d llm_ms=%{public}d output_tokens=%{public}d thinking_tokens=%{public}d effort_refused=%{public}d",
                    log: Self.log, type: .default,
-                   Self.safeDiagnosticID(model), reasoning.map(\.diagnosticLabel) ?? "default",
+                   CleanupDiagnosticModel.anthropic(model), reasoning.map(\.diagnosticLabel) ?? "default",
                    http.statusCode, requestMs,
                    (usage?["output_tokens"] as? Int) ?? -1, (details?["thinking_tokens"] as? Int) ?? -1,
                    refused ? 1 : 0)
@@ -101,6 +99,9 @@ extension OpenRouterLLMClient {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenRouterLLMError.emptyContent
         }
+        // The repeat without the fields produced a real answer: they were
+        // the reason. A status alone does not prove it.
+        if refused { reasoningRefusals.record(.anthropic, model: model) }
         return text
     }
 }

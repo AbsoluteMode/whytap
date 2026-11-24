@@ -188,12 +188,17 @@ Voice flow (Drop / dictation):
        Anthropic output_config.effort low, plus thinking between_tools on
        Claude Sonnet 5.5 or disabled on Haiku 5.5 and Sonnet 5; OpenAI
        reasoning_effort none, minimal or low by model). A model outside the
-       tables gets no field; a field refused with HTTP 400 is dropped, the
-       request repeated once and the model left without it until relaunch.
+       tables gets no field; when a request with a field is refused with HTTP
+       400 (or 422 on Anthropic), it is repeated once without the field, and
+       only if that repeat returns a valid answer is the model left without
+       the field until relaunch.
        Translation, meetings, OpenRouter and custom servers are unchanged. The
        cleanup timing lines (category cleanup-llm, "drop processing ok",
        "drop turn ... completed") are logged at the default level so the system
-       log keeps them. WHY:
+       log keeps them. A model name is logged only when it is a public catalog
+       name (CleanupDiagnosticModel: a published Anthropic or OpenAI name, or
+       an ID OpenRouter's catalog lists); any other saved name is "other" and
+       a user's own server "custom". WHY:
        .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->

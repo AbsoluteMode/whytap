@@ -175,12 +175,14 @@ Voice flow (Drop / dictation):
        single-line field, a take into Whytap's own editor and an app without
        a name get no line and stay plain. SmartFormattingMetadataReader reads
        the focused element's AX role and document URL on this Mac (1.5s
-       deadline); they are never sent. WHY:
+       deadline); they are never sent, and an unread role leaves the app
+       named. WHY:
        .project-docs/decisions/2026-11-24-smart-destination-line.md
        Slack/Telegram (bundle ID, or app.slack.com / web.telegram.org in a
        browser) are the only apps named in SmartFormattingProfile: their
        paste uses local RTF + semantic HTML + plain clipboard fallback, and
-       their line describes that converter. Code/URLs survive filler
+       their line names Slack/Telegram (also in a browser) and describes
+       that converter. Code/URLs survive filler
        stripping and every flavor is restored after paste. Fast and the
        editor's pass verdict stay plain. WHY:
        .project-docs/decisions/2026-10-21-smart-destination-formatting.md

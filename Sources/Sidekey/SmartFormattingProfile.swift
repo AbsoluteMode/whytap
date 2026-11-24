@@ -43,6 +43,8 @@ struct SmartFormattingProfile: Sendable, Equatable {
     static func resolve(bundleID: String?, appName: String?, documentURL: URL?, focusedRole: String?) -> Self {
         // Single-line fields include search, issue titles, addresses and names:
         // no markup there, whatever the app.
+        // A role that could not be read (slow Accessibility) does not hide the
+        // app's name: the guard works only when the field is known.
         if focusedRole == "AXTextField" || focusedRole == "AXComboBox" || focusedRole == "AXSecureTextField" { return .plain }
         // No process identity: the take goes into one of Whytap's own editors
         // (AutoPasteEngine.currentDropTarget) or the target is unknown.
@@ -68,7 +70,9 @@ struct SmartFormattingProfile: Sendable, Equatable {
     private static func cleanName(_ name: String?) -> String? {
         guard let name else { return nil }
         let scalars = name.unicodeScalars.map { scalar -> Character in
-            CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar)
+            // Cc and line separators only: format characters (ZWJ, ZWNJ) are
+            // part of real names in some scripts.
+            scalar.properties.generalCategory == .control || CharacterSet.newlines.contains(scalar)
                 || scalar == "«" || scalar == "»" ? " " : Character(scalar)
         }
         let words = String(scalars).split(whereSeparator: \.isWhitespace)

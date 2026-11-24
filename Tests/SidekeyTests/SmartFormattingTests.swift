@@ -87,6 +87,8 @@ final class SmartFormattingProfileTests: XCTestCase {
         XCTAssertEqual(line.components(separatedBy: "«").count, 2, "Only Whytap's own quotes delimit the name")
         XCTAssertEqual(SmartFormattingProfile.app(String(repeating: "я", count: 500)).destination?.count, 60)
         XCTAssertEqual(SmartFormattingProfile.app(nil), .plain)
+        // Format characters inside a real name survive (ZWNJ in Persian).
+        XCTAssertEqual(SmartFormattingProfile.app("می\u{200C}خواهم").destination, "می\u{200C}خواهم")
         XCTAssertEqual(SmartFormattingProfile.app("«»"), .plain)
     }
 

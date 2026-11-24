@@ -54,8 +54,9 @@ is a verifiable claim rather than a slogan.
 - Smart sends the cleanup model you chose the transcript of your dictation,
   the name of the app you dictate into, Whytap's own instructions and your
   language settings. It does not read or send the text of that app's window.
-  Its instructions name that app once more, so the model can use the app's
-  Markdown when it knows the app shows it. To leave single-line fields plain
+  Its instructions name that app once more (for Slack or Telegram open in a
+  browser: "Slack" or "Telegram"), so the model can use the app's Markdown
+  when it knows the app shows it. To leave single-line fields plain
   and to recognize Slack or Telegram in a browser it reads, on the Mac, only
   the focused field's Accessibility role and the document's address; these
   are not sent with the request or logged.

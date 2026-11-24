@@ -51,7 +51,9 @@ apps show Markdown.
   > no markup except simple lists.
 
 - X is the app's display name, the same one the request already carried as
-  `Active app:`. No new data leaves the Mac. The name is reduced to one line
+  `Active app:`; for Slack or Telegram open in a browser it is "Slack" or
+  "Telegram", as the old profile rules already said. No new data leaves the
+  Mac, and no address is sent. The name is reduced to one line
   of at most 60 characters without control characters or the angle quotes
   that delimit it.
 - No list of apps decides who gets the line. Editors and browsers are named
@@ -60,6 +62,8 @@ apps show Markdown.
   (`AXTextField`, `AXComboBox`, `AXSecureTextField`) gets no line and stays
   plain; so does a take without a process identity (one of Whytap's own
   editors) and an app without a name.
+  The single-line guard works only when the role was read: if Accessibility
+  does not answer within the 1.5 s deadline, the app is still named.
 - Slack and Telegram stay named in code, because the paste mechanics need
   them: there Whytap converts Markdown to RTF + HTML on the clipboard
   (`SmartRichTextPaste`). They are recognized by bundle identifier and, in a
@@ -141,6 +145,12 @@ an app.
 - Recognized web composers lose their site-specific rules: GitHub, GitLab or
   Discord in a browser is now "Google Chrome" to the model.
 - A code file in an IDE and a terminal are no longer forced to plain text.
+  In a shell, backticks are command substitution: prose with `code` dictated
+  straight at a shell prompt would run the quoted command on Enter. It is
+  harmless in a terminal agent such as Claude Code or Codex. Terminal got
+  backticks in 3 of 3 measured answers.
+- When the focused role cannot be read, a single-line field in a browser or
+  IDE gets the line too; before, those apps were plain without metadata.
 - An app without a bundle identifier is plain even when it has a name.
 
 ## Supersedes / superseded by

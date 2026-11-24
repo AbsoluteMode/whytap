@@ -7,9 +7,11 @@ import Foundation
 /// `SmartFormattingProfile.resolve`.
 ///
 /// Only these two values are read. No text of the window (values, titles,
-/// descriptions) is collected, and nothing read here goes into the cleanup
+/// descriptions) is collected, and neither value goes into the cleanup
 /// request. The request carries the transcript, Whytap's instructions, the
 /// target app's name, and language and mode hints from the dictation path.
+/// On the two rich-paste hosts the instructions say "Slack" or "Telegram"
+/// instead of the browser's name; the address itself is never sent.
 /// WHY: .project-docs/decisions/2026-11-22-smart-no-window-context.md
 ///
 /// Permission: reuses the **Accessibility** grant the app already holds for
@@ -23,7 +25,8 @@ enum SmartFormattingMetadataReader {
     /// Wall-clock ceiling for the whole read. The per-message AX timeout
     /// (0.5 s) bounds only a single message; an app that answers
     /// Accessibility slowly must never hold the take on "thinking…". On expiry
-    /// the take proceeds with the plain profile.
+    /// the take proceeds without this metadata: the app is still named to the
+    /// model, with no single-line guard and no rich paste in a browser.
     /// WHY: docs/decisions/2026-06-17-ax-context-snapshot-timeout.md
     static let defaultTimeout: Duration = .seconds(1.5)
 

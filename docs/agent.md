@@ -8,8 +8,9 @@ on your Mac, and inference runs at the provider you choose, with your key.
 
 1. In **Settings → API & Models → API keys**, add an OpenRouter, OpenAI or
    Anthropic key.
-2. Under **Models**, choose the **Agent** model (and **Agent voice** for spoken
-   requests).
+2. Under **Models**, choose an **LLM** (and a **Speech** model for spoken
+   requests). To give the Agent its own models, open **Advanced**: the
+   **Agent** card holds both, Speech for your voice and Text for the answer.
 3. In **Settings → Other → Agent**, turn on **Agent**.
 
 Turning it on connects: it prepares the local workspace and checks that a key and a model are

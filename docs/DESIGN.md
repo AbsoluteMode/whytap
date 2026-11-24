@@ -81,7 +81,8 @@ change the tool's settings below.
   reason ("Agent: no tool support · kept …"), and "Checking…" while the single
   probe runs.
 - "Advanced · a model per feature" (chevron, collapsed by default) holds the
-  former per-feature groups unchanged. It starts expanded for Mixed, a link
+  former per-feature groups. Since 2026-11-24 the Agent is one card like Drop
+  Smart and Meetings: Speech (the Agent voice route), then Text. It starts expanded for Mixed, a link
   to one feature, and "Show" for features without a model.
 - Re-picking with custom features asks in a native dialog: Keep custom models
   (default), Replace them too, Cancel; the message names those features.

@@ -1164,7 +1164,9 @@ provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
 then Search (the Agent's web search, AgentSearchRow; see the native Agent
 section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
-list. A shared pick writes every feature route of its kind
+list (FeatureGroup.layout): a function that listens and writes is one card,
+speech route first (Drop Smart, Meetings, and Agent with its Agent voice
+route). A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
 a feature it cannot serve (the Agent without tools, a provider without a

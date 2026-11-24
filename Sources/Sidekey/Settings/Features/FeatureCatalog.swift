@@ -12,6 +12,12 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case googleSearch
     case translateSubtitles
     case screenshots
+    /// The island's hover tools: which ones show and in what order.
+    case hover
+    /// Notify: cards beside the island from sources a coding agent sets up.
+    case notify
+    /// Monitor: dashboards in the island that a coding agent's collector writes.
+    case monitor
 
     var id: String { rawValue }
 }
@@ -60,6 +66,8 @@ enum FeatureHotkey: Hashable {
         case .tool(.translate): return "Open Translate"
         case .tool(.subtitles): return "Start Subtitles"
         case .tool(.screenshot): return "Capture an area"
+        case .tool(.notifs): return "Open Notify"
+        case .tool(.monitor): return "Open Monitor"
         case .tool(let tool): return HoverToolRegistry.info(for: tool).title
         }
     }
@@ -295,6 +303,11 @@ struct FeatureSetupSnapshot: Equatable {
     var agentOn = false
     var meetingsOn = false
     var googleOn = false
+    /// Notify sources a coding agent connected (the built-in Meeting notes
+    /// source is not counted: it belongs to Meeting Notes).
+    var notifySources = 0
+    /// Dashboards Monitor lists: custom snapshots plus Server status once set up.
+    var monitorDashboards = 0
 
     func modelStatus(_ feature: AIFeature) -> ModelRowStatus { models[feature] ?? .notSet }
 }
@@ -372,6 +385,25 @@ enum FeatureCatalog {
                 line: "Capture an area, annotate it, blur text and numbers.",
                 video: nil, hotkeys: [.tool(.screenshot)],
                 activation: .islandTools([.screenshot]), place: .tool(.screenshot))
+        // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
+        case .hover:
+            return FeatureInfo(
+                feature: feature, name: "Hover", kind: "Island tools",
+                line: "Small tools that open when you hover the notch. Choose them and put them in order.",
+                video: nil, hotkeys: [], activation: .alwaysOn, place: .screen,
+                clipCaption: "Move a tool up the list and see it change places in the island.")
+        case .notify:
+            return FeatureInfo(
+                feature: feature, name: "Notify", kind: "Your own notifications",
+                line: "Cards beside the island from sources your coding agent connects: builds, messages, checks.",
+                video: nil, hotkeys: [.tool(.notifs)], activation: .islandTools([.notifs]), place: .screen,
+                clipCaption: "A build finishes and its notification appears beside the island.")
+        case .monitor:
+            return FeatureInfo(
+                feature: feature, name: "Monitor", kind: "Dashboards in the island",
+                line: "Numbers from your servers or anything you watch, kept up to date by your coding agent's collector.",
+                video: nil, hotkeys: [.tool(.monitor)], activation: .islandTools([.monitor]), place: .screen,
+                clipCaption: "Open Monitor in the island and pick a dashboard to see its numbers.")
         }
     }
 
@@ -468,6 +500,10 @@ enum FeatureCatalog {
                 FeatureRequirement(kind: .permission(.screenRecording), title: FeaturePermission.screenRecording.title,
                                    detail: "To capture the area you pick."),
             ]
+        // Nothing to grant or pay for: the island draws them, and Notify's
+        // and Monitor's sources are local programs the person's agent writes.
+        case .hover, .notify, .monitor:
+            return []
         }
     }
 
@@ -584,7 +620,7 @@ enum FeatureCatalog {
 
     static func isOn(_ feature: AppFeature, snapshot: FeatureSetupSnapshot) -> Bool {
         switch feature {
-        case .drop, .translateSubtitles, .screenshots: return true
+        case .drop, .translateSubtitles, .screenshots, .hover, .notify, .monitor: return true
         case .agent: return snapshot.agentOn
         case .meetings: return snapshot.meetingsOn
         case .googleSearch: return snapshot.googleOn
@@ -596,6 +632,11 @@ enum FeatureCatalog {
         guard isOn(feature, snapshot: snapshot) else { return .off }
         let checks = checks(for: feature, snapshot: snapshot)
         if feature == .translateSubtitles { return translateSubtitlesStatus(checks) }
+        // Notify and Monitor show only what the person's agent connected: with
+        // nothing connected yet they are quiet, like an unused island tool.
+        // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
+        if feature == .notify { return snapshot.notifySources > 0 ? .ready(note: nil) : .notSetUp([]) }
+        if feature == .monitor { return snapshot.monitorDashboards > 0 ? .ready(note: nil) : .notSetUp([]) }
         let missing = checks.filter(\.isBlocking)
         guard missing.isEmpty else {
             // An island tool the person never set up is not a problem to

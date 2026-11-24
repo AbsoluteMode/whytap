@@ -50,6 +50,8 @@ struct SettingsFeaturesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
+            // Monitor's files are read, not polled: Settings never connects to servers.
+            environment.monitor.reloadFiles()
             await models.onAppear()
             if environment.supportsOnDevice { await onDevice.refresh() }
         }
@@ -63,6 +65,8 @@ struct SettingsFeaturesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyDropModeChanged)) { _ in
             externalChange += 1
         }
+        .onReceive(environment.notifySupervisor.$sources) { _ in externalChange += 1 }
+        .onReceive(environment.monitor.$dashboards) { _ in externalChange += 1 }
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in
             // The Agent counts as on only while its native provider is connected.
             DispatchQueue.main.async { externalChange += 1 }
@@ -81,6 +85,12 @@ struct FeatureScreens: View {
 
     var body: some View {
         switch feature {
+        case .hover:
+            HoverFeatureView(selection: context.selection, environment: context.environment)
+        case .notify:
+            NotifyFeatureView(selection: context.selection, environment: context.environment)
+        case .monitor:
+            MonitorFeatureView(selection: context.selection, environment: context.environment)
         default:
             FeatureScreenView(feature: feature, context: context) { EmptyView() }
         }

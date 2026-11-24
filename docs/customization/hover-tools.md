@@ -1,6 +1,8 @@
 # Add or change a hover tool
 
-The user chooses any number of tools in **Settings, Toolbox**. Selected tools wrap
+The user chooses any number of tools in **Settings → Features → Hover** (a list
+in the island's order: hold a row and drag it, switch a tool off or on) or in
+**Settings, Toolbox**. Selected tools wrap
 into rows of three compact capsules, 52 points high. The drawer has exactly the
 same width as the compact island, using its actual notch-derived `compactWidth`.
 Each cell width is `(panelWidth - 24 - 16) / 3`: 90 points for a 310-point island,
@@ -37,6 +39,7 @@ All paths below start at `Sources/Sidekey/`.
 | Measured pointer targets, viewport clipping and down/up ownership | `DynamicIsland/IslandHoverHitBridge.swift`, `DynamicIsland/IslandPanel.swift` |
 | Catalog search, aliases, AppKit search field and keyboard commands | `DynamicIsland/IslandHoverToolSearch.swift` |
 | Drag/drop catalog, fixed Add and selected layout | `Settings/ToolboxSettingsView.swift` |
+| Hover screen: ordered list, live drag, switches | `Settings/Features/HoverFeatureView.swift` |
 | Embedded History, Record and translation panels | `Settings/ToolboxMiniApps.swift` |
 | App services and hotkey dispatch | `AppDelegate.swift` (`onToolHotkeyActivated`) |
 | Feature hotkey labels and hints | `Hotkeys/HotkeysSettingsView.swift`, `HelpWindowController.swift` |

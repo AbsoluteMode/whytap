@@ -69,8 +69,8 @@ external process could read it.
 - **The wing.** `showsLiveText: true` keeps an opt-in for 1.5 s. While it holds
   and the running take goes into that same process, `onTranscriptUpdate`
   skips `dropTranscriptUpdated`; the orb, phase and paste are untouched. When
-  the app stops asking (composer blurred, app quit or hung) the next partial
-  reaches the wing again, with the whole cumulative text.
+  the app stops asking (composer blurred, app quit or hung), the next partial
+  reaches the wing again with the text the provider normally supplies.
 - **Long on-device takes.** `OnDeviceTranscriptionSession` re-decodes only
   its trailing ~14 s for the island ticker. It now also reports, per partial
   (`onTranscriptWindow`), whether that window still starts at the beginning

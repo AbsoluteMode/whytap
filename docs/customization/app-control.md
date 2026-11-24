@@ -222,8 +222,8 @@ partials into the island's wing (the orb and phase stay). When the app stops
 asking, quits or loses the take, the next partial reaches the wing as before.
 The final text is still pasted by Drop (in Smart it can differ from the
 partials); the app replaces its preview with it. Poll it about 10 times a
-second during a take. Whytap 2.2.27 and older answer the call with
-`Unknown tool` (MCP error -32602): treat that, `unsupported_client`,
+second during a take. Builds without this tool answer with `Unknown tool`
+(MCP error -32602): treat that, `unsupported_client`,
 `access_denied` and `approval_timed_out` as "no live text" and keep the
 earlier behaviour. Nothing from this tool is logged.
 

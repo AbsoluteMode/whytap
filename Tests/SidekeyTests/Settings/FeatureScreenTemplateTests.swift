@@ -82,10 +82,10 @@ final class FeatureScreenTemplateTests: XCTestCase {
 
         for dark in [false, true] {
             let appearance = dark ? "dark" : "light"
+            let size = NSSize(width: 680, height: 80)
             let strip = FeatureVideoStrip(info: info, bundle: bundle)
                 .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            let size = NSSize(width: 680, height: 80)
+                .frame(width: size.width, height: size.height)
             let directory = FeaturesFixture.renderDirectory
             let enabled = try FeaturesFixture.render(strip, size: size, dark: dark,
                                                       to: directory?.appendingPathComponent("video-ready-\(appearance).png"))

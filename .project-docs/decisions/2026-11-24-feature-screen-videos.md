@@ -3,7 +3,7 @@ id: feature-screen-videos-2026-11-24
 type: decision
 title: Feature screens get the Drop, Shot and Translate clips
 summary: Three bundled clips for the feature screens (drop-fast, screenshot, translate), named after their kit scene ids and referenced from FeatureCatalog.video; a Subtitles clip is made and waits for a place on the shared screen; the clips follow build 1747 and show real model output.
-status: proposed
+status: confirmed
 tags: [settings, video, features]
 canonical_for: [feature-screen-videos]
 verified_at: 2026-11-24

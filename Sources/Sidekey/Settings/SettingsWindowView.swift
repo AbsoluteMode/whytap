@@ -240,7 +240,9 @@ struct SettingsWindowView: View {
                 environment: featuresEnvironment ?? liveFeaturesEnvironment
             )
         case .apiAndModels:
-            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature)
+            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature,
+                             initialSection: selection.requestedAPISection ?? .models)
+                .onAppear { selection.requestedAPISection = nil }
         case .hotkeys:
             HotkeysSettingsView()
         case .permissions:
@@ -370,6 +372,9 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
     @Published var shownFeature: AppFeature?
+    /// The part of API & Models to open on next (API keys from a feature's
+    /// screen); API & Models takes it once and clears it.
+    @Published var requestedAPISection: APIAndModelsSection?
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?
@@ -418,6 +423,14 @@ final class SettingsWindowSelection: ObservableObject {
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
         focusedFeature = feature
+    }
+
+    /// Opens API & Models on API keys, where a key is added or replaced:
+    /// "Add a key" and "Fix the key" on a feature's screen.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    func showAPIKeys() {
+        requestedAPISection = .keys
+        select(.apiAndModels)
     }
 
     /// Opens Toolbox on one tool's pane without running its action.

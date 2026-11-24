@@ -1405,7 +1405,12 @@ action uses is not saved and recording stays open; Space stays hold-only);
 "Try it here" is the onboarding's native text field; "What it needs" lists the
 catalog's checks with the API & Models ModelMenu in place, Download free model
 or Use the model on this Mac (APIAndModelsViewModel.useOnDeviceModel: that one
-feature, no Assign window), Allow, Restart Whytap and Retry; Settings holds
+feature, no Assign window; after a download only if the feature's route is
+still the one it had when the download began, so a model picked meanwhile
+stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
+API & Models on API keys; the sidebar entry still opens Models), Allow,
+Restart Whytap and Retry; the back link to Features uses
+MacButtonInteractionStyle like the Features rows; Settings holds
 Mode, Language you speak, Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
 island editors. The same switches remain in Other and in the island. WHY:

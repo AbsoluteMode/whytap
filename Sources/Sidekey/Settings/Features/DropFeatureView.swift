@@ -19,6 +19,7 @@ struct DropFeatureView: View {
     @State private var language: AppLanguage?
     @State private var volumeDuck = false
     @State private var autoStop = false
+    @FocusState private var backFocused: Bool
 
     init(snapshot: FeatureSetupSnapshot, selection: SettingsWindowSelection, models: APIAndModelsViewModel,
          permissions: PermissionsSettingsViewModel, environment: FeaturesEnvironment,
@@ -93,9 +94,14 @@ struct DropFeatureView: View {
                     Text("Features").font(.system(size: 12.5, weight: .medium))
                 }
                 .foregroundStyle(MacSettingsTheme.accent)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            // The same hover, press and focus feedback as the Features rows.
+            .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.accent, focused: backFocused))
+            .focused($backFocused)
+            .padding(.leading, -6)
             .accessibilityLabel("Back to Features")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(info.name)
@@ -189,7 +195,7 @@ struct DropFeatureView: View {
            snapshot.selectableModels.contains(feature) {
             ModelMenu(viewModel: models, feature: feature,
                       label: models.rows.first { $0.feature == feature }?.selectionLabel ?? "Choose a model",
-                      onAddKey: { selection.select(.apiAndModels) },
+                      onAddKey: { selection.showAPIKeys() },
                       // Beside the free model's button the list is the other way.
                       width: Self.offersOnDevice(check) ? 150 : 230)
         }
@@ -238,15 +244,18 @@ struct DropFeatureView: View {
     private func perform(_ action: FeatureSetupAction) {
         switch action {
         case .downloadOnDeviceModel(let feature):
+            // The download takes minutes; a model picked meanwhile (here or
+            // in API & Models) is the newer choice and stays.
+            let startedFrom = models.currentRoute(for: feature)
             Task {
-                if await onDevice.download() { models.useOnDeviceModel(for: feature) }
+                if await onDevice.download() { models.useOnDeviceModel(for: feature, ifRouteIs: startedFrom) }
             }
         case .useOnDeviceModel(let feature):
             models.useOnDeviceModel(for: feature)
         case .chooseModel(let feature):
             selection.focus(feature)
         case .addKey, .fixKey, .addOpenAIKey:
-            selection.select(.apiAndModels)
+            selection.showAPIKeys()
         case .allow(.keyboard):
             permissions.requestAccessibility()
         case .allow(.microphone):

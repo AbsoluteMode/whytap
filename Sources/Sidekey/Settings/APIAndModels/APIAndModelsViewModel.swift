@@ -664,6 +664,16 @@ final class APIAndModelsViewModel: ObservableObject {
         return true
     }
 
+    /// The on-device download a feature's screen started has finished: the
+    /// model is used only if the feature's route is still the one it was
+    /// when the download began. A model chosen meanwhile is kept.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    @discardableResult
+    func useOnDeviceModel(for feature: AIFeature, ifRouteIs startedFrom: FeatureRoute?) -> Bool {
+        guard routing.route(for: feature) == startedFrom else { return false }
+        return useOnDeviceModel(for: feature)
+    }
+
     // MARK: - Models
 
     func sections(for feature: AIFeature) -> [PickerSection] {

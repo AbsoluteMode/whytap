@@ -165,7 +165,11 @@ Fast missing or broken, the text model missing with Fast working and not,
 the Agent's and search's voice parts, Translate and Subtitles each alone,
 both and neither, the 27.3 Input Monitoring stage beside Override, restart
 and the older-macOS fallback, and refused, removed and unsupported routes
-with and without another model to pick;
+with and without another model to pick; and, after the review of the
+Drop screen (ticket 523): a model picked while the free model downloads
+is kept, the download is used when nothing changed meanwhile, every key
+action opens API keys while the sidebar still opens Models, and the back
+link has the shared hover, press and focus feedback;
 Meeting Notes and the Agent turned on without models; island tools; a rebound
 key and a stale Toggle stored for Space; the summary line; no text naming a
 key.

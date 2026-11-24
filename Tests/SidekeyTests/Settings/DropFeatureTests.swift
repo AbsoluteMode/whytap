@@ -29,6 +29,29 @@ final class DropFeatureTests: XCTestCase {
         XCTAssertEqual(selection.shownFeature, .drop)
     }
 
+    /// "Add a key", "Fix the key" and the model menu's Add key open API keys,
+    /// not Models (queue review 523, 2). The ordinary entry stays on Models
+    /// and the way back to Drop is the Features row again.
+    func testKeyActionsOpenAPIKeysAndTheWayBackStillWorks() async throws {
+        let fixture = try await fixture(.freshInstall)
+        let selection = SettingsWindowSelection()
+        selection.open(.drop)
+        selection.showAPIKeys()
+        XCTAssertEqual(selection.selectedTab, .apiAndModels)
+        XCTAssertEqual(selection.requestedAPISection, .keys)
+        try FeaturesFixture.render(fixture.shell(selection: selection), size: NSSize(width: 960, height: 560), dark: false,
+                                   to: FeaturesFixture.renderDirectory?.appendingPathComponent("drop-add-key-opens-api-keys.png"))
+        XCTAssertNil(selection.requestedAPISection, "API & Models takes the request once")
+
+        selection.select(.hotkeys)
+        selection.select(.apiAndModels)
+        XCTAssertNil(selection.requestedAPISection, "the sidebar entry opens Models as before")
+
+        selection.open(.drop)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .drop)
+    }
+
     // MARK: - Shortcut changed in place
 
     func testRecordingANewKeySavesItAtOnce() async throws {
@@ -133,6 +156,34 @@ final class DropFeatureTests: XCTestCase {
         fixture.models.useOnDeviceModel(for: .dropFast)
         XCTAssertNil(fixture.models.proposal, "No Assign window appears later in API & Models")
         XCTAssertNil(fixture.routing.route(for: .meetings), "Other features are left as they were")
+    }
+
+    /// A download started from Drop's screen ends minutes later: a model
+    /// picked meanwhile is the newer choice and is kept (queue review 523, 1).
+    func testDownloadDoesNotReplaceAModelChosenWhileItRan() async throws {
+        let fixture = try await fixture(.usual)
+        fixture.routing.setRoute(nil, for: .dropFast)
+        let startedFrom = fixture.models.currentRoute(for: .dropFast)
+        let picked = FeatureRoute(account: .openRouter, model: "picked-while-downloading")
+        fixture.routing.setRoute(picked, for: .dropFast)
+
+        XCTAssertFalse(fixture.models.useOnDeviceModel(for: .dropFast, ifRouteIs: startedFrom))
+        XCTAssertEqual(fixture.routing.route(for: .dropFast), picked)
+    }
+
+    func testDownloadIsUsedWhenNothingWasChosenMeanwhile() async throws {
+        let fixture = try await fixture(.usual)
+        fixture.routing.setRoute(nil, for: .dropFast)
+        let startedFrom = fixture.models.currentRoute(for: .dropFast)
+
+        XCTAssertTrue(fixture.models.useOnDeviceModel(for: .dropFast, ifRouteIs: startedFrom))
+        XCTAssertEqual(fixture.routing.route(for: .dropFast)?.account, .thisMac)
+
+        // A broken route the download was meant to replace is replaced too.
+        let broken = FeatureRoute(account: .openRouter, model: "removed-model")
+        fixture.routing.setRoute(broken, for: .dropFast)
+        XCTAssertTrue(fixture.models.useOnDeviceModel(for: .dropFast, ifRouteIs: broken))
+        XCTAssertEqual(fixture.routing.route(for: .dropFast)?.account, .thisMac)
     }
 
     func testLocalModelIsNotAssignedWhenItIsNotOnThisMacOrCannotServe() async throws {

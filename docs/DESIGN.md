@@ -15,7 +15,8 @@ action ("Open Models ›") that opens that Settings tab. The first row of the
 newest release carries its clip at 368 × 207 pt above the text: the still
 frame at once, the silent loop over it, the still frame alone under Reduce
 Motion. One primary button on the right, Got it (Return); Escape and the
-close button do the same.
+close button do the same. The window comes up with the keyboard at the
+Settings level, so it is never under Settings or another app's window.
 
 Why: a person who just updated wants to know in a few seconds what is
 different. Five short rows are read at a glance, one clip shows the main

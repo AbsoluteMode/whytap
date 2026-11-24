@@ -847,7 +847,33 @@ contrast. Green/red/amber status text has separate light and dark values.
 `MacSettingsThemeTests` measures normal text and status labels at 4.5:1 or better
 against their intended surfaces. Disabled controls are explicitly dimmed.
 
-An unconfigured model function uses a static orange outline and a soft 5 pt
+### Feature status in words
+
+As amended 2026-11-24: the Features list and every feature screen say a
+feature's state as a sign, a word and a reason, never as colour or glow.
+
+- **Ready**: a check mark and "Ready" in normal text; a short note under it
+  when a part does not work ("typing only").
+- **Off** and **Not set up**: a dash and the word in tertiary grey, and the
+  row's name and phrase at 78% opacity. Off is a feature whose switch is off;
+  Not set up is an island tool that lacks something. Neither shows a reason in
+  the list: a feature the person does not use asks nothing.
+- **Needs setup**: an open circle and "Needs setup" in semibold normal text,
+  with the first missing step and the count of the rest under it ("No
+  speech-to-text model +2"). Only a feature that is on can need setup.
+- On a feature's screen each requirement has a mark (done, missing, optional,
+  asked later by macOS), its name, one sentence and one action in place.
+- Amber stays for something that broke after it worked (a refused key, a
+  shortcut that could not be saved), always with words beside it.
+- VoiceOver reads the name, then the word, the reason and what the feature
+  does.
+
+Why: the first outside tester saw orange outlines on models of features he
+did not use, could not tell what they meant and closed Settings. The outline
+below remains on the older API & Models rows until those rows move to the
+feature screens; new screens do not use it.
+
+An unconfigured model function in API & Models uses a static orange outline and a soft 5 pt
 outer glow (12% light, 18% dark). The outline has at least 3:1 contrast on both
 the row and page surface; the glow is decoration, never the only boundary.
 The normal `Choose a model` action stays visible. `Not set` and warning triangles
@@ -926,6 +952,9 @@ installed app. Older-macOS fallback needs device acceptance.
   native, and retaining native focus, bindings and accessibility matters here.
 - 2026-10-20 — Group rows with consistent insets: this brings the requested iOS
   settings rhythm while preserving the established macOS navigation.
+- 2026-11-24 — Feature status is a sign, a word and a reason; the warm contour
+  is not used on the Features screens: without words it read as an unexplained
+  error, and it lit up for features the person did not use.
 - 2026-10-20 — Replace unconfigured model alarms with a warm contour and soft
   glow: the user requested a calm setup cue, plus clearer separation of rows.
   Each model function gets its own contour because its routes form one setting.
@@ -934,8 +963,8 @@ installed app. Older-macOS fallback needs device acceptance.
 
 The user requested removal of the sidebar icons and animation on hover.
 Keep section names, order and 220 pt sidebar width. As amended 2026-10-21,
-rows have 30 pt hit targets, 4 pt gaps and 10 pt vertical list insets. The ten
-sections and pinned footer fit at the minimum Settings size without scrolling;
+rows have 30 pt hit targets, 4 pt gaps and 10 pt vertical list insets. The eleven
+sections (Features first, since 2026-11-24) and pinned footer fit at the minimum Settings size without scrolling;
 the ScrollView remains a fallback if the section list grows. Why: the user
 requested smaller buttons so every section is immediately visible.
 Removing the icon and gap gives labels 180 pt instead of 144 pt, without

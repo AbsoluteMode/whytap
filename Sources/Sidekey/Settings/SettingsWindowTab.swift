@@ -1,6 +1,10 @@
 import SwiftUI
 
 enum SettingsWindowTab: String, CaseIterable, Identifiable {
+    /// The list of features and each feature's own screen. First, so Settings
+    /// opens on it.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    case features
     case apiAndModels
     case hotkeys
     case permissions
@@ -27,7 +31,7 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
     }
 
     static var defaultAvailable: SettingsWindowTab {
-        availableCases.first ?? .apiAndModels
+        availableCases.first ?? .features
     }
 
     var isAvailable: Bool {
@@ -36,6 +40,8 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .features:
+            return "Features"
         case .apiAndModels:
             return "API & Models"
         case .hotkeys:
@@ -65,6 +71,7 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var iconTint: Color {
         switch self {
+        case .features: return Color(hexCSS: "#5469CC")
         case .apiAndModels: return Color(hexCSS: "#5469CC")
         case .hotkeys: return Color(hexCSS: "#65656D")
         case .permissions: return Color(hexCSS: "#27845A")
@@ -80,6 +87,8 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var fallbackSystemImageName: String {
         switch self {
+        case .features:
+            return "sparkles"
         case .apiAndModels:
             return "cpu"
         case .hotkeys:
@@ -105,7 +114,7 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var pdfResourceName: String? {
         switch self {
-        case .apiAndModels, .hotkeys, .permissions, .notes, .agentMode, .toolbox, .notifications, .integrations, .backup, .other:
+        case .features, .apiAndModels, .hotkeys, .permissions, .notes, .agentMode, .toolbox, .notifications, .integrations, .backup, .other:
             return nil
         }
     }

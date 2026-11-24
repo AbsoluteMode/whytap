@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-meeting-gate.swift
     confirmed_at: 2026-10-20
-related: [../processes/shared-app-development.md, 2026-10-19-shared-working-app.md, 2026-11-19-on-demand-build-queue-builder.md, 2026-11-23-builder-queue-group-install.md]
+related: [../processes/shared-app-development.md, 2026-10-19-shared-working-app.md, 2026-11-19-on-demand-build-queue-builder.md, 2026-11-23-builder-queue-group-install.md, 2026-11-24-meeting-gate-whytap-activity.md]
 ---
 
 # Meeting-aware builder refresh

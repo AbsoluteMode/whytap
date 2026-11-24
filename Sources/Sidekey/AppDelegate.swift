@@ -1210,7 +1210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSubtitles: { [weak self] in self?.openTranslation(.subtitles) },
             openScreenshot: { [weak self] in self?.openScreenshot() },
             openSettings: { [weak self] in
-                self?.openSettingsWindow(tab: .apiAndModels)
+                self?.openSettingsWindow(tab: .features)
             },
             openHelp: { [weak self] in
                 self?.openHelpWindow()
@@ -1336,7 +1336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettingsWindow(tab: .hotkeys)
     }
 
-    private func openSettingsWindow(tab: SettingsWindowTab = .apiAndModels, feature: AIFeature? = nil) {
+    private func openSettingsWindow(tab: SettingsWindowTab = .features, feature: AIFeature? = nil) {
         ensureSettingsWindowController().show(tab: tab, feature: feature)
     }
 

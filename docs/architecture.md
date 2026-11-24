@@ -1471,7 +1471,15 @@ claude-haiku-5-5), which returns sentences, points, follow-ups and one place;
 an id the app does not have is dropped. No internet or a timeout is offline,
 429 or a spent budget is the daily limit, any other error is unavailable; each
 offers Try again (offline, unavailable) and the closest pages the local guide
-finds, and changes nothing. ⋯ turns answers off again. The sprite sheet is Resources/LilBro, embedded
+finds, and changes nothing. ⋯ turns answers off again. On a feature's screen
+the "What it needs" rows report themselves with lilBroNeed (FeatureNeedsGroup):
+their spot and, while unmet, the step they offer (LilBroPressable). After
+guiding to a feature he offers the first required step — "One step left:
+Download free model. It downloads about 470 MB to this Mac. Press it?" — and
+presses it only after "Yes, press it": he runs to the row, punches it and
+calls the same FeatureScreenContext.perform as the row's button. "I'll do it",
+closing, a new question or the step being done meanwhile withdraw the offer.
+Tabs and API keys never offer a press. The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md
 

@@ -306,4 +306,121 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertEqual(controller.turns.last?.opened, "Drop")
         XCTAssertEqual(LilBroLocalGuide.closestPlaces(for: "zzz"), [.tab(.features), .apiKeys])
     }
+
+    // MARK: Pressing after a yes (step 3)
+
+    /// Drop's screen reports its "What it needs" rows: the model row with
+    /// Download free model, and an optional row that is never offered unasked.
+    @MainActor
+    private final class Steps {
+        private(set) var performed: [FeatureSetupAction] = []
+        func report(to controller: LilBroController, optionalFirst: Bool = false) {
+            let perform: @MainActor (FeatureSetupAction) -> Void = { [weak self] in self?.performed.append($0) }
+            let model = LilBroPressable(id: "model.dropFast", action: .downloadOnDeviceModel(.dropFast),
+                                        optional: false, perform: perform)
+            let extra = LilBroPressable(id: "permission.microphone", action: .allow(.microphone),
+                                        optional: true, perform: perform)
+            controller.update(pressables: optionalFirst ? [extra, model] : [model, extra])
+            var spots = map().spots
+            spots[.need("model.dropFast")] = CGRect(x: 245, y: 300, width: 690, height: 50)
+            controller.update(spots: spots)
+        }
+
+        private func map() -> (spots: [LilBroSpot: CGRect], blocks: [CGRect]) {
+            var spots: [LilBroSpot: CGRect] = [
+                .home: CGRect(x: 10, y: 470, width: 200, height: 34),
+                .sidebar: CGRect(x: 0, y: 0, width: 220, height: 460),
+                .pane: CGRect(x: 221, y: 0, width: 739, height: 560),
+                .feature(.drop): CGRect(x: 245, y: 92, width: 690, height: 50),
+            ]
+            for (index, tab) in SettingsWindowTab.availableCases.enumerated() {
+                spots[.tab(tab)] = CGRect(x: 10, y: 10 + CGFloat(index) * 34, width: 200, height: 30)
+            }
+            return (spots, [])
+        }
+    }
+
+    func test_on_a_feature_screen_he_asks_before_pressing_and_presses_only_after_yes() async {
+        let steps = Steps()
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection)
+        steps.report(to: controller, optionalFirst: true)
+        controller.ask("Set up dictation")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(controller.proposal?.action, .downloadOnDeviceModel(.dropFast), "the required step, not the optional one")
+        XCTAssertTrue(steps.performed.isEmpty, "nothing is pressed while he asks")
+
+        controller.confirmProposal()
+        XCTAssertNil(controller.proposal)
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(steps.performed, [.downloadOnDeviceModel(.dropFast)], "the row's own action, once")
+        XCTAssertEqual(controller.turns.last?.pressed, "Download free model")
+        XCTAssertEqual(controller.feet, LilBroPlanner.perch(on: CGRect(x: 245, y: 300, width: 690, height: 50)),
+                       "he ran to the row he pressed")
+        XCTAssertEqual(controller.pose, .done)
+    }
+
+    func test_ill_do_it_presses_nothing() async {
+        let steps = Steps()
+        let controller = make()
+        steps.report(to: controller)
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        controller.declineProposal()
+        XCTAssertNil(controller.proposal)
+        controller.confirmProposal()
+        await Task.yield()
+        XCTAssertTrue(steps.performed.isEmpty)
+        XCTAssertNil(controller.turns.last?.pressed)
+    }
+
+    func test_closing_or_asking_again_withdraws_the_question() async {
+        let steps = Steps()
+        let controller = make()
+        steps.report(to: controller)
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        controller.close()
+        XCTAssertNil(controller.proposal)
+        controller.confirmProposal()
+        XCTAssertTrue(steps.performed.isEmpty)
+    }
+
+    func test_a_step_done_meanwhile_is_not_asked_about() async {
+        let steps = Steps()
+        let controller = make()
+        steps.report(to: controller)
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        controller.update(pressables: [])
+        XCTAssertNil(controller.proposal)
+    }
+
+    func test_tabs_and_keys_never_offer_a_press() async {
+        let steps = Steps()
+        let controller = make()
+        steps.report(to: controller)
+        controller.ask("change a hotkey")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertNil(controller.proposal)
+    }
+
+    func test_hidden_he_presses_at_once_after_yes() async {
+        let steps = Steps()
+        let controller = make(mascot: false)
+        steps.report(to: controller)
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        controller.confirmProposal()
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertEqual(steps.performed, [.downloadOnDeviceModel(.dropFast)])
+        XCTAssertEqual(controller.feet, CGPoint(x: 176, y: 471), "nobody ran")
+    }
+
+    func test_each_step_says_what_pressing_it_does() {
+        XCTAssertEqual(LilBroCopy.ask(.downloadOnDeviceModel(.dropFast)),
+                       "One step left: Download free model. It downloads about 470 MB to this Mac. Press it?")
+        XCTAssertEqual(LilBroCopy.consequence(of: .allow(.keyboard)), "macOS will ask you to allow it.")
+        XCTAssertEqual(LilBroCopy.consequence(of: .restartWhytap), "Whytap quits and opens again; Settings closes.")
+    }
 }

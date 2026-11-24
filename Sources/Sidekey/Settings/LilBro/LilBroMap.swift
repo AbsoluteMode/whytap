@@ -9,6 +9,25 @@ enum LilBroSpot: Hashable {
     case pane
     case tab(SettingsWindowTab)
     case feature(AppFeature)
+    /// A row of a feature's "What it needs", by requirement id ("model.drop").
+    case need(String)
+}
+
+/// A setup step a feature screen offers in its "What it needs" rows. Lil Bro
+/// may press it only after the person says yes; pressing runs the same
+/// `FeatureScreenContext.perform` as the row's own button.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+struct LilBroPressable: Equatable {
+    /// The requirement id, also the row's `LilBroSpot.need` name.
+    let id: String
+    let action: FeatureSetupAction
+    /// An optional step is never offered unasked.
+    let optional: Bool
+    let perform: @MainActor (FeatureSetupAction) -> Void
+
+    static func == (lhs: LilBroPressable, rhs: LilBroPressable) -> Bool {
+        lhs.id == rhs.id && lhs.action == rhs.action && lhs.optional == rhs.optional
+    }
 }
 
 /// The window as Lil Bro sees it: named spots and the blocks (cards) he can
@@ -83,7 +102,25 @@ struct LilBroBlocksKey: PreferenceKey {
     }
 }
 
+struct LilBroPressablesKey: PreferenceKey {
+    static let defaultValue: [LilBroPressable] = []
+    static func reduce(value: inout [LilBroPressable], nextValue: () -> [LilBroPressable]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 extension View {
+    /// A "What it needs" row: where it is, and the step it offers while unmet.
+    func lilBroNeed(_ check: FeatureCheck, perform: @escaping @MainActor (FeatureSetupAction) -> Void) -> some View {
+        var offered: [LilBroPressable] = []
+        if case .unmet(_, let action?) = check.state {
+            offered = [LilBroPressable(id: check.id, action: action, optional: check.requirement.optional,
+                                       perform: perform)]
+        }
+        return lilBroSpot(.need(check.id))
+            .preference(key: LilBroPressablesKey.self, value: offered)
+    }
+
     /// Tells Lil Bro where this view is, by name.
     func lilBroSpot(_ spot: LilBroSpot) -> some View {
         background(GeometryReader { proxy in

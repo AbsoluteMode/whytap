@@ -127,4 +127,21 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertEqual(lilBro.turns.last?.reply, .offline)
         XCTAssertNil(selection.shownFeature, "offline changes nothing")
     }
+
+    func test_on_drop_the_real_needs_row_reports_its_step_and_he_asks_before_pressing() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        try await render(fixture, selection, lilBro, name: "press-light") {
+            lilBro.toggleFromSidebar()
+            lilBro.ask("Set up dictation")
+            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+        }
+        XCTAssertEqual(selection.shownFeature, .drop)
+        let step = try XCTUnwrap(lilBro.proposal, "a fresh Mac has a required Drop step")
+        XCTAssertFalse(step.optional)
+        XCTAssertNotNil(lilBro.map.spots[.need(step.id)], "the row he would press reports itself")
+        XCTAssertNil(lilBro.turns.last?.pressed, "nothing pressed without a yes")
+    }
 }

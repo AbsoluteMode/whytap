@@ -11,6 +11,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-24 the first outside tester of 2.2.27 said on a call that the update arrived, he pressed it, the app updated, and he could not tell what happened or why it updated. The maintainer asked for release notes shown in a nicely made window after an update, when something changed for the person.
     confirmed_at: 2026-11-24
+  - type: user-confirmed
+    reference: On 2026-11-24 the maintainer looked at the offscreen pictures of the 2.2.27 list, with and without the clip, and answered "yes, with the clip".
+    confirmed_at: 2026-11-24
   - type: repository
     reference: Sources/Sidekey/WhatsNew/WhatsNewCatalog.swift
     confirmed_at: 2026-11-24
@@ -25,9 +28,9 @@ related: [2026-11-21-settings-update-button.md]
 
 # What's New window
 
-The maintainer asked for the window; its look awaits his acceptance from the
-offscreen pictures (`WHYTAP_WHATSNEW_RENDER_DIR`) before the pull request is
-queued.
+The maintainer asked for the window and on 2026-11-24 accepted its look
+from the offscreen pictures (`WHYTAP_WHATSNEW_RENDER_DIR`), choosing the
+variant with the clip over the one without.
 
 ## Context
 

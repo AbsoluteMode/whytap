@@ -419,6 +419,16 @@ Off (выключатель выключен), Needs setup (фича включ�
 настроек (Other или панель инструмента в Toolbox). Прежние разделы остаются в
 боковой панели. Ссылка: `whytap://settings/features`.
 
+**Экран Drop (Settings → Features → Drop):** что делает диктовка; если чего-то
+не хватает — блок Needs setup с первой причиной и кнопкой действия; хоткей и
+способ Hold / Toggle меняются здесь же и сохраняются сразу (занятая клавиша не
+сохраняется, запись продолжается; Space остаётся только Hold); поле «Try it
+here»; «What it needs» — речевая модель (на Apple Silicon первой предлагается
+бесплатная модель на этом Mac, на Intel — ключ провайдера), Keyboard control,
+Microphone и «Your shortcut is heard»; настройки Mode, Language you speak, Lower
+other audio while speaking, Stop Drop automatically (только с Toggle); Vocab и
+Filler открывают свои редакторы в острове.
+
 **Настройки API & Models (Settings → API & Models):** четыре внутренних раздела
 API keys, Models, Costs и API hints в одной панели. При открытии выбран Models.
 Функции визуально разделены. Ненастроенная функция отмечена оранжевым контуром

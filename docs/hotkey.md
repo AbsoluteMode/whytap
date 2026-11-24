@@ -6,7 +6,9 @@ Single source of truth for how Whytap renders hotkey hints in its UI.
 
 Out of the box (`HotkeyConfiguration.defaults` and the meeting-record
 default). Remap any of them, or give any tool its own shortcut, in
-**Settings → Hotkeys**.
+**Settings → Hotkeys**. Drop's shortcut and its Hold or Toggle can also be
+changed on **Settings → Features → Drop**, where a recorded key is saved at
+once (a key another action uses is refused and recording stays open).
 
 | Action | Default |
 |---|---|

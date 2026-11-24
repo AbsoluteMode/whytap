@@ -23,6 +23,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/SettingsFeaturesTests.swift
     confirmed_at: 2026-11-24
+  - type: repository
+    reference: Sources/Sidekey/Settings/Features/DropFeatureView.swift
+    confirmed_at: 2026-11-24
+  - type: repository
+    reference: Tests/SidekeyTests/Settings/DropFeatureTests.swift
+    confirmed_at: 2026-11-24
 related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md]
 ---
 
@@ -78,6 +84,16 @@ accepted the second version.
   are shown today (`FeaturePlace`): the Other tab with the Agent group marked,
   or the tool's Toolbox pane. The island's Settings tile opens Features too.
 - The list shows no reason under Off and Not set up; VoiceOver still reads it.
+- Drop is the first feature with its own screen, top to bottom: what it does
+  (following Hold or Toggle), a Needs setup box with the first action, the
+  shortcut with Hold or Toggle and Change, "Try it here", "What it needs",
+  Settings (Mode, Language you speak, Lower other audio, Stop Drop
+  automatically) and Your words (Vocab, Filler).
+- A shortcut recorded on the screen is saved at once. One that another action
+  uses is not saved, the row says which, and recording stays open.
+- Choosing the model on this Mac from the screen assigns it to that one
+  feature and opens no Assign window for the others.
+- There is no video block until a Drop clip exists: no placeholder is drawn.
 
 ## Why
 
@@ -111,6 +127,17 @@ The app's behaviour wins, with "simple for a newcomer" as the tie-breaker.
 - Translate & Subtitles and Screenshots have no switch and no Off.
 - Google search with no voice model is Ready, "typing only".
 - The Agent's web search follows its model and is not a requirement.
+- "Stop Drop automatically" acts only on a Toggle shortcut: with Hold the
+  switch is disabled and says why.
+- Mode, Language you speak, Vocab and Filler lived only in the island. Mode
+  and language are now also set on Drop's screen through the island's own
+  actions; Vocab and Filler open their island editors (new editors inside
+  Settings are a later step).
+- On a Mac where Drop is not ready, "What it needs" comes before "Try it
+  here"; the mockup had the field first in both states.
+- The shortcut row keeps the app's sentence about Space being hold-only: it is
+  computed from the key bound now, so it cannot go stale.
+- The model dropdown shows the app's label ("On this Mac · parakeet-tdt-v3").
 
 ## What we tested
 
@@ -128,6 +155,18 @@ Mac read from the live view models; the tab order and identifiers; the
 `whytap://settings/features` link; where each row leads; the sidebar fitting
 the smallest window; offscreen pictures of the start screen in both themes at
 960 x 560 and 1280 x 760.
+
+`DropFeatureTests`: a recorded key saved at once and stored; a key in use
+refused with recording left open; Cancel; Space hold-only and another key as
+Toggle; the local model chosen in place, for Drop only, and refused when it
+is not on the Mac or the feature needs a text model; the words of the Needs
+setup box and the requirement counter; offscreen pictures of the screen in
+the Settings window (both themes, 960 x 560 and 1280 x 760, usual and fresh)
+and of its states (Intel, downloading, Smart, recording a shortcut, a rebound
+Toggle key).
+
+Not checked in a running app: dictating into "Try it here" inside Settings,
+the real permission prompts, the download itself.
 
 ## Rejected
 

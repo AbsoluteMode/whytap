@@ -71,6 +71,14 @@ struct SettingsWindowView: View {
     private var liveFeaturesEnvironment: FeaturesEnvironment {
         FeaturesEnvironment(
             dropMode: toolboxDeps.currentDropMode,
+            // The island owns the mode switch; Settings asks it to flip.
+            setDropMode: { [toolboxDeps] mode in
+                if toolboxDeps.currentDropMode() != mode { _ = toolboxDeps.toggleDropMode() }
+            },
+            language: toolboxDeps.currentLanguage,
+            setLanguage: toolboxDeps.setLanguage,
+            volumeDuck: otherVolumeDuckConfig,
+            openHoverPanel: toolboxDeps.openHoverPanel,
             agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),
                                               activeProvider: AgentProviderStore.shared.activeProvider) },
             meetingsOn: otherMeetingsEnabled,
